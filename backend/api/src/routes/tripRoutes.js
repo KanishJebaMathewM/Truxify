@@ -84,6 +84,21 @@ const router = express.Router();
 const DEFAULT_EVENTS_LIMIT = 100;
 const MAX_EVENTS_LIMIT = 500;
 
+/**
+ * Builds the Supabase client for a request. End-user queries must run as the
+ * authenticated user (per-request client carrying the JWT) so Row Level
+ * Security authorizes them — the anon client fails RLS and trips every
+ * endpoint (ownership 403, inserts 500, empty reads, broken idempotency).
+ * Admins and token-less (dev/test bypass) requests fall back to the admin
+ * client.
+ */
+function getUserSupabaseClient(req) {
+  if (!req.token || req.user?.role === 'admin') {
+    return supabaseAdmin || supabase;
+  }
+  return createUserClient(req.token);
+}
+
 function parsePositiveIntegerQuery(value, fallback, max) {
   if (value === undefined) return { value: fallback };
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {

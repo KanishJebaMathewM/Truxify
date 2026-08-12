@@ -118,9 +118,9 @@ describe('BidAcceptanceService', () => {
     // Verify the correct amountWei was computed using ESCROW_MATIC_PER_PAISA
     // bid_amount = 50000 paisa (₹500) converted via paisaToMaticWei
     const escrowArgs = escrowDeposit.mock.calls[0];
-    const amountWei = escrowArgs[2];
+    const amountWei = escrowArgs[3];
     expect(typeof amountWei).toBe('bigint');
-    expect(amountWei).toBe(ethers.parseEther((50000 * 0.000004).toFixed(18)));
+    expect(amountWei).toBe(ethers.parseEther('0.2'));
     // Two-phase acceptance: the driver must NOT be committed at accept time.
     expect(supabaseMock.calls.some(call => call.rpc === 'accept_bid_tx')).toBe(false);
 

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "backend/api/**"
+      - "automation/n8n/**"
       - "blockchain/**"
       - ".github/workflows/backend-ci.yml"
   push:
@@ -11,6 +12,7 @@ on:
       - main
     paths:
       - "backend/api/**"
+      - "automation/n8n/**"
       - "blockchain/**"
       - ".github/workflows/backend-ci.yml"
 
@@ -100,3 +102,19 @@ jobs:
       - name: Run integration tests
         working-directory: backend/api
         run: npm run test:integration
+
+  n8n-workflow-urls:
+    name: n8n Workflow URLs point at mounted routes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify n8n workflow URLs
+        working-directory: backend/api
+        run: node scripts/check-n8n-workflow-urls.js

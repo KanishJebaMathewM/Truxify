@@ -34,4 +34,14 @@ describe('formatError', () => {
     const err = formatError(400, 'Invalid', null)
     expect(err.error.details).toBeUndefined()
   })
+
+  it('includes details when they are an empty object', () => {
+    const err = formatError(400, 'Invalid', {})
+    expect(err.error.details).toEqual({})
+  })
+
+  it('preserves non-object details such as arrays', () => {
+    const err = formatError(400, 'Invalid', ['a', 'b'])
+    expect(err.error.details).toEqual(['a', 'b'])
+  })
 })

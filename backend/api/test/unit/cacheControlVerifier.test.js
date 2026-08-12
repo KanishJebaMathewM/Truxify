@@ -190,4 +190,26 @@ describe('cacheControlVerifier', () => {
       process.env.NODE_ENV = originalEnv;
     }
   });
+
+  it('warns when Cache-Control is public on an authenticated response', () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    try {
+      const req = makeReq({ user: { id: 'user-1' } });
+      const res = makeRes({
+        'cache-control': 'public, max-age=3600',
+        pragma: 'no-cache',
+        expires: 'Thu, 01 Jan 2025 00:00:00 GMT',
+      });
+      const next = vi.fn();
+      cacheControlVerifier(req, res, next);
+      emitFinish(res);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ missingHeaders: expect.arrayContaining(['Cache-Control policy']) }),
+        'Authenticated response may be cacheable'
+      );
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+  });
 });

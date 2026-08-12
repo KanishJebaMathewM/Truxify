@@ -65,6 +65,22 @@ describe('requireIdempotency middleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('returns 400 for a non-string idempotency key', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const middleware = requireIdempotency();
+    const req = makeReq({ headers: { 'x-idempotency-key': 12345 } });
+    const res = makeRes();
+    const next = makeNext();
+
+    await middleware(req, res, next);
+
+    process.env.NODE_ENV = originalEnv;
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('calls next on cache miss (Redis available)', async () => {
     const middleware = requireIdempotency();
     const req = makeReq({ headers: { 'x-idempotency-key': 'key-abc' } });

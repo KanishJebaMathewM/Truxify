@@ -85,20 +85,20 @@ function getHeaders() {
 /**
  * Utility: handle ML engine responses consistently
  */
-async function handleResponse(response, url = '', method = 'GET') {
+async function handleResponse(response) {
     const text = await response.text();
 
     if (response.status === 401 || response.status === 403) {
-        throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
+        throw new Error(`[ML] Authentication failed (${response.status}): ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
+        throw new Error(`[ML] Request failed (${response.status}): ${text}`);
     }
 
     try {
         return JSON.parse(text);
     } catch (err) {
-        logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
+        logger.error({ status: response ? response.status : undefined, bodyPreview: text.slice(0, 200) }, 'ML service request failed');
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }
@@ -134,7 +134,7 @@ export async function predictDemand(features = {}) {
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response, url, 'POST');
+  const result = await handleResponse(response);
   demandCache.set(cacheKey, result);
   return result;
 }
@@ -186,7 +186,7 @@ export async function predictPrice({
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const raw = await handleResponse(response, url, 'POST');
+  const raw = await handleResponse(response);
 
   const initialValidation = validatePricePrediction(raw);
   if (!initialValidation.ok) {
@@ -266,7 +266,7 @@ export async function predictEta({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response, url, 'POST');
+  const result = await handleResponse(response);
 
   if (
     result == null ||
@@ -347,7 +347,7 @@ export async function predictDriverProfit({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response, url, 'POST');
+  const result = await handleResponse(response);
 
   if (
     result == null ||
@@ -745,15 +745,15 @@ class MLService {
     }
 
     if (response.status === 401) {
-      throw new Error(`[MLService] Authentication failed: ${method} ${url} (${response.status})`);
+      throw new Error(`[MLService] Unauthorized (401) for ${method} ${url}`);
     }
 
     if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden: ${method} ${url} (${response.status})`);
+      throw new Error(`[MLService] Forbidden (403) for ${method} ${url}`);
     }
 
     if (!response.ok) {
-      throw new Error(`[MLService] Request failed: ${method} ${url} ${response.status}`);
+      throw new Error(`[MLService] Request failed with status ${response.status} for ${method} ${url}`);
     }
 
     return data;

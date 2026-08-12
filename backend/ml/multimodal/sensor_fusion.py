@@ -3,7 +3,6 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any
 import redis
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -159,30 +158,51 @@ class SensorFusion:
         return min(risk, 1.0)
     
     def get_safety_report(self) -> Dict:
-        """Get latest safety report"""
+        """Get latest safety report.
+
+        Sensor state is read from Redis keys populated by real device
+        ingestion (e.g. ``sensor:latest``, mirroring ``vision:latest`` /
+        ``audio:latest``). Sensor inputs are never synthesized: when no real
+        sensor frame is available the report is ``UNKNOWN`` with
+        ``data_available: false`` instead of inventing values.
+        """
         # Get latest data from all modalities
         vision_data = self.redis.get('vision:latest')
         audio_data = self.redis.get('audio:latest')
-        
+        sensor_data = self.redis.get('sensor:latest')
+
         vision = json.loads(vision_data) if vision_data else {}
         audio = json.loads(audio_data) if audio_data else {}
-        
-        # Simulate sensor data (in production: read from IoT devices)
-        sensor = {
-            'speed': np.random.uniform(40, 90),
-            'acceleration': np.random.uniform(-8, 8),
-            'steering_angle': np.random.uniform(-45, 45),
-            'seatbelt': np.random.choice([True, False], p=[0.95, 0.05]),
-            'timestamp': datetime.now().isoformat()
-        }
-        
+        sensor = json.loads(sensor_data) if sensor_data else {}
+
+        # No real sensor frame (and no vision/audio either): report an
+        # explicit UNKNOWN state rather than fabricating sensor inputs.
+        if not sensor and not vision and not audio:
+            return {
+                'fusion_risk': 0.0,
+                'vision_risk': 0.0,
+                'audio_risk': 0.0,
+                'sensor_risk': 0.0,
+                'alert_level': 'UNKNOWN',
+                'alert_message': 'No sensor data available.',
+                'components': {
+                    'vision': {},
+                    'audio': {},
+                    'sensors': {}
+                },
+                'actions': self._generate_actions({'alert_level': 'UNKNOWN'}),
+                'timestamp': datetime.now().isoformat(),
+                'data_available': False
+            }
+
         # Fuse data
         result = self.fuse_data(vision, audio, sensor)
-        
+
         # Generate actions
         actions = self._generate_actions(result)
         result['actions'] = actions
-        
+        result['data_available'] = True
+
         return result
     
     def _generate_actions(self, report: Dict) -> List[str]:
@@ -203,6 +223,12 @@ class SensorFusion:
                 '📊 Monitor driver closely',
                 '🔄 Suggest rest stop',
                 '📝 Log incident for review'
+            ]
+        elif report['alert_level'] == 'UNKNOWN':
+            actions = [
+                '📊 Waiting for sensor data',
+                '📡 Check device connectivity',
+                '📝 No safety assessment possible without data'
             ]
         else:
             actions = [

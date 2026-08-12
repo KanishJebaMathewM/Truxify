@@ -69,4 +69,14 @@ describe('validateDocumentBuffer', () => {
   it('accepts content when no declared type is provided, based on content alone', () => {
     expect(validateDocumentBuffer(PDF_BYTES, undefined)).toBe('application/pdf');
   });
+
+  it('treats an empty-string declared type as absent', () => {
+    expect(validateDocumentBuffer(PDF_BYTES, '')).toBe('application/pdf');
+    expect(validateDocumentBuffer(PDF_BYTES, '   ')).toBe('application/pdf');
+  });
+
+  it('compares the declared type case-insensitively', () => {
+    expect(validateDocumentBuffer(JPEG_BYTES, 'IMAGE/JPEG')).toBe('image/jpeg');
+    expect(validateDocumentBuffer(PNG_BYTES, 'Image/PNG')).toBe('image/png');
+  });
 });

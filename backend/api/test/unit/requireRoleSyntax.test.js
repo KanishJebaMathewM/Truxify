@@ -21,6 +21,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const authFile = path.resolve(__dirname, '../../src/middleware/auth.js');
 
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 async function loadAuth() {
   vi.resetModules();
   vi.doMock('../../src/config/db.js', () => ({
@@ -92,5 +96,26 @@ describe('auth.js requireRole (issue #6664)', () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledTimes(1);
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('uses the trimmed role in the denial message payload', async () => {
+    const { requireRole } = await loadAuth();
+    const { default: logger } = await import('../../src/middleware/logger.js');
+
+    const req = { user: { id: 'u1', role: '  customer  ' } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    await requireRole(['driver'])(req, res, next);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ userRole: 'customer', userId: 'u1' }),
+      expect.stringContaining('role=customer'),
+    );
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: "Your account role 'customer' is not authorized to access this resource.",
+      }),
+    );
   });
 });

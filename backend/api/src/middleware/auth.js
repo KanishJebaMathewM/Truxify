@@ -541,21 +541,22 @@ export function requireRole(allowedRoles) {
       typeof req.user.role === "string" ? req.user.role.trim() : "";
     if (!sanitizedAllowedRoles.includes(userRole)) {
       const requestId = req.requestId || req.id;
+      const userId = typeof req.user.id === "string" ? req.user.id : String(req.user.id || "");
       logger.warn(
         {
           event: "AUTH_DENIAL",
           action: `requireRole(${sanitizedAllowedRoles.join(",")})`,
-          userId: req.user.id,
-          userRole: req.user.role,
+          userId,
+          userRole,
           allowedRoles: sanitizedAllowedRoles,
           requestId,
         },
-        `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${sanitizedAllowedRoles.join(",")}]`,
+        `[Auth] Role denied: user=${userId} role=${userRole} not in [${sanitizedAllowedRoles.join(",")}]`,
       );
 
       return res.status(403).json({
         error: "Forbidden: Insufficient privileges.",
-        details: `Your account role '${req.user.role}' is not authorized to access this resource.`,
+        details: `Your account role '${userRole}' is not authorized to access this resource.`,
       });
     }
 

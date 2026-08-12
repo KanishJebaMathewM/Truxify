@@ -381,15 +381,22 @@ export class EventStoreCore {
     }
     if (row.snapshot_version !== undefined && row.snapshot_version !== null) {
       const schemaVersion = Number(row.snapshot_version);
-      if (Number.isNaN(schemaVersion) || schemaVersion > this.snapshotSchemaVersion) {
+      if (!Number.isInteger(schemaVersion) || schemaVersion < 0 || schemaVersion > this.snapshotSchemaVersion) {
         return null;
       }
     }
+    // Preserve the stored schema version exactly. The old `Number(...) || default`
+    // idiom coerced a stored snapshot_version of 0 into the default schema
+    // version, silently mislabeling v0 snapshots as the current schema version.
+    const storedSchemaVersion =
+      row.snapshot_version !== undefined && row.snapshot_version !== null
+        ? Number(row.snapshot_version)
+        : this.snapshotSchemaVersion;
     return {
       aggregateId: row.aggregate_id ?? row.aggregateId,
       version,
       state: row.state,
-      snapshotVersion: Number(row.snapshot_version) || this.snapshotSchemaVersion,
+      snapshotVersion: storedSchemaVersion,
       createdAt: row.created_at ?? row.timestamp,
     };
   }

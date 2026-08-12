@@ -34,3 +34,8 @@ export function generateOrderDisplayId() {
   ).join('');
   return `${DISPLAY_ID_PREFIX}${dateStr}${random}`;
 }
+
+export function isValidOrderDisplayId(displayId) {
+  if (typeof displayId !== 'string') return false;
+  return /^#FF\d{8}[A-Z0-9]{12}$/.test(displayId);
+}

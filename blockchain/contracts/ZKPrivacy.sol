@@ -79,18 +79,34 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
     function submitAnonymousRating(
         address _driver,
         uint8 _stars,
-        bytes32 _nullifierHash,
-        bytes32 _zkProof
-    ) external {
+        bytes32 _tripId,
+        Proof calldata proof
+    ) external nonReentrant whenNotPaused {
+        require(_driver != address(0), "Invalid driver");
         require(_stars >= 1 && _stars <= 5, "Invalid rating stars (1-5)");
-        require(!usedNullifiers[_nullifierHash], "Nullifier already used for trip rating");
-        require(_zkProof != bytes32(0), "Invalid ZK proof");
+        require(_tripId != bytes32(0), "Invalid trip id");
+        require(verifier != address(0), "Verifier not set");
 
-        usedNullifiers[_nullifierHash] = true;
+        // Derive the nullifier from the trip and the rater so it cannot be
+        // freely chosen and each rater can rate a given trip at most once.
+        bytes32 nullifierHash = keccak256(abi.encodePacked(_tripId, msg.sender));
+        require(!usedNullifiers[nullifierHash], "Nullifier already used for trip rating");
+
+        // Bind the proof's public inputs to this exact rating: nullifier,
+        // driver and stars must all be committed inside the proof.
+        require(proof.input.length >= 3, "Invalid proof public inputs length");
+        require(proof.input[0] == uint256(nullifierHash), "Nullifier mismatch in proof input");
+        require(proof.input[1] == uint256(uint160(_driver)), "Driver mismatch in proof input");
+        require(proof.input[2] == uint256(_stars), "Stars mismatch in proof input");
+
+        bool isValid = IVerifier(verifier).verifyProof(proof.a, proof.b, proof.c, proof.input);
+        require(isValid, "Invalid ZK proof");
+
+        usedNullifiers[nullifierHash] = true;
         driverRatings[_driver].totalStars += _stars;
         driverRatings[_driver].totalRatings += 1;
 
-        emit RatingSubmitted(_driver, _stars, _nullifierHash);
+        emit RatingSubmitted(_driver, _stars, nullifierHash);
     }
 
     function getDriverAverageRating(address _driver) external view returns (uint256 averageScaled) {

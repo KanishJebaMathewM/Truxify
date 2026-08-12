@@ -766,6 +766,41 @@ export class DeliveryVerificationService {
           logger.info(
             `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
+
+          // The order is already `payment_released` (that is what defines a
+          // stuck-escrow retry), but `complete_trip_tx` may never have run —
+          // e.g. the original call failed after the on-chain release landed —
+          // leaving the driver's wallet uncredited. Call `complete_trip_tx`
+          // (service_role, no OTP) now: it is idempotent on
+          // `status = 'payment_released'`, so an already-finalized order
+          // short-circuits without double-crediting the wallet, while a
+          // never-finalized order gets its wallet credited exactly once
+          // (issue #11188).
+          const retryRpcResult = await this.orderRepository.executeRpc(
+            "complete_trip_tx",
+            {
+              p_order_id: orderId,
+              p_otp_id: null,
+              p_release_tx_hash: releaseTxHash,
+            },
+            supabaseAdmin,
+          );
+          if (retryRpcResult.error) {
+            logger.error(
+              "[verify-delivery] complete_trip_tx failed on stuck-escrow retry for order",
+              orderId,
+              ":",
+              retryRpcResult.error.message,
+            );
+            throw new DomainError(503, {
+              error:
+                "Failed to finalize trip and credit wallet. Please retry.",
+              details: retryRpcResult.error.message,
+              retryable: true,
+            });
+          }
+          tripData = retryRpcResult.data;
+
           // The verified OTP is consumed on the retry path too so it cannot be
           // replayed by a later attempt. It is only consumed after the release
           // is confirmed, so a failed release leaves the OTP intact for the

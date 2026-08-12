@@ -87,6 +87,18 @@ describe('fraudMiddleware', () => {
       expect(res.status).toHaveBeenCalledWith(403);
       expect(next).not.toHaveBeenCalled();
     });
+
+    it('includes the request id in the review queue reason', async () => {
+      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.8, riskLevel: 'HIGH' });
+      const { req, res, next } = makeReqRes({ requestId: 'fraud-req-42' });
+      await fraudDetectionMiddleware(req, res, next);
+      expect(fraudMock.addToReviewQueue).toHaveBeenCalledWith(
+        'u1',
+        expect.stringContaining('fraud-req-42'),
+        0.8
+      );
+      expect(next).toHaveBeenCalled();
+    });
   });
 
   describe('networkAnalysisMiddleware', () => {

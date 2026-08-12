@@ -201,7 +201,6 @@ class KeyRotationService {
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
             newAddress,
-            newWalletAddress,  // public address only — never the private key
             Date.now(),
           ]),
         });

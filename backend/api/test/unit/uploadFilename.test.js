@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeUploadFilename } from '../../../src/lib/uploadFilename.js';
+import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {
   it('returns original name when safe', () => {
@@ -7,11 +7,11 @@ describe('sanitizeUploadFilename', () => {
   });
 
   it('strips directory traversal sequences', () => {
-    expect(sanitizeUploadFilename('../../../etc/passwd', 'default')).toBe('etc.passwd');
+    expect(sanitizeUploadFilename('../../../etc/passwd', 'default')).toBe('passwd');
   });
 
   it('strips backslash traversal on POSIX', () => {
-    expect(sanitizeUploadFilename('..\\..\\etc\\passwd', 'default')).toBe('etc.passwd');
+    expect(sanitizeUploadFilename('..\\..\\etc\\passwd', 'default')).toBe('passwd');
   });
 
   it('strips control characters', () => {
@@ -47,5 +47,20 @@ describe('sanitizeUploadFilename', () => {
 
   it('collapses multiple dots', () => {
     expect(sanitizeUploadFilename('file...name.pdf', 'default')).toBe('file.name.pdf');
+  });
+
+  it('returns the fallback for non-string input', () => {
+    expect(sanitizeUploadFilename(null, 'default')).toBe('default');
+    expect(sanitizeUploadFilename(undefined, 'default')).toBe('default');
+    expect(sanitizeUploadFilename(42, 'default')).toBe('default');
+  });
+
+  it('rejects a reserved name without an extension', () => {
+    expect(sanitizeUploadFilename('CON', 'default')).toBe('default');
+    expect(sanitizeUploadFilename('nul', 'default')).toBe('default');
+  });
+
+  it('keeps a mixed-case safe filename intact', () => {
+    expect(sanitizeUploadFilename('My-Document_v2.1.pdf', 'default')).toBe('My-Document_v2.1.pdf');
   });
 });

@@ -18,6 +18,11 @@
 import logger from '../middleware/logger.js';
 
 export function sanitizePrice(value) {
+  // Reject hex/exponent strings that Number() would otherwise coerce
+  // ('0x10' -> 16, '1e3' -> 1000); only decimal strings are prices.
+  if (typeof value === 'string' && !/^-?\d*\.?\d+$/.test(value.trim())) {
+    return 0;
+  }
   const num = Number(value);
   return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
 }

@@ -239,5 +239,12 @@ describe('Pricing Service Unit Tests', () => {
       expect(() => convertKmToMiles(-5)).toThrow(RangeError);
       expect(() => convertKmToMiles(-100)).toThrow(RangeError);
     });
+
+    it('rejects hex and exponent strings in sanitizePrice', () => {
+      // Number() would coerce these to 16 and 1000 respectively; the strict
+      // decimal guard must reject them.
+      expect(sanitizePrice('0x10')).toBe(0);
+      expect(sanitizePrice('1e3')).toBe(0);
+    });
   });
 });

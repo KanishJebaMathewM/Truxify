@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { validatePagination } from '../../src/middleware/pagination.js';
+import { buildPagination } from '../../src/utils/pagination.js';
 
 function parsePage(raw) {
   const p = parseInt(raw, 10);
@@ -62,10 +64,6 @@ describe('parseLimit', () => {
     expect(parseLimit('25', 50)).toBe(25);
   });
 });
-import { describe, it, expect, vi } from 'vitest';
-import { validatePagination } from '../../src/middleware/pagination.js';
-import { buildPagination } from '../../src/utils/pagination.js';
-
 describe('buildPagination', () => {
   it('returns defaults when no params provided', () => {
     const result = buildPagination();

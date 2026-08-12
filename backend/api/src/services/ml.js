@@ -98,7 +98,7 @@ async function handleResponse(response) {
     try {
         return JSON.parse(text);
     } catch (err) {
-    logger.error({ status: response ? response.status : undefined, url }, 'ML service request failed');
+        logger.error({ status: response ? response.status : undefined }, 'ML service request failed');
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }
@@ -741,7 +741,7 @@ class MLService {
     try {
       data = await response.json();
     } catch (e) {
-      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
+      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`, { cause: e });
     }
 
     if (response.status === 401) {

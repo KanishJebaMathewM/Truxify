@@ -10,7 +10,7 @@
  * Run with:  npm run test:unit -- test/unit/validate.test.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { validateBody, validateParams, validateQuery } from '../../src/middleware/validate.js';
+import { validateBody, validateParams, validateQuery, formatValidationIssues } from '../../src/middleware/validate.js';
 import { z } from 'zod';
 
 function makeRes() {

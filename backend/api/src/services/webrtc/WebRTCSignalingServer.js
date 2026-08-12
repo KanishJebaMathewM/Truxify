@@ -415,7 +415,12 @@ class WebRTCSignalingServer {
     if (user?.role === 'admin') return true;
 
     const peer = this.peers.get(peerId);
-    return Boolean(peer && peer.userId === user?.id);
+    // Both ids must actually be present: `peer.userId === user?.id` is true
+    // when both sides are undefined, which would admit a caller with no id to
+    // any peer registered from a token carrying no `id` claim.
+    return Boolean(
+      peer && peer.userId != null && user?.id != null && peer.userId === user.id,
+    );
   }
 
   async getOfflineGPSData(peerId, since, requestingUser, token) {

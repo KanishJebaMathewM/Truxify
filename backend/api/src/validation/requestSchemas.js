@@ -265,14 +265,6 @@ export const updateDocumentStatusSchema = z.object({
   rejection_reason: z.string().optional()
 });
 
-export const syncWeightSchema = z.object({
-  truck_id: z.string().min(1, "Truck ID is required"),
-  axles: z.array(z.object({
-    position: z.string().min(1, "Axle position is required"),
-    pressure_psi: coerceNumber(z.number().positive("Pressure must be positive"))
-  })).min(1, "At least one axle reading is required")
-}).strict();
-
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
@@ -429,16 +421,3 @@ export const reportGripDataSchema = z.object({
   ).optional().default(0),
 }).strict();
 
-
-/**
- * Schema for POST /api/driver/weigh-stations/sync-weight
- */
-export const syncWeightSchema = z.object({
-  vehicleId: z.string().min(1, 'vehicleId is required'),
-  truckId: z.string().min(1, 'truckId is required'),
-  axles: z.array(z.object({
-    position: z.number().int().min(0),
-    pressure_psi: z.number().positive('pressure_psi must be a positive number'),
-  })).min(1, 'At least one axle is required'),
-  timestamp: z.string().datetime({ message: 'timestamp must be ISO 8601' }).optional(),
-});

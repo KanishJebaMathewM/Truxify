@@ -63,6 +63,12 @@ import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
+// Explicit allow-list for the driver-facing marketplace. Excludes internal
+// columns such as customer_id so drivers never see the freight owner's
+// identity and any future sensitive column is not auto-disclosed.
+const MARKETPLACE_COLUMNS =
+  'id, order_display_id, customer_name, company_name, route_label, route_subtitle, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, route_distance, route_duration, goods_type, weight, dimensions, is_stackable, is_fragile, special_handling, freight_value, fuel_cost, toll_cost, net_profit, capacity_used, truck_fill_label, space_available, badge_label, badge_emoji, is_best_profit, is_en_route, extra_distance_km, extra_earnings, route_note, distance_from_driver, status, created_at, updated_at';
+
 
 // Sanitize load filter query params to prevent injection attacks
 function sanitizeLoadFilters(query) {
@@ -197,7 +203,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
     // marketplace board must read through the service-role client.
     let query = supabaseAdmin
       .from('load_offers')
-      .select('*', { count: 'exact' });
+      .select(MARKETPLACE_COLUMNS, { count: 'exact' });
 
     let statusFilter = 'available';
     if (req.query.status) {
@@ -469,7 +475,7 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse')
   try {
     const { data: load, error } = await supabaseAdmin
       .from('load_offers')
-      .select('*')
+      .select(MARKETPLACE_COLUMNS)
       .eq('id', req.params.id)
       .eq('status', 'available')
       .maybeSingle();

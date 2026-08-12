@@ -7,6 +7,7 @@ const RUSH_HOUR_END_PM = 19;
 const MIN_SURGE_MULTIPLIER = 1.2;
 const MAX_SURGE_MULTIPLIER = 2.5;
 const SURGE_PEAK_AMPLITUDE = 1.3;
+const TRAFFIC_API_TIMEOUT_MS = 5000;
 
 export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   try {
@@ -24,7 +25,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     let multiplier;
     if (process.env.TOMTOM_API_KEY) {
       const url = `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=${process.env.TOMTOM_API_KEY}&point=${pickupLat},${pickupLng}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(TRAFFIC_API_TIMEOUT_MS) });
       if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
       const data = await response.json();
       // speedDiffPercent is negative when traffic is slower than the
@@ -38,7 +39,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
       const origin = `${pickupLat},${pickupLng}`;
       const destination = `${pickupLat + 0.01},${pickupLng + 0.01}`;
       const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(TRAFFIC_API_TIMEOUT_MS) });
       if (!response.ok) throw new Error(`Google API error: ${response.status}`);
       const data = await response.json();
       const duration = data.rows?.[0]?.elements?.[0]?.duration_in_traffic?.value;

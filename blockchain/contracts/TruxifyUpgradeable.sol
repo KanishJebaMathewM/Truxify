@@ -227,6 +227,10 @@ contract TruxifyUpgradeable is
         uint256 requestTimestamp = emergencyUpgradeRequests[newImplementation];
         if (requestTimestamp != 0) {
             require(
+                approvedImplementations[newImplementation],
+                "Implementation not approved"
+            );
+            require(
                 block.timestamp >= requestTimestamp + EMERGENCY_UPGRADE_TIMELOCK,
                 "Emergency timelock not yet elapsed"
             );
@@ -485,6 +489,10 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
     {
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
+        require(
+            approvedImplementations[newImplementation],
+            "Implementation not approved"
+        );
         require(
             emergencyUpgradeRequests[newImplementation] == 0,
             "Emergency upgrade already requested for this implementation"

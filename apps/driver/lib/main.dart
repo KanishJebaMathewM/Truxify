@@ -10,6 +10,7 @@ import 'app.dart';
 import 'core/firebase_config.dart';
 import 'package:truxify_driver/config/env.dart';
 import 'providers/text_scale_provider.dart';
+
 import 'providers/language_provider.dart';
 import 'services/background_sync_service.dart';
 

@@ -361,18 +361,18 @@ describe('WebRTCSignalingServer', () => {
       ['no user', undefined],
       ['null', null],
       ['a user with no id', {}],
-    ])(
-      'currently ADMITS %s to a peer with an unset userId (undefined === undefined)',
-      (_label, user) => {
-        // Not the intended behaviour — pinned so the fix is visible as a diff.
-        // `peer.userId === user?.id` is true when both sides are undefined, so
-        // a peer registered from a token with no `id` claim is reachable by a
-        // caller who also has no id. Tracked separately; see the follow-up
-        // that tightens this to require both ids to be present.
-        addPeer(server, 'peer-anon', { userId: undefined });
-        expect(server.canUserAccessPeer('peer-anon', user)).toBe(true);
-      },
-    );
+    ])('refuses %s for a peer with an unset userId', (_label, user) => {
+      // `peer.userId === user?.id` alone is true when both sides are
+      // undefined, which admitted a caller with no id to any peer registered
+      // from a token that carries no `id` claim.
+      addPeer(server, 'peer-anon', { userId: undefined });
+      expect(server.canUserAccessPeer('peer-anon', user)).toBe(false);
+    });
+
+    it('refuses a null-id caller for a peer with a null userId', () => {
+      addPeer(server, 'peer-null', { userId: null });
+      expect(server.canUserAccessPeer('peer-null', { id: null })).toBe(false);
+    });
 
     it('refuses an identified user for a peer with an unset userId', () => {
       addPeer(server, 'peer-anon', { userId: undefined });

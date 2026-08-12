@@ -14,6 +14,10 @@ from app.models.base import (
     get_meta_path,
     ensure_model_loaded,
     preload_all_models,
+    restore_previous_model,
+    get_model_meta,
+    get_previous_model_path,
+    get_previous_meta_path,
 )
 
 
@@ -331,3 +335,48 @@ async def test_preload_all_models_returns_set_type(tmp_path, monkeypatch):
     monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
     result = await preload_all_models()
     assert isinstance(result, set)
+
+
+class TestRestorePreviousModel:
+    def test_save_twice_preserves_previous(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        model_a = {"version": "A"}
+        model_b = {"version": "B"}
+        metrics_a = {"mae": 1.0}
+        metrics_b = {"mae": 0.5}
+
+        save_model(model_a, "test_restore", metrics=metrics_a)
+        save_model(model_b, "test_restore", metrics=metrics_b)
+
+        assert load_model("test_restore") == model_b
+
+        restored = restore_previous_model("test_restore")
+        assert restored is True
+        assert load_model("test_restore") == model_a
+        assert get_model_meta("test_restore")["metrics"] == metrics_a
+
+    def test_restore_returns_false_when_no_previous_version(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        model_a = {"version": "A"}
+        save_model(model_a, "test_single_save")
+
+        restored = restore_previous_model("test_single_save")
+        assert restored is False
+        assert load_model("test_single_save") == model_a
+
+    def test_restore_is_reversible(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        model_a = {"version": "A"}
+        model_b = {"version": "B"}
+
+        save_model(model_a, "test_reversible")
+        save_model(model_b, "test_reversible")
+
+        # First restore: B -> A (A is production, B is previous)
+        assert restore_previous_model("test_reversible") is True
+        assert load_model("test_reversible") == model_a
+
+        # Second restore: A -> B (B is production again)
+        assert restore_previous_model("test_reversible") is True
+        assert load_model("test_reversible") == model_b
+

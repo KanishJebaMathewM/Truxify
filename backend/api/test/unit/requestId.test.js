@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { requestIdMiddleware, requestLogger } from '../../src/middleware/requestId.js';
+import { requestIdMiddleware, requestLogger, addTracingHeaders } from '../../src/middleware/requestId.js';
 
 vi.mock('../../src/middleware/logger.js', () => {
   const mLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -104,5 +104,36 @@ describe('requestLogger', () => {
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ durationMs: expect.any(Number) })
     );
+  });
+});
+
+describe('addTracingHeaders', () => {
+  it('sets X-Trace-Id and X-Span-Id headers', () => {
+    const req = { requestId: 'req-1' };
+    const res = makeRes();
+    addTracingHeaders(req, res, vi.fn());
+    expect(res.setHeader).toHaveBeenCalledWith('X-Trace-Id', 'req-1');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Span-Id', expect.any(String));
+  });
+
+  it('sets a truncated X-User-Id when req.user is present', () => {
+    const req = { requestId: 'req-1', user: { id: 'user-abcdef1234567890' } };
+    const res = makeRes();
+    addTracingHeaders(req, res, vi.fn());
+    expect(res.setHeader).toHaveBeenCalledWith('X-User-Id', 'user-abc');
+  });
+
+  it('does not set X-User-Id for anonymous requests', () => {
+    const req = { requestId: 'req-1' };
+    const res = makeRes();
+    addTracingHeaders(req, res, vi.fn());
+    const calls = res.setHeader.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('X-User-Id');
+  });
+
+  it('calls next to continue the chain', () => {
+    const next = vi.fn();
+    addTracingHeaders({ requestId: 'req-1' }, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
   });
 });

@@ -27,6 +27,21 @@ from functools import partial
 logger = logging.getLogger(__name__)
 Base = declarative_base()
 
+
+def eta_seconds_from_speed(route_distance_m: float, predicted_speed_mps: float) -> Optional[float]:
+    """Convert a predicted traffic speed (m/s) into a travel time (seconds).
+
+    The LSTM is trained on traffic_speed (m/s) (see train_model), so its raw
+    output is a speed, not a duration. eta_seconds = distance_m / speed_mps.
+    Returns None when either input is missing or non-positive so callers can
+    fall back to the routing engine's own duration estimate.
+    """
+    if not route_distance_m or route_distance_m <= 0:
+        return None
+    if not predicted_speed_mps or predicted_speed_mps <= 0:
+        return None
+    return route_distance_m / predicted_speed_mps
+
 class TrafficData(Base):
     __tablename__ = 'traffic_data'
     

@@ -36,36 +36,59 @@ export class FlashbotsRelayerService {
   }
 
   async sendPrivateBundle(bundle) {
-    const params = {
-      txs: bundle.signedBundle,
-      blockNumber: `0x${BigInt(bundle.targetBlock).toString(16)}`,
-      version: process.env.FLASHBOTS_BUNDLE_VERSION || 'v3',
-    };
-
-    const response = await axios.post(
-      this.flashbotsRelayUrl,
-      {
-        jsonrpc: '2.0',
-        method: 'eth_sendBundle',
-        params: [params],
-        id: 1,
-      },
-      { timeout: 30000 }
-    );
-
-    if (response.data?.error) {
-      const message =
-        response.data.error.message ||
-        JSON.stringify(response.data.error);
-      throw new Error(`Flashbots bundle rejected: ${message}`);
+    if (process.env.FLASHBOTS_DRY_RUN === 'true') {
+      console.log(`[MEV Relayer] DRY RUN: Simulated private transaction bundle submission to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`);
+      return {
+        success: true,
+        bundleHash: ethers.keccak256(bundle.signedBundle[0]),
+        targetBlock: bundle.targetBlock,
+      };
     }
 
-    return {
-      success: true,
-      bundleHash: response.data?.result || null,
-      targetBlock: bundle.targetBlock,
-      relayUrl: this.flashbotsRelayUrl,
+    console.log(`[MEV Relayer] Submitting private transaction bundle to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`);
+
+    const payload = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'eth_sendBundle',
+      params: [
+        {
+          txs: bundle.signedBundle,
+          blockNumber: `0x${bundle.targetBlock.toString(16)}`,
+          version: process.env.FLASHBOTS_BUNDLE_VERSION || 'v3',
+        }
+      ]
     };
+
+    const payloadString = JSON.stringify(payload);
+    const signature = await this.wallet.signMessage(ethers.id(payloadString));
+    const authHeader = `${this.wallet.address}:${signature}`;
+
+    try {
+      const response = await axios.post(
+        this.flashbotsRelayUrl,
+        payloadString,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Flashbots-Signature': authHeader,
+          }
+        }
+      );
+
+      if (response.data.error) {
+        throw new Error(response.data.error.message || 'Flashbots relay error');
+      }
+
+      return {
+        success: true,
+        bundleHash: response.data.result?.bundleHash || ethers.keccak256(bundle.signedBundle[0]),
+        targetBlock: bundle.targetBlock,
+      };
+    } catch (error) {
+      console.error('[MEV Relayer] Failed to send private bundle:', error.message);
+      throw error;
+    }
   }
 }
 

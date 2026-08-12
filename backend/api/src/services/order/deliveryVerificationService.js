@@ -420,9 +420,16 @@ export class DeliveryVerificationService {
 
     // Ownership + provenance: only telemetry for THIS driver on THIS order.
     // driver_id is stamped server-side from the authenticated connection.
+    // Also filter by order_display_id to prevent stale telemetry from a
+    // previous order with the same driver from satisfying the geofence check
+    // (issue #11185).
     const latestTelemetry = await mongoDb
       .collection("telemetry")
-      .find({ driver_id: order.driver_id, order_id: order.id })
+      .find({
+        driver_id: order.driver_id,
+        order_id: order.id,
+        order_display_id: order.order_display_id,
+      })
       .sort({ server_received_at: -1 })
       .limit(1)
       .toArray();

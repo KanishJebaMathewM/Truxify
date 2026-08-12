@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
@@ -376,13 +376,17 @@ class MEVService {
     // ============ Statistics ============
 
     async getMEVStats() {
-        const { data: escrows } = await supabase
+        const { data: escrows, error: escrowsError } = await supabaseAdmin
             .from('mev_escrows')
             .select('*');
 
-        const { data: bundles } = await supabase
+        if (escrowsError) throw escrowsError;
+
+        const { data: bundles, error: bundlesError } = await supabaseAdmin
             .from('flashbots_bundles')
             .select('*');
+
+        if (bundlesError) throw bundlesError;
 
         return {
             totalEscrows: escrows?.length || 0,

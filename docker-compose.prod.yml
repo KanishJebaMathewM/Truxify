@@ -84,10 +84,11 @@ services:
     environment:
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ENVIRONMENT: production
+      MODEL_STORAGE_DIR: /app/models_storage
     volumes:
       # Remove dev code mount — code is baked into the production image
-      # Persist trained models across restarts
-      - ml_models_data:/app/models
+      # Persist trained models across restarts — must match MODEL_STORAGE_DIR in base.py
+      - ml_models_data:/app/models_storage
     deploy:
       resources:
         limits:

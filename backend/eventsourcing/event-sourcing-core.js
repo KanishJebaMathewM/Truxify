@@ -441,23 +441,44 @@ export class EventStoreCore {
    * Snapshot policy: snapshot when the aggregate has grown by
    * `snapshotThreshold` events since its last snapshot. Never snapshot every
    * event, and never delete the underlying event history.
+   *
+   * The trigger and the snapshot state are based on DB-authoritative data:
+   * `getLatestVersion` bypasses the in-memory event cache, and the state is
+   * rebuilt from freshly-fetched rows. This keeps snapshots consistent across
+   * instances whose caches have not yet seen writes committed by another
+   * instance.
    */
   async checkSnapshot(aggregateId) {
-    const events = await this.getEventStream(aggregateId);
-    if (!events || events.length === 0) {
-      return;
+    const latestVersion = await this.getLatestVersion(aggregateId);
+    if (latestVersion === null || latestVersion <= 0) {
+      return false;
     }
-    const latestVersion = Math.max(...events.map((e) => Number(e.version) || 0));
+
     const snapshot = await this.getSnapshot(aggregateId);
     const snapshotVersion = snapshot ? Number(snapshot.version) : 0;
 
-    if (latestVersion - snapshotVersion >= this.snapshotThreshold) {
-      const state = await this.getAggregateState(aggregateId);
-      await this.takeSnapshot(aggregateId, state, latestVersion);
-      this.logger.info?.(`Snapshot taken for ${aggregateId} at version ${latestVersion}`);
-      return true;
+    if (latestVersion - snapshotVersion < this.snapshotThreshold) {
+      return false;
     }
-    return false;
+
+    // Rebuild the snapshot state from freshly-fetched rows so it includes
+    // events committed by other instances, and refresh the cache so this
+    // instance's reads stay consistent with the database afterwards.
+    const rawRows = await this.db.fetchEventStream(aggregateId);
+    const events = (rawRows || [])
+      .map(normalizeEventRow)
+      .filter(Boolean)
+      .sort((a, b) => Number(a.version) - Number(b.version));
+    this.eventStreams.set(aggregateId, events);
+
+    const state = await this.rebuildFromRows(aggregateId, rawRows);
+    if (!state) {
+      return false;
+    }
+
+    await this.takeSnapshot(aggregateId, state, latestVersion);
+    this.logger.info?.(`Snapshot taken for ${aggregateId} at version ${latestVersion}`);
+    return true;
   }
 }
 

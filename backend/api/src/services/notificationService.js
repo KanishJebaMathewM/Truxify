@@ -173,6 +173,21 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
       logger.error({}, '[NotificationService] Service-role client not configured — cannot store OTP.');
       return null;
     }
+
+    // Invalidate all existing unverified OTPs for this order so that only one
+    // active OTP can ever exist per order within the TTL window. This prevents
+    // an attacker who obtained an older OTP from using it after a new one is
+    // issued (see issue #11205).
+    const { error: invalidateError } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({ expires_at: new Date().toISOString(), verified: true })
+      .eq('order_id', orderId)
+      .eq('verified', false);
+
+    if (invalidateError) {
+      logger.error({ err: invalidateError }, '[NotificationService] Failed to invalidate existing OTPs');
+    }
+
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 

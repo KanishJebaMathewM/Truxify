@@ -80,4 +80,24 @@ describe('correlationIdMiddleware', () => {
     expect(req.correlationId).toBe(validUuid);
     expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', validUuid);
   });
+
+  it('falls back to a random UUID for an unsafe header value', () => {
+    const req = makeReq({ 'x-correlation-id': 'bad id with spaces and !!!' });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
+
+  it('falls back to a random UUID for an over-length header value', () => {
+    const req = makeReq({ 'x-correlation-id': 'a'.repeat(65) });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
 });

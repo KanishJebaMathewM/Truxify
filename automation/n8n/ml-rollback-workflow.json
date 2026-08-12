@@ -69,7 +69,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const data = $input.item.json;\nconst shouldRollback = Boolean(data.should_rollback || (data.metrics && data.metrics.degradation > 0.15));\nreturn {\n  test_id: data.test_id || 'test-default',\n  should_rollback: shouldRollback,\n  action: shouldRollback ? 'rollback' : 'promote',\n  evaluated_at: new Date().toISOString()\n};"
+        "jsCode": "const data = $input.item.json;\nconst results = data.results || {};\nconst metricValues = Object.values(results).filter(r => r && typeof r.improvement === 'number');\nconst meanImprovement = metricValues.length\n  ? metricValues.reduce((sum, r) => sum + r.improvement, 0) / metricValues.length\n  : 0;\nconst degradation = (data.metrics && typeof data.metrics.degradation === 'number')\n  ? data.metrics.degradation\n  : Math.max(0, -meanImprovement / 100);\nconst shouldRollback = Boolean(data.should_rollback) || degradation > 0.15;\nreturn {\n  test_id: data.test_id || 'test-default',\n  should_rollback: shouldRollback,\n  degradation: degradation,\n  action: shouldRollback ? 'rollback' : 'promote',\n  evaluated_at: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -129,7 +129,7 @@
         "toEmail": "ml-alerts@truxify.org",
         "subject": "⚠️ ML Model Auto-Rollback Triggered: {{$node[\"Decision\"].json.test_id}}",
         "htmlFormat": true,
-        "message": "<h3>ML Model Auto-Rollback Triggered</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong>.</p><p>Auto-rollback executed successfully at: {{$node[\"Decision\"].json.evaluated_at}}.</p><p>Previous stable model baseline has been restored.</p>",
+        "message": "<h3>ML Model Auto-Rollback Triggered</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong> (degradation {{$node[\"Decision\"].json.degradation}}).</p><p>Auto-rollback executed successfully at: {{$node[\"Decision\"].json.evaluated_at}}.</p><p>Previous stable model baseline has been restored.</p>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",

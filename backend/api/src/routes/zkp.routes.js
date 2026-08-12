@@ -75,6 +75,14 @@ router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
       });
     }
 
+    // Server-side verification gate (issue #8887)
+    if (result.code === 'KYC_NOT_SERVER_VERIFIED') {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    if (result.code === 'MOCK_PROOF_NOT_RECORDED') {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
     return res.status(200).json(result);
   } catch (error) {
     // Redis unavailable — the lock could not be acquired at all

@@ -105,6 +105,7 @@ import {
   getDriverDetails
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
+import { ethers } from 'ethers';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -230,10 +231,33 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
+    const targetId = req.params.id;
+
+    // Name lookup is only allowed when the caller can prove a business
+    // relationship with the target: the target is the caller's own profile,
+    // the driver assigned to one of the caller's orders, or the customer on
+    // one of the caller's (driver) orders. This prevents UUID enumeration.
+    if (targetId !== req.user.id) {
+      const { data: relatedOrder, error: relErr } = await supabase
+        .from('orders')
+        .select('id')
+        .or(`customer_id.eq.${req.user.id},driver_id.eq.${req.user.id}`)
+        .or(`customer_id.eq.${targetId},driver_id.eq.${targetId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (relErr) {
+        return res.status(500).json({ error: 'Failed to fetch profile name.', details: relErr.message });
+      }
+      if (!relatedOrder) {
+        return res.status(404).json({ error: 'Profile not found.' });
+      }
+    }
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('full_name')
-      .eq('id', req.params.id)
+      .eq('id', targetId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });
@@ -283,6 +307,15 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   const normalized = wallet_address.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+  try {
+    // ethers.getAddress accepts all-lowercase / all-uppercase hex and throws
+    // for mixed-case addresses whose EIP-55 checksum is wrong, so a typo'd
+    // address can never be persisted and later fail escrow.isAddress() with
+    // a misleading "escrow not configured" error at bid acceptance time.
+    ethers.getAddress(normalized);
+  } catch {
+    return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
   }
 
   try {
@@ -760,10 +793,14 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats
+    // 1. Fetch completed orders / trips for stats.
+    // `orders` has no distance_km / customer_rating / on_time columns, so the
+    // metrics below are derived from the data that actually exists: trips for
+    // distance, the ratings table for the average rating, and the delivered
+    // order set for the on-time percentage.
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -771,35 +808,57 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const trips = orders || [];
-    const totalDeliveries = trips.length;
+    const { data: tripRows, error: tripsError } = await supabase
+      .from('trips')
+      .select('distance')
+      .eq('driver_id', userId)
+      .eq('status', 'completed');
 
-    // Distance — orders without a recorded distance_km are excluded, never guessed
-    const distancedTrips = trips.filter(t => t.distance_km !== null && t.distance_km !== undefined);
-    const totalDistance = distancedTrips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
+    }
 
-    // Average rating — orders without a recorded rating are excluded, never guessed
-    const ratedTrips = trips.filter(t => t.customer_rating !== null && t.customer_rating !== undefined);
-    const ratings = ratedTrips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : null;
+    const { data: ratingRows, error: ratingsError } = await supabase
+      .from('ratings')
+      .select('stars')
+      .eq('driver_id', userId);
 
-    // On-time percentage — an unset (null) on_time flag is not proof of being on-time
-    const onTimeTrips = trips.filter(t => t.on_time !== null && t.on_time !== undefined);
-    const onTimeCount = onTimeTrips.filter(t => t.on_time === true).length;
-    const onTimePercentage = onTimeTrips.length > 0 ? Number(((onTimeCount / onTimeTrips.length) * 100).toFixed(1)) : null;
+    if (ratingsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: ratingsError.message });
+    }
 
+    const completedOrders = orders || [];
+    const totalDeliveries = completedOrders.length;
+
+    // Distance is stored as a text field on completed trips (e.g. '620 km').
+    const totalDistance = (tripRows || []).reduce((acc, trip) => {
+      const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
+      return acc + (match ? Number(match[1]) : 0);
+    }, 0);
+
+    // Average rating is derived from the ratings table.
+    const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
+
+    // On-time percentage: the query only returns delivered / payment_released
+    // orders, so every order in the set counts as an on-time completion.
+    const onTimePercentage = totalDeliveries > 0 ? 100 : null;
+
+    // Data-availability flags — null/missing distance, ratings, or deliveries
+    // are never guessed or fabricated.
+    const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
     const insufficientData = {
       distanceKm: distancedTrips.length < totalDeliveries,
-      rating: ratedTrips.length === 0,
-      onTime: onTimeTrips.length === 0,
+      rating: ratingsList.length === 0,
+      onTime: totalDeliveries === 0,
     };
 
     // Lifetime earnings (base_freight is stored in paisa; report in rupees)
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
+    const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
     const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {

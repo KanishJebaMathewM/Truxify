@@ -470,6 +470,11 @@ func sweepDrivers() {
 		e.mu.Unlock()
 		return true
 	})
+
+	// geofenceRateLimit has no TTL-based cleanup of its own — without this,
+	// it only ever shrinks via evictGeofenceOverflow's oldest-first hard-cap
+	// eviction once it hits maxRateTracked entries.
+	pruneGeofenceRateEntries()
 }
 
 // Handle Single Telemetry Ping

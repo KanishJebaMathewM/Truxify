@@ -133,14 +133,32 @@ export class OrderRepository {
       .maybeSingle(), 'findOrderForTimeline');
   } 
 
-  async updateOrder(id, updates) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .update(updates)
-      .eq('id', id)
-      .select('*')
-      .single(), 'updateOrder');
+  async updateOrder(id, updates, eventType = null) {
+  const result = await this._retryableQuery(() => this.supabase
+    .from('orders')
+    .update(updates)
+    .eq('id', id)
+    .select('*')
+    .single(), 'updateOrder');
+
+  // Write outbox event after successful mutation — best-effort, never throws.
+  if (!result.error && result.data && eventType) {
+    const { outboxService } = await import('../services/outbox/outboxService.js');
+    await outboxService.writeEvent({
+      aggregateId: result.data.order_display_id || id,
+      aggregateType: 'order',
+      eventType,
+      payload: {
+        orderId: id,
+        orderDisplayId: result.data.order_display_id,
+        status: result.data.status,
+        updates,
+      },
+    });
   }
+
+  return result;
+}
 
   async updateOrderWithFilter(id, updates, filters, selectColumns) {
     return this._retryableQuery(() => {

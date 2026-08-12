@@ -81,4 +81,28 @@ describe('responseSanitizer', () => {
 
     expect(res._data).toBe('hello');
   });
+
+  it('removes undefined values from nested objects', () => {
+    const req = {};
+    const res = makeResMock();
+    const next = vi.fn();
+
+    responseSanitizer(req, res, next);
+    res.json({ user: { id: 'u1', deleted: undefined, profile: { name: 'A', temp: undefined } } });
+
+    expect(res._data).toEqual({ user: { id: 'u1', profile: { name: 'A' } } });
+  });
+
+  it('passes falsy primitives through unchanged', () => {
+    const req = {};
+    const res = makeResMock();
+    const next = vi.fn();
+
+    responseSanitizer(req, res, next);
+    res.json(0);
+    expect(res._data).toBe(0);
+
+    res.json(false);
+    expect(res._data).toBe(false);
+  });
 });

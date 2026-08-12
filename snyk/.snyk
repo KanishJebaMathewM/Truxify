@@ -1,0 +1,25 @@
+# Snyk Policy File
+version: v1.25.0
+ignore:
+  'npm:minimatch:20160629':
+    - '*':
+        reason: 'False positive'
+        expires: '2026-12-31T00:00:00.000Z'
+  'npm:lodash:20180130':
+    - '*':
+        reason: 'Not exploitable in our use case'
+        expires: '2026-12-31T00:00:00.000Z'
+patch:
+  'npm:minimatch:20160629':
+    - '*':
+        patched: '2026-01-01T00:00:00.000Z'
+exclude:
+  - '**/test/**'
+  - '**/examples/**'
+  - '**/node_modules/**'
+  - '**/dist/**'
+severity:
+  - critical
+  - high
+  - medium
+  - low

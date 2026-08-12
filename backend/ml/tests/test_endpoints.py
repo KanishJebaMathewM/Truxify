@@ -9,8 +9,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from main import app
 from app.models.base import MODEL_STORAGE_DIR
+from app.models import price_prediction as pp
 
-client = TestClient(app)
+client = TestClient(app, headers={'X-API-Key': 'test_key'})
 
 
 def test_root():
@@ -26,10 +27,13 @@ def test_health():
     assert data["status"] in {"healthy", "degraded"}
     assert data["service"] == "ml-engine"
     assert set(data["models"]) == {
-        "eta_predictor",
         "demand_forecast",
         "price_forecast",
         "driver_profit",
+        "trust_scorer",
+        "collaborative_filter",
+        "eta_predictor",
+        "traffic_eta",
     }
 
 
@@ -117,7 +121,9 @@ def test_predict_demand_valid():
     assert data["model_version"] == "1.0.0"
 
 
-def test_predict_price_valid():
+def test_predict_price_valid(monkeypatch):
+    """Price model is gated: without a real-data model the endpoint is 503."""
+    monkeypatch.setattr(pp, "get_model_meta", lambda name: None)
     payload = {
         "distance_km": 500.0,
         "cargo_weight_kg": 10000.0,
@@ -126,23 +132,18 @@ def test_predict_price_valid():
         "route_destination": "Delhi",
     }
     response = client.post("/predict/price", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "estimated_price" in data
-    assert isinstance(data["estimated_price"], float)
-    assert data["estimated_price"] > 0
-    assert data["currency"] == "INR"
+    assert response.status_code == 503
 
 
-def test_predict_price_minimal():
+def test_predict_price_minimal(monkeypatch):
+    """Backward-compat payload still gated at 503 without a real model."""
+    monkeypatch.setattr(pp, "get_model_meta", lambda name: None)
     payload = {
         "distance_km": 100.0,
         "cargo_weight_kg": 1000.0,
     }
     response = client.post("/predict/price", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["estimated_price"] > 0
+    assert response.status_code == 503
 
 
 def test_predict_price_invalid_distance():
@@ -166,3 +167,108 @@ def test_predict_demand_invalid_fields():
     }
     response = client.post("/predict/demand", json=payload)
     assert response.status_code == 422
+
+
+def test_cpu_bound_inference_runs_once_per_request(monkeypatch):
+    """Regression guard for #10144: demand/packing/deadhead/mid-trip must run
+    the CPU-bound scorer exactly once — never twice via a second
+    asyncio.to_thread call that discards the run_inference result."""
+    import main as main_module
+
+    calls = []
+
+    async def fake_run_inference(func, *args, **kwargs):
+        calls.append(func.__name__)
+        if func is main_module.predict_demand:
+            return 10.0
+        if func is main_module.optimise_packing:
+            return {
+                "packing_arrangement": [],
+                "unpacked_packages": [],
+                "stop_sequence": [0],
+                "utilization_pct": 50.0,
+            }
+        return {"recommendations": []}
+
+    async def fail_to_thread(*args, **kwargs):
+        raise AssertionError(
+            "asyncio.to_thread must not be called by endpoint inference"
+        )
+
+    monkeypatch.setattr(main_module, "run_inference", fake_run_inference)
+    monkeypatch.setattr(main_module.asyncio, "to_thread", fail_to_thread)
+
+    demand_payload = _auth_payload()
+    response = client.post("/predict/demand", json=demand_payload)
+    assert response.status_code == 200
+    assert calls == ["predict_demand"]
+    calls.clear()
+
+    packing_payload = {
+        "packages": [{"length": 1.0, "width": 1.0, "height": 1.0, "weight": 5.0}],
+        "truck": {"length": 10.0, "width": 5.0, "height": 5.0, "max_weight": 1000.0},
+        "delivery_addresses": [{"lat": 19.07, "lng": 72.87}],
+    }
+    response = client.post("/optimise/packing", json=packing_payload)
+    assert response.status_code == 200
+    assert calls == ["optimise_packing"]
+    calls.clear()
+
+    deadhead_payload = {
+        "driver_destination": {"lat": 19.07, "lng": 72.87},
+        "truck_specs": {
+            "max_weight_kg": 10000.0,
+            "max_length_m": 20.0,
+            "max_width_m": 8.0,
+            "max_height_m": 8.0,
+        },
+        "arrival_time": "2026-08-11T10:00:00Z",
+        "available_loads": [
+            {
+                "load_id": "L1",
+                "origin_lat": 19.0,
+                "origin_lng": 72.0,
+                "dest_lat": 20.0,
+                "dest_lng": 73.0,
+                "weight_kg": 5000.0,
+                "length_m": 10.0,
+                "width_m": 5.0,
+                "height_m": 5.0,
+                "pickup_deadline": "2026-08-11T10:00:00Z",
+                "payment_inr": 10000.0,
+            }
+        ],
+    }
+    response = client.post("/match/deadhead", json=deadhead_payload)
+    assert response.status_code == 200
+    assert calls == ["find_return_loads"]
+    calls.clear()
+
+    mid_trip_payload = {
+        "current_location": {"lat": 19.07, "lng": 72.87},
+        "remaining_route": [{"lat": 19.0, "lng": 72.0}],
+        "available_capacity": {
+            "weight_kg": 5000.0,
+            "length_m": 10.0,
+            "width_m": 5.0,
+            "height_m": 5.0,
+        },
+        "nearby_loads": [
+            {
+                "load_id": "L1",
+                "pickup_lat": 19.0,
+                "pickup_lng": 72.0,
+                "dropoff_lat": 20.0,
+                "dropoff_lng": 73.0,
+                "weight_kg": 5000.0,
+                "length_m": 10.0,
+                "width_m": 5.0,
+                "height_m": 5.0,
+                "payment_inr": 10000.0,
+                "pickup_deadline": "2026-08-11T10:00:00Z",
+            }
+        ],
+    }
+    response = client.post("/optimise/mid-trip", json=mid_trip_payload)
+    assert response.status_code == 200
+    assert calls == ["find_mid_trip_loads"]

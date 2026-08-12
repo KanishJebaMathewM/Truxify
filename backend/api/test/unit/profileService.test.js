@@ -5,21 +5,30 @@
  *   - getProfile throws when supabase is null (fail-fast on misconfiguration)
  *   - getProfile calls supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
  *   - getProfile throws when supabase query returns an error
- *   - getCustomerStats throws when supabase is null (fail-fast on misconfiguration)
- *   - getCustomerStats queries customer_stats table correctly
- *   - getDriverDetails throws when supabase is null (fail-fast on misconfiguration)
+ *   - getProfile returns cached data on cache hit (skips DB)
+ *   - getProfile falls back to DB when cache read fails
+ *   - getProfile populates cache after DB fetch
+ *   - getProfile continues when cache write fails
+ *   - getCustomerStats throws when supabase is null
+ *   - getCustomerStats computes stats from the customer's orders
+ *   - getCustomerStats returns cached data on cache hit
+ *   - getCustomerStats falls back to the orders query when cache read fails
+ *   - getDriverDetails throws when supabase is null
  *   - getDriverDetails queries driver_details table correctly
+ *   - getDriverDetails returns cached data on cache hit
+ *   - getDriverDetails falls back to DB when cache read fails
+ *   - CACHE_ENABLED=false disables caching entirely
  *
  * Run with:  npm run test:unit -- test/unit/profileService.test.js
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
 const mockEqProfileMaybeSingle = vi.fn();
-const mockEqStatsMaybeSingle = vi.fn();
+const mockEqOrders = vi.fn();
 const mockEqDriverMaybeSingle = vi.fn();
 const supabaseRef = vi.hoisted(() => ({ current: null }));
 
@@ -34,12 +43,10 @@ const defaultMockSupabase = {
         })),
       };
     }
-    if (table === 'customer_stats') {
+    if (table === 'orders') {
       return {
         select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            maybeSingle: mockEqStatsMaybeSingle,
-          })),
+          eq: mockEqOrders,
         })),
       };
     }
@@ -61,17 +68,39 @@ const useMockSupabase = () => {
   supabaseRef.current = defaultMockSupabase;
 };
 
+const profileCacheRef = vi.hoisted(() => ({
+  getCachedSupabaseProfile: vi.fn().mockResolvedValue(null),
+  setCachedSupabaseProfile: vi.fn().mockResolvedValue(undefined),
+  getCachedCustomerStats: vi.fn().mockResolvedValue(null),
+  setCachedCustomerStats: vi.fn().mockResolvedValue(undefined),
+  getCachedDriverDetails: vi.fn().mockResolvedValue(null),
+  setCachedDriverDetails: vi.fn().mockResolvedValue(undefined),
+  isValidCachedSupabaseProfile: vi.fn(() => true),
+}));
+
 vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
+  // No service-role key in tests — the service falls back to the anon mock.
+  supabaseAdmin: undefined,
 }));
+
+vi.mock('../../src/lib/profileCache.js', () => profileCacheRef);
 
 import { getProfile, getCustomerStats, getDriverDetails } from '../../src/services/profileService.js';
 
 describe('getProfile', () => {
   beforeEach(() => {
     supabaseRef.current = defaultMockSupabase;
+    vi.clearAllMocks();
+    profileCacheRef.getCachedSupabaseProfile.mockResolvedValue(null);
+    profileCacheRef.setCachedSupabaseProfile.mockResolvedValue(undefined);
+    process.env.CACHE_ENABLED = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.CACHE_ENABLED;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -103,11 +132,71 @@ describe('getProfile', () => {
     const result = await getProfile('nonexistent-user');
     expect(result).toBeNull();
   });
+
+  it('returns cached profile on cache hit (skips DB)', async () => {
+    const cachedProfile = { id: 'user-123', isActive: true, role: 'driver', full_name: 'Cached John' };
+    profileCacheRef.getCachedSupabaseProfile.mockResolvedValueOnce(cachedProfile);
+
+    const result = await getProfile('user-123');
+    expect(result).toEqual(cachedProfile);
+    expect(profileCacheRef.getCachedSupabaseProfile).toHaveBeenCalledWith('user-123');
+    expect(profileCacheRef.isValidCachedSupabaseProfile).toHaveBeenCalledWith('user-123', cachedProfile);
+    expect(profileCacheRef.setCachedSupabaseProfile).not.toHaveBeenCalled();
+  });
+
+  it('falls back to DB when cache read fails', async () => {
+    profileCacheRef.getCachedSupabaseProfile.mockRejectedValueOnce(new Error('Redis down'));
+    useMockSupabase();
+    const mockData = { id: 'user-123', role: 'driver', full_name: 'John' };
+    mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    const result = await getProfile('user-123');
+    expect(result).toEqual(mockData);
+  });
+
+  it('populates cache after successful DB fetch', async () => {
+    useMockSupabase();
+    const mockData = { id: 'user-123', role: 'driver', full_name: 'John' };
+    mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    await getProfile('user-123');
+    expect(profileCacheRef.setCachedSupabaseProfile).toHaveBeenCalledWith('user-123', mockData);
+  });
+
+  it('continues when cache write fails', async () => {
+    profileCacheRef.setCachedSupabaseProfile.mockRejectedValueOnce(new Error('Redis write fail'));
+    useMockSupabase();
+    const mockData = { id: 'user-123', role: 'driver', full_name: 'John' };
+    mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    const result = await getProfile('user-123');
+    expect(result).toEqual(mockData);
+  });
+
+  it('skips cache when CACHE_ENABLED is false', async () => {
+    process.env.CACHE_ENABLED = 'false';
+    useMockSupabase();
+    const mockData = { id: 'user-123', role: 'driver', full_name: 'John' };
+    mockEqProfileMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    const result = await getProfile('user-123');
+    expect(result).toEqual(mockData);
+    expect(profileCacheRef.getCachedSupabaseProfile).not.toHaveBeenCalled();
+    expect(profileCacheRef.setCachedSupabaseProfile).not.toHaveBeenCalled();
+  });
 });
 
 describe('getCustomerStats', () => {
   beforeEach(() => {
     supabaseRef.current = defaultMockSupabase;
+    vi.clearAllMocks();
+    profileCacheRef.getCachedCustomerStats.mockResolvedValue(null);
+    profileCacheRef.setCachedCustomerStats.mockResolvedValue(undefined);
+    process.env.CACHE_ENABLED = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.CACHE_ENABLED;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -115,35 +204,92 @@ describe('getCustomerStats', () => {
     await expect(getCustomerStats('user-123')).rejects.toThrow('Supabase client not configured');
   });
 
-  it('returns customer stats on successful query', async () => {
+  it('computes stats from the customer\'s orders', async () => {
     useMockSupabase();
-    const mockData = { total_orders: 42, total_saved: 8, co2_reduced_kg: 156.5 };
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+    mockEqOrders.mockResolvedValueOnce({
+      data: [
+        { status: 'delivered', total_amount: 100 },
+        { status: 'in_transit', total_amount: 200 },
+        { status: 'cancelled', total_amount: 50 },
+      ],
+      error: null,
+    });
     const result = await getCustomerStats('user-456');
-    expect(result).toEqual(mockData);
+    expect(result).toEqual({
+      user_id: 'user-456',
+      total_orders: 3,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 
-  it('throws when supabase query returns an error', async () => {
+  it('throws when the orders query returns an error', async () => {
     useMockSupabase();
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Row not found' } });
-    await expect(getCustomerStats('user-456')).rejects.toThrow('Row not found');
+    mockEqOrders.mockResolvedValueOnce({ data: null, error: { message: 'Permission denied' } });
+    await expect(getCustomerStats('user-456')).rejects.toThrow('Permission denied');
   });
 
-  it('returns null when no customer stats are found', async () => {
-    supabaseRef.current = {
-      from: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-    };
-    const result = await getCustomerStats('new-user-without-stats');
-    expect(result).toBeNull();
+  it('returns zeroed stats when the customer has no orders', async () => {
+    useMockSupabase();
+    mockEqOrders.mockResolvedValueOnce({ data: [], error: null });
+    const result = await getCustomerStats('new-user-without-orders');
+    expect(result).toEqual({
+      user_id: 'new-user-without-orders',
+      total_orders: 0,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
+  });
+
+  it('returns cached stats on cache hit', async () => {
+    const cachedStats = { total_orders: 10, total_saved: 5, co2_reduced_kg: 2.5 };
+    profileCacheRef.getCachedCustomerStats.mockResolvedValueOnce(cachedStats);
+
+    const result = await getCustomerStats('user-456');
+    expect(result).toEqual(cachedStats);
+    expect(profileCacheRef.getCachedCustomerStats).toHaveBeenCalledWith('user-456');
+    expect(profileCacheRef.setCachedCustomerStats).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the orders query when cache read fails', async () => {
+    profileCacheRef.getCachedCustomerStats.mockRejectedValueOnce(new Error('Redis down'));
+    useMockSupabase();
+    mockEqOrders.mockResolvedValueOnce({ data: [{ status: 'delivered' }], error: null });
+
+    const result = await getCustomerStats('user-456');
+    expect(result).toEqual({
+      user_id: 'user-456',
+      total_orders: 1,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
+  });
+
+  it('populates cache after a successful orders query', async () => {
+    useMockSupabase();
+    mockEqOrders.mockResolvedValueOnce({ data: [{ status: 'delivered' }], error: null });
+
+    await getCustomerStats('user-456');
+    expect(profileCacheRef.setCachedCustomerStats).toHaveBeenCalledWith('user-456', {
+      user_id: 'user-456',
+      total_orders: 1,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 });
 
 describe('getDriverDetails', () => {
   beforeEach(() => {
     supabaseRef.current = defaultMockSupabase;
+    vi.clearAllMocks();
+    profileCacheRef.getCachedDriverDetails.mockResolvedValue(null);
+    profileCacheRef.setCachedDriverDetails.mockResolvedValue(undefined);
+    process.env.CACHE_ENABLED = 'true';
+  });
+
+  afterEach(() => {
+    delete process.env.CACHE_ENABLED;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -177,6 +323,35 @@ describe('getDriverDetails', () => {
     };
     const result = await getDriverDetails('new-driver-without-details');
     expect(result).toBeNull();
+  });
+
+  it('returns cached driver details on cache hit', async () => {
+    const cachedDetails = { truck_id: 'truck-01', rating: 4.7, total_trips: 150 };
+    profileCacheRef.getCachedDriverDetails.mockResolvedValueOnce(cachedDetails);
+
+    const result = await getDriverDetails('driver-789');
+    expect(result).toEqual(cachedDetails);
+    expect(profileCacheRef.getCachedDriverDetails).toHaveBeenCalledWith('driver-789');
+    expect(profileCacheRef.setCachedDriverDetails).not.toHaveBeenCalled();
+  });
+
+  it('falls back to DB when cache read fails', async () => {
+    profileCacheRef.getCachedDriverDetails.mockRejectedValueOnce(new Error('Redis down'));
+    useMockSupabase();
+    const mockData = { truck_id: 'truck-01' };
+    mockEqDriverMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    const result = await getDriverDetails('driver-789');
+    expect(result).toEqual(mockData);
+  });
+
+  it('populates cache after successful DB fetch', async () => {
+    useMockSupabase();
+    const mockData = { truck_id: 'truck-01' };
+    mockEqDriverMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+
+    await getDriverDetails('driver-789');
+    expect(profileCacheRef.setCachedDriverDetails).toHaveBeenCalledWith('driver-789', mockData);
   });
 });
 
@@ -235,15 +410,5 @@ describe('updateProfile', () => {
     const { updateProfile } = await import('../../src/services/profileService.js');
     const result = await updateProfile('id', { name: 'test' });
     expect(result).toEqual({ id: 'id' });
-  });
-});
-
-describe('invalidateProfileCache', () => {
-  it('calls redisClient.del correctly', async () => {
-    const mockDel = vi.fn().mockResolvedValue(1);
-    vi.mocked(await import('../../src/config/db.js')).redisClient = { del: mockDel };
-    const { invalidateProfileCache } = await import('../../src/services/profileService.js');
-    await invalidateProfileCache('123');
-    expect(mockDel).toHaveBeenCalledWith('profile:123');
   });
 });

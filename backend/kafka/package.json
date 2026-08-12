@@ -1,0 +1,25 @@
+{
+  "name": "truxify-kafka",
+  "version": "1.0.0",
+  "description": "Kafka event-driven microservices for Truxify",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "init": "node scripts/init-kafka.js",
+    "test": "vitest run",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4",
+    "uuid": "^14.0.1",
+    "dotenv": "^16.0.3",
+    "redis": "^4.6.5",
+    "@supabase/supabase-js": "^2.38.0",
+    "winston": "^3.9.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "vitest": "^4.1.10"
+  }
+}

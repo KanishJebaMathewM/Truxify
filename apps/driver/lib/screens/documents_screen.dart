@@ -1,10 +1,22 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/core/driver_session.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+
+class DocumentsParseException implements Exception {
+  const DocumentsParseException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 class DriverDocument {
   const DriverDocument({
@@ -16,6 +28,7 @@ class DriverDocument {
     required this.validUntil,
     required this.statusTone,
     required this.statusLabel,
+    this.isGovtVerified = false,
   });
 
   final String id;
@@ -26,10 +39,12 @@ class DriverDocument {
   final String validUntil;
   final String statusTone;
   final String statusLabel;
+  final bool isGovtVerified;
 
   factory DriverDocument.fromMap(Map<String, dynamic> map) {
     final docType = map['doc_type'] as String? ?? '';
     final status = map['status'] as String? ?? 'pending';
+    final isGovtVerified = map['is_govt_verified'] == true;
 
     return DriverDocument(
       id: map['id']?.toString() ?? '',
@@ -45,6 +60,7 @@ class DriverDocument {
       validUntil: _formatDate(map['valid_until'] as String?),
       statusTone: _statusTone(status),
       statusLabel: 'Document No.',
+      isGovtVerified: isGovtVerified,
     );
   }
 
@@ -83,7 +99,8 @@ class DriverDocument {
       return '${dt.day.toString().padLeft(2, '0')}/'
           '${dt.month.toString().padLeft(2, '0')}/'
           '${dt.year}';
-    } catch (_) {
+    } catch (e) {
+      debugPrint('DocumentsScreen: failed to parse date "$raw": $e');
       return raw;
     }
   }
@@ -112,12 +129,507 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   SupabaseClient get _supabase => Supabase.instance.client;
 
   String? _selectedUploadType;
-  late final Future<List<DriverDocument>> _documentsFuture;
+  late Future<List<DriverDocument>> _documentsFuture;
+  bool _isDigilockerVerified = false;
 
   @override
   void initState() {
     super.initState();
+    _checkDigilockerStatus();
     _documentsFuture = _fetchDocuments();
+  }
+
+  Future<void> _checkDigilockerStatus() async {
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final data = await client
+            .from('profiles')
+            .select('is_digilocker_verified')
+            .eq('id', userId)
+            .maybeSingle();
+        if (data != null && mounted) {
+          setState(() {
+            _isDigilockerVerified =
+                data['is_digilocker_verified'] as bool? ?? false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to check Digilocker status: $e');
+    }
+  }
+
+  Future<void> _startDigilockerOAuth(BuildContext context) async {
+    if (!_requireAuth(context)) return;
+
+    // Production builds must never run the fake Aadhaar/OTP theater or post a mock OAuth code.
+    if (kReleaseMode) {
+      await _startRealDigilockerLink(context);
+      return;
+    }
+
+    // Debug/profile only: optional local mock gated behind kDebugMode.
+    assert(() {
+      return true;
+    }());
+    if (!kDebugMode) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'DigiLocker OAuth requires the real backend endpoint. Use a debug build for local mock testing.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final aadhaarController = TextEditingController();
+    final otpController = TextEditingController();
+    var otpSent = false;
+    var isVerifying = false;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                title: Row(
+                  children: [
+                    const Icon(
+                      Icons.security_rounded,
+                      color: TruxifyColors.accent,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'DigiLocker Login (Debug)',
+                      style: GoogleFonts.dmSans(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Debug mock only. Release builds use the real DigiLocker backend flow.',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 13,
+                        color: TruxifyColors.secondaryText,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (!otpSent) ...[
+                      TextField(
+                        controller: aadhaarController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 12,
+                        decoration: InputDecoration(
+                          labelText: 'Aadhaar Number',
+                          hintText: 'Enter 12-digit Aadhaar',
+                          labelStyle: GoogleFonts.dmSans(
+                            color: TruxifyColors.secondaryText,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          counterText: '',
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        'Enter the 6-digit OTP sent to your Aadhaar-linked mobile number.',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          color: TruxifyColors.secondaryText,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        decoration: InputDecoration(
+                          labelText: 'Aadhaar OTP',
+                          hintText: 'Enter 6-digit OTP',
+                          labelStyle: GoogleFonts.dmSans(
+                            color: TruxifyColors.secondaryText,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          counterText: '',
+                        ),
+                      ),
+                    ],
+                    if (isVerifying) ...[
+                      const SizedBox(height: 16),
+                      const Center(
+                        child: CircularProgressIndicator(
+                          color: TruxifyColors.accent,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isVerifying
+                        ? null
+                        : () => Navigator.pop(dialogContext),
+                    child: Text(
+                      'Cancel',
+                      style: GoogleFonts.dmSans(
+                        color: TruxifyColors.secondaryText,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: TruxifyColors.accent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: isVerifying
+                        ? null
+                        : () async {
+                            if (!otpSent) {
+                              if (aadhaarController.text.length < 12) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Please enter a valid 12-digit Aadhaar number',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              setDialogState(() => isVerifying = true);
+                              await Future<void>.delayed(
+                                const Duration(seconds: 1),
+                              );
+                              setDialogState(() {
+                                otpSent = true;
+                                isVerifying = false;
+                              });
+                              return;
+                            }
+                            if (otpController.text.length < 6) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please enter the 6-digit OTP'),
+                                ),
+                              );
+                              return;
+                            }
+                            setDialogState(() => isVerifying = true);
+                            try {
+                              // Debug-only mock code — never used in release (gated above).
+                              final apiClient = ApiClient();
+                              final tokenRes = await apiClient.post(
+                                '/api/verify/digilocker/token',
+                                {'code': 'mock_auth_code_from_oauth'},
+                              );
+                              final accessToken =
+                                  tokenRes['data']?['access_token'];
+                              if (accessToken == null) {
+                                throw Exception(
+                                  'Failed to get access token from DigiLocker',
+                                );
+                              }
+                              final verifyRes = await apiClient
+                                  .post('/api/verify/digilocker/verify', {
+                                    'accessToken': accessToken,
+                                    'userId': Supabase
+                                        .instance
+                                        .client
+                                        .auth
+                                        .currentUser
+                                        ?.id,
+                                  });
+                              if (verifyRes['success'] == true) {
+                                if (dialogContext.mounted)
+                                  Navigator.pop(dialogContext);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'DigiLocker verification succeeded! Documents verified on-chain.',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                                await _checkDigilockerStatus();
+                                if (mounted) {
+                                  setState(() {
+                                    _documentsFuture = _fetchDocuments();
+                                  });
+                                }
+                              } else {
+                                throw Exception('Verification failed');
+                              }
+                            } catch (e) {
+                              if (dialogContext.mounted)
+                                Navigator.pop(dialogContext);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Verification failed: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    child: Text(
+                      otpSent ? 'Verify' : 'Request OTP',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      aadhaarController.dispose();
+      otpController.dispose();
+    }
+  }
+
+  /// Production DigiLocker link: paste a real OAuth code and POST to backend.
+  Future<void> _startRealDigilockerLink(BuildContext context) async {
+    final codeController = TextEditingController();
+    try {
+      final code = await showDialog<String>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => AlertDialog(
+          title: const Text('DigiLocker Verification'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'DigiLocker OAuth must use the real backend endpoint. '
+                'Complete authorization with DigiLocker, then paste the authorization code here. '
+                'Mock OTP flows are disabled in release builds.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: codeController,
+                decoration: const InputDecoration(
+                  hintText: 'Authorization code',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, codeController.text.trim()),
+              child: const Text('Verify'),
+            ),
+          ],
+        ),
+      );
+
+      if (code == null || code.isEmpty) return;
+      if (code == 'mock_auth_code_from_oauth') {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Mock DigiLocker codes are not allowed in release builds.',
+              ),
+              backgroundColor: TruxifyColors.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      final apiClient = ApiClient();
+      dynamic result;
+      try {
+        result = await apiClient.post(
+          '/api/driver/documents/verify-digilocker',
+          body: {'code': code},
+        );
+      } finally {
+        apiClient.close();
+      }
+
+      if (!context.mounted) return;
+      if (result is Map && result['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Government documents linked successfully via DigiLocker.',
+            ),
+            backgroundColor: TruxifyColors.success,
+          ),
+        );
+        await _checkDigilockerStatus();
+        if (mounted) {
+          setState(() {
+            _documentsFuture = _fetchDocuments();
+          });
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('DigiLocker link failed.'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('DigiLocker link failed: $e'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    } finally {
+      codeController.dispose();
+    }
+  }
+
+  Widget _buildDigilockerVerificationCard(BuildContext context) {
+    if (_isDigilockerVerified) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.green.withValues(alpha: 0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_rounded, color: Colors.green, size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DigiLocker Verified',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Your Driving Licence, RC Book, and Insurance are securely verified on-chain.',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: TruxifyColors.accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: TruxifyColors.accent.withValues(alpha: 0.25),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.document_scanner_rounded,
+                color: TruxifyColors.accent,
+                size: 28,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Instant DigiLocker Verification',
+                style: GoogleFonts.dmSans(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.accentDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Skip manual uploads! Fetch and verify your Driving Licence, RC Book, and Insurance directly from your government DigiLocker account.',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              color: TruxifyColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TruxifyColors.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              elevation: 0,
+            ),
+            onPressed: () => _startDigilockerOAuth(context),
+            icon: const Icon(Icons.login_rounded, size: 18),
+            label: Text(
+              'Link DigiLocker Account',
+              style: GoogleFonts.dmSans(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<List<DriverDocument>> _fetchDocuments() async {
@@ -127,15 +639,29 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       throw AuthException('No authenticated user. Please log in again.');
     }
 
-    final response = await _supabase
-        .from('documents')
-        .select()
-        .eq('user_id', driverId)
-        .order('created_at', ascending: false);
+    try {
+      final dynamic response = await _supabase
+          .from('documents')
+          .select()
+          .eq('user_id', driverId)
+          .order('created_at', ascending: false);
 
-    return (response as List)
-        .map((row) => DriverDocument.fromMap(row as Map<String, dynamic>))
-        .toList();
+      final documents = <DriverDocument>[];
+      for (final dynamic row in response as Iterable) {
+        if (row is! Map) continue;
+        try {
+          documents.add(DriverDocument.fromMap(Map<String, dynamic>.from(row)));
+        } catch (_) {
+          continue;
+        }
+      }
+
+      return documents;
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      throw DocumentsParseException('Unable to read documents: $e');
+    }
   }
 
   bool _requireAuth(BuildContext context) {
@@ -156,12 +682,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     double progress = 0.0;
     String statusText = 'Reading file contents...';
     bool isDone = false;
+    Timer? uploadTimer;
 
     await showModalBottomSheet<void>(
       context: context,
       isDismissible: false,
       enableDrag: false,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -169,7 +696,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             if (progress == 0.0) {
-              Timer.periodic(const Duration(milliseconds: 300), (timer) {
+              uploadTimer?.cancel();
+              uploadTimer = Timer.periodic(const Duration(milliseconds: 300), (
+                timer,
+              ) {
                 if (!context.mounted) {
                   timer.cancel();
                   return;
@@ -288,7 +818,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           },
         );
       },
-    );
+    ).then((_) => uploadTimer?.cancel());
   }
 
   Future<void> _showUploadSheet(BuildContext context) async {
@@ -298,7 +828,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -364,8 +894,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                   ),
                                 ),
                                 if (isSelected)
-                                  const Icon(Icons.check_circle_rounded,
-                                      color: TruxifyColors.accent),
+                                  const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: TruxifyColors.accent,
+                                  ),
                               ],
                             ),
                           ),
@@ -401,7 +933,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -425,8 +957,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     ),
                   ),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: isWarning
                           ? TruxifyColors.warningLight
@@ -470,52 +1004,74 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     Text(
                       'Document Status',
                       style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.primaryText),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: TruxifyColors.primaryText,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Document ID:',
-                            style: GoogleFonts.dmSans(
-                                fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(docNumber,
-                            style: GoogleFonts.robotoMono(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: TruxifyColors.primaryText)),
+                        Text(
+                          'Document ID:',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: TruxifyColors.hintText,
+                          ),
+                        ),
+                        Text(
+                          docNumber,
+                          style: GoogleFonts.robotoMono(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: TruxifyColors.primaryText,
+                          ),
+                        ),
                       ],
                     ),
                     const Divider(height: 16, color: TruxifyColors.border),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Last Verified:',
-                            style: GoogleFonts.dmSans(
-                                fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(lastVerified,
-                            style: GoogleFonts.dmSans(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: TruxifyColors.primaryText)),
+                        Text(
+                          'Last Verified:',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: TruxifyColors.hintText,
+                          ),
+                        ),
+                        Text(
+                          lastVerified,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: TruxifyColors.primaryText,
+                          ),
+                        ),
                       ],
                     ),
                     const Divider(height: 16, color: TruxifyColors.border),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Valid Until:',
-                            style: GoogleFonts.dmSans(
-                                fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(validUntil,
-                            style: GoogleFonts.dmSans(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isWarning
-                                    ? TruxifyColors.warning
-                                    : TruxifyColors.primaryText)),
+                        Text(
+                          'Valid Until:',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            color: TruxifyColors.hintText,
+                          ),
+                        ),
+                        Text(
+                          validUntil,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isWarning
+                                ? TruxifyColors.warning
+                                : TruxifyColors.primaryText,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -530,7 +1086,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           side: const BorderSide(color: TruxifyColors.accent),
                         ),
                         onPressed: () {
@@ -568,11 +1125,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Scaffold(
       backgroundColor: TruxifyColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded,
-              color: TruxifyColors.primaryText),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: TruxifyColors.primaryText,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -591,6 +1150,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               final isAuthError = snapshot.error is AuthException;
+              final isParseError = snapshot.error is DocumentsParseException;
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -608,6 +1168,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Session Expired'
+                            : isParseError
+                            ? 'Could Not Read Documents'
                             : 'Could Not Load Documents',
                         style: GoogleFonts.dmSans(
                           fontSize: 16,
@@ -619,6 +1181,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Please log in again to view your documents.'
+                            : isParseError
+                            ? 'We had trouble reading your documents. Please try again later.'
                             : 'Something went wrong. Please try again later.',
                         style: GoogleFonts.dmSans(
                           fontSize: 13,
@@ -630,8 +1194,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         const SizedBox(height: 24),
                         PrimaryButton(
                           label: 'Go to Login',
-                          onPressed: () => Navigator.of(context)
-                              .pushReplacementNamed('/login'),
+                          onPressed: () => Navigator.of(
+                            context,
+                          ).pushReplacementNamed('/login'),
                         ),
                       ],
                     ],
@@ -653,8 +1218,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.folder_open_rounded,
-                          size: 56, color: TruxifyColors.hintText),
+                      const Icon(
+                        Icons.folder_open_rounded,
+                        size: 56,
+                        color: TruxifyColors.hintText,
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         'No Documents Yet',
@@ -682,6 +1250,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
+                _buildDigilockerVerificationCard(context),
                 ...documents.map((document) {
                   final isWarning = document.statusTone == 'warning';
                   return Padding(
@@ -705,21 +1274,31 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               ),
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: isWarning
                                       ? TruxifyColors.warningLight
-                                      : TruxifyColors.accentLight,
+                                      : (document.isGovtVerified
+                                            ? Colors.green.shade50
+                                            : Colors.orange.shade50),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  isWarning ? 'Expiring Soon' : 'Verified',
+                                  isWarning
+                                      ? 'Expiring Soon'
+                                      : (document.isGovtVerified
+                                            ? '✓ Govt Verified'
+                                            : 'Self-Uploaded (Unverified)'),
                                   style: GoogleFonts.dmSans(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                     color: isWarning
                                         ? TruxifyColors.warning
-                                        : TruxifyColors.accentDark,
+                                        : (document.isGovtVerified
+                                              ? Colors.green.shade800
+                                              : Colors.orange.shade800),
                                   ),
                                 ),
                               ),
@@ -737,16 +1316,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                           const Divider(height: 1, color: TruxifyColors.border),
                           const SizedBox(height: 12),
                           _DocLine(
-                              label: document.statusLabel,
-                              value: document.docNumber,
-                              isMonospace: true),
+                            label: document.statusLabel,
+                            value: document.docNumber,
+                            isMonospace: true,
+                          ),
                           _DocLine(
-                              label: 'Last verified',
-                              value: document.lastVerified),
+                            label: 'Last verified',
+                            value: document.lastVerified,
+                          ),
                           _DocLine(
-                              label: 'Valid until',
-                              value: document.validUntil,
-                              isWarning: isWarning),
+                            label: 'Valid until',
+                            value: document.validUntil,
+                            isWarning: isWarning,
+                          ),
                           const SizedBox(height: 16),
                           Row(
                             children: [
@@ -754,12 +1336,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 child: OutlinedButton(
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
+                                      vertical: 12,
+                                    ),
                                     shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
                                     side: const BorderSide(
-                                        color: TruxifyColors.border),
+                                      color: TruxifyColors.border,
+                                    ),
                                   ),
                                   onPressed: () => _showDocumentPreviewSheet(
                                     context,
@@ -786,11 +1370,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                     if (isWarning) {
                                       _simulateUpload(context, document.title);
                                     } else {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                              '${document.title} re-verification request sent to RTO Node.'),
+                                            '${document.title} re-verification request sent to RTO Node.',
+                                          ),
                                           backgroundColor:
                                               TruxifyColors.success,
                                         ),
@@ -815,16 +1401,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color: TruxifyColors.accent.withValues(alpha: 0.3),
-                          style: BorderStyle.solid),
+                        color: TruxifyColors.accent.withValues(alpha: 0.3),
+                        style: BorderStyle.solid,
+                      ),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                          vertical: 28, horizontal: 16),
+                        vertical: 28,
+                        horizontal: 16,
+                      ),
                       child: Column(
                         children: [
-                          const Icon(Icons.cloud_upload_outlined,
-                              color: TruxifyColors.accent, size: 36),
+                          const Icon(
+                            Icons.cloud_upload_outlined,
+                            color: TruxifyColors.accent,
+                            size: 36,
+                          ),
                           const SizedBox(height: 10),
                           Text(
                             'Upload New Document',

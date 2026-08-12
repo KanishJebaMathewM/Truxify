@@ -30,6 +30,8 @@ class SyncEngine {
   final int maxRetries;
   final int batchSize;
 
+  bool _isSyncing = false;
+
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   final Connectivity _connectivity = Connectivity();
 
@@ -48,20 +50,65 @@ class SyncEngine {
   }
 
   Future<int> syncPending() async {
+    if (_isSyncing) return 0;
+    _isSyncing = true;
+    try {
+      return await _syncPendingInternal();
+    } finally {
+      _isSyncing = false;
+    }
+  }
+
+  Future<int> _syncPendingInternal() async {
     final pending = await db.pendingEvents(limit: batchSize);
-    final eligible = pending.where((event) => event.retryCount < maxRetries).toList();
+    if (pending.isEmpty) {
+      return 0;
+    }
+
+    // Events that exhausted their retry budget must never be silently dropped
+    // forever: mark them rejected with a stored reason the UI can surface.
+    final exhausted = pending
+        .where((event) => event.retryCount >= maxRetries)
+        .toList();
+    if (exhausted.isNotEmpty) {
+      for (final event in exhausted) {
+        await db.markRejected(event.id, reason: 'retry budget exhausted');
+      }
+      developer.log(
+        '[SyncEngine] Rejected ${exhausted.length} offline event(s) that exhausted their retry budget.',
+      );
+    }
+
+    final eligible =
+        pending.where((event) => event.retryCount < maxRetries).toList();
     if (eligible.isEmpty) {
       return 0;
     }
 
-    final resolved = resolver.resolve(eligible);
+    final resolution = resolver.resolveWithDetails(eligible);
+    final resolved = resolution.resolved;
+    final supersededIds = resolution.supersededIds;
+
+    // Clear superseded/deduplicated event IDs from SQLite to prevent orphan pending queue loops
+    for (final id in supersededIds) {
+      await db.markSynced(id);
+    }
+
     if (resolved.isEmpty) {
       return 0;
     }
 
     await _markAsSyncing(resolved);
 
-    final uploadOutcome = await _uploadBatch(resolved);
+    final SyncUploadOutcome uploadOutcome;
+    try {
+      uploadOutcome = await _uploadBatch(resolved);
+    } catch (_) {
+      // An unexpected error during upload must never leave events stuck in the
+      // transient `syncing` state; fall through to failure handling below so
+      // they are re-queued on a later sync pass.
+      uploadOutcome = SyncUploadOutcome.retryableFailure;
+    }
     if (uploadOutcome == SyncUploadOutcome.success) {
       for (final event in resolved) {
         await db.markSynced(event.id);
@@ -149,7 +196,7 @@ class SyncEngine {
   }
 
   Duration _backoffDelay(int retryCount) {
-    final delayMs = 250 * (1 << (retryCount.clamp(0, 5)));
+    final delayMs = 250 * (1 << (retryCount.clamp(0, 5).toInt()));
     return Duration(milliseconds: delayMs > 8000 ? 8000 : delayMs);
   }
 }

@@ -39,8 +39,13 @@ describe('buildPagination', () => {
   });
 
   it('returns correct string pagination from string values', () => {
-    const result = buildPagination({ page: 2, limit: 15 });
+    const result = buildPagination({ page: '2', limit: '15' });
     expect(result).toEqual({ page: 2, limit: 15, offset: 15, from: 15, to: 29 });
+  });
+
+  it('falls back to defaults for malformed string values', () => {
+    const result = buildPagination({ page: '2abc', limit: '15abc' });
+    expect(result).toEqual({ page: 1, limit: 20, offset: 0, from: 0, to: 19 });
   });
 
   it('handles page 1 with no limit correctly', () => {
@@ -109,6 +114,19 @@ describe('Pagination Middleware', () => {
     expect(res.json).toHaveBeenCalledWith({ error: 'Invalid limit parameter' });
   });
 
+  it('returns 400 for partially numeric limit values', () => {
+    const middleware = validatePagination();
+    const req = { query: { limit: '10abc' } };
+    const res = mockResponse();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid limit parameter' });
+  });
+
   it('calculates offset correctly from page parameter', () => {
     const middleware = validatePagination();
     const req = { query: { limit: '20', page: '3' } };
@@ -120,5 +138,23 @@ describe('Pagination Middleware', () => {
     expect(next).toHaveBeenCalled();
     expect(req.query.limit).toBe(20);
     expect(req.query.offset).toBe(40); // (3-1) * 20
+  });
+});
+
+describe('pagination — NaN and edge case handling', () => {
+  it('buildPagination handles NaN page by defaulting to 1', () => {
+    const result = buildPagination({ page: NaN });
+    expect(result.page).toBe(1);
+    expect(result.offset).toBe(0);
+  });
+
+  it('buildPagination handles NaN limit by defaulting to 20', () => {
+    const result = buildPagination({ limit: NaN });
+    expect(result.limit).toBe(20);
+  });
+
+  it('buildPagination handles Infinity page by defaulting to 1', () => {
+    const result = buildPagination({ page: Infinity });
+    expect(result.page).toBe(1);
   });
 });

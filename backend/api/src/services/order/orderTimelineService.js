@@ -1,4 +1,6 @@
 import { DomainError } from './domainError.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
+import logger from '../../middleware/logger.js';
 
 const DEFAULT_MILESTONES = [
   { milestone: 'Order Placed', completed: true, sort_order: 10 },
@@ -12,13 +14,8 @@ const DEFAULT_MILESTONES = [
 ];
 
 export class OrderTimelineService {
-  constructor(args) {
-    if (args && args.supabase) {
-      this.supabase = args.supabase;
-      this.logger = args.logger;
-    } else {
-      this.orderRepository = args;
-    }
+  constructor(orderRepository) {
+    this.orderRepository = orderRepository;
   }
 
   async createOrderTimeline(orderDisplayId) {
@@ -30,149 +27,66 @@ export class OrderTimelineService {
       sort_order: m.sort_order,
     }));
 
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.createTimeline(milestones);
-      error = res.error;
-    } else {
-      const res = await this.supabase.from('order_timeline').insert(milestones);
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.createTimeline(milestones);
     if (error) {
-      this.logger?.error?.('Timeline Insertion Error:', error.message);
       throw new DomainError(500, { error: 'Failed to create order timeline.', details: error.message });
     }
   }
 
   async getOrderTimeline(orderDisplayId) {
-    let data, error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.getTimeline(orderDisplayId);
-      data = res.data;
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .select('milestone, milestone_time, completed, sort_order')
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order', { ascending: true });
-      data = res.data;
-      error = res.error;
-    }
-
+    const { data, error } = await this.orderRepository.getTimeline(orderDisplayId);
     if (error) {
-      this.logger?.error?.('Timeline Fetch Error:', error.message);
       throw new DomainError(500, { error: 'Failed to fetch order timeline.', details: error.message });
     }
-
     return data || [];
   }
 
   async completeMilestone(orderDisplayId, milestone, milestoneTime) {
     const time = milestoneTime || new Date().toISOString();
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.updateTimelineMilestone(orderDisplayId, milestone, { completed: true, milestone_time: time });
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .update({ completed: true, milestone_time: time })
-        .eq('order_display_id', orderDisplayId)
-        .eq('milestone', milestone);
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.updateTimelineMilestone(orderDisplayId, milestone, { completed: true, milestone_time: time });
     if (error) {
-      this.logger?.error?.('Timeline Update Error:', error.message);
       throw new DomainError(500, { error: 'Failed to update order timeline.', details: error.message });
     }
   }
 
   async resetMilestone(orderDisplayId, milestone) {
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.updateTimelineMilestone(orderDisplayId, milestone, { completed: false, milestone_time: null });
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .update({ completed: false, milestone_time: null })
-        .eq('order_display_id', orderDisplayId)
-        .eq('milestone', milestone);
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.updateTimelineMilestone(orderDisplayId, milestone, { completed: false, milestone_time: null });
     if (error) {
-      this.logger?.error?.('Timeline Reset Error:', error.message);
+      logger.error('Timeline Reset Error:', error.message);
+      throw new DomainError(500, { error: 'Failed to reset order timeline.', details: error.message });
     }
   }
 
   async insertDropChangedEvent(orderDisplayId) {
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.createTimeline([{
-        order_display_id: orderDisplayId,
-        milestone: 'Drop Changed',
-        milestone_time: new Date().toISOString(),
-        completed: true,
-        sort_order: 25,
-      }]);
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .insert({
-          order_display_id: orderDisplayId,
-          milestone: 'Drop Changed',
-          milestone_time: new Date().toISOString(),
-          completed: true,
-          sort_order: 25,
-        });
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.createTimeline([{
+      order_display_id: orderDisplayId,
+      milestone: 'Drop Changed',
+      milestone_time: new Date().toISOString(),
+      completed: true,
+      sort_order: 25,
+    }]);
     if (error) {
-      this.logger?.warn?.('Failed to update timeline for change-drop:', error.message);
+      logger.error('Failed to update timeline for change-drop:', error.message);
+      throw new DomainError(500, { error: 'Failed to record drop-change event.', details: error.message });
     }
   }
 
   async completeOrderPlacedMilestone(orderDisplayId, completedAt) {
     const time = completedAt || new Date().toISOString();
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.updateTimelineMilestone(orderDisplayId, 'Order Placed', { completed: true, milestone_time: time });
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .update({ completed: true, milestone_time: time })
-        .eq('order_display_id', orderDisplayId)
-        .eq('milestone', 'Order Placed');
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.updateTimelineMilestone(orderDisplayId, 'Order Placed', { completed: true, milestone_time: time });
     if (error) {
-      this.logger?.error?.('Failed to update Order Placed milestone on cancel:', error.message);
+      // Silently fail — cancel continues even if timeline update fails
+      logger.error('Failed to update Order Placed milestone on cancel:', error.message);
+      throw new DomainError(500, { error: 'Failed to update Order Placed milestone.', details: error.message });
     }
   }
 
   async deleteOrderTimeline(orderDisplayId) {
-    let error;
-    if (this.orderRepository) {
-      const res = await this.orderRepository.deleteTimeline(orderDisplayId);
-      error = res.error;
-    } else {
-      const res = await this.supabase
-        .from('order_timeline')
-        .delete()
-        .eq('order_display_id', orderDisplayId);
-      error = res.error;
-    }
-
+    const { error } = await this.orderRepository.deleteTimeline(orderDisplayId);
     if (error) {
-      this.logger?.error?.('Failed to delete order timeline:', error.message);
+      // Silently fail — cleanup is best-effort
+      logger.error('Failed to delete order timeline:', error.message);
+      throw new DomainError(500, { error: 'Failed to delete order timeline.', details: error.message });
     }
   }
 
@@ -189,103 +103,49 @@ export class OrderTimelineService {
       { order_display_id: orderDisplayId, milestone: 'Arriving', milestone_time: null, completed: false, sort_order: 55 },
       { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 },
     ];
-    if (this.orderRepository) {
-      return this.orderRepository.createTimeline(milestones);
-    } else {
-      return this.supabase.from('order_timeline').insert(milestones);
-    }
+    return this.orderRepository.createTimeline(milestones);
   }
 
   async getTimeline(orderDisplayId) {
-    if (this.orderRepository) {
-      const { data, error } = await this.orderRepository.getTimeline(orderDisplayId);
-      return { data: data || [], error };
-    } else {
-      const { data, error } = await this.supabase
-        .from('order_timeline')
-        .select('milestone, milestone_time, completed, sort_order')
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order', { ascending: true });
-      return { data: data || [], error };
-    }
+    const { data, error } = await this.orderRepository.getTimeline(orderDisplayId);
+    return { data: data || [], error };
   }
 
   async getTimelineWithSortCheck(orderDisplayId) {
-    if (this.orderRepository) {
-      return this.orderRepository.getTimelineWithSortCheck(orderDisplayId);
-    } else {
-      return this.supabase
-        .from('order_timeline')
-        .select('milestone, sort_order, completed')
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order', { ascending: true });
-    }
+    return this.orderRepository.getTimelineWithSortCheck(orderDisplayId);
   }
 
   async markMilestoneCompleted(orderDisplayId, milestone) {
-    if (this.orderRepository) {
-      const { error } = await this.orderRepository.updateTimelineMilestone(
-        orderDisplayId, milestone,
-        { completed: true, milestone_time: new Date().toISOString() }
-      );
-      return { error };
-    } else {
-      const { error } = await this.supabase
-        .from('order_timeline')
-        .update({ completed: true, milestone_time: new Date().toISOString() })
-        .eq('order_display_id', orderDisplayId)
-        .eq('milestone', milestone);
-      return { error };
-    }
+    const { error } = await this.orderRepository.updateTimelineMilestone(
+      orderDisplayId, milestone,
+      { completed: true, milestone_time: new Date().toISOString() }
+    );
+    return { error };
   }
 
   async rollbackMilestone(orderDisplayId, milestone) {
-    if (this.orderRepository) {
-      const { error } = await this.orderRepository.updateTimelineMilestone(
-        orderDisplayId, milestone,
-        { completed: false, milestone_time: null }
-      );
-      return { error };
-    } else {
-      const { error } = await this.supabase
-        .from('order_timeline')
-        .update({ completed: false, milestone_time: null })
-        .eq('order_display_id', orderDisplayId)
-        .eq('milestone', milestone);
-      return { error };
-    }
+    const { error } = await this.orderRepository.updateTimelineMilestone(
+      orderDisplayId, milestone,
+      { completed: false, milestone_time: null }
+    );
+    return { error };
   }
 
   async insertEntry(orderDisplayId, milestone, sortOrder) {
-    if (this.orderRepository) {
-      return this.orderRepository.createTimeline([{
-        order_display_id: orderDisplayId,
-        milestone,
-        milestone_time: new Date().toISOString(),
-        completed: true,
-        sort_order: sortOrder,
-      }]);
-    } else {
-      return this.supabase
-        .from('order_timeline')
-        .insert({
-          order_display_id: orderDisplayId,
-          milestone,
-          milestone_time: new Date().toISOString(),
-          completed: true,
-          sort_order: sortOrder,
-        });
-    }
+    return this.orderRepository.createTimeline([{
+      order_display_id: orderDisplayId,
+      milestone,
+      milestone_time: new Date().toISOString(),
+      completed: true,
+      sort_order: sortOrder,
+    }]);
   }
 
   async deleteTimeline(orderDisplayId) {
-    if (this.orderRepository) {
-      return this.orderRepository.deleteTimeline(orderDisplayId);
-    } else {
-      return this.supabase
-        .from('order_timeline')
-        .delete()
-        .eq('order_display_id', orderDisplayId);
-    }
+    return this.orderRepository.deleteTimeline(orderDisplayId);
+  }
+
+  async insertCancelEvent(orderDisplayId) {
+    return this.insertEntry(orderDisplayId, 'Cancelled', 70);
   }
 }

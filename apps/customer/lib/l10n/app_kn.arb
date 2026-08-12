@@ -1,0 +1,814 @@
+{
+  "@@locale": "kn",
+
+  "appTitle": "Truxify",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+
+  "loginTitle": "Truxify ಗೆ ಸುಸ್ವಾಗತ",
+  "@loginTitle": {
+    "description": "Greeting title on the login screen"
+  },
+
+  "bookLoadButton": "ಲೋಡ್ ಬುಕ್ ಮಾಡಿ",
+  "@bookLoadButton": {
+    "description": "Text for the book a load button"
+  },
+
+  "loadingText": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
+  "@loadingText": {
+    "description": "Generic loading indicator text"
+  },
+
+  "comingSoon": "{title} ಶೀಘ್ರದಲ್ಲೇ ಬರುತ್ತಿದೆ",
+  "@comingSoon": {
+    "description": "Coming soon message",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Feature"
+      }
+    }
+  },
+
+  "greetingMessage": "{greeting}, {displayName} 👋",
+  "@greetingMessage": {
+    "description": "Greeting message with name",
+    "placeholders": {
+      "greeting": {
+        "type": "String",
+        "example": "Good morning"
+      },
+      "displayName": {
+        "type": "String",
+        "example": "John"
+      }
+    }
+  },
+
+  "noActiveShipments": "ಸಕ್ರಿಯ ಸರಕು ಸಾಗಣೆ ಇಲ್ಲ",
+  "@noActiveShipments": {
+    "description": "Text shown when there are no active shipments"
+  },
+
+  "routeHistoryComingSoon": "ಮಾರ್ಗ ಇತಿಹಾಸ ಶೀಘ್ರದಲ್ಲೇ ಬರುತ್ತಿದೆ",
+  "@routeHistoryComingSoon": {
+    "description": "Text shown for route history placeholder"
+  },
+
+  "walletAddressUpdated": "ವಾಲೆಟ್ ವಿಳಾಸ ನವೀಕರಿಸಲಾಗಿದೆ",
+  "@walletAddressUpdated": {
+    "description": "Success message when wallet address is updated"
+  },
+
+  "polygonWalletAddress": "ಪಾಲಿಗಾನ್ ವಾಲೆಟ್ ವಿಳಾಸ",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+
+  "saveWalletAddress": "ವಾಲೆಟ್ ವಿಳಾಸ ಉಳಿಸಿ",
+  "@saveWalletAddress": {
+    "description": "Button text to save wallet address"
+  },
+
+  "error": "ದೋಷ: {errorMsg}",
+  "@error": {
+    "description": "Error message format",
+    "placeholders": {
+      "errorMsg": {
+        "type": "String",
+        "example": "Something went wrong"
+      }
+    }
+  },
+
+  "lightTheme": "ಬೆಳಕು",
+  "@lightTheme": {
+    "description": "Light theme option"
+  },
+
+  "darkTheme": "ಗಾಢ",
+  "@darkTheme": {
+    "description": "Dark theme option"
+  },
+
+  "retry": "ಮರುಪ್ರಯತ್ನಿಸಿ",
+  "@retry": {
+    "description": "Button text to retry a failed action"
+  },
+
+  "cancel": "ರದ್ದುಮಾಡಿ",
+  "@cancel": {
+    "description": "Button text to cancel an action"
+  },
+
+  "save": "ಉಳಿಸಿ",
+  "@save": {
+    "description": "Generic save button text"
+  },
+
+  "close": "ಮುಚ್ಚಿ",
+  "@close": {
+    "description": "Button text to close a dialog or sheet"
+  },
+
+  "apply": "ಅನ್ವಯಿಸಿ",
+  "@apply": {
+    "description": "Button text to apply filters or settings"
+  },
+
+  "reset": "ಮರುಹೊಂದಿಸಿ",
+  "@reset": {
+    "description": "Button text to reset filters or form fields"
+  },
+
+  "search": "ಹುಡುಕಿ",
+  "@search": {
+    "description": "Placeholder text for search input"
+  },
+
+  "welcomeBack": "ಮತ್ತೆ ಸುಸ್ವಾಗತ",
+  "@welcomeBack": {
+    "description": "Subtitle greeting on login screen for returning users"
+  },
+
+  "signInSubtitle": "ಮುಂದುವರಿಯಲು ಸೈನ್ ಇನ್ ಮಾಡಿ",
+  "@signInSubtitle": {
+    "description": "Subtitle text below the login title"
+  },
+
+  "phoneNumber": "ಫೋನ್ ಸಂಖ್ಯೆ",
+  "@phoneNumber": {
+    "description": "Label for phone number input field"
+  },
+
+  "sendOtp": "OTP ಕಳುಹಿಸಿ",
+  "@sendOtp": {
+    "description": "Button text to send a one-time password"
+  },
+
+  "sendingOtp": "OTP ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ...",
+  "@sendingOtp": {
+    "description": "Loading text while OTP is being sent"
+  },
+
+  "verifyingOtp": "ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...",
+  "@verifyingOtp": {
+    "description": "Loading text while OTP is being verified"
+  },
+
+  "verifyOtp": "OTP ಪರಿಶೀಲಿಸಿ",
+  "@verifyOtp": {
+    "description": "Button text to verify the entered OTP"
+  },
+
+  "loginWithBiometrics": "ಬಯೋಮೆಟ್ರಿಕ್ಸ್‌ನೊಂದಿಗೆ ಲಾಗಿನ್ ಮಾಡಿ",
+  "@loginWithBiometrics": {
+    "description": "Button text to login using biometric authentication"
+  },
+
+  "biometricsNotSupported": "ಈ ಸಾಧನದಲ್ಲಿ ಬಯೋಮೆಟ್ರಿಕ್ಸ್ ಬೆಂಬಲಿಸುವುದಿಲ್ಲ",
+  "@biometricsNotSupported": {
+    "description": "Message shown when device does not support biometric auth"
+  },
+
+  "biometricAuthSuccessful": "ಬಯೋಮೆಟ್ರಿಕ್ ದೃಢೀಕರಣ ಯಶಸ್ವಿಯಾಗಿದೆ",
+  "@biometricAuthSuccessful": {
+    "description": "Success message after biometric authentication"
+  },
+
+  "pleaseEnterPhone": "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone number field is empty"
+  },
+
+  "phoneDigitsOnly": "ಫೋನ್ ಸಂಖ್ಯೆಯಲ್ಲಿ ಕೇವಲ ಅಂಕಿಗಳಿರಬೇಕು",
+  "@phoneDigitsOnly": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "phoneMustBeExactDigits": "ಫೋನ್ ಸಂಖ್ಯೆಯು ನಿಖರವಾಗಿ {digitCount} ಅಂಕಿಗಳನ್ನು ಹೊಂದಿರಬೇಕು",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message when phone number does not have the exact required digit count",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+
+  "phoneMustBeDigits": "ಫೋನ್ ಸಂಖ್ಯೆಯಲ್ಲಿ ಕೇವಲ ಅಂಕಿಗಳಿರಬೇಕು",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "verificationFailed": "ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "@verificationFailed": {
+    "description": "Generic verification failure message"
+  },
+
+  "phoneVerificationFailed": "ಫೋನ್ ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "@phoneVerificationFailed": {
+    "description": "Message shown when phone OTP verification fails"
+  },
+
+  "autoVerificationFailed": "ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಯನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+
+  "failedToSendOtp": "OTP ಕಳುಹಿಸಲು ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "@failedToSendOtp": {
+    "description": "Error message when OTP sending fails"
+  },
+
+  "enterOtp": "OTP ನಮೂದಿಸಿ",
+  "@enterOtp": {
+    "description": "Label for OTP input field"
+  },
+
+  "sentTo": "{phoneNumber} ಗೆ ಕಳುಹಿಸಲಾಗಿದೆ",
+  "@sentTo": {
+    "description": "Text indicating where the OTP was sent",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+
+  "invalidOtp": "ಅಮಾನ್ಯ OTP. ದಯವಿಟ್ಟು ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
+  "@invalidOtp": {
+    "description": "Error message when entered OTP is invalid"
+  },
+
+  "verificationSessionExpired": "ಪರಿಶೀಲನಾ ಅಧಿವೇಶನ ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸ OTP ವಿನಂತಿಸಿ.",
+  "@verificationSessionExpired": {
+    "description": "Message shown when the verification session times out"
+  },
+
+  "invalidVerificationCode": "ಅಮಾನ್ಯ ಪರಿಶೀಲನಾ ಕೋಡ್.",
+  "@invalidVerificationCode": {
+    "description": "Error message for an invalid verification code"
+  },
+
+  "otpExpired": "OTP ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸದನ್ನು ವಿನಂತಿಸಿ.",
+  "@otpExpired": {
+    "description": "Message shown when the OTP has expired"
+  },
+
+  "home": "ಹೋಮ್",
+  "@home": {
+    "description": "Bottom navigation tab label for home"
+  },
+
+  "findTrucks": "ಟ್ರಕ್‌ಗಳನ್ನು ಹುಡುಕಿ",
+  "@findTrucks": {
+    "description": "Bottom navigation tab label and screen title for finding trucks"
+  },
+
+  "orders": "ಆದೇಶಗಳು",
+  "@orders": {
+    "description": "Bottom navigation tab label for orders"
+  },
+
+  "profile": "ಪ್ರೊಫೈಲ್",
+  "@profile": {
+    "description": "Bottom navigation tab label for profile"
+  },
+
+  "activeShipments": "ಸಕ್ರಿಯ ಸರಕು ಸಾಗಣೆ",
+  "@activeShipments": {
+    "description": "Section title for active shipments on home screen"
+  },
+
+  "seeAll": "ಎಲ್ಲವನ್ನೂ ನೋಡಿ",
+  "@seeAll": {
+    "description": "Link text to view all items in a list"
+  },
+
+  "bookATruck": "ಟ್ರಕ್ ಬುಕ್ ಮಾಡಿ",
+  "@bookATruck": {
+    "description": "Button or card text to book a truck"
+  },
+
+  "active": "ಸಕ್ರಿಯ",
+  "@active": {
+    "description": "Badge or status label for active items"
+  },
+
+  "moreStats": "ಹೆಚ್ಚಿನ ಅಂಕಿಅಂಶಗಳು",
+  "@moreStats": {
+    "description": "Button text to view more statistics"
+  },
+
+  "savings": "ಉಳಿತಾಯ",
+  "@savings": {
+    "description": "Label for savings summary on home screen"
+  },
+
+  "totalShipments": "ಒಟ್ಟು ಸರಕು ಸಾಗಣೆ",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+
+  "yourUsualRoutes": "ನಿಮ್ಮ ಸಾಮಾನ್ಯ ಮಾರ್ಗಗಳು",
+  "@yourUsualRoutes": {
+    "description": "Section title for frequently used routes"
+  },
+
+  "lastTruckLocation": "ಕೊನೆಯ ಟ್ರಕ್ ಸ್ಥಳ",
+  "@lastTruckLocation": {
+    "description": "Label for the last known truck location"
+  },
+
+  "couldNotLoadData": "ಡೇಟಾ ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+  "@couldNotLoadData": {
+    "description": "Error message when data loading fails"
+  },
+
+  "mlPoweredMatching": "ML-ಆಧಾರಿತ ಹೊಂದಾಣಿಕೆ",
+  "@mlPoweredMatching": {
+    "description": "Subtitle indicating AI-based truck matching"
+  },
+
+  "route": "ಮಾರ್ಗ",
+  "@route": {
+    "description": "Label for route section"
+  },
+
+  "pickupLocation": "ಪಿಕಪ್ ಸ್ಥಳ",
+  "@pickupLocation": {
+    "description": "Label for pickup location input"
+  },
+
+  "dropLocation": "ಡ್ರಾಪ್ ಸ್ಥಳ",
+  "@dropLocation": {
+    "description": "Label for drop location input"
+  },
+
+  "date": "ದಿನಾಂಕ",
+  "@date": {
+    "description": "Label for date picker"
+  },
+
+  "time": "ಸಮಯ",
+  "@time": {
+    "description": "Label for time picker"
+  },
+
+  "goodsDetails": "ಸರಕು ವಿವರಗಳು",
+  "@goodsDetails": {
+    "description": "Section title for goods information"
+  },
+
+  "goodsType": "ಸರಕು ಪ್ರಕಾರ",
+  "@goodsType": {
+    "description": "Label for goods type selector"
+  },
+
+  "weightTonnes": "ತೂಕ (ಟನ್‌ಗಳು)",
+  "@weightTonnes": {
+    "description": "Label for weight input in tonnes"
+  },
+
+  "lengthFt": "ಉದ್ದ (ಅಡಿ)",
+  "@lengthFt": {
+    "description": "Label for length input in feet"
+  },
+
+  "widthFt": "ಅಗಲ (ಅಡಿ)",
+  "@widthFt": {
+    "description": "Label for width input in feet"
+  },
+
+  "heightFt": "ಎತ್ತರ (ಅಡಿ)",
+  "@heightFt": {
+    "description": "Label for height input in feet"
+  },
+
+  "stackable": "ಜೋಡಿಸಬಹುದಾದ",
+  "@stackable": {
+    "description": "Label for stackable goods option"
+  },
+
+  "fragile": "ಜೋರಾದ",
+  "@fragile": {
+    "description": "Label for fragile goods option"
+  },
+
+  "specialRequirements": "ವಿಶೇಷ ಅಗತ್ಯಗಳು",
+  "@specialRequirements": {
+    "description": "Label for special requirements text field"
+  },
+
+  "estimatedPriceRange": "ಅಂದಾಜು ಬೆಲೆ ಶ್ರೇಣಿ",
+  "@estimatedPriceRange": {
+    "description": "Label for the estimated price display"
+  },
+
+  "stableThisWeek": "ಈ ವಾರ ಸ್ಥಿರ",
+  "@stableThisWeek": {
+    "description": "Indicator that the price has been stable this week"
+  },
+
+  "estimatingPrice": "ಬೆಲೆ ಅಂದಾಜು ಮಾಡಲಾಗುತ್ತಿದೆ...",
+  "@estimatingPrice": {
+    "description": "Loading text while price is being estimated"
+  },
+
+  "estimateUnavailable": "ಅಂದಾಜು ಲಭ್ಯವಿಲ್ಲ",
+  "@estimateUnavailable": {
+    "description": "Text shown when a price estimate cannot be generated"
+  },
+
+  "enterRouteDetails": "ಪ್ರಾರಂಭಿಸಲು ಮಾರ್ಗ ವಿವರಗಳನ್ನು ನಮೂದಿಸಿ",
+  "@enterRouteDetails": {
+    "description": "Prompt text to encourage user to fill in route details"
+  },
+
+  "basedOnCurrentDemand": "ಪ್ರಸ್ತುತ ಬೇಡಿಕೆಯ ಆಧಾರದ ಮೇಲೆ",
+  "@basedOnCurrentDemand": {
+    "description": "Subtext indicating price estimate is based on demand"
+  },
+
+  "filterTrucks": "ಟ್ರಕ್‌ಗಳನ್ನು ಫಿಲ್ಟರ್ ಮಾಡಿ",
+  "@filterTrucks": {
+    "description": "Button text to open truck filter options"
+  },
+
+  "truckType": "ಟ್ರಕ್ ಪ್ರಕಾರ",
+  "@truckType": {
+    "description": "Label for truck type filter"
+  },
+
+  "capacityTonnes": "ಸಾಮರ್ಥ್ಯ (ಟನ್‌ಗಳು)",
+  "@capacityTonnes": {
+    "description": "Label for truck capacity filter in tonnes"
+  },
+
+  "materialType": "ವಸ್ತು ಪ್ರಕಾರ",
+  "@materialType": {
+    "description": "Label for material type filter"
+  },
+
+  "today": "ಇಂದು",
+  "@today": {
+    "description": "Date selection option for today"
+  },
+
+  "tomorrow": "ನಾಳೆ",
+  "@tomorrow": {
+    "description": "Date selection option for tomorrow"
+  },
+
+  "selectPickupOnMap": "ನಕ್ಷೆಯಲ್ಲಿ ಪಿಕಪ್ ಆಯ್ಕೆಮಾಡಿ",
+  "@selectPickupOnMap": {
+    "description": "Button text to select pickup location on map"
+  },
+
+  "selectDropOnMap": "ನಕ್ಷೆಯಲ್ಲಿ ಡ್ರಾಪ್ ಆಯ್ಕೆಮಾಡಿ",
+  "@selectDropOnMap": {
+    "description": "Button text to select drop location on map"
+  },
+
+  "temperatureControl": "ತಾಪಮಾನ ನಿಯಂತ್ರಣ",
+  "@temperatureControl": {
+    "description": "Label for temperature controlled truck option"
+  },
+
+  "waterproofCover": "ನೀರಾಡಿಕೆ ಹೊದಿಕೆ",
+  "@waterproofCover": {
+    "description": "Label for waterproof cover truck option"
+  },
+
+  "loadingHelp": "ಲೋಡಿಂಗ್ ಸಹಾಯ",
+  "@loadingHelp": {
+    "description": "Label for loading assistance option"
+  },
+
+  "loadingHelpNeeded": "ಲೋಡಿಂಗ್ ಸಹಾಯ ಅಗತ್ಯವಿದೆ",
+  "@loadingHelpNeeded": {
+    "description": "Indicator that loading assistance is required"
+  },
+
+  "other": "ಇತರೆ",
+  "@other": {
+    "description": "Generic option for other/miscellaneous selection"
+  },
+
+  "describeYourGoods": "ನಿಮ್ಮ ಸರಕುಗಳನ್ನು ವಿವರಿಸಿ...",
+  "@describeYourGoods": {
+    "description": "Placeholder text for goods description input"
+  },
+
+  "activeTab": "ಸಕ್ರಿಯ",
+  "@activeTab": {
+    "description": "Tab label for active orders"
+  },
+
+  "historyTab": "ಇತಿಹಾಸ",
+  "@historyTab": {
+    "description": "Tab label for order history"
+  },
+
+  "searchOrdersHint": "ಆದೇಶಗಳನ್ನು ಹುಡುಕಿ...",
+  "@searchOrdersHint": {
+    "description": "Placeholder text for order search input"
+  },
+
+  "noActiveOrders": "ಸಕ್ರಿಯ ಆದೇಶಗಳಿಲ್ಲ",
+  "@noActiveOrders": {
+    "description": "Text shown when there are no active orders"
+  },
+
+  "noHistoryOrders": "ಆದೇಶ ಇತಿಹಾಸವಿಲ್ಲ",
+  "@noHistoryOrders": {
+    "description": "Text shown when there is no order history"
+  },
+
+  "offlineMode": "ಆಫ್‌ಲೈನ್ ಮೋಡ್",
+  "@offlineMode": {
+    "description": "Label indicating the app is in offline mode"
+  },
+
+  "lastUpdated": "ಕೊನೆಯ ನವೀಕರಣ {timeAgo}",
+  "@lastUpdated": {
+    "description": "Text showing when data was last updated",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "driverAssigned": "ಚಾಲಕ ನಿಯೋಜಿಸಲಾಗಿದೆ",
+  "@driverAssigned": {
+    "description": "Order status label when a driver has been assigned"
+  },
+
+  "inTransit": "ಸಾಗಣೆಯಲ್ಲಿದೆ",
+  "@inTransit": {
+    "description": "Order status label when shipment is in transit"
+  },
+
+  "paymentReleased": "ಪಾವತಿ ಬಿಡುಗಡೆಯಾಗಿದೆ",
+  "@paymentReleased": {
+    "description": "Order status label when payment has been released"
+  },
+
+  "delivered": "ತಲುಪಿಸಲಾಗಿದೆ",
+  "@delivered": {
+    "description": "Order status label for completed delivery"
+  },
+
+  "cancelled": "ರದ್ದುಮಾಡಲಾಗಿದೆ",
+  "@cancelled": {
+    "description": "Order status label for cancelled orders"
+  },
+
+  "pending": "ಬಾಕಿ ಇದೆ",
+  "@pending": {
+    "description": "Order status label for pending orders"
+  },
+
+  "account": "ಖಾತೆ",
+  "@account": {
+    "description": "Profile section title for account settings"
+  },
+
+  "preferences": "ಆದ್ಯತೆಗಳು",
+  "@preferences": {
+    "description": "Profile section title for app preferences"
+  },
+
+  "paymentMethods": "ಪಾವತಿ ವಿಧಾನಗಳು",
+  "@paymentMethods": {
+    "description": "Profile menu item for payment methods"
+  },
+
+  "myDocuments": "ನನ್ನ ಡಾಕ್ಯುಮೆಂಟ್‌ಗಳು",
+  "@myDocuments": {
+    "description": "Profile menu item for documents"
+  },
+
+  "savedAddresses": "ಉಳಿಸಿದ ವಿಳಾಸಗಳು",
+  "@savedAddresses": {
+    "description": "Profile menu item for saved addresses"
+  },
+
+  "walletAddressLabel": "ವಾಲೆಟ್ ವಿಳಾಸ",
+  "@walletAddressLabel": {
+    "description": "Label for wallet address in profile"
+  },
+
+  "notSet": "ಹೊಂದಿಸಿಲ್ಲ",
+  "@notSet": {
+    "description": "Text shown when a field has not been configured"
+  },
+
+  "language": "ಭಾಷೆ",
+  "@language": {
+    "description": "Profile menu item for language settings"
+  },
+
+  "helpSupport": "ಸಹಾಯ & ಬೆಂಬಲ",
+  "@helpSupport": {
+    "description": "Profile menu item for help and support"
+  },
+
+  "aboutTruxify": "Truxify ಬಗ್ಗೆ",
+  "@aboutTruxify": {
+    "description": "Profile menu item for about page"
+  },
+
+  "logout": "ಲಾಗ್‌ಔಟ್",
+  "@logout": {
+    "description": "Button text to log out of the app"
+  },
+
+  "offlineModeLabel": "ಆಫ್‌ಲೈನ್ ಮೋಡ್ (ಕೊನೆಯ ನವೀಕರಣ {timeAgo})",
+  "@offlineModeLabel": {
+    "description": "Label indicating offline mode with last updated time",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "ordersLabel": "ಆದೇಶಗಳು",
+  "@ordersLabel": {
+    "description": "Label for orders count or section in profile"
+  },
+
+  "savedLabel": "ಉಳಿಸಿದೆ",
+  "@savedLabel": {
+    "description": "Label for saved items count in profile"
+  },
+
+  "co2Label": "CO₂ ಉಳಿಸಿದೆ",
+  "@co2Label": {
+    "description": "Label for CO2 emissions saved metric"
+  },
+
+  "editProfile": "ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
+  "@editProfile": {
+    "description": "Button text to edit profile information"
+  },
+
+  "fullName": "ಪೂರ್ಣ ಹೆಸರು",
+  "@fullName": {
+    "description": "Label for full name input field"
+  },
+
+  "companyName": "ಕಂಪನಿ ಹೆಸರು",
+  "@companyName": {
+    "description": "Label for company name input field"
+  },
+
+  "phone": "ಫೋನ್",
+  "@phone": {
+    "description": "Label for phone number display or input"
+  },
+
+  "enterFullName": "ನಿಮ್ಮ ಪೂರ್ಣ ಹೆಸರು ನಮೂದಿಸಿ",
+  "@enterFullName": {
+    "description": "Placeholder text for full name input"
+  },
+
+  "enterCompanyName": "ನಿಮ್ಮ ಕಂಪನಿ ಹೆಸರು ನಮೂದಿಸಿ",
+  "@enterCompanyName": {
+    "description": "Placeholder text for company name input"
+  },
+
+  "enterPhoneNumber": "ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆ ನಮೂದಿಸಿ",
+  "@enterPhoneNumber": {
+    "description": "Placeholder text for phone number input"
+  },
+
+  "nameIsRequired": "ಹೆಸರು ಅಗತ್ಯವಿದೆ",
+  "@nameIsRequired": {
+    "description": "Validation error when name field is empty"
+  },
+
+  "companyNameIsRequired": "ಕಂಪನಿ ಹೆಸರು ಅಗತ್ಯವಿದೆ",
+  "@companyNameIsRequired": {
+    "description": "Validation error when company name field is empty"
+  },
+
+  "phoneNumberIsRequired": "ಫೋನ್ ಸಂಖ್ಯೆ ಅಗತ್ಯವಿದೆ",
+  "@phoneNumberIsRequired": {
+    "description": "Validation error when phone number field is empty"
+  },
+
+  "saving": "ಉಳಿಸಲಾಗುತ್ತಿದೆ...",
+  "@saving": {
+    "description": "Loading text while profile changes are being saved"
+  },
+
+  "saveChanges": "ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ",
+  "@saveChanges": {
+    "description": "Button text to save profile changes"
+  },
+
+  "profileUpdatedSuccessfully": "ಪ್ರೊಫೈಲ್ ಯಶಸ್ವಿಯಾಗಿ ನವೀಕರಿಸಲಾಗಿದೆ",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile is updated"
+  },
+
+  "failedToLoadProfile": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ",
+  "@failedToLoadProfile": {
+    "description": "Error message when profile data fails to load"
+  },
+
+  "failedToUpdateProfile": "ಪ್ರೊಫೈಲ್ ನವೀಕರಿಸಲು ವಿಫಲವಾಗಿದೆ",
+  "@failedToUpdateProfile": {
+    "description": "Error message when profile update fails"
+  },
+
+  "shareTracking": "ಟ್ರ್ಯಾಕಿಂಗ್ ಹಂಚಿಕೊಳ್ಳಿ",
+  "@shareTracking": {
+    "description": "Button text to share order tracking link"
+  },
+
+  "trackingLinkGenerated": "ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್ ರಚಿಸಲಾಗಿದೆ",
+  "@trackingLinkGenerated": {
+    "description": "Success message when tracking link is generated"
+  },
+
+  "unableToShare": "ಹಂಚಿಕೊಳ್ಳಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+  "@unableToShare": {
+    "description": "Error message when sharing fails"
+  },
+
+  "linkExpired": "ಈ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್ ಅವಧಿ ಮುಗಿದಿದೆ ಅಥವಾ ಇನ್ನು ಮಾನ್ಯವಾಗಿಲ್ಲ.",
+  "@linkExpired": {
+    "description": "Message shown when a tracking link has expired"
+  },
+
+  "trackingRevoked": "ಎಲ್ಲಾ ಟ್ರ್ಯಾಕಿಂಗ್ ಲಿಂಕ್‌ಗಳನ್ನು ರದ್ದುಗೊಳಿಸಲಾಗಿದೆ.",
+  "@trackingRevoked": {
+    "description": "Message shown when tracking links are revoked"
+  },
+
+  "copyLink": "ಲಿಂಕ್ ನಕಲಿಸಿ",
+  "@copyLink": {
+    "description": "Button text to copy tracking link to clipboard"
+  },
+
+  "shareMessage": "Truxify ನಲ್ಲಿ ನಿಮ್ಮ ಸರಕು ಸಾಗಣೆಯನ್ನು ಟ್ರ್ಯಾಕ್ ಮಾಡಿ",
+  "@shareMessage": {
+    "description": "Default message included when sharing tracking link"
+  },
+
+  "orderNotFound": "ಆದೇಶ ಕಂಡುಬಂದಿಲ್ಲ",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "ಅಧಿಸೂಚನೆ",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "ಅಧಿಸೂಚನೆಯನ್ನು ತೆರೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+
+  "downloadInvoice": "ಇನ್‌ವಾಯ್ಸ್ ಡೌನ್‌ಲೋಡ್ ಮಾಡಿ",
+  "@downloadInvoice": {
+    "description": "Button text to download the order invoice as PDF"
+  },
+
+  "generatingInvoice": "ಇನ್‌ವಾಯ್ಸ್ ರಚಿಸಲಾಗುತ್ತಿದೆ...",
+  "@generatingInvoice": {
+    "description": "Status text while the PDF invoice is being generated"
+  },
+
+  "invoiceReady": "ಇನ್‌ವಾಯ್ಸ್ ಸಿದ್ಧವಾಗಿದೆ",
+  "@invoiceReady": {
+    "description": "Success message after invoice PDF is generated"
+  },
+
+  "shareInvoice": "ಇನ್‌ವಾಯ್ಸ್ ಹಂಚಿಕೊಳ್ಳಿ",
+  "@shareInvoice": {
+    "description": "Button text to share the generated invoice"
+  },
+
+  "printInvoice": "ಇನ್‌ವಾಯ್ಸ್ ಮುದ್ರಿಸಿ",
+  "@printInvoice": {
+    "description": "Button text to print the generated invoice"
+  },
+
+  "downloadFailed": "ಡೌನ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ",
+  "@downloadFailed": {
+    "description": "Error message when invoice download or generation fails"
+  }
+}

@@ -1,0 +1,79 @@
+name: "Stale Issue & PR "
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+    
+  workflow_dispatch:
+
+jobs:
+  stale:
+    name: Mark and Close Stale Issues & PRs
+    runs-on: ubuntu-latest
+    
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Run Stale Action
+        uses: actions/stale@v11
+        
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Days of inactivity before a warning is posted
+          days-before-stale: 14
+
+          # Disable auto-closing issues (never close issues)
+          days-before-issue-close: -1
+
+          # Auto-close stale PRs after 7 days
+          days-before-pr-close: 7
+
+          # Labels applied when stale
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+
+          # Remove stale label automatically if activity resumes
+          remove-stale-when-updated: true
+
+          # Unassign inactive users when marked stale
+          remove-issue-assignees-when-stale: true
+
+          # Warning comment posted on stale issues
+          stale-issue-message: >
+            This issue has had no activity for **14 days**. You have been unassigned 
+            so other contributors can pick it up. If you are still working on this, 
+            please leave a comment to re-claim it!
+
+          # Warning comment posted on stale PRs
+          
+          stale-pr-message: >
+            This pull request has had no activity for **14 days** and
+            has been marked as `stale`. If this is still being worked on,
+            please push a commit or leave a comment within the next **7 days**,
+            otherwise it will be closed automatically.
+
+
+          # Comment posted when a stale PR is closed
+          
+          close-pr-message: >
+            This pull request has been automatically closed after 21 days
+            of inactivity. Please reopen or raise a fresh PR rebased on the
+            latest main branch if you would like to continue. Thank you!
+
+          # Issues and PRs with these labels are never touched by the sweeper
+          
+          exempt-issue-labels: "pinned,security,critical,in-progress,blocked,help wanted,gssoc:approved"
+          
+          exempt-pr-labels: "pinned,security,critical,in-progress,blocked,do-not-merge,gssoc:approved"
+
+          # Cap API calls per run to respect GitHub rate limits
+          operations-per-run: 100
+
+          # Process oldest items first
+          ascending: true
+
+
+          

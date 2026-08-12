@@ -1,272 +1,103 @@
 # Truxify ML Engine
 
-Machine Learning microservice for Truxify built with FastAPI.
+Machine Learning microservice for Truxify built with **FastAPI** and **PyTorch / TensorFlow / Scikit-Learn**.
 
-## Overview
+---
 
-The ML Engine serves as the foundation for machine learning features in Truxify. It provides a FastAPI-based backend service that can host ML models, prediction APIs, and future AI-powered functionality.
+## 🧠 Overview
 
-## Features
+The Truxify ML Engine serves as the intelligence layer for the Truxify logistics ecosystem. It powers real-time pricing, demand forecasting, dynamic driver-order matching, automated ETA predictions, 3D cargo bin packing, deadhead mileage reduction, and advanced spatio-temporal research models.
 
-- FastAPI backend service
-- Health monitoring endpoint
-- Interactive Swagger API documentation
-- OpenAPI schema generation
-- Docker support for containerized deployment
-- Ready for future ML model integration
+---
 
-## Project Structure
+## 📐 Project Structure & Module Inventory
 
 ```text
 backend/ml
-├── app
-│   ├── __init__.py
-│   └── main.py
-├── Dockerfile
-├── .dockerignore
-├── requirements.txt
-└── README.md
+├── app/
+│   └── models/               # Production Scikit-Learn & Optimization Models
+│       ├── base.py           # Model serialization, SHA-256 integrity, preloaders
+│       ├── demand_forecast.py# GradientBoosting Demand Regressor
+│       ├── price_prediction.py # Freight Price Regressor
+│       ├── eta_prediction.py # Route ETA Estimator
+│       ├── driver_profit.py  # Driver Earnings Optimizer
+│       ├── trust_scorer.py   # Driver & Shipper Trust Score Model
+│       ├── collaborative_filter.py # Recommendation Matrix Factorization (SVD)
+│       ├── bilateral_matcher.py # Bipartite Matching Solver
+│       ├── bin_packing.py    # 3D Cargo Bin Packing (First-Fit Decreasing)
+│       ├── deadhead_eliminator.py # Route Chain Optimization (VRP 2-opt)
+│       └── mid_trip_reoptimiser.py # Dynamic Route Re-optimizer
+├── models_storage/           # Saved binary model pickles (*.pkl) & JSON metadata
+├── routes/                   # Modular FastAPI REST Router Handlers
+├── services/                 # Infrastructure Services (Traffic, A/B Testing)
+│   ├── traffic_pipeline.py  # Live OSM/GPS Telemetry Pipeline & SQLite Store
+│   └── ab_testing.py        # Model Variant Routing & Analytics Engine
+├── tests/                    # Comprehensive Pytest Suite
+├── anomaly/                  # Real-time LSTM Autoencoder Anomaly Detection
+├── diffusion/                # DDPM Synthetic Trajectory & Demand Generation
+├── federated/                # FedAvg Decentralized Edge Learning
+├── foundation/               # Spatio-Temporal Transformer Foundation Model
+├── gat/                      # Graph Attention Networks (Traffic Flow)
+├── gnn/                      # Graph Neural Networks (GraphSAGE/GCN Route Embeddings)
+├── imitation/                # Behavioral Cloning & GAIL Dispatch Policy
+├── meta/                     # MAML Few-Shot Regional Adaptation
+├── mtl/                      # Multi-Task Learning Joint Network
+├── multimodal/               # Computer Vision & Sensor Fusion Safety Monitor
+├── nas/                      # DARTS Neural Architecture Search
+├── nerf/                     # NeRF 3D Cargo Reconstruction
+├── pinns/                    # Physics-Informed Kinematics Networks
+├── self_supervised/          # SimCLR Contrastive Telemetry Pre-training
+└── transformers/             # Time-Series Informer / PatchTST Forecasting
 ```
 
-## Local Development
+---
 
-### 1. Create a Virtual Environment
+## ⚡ Dynamic Route Registration
+
+The ML Engine implements dynamic, fault-tolerant router registration via [`routes/__init__.py`](./routes/__init__.py). 
+
+Heavy optional deep learning frameworks (e.g., PyTorch Geometric, OpenCV, MediaPipe, Librosa) are loaded conditionally. If a library is not installed in the host environment, the engine catches `ImportError` gracefully and continues serving core endpoints without interruption.
+
+---
+
+## 📊 Core Production API Endpoints
+
+| Endpoint | Method | Input Model | Description |
+| :--- | :--- | :--- | :--- |
+| `/predict/demand` | `POST` | `DemandForecastInput` | Predicts demand volume based on location, hour, weather, and historical traffic. |
+| `/predict/price` | `POST` | `PricePredictInput` | Estimates optimal freight rate per kilometer considering vehicle type and market demand. |
+| `/predict/eta` | `POST` | `ETAPredictInput` | Calculates route travel duration with live telemetry adjustments. |
+| `/match` | `POST` | `BilateralMatchInput` | Solves maximum weight bipartite matching between loads and available drivers. |
+| `/pack` | `POST` | `PackingInput` | Calculates 3D cargo arrangement and volume utilization. |
+| `/deadhead` | `POST` | `DeadheadInput` | Finds multi-leg chain routes to eliminate empty return trips. |
+| `/ab-testing/status` | `GET` | — | Returns active A/B model variant tests and performance degradation metrics. |
+
+All endpoints require the `X-API-Key` header matching the environment `ML_API_KEY`.
+
+---
+
+## 🧪 Running Unit Tests
+
+Execute the complete test suite using `pytest`:
 
 ```bash
-python -m venv venv
+# Set PYTHONPATH to current directory
+export PYTHONPATH=.
+
+# Run unit tests
+pytest tests/ -v
 ```
 
-### 2. Activate the Virtual Environment
+---
 
-#### Windows
+## 🐳 Docker Deployment
+
+Build and start the ML Engine with Docker Compose:
 
 ```bash
-venv\Scripts\activate
+# Local Development
+docker compose up ml-engine -d
+
+# Verify Health
+curl http://localhost:8001/health
 ```
-
-#### Linux/macOS
-
-```bash
-source venv/bin/activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Run the Application
-
-```bash
-uvicorn app.main:app --reload
-```
-
-The application will be available at:
-
-```text
-http://localhost:8000
-```
-
-## Available Endpoints
-
-### Root Endpoint
-
-```http
-GET /
-```
-
-Returns a welcome message confirming the service is running.
-
-### Health Check Endpoint
-
-```http
-GET /health
-```
-
-Returns the health status of the service.
-
-Example Response:
-```json
-{
-  "status": "healthy"
-}
-```
-
-### Predict Demand Endpoint
-
-```http
-POST /predict/demand
-```
-
-Predicts ride/truck demand based on time, weather, and traffic features. If the model hasn't been trained yet, this endpoint triggers the training pipeline automatically.
-
-**Request Body Schema**:
-```json
-{
-  "hour": 14.5,
-  "day_of_week": 3,
-  "temperature": 25.0,
-  "precipitation": 0.0,
-  "historical_volume": 50.0,
-  "nearby_drivers": 15.0
-}
-```
-
-**Response Schema**:
-```json
-{
-  "predicted_demand": 54.93,
-  "model_version": "1.0.0",
-  "feature_names": [
-    "hour",
-    "day_of_week",
-    "is_weekend",
-    "temperature",
-    "precipitation",
-    "historical_volume",
-    "nearby_drivers"
-  ]
-}
-```
-
-### Train Demand Model Endpoint
-
-```http
-POST /train/demand
-```
-
-Triggers model training using synthetic dataset and saves the model pickle and metadata metrics to `models_storage/`.
-
-**Response Schema**:
-```json
-{
-  "status": "success",
-  "metrics": {
-    "mae": 4.304729891391666,
-    "rmse": 5.299083712860529,
-    "r2": 0.7975017721221801,
-    "n_samples": 2000,
-    "feature_names": [
-      "hour",
-      "day_of_week",
-      "is_weekend",
-      "temperature",
-      "precipitation",
-      "historical_volume",
-      "nearby_drivers"
-    ]
-  }
-}
-```
-
-### List Models Endpoint
-
-```http
-GET /models
-```
-
-Lists all trained models with their saved timestamps and performance metrics.
-
-**Response Schema**:
-```json
-{
-  "models": [
-    {
-      "model_name": "demand_forecast",
-      "saved_at": "2026-06-11T17:44:09.780044",
-      "metrics": {
-        "mae": 4.304729891391666,
-        "rmse": 5.299083712860529,
-        "r2": 0.7975017721221801,
-        "n_samples": 2000,
-        "feature_names": [
-          "hour",
-          "day_of_week",
-          "is_weekend",
-          "temperature",
-          "precipitation",
-          "historical_volume",
-          "nearby_drivers"
-        ]
-      }
-    }
-  ]
-}
-```
-
-## Model Training & Evaluation Metrics
-
-The demand forecasting model is built using a **Gradient Boosting Regressor** (`scikit-learn`). 
-
-- **Target Metric**: R² score, Mean Absolute Error (MAE), Root Mean Squared Error (RMSE).
-- **Features Used**: Hour of day, Day of week, Weekend flag, Temperature, Precipitation, Historical booking volume, Nearby available drivers.
-- **Baseline Performance Metrics**:
-  - **R² Score**: ~0.80 (80% variance explained)
-  - **MAE**: ~4.30 units of demand
-  - **RMSE**: ~5.30 units of demand
-  - **Dataset size**: 2,000 synthetic logs
-
-## Running Tests
-
-FastAPI microservice endpoints are verified via a test suite built with `pytest` and `httpx`.
-
-### 1. Activate the Virtual Environment
-Activate your Python virtual environment.
-
-### 2. Run Pytest
-From the project root directory, run:
-```bash
-pytest backend/ml/tests
-```
-
-## API Documentation
-
-### Swagger UI
-
-```text
-http://localhost:8000/docs
-```
-
-### OpenAPI Schema
-
-```text
-http://localhost:8000/openapi.json
-```
-
-## Docker Setup
-
-### Build the ML Engine Image
-
-From the project root:
-
-```bash
-docker compose build ml-engine
-```
-
-### Run the ML Engine Service
-
-```bash
-docker compose up ml-engine
-```
-
-### Verify the Service
-
-Health Check:
-
-```text
-http://localhost:8001/health
-```
-
-Swagger Documentation:
-
-```text
-http://localhost:8001/docs
-```
-
-## Notes
-
-- FastAPI is used as the web framework.
-- Uvicorn is used as the ASGI server.
-- Docker support is included for consistent development and deployment environments.
-- This implementation provides the initial foundation for future machine learning model integration within Truxify.

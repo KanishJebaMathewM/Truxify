@@ -1,18 +1,45 @@
 import { DomainError } from './domainError.js';
+import { policy } from '../../security/policyEngine.js';
+import { orderRepository } from '../../core/container.js';
 
 export class OrderValidationService {
-  constructor({ supabase, logger }) {
-    this.supabase = supabase;
+  constructor({ supabase, orderRepository, logger } = {}) {
+    this.supabase = supabase || null;
+    this.orderRepository = orderRepository || null;
     this.logger = logger;
   }
 
+  async _unwrapOrderResult(result) {
+    const resolved = await result;
+    if (resolved && resolved.error) {
+      throw new DomainError(500, { error: 'Query failed.', details: resolved.error.message });
+    }
+    if (resolved && resolved.data !== undefined) return resolved.data;
+    return resolved;
+  }
+
   async findOrderByIdOrDisplayId(identifier, select = '*') {
-    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', identifier).maybeSingle();
+    const targetId = typeof identifier === 'string' && identifier.startsWith('TX-')
+      ? identifier.slice(3)
+      : identifier;
+
+    if (this.orderRepository) {
+      const byId = await this._unwrapOrderResult(this.orderRepository.findOrderById(targetId, select));
+      if (byId) return byId;
+      return (await this._unwrapOrderResult(this.orderRepository.findOrderByDisplayId(targetId, select))) || null;
+    }
+
+    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
     if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
     if (byId) return byId;
-    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', identifier).maybeSingle();
+    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', targetId).maybeSingle();
     if (errDisplay) throw new DomainError(500, { error: 'Query failed.', details: errDisplay.message });
     return byDisplay || null;
+  }
+
+  validateOrderForBidAcceptance(order) {
+    if (!order) return false;
+    return ['pending'].includes(order.status);
   }
 
   assertOrderFound(order) {
@@ -22,19 +49,25 @@ export class OrderValidationService {
   }
 
   assertCustomerOwnership(order, userId) {
-    if (order.customer_id !== userId) {
+    try {
+      policy.authorize({ id: userId, role: 'customer' }, 'order:view-bids', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
     }
   }
 
   assertDriverAssignment(order, driverId) {
-    if (order.driver_id !== driverId) {
+    try {
+      policy.authorize({ id: driverId, role: 'driver' }, 'milestone:update', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
     }
   }
 
-  assertOrderAccess(order, userId) {
-    if (order.customer_id !== userId && order.driver_id !== userId) {
+  assertOrderAccess(order, user) {
+    try {
+      policy.authorize(user, 'order:view', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You do not own or are not assigned to this order.' });
     }
   }
@@ -69,8 +102,15 @@ export class OrderValidationService {
   }
 
   assertNotOwnLoad(offerCustomerId, userId) {
-    if (offerCustomerId === userId) {
-      throw new DomainError(403, { error: 'You cannot bid on your own load offer' });
+    const offer = { customer_id: offerCustomerId };
+    try {
+      policy.authorize({ id: userId, role: 'driver' }, 'bid:submit', { offer });
+    } catch (err) {
+      if (err.code === 'OWN_LOAD_VIOLATION' || err.message?.includes('own load')) {
+        throw new DomainError(403, { error: 'You cannot bid on your own load offer' });
+      }
+      this.logger.error({ err, userId, offerCustomerId }, 'Policy authorization failed in assertNotOwnLoad');
+      throw new DomainError(500, { error: 'Authorization check failed. Please try again.' });
     }
   }
 
@@ -143,9 +183,11 @@ export class OrderValidationService {
   }
 
   assertChangeDropAllowed(order) {
-    if (order.escrow_status === 'funded' || order.status !== 'pending') {
-      const reason = order.escrow_status === 'funded'
-        ? 'after escrow has been funded'
+    const escrowInFlight = order.escrow_status === 'funding' || order.escrow_status === 'funded';
+    const escrowPending = order.escrow_status === 'pending' || order.escrow_status === null;
+    if (!escrowPending || order.status !== 'pending') {
+      const reason = escrowInFlight
+        ? `after escrow ${order.escrow_status === 'funding' ? 'funding has been initiated' : 'has been funded'}`
         : `after order status is '${order.status}'`;
       throw new DomainError(409, {
         error: `Drop location cannot be changed ${reason}.`,
@@ -159,4 +201,47 @@ export class OrderValidationService {
       throw new DomainError(500, { error: 'Data inconsistency: Order is missing weight_tonnes.' });
     }
   }
+
+  async assertHosCompliant(driverId) {
+    const { data: driver, error } = await this.supabase
+      .from('driver_details')
+      .select('accumulated_driving_minutes, accumulated_on_duty_minutes, hos_status')
+      .eq('user_id', driverId)
+      .maybeSingle();
+
+    if (error) {
+      throw new DomainError(500, { error: 'Failed to verify driver HoS status.', details: error.message });
+    }
+
+    if (driver) {
+      const drivingHours = (driver.accumulated_driving_minutes || 0) / 60;
+      const onDutyHours = (driver.accumulated_on_duty_minutes || 0) / 60;
+
+      if (drivingHours >= 11 || onDutyHours >= 14) {
+        throw new DomainError(403, {
+          error: 'HoS Limit Exceeded: You have reached your maximum legal driving or on-duty hours for this shift. You must take a mandatory rest break before bidding on new loads.'
+        });
+      }
+    }
+  }
 }
+
+let defaultValidationService = null;
+
+function getDefaultValidationService() {
+  if (!defaultValidationService) {
+    defaultValidationService = new OrderValidationService({ orderRepository });
+  }
+  return defaultValidationService;
+}
+
+export default new Proxy({}, {
+  get(_target, prop) {
+    if (prop === 'then') return undefined;
+    return getDefaultValidationService()[prop];
+  },
+  set(_target, prop, value) {
+    getDefaultValidationService()[prop] = value;
+    return true;
+  },
+});

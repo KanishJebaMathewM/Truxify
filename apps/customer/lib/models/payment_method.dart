@@ -1,3 +1,19 @@
+class PaymentHelper {
+  static String detectBrand(String num) {
+    if (num.startsWith('4')) return 'Visa';
+    if (num.startsWith('5')) return 'Mastercard';
+    if (num.startsWith('34') || num.startsWith('37')) return 'Amex';
+    if (num.startsWith('6')) return 'RuPay';
+    return 'Unknown';
+  }
+  static String maskNumber(String num) {
+    if (num.length < 8) return '****';
+    return '${num.substring(0, 4)} **** **** ${num.substring(num.length - 4)}';
+  }
+  static String iconAsset(String brand) => 'assets/icons/payment_${brand.toLowerCase()}.png';
+  static bool isValidUpi(String id) => id.contains('@') && id.length > 5;
+}
+
 class PaymentMethod {
   final String id;
   final String userId;

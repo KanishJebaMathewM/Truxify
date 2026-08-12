@@ -1,0 +1,1 @@
+ALTER TABLE "public"."trucks" ADD COLUMN IF NOT EXISTS "average_mpg" NUMERIC DEFAULT 6.0;

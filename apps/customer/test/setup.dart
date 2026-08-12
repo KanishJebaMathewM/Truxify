@@ -28,7 +28,7 @@ Future<void> setupTests() async {
   } on AssertionError {
     await Supabase.initialize(
       url: 'http://localhost:54321',
-      publishableKey: 'mock-anon-key',
+      anonKey: 'mock-anon-key',
     );
   }
 }

@@ -31,7 +31,7 @@ class MapPlaceholder extends StatelessWidget {
         children: [
           Positioned.fill(
             child: CustomPaint(
-              painter: _MapGridPainter(),
+              painter: const _MapGridPainter(),
               child: Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -158,6 +158,7 @@ class _MapPin extends StatelessWidget {
 }
 
 class _MapGridPainter extends CustomPainter {
+  const _MapGridPainter();
   @override
   void paint(Canvas canvas, Size size) {
     final gridPaint = Paint()

@@ -1,5 +1,6 @@
 import { getRequestCache } from '../lib/requestContext.js';
 import { executeWithRetry, isRetryable } from '../core/retry.js';
+import { measureExecution } from '../core/performanceMetrics.js';
 import { buildPagination } from '../utils/pagination.js';
 
 export class OrderRepository {
@@ -23,7 +24,7 @@ export class OrderRepository {
     return executeWithRetry(async () => {
       let result;
       try {
-        result = await queryFn();
+        result = await measureExecution(`OrderRepository.${operationName}`, queryFn);
       } catch (err) {
         if (isRetryable(err)) {
           throw err;
@@ -56,25 +57,21 @@ export class OrderRepository {
   }
 
   async findOrderById(id, columns = '*') {
-    return this._cachedQuery(`order:id:${id}:${columns}`, () =>
-      this.supabase
-        .from('orders')
-        .select(columns)
-        .eq('id', id)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select(columns)
+      .eq('id', id)
+      .maybeSingle(), 'findOrderById');
   }
 
   async findOrderByDisplayId(displayId, columns = '*') {
-    return this._cachedQuery(`order:display:${displayId}:${columns}`, () =>
-      this.supabase
-        .from('orders')
-        .select(columns)
-        .eq('order_display_id', displayId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select(columns)
+      .eq('order_display_id', displayId)
+      .maybeSingle(), 'findOrderByDisplayId');
   }
-
+  
   async findOrderByAnyId(id, columns = '*') {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (uuidRegex.test(id)) {
@@ -82,6 +79,10 @@ export class OrderRepository {
       if (result.data) return result;
     }
     return this.findOrderByDisplayId(id, columns);
+  }
+
+  async findOrderByIdOrDisplayId(id, columns = '*') {
+    return this.findOrderByAnyId(id, columns);
   }
 
   async findOrdersByCustomer(customerId, columns, statuses, orderColumn, ascending, pagination) {
@@ -100,6 +101,18 @@ export class OrderRepository {
     }, 'findOrdersByCustomer');
   }
 
+  async findActiveOrderForDriverByCustomer(customerId, driverId, columns) {
+    const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select(columns || 'id, order_display_id')
+      .eq('customer_id', customerId)
+      .eq('driver_id', driverId)
+      .in('status', activeStatuses)
+      .limit(1)
+      .maybeSingle(), 'findActiveOrderForDriverByCustomer');
+  }
+
   async findOrdersWithCount(customerId, columns, pagination) {
     const { page = 1, limit: perPage = 10 } = pagination || {};
     const from = (page - 1) * perPage;
@@ -113,33 +126,39 @@ export class OrderRepository {
   }
 
   async findOrderForTimeline(id) {
-    return this._cachedQuery(`order:timeline:${id}`, () =>
-      this.supabase
-        .from('orders')
-        .select('customer_id, driver_id, order_display_id')
-        .eq('id', id)
-        .maybeSingle()
-    );
-  }
-
-  async findOrderByDisplayForTimeline(displayId) {
-    return this._cachedQuery(`order:displayTimeline:${displayId}`, () =>
-      this.supabase
-        .from('orders')
-        .select('customer_id, driver_id, order_display_id')
-        .eq('order_display_id', displayId)
-        .maybeSingle()
-    );
-  }
-
-  async updateOrder(id, updates) {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .update(updates)
+      .select('customer_id, driver_id, order_display_id')
       .eq('id', id)
-      .select('*')
-      .single(), 'updateOrder');
+      .maybeSingle(), 'findOrderForTimeline');
+  } 
+
+  async updateOrder(id, updates, eventType = null) {
+  const result = await this._retryableQuery(() => this.supabase
+    .from('orders')
+    .update(updates)
+    .eq('id', id)
+    .select('*')
+    .single(), 'updateOrder');
+
+  // Write outbox event after successful mutation — best-effort, never throws.
+  if (!result.error && result.data && eventType) {
+    const { outboxService } = await import('../services/outbox/outboxService.js');
+    await outboxService.writeEvent({
+      aggregateId: result.data.order_display_id || id,
+      aggregateType: 'order',
+      eventType,
+      payload: {
+        orderId: id,
+        orderDisplayId: result.data.order_display_id,
+        status: result.data.status,
+        updates,
+      },
+    });
   }
+
+  return result;
+}
 
   async updateOrderWithFilter(id, updates, filters, selectColumns) {
     return this._retryableQuery(() => {
@@ -148,6 +167,8 @@ export class OrderRepository {
         for (const f of filters) {
           if (f.op === 'eq') {
             query = query.eq(f.column, f.value);
+          } else if (f.op === 'neq') {
+            query = query.neq(f.column, f.value);
           } else if (f.op === 'not') {
             query = query.not(f.column, f.operator, f.value);
           } else if (f.op === 'in') {
@@ -207,23 +228,19 @@ export class OrderRepository {
   }
 
   async getTimeline(orderDisplayId) {
-    return this._cachedQuery(`timeline:${orderDisplayId}`, () =>
-      this.supabase
-        .from('order_timeline')
-        .select('milestone, milestone_time, completed, sort_order')
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order', { ascending: true })
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('order_timeline')
+      .select('milestone, milestone_time, completed, sort_order')
+      .eq('order_display_id', orderDisplayId)
+      .order('sort_order', { ascending: true }), 'getTimeline');
   }
 
   async getTimelineWithSortCheck(orderDisplayId) {
-    return this._cachedQuery(`timeline:sort:${orderDisplayId}`, () =>
-      this.supabase
-        .from('order_timeline')
-        .select('milestone, sort_order, completed')
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order', { ascending: true })
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('order_timeline')
+      .select('milestone, sort_order, completed')
+      .eq('order_display_id', orderDisplayId)
+      .order('sort_order', { ascending: true }), 'getTimelineWithSortCheck');
   }
 
   async updateTimelineMilestone(orderDisplayId, milestone, updates) {
@@ -258,23 +275,19 @@ export class OrderRepository {
   }
 
   async findLoadOfferById(id, columns = '*') {
-    return this._cachedQuery(`load_offer:id:${id}:${columns}`, () =>
-      this.supabase
-        .from('load_offers')
-        .select(columns)
-        .eq('id', id)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('load_offers')
+      .select(columns)
+      .eq('id', id)
+      .maybeSingle(), 'findLoadOfferById');
   }
 
   async findLoadOfferByOrderDisplayId(displayId) {
-    return this._cachedQuery(`load_offer:display:${displayId}`, () =>
-      this.supabase
-        .from('load_offers')
-        .select('id')
-        .eq('order_display_id', displayId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('load_offers')
+      .select('id')
+      .eq('order_display_id', displayId)
+      .maybeSingle(), 'findLoadOfferByOrderDisplayId');
   }
 
   async findLoadOffers(filters, options = {}) {
@@ -321,13 +334,11 @@ export class OrderRepository {
   }
 
   async findBidById(id) {
-    return this._cachedQuery(`bid:${id}`, () =>
-      this.supabase
-        .from('load_bids')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('load_bids')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle(), 'findBidById');
   }
 
   async findBidsByLoad(loadId, status, options = {}) {
@@ -381,8 +392,13 @@ export class OrderRepository {
   // RPC
   // ===================================================================
 
-  async executeRpc(name, params) {
-    return this._retryableQuery(() => this.supabase.rpc(name, params), `executeRpc:${name}`);
+  async executeRpc(name, params, client) {
+    if (!client) {
+      throw new Error(
+        `executeRpc("${name}") requires a Supabase client. Pass the per-request user client so auth.uid() resolves to the caller instead of falling back to the shared anon-key client.`
+      );
+    }
+    return this._retryableQuery(() => client.rpc(name, params), `executeRpc:${name}`);
   }
 
   // ===================================================================
@@ -397,33 +413,27 @@ export class OrderRepository {
   }
 
   async findProfile(userId, columns = 'full_name, phone, avatar_url') {
-    return this._cachedQuery(`profile:${userId}:${columns}`, () =>
-      this.supabase
-        .from('profiles')
-        .select(columns)
-        .eq('id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('profiles')
+      .select(columns)
+      .eq('id', userId)
+      .maybeSingle(), 'findProfile');
   }
 
   async findCustomerWallet(userId) {
-    return this._cachedQuery(`profile:wallet:${userId}`, () =>
-      this.supabase
-        .from('profiles')
-        .select('polygon_wallet_address')
-        .eq('id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('profiles')
+      .select('polygon_wallet_address')
+      .eq('id', userId)
+      .maybeSingle(), 'findCustomerWallet');
   }
 
   async findProfileWallet(userId) {
-    return this._cachedQuery(`profile:wallet:${userId}`, () =>
-      this.supabase
-        .from('profiles')
-        .select('polygon_wallet_address')
-        .eq('id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('profiles')
+      .select('polygon_wallet_address')
+      .eq('id', userId)
+      .maybeSingle(), 'findProfileWallet');
   }
 
   // ===================================================================
@@ -431,13 +441,11 @@ export class OrderRepository {
   // ===================================================================
 
   async findDriverDetail(userId, columns = 'polygon_wallet_address, rating, truck_id, total_trips') {
-    return this._cachedQuery(`driver:detail:${userId}:${columns}`, () =>
-      this.supabase
-        .from('driver_details')
-        .select(columns)
-        .eq('user_id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('driver_details')
+      .select(columns)
+      .eq('user_id', userId)
+      .maybeSingle(), 'findDriverDetail');
   }
 
   async findDriverDetails(userIds) {
@@ -448,33 +456,27 @@ export class OrderRepository {
   }
 
   async findDriverDetailMinimal(userId) {
-    return this._cachedQuery(`driver:minimal:${userId}`, () =>
-      this.supabase
-        .from('driver_details')
-        .select('truck_id')
-        .eq('user_id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('driver_details')
+      .select('truck_id')
+      .eq('user_id', userId)
+      .maybeSingle(), 'findDriverDetailMinimal');
   }
 
   async findDriverWallet(userId) {
-    return this._cachedQuery(`driver:wallet:${userId}`, () =>
-      this.supabase
-        .from('driver_details')
-        .select('polygon_wallet_address')
-        .eq('user_id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('driver_details')
+      .select('polygon_wallet_address')
+      .eq('user_id', userId)
+      .maybeSingle(), 'findDriverWallet');
   }
 
   async findDriverDetailWithRating(userId) {
-    return this._cachedQuery(`driver:rating:${userId}`, () =>
-      this.supabase
-        .from('driver_details')
-        .select('rating, truck_id')
-        .eq('user_id', userId)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('driver_details')
+      .select('rating, truck_id')
+      .eq('user_id', userId)
+      .maybeSingle(), 'findDriverDetailWithRating');
   }
 
   // ===================================================================
@@ -482,23 +484,19 @@ export class OrderRepository {
   // ===================================================================
 
   async findTruckById(id, columns = 'id') {
-    return this._cachedQuery(`truck:${id}:${columns}`, () =>
-      this.supabase
-        .from('trucks')
-        .select(columns)
-        .eq('id', id)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('trucks')
+      .select(columns)
+      .eq('id', id)
+      .maybeSingle(), 'findTruckById');
   }
 
   async findTruckWithDetails(id) {
-    return this._cachedQuery(`truck:detail:${id}`, () =>
-      this.supabase
-        .from('trucks')
-        .select('id, name, number_plate')
-        .eq('id', id)
-        .maybeSingle()
-    );
+    return this._retryableQuery(() => this.supabase
+      .from('trucks')
+      .select('id, name, number_plate')
+      .eq('id', id)
+      .maybeSingle(), 'findTruckWithDetails');
   }
 
   async findTrucksByIds(ids) {
@@ -512,8 +510,8 @@ export class OrderRepository {
   // DELIVERY OTPS
   // ===================================================================
 
-  async findVerifiedDeliveryOtp(orderId) {
-    return this._retryableQuery(() => this.supabase
+  async findVerifiedDeliveryOtp(orderId, client) {
+    return this._retryableQuery(() => (client ?? this.supabase)
       .from('delivery_otps')
       .select('id')
       .eq('order_id', orderId)
@@ -532,31 +530,89 @@ export class OrderRepository {
       .update(updates)
       .eq('driver_id', driverId)
       .eq('order_display_id', orderDisplayId)
-      .eq('txn_type', 'credit'), 'updateWalletTransaction');
+      .eq('txn_type', 'credit')
+      .order('id', { ascending: false })
+      .limit(1), 'updateWalletTransaction');
   }
 
   // ===================================================================
   // ESCROW
   // ===================================================================
 
-  async updateEscrowBooking(orderId, bookingId, escrowStatus) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .update({
-        escrow_booking_id: bookingId,
-        escrow_status: escrowStatus,
-      })
-      .eq('id', orderId), 'updateEscrowBooking');
+  async updateEscrowBooking(orderId, bookingId, escrowStatus, extra = {}, filters) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .update({
+          escrow_booking_id: bookingId,
+          escrow_status: escrowStatus,
+          ...extra,
+        })
+        .eq('id', orderId);
+      if (filters) {
+        for (const f of filters) {
+          if (f.op === 'eq') {
+            query = query.eq(f.column, f.value);
+          } else if (f.op === 'is') {
+            query = query.is(f.column, f.value);
+          } else if (f.op === 'or') {
+            query = query.or(f.value);
+          }
+        }
+      }
+      return query.select('id, escrow_status, pending_bid_acceptance').single();
+    }, 'updateEscrowBooking');
   }
 
   async revertEscrowStatus(orderId) {
+    // Guard the revert to 'pending' so it can never clobber a concurrent
+    // escrow transition (e.g. the stale-order worker moving a funded order
+    // into 'refund_pending'). Only states this method legitimately reverts
+    // are 'funding'/'funded'.
     return this._retryableQuery(() => this.supabase
       .from('orders')
       .update({
         escrow_status: 'pending',
         escrow_booking_id: null,
       })
-      .eq('id', orderId), 'revertEscrowStatus');
+      .eq('id', orderId)
+      .in('escrow_status', ['funding', 'funded']), 'revertEscrowStatus');
+  }
+
+  // ===================================================================
+  // STALE ORDER CANCELLATION
+  // ===================================================================
+
+  async findStalePendingOrders(cutoff, limit) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'pending')
+      .lt('created_at', cutoff)
+      .or('escrow_status.is.null,escrow_status.neq.funding')
+      .limit(limit), 'findStalePendingOrders');
+  }
+
+  async cancelStaleOrder(orderId, cancellationReason, staleSince, client) {
+    const supabaseClient = client || this.supabase;
+    return this._retryableQuery(() => supabaseClient
+      .rpc('cancel_stale_order_tx', {
+        p_order_id: orderId,
+        p_cancellation_reason: cancellationReason,
+        p_stale_since: staleSince,
+      }), 'cancelStaleOrder');
+  }
+
+  async findStaleFundingOrders(cutoff, { offset = 0, limit = 1000 } = {}) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+      .eq('escrow_status', 'funding')
+      .not('pending_bid_acceptance', 'is', null)
+      .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')
+      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`)
+      .order('updated_at', { ascending: true })
+      .range(offset, offset + Math.max(1, limit) - 1), 'findStaleFundingOrders');
   }
 
   // ===================================================================
@@ -576,16 +632,45 @@ export class OrderRepository {
   async findPendingEscrowRefunds() {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count')
+      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_attempts, updated_at, cancellation_fee, escrow_amount_wei, total_amount')
       .in('escrow_status', ['refund_pending', 'refund_failed'])
       .limit(50), 'findPendingEscrowRefunds');
   }
 
-  async claimRefundReconciliation(orderId, instanceId) {
-    return this._retryableQuery(() => this.supabase
+  async claimRefundReconciliation(orderId, instanceId, client) {
+    const supabaseClient = client || this.supabase;
+    return this._retryableQuery(() => supabaseClient
       .rpc('claim_refund_reconciliation', {
         p_order_id: orderId,
         p_instance_id: instanceId,
       }), 'claimRefundReconciliation');
   }
+
+  // ===================================================================
+  // ESCROW RELEASE RECONCILIATION
+  // ===================================================================
+
+  /**
+   * Selects orders whose on-chain escrow release may have completed without
+   * the trip being finalized. Covers the exact failure window: a release that
+   * succeeded on-chain but whose `complete_trip_tx` never ran (or whose
+   * release evidence was never persisted), leaving the order at
+   * `status <> 'payment_released'`.
+   *
+   * Plain `funded` orders that are still awaiting delivery are included so the
+   * worker can consult the on-chain booking and heal the release if it did in
+   * fact land; orders still waiting are skipped without side effects. The
+   * attempt budget excludes orders already escalated to manual review.
+   */
+  async findPendingEscrowReleases(limit = 50) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id, order_display_id, status, escrow_status, escrow_disabled, escrow_booking_id, escrow_release_attempts, escrow_release_last_attempt_at, escrow_release_error, release_tx_hash, escrow_released_at')
+      .in('escrow_status', ['release_failed', 'released', 'funded'])
+      .neq('status', 'payment_released')
+      .or('escrow_release_attempts.lt.10,escrow_release_attempts.is.null')
+      .order('escrow_release_attempts', { ascending: false })
+      .limit(limit), 'findPendingEscrowReleases');
+  }
 }
+

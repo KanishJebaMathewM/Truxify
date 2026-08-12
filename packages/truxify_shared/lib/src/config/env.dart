@@ -44,8 +44,8 @@ class Env {
 
   // ── Backend API ────────────────────────────────────────────────────────────
   static const String apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:3000',  // Local Node.js backend
+    'TRUXIFY_API_BASE_URL',
+    defaultValue: 'http://localhost:5000', // Local Express API
   );
 
   static const String mlEngineUrl = String.fromEnvironment(
@@ -59,6 +59,16 @@ class Env {
     defaultValue: 'https://rpc-amoy.polygon.technology',  // Testnet by default
   );
 
+  // ── Crash Reporting ─────────────────────────────────────────────────────
+  static const String sentryDsn = String.fromEnvironment(
+    'SENTRY_DSN',
+    defaultValue: '',
+  );
+
+  /// Whether Sentry crash reporting should be enabled.
+  /// Disabled when DSN is empty or when running in dev mode without explicit opt-in.
+  static bool get isCrashReportingEnabled => sentryDsn.isNotEmpty;
+
   // ── Validation ────────────────────────────────────────────────────────────
   // Call this in main() to catch missing config early (fail fast, not silently)
   static void validate() {
@@ -71,7 +81,7 @@ class Env {
       errors.add('SUPABASE_ANON_KEY is not set');
     }
     if (apiBaseUrl.isEmpty) {
-      errors.add('API_BASE_URL is not set');
+      errors.add('TRUXIFY_API_BASE_URL is not set');
     }
 
     if (errors.isNotEmpty) {

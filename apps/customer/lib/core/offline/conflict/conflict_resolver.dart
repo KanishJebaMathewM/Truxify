@@ -1,6 +1,30 @@
 import '../models/trip_event.dart';
 
+class ConflictResolutionResult {
+  final List<TripEvent> resolved;
+  final List<String> supersededIds;
+
+  ConflictResolutionResult({
+    required this.resolved,
+    required this.supersededIds,
+  });
+}
+
 class ConflictResolver {
+  ConflictResolutionResult resolveWithDetails(List<TripEvent> events) {
+    final resolved = resolve(events);
+    final resolvedIds = resolved.map((e) => e.id).toSet();
+    final supersededIds = events
+        .map((e) => e.id)
+        .where((id) => !resolvedIds.contains(id))
+        .toList();
+
+    return ConflictResolutionResult(
+      resolved: resolved,
+      supersededIds: supersededIds,
+    );
+  }
+
   List<TripEvent> resolve(List<TripEvent> events) {
     final sorted = List<TripEvent>.of(events)
       ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
@@ -65,6 +89,17 @@ class ConflictResolver {
     return leftTime.compareTo(rightTime);
   }
 
+  static Iterable<Map<String, dynamic>> _attachmentRows(Object? value) sync* {
+    if (value is! List) return;
+    for (final item in value) {
+      if (item is Map<String, dynamic>) {
+        yield item;
+      } else if (item is Map) {
+        yield Map<String, dynamic>.from(item);
+      }
+    }
+  }
+
   static TripEvent _mergePodMetadata(TripEvent? existing, TripEvent incoming) {
     if (existing == null) {
       return incoming;
@@ -76,9 +111,9 @@ class ConflictResolver {
     if (incomingPayload['attachments'] is List && mergedPayload['attachments'] is List) {
       final merged = <Map<String, dynamic>>[];
       final seen = <String>{};
-      for (final item in <Map<String, dynamic>>[
-        ...List<Map<String, dynamic>>.from(mergedPayload['attachments']),
-        ...List<Map<String, dynamic>>.from(incomingPayload['attachments']),
+      for (final item in [
+        ..._attachmentRows(mergedPayload['attachments']),
+        ..._attachmentRows(incomingPayload['attachments']),
       ]) {
         final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
         if (!seen.contains(hash)) {
@@ -91,4 +126,19 @@ class ConflictResolver {
 
     return existing.copyWith(payload: mergedPayload, occurredAt: incoming.occurredAt);
   }
+}
+
+class ResolutionStrategy {
+  final String name;
+  final int priority;
+  const ResolutionStrategy(this.name, this.priority);
+
+  static const latestWins = ResolutionStrategy('latestWins', 1);
+  static const earliestWins = ResolutionStrategy('earliestWins', 2);
+  static const serverWins = ResolutionStrategy('serverWins', 3);
+  static const clientWins = ResolutionStrategy('clientWins', 4);
+
+  static ResolutionStrategy fromName(String n) => [latestWins, earliestWins, serverWins, clientWins].firstWhere((s) => s.name == n, orElse: () => latestWins);
+
+  static final List<ResolutionStrategy> values = [latestWins, earliestWins, serverWins, clientWins];
 }

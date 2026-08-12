@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
+import pg from 'pg';
 import * as admin from 'firebase-admin';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -27,6 +28,26 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export let supabase = null;
 export let supabaseAdmin = null;
 
+// Connection health helpers
+export function isConnected() {
+  return supabase !== null;
+}
+
+export async function reconnect() {
+  logger.warn('[db] Reconnecting Supabase clients...');
+  supabase = null;
+  supabaseAdmin = null;
+  // Re-initialize (simplified - full reconnect would re-parse env vars)
+  if (supabaseUrl && supabaseAnonKey) {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  if (supabaseUrl && supabaseServiceKey) {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  }
+}
+
+
+
 if (supabaseUrl && supabaseAnonKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -46,6 +67,31 @@ if (supabaseUrl && supabaseAnonKey) {
   );
 }
 
+/**
+ * Creates a per-request Supabase client authenticated with the given JWT.
+ * The resulting client carries the user's identity so that
+ * SECURITY DEFINER RPCs that call auth.uid() receive the correct user.
+ *
+ * @param {string} accessToken — a valid Supabase or Firebase access token
+ * @returns {import('@supabase/supabase-js').SupabaseClient}
+ */
+export function createUserClient(accessToken) {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Cannot create user client: SUPABASE_URL or SUPABASE_ANON_KEY is not configured.');
+  }
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
 if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey) {
   try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -58,6 +104,30 @@ if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey)
   } catch (error) {
     logger.error({ err: error }, 'Failed to initialize Supabase admin client');
   }
+}
+
+// ============================================================================
+// 1.5 DIRECT POSTGRESQL POOL (PgBouncer)
+// ============================================================================
+const databaseUrl = process.env.DATABASE_URL;
+export let pgPool = null;
+
+if (databaseUrl) {
+  try {
+    const { Pool } = pg;
+    pgPool = new Pool({
+      connectionString: databaseUrl,
+      // For PgBouncer in transaction mode, use a moderate pool size
+      max: 20, 
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+    logger.info('PostgreSQL Pool initialized successfully (PgBouncer port 6543).');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize PostgreSQL pool');
+  }
+} else {
+  logger.warn('DATABASE_URL not found in .env. Direct PostgreSQL pool disabled.');
 }
 
 // ============================================================================
@@ -94,6 +164,10 @@ export async function waitForMongoDb() {
         { timestamp: 1 },
         { expireAfterSeconds: 604800 }
       ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
+
+      mongoDb.collection('telemetry').createIndex(
+        { driver_id: 1, order_id: 1, timestamp: -1 }
+      ).catch(err => logger.error({ err }, 'Failed to create compound index on telemetry'));
 
       mongoDb.collection('telemetry').createIndex(
         { location: '2dsphere' }
@@ -178,7 +252,11 @@ if (serviceAccountRaw) {
   logger.warn('Firebase not configured. Skipping initialization.');
 }
 
+let _closeDbInProgress = false;
+
 export async function closeDbConnections() {
+  if (_closeDbInProgress) return;
+  _closeDbInProgress = true;
   if (supabase) {
     try {
       await supabase.removeAllChannels();
@@ -194,6 +272,15 @@ export async function closeDbConnections() {
       logger.info('[shutdown] Supabase Admin channels removed.');
     } catch (err) {
       logger.error({ err }, '[shutdown] Supabase Admin close error');
+    }
+  }
+
+  if (pgPool) {
+    try {
+      await pgPool.end();
+      logger.info('[shutdown] PostgreSQL pool closed.');
+    } catch (err) {
+      logger.error({ err }, '[shutdown] PostgreSQL pool close error');
     }
   }
 
@@ -241,9 +328,24 @@ export async function closeDbConnections() {
  * Logs warnings for missing optional vars, throws for missing required vars.
  */
 export function validateConfig() {
-  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'];
-  const recommended = ['REDIS_URL', 'MONGODB_URI', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'SUPABASE_SERVICE_ROLE_KEY'];
-  const missing = required.filter((key) => !process.env[key]);
+  // Required: core runtime dependencies. App cannot function without these.
+  const required = [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ];
+  // Recommended: optional services that enhance functionality.
+  const recommended = [
+    'REDIS_URL',
+    'MONGODB_URI',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'JWT_SECRET',
+    'SENTRY_DSN',
+  ];
+  const missing = required.filter((key) => {
+    const val = process.env[key];
+    return !val || val.trim().length === 0;
+  });
   const missingRecommended = recommended.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
@@ -256,7 +358,27 @@ export function validateConfig() {
     logger.warn(`Missing optional env vars (features disabled): ${missingRecommended.join(', ')}`);
   }
 
+  // Pricing rate-card validation
+  const pricingVars = [
+    'TRUXIFY_RATE_PER_TONNE_KM',
+    'TRUXIFY_FRAGILE_MULTIPLIER',
+    'TRUXIFY_STACKABLE_DISCOUNT',
+    'TRUXIFY_HANDLING_FEE',
+    'TRUXIFY_PLATFORM_FEE_PCT',
+    'TRUXIFY_FUEL_COST_PCT',
+    'TRUXIFY_TOLL_PER_KM',
+  ];
+  for (const key of pricingVars) {
+    const raw = process.env[key];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        logger.warn(`[pricing] ${key}=${raw} is invalid — will use default at runtime`);
+      }
+    }
+  }
+
   logger.info('Config validation passed');
 }
 
-// Resolves #2050: Handle SIGINT and SIGTERM for graceful DB shutdown
+// Signal handlers are registered in index.js only to ensure coordinated shutdown.

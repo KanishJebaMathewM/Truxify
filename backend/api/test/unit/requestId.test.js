@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requestIdMiddleware, requestLogger } from '../../src/middleware/requestId.js';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
+vi.mock('../../src/middleware/logger.js', () => {
+  const mLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  mLogger.child = vi.fn(() => mLogger);
+  return { default: mLogger };
+});
 
 function makeReq(overrides = {}) {
   return { requestId: undefined, originalUrl: '/api/test', method: 'GET', headers: {}, ...overrides };
@@ -13,6 +15,7 @@ function makeRes(statusCode = 200) {
   const listeners = {};
   return {
     statusCode,
+    locals: {},
     setHeader: vi.fn(),
     on: (event, cb) => { listeners[event] = cb; },
     emit: (event) => listeners[event]?.(),

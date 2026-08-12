@@ -1,3 +1,18 @@
+class AddressHelper {
+  static String shortDisplay(String addr) => addr.length > 30 ? '${addr.substring(0, 27)}...' : addr;
+  static String labelWithAddr(String label, String addr) => label.isNotEmpty ? '$label: ${shortDisplay(addr)}' : shortDisplay(addr);
+  static bool sameAddress(String a, String b) => a.trim().toLowerCase() == b.trim().toLowerCase();
+  static Map<String, dynamic> toJson(String label, double lat, double lng, String addr) => {'label': label, 'latitude': lat, 'longitude': lng, 'address': addr, 'created_at': DateTime.now().toIso8601String()};
+
+  static String formatPincode(String pincode) => pincode.replaceAll(RegExp(r'[^0-9]'), '');
+  static bool isValidPincode(String pincode) => RegExp(r'^\d{6}$').hasMatch(pincode);
+  static String cityState(String city, String state) => [city, state].where((s) => s.isNotEmpty).join(', ');
+  static String fullAddress(String addr, String city, String state, String pincode) {
+    final parts = [addr, city, state, pincode].where((s) => s.isNotEmpty);
+    return parts.join(', ');
+  }
+}
+
 class SavedAddress {
   final String id;
   final String userId;

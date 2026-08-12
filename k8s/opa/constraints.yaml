@@ -1,0 +1,44 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-labels
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Deployment", "Service", "Pod"]
+  parameters:
+    labels:
+      - key: app
+        allowedRegex: ^[a-zA-Z0-9-]+$
+      - key: environment
+        allowedRegex: ^(dev|staging|production)$
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sContainerLimits
+metadata:
+  name: container-limits
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    cpu:
+      max: "2"
+    memory:
+      max: "2Gi"
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sImageTags
+metadata:
+  name: image-tags
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+  parameters:
+    exemptImages:
+      - "truxify/*"
+    tagRegex: ^[0-9]+\.[0-9]+\.[0-9]+$

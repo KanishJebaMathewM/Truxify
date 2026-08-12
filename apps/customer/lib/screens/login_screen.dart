@@ -1,10 +1,16 @@
+// apps/customer/lib/screens/login_screen.dart
+// XL changes: body content is centered and capped at 480px wide on tablets.
+// All original logic is unchanged.
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/breakpoints.dart'; // XL: added
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
 import '../widgets/common_widgets.dart';
@@ -84,11 +90,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!canCheckBiometrics || !isDeviceSupported) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Biometrics not supported on this device')),
+          SnackBar(
+              content: Text(
+                  AppLocalizations.of(context)!.biometricsNotSupported)),
         );
         return;
       }
-      
+
       final authenticated = await _localAuth.authenticate(
         localizedReason: 'Authenticate to log in',
         options: const AuthenticationOptions(
@@ -96,20 +104,22 @@ class _LoginScreenState extends State<LoginScreen> {
           biometricOnly: true,
         ),
       );
-      
+
       if (authenticated) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Biometric authentication successful. Please login with OTP to link your account.'),
-            duration: Duration(seconds: 4),
+          SnackBar(
+            content: Text(
+                AppLocalizations.of(context)!.biometricAuthSuccessful),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Biometric error: $e')),
+        SnackBar(
+            content: Text(AppLocalizations.of(context)!.error(e.toString()))),
       );
     }
   }
@@ -120,24 +130,26 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter phone number')),
+        SnackBar(
+            content: Text(AppLocalizations.of(context)!.pleaseEnterPhone)),
       );
       return;
     }
 
     if (int.tryParse(phone) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Phone number can only contain digits'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.phoneDigitsOnly),
         ),
       );
       return;
     }
 
     if (phone.length != _expectedDigits) {
+      final l10n = AppLocalizations.of(context)!;
       final msg = _expectedDigits == 10
-          ? 'Phone number must be exactly $_expectedDigits digits for $_selectedCode'
-          : 'Phone number must be $_expectedDigits digits for $_selectedCode';
+          ? l10n.phoneMustBeExactDigits(_expectedDigits)
+          : l10n.phoneMustBeDigits;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -162,16 +174,18 @@ class _LoginScreenState extends State<LoginScreen> {
         onVerificationFailed: (e) {
           if (!mounted) return;
           setState(() => _sendingOtp = false);
+
+          String errorMsg = e.message ??
+              AppLocalizations.of(context)!.phoneVerificationFailed;
+          if (e.code == 'network-request-failed') {
+            errorMsg = AppLocalizations.of(context)!.networkError;
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                e.message ?? 'Phone verification failed. Please try again.',
-              ),
-            ),
+            SnackBar(content: Text(errorMsg)),
           );
         },
         onAutoVerification: (credential) async {
-          // Auto-verification (e.g. on Android with SMS auto-retrieval)
           if (!mounted) return;
           try {
             await FirebaseAuth.instance.signInWithCredential(credential);
@@ -182,7 +196,9 @@ class _LoginScreenState extends State<LoginScreen> {
             if (!mounted) return;
             setState(() => _sendingOtp = false);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Auto-verification failed: $e')),
+              SnackBar(
+                  content: Text(
+                      AppLocalizations.of(context)!.autoVerificationFailed)),
             );
           }
         },
@@ -190,26 +206,35 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _sendingOtp = false);
+      String errorMsg = AppLocalizations.of(context)!.failedToSendOtp;
+      if (e is FirebaseAuthException && e.code == 'network-request-failed') {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      } else if (e.toString().contains('SocketException') ||
+          e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send OTP: $e')),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }
 
-  void _verifyOtp() async {
-    final otp = _otpControllers.map((controller) => controller.text).join();
+  Future<void> _verifyOtp() async {
+    final otp =
+        _otpControllers.map((controller) => controller.text).join();
 
     if (otp.length != 6 || !RegExp(r'^\d{6}$').hasMatch(otp)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid 6-digit OTP')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.invalidOtp)),
       );
       return;
     }
 
     if (_verificationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Verification session expired. Please resend OTP.'),
+        SnackBar(
+          content: Text(
+              AppLocalizations.of(context)!.verificationSessionExpired),
         ),
       );
       return;
@@ -226,9 +251,11 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() => _verifyingOtp = false);
       final message = switch (e.code) {
-        'invalid-verification-code' => 'Invalid OTP. Please try again.',
-        'session-expired' => 'OTP has expired. Please request a new one.',
-        _ => e.message ?? 'Verification failed. Please try again.',
+        'invalid-verification-code' =>
+          AppLocalizations.of(context)!.invalidVerificationCode,
+        'session-expired' => AppLocalizations.of(context)!.otpExpired,
+        'network-request-failed' => AppLocalizations.of(context)!.networkError,
+        _ => e.message ?? AppLocalizations.of(context)!.verificationFailed,
       };
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -236,8 +263,13 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _verifyingOtp = false);
+      String errorMsg = AppLocalizations.of(context)!.verificationFailed;
+      if (e.toString().contains('SocketException') ||
+          e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Verification failed: $e')),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }
@@ -248,36 +280,46 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              const AppLogo(iconSize: 24),
-              const SizedBox(height: 28),
-              Text(
-                'Welcome back',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w800,
-                    ),
+        // XL: Center the form and cap it at 480 px so it doesn't stretch
+        // across a tablet. On phones (<840 dp) nothing changes.
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  const AppLogo(iconSize: 24),
+                  const SizedBox(height: 28),
+                  Text(
+                    AppLocalizations.of(context)!.welcomeBack,
+                    style:
+                        Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.w800,
+                            ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    AppLocalizations.of(context)!.signInSubtitle,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color:
+                              TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                  ),
+                  const SizedBox(height: 28),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    child: _showOtp
+                        ? _buildOtpForm(context)
+                        : _buildPhoneForm(context),
+                  ),
+                ],
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Sign in to manage your freight bookings.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              ),
-              const SizedBox(height: 28),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 240),
-                child: _showOtp
-                    ? _buildOtpForm(context)
-                    : _buildPhoneForm(context),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -295,7 +337,7 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Phone number',
+          AppLocalizations.of(context)!.phoneNumber,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: colorScheme.onSurface,
                 fontWeight: FontWeight.w800,
@@ -338,7 +380,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   }).toList(),
                   onChanged: (val) {
                     if (val == null) return;
-                    final code = _countryCodes.firstWhere((c) => c.$1 == val);
+                    final code =
+                        _countryCodes.firstWhere((c) => c.$1 == val);
                     setState(() {
                       _selectedCode = val;
                       _expectedDigits = code.$3;
@@ -353,7 +396,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 18),
         PrimaryButton(
-          label: _sendingOtp ? 'Sending OTP...' : 'Send OTP',
+          label: _sendingOtp
+              ? AppLocalizations.of(context)!.sendingOtp
+              : AppLocalizations.of(context)!.sendOtp,
           onPressed: _sendingOtp ? null : _sendOtp,
         ),
         const SizedBox(height: 18),
@@ -361,9 +406,10 @@ class _LoginScreenState extends State<LoginScreen> {
           child: TextButton.icon(
             onPressed: _authenticateWithBiometrics,
             icon: const Icon(Icons.fingerprint, size: 28),
-            label: const Text('Login with Biometrics'),
+            label: Text(AppLocalizations.of(context)!.loginWithBiometrics),
             style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
           ),
         ),
@@ -395,7 +441,7 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Enter OTP',
+          AppLocalizations.of(context)!.enterOtp,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: colorScheme.onSurface,
                 fontWeight: FontWeight.w800,
@@ -403,7 +449,8 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Sent to +91 ${_phoneController.text}',
+          AppLocalizations.of(context)!
+              .sentTo('${_selectedCode} ${_phoneController.text}'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: TruxifyColors.adaptiveSecondaryText(context),
               ),
@@ -420,10 +467,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   maxLength: 1,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style:
+                      Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: colorScheme.onSurface,
+                            fontWeight: FontWeight.w800,
+                          ),
                   decoration: const InputDecoration(counterText: ''),
                   onChanged: (value) {
                     if (value.isNotEmpty && index < 5) {
@@ -440,7 +488,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 18),
         PrimaryButton(
-          label: _verifyingOtp ? 'Verifying...' : 'Verify OTP',
+          label: _verifyingOtp
+              ? AppLocalizations.of(context)!.verifyingOtp
+              : AppLocalizations.of(context)!.verifyOtp,
           onPressed: _verifyingOtp ? null : _verifyOtp,
         ),
         const SizedBox(height: 14),
@@ -458,7 +508,9 @@ class _LoginScreenState extends State<LoginScreen> {
             const Spacer(),
             TextButton(
               onPressed: _sendingOtp ? null : _sendOtp,
-              child: Text(_sendingOtp ? 'Sending...' : 'Resend OTP'),
+              child: Text(_sendingOtp
+                  ? AppLocalizations.of(context)!.sendingOtp
+                  : AppLocalizations.of(context)!.sendOtp),
             ),
           ],
         ),

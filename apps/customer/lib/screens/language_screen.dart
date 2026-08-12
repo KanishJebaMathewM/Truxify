@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../controllers/app_controller.dart';
 
 class LanguageScreen extends StatefulWidget {
   const LanguageScreen({super.key});
@@ -18,10 +19,9 @@ class _LanguageScreenState extends State<LanguageScreen> {
   final List<Map<String, String>> _languages = [
     {'code': 'en', 'name': 'English', 'native': 'English'},
     {'code': 'hi', 'name': 'Hindi', 'native': 'हिंदी'},
-    {'code': 'gu', 'name': 'Gujarati', 'native': 'ગુજરાતી'},
-    {'code': 'mr', 'name': 'Marathi', 'native': 'मराठी'},
     {'code': 'ta', 'name': 'Tamil', 'native': 'தமிழ்'},
-    {'code': 'te', 'name': 'Telugu', 'native': 'తెలుగు'},
+    {'code': 'kn', 'name': 'Kannada', 'native': 'ಕನ್ನಡ'},
+    {'code': 'mr', 'name': 'Marathi', 'native': 'मराठी'},
   ];
 
   void _showLanguageChangedSnackBar() {
@@ -119,13 +119,9 @@ class _LanguageScreenState extends State<LanguageScreen> {
             PrimaryButton(
               label: 'Apply',
               onPressed: () async {
-                await _cacheManager.open();
-                await _cacheManager.cacheSettings({
-                  'language': {
-                    'code': _languages[_selectedLanguageIndex]['code'],
-                    'name': _languages[_selectedLanguageIndex]['name']
-                  },
-                });
+                final controller = TruxifyScope.of(context);
+                final selectedCode = _languages[_selectedLanguageIndex]['code'] ?? 'en';
+                await controller.setLocale(selectedCode);
                 if (!mounted) return;
                 _showLanguageChangedSnackBar();
                 Navigator.of(context).pop();

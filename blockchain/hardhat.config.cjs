@@ -1,6 +1,8 @@
 require("@nomicfoundation/hardhat-ethers");
-require("@nomicfoundation/hardhat-verify");
 require("@nomicfoundation/hardhat-chai-matchers");
+require("@nomicfoundation/hardhat-network-helpers");
+require("@nomicfoundation/hardhat-verify");
+require("@openzeppelin/hardhat-upgrades");
 
 const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";
 const DEPLOYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
@@ -38,6 +40,12 @@ module.exports = {
         enabled: true,
         runs: 200,
       },
+      viaIR: true,
+      // solc 0.8.24 defaults to the shanghai EVM, which has no MCOPY.
+      // OpenZeppelin Contracts 5.x (Bytes.sol) emits mcopy in assembly, so the
+      // whole tree fails to compile without this. Polygon PoS has supported
+      // the cancun opcodes since the Napoli upgrade.
+      evmVersion: "cancun",
     },
   },
   networks: {

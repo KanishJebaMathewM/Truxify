@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../core/config.dart';
 import 'package:latlong2/latlong.dart';
@@ -33,13 +34,14 @@ class RouteService {
       final out = <LatLng>[];
       for (final e in coordsList) {
         if (e is List && e.length >= 2) {
-          final lon = (e[0] as num).toDouble();
-          final lat = (e[1] as num).toDouble();
+          final lon = double.tryParse(e[0].toString()) ?? 0.0;
+          final lat = double.tryParse(e[1].toString()) ?? 0.0;
           out.add(LatLng(lat, lon));
         }
       }
       return out;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('RouteService error: $e');
       return [];
     }
   }

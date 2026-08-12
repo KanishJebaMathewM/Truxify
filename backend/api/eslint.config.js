@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
+  { ignores: ['coverage/**'] },
   js.configs.recommended,
   {
     languageOptions: {
@@ -19,6 +20,22 @@ export default [
       'no-useless-escape': 'off',
       'no-dupe-keys': 'off',
       'no-duplicate-imports': 'warn',
+    },
+  },
+  {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+        vi: 'writable',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        test: 'readonly',
+      }
     },
   },
 ];

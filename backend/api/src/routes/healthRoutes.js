@@ -1,8 +1,69 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     HealthResponse:
+ *       type: object
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [ok, degraded]
+ *         services:
+ *           type: object
+ *           properties:
+ *             supabase:
+ *               type: string
+ *               enum: [connected, failed, not_configured]
+ *             mongodb:
+ *               type: string
+ *               enum: [connected, failed, not_configured]
+ *             redis:
+ *               type: string
+ *               enum: [connected, failed, not_configured]
+ *             firebase:
+ *               type: string
+ *               enum: [configured, not_configured]
+ *             polygon:
+ *               type: string
+ *               enum: [configured, not_configured]
+ *         uptime:
+ *           type: number
+ *         memory:
+ *           type: object
+ *           properties:
+ *             rss:
+ *               type: number
+ *             heapTotal:
+ *               type: number
+ *             heapUsed:
+ *               type: number
+ *             external:
+ *               type: number
+ *     LivenessResponse:
+ *       type: object
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [ok]
+ *         uptime:
+ *           type: number
+ *     ReadinessResponse:
+ *       type: object
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [ready, not_ready]
+ *         services:
+ *           type: object
+ */
+
 import express from 'express';
-import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
+import { createDefaultAggregator } from '../core/health/index.js';
+import { captureDebugException } from '../middleware/sentry.js';
 
 const router = express.Router();
 
@@ -22,10 +83,14 @@ function withTimeout(promise) {
 }
 
 async function checkSupabase() {
-  if (!supabase) return 'not_configured';
+  // Probe through the service-role client: anon privileges on profiles are
+  // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
+  // report 42501 permission denied even when Supabase is reachable.
+  const client = supabaseAdmin || supabase;
+  if (!client) return 'not_configured';
   try {
     const { error } = await withTimeout(
-      supabase.from('profiles').select('id').limit(1)
+      client.from('profiles').select('id').limit(1)
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
@@ -61,8 +126,13 @@ function checkFirebase() {
 }
 
 async function checkEscrow() {
-  const result = await checkEscrowHealth();
-  return result.status;
+  try {
+    const result = await checkEscrowHealth();
+    return result?.status ?? 'unavailable';
+  } catch (err) {
+    logger.error('[health] Escrow health check failed:', err.message);
+    return 'unavailable';
+  }
 }
 
 function checkPolygon() {
@@ -73,7 +143,29 @@ const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
 // Optional services treat 'not_configured' as healthy — only actual failures are critical.
 const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
 
-// GET /api/health — full dependency check; returns 503 when a critical service fails
+/**
+ * @openapi
+ * /api/health:
+ *   get:
+ *     tags: [Health]
+ *     summary: Full system health check
+ *     description: Returns the status of all dependent services (Supabase, MongoDB, Redis, Firebase, Polygon). Returns 503 when a critical service fails.
+ *     security:
+ *       - {}
+ *     responses:
+ *       200:
+ *         description: All critical services healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthResponse'
+ *       503:
+ *         description: One or more critical services degraded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/HealthResponse'
+ */
 router.get('/', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus, escrowStatus] = await Promise.all([
     checkSupabase(),
@@ -109,12 +201,50 @@ router.get('/', healthLimiter, async (req, res) => {
   });
 });
 
-// GET /api/health/live — liveness probe; always 200 as long as the process is up
+/**
+ * @openapi
+ * /api/health/live:
+ *   get:
+ *     tags: [Health]
+ *     summary: Kubernetes liveness probe
+ *     description: Always returns 200 as long as the process is running. Does not check dependencies.
+ *     security:
+ *       - {}
+ *     responses:
+ *       200:
+ *         description: Process is alive
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LivenessResponse'
+ */
 router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// GET /api/health/ready — readiness probe for k8s
+/**
+ * @openapi
+ * /api/health/ready:
+ *   get:
+ *     tags: [Health]
+ *     summary: Kubernetes readiness probe
+ *     description: Returns 200 when all critical services (Supabase, MongoDB) are reachable. Returns 503 if any critical dependency is down.
+ *     security:
+ *       - {}
+ *     responses:
+ *       200:
+ *         description: All critical services ready
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessResponse'
+ *       503:
+ *         description: One or more critical services not ready
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ReadinessResponse'
+ */
 router.get('/ready', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
     checkSupabase(),
@@ -137,6 +267,71 @@ router.get('/ready', healthLimiter, async (req, res) => {
   }
 
   return res.status(200).json({ status: 'ready', services });
+});
+
+// ============================================================================
+// Centralized Health Aggregation Endpoint
+// ============================================================================
+
+const aggregator = createDefaultAggregator();
+
+/**
+ * @openapi
+ * /api/health/full:
+ *   get:
+ *     tags: [Health]
+ *     summary: Centralized health aggregation for all distributed components
+ *     description: >
+ *       Returns a unified health response covering all major backend services
+ *       including databases, message queues, ML engine, GraphQL gateway,
+ *       WebSocket server, blockchain, and background workers.
+ *     security:
+ *       - {}
+ *     responses:
+ *       200:
+ *         description: All critical services healthy
+ *       503:
+ *         description: One or more critical services degraded
+ */
+router.get('/full', healthLimiter, async (req, res) => {
+  try {
+    const result = await aggregator.aggregate();
+    // Strip per-service metadata (broker hostnames, ports, pool counts, ML
+    // engine URL, chain ids) so the public surface exposes only status.
+    for (const service of Object.values(result.services || {})) {
+      delete service.metadata;
+    }
+    // 200 = system operational (healthy or degraded with non-critical failures)
+    // 503 = system not operational (critical services down)
+    const httpStatus = result.status === 'unhealthy' ? 503 : 200;
+    return res.status(httpStatus).json(result);
+  } catch (err) {
+    logger.error(
+      { event: 'HEALTH_AGGREGATION_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      '[health] Aggregated health check failed',
+    );
+    return res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: 'health aggregation failed',
+    });
+  }
+});
+
+router.get('/sentry-debug', healthLimiter, (req, res) => {
+  // Debug-only route: fail-closed unless explicitly enabled outside production.
+  if (process.env.SENTRY_DEBUG_ENABLED !== 'true' || process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const err = new Error('Sentry Test Error from Node.js Backend');
+  err.name = 'SentryDebugTestError';
+  const eventId = captureDebugException(err);
+
+  if (eventId) {
+    return res.status(200).json({ sent: true, eventId });
+  }
+  return res.status(503).json({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
 });
 
 export default router;

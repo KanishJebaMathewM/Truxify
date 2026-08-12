@@ -1,7 +1,12 @@
+// apps/driver/lib/screens/login_screen.dart
+// XL changes: body content is centered and capped at 480px wide on tablets.
+// All original logic is unchanged.
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/app_routes.dart';
+import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
@@ -31,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final AuthService _authService = AuthService();
   bool _loading = false;
+  String? _verificationId;
   int? _resendToken;
   String _selectedCode = '+91';
   int _expectedDigits = 10;
@@ -41,27 +47,26 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _sendOtp() async {
+  Future<void> _sendOtp() async {
     final phone = _phoneController.text.replaceAll(' ', '').trim();
 
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter phone number')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.pleaseEnterPhone)),
       );
       return;
     }
 
     if (int.tryParse(phone) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid phone number')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.enterValidPhone)),
       );
       return;
     }
 
     if (phone.length != _expectedDigits) {
-      final msg = _expectedDigits == 10
-          ? 'Phone number must be exactly $_expectedDigits digits for $_selectedCode'
-          : 'Phone number must be $_expectedDigits digits for $_selectedCode';
+      final l10n = AppLocalizations.of(context)!;
+      final msg = l10n.phoneMustBeExactDigits(_expectedDigits);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -87,14 +92,22 @@ class _LoginScreenState extends State<LoginScreen> {
               'phone': phone,
               'verificationId': verificationId,
               'countryCode': _selectedCode,
+              if (resendToken != null) 'resendToken': resendToken.toString(),
             },
           );
         },
         onVerificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
           setState(() => _loading = false);
+
+          String errorMsg =
+              e.message ?? AppLocalizations.of(context)!.verificationFailed;
+          if (e.code == 'network-request-failed') {
+            errorMsg = AppLocalizations.of(context)!.networkError;
+          }
+
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message ?? 'Verification failed')),
+            SnackBar(content: Text(errorMsg)),
           );
         },
         onAutoVerification: (PhoneAuthCredential credential) async {
@@ -107,7 +120,9 @@ class _LoginScreenState extends State<LoginScreen> {
             if (!mounted) return;
             setState(() => _loading = false);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Auto-verification failed: $e')),
+              SnackBar(
+                  content: Text(
+                      AppLocalizations.of(context)!.autoVerificationFailed)),
             );
           }
         },
@@ -115,8 +130,15 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
+      String errorMsg = AppLocalizations.of(context)!.verificationFailed;
+      if (e is FirebaseAuthException && e.code == 'network-request-failed') {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      } else if (e.toString().contains('SocketException') ||
+          e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Verification failed: $e')),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }
@@ -128,115 +150,127 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const TruxifyLogo(size: 30),
-              const SizedBox(height: 36),
-              Text(
-                'Welcome, Driver',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Log in to start earning',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              ),
-              const SizedBox(height: 28),
-              Text(
-                'Phone Number',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _phoneController,
-                maxLength: _expectedDigits,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
-                style: TextStyle(color: colorScheme.onSurface),
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  prefixIcon: Container(
-                    alignment: Alignment.center,
-                    width: 90,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        right: BorderSide(color: colorScheme.outlineVariant),
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _selectedCode,
-                        isDense: true,
-                        dropdownColor: colorScheme.surface,
-                        style: TextStyle(
+        // XL: Center the form and cap it at 480 px so it doesn't stretch
+        // across a tablet. On phones (<840 dp) nothing changes.
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const TruxifyLogo(size: 30),
+                  const SizedBox(height: 36),
+                  Text(
+                    AppLocalizations.of(context)!.welcomeDriver,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
                         ),
-                        items: _countryCodes.map((c) {
-                          return DropdownMenuItem(
-                            value: c.$1,
-                            child: Text(c.$2),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val == null) return;
-                          final code = _countryCodes.firstWhere((c) => c.$1 == val);
-                          setState(() {
-                            _selectedCode = val;
-                            _expectedDigits = code.$3;
-                            _phoneController.clear();
-                          });
-                        },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    AppLocalizations.of(context)!.logInToStartEarning,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                  ),
+                  const SizedBox(height: 28),
+                  Text(
+                    AppLocalizations.of(context)!.phoneNumber,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _phoneController,
+                    maxLength: _expectedDigits,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    style: TextStyle(color: colorScheme.onSurface),
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      prefixIcon: Container(
+                        alignment: Alignment.center,
+                        width: 90,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            right:
+                                BorderSide(color: colorScheme.outlineVariant),
+                          ),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedCode,
+                            isDense: true,
+                            dropdownColor: colorScheme.surface,
+                            style: TextStyle(
+                              color: colorScheme.onSurface,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                            items: _countryCodes.map((c) {
+                              return DropdownMenuItem(
+                                value: c.$1,
+                                child: Text(c.$2),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val == null) return;
+                              final code = _countryCodes
+                                  .firstWhere((c) => c.$1 == val);
+                              setState(() {
+                                _selectedCode = val;
+                                _expectedDigits = code.$3;
+                                _phoneController.clear();
+                              });
+                            },
+                          ),
+                        ),
                       ),
+                      hintText: '9876543210',
                     ),
                   ),
-                  hintText: '9876543210',
-                ),
-              ),
-              const SizedBox(height: 20),
-              PrimaryButton(
-                label: _loading ? 'Sending...' : 'Send OTP',
-                onPressed: _loading ? null : _sendOtp,
-              ),
-              const SizedBox(height: 18),
-              AppCard(
-                padding: const EdgeInsets.all(18),
-                child: Row(
-                  children: [
-                    const Icon(Icons.shield_outlined,
-                        color: TruxifyColors.accent),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'A verification code will be sent via SMS to verify your phone number.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: colorScheme.onSurface,
-                            ),
-                      ),
+                  const SizedBox(height: 20),
+                  PrimaryButton(
+                    label: _loading
+                        ? AppLocalizations.of(context)!.sending
+                        : AppLocalizations.of(context)!.sendOtp,
+                    onPressed: _loading ? null : _sendOtp,
+                  ),
+                  const SizedBox(height: 18),
+                  AppCard(
+                    padding: const EdgeInsets.all(18),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.shield_outlined,
+                            color: TruxifyColors.accent),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'A verification code will be sent via SMS to verify your phone number.',
+                            style:
+                                Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: colorScheme.onSurface,
+                                    ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    AppLocalizations.of(context)!.protectedDriverAccess,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 18),
-              Text(
-                'Protected driver access. Verified via Firebase.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

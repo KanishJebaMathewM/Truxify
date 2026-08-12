@@ -167,7 +167,7 @@ void main() {
       service.dispose();
     });
 
-    test('fetchMonthlyEarnings returns filtered earnings for current month', () async {
+    test('fetchMonthlyEarnings requests only the selected month via the API', () async {
       final mockResponse = [
         {'day_date': '2026-06-01', 'amount': 2000, 'trip_count': 1, 'hours_driven': 2.5},
         {'day_date': '2026-06-15', 'amount': 4500, 'trip_count': 2, 'hours_driven': 5.0},
@@ -176,6 +176,8 @@ void main() {
 
       final httpClient = MockHttpClient((request) async {
         expect(request.url.path, equals('/api/driver/earnings/summary'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-07-01'));
         return http.Response(jsonEncode(mockResponse), 200);
       });
 
@@ -194,23 +196,22 @@ void main() {
       service.dispose();
     });
 
-    test('fetchMonthlyEarnings falls back to database for dates > 365 days ago', () async {
+    test('fetchMonthlyEarnings uses the API for historical months older than 365 days', () async {
       bool databaseCalled = false;
       final supabaseClient = FakeSupabaseClient(
         auth: mockAuth,
         onFrom: (relation) {
-          expect(relation, equals('earnings_daily'));
           databaseCalled = true;
-        },
-        queryResult: (relation) {
-          return Future.value([
-            {'day_date': '2020-01-15', 'amount': 3000, 'trip_count': 2, 'hours_driven': 4.0}
-          ]);
         },
       );
 
       final httpClient = MockHttpClient((request) async {
-        fail('HTTP client should not be called for historical months older than 365 days');
+        expect(request.url.path, equals('/api/driver/earnings/summary'));
+        expect(request.url.queryParameters['start_date'], equals('2020-01-01'));
+        expect(request.url.queryParameters['end_date'], equals('2020-02-01'));
+        return http.Response(jsonEncode([
+          {'day_date': '2020-01-15', 'amount': 3000, 'trip_count': 2, 'hours_driven': 4.0}
+        ]), 200);
       });
 
       final service = DriverEarningsService(
@@ -218,9 +219,10 @@ void main() {
         httpClient: httpClient,
       );
 
-      // Querying January 2020 (way older than 365 days)
+      // Querying January 2020 (way older than 365 days): the API is still the
+      // single source, and the direct database path is never used.
       final result = await service.fetchMonthlyEarnings(month: DateTime(2020, 1));
-      expect(databaseCalled, isTrue);
+      expect(databaseCalled, isFalse);
       expect(result.length, equals(1));
       expect(result[0]['amount'], equals(3000));
       
@@ -248,6 +250,133 @@ void main() {
       expect(result.length, equals(1));
       expect(result[0]['id'], equals('trip-1'));
       
+      service.dispose();
+    });
+
+    test('fetchStatement returns parsed JSON for format=json', () async {
+      final mockStatement = {
+        'driver_name': 'Test Driver',
+        'driver_phone': '+911234567890',
+        'start_date': '2026-06-01',
+        'end_date': '2026-06-30',
+        'total_trips': 10,
+        'total_earnings': 5000000,
+        'platform_fees': 500000,
+        'net_earnings': 4500000,
+        'trips': [
+          {
+            'trip_id': 'trip-1',
+            'display_id': 'TRP-001',
+            'trip_date': '2026-06-15',
+            'route': 'Delhi → Mumbai',
+            'customer_name': 'Acme Corp',
+            'earnings': 500000,
+          }
+        ],
+      };
+
+      final httpClient = MockHttpClient((request) async {
+        expect(request.url.path, equals('/api/profile/driver/statement'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-06-30'));
+        expect(request.url.queryParameters['format'], equals('json'));
+        return http.Response(jsonEncode(mockStatement), 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      final result = await service.fetchStatement(
+        startDate: DateTime(2026, 6, 1),
+        endDate: DateTime(2026, 6, 30),
+        format: 'json',
+      );
+
+      expect(result, isA<Map<String, dynamic>>());
+      expect((result as Map<String, dynamic>)['driver_name'], equals('Test Driver'));
+
+      service.dispose();
+    });
+
+    test('fetchStatement returns raw CSV string for format=csv', () async {
+      final csvContent = 'date,route,earnings\n2026-06-15,Delhi-Mumbai,5000';
+
+      final httpClient = MockHttpClient((request) async {
+        expect(request.url.path, equals('/api/profile/driver/statement'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-06-30'));
+        expect(request.url.queryParameters['format'], equals('csv'));
+        return http.Response(csvContent, 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      final result = await service.fetchStatement(
+        startDate: DateTime(2026, 6, 1),
+        endDate: DateTime(2026, 6, 30),
+        format: 'csv',
+      );
+
+      expect(result, isA<String>());
+      expect(result as String, contains('date,route,earnings'));
+
+      service.dispose();
+    });
+
+    test('fetchStatement throws exception on API error', () async {
+      final httpClient = MockHttpClient((request) async {
+        return http.Response(jsonEncode({'error': 'Unauthorized'}), 401);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      expect(
+        () => service.fetchStatement(
+          startDate: DateTime(2026, 6, 1),
+          endDate: DateTime(2026, 6, 30),
+        ),
+        throwsA(isA<Exception>()),
+      );
+
+      service.dispose();
+    });
+
+    test('fetchStatement queries with correct endpoint and query parameters', () async {
+      Uri? capturedUri;
+
+      final httpClient = MockHttpClient((request) async {
+        capturedUri = request.url;
+        return http.Response(jsonEncode({'driver_name': 'Test'}), 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      await service.fetchStatement(
+        startDate: DateTime(2026, 7, 1),
+        endDate: DateTime(2026, 7, 15),
+        format: 'json',
+      );
+
+      expect(capturedUri!.path, equals('/api/profile/driver/statement'));
+      expect(capturedUri!.queryParameters['start_date'], equals('2026-07-01'));
+      expect(capturedUri!.queryParameters['end_date'], equals('2026-07-15'));
+      expect(capturedUri!.queryParameters['format'], equals('json'));
+
       service.dispose();
     });
 

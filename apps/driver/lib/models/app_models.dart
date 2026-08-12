@@ -120,6 +120,15 @@ class LoadOffer {
     this.bestProfit = false,
     this.routeSubtitle = '',
     this.id = '',
+    this.originLat,
+    this.originLng,
+    this.destinationLat,
+    this.destinationLng,
+    this.weightKg,
+    this.lengthM,
+    this.widthM,
+    this.heightM,
+    this.paymentInr,
   });
 
   final String id;
@@ -153,6 +162,28 @@ class LoadOffer {
   final String extraEarnings;
   final String spaceAvailable;
   final String updatedTotalEarnings;
+
+  /// Raw coordinate and cargo data for ML recommendation payloads.
+  /// These are nullable for backward compatibility with mock data
+  /// and older API responses.
+  final double? originLat;
+  final double? originLng;
+  final double? destinationLat;
+  final double? destinationLng;
+  final double? weightKg;
+  final double? lengthM;
+  final double? widthM;
+  final double? heightM;
+  final double? paymentInr;
+
+  /// Whether this load has sufficient raw data for deadhead recommendations.
+  bool get hasDeadheadData =>
+      originLat != null &&
+      originLng != null &&
+      destinationLat != null &&
+      destinationLng != null &&
+      weightKg != null &&
+      paymentInr != null;
 }
 
 class DemandRoute {
@@ -260,6 +291,9 @@ class Trip {
     this.endTime = '',
     this.paymentBreakdown,
     this.tripItems = const [],
+    this.escrowStatus,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String route;
@@ -270,11 +304,15 @@ class Trip {
   final String earnings;
   final TripStatusType status;
   final String tripId;
+  String get id => tripId;
   final String hash;
   final String duration;
   final String endTime;
   final PaymentBreakdown? paymentBreakdown;
   final List<TripItem> tripItems;
+  final String? escrowStatus;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class TripItem {
@@ -284,6 +322,9 @@ class TripItem {
     required this.destination,
     required this.earnings,
     required this.delivered,
+    required this.isFragile = false,
+    required this.isStackable = true,
+    this.specialRequirements,
   });
 
   final String customerName;
@@ -291,6 +332,9 @@ class TripItem {
   final String destination;
   final String earnings;
   final bool delivered;
+  final bool isFragile;
+  final bool isStackable;
+  final String? specialRequirements;
 }
 
 class PaymentBreakdown {

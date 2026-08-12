@@ -1,24 +1,34 @@
 import 'dart:async';
 import 'dart:convert';
+import '../core/api_client.dart';
 import '../services/order_service.dart';
+import '../services/tracking_service.dart';
 import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/offline/websocket/resilient_websocket.dart';
 import '../theme/app_theme.dart';
 import '../constants/supabase_config.dart';
+import '../services/supabase_service.dart';
 import '../widgets/common_widgets.dart';
-import '../widgets/timeline_connector.dart';
-import '../widgets/timeline_milestone.dart';
-
 class LiveTrackingScreen extends StatefulWidget {
-  const LiveTrackingScreen({super.key, required this.orderId});
-
   final String orderId;
+  final OrderService? orderService;
+  final TrackingService? trackingService;
+  final ResilientWebSocket? trackingWebSocket;
+
+  const LiveTrackingScreen({
+    super.key,
+    required this.orderId,
+    this.orderService,
+    this.trackingService,
+    this.trackingWebSocket,
+  });
 
   @override
   State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
@@ -28,10 +38,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _movementController;
   late final OrderService _orderService;
+  late final TrackingService _trackingService;
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
-  List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
+  List<LatLng> _routePoints = const [];
 
   static const String _loadingDriverText = 'Loading driver...';
   static const String _loadingTruckText = 'Loading truck...';
@@ -47,6 +58,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   ResilientWebSocket? _trackingWebSocket;
   StreamSubscription? _trackingSubscription;
   RealtimeChannel? _supabaseRealtimeChannel;
+  final MapController _mapController = MapController();
 
   // ── Route polyline state ──────────────────────────────────────────────
   Timer? _routeRefreshTimer;
@@ -55,11 +67,49 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   bool _isRouteLoading = false;
   static const Duration _routeRefreshInterval = Duration(seconds: 30);
 
+  // ── WebSocket connection state ────────────────────────────────────
+  bool _wsConnected = false;
+  String? _mlEta;
+
+  String _formatEta(double etaMinutes) {
+    if (etaMinutes <= 0) return '0 mins';
+    final hrs = etaMinutes ~/ 60;
+    final mins = (etaMinutes % 60).round();
+    if (hrs > 0) {
+      if (mins > 0) {
+        return '$hrs hrs $mins mins';
+      } else {
+        return '$hrs hrs';
+      }
+    } else {
+      return '$mins mins';
+    }
+  }
+
+  Future<void> _fetchEtaFromMl(LatLng position) async {
+    try {
+      final res = await _orderService.fetchMlEta(
+        tripId: widget.orderId,
+        lat: position.latitude,
+        lng: position.longitude,
+      );
+      final etaMinutes = (res['eta_minutes'] as num?)?.toDouble();
+      if (etaMinutes != null && mounted) {
+        setState(() {
+          _mlEta = _formatEta(etaMinutes);
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch ML ETA: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
 
-    _orderService = OrderService();
+    _orderService = widget.orderService ?? OrderService();
+    _trackingService = widget.trackingService ?? TrackingService();
     _movementController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -72,8 +122,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       _routeRefreshInterval,
       (_) => _loadRoute(),
     );
-    if (SupabaseConfig.isConfigured) {
-      _subscribeToOrderUpdates();
+    if (SupabaseConfig.isConfigured || widget.trackingWebSocket != null) {
+      if (SupabaseConfig.isConfigured || SupabaseService.mockClient != null) {
+        _subscribeToOrderUpdates();
+      }
       _subscribeToTracking();
     } else {
       debugPrint('[LiveTracking] Supabase not configured — real-time updates disabled');
@@ -84,21 +136,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   void dispose() {
     _routeRefreshTimer?.cancel();
     _movementController.dispose();
-    if (SupabaseConfig.isConfigured) {
+    _mapController.dispose();
+    if (SupabaseConfig.isConfigured || SupabaseService.mockClient != null) {
       if (_ordersChannel != null) {
-        Supabase.instance.client.removeChannel(_ordersChannel!);
+        SupabaseService.client.removeChannel(_ordersChannel!);
       }
       if (_supabaseRealtimeChannel != null) {
-        Supabase.instance.client.removeChannel(_supabaseRealtimeChannel!);
+        SupabaseService.client.removeChannel(_supabaseRealtimeChannel!);
       }
     }
     _trackingSubscription?.cancel();
-    _trackingWebSocket?.close();
+    unawaited(_trackingWebSocket?.close());
     super.dispose();
   }
 
   void _subscribeToTracking() {
-    final apiBaseUrl = OrderService.defaultApiBaseUrl;
+    final apiBaseUrl = ApiClient.defaultBaseUrl;
     final baseUri = Uri.parse(apiBaseUrl);
     final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
     
@@ -125,23 +178,35 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       initialWsUrl,
       urlFactory: buildUrl,
       onConnect: () {
-        debugPrint('WebSocket connected, subscribing to order updates...');
+        debugPrint('WebSocket connected, authenticating...');
+        if (mounted) setState(() => _wsConnected = true);
+        final session = SupabaseService.client.auth.currentSession;
+        final token = session?.accessToken ?? '';
         _trackingWebSocket?.send({
-          'event': 'subscribe_tracking',
+          'event': 'auth',
           'data': {
-            'order_display_id': widget.orderId,
+            'token': token,
           },
         });
       },
     );
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
-      debugPrint('Tracking WebSocket message received: $message');
+      debugPrint('Tracking WebSocket message received');
+      if (message is! String) return;
       try {
         if (message == 'pong') return;
-        final payload = jsonDecode(message as String) as Map<String, dynamic>;
+        final payload = jsonDecode(message) as Map<String, dynamic>;
 
-        if (payload['event'] == 'location_update') {
+        if (payload['status'] == 'authenticated') {
+          // First-frame auth succeeded; now register for order updates.
+          _trackingWebSocket?.send({
+            'event': 'subscribe_tracking',
+            'data': {
+              'order_display_id': widget.orderId,
+            },
+          });
+        } else if (payload['event'] == 'location_update') {
           final data = payload['data'] as Map<String, dynamic>?;
           if (data != null) {
             final lat = (data['latitude'] as num?)?.toDouble();
@@ -151,10 +216,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
               _updateTruckPosition(LatLng(lat, lng));
             }
           }
+        } else if (payload['event'] == 'milestone_update') {
+          // Refresh timeline whenever the driver hits a new milestone.
+          debugPrint('[LiveTracking] Milestone update received');
+          _loadTimeline();
+        } else if (payload['event'] == null && payload['error'] != null) {
+          debugPrint('[LiveTracking] WS server error: ${payload['error']}');
+          if (mounted) setState(() => _wsConnected = false);
         }
       } catch (e) {
         debugPrint('Error parsing tracking WebSocket message: $e');
       }
+    }, onError: (_) {
+      if (mounted) setState(() => _wsConnected = false);
+    }, onDone: () {
+      if (mounted) setState(() => _wsConnected = false);
     });
 
     _trackingWebSocket!.connect();
@@ -162,10 +238,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   void _updateTruckPosition(LatLng newPosition) {
     if (!mounted) return;
+    _fetchEtaFromMl(newPosition);
 
     if (_currentPosition == null) {
       setState(() {
         _currentPosition = newPosition;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          _mapController.move(newPosition, 13.0);
+        } catch (e) {
+          debugPrint('Error moving map: $e');
+        }
       });
       return;
     }
@@ -185,13 +269,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       _currentPosition = newPosition;
     });
     _movementController.forward(from: 0.0);
+
+    try {
+      final zoom = _mapController.camera.zoom;
+      _mapController.move(newPosition, zoom);
+    } catch (_) {
+      try {
+        _mapController.move(newPosition, 13.0);
+      } catch (e) {
+        debugPrint('Error moving map: $e');
+      }
+    }
   }
 
   Future<void> _loadOrder() async {
     try {
       final order = await _orderService.fetchOrderById(widget.orderId);
-
-      debugPrint('ORDER DATA = $order');
 
       if (!mounted) return;
 
@@ -274,13 +367,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
     debugPrint('Subscribing to Supabase Realtime channel driver-location:$orderUuid');
 
-    _supabaseRealtimeChannel = Supabase.instance.client
+    _supabaseRealtimeChannel = SupabaseService.client
         .channel('driver-location:$orderUuid');
 
     _supabaseRealtimeChannel!.onBroadcast(
       event: 'location',
       callback: (payload) {
-        debugPrint('Received Supabase Realtime location update: $payload');
+        debugPrint('Received Supabase Realtime location update');
         final lat = (payload['lat'] as num?)?.toDouble();
         final lng = (payload['lng'] as num?)?.toDouble();
         if (lat != null && lng != null && mounted) {
@@ -601,8 +694,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               );
 
                               final pricing = resp['pricing'];
-                              final total = pricing != null ? pricing['total_amount'] : null;
-                              setModalState(() => pricingText = total != null ? 'New estimated price: ₹${total.toString()}' : 'Price updated');
+                              final total = pricing != null ? pricing['total_amount'] as num? : null;
+                              setModalState(() => pricingText = total != null ? 'New estimated price: ₹${(total / 100).toStringAsFixed(0)}' : 'Price updated');
 
                               // refresh outer order state
                               await _loadOrder();
@@ -633,7 +726,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Future<void> _showCancel() async {
     bool isLoading = false;
     final rawFee = _order?['cancellation_fee'];
-    final feeInRupees = rawFee != null ? (rawFee as num) / 100 : null;
+    final feeInRupees = rawFee is num ? rawFee / 100 : null;
     String? feeText = feeInRupees != null ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}' : null;
 
     await showModalBottomSheet<void>(
@@ -667,7 +760,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           try {
                             final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
                             final rawFee = resp['cancellation_fee'];
-                            final feeInRupees = rawFee != null ? (rawFee as num) / 100 : 0;
+                            final feeInRupees = rawFee is num ? rawFee / 100 : 0;
                             await _loadOrder();
                             if (!context.mounted) return;
                             Navigator.of(context).pop();
@@ -685,6 +778,36 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         });
       },
     );
+  }
+
+  Future<void> _shareTracking() async {
+    if (_order == null) return;
+
+    try {
+      final result = await _trackingService.shareTrackingLink(
+        orderDisplayId: widget.orderId,
+      );
+
+      final trackingUrl = result['trackingUrl'] as String?;
+      if (trackingUrl == null || trackingUrl.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to generate tracking link')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      await Share.share(
+        'Track your shipment on Truxify:\n$trackingUrl',
+        subject: 'Shipment Tracking - ${widget.orderId}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share: $e')),
+      );
+    }
   }
 
   static const LatLng _fallbackPickupPoint = LatLng(21.1702, 72.8311);
@@ -705,7 +828,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   void _subscribeToOrderUpdates() {
-    _ordersChannel = Supabase.instance.client
+    _ordersChannel = SupabaseService.client
         .channel('order_updates_${widget.orderId}')
         .onPostgresChanges(
           event: PostgresChangeEvent.update,
@@ -717,7 +840,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             value: widget.orderId,
           ),
           callback: (payload) {
-            debugPrint('Realtime order update: ${payload.newRecord}');
+            debugPrint('Realtime order update received');
             _loadOrder();
             _loadTimeline();
           },
@@ -764,53 +887,114 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     ];
   }
 
-  List<Widget> _buildTimelineWidgets() {
-    if (_timeline.isEmpty) {
-      return const [
-        TimelineMilestone(label: 'Order Placed', done: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'In Transit', done: true, current: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'Delivered', done: false),
-      ];
+  Widget _buildVerticalTimeline() {
+    final timelineData = _timeline.isNotEmpty
+        ? _timeline
+        : [
+            {'milestone': 'Booking Confirmed', 'completed': true},
+            {'milestone': 'Driver Assigned', 'completed': true},
+            {'milestone': 'Pickup Completed', 'completed': _currentPosition != null},
+            {'milestone': 'In Transit', 'completed': false},
+            {'milestone': 'Near Destination', 'completed': false},
+            {'milestone': 'Delivered', 'completed': false},
+          ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(timelineData.length, (i) {
+        final step = timelineData[i];
+        final completed = step['completed'] == true;
+        final isCurrent = completed &&
+            (i == timelineData.length - 1 || timelineData[i + 1]['completed'] != true);
+        final isLast = i == timelineData.length - 1;
+        
+        final color = isCurrent ? TruxifyColors.accent : completed ? TruxifyColors.accentDark : TruxifyColors.border;
+        final timestamp = step['timestamp']?.toString();
+
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Column(
+                children: [
+                  Container(
+                    width: 16,
+                    height: 16,
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      boxShadow: isCurrent
+                          ? [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
+                          : const [],
+                    ),
+                  ),
+                  if (!isLast)
+                    Expanded(
+                      child: Container(
+                        width: 2,
+                        color: completed ? TruxifyColors.accentDark : TruxifyColors.border,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        step['milestone']?.toString() ?? '',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+                          color: isCurrent || completed ? null : TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                      if (timestamp != null && timestamp.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatTimestamp(timestamp),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                      ]
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  String _formatTimestamp(String ts) {
+    try {
+      final dt = DateTime.parse(ts).toLocal();
+      // Returns a nicely formatted manual timestamp: "05/08/2026 14:30"
+      return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return ts;
     }
-
-    final widgets = <Widget>[];
-
-    for (int i = 0; i < _timeline.length; i++) {
-      final step = _timeline[i];
-      final completed = step['completed'] == true;
-
-      final isCurrent = completed &&
-          (i == _timeline.length - 1 || _timeline[i + 1]['completed'] != true);
-
-      widgets.add(
-        TimelineMilestone(
-          label: step['milestone']?.toString() ?? '',
-          done: completed,
-          current: isCurrent,
-        ),
-      );
-
-      if (i != _timeline.length - 1) {
-        widgets.add(const TimelineConnector());
-      }
-    }
-
-    return widgets;
   }
 
   @override
   Widget build(BuildContext context) {
     final driverName = _driverName;
     final truckNumber = _truckNumber;
-    final eta = _order?['eta']?.toString() ?? 'TBD';
+    final eta = _mlEta ?? 'Calculating…';
     final currentLocation = _order?['status']?.toString() ?? 'Pending';
     return Scaffold(
       body: Stack(
         children: [
           Positioned.fill(
             child: FlutterMap(
+              mapController: _mapController,
               options: const MapOptions(
                 initialCenter: LatLng(24.25, 74.40),
                 initialZoom: 6.2,
@@ -836,31 +1020,32 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                     AnimatedBuilder(
                       animation: _movementController,
                       builder: (context, _) {
+                        if (_routePoints.isEmpty) return const SizedBox.shrink();
                         return MarkerLayer(
                           markers: [
-                            Marker(
-                              point: _routePoints.first,
-                              width: 30,
-                              height: 30,
-                              child: const Icon(Icons.trip_origin_rounded,
-                                  color: Colors.blue, size: 22),
-                            ),
-                            Marker(
-                              point: _routePoints.last,
-                              width: 34,
-                              height: 34,
-                              child: const Icon(Icons.place_rounded,
-                                  color: Colors.redAccent, size: 26),
-                            ),
+                            if (_routePoints.isNotEmpty) ...[
+                              Marker(
+                                point: _routePoints.first,
+                                width: 30,
+                                height: 30,
+                                child: const Icon(Icons.trip_origin_rounded,
+                                    color: Colors.blue, size: 22),
+                              ),
+                              Marker(
+                                point: _routePoints.last,
+                                width: 34,
+                                height: 34,
+                                child: const Icon(Icons.place_rounded,
+                                    color: Colors.redAccent, size: 26),
+                              ),
+                            ],
                             ..._buildTruckMarkers(),
                           ],
                         );
                       }
                     ),
                   ],
-                );
-              },
-            ),
+                ),
           ),
           Positioned(
             top: 0,
@@ -947,7 +1132,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
-                                      ] else ...[
+                                      ] else if (_wsConnected) ...[
                                         const LiveDot(
                                           color: TruxifyColors.accent,
                                           size: 8,
@@ -961,6 +1146,24 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
+                                      ] else ...[
+                                        const SizedBox(
+                                          width: 8,
+                                          height: 8,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 1.5,
+                                            color: Colors.orangeAccent,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Connecting...',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.orangeAccent,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
                                       ],
                                     ],
                                   ),
@@ -968,9 +1171,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               ),
                             ),
                             IconButton(
-                              onPressed: () {},
+                              onPressed: _order == null ? null : _shareTracking,
                               icon: Icon(
-                                Icons.more_vert_rounded,
+                                Icons.share_rounded,
                                 color: Theme.of(context).brightness ==
                                         Brightness.dark
                                     ? TruxifyColors.darkPrimaryText
@@ -1059,12 +1262,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                     color: TruxifyColors.adaptiveSecondaryText(
                                         context))),
                         const SizedBox(height: 18),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: _buildTimelineWidgets(),
-                          ),
-                        ),
+                        _buildVerticalTimeline(),
                         const SizedBox(height: 18),
                         GridView.count(
                           crossAxisCount: 2,

@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { awardReputationPoints } from './reputation.js';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -12,6 +12,11 @@ let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcileFailedReputationUpdates() {
+  if (!supabaseAdmin) {
+    logger.warn('[reputation-reconciliation] supabaseAdmin not available — skipping cycle');
+    return;
+  }
+
   let lockAcquired = false;
   let leaseExtender = null;
 
@@ -31,8 +36,11 @@ export async function reconcileFailedReputationUpdates() {
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
-      logger.error('[reputation-reconciliation] Failed to acquire Redis lock:', err.message);
+      logger.error('[reputation-reconciliation] Failed to acquire Redis lock, skipping batch:', err.message);
+      return;
     }
+  } else {
+    // Redis not configured — single-instance mode, use in-process guard only
   }
 
   if (!lockAcquired) {
@@ -42,7 +50,7 @@ export async function reconcileFailedReputationUpdates() {
 
   try {
     const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: failedReputations, error } = await supabase
+    const { data: failedReputations, error } = await supabaseAdmin
       .from('reputation_failures')
       .select('*')
       .lt('retry_count', MAX_RETRIES)
@@ -59,8 +67,9 @@ export async function reconcileFailedReputationUpdates() {
 
     for (const row of failedReputations ?? []) {
       let claimError;
+      let claimKey;
       if (redisClient) {
-        const claimKey = `reputation:claim:${row.id}`;
+        claimKey = `reputation:claim:${row.id}`;
         const claimed = await redisClient.set(claimKey, instanceId, 'NX', 'EX', 300);
         if (!claimed) {
           logger.info(`[reputation-reconciliation] Row ${row.id} already claimed, skipping.`);
@@ -69,32 +78,62 @@ export async function reconcileFailedReputationUpdates() {
       }
 
       try {
+        // Award first, then delete. Deleting before the award leaves a crash
+        // window where the pending row is gone and the driver never receives
+        // the points. Only remove the row once the award succeeded; if the
+        // delete fails after a successful award it is only logged (never
+        // re-queued) so the points cannot be awarded twice from the same row.
         await awardReputationPoints(row.driver_wallet, row.stars);
-        await supabase.from('reputation_failures').delete().eq('id', row.id);
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
+
+        const { error: deleteError } = await supabaseAdmin.from('reputation_failures').delete().eq('id', row.id);
+        if (deleteError) {
+          logger.warn(`[reputation-reconciliation] Award succeeded but failed to remove pending row ${row.id}: ${deleteError.message}`);
+        }
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;
-        await supabase.from('reputation_failures').update({
+        await supabaseAdmin.from('reputation_failures').upsert({
+          id: row.id,
+          driver_wallet: row.driver_wallet,
+          stars: row.stars,
           retry_count: newRetryCount,
           last_error: err.message,
           last_attempt_at: new Date().toISOString(),
-        }).eq('id', row.id);
+        });
         logger.warn(`[reputation-reconciliation] Retry ${newRetryCount}/${MAX_RETRIES} failed for ${row.driver_wallet}: ${err.message}`);
+      } finally {
+        // Release the per-row claim so a re-queued failure can be retried on
+        // the next cycle instead of waiting for the 300s claim TTL to expire.
+        if (claimKey) {
+          try {
+            await redisClient.del(claimKey);
+          } catch (err) {
+            logger.warn(`[reputation-reconciliation] Failed to release claim for ${row.id}:`, err.message);
+          }
+        }
       }
     }
   } finally {
     if (leaseExtender) {
       clearInterval(leaseExtender);
     }
+
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(LOCK_KEY);
+        logger.debug('[reputation-reconciliation] Lock released successfully');
+      } catch (err) {
+        logger.error(
+          { err, lockKey: LOCK_KEY },
+          'Failed to release reputation reconciliation lock'
+        );
+      }
     }
-    if (!lockAcquired) {
-      reconciliationRunning = false;
-    }
+
+    // Always reset running flag so fallback/single-instance logic doesn't permanently deadlock
+    reconciliationRunning = false;
   }
 }
-
 export function startReputationReconciliation() {
   if (reconciliationTimer) return;
 
@@ -112,5 +151,4 @@ export function startReputationReconciliation() {
 export function stopReputationReconciliation() {
   if (!reconciliationTimer) return;
   clearInterval(reconciliationTimer);
-  reconciliationTimer = null;
-}
+  reconciliationTimer = null;}

@@ -1,0 +1,67 @@
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: api-service.truxify.svc.cluster.local
+  namespace: truxify
+spec:
+  routes:
+  - name: GET /api/health
+    condition:
+      method: GET
+      pathRegex: /api/health
+    responseClasses:
+      - condition:
+          status:
+            range: "200"
+        isFailure: false
+      - condition:
+          status:
+            range: "500"
+        isFailure: true
+  - name: GET /api/orders
+    condition:
+      method: GET
+      pathRegex: /api/orders
+  - name: POST /api/orders
+    condition:
+      method: POST
+      pathRegex: /api/orders
+  - name: GET /api/driver
+    condition:
+      method: GET
+      pathRegex: /api/driver
+  retryBudget:
+    retryRatio: 0.2
+    minRetriesPerSecond: 10
+    ttl: 10s
+---
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: ml-engine-service.truxify.svc.cluster.local
+  namespace: truxify
+spec:
+  routes:
+  - name: GET /health
+    condition:
+      method: GET
+      pathRegex: /health
+  - name: POST /predict
+    condition:
+      method: POST
+      pathRegex: /predict
+  - name: POST /match
+    condition:
+      method: POST
+      pathRegex: /match
+---
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: redis-service.truxify.svc.cluster.local
+  namespace: truxify
+spec:
+  routes:
+  - name: REDIS Command
+    condition:
+      method: REDIS

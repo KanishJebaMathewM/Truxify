@@ -38,6 +38,8 @@ void main() {
         destination: 'Jaipur',
         earnings: '₹12,000',
         delivered: false,
+        isFragile: false,
+        isStackable: true,
       ),
     ],
   );

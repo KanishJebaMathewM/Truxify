@@ -1,0 +1,41 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: truxify
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: https://github.com/BhakktiGautam/Truxify
+  ref:
+    branch: main
+  secretRef:
+    name: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: truxify
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./k8s/fluxcd
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: truxify
+  validation: client
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: api-deployment
+      namespace: truxify
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: ml-deployment
+      namespace: truxify
+  dependsOn:
+    - name: infrastructure
+  postBuild:
+    substitute:
+      environment: production
+      region: us-east-1

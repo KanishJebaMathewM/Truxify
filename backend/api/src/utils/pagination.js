@@ -4,10 +4,22 @@ const DEFAULTS = {
   maxLimit: 100,
 };
 
+function normalizeNumber(value) {
+  if (Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())) {
+    return Number(value);
+  }
+  return Number.NaN;
+}
+
 export function buildPagination(params = {}) {
-  const page = Number.isFinite(params.page) ? Math.max(1, Math.floor(params.page)) : DEFAULTS.page;
-  const limit = Number.isFinite(params.limit)
-    ? Math.min(Math.max(1, Math.floor(params.limit)), DEFAULTS.maxLimit)
+  const rawPage = normalizeNumber(params.page);
+  const rawLimit = normalizeNumber(params.limit);
+  const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : DEFAULTS.page;
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(1, Math.floor(rawLimit)), DEFAULTS.maxLimit)
     : DEFAULTS.limit;
 
   const offset = (page - 1) * limit;

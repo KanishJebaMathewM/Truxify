@@ -1,21 +1,126 @@
 import logging
-import numpy as np
-from typing import Dict
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import math
+import os
+import threading
+import time
+from collections import OrderedDict
+import httpx
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
-from .base import save_model, load_model, model_exists
+import httpx
+import numpy as np
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+from .base import get_model_meta, load_model, save_model
 
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "price_forecast"
 
-# NOTE: This module currently trains on synthetic (randomly generated) data
-# as a placeholder. Replace generate_synthetic_price_data() with a real
-# data pipeline that loads historical completed trip pricing data from
-# PostgreSQL or MongoDB to make predictions meaningful.
+# Real-data training pipeline: this module only ever fits on completed trips
+# loaded from PostgreSQL. The previous synthetic (randomly generated) training
+# data has been removed — a model is persisted exclusively via
+# train_price_model() over real market rates, and predictions are gated until
+# such a model exists.
+MIN_REAL_SAMPLES = 100
+DEFAULT_FUEL_PRICE = 105.0
+
+# ---------------------------------------------------------------------------
+# Weather lookup: shared HTTP client + bounded in-memory cache
+# ---------------------------------------------------------------------------
+# Weather lookups are fetched by predict_price(), which the API runs on a
+# worker thread, so blocking I/O never touches the FastAPI event loop. A single
+# module-level httpx.Client is reused across calls for connection pooling
+# (httpx.Client is thread-safe). Every request carries an explicit timeout.
+#
+# Results are cached by city so repeated predictions for the same corridor do
+# not hammer the upstream. A failed lookup is cached as the neutral multiplier
+# (1.0) for a short window to act as a circuit-broken fallback so a flaky
+# upstream cannot stall subsequent predictions for that city.
+ML_WEATHER_TIMEOUT_SECONDS = float(os.environ.get("ML_WEATHER_TIMEOUT_SECONDS", "2.0"))
+ML_WEATHER_CACHE_MAX_ENTRIES = int(os.environ.get("ML_WEATHER_CACHE_MAX_ENTRIES", "512"))
+ML_WEATHER_CACHE_TTL_SECONDS = float(os.environ.get("ML_WEATHER_CACHE_TTL_SECONDS", "600.0"))
+ML_WEATHER_FAILURE_TTL_SECONDS = float(
+    os.environ.get("ML_WEATHER_FAILURE_TTL_SECONDS", "30.0")
+)
+
+# Indirection so tests can drive cache expiry deterministically without
+# patching the shared ``time`` module.
+_now = time.monotonic
+
+# city -> (multiplier, expires_at_monotonic). Ordered by insertion so the LRU
+# eviction on overflow stays deterministic.
+_WEATHER_CACHE: "OrderedDict[str, Tuple[float, float]]" = OrderedDict()
+_WEATHER_CACHE_LOCK = threading.Lock()
+
+_WEATHER_CLIENT = httpx.Client(
+    timeout=httpx.Timeout(ML_WEATHER_TIMEOUT_SECONDS),
+    headers={"Accept": "application/json"},
+)
+
+# Non-neutral multipliers indicate a successful upstream response; the neutral
+# 1.0 entry may be a cached failure (short TTL) rather than a good response.
+_SUCCESS_MULTIPLIER = (1.1, 1.2)
+
+
+def reset_weather_cache() -> None:
+    """Drop every cached weather multiplier (used by tests)."""
+    with _WEATHER_CACHE_LOCK:
+        _WEATHER_CACHE.clear()
+
+
+def _cached_weather_multiplier(city: str) -> Optional[float]:
+    """Return a fresh cached multiplier for ``city``, or None when stale/missing."""
+    with _WEATHER_CACHE_LOCK:
+        entry = _WEATHER_CACHE.get(city)
+        if entry is None:
+            return None
+        multiplier, expires_at = entry
+        if _now() <= expires_at:
+            # Refresh recency so frequently used entries survive LRU eviction.
+            _WEATHER_CACHE.move_to_end(city)
+            return multiplier
+        _WEATHER_CACHE.pop(city, None)
+        return None
+
+
+def _cache_weather_multiplier(city: str, multiplier: float) -> None:
+    """Cache a weather multiplier with a TTL; failures use a short TTL."""
+    with _WEATHER_CACHE_LOCK:
+        ttl = (
+            ML_WEATHER_CACHE_TTL_SECONDS
+            if multiplier in _SUCCESS_MULTIPLIER
+            else ML_WEATHER_FAILURE_TTL_SECONDS
+        )
+        _WEATHER_CACHE[city] = (multiplier, _now() + ttl)
+        while len(_WEATHER_CACHE) > ML_WEATHER_CACHE_MAX_ENTRIES:
+            _WEATHER_CACHE.popitem(last=False)
+
+
+def _parse_weather_multiplier(response: httpx.Response) -> float:
+    """Map an OpenWeather response body to a price multiplier (default 1.0)."""
+    if response.status_code != 200:
+        return 1.0
+    weather_main = (
+        response.json().get("weather", [{}])[0].get("main", "").lower()
+    )
+    if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
+        return 1.2
+    if weather_main in ["drizzle", "mist", "fog", "haze", "dust", "sand", "ash"]:
+        return 1.1
+    return 1.0
+
+
+def close_weather_resources() -> None:
+    """Close the shared weather HTTP client (app shutdown)."""
+    try:
+        _WEATHER_CLIENT.close()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Error closing weather client: %s", exc)
 
 TRUCK_TYPE_ENCODING: Dict[str, int] = {
     "light_truck": 0,
@@ -32,8 +137,13 @@ CARGO_TYPE_ENCODING: Dict[str, int] = {
     "bulk": 4,
 }
 
-TRUCK_RATE_MULTIPLIER = {0: 1.0, 1: 1.2, 2: 1.5, 3: 1.8}
-CARGO_PREMIUM = {0: 0.0, 1: 1500.0, 2: 2000.0, 3: 3500.0, 4: -500.0}
+# trucks.truck_type -> price-model truck_type
+TRUCK_TYPE_FROM_DB: Dict[str, str] = {
+    "Open Body": "light_truck",
+    "Closed Body": "medium_truck",
+    "Container": "heavy_truck",
+    "Refrigerated": "trailer",
+}
 
 FEATURE_NAMES = [
     "distance_km",
@@ -44,97 +154,315 @@ FEATURE_NAMES = [
     "month",
     "fuel_price",
     "cargo_type",
+    "route_origin",
+    "route_destination",
 ]
 
+# Indian state / UT codes, skipped during city extraction from addresses.
+_STATE_CODES = {
+    "AN", "AP", "AR", "AS", "BR", "CG", "CH", "DD", "DL", "DN", "GA", "GJ",
+    "HR", "HP", "JH", "JK", "KA", "KL", "LD", "MP", "MH", "ML", "MN", "MZ",
+    "NL", "OD", "PB", "PY", "RJ", "SK", "TN", "TR", "TS", "UP", "UK", "WB",
+}
 
-def generate_synthetic_price_data(n_samples: int = 2000) -> tuple:
-    """Generate synthetic Indian freight pricing data.
 
-    Creates realistic training data incorporating distance, weight, truck type,
-    temporal factors (hour, day, month), fuel price, and cargo type.  Seasonal
-    effects model Indian festival/harvest (Oct-Jan) and monsoon (Jul-Sep)
-    periods.
+class PriceModelDataUnavailableError(RuntimeError):
+    """Raised when the real-data training pipeline has no data to fit on."""
 
-    Args:
-        n_samples: Number of data points to generate.
 
-    Returns:
-        Tuple of (X feature array, y price array).
+# ---------------------------------------------------------------------------
+# Historical data pipeline (PostgreSQL)
+# ---------------------------------------------------------------------------
+
+def load_historical_trips(max_samples: int = 20000) -> List[dict]:
+    """Load completed-trip pricing history from PostgreSQL.
+
+    Reads the ``orders`` table for delivered / payment-released orders (the
+    realised market rates), joining ``trucks`` to recover the vehicle type.
+    Returns raw rows; an empty list when the database is unreachable or no
+    completed trips exist yet.
     """
-    np.random.seed(42)
+    rows: List[dict] = []
+    try:
+        from sqlalchemy import text
+        from app.models.database import engine
+    except Exception as exc:  # pragma: no cover - environment specific
+        logger.warning("Historical trip loader unavailable (sqlalchemy import): %s", exc)
+        return rows
 
-    distance_km = np.random.uniform(50, 2500, n_samples)
-    cargo_weight_kg = np.random.uniform(100, 30000, n_samples)
-    truck_type = np.random.randint(0, 4, n_samples)
-    hour_of_day = np.random.randint(0, 24, n_samples)
-    day_of_week = np.random.randint(0, 7, n_samples)
-    month = np.random.randint(1, 13, n_samples)
-    fuel_price = np.random.uniform(90, 120, n_samples)
-    cargo_type = np.random.randint(0, 5, n_samples)
-
-    # Base rate per km varies by distance band
-    rate_per_km = np.where(distance_km < 300, 8.0, np.where(distance_km < 1000, 6.5, 5.5))
-
-    # Truck type multiplier
-    truck_mult = np.vectorize(TRUCK_RATE_MULTIPLIER.get)(truck_type)
-
-    # Weight-based cost
-    rate_per_kg = 0.005
-
-    # Fuel surcharge proportional to distance and fuel price deviation
-    fuel_baseline = 100.0
-    fuel_surcharge = distance_km * (fuel_price - fuel_baseline) * 0.02
-
-    # Seasonal factor (Indian context)
-    seasonal_factor = np.zeros(n_samples)
-    # Festival/harvest season (Oct-Jan): higher prices
-    seasonal_factor = np.where((month >= 10) | (month <= 1), distance_km * 0.08, seasonal_factor)
-    # Monsoon (Jul-Sep): lower demand, slightly lower prices
-    seasonal_factor = np.where((month >= 7) & (month <= 9), -distance_km * 0.04, seasonal_factor)
-
-    # Time-of-day factor: slightly higher during business hours (8-18)
-    time_factor = np.where((hour_of_day >= 8) & (hour_of_day <= 18), distance_km * 0.03, 0.0)
-
-    # Cargo type premium
-    cargo_premium = np.vectorize(CARGO_PREMIUM.get)(cargo_type)
-
-    # Compute price
-    price = (
-        distance_km * rate_per_km * truck_mult
-        + cargo_weight_kg * rate_per_kg
-        + fuel_surcharge
-        + seasonal_factor
-        + time_factor
-        + cargo_premium
-        + np.random.normal(0, 200, n_samples)  # noise
+    sql = text(
+        """
+        SELECT
+            o.pickup_address, o.pickup_lat, o.pickup_lng,
+            o.drop_address, o.drop_lat, o.drop_lng,
+            o.weight_tonnes, o.goods_type, o.created_at,
+            o.truck_id, o.bid_amount, o.total_amount,
+            t.truck_type
+        FROM orders o
+        LEFT JOIN trucks t ON t.id = o.truck_id
+        WHERE o.status IN ('delivered', 'payment_released')
+          AND o.pickup_lat IS NOT NULL AND o.pickup_lng IS NOT NULL
+          AND o.drop_lat IS NOT NULL AND o.drop_lng IS NOT NULL
+          AND o.weight_tonnes IS NOT NULL AND o.weight_tonnes > 0
+          AND (o.bid_amount IS NOT NULL OR o.total_amount IS NOT NULL)
+        ORDER BY o.created_at DESC
+        LIMIT :max_samples
+        """
     )
-    price = np.maximum(price, 500.0)
-
-    X = np.column_stack([
-        distance_km,
-        cargo_weight_kg,
-        truck_type,
-        hour_of_day,
-        day_of_week,
-        month,
-        fuel_price,
-        cargo_type,
-    ])
-
-    return X, price
+    try:
+        with engine.connect() as conn:
+            for row in conn.execute(sql, {"max_samples": max_samples}).mappings():
+                rows.append(dict(row))
+        logger.info("Loaded %d historical completed trips from PostgreSQL", len(rows))
+    except Exception as exc:
+        logger.warning("Could not load historical trips from PostgreSQL: %s", exc)
+    return rows
 
 
-def train_price_model() -> dict:
-    """Train a GradientBoostingRegressor for freight price prediction.
+def _city_from_address(address) -> str:
+    """Best-effort city extraction from a free-text address.
 
-    Uses synthetic data modelling Indian freight pricing patterns.
-    Persists the trained model and scaler via the base persistence layer.
+    Drops PIN codes and state/UT abbreviations so ``"Warehouse 0, Mumbai,
+    MH 400001"`` yields ``"Mumbai"``. Applied identically during training (from
+    ``pickup_address``/``drop_address``) and inference (from
+    ``route_origin``/``route_destination``).
+    """
+    if not address:
+        return ""
+    tokens = str(address).replace(",", " ").split()
+    words: List[str] = []
+    for token in tokens:
+        cleaned = token.strip(" .-")
+        if not cleaned:
+            continue
+        if cleaned.isdigit() and len(cleaned) == 6:
+            continue
+        if cleaned.isalpha() and cleaned.upper() in _STATE_CODES:
+            continue
+        words.append(cleaned)
+    if not words:
+        return ""
+    for word in reversed(words):
+        if word.lower() in {
+            "warehouse", "godown", "factory", "plot", "near", "opp",
+            "opposite", "road", "street", "area", "sector", "colony",
+        }:
+            continue
+        return word
+    return words[-1]
+
+
+def _normalize_cargo_type(goods_type) -> str:
+    """Map a free-text goods_type from the app onto the ML cargo taxonomy."""
+    g = str(goods_type or "").lower().replace("-", " ").replace("_", " ")
+    if any(k in g for k in ("perish", "fresh", "food", "fruit", "vegetable", "milk", "meat", "dairy")):
+        return "perishable"
+    if any(k in g for k in ("fragil", "glass", "ceramic", "electronics", "appliance")):
+        return "fragile"
+    if any(k in g for k in ("hazard", "chem", "acid", "fuel", "flammable", "petrol", "diesel")):
+        return "hazardous"
+    if any(k in g for k in ("bulk", "grain", "sand", "cement", "aggregate", "stone", "coal")):
+        return "bulk"
+    return "general"
+
+
+def _normalize_truck_type(truck_type) -> str:
+    """Map the trucks.truck_type domain onto the price-model truck taxonomy."""
+    raw = str(truck_type or "").strip()
+    if not raw:
+        return "medium_truck"
+    if raw in TRUCK_TYPE_FROM_DB:
+        return TRUCK_TYPE_FROM_DB[raw]
+    norm = raw.lower().replace(" ", "_").replace("-", "_")
+    if norm in TRUCK_TYPE_ENCODING:
+        return norm
+    if "light" in norm or "open" in norm:
+        return "light_truck"
+    if "container" in norm:
+        return "heavy_truck"
+    if "refrig" in norm or "trailer" in norm or "reefer" in norm:
+        return "trailer"
+    return "medium_truck"
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r_earth = 6371.0
+    d_lat = math.radians(lat2 - lat1)
+    d_lng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(d_lat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lng / 2) ** 2
+    )
+    return r_earth * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _parse_trip_row(row: dict) -> Optional[dict]:
+    """Convert a raw orders row into a training sample, or None if unusable."""
+    try:
+        pickup_lat = float(row.get("pickup_lat"))
+        pickup_lng = float(row.get("pickup_lng"))
+        drop_lat = float(row.get("drop_lat"))
+        drop_lng = float(row.get("drop_lng"))
+        weight_kg = float(row.get("weight_tonnes")) * 1000.0
+    except (TypeError, ValueError):
+        return None
+
+    distance_km = _haversine_km(pickup_lat, pickup_lng, drop_lat, drop_lng)
+    if distance_km <= 0 or weight_kg <= 0:
+        return None
+
+    created_at = row.get("created_at")
+    if isinstance(created_at, datetime):
+        hour = created_at.hour
+        day_of_week = created_at.weekday()
+        month = created_at.month
+    else:
+        hour, day_of_week, month = 12, 3, 6
+
+    price_paisa = row.get("bid_amount")
+    if price_paisa is None:
+        price_paisa = row.get("total_amount")
+    try:
+        price_paisa = float(price_paisa)
+    except (TypeError, ValueError):
+        return None
+    if price_paisa <= 0:
+        return None
+
+    return {
+        "numeric": [
+            distance_km,
+            weight_kg,
+            TRUCK_TYPE_ENCODING[_normalize_truck_type(row.get("truck_type"))],
+            hour,
+            day_of_week,
+            month,
+            DEFAULT_FUEL_PRICE,
+            CARGO_TYPE_ENCODING[_normalize_cargo_type(row.get("goods_type"))],
+        ],
+        "origin": _city_from_address(row.get("pickup_address")),
+        "destination": _city_from_address(row.get("drop_address")),
+        "price_inr": price_paisa / 100.0,
+    }
+
+
+def _get_weather_multiplier(city: str) -> float:
+    """Fetch weather for a city (cached) and return a price multiplier.
+
+    Blocking HTTP runs on the shared, thread-safe :data:`_WEATHER_CLIENT` with
+    an explicit timeout. Results are cached by city and failures fall back to
+    the neutral multiplier of 1.0 (never surfacing raw network errors).
+    """
+    if not city:
+        return 1.0
+    cached = _cached_weather_multiplier(city)
+    if cached is not None:
+        return cached
+    multiplier = _fetch_weather_multiplier_http(city)
+    _cache_weather_multiplier(city, multiplier)
+    return multiplier
+
+
+def _fetch_weather_multiplier_http(city: str) -> float:
+    """Issue a single OpenWeather request; returns 1.0 on any failure.
+
+    Isolated from the cache so tests can stub the network call directly.
+    """
+    api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
+    if not api_key:
+        return 1.0
+    try:
+        url = (
+            "https://api.openweathermap.org/data/2.5/weather"
+            f"?q={city}&appid={api_key}"
+        )
+        response = _WEATHER_CLIENT.get(url, timeout=ML_WEATHER_TIMEOUT_SECONDS)
+        return _parse_weather_multiplier(response)
+    except Exception as e:
+        logger.warning("Weather API failed for %s: %s", city, e)
+        return 1.0
+
+
+async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) -> float:
+    """Async fetch weather for a city (cached) and return a price multiplier.
+
+    Mirrors :func:`_get_weather_multiplier` for callers already inside an
+    async context. Shares the same bounded cache and explicit timeout.
+    """
+    if not city:
+        return 1.0
+    cached = _cached_weather_multiplier(city)
+    if cached is not None:
+        return cached
+    api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
+    if not api_key:
+        return 1.0
+    try:
+        url = (
+            "https://api.openweathermap.org/data/2.5/weather"
+            f"?q={city}&appid={api_key}"
+        )
+        response = await client.get(url, timeout=ML_WEATHER_TIMEOUT_SECONDS)
+        multiplier = _parse_weather_multiplier(response)
+        _cache_weather_multiplier(city, multiplier)
+        return multiplier
+    except Exception as e:
+        logger.warning("Weather API failed for %s: %s", city, e)
+        _cache_weather_multiplier(city, 1.0)
+        return 1.0
+
+
+def _build_city_encoder(samples: List[dict]) -> Dict[str, int]:
+    """Ordinal city encoder fitted on training origins/destinations."""
+    counts: Dict[str, int] = {}
+    for sample in samples:
+        for city in (sample["origin"], sample["destination"]):
+            if city:
+                counts[city] = counts.get(city, 0) + 1
+    ranked = sorted(counts, key=lambda c: (-counts[c], c))
+    return {city: index for index, city in enumerate(ranked)}
+
+
+def train_price_model(max_samples: int = 20000) -> dict:
+    """Train the freight price model on real completed-trip pricing.
+
+    Loads historical orders from PostgreSQL. Raises
+    :class:`PriceModelDataUnavailableError` when fewer than ``MIN_REAL_SAMPLES``
+    completed trips are available so callers can surface a 503 instead of
+    silently fitting on random noise.
 
     Returns:
-        Dictionary of training metrics (MAE, RMSE, R2, sample count).
+        Dictionary of training metrics, flagged as a real-data model.
     """
-    logger.info("Training price forecast model...")
-    X, y = generate_synthetic_price_data()
+    samples: List[dict] = []
+    for row in load_historical_trips(max_samples=max_samples):
+        parsed = _parse_trip_row(row)
+        if parsed is not None:
+            samples.append(parsed)
+
+    if len(samples) < MIN_REAL_SAMPLES:
+        raise PriceModelDataUnavailableError(
+            "Insufficient completed trips for training: "
+            f"found {len(samples)} of {MIN_REAL_SAMPLES} required. "
+            "Train again once more trips have been delivered."
+        )
+
+    city_encoder = _build_city_encoder(samples)
+    unknown = len(city_encoder)
+
+    X = np.array(
+        [
+            sample["numeric"]
+            + [
+                city_encoder.get(sample["origin"], unknown),
+                city_encoder.get(sample["destination"], unknown),
+            ]
+            for sample in samples
+        ],
+        dtype=float,
+    )
+    y = np.array([sample["price_inr"] for sample in samples], dtype=float)
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
@@ -162,11 +490,27 @@ def train_price_model() -> dict:
         "r2": float(r2),
         "n_samples": len(X),
         "feature_names": FEATURE_NAMES,
+        "data_source": "postgres_completed_trips",
+        "is_real_model": True,
+        "city_count": len(city_encoder),
     }
 
-    save_model((model, scaler), MODEL_NAME, metrics)
-    logger.info("Price forecast model trained. R2: %.3f, MAE: %.3f", r2, mae)
+    save_model((model, scaler, city_encoder), MODEL_NAME, metrics)
+    logger.info(
+        "Price model trained on %d real completed trips. R2: %.3f, MAE: %.3f",
+        len(X),
+        r2,
+        mae,
+    )
     return metrics
+
+
+def _model_is_real() -> bool:
+    """Only models persisted by the real-data pipeline are served."""
+    meta = get_model_meta(MODEL_NAME)
+    if meta is None:
+        return False
+    return bool((meta.get("metrics") or {}).get("is_real_model"))
 
 
 def predict_price(
@@ -180,17 +524,19 @@ def predict_price(
     month: int = 6,
     fuel_price: float = 105.0,
     cargo_type: str = "general",
-) -> dict:
+) -> Optional[dict]:
     """Predict freight price using the trained ML model.
 
-    Auto-trains the model on first invocation if no persisted model exists.
+    Only a model persisted by the real-data pipeline is served: when no real
+    model has been trained yet this returns ``None`` (never auto-trains on
+    synthetic randomness), which callers surface as a 503.
 
     Args:
         distance_km: Shipping distance in kilometres.
         cargo_weight_kg: Total cargo weight in kilograms.
         truck_type: One of 'light_truck', 'medium_truck', 'heavy_truck', 'trailer'.
-        route_origin: Origin location name (reserved for future geocoding).
-        route_destination: Destination location name (reserved for future geocoding).
+        route_origin: Origin location name (used as a categorical geography feature).
+        route_destination: Destination location name (used as a categorical geography feature).
         hour_of_day: Hour of departure (0-23).
         day_of_week: Day of week (0=Mon, 6=Sun).
         month: Month of year (1-12).
@@ -198,7 +544,8 @@ def predict_price(
         cargo_type: One of 'general', 'perishable', 'fragile', 'hazardous', 'bulk'.
 
     Returns:
-        Dict with estimated_price, min_price, max_price, and currency.
+        Dict with estimated_price, min_price, max_price, and currency, or None
+        when no real-data model is available.
 
     Raises:
         ValueError: If distance_km or cargo_weight_kg is non-positive.
@@ -208,24 +555,19 @@ def predict_price(
     if cargo_weight_kg <= 0:
         raise ValueError("cargo_weight_kg must be positive")
 
-    # Auto-train if model does not exist
-    if not model_exists(MODEL_NAME):
-        train_price_model()
+    if not _model_is_real():
+        return None
 
     loaded = load_model(MODEL_NAME)
-    if loaded is None:
-        # Fallback: train again if loading failed
-        train_price_model()
-        loaded = load_model(MODEL_NAME)
-        if loaded is None:
-            logger.error("Failed to load price forecast model after retraining")
-            raise RuntimeError("Price forecast model unavailable")
+    if loaded is None or not isinstance(loaded, (list, tuple)) or len(loaded) != 3:
+        logger.warning("Persisted price model is not a real-data model; ignoring.")
+        return None
 
-    model, scaler = loaded
+    model, scaler, city_encoder = loaded
+    unknown = len(city_encoder)
 
-    truck_encoded = TRUCK_TYPE_ENCODING.get(
-        truck_type.lower().replace(" ", "_"), 1
-    )
+    norm_truck = _normalize_truck_type(truck_type)
+    truck_encoded = TRUCK_TYPE_ENCODING.get(norm_truck, 1)
     cargo_encoded = CARGO_TYPE_ENCODING.get(
         cargo_type.lower().replace(" ", "_"), 0
     )
@@ -239,10 +581,23 @@ def predict_price(
         month,
         fuel_price,
         cargo_encoded,
+        city_encoder.get(_city_from_address(route_origin), unknown),
+        city_encoder.get(_city_from_address(route_destination), unknown),
     ]])
     features_scaled = scaler.transform(features)
     predicted = float(model.predict(features_scaled)[0])
     predicted = max(predicted, 500.0)
+
+    origin_city = _city_from_address(route_origin)
+    destination_city = _city_from_address(route_destination)
+    # Blocking weather lookups run inside this worker thread (the endpoint
+    # executes predict_price via app.execution.run_inference), so they never
+    # block the event loop. Results are cached by city with a bounded TTL.
+    weather_multiplier = max(
+        _get_weather_multiplier(origin_city),
+        _get_weather_multiplier(destination_city),
+    )
+    predicted *= weather_multiplier
 
     return {
         "estimated_price": round(predicted, 2),

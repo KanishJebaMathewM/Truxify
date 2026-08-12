@@ -1,4 +1,4 @@
-import 'package:truxify/core/offline/gps/gps_delta_compressor.dart';
+import 'gps/gps_delta_compressor.dart';
 
 import 'cache/cache_manager.dart';
 import 'db/offline_event_db.dart';
@@ -19,6 +19,9 @@ class OfflineSyncManager {
 
   Future<void> init() async {
     await _db.open();
+    // Recover events orphaned in the transient `syncing` state by a previous
+    // run being killed mid-upload; without this they would never be re-queued.
+    await _db.reconcileStuckSyncing();
     await _cacheManager.open();
     _syncEngine = SyncEngine(db: _db, apiBaseUrl: apiBaseUrl);
     await _syncEngine.startListening();

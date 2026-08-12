@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
+
+    <changeSet id="12" author="truxify">
+        <comment>Create audit_log table</comment>
+        <createTable tableName="audit_log">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="table_name" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="record_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="action" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="old_data" type="JSON"/>
+            <column name="new_data" type="JSON"/>
+            <column name="user_id" type="BIGINT"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="13" author="truxify">
+        <comment>Create audit triggers</comment>
+        <sql>
+            CREATE OR REPLACE FUNCTION audit_trigger_function() 
+            RETURNS TRIGGER AS $$
+            BEGIN
+                INSERT INTO audit_log(table_name, record_id, action, old_data, new_data, user_id)
+                VALUES (
+                    TG_TABLE_NAME,
+                    COALESCE(NEW.id, OLD.id),
+                    TG_OP,
+                    row_to_json(OLD),
+                    row_to_json(NEW),
+                    COALESCE(NEW.user_id, OLD.user_id)
+                );
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        </sql>
+    </changeSet>
+
+    <changeSet id="14" author="truxify">
+        <comment>Create soft delete triggers</comment>
+        <sql>
+            CREATE OR REPLACE FUNCTION soft_delete_trigger() 
+            RETURNS TRIGGER AS $$
+            BEGIN
+                NEW.deleted_at = CURRENT_TIMESTAMP;
+                NEW.is_deleted = true;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        </sql>
+    </changeSet>
+
+    <changeSet id="15" author="truxify">
+        <comment>Add soft delete columns</comment>
+        <addColumn tableName="users">
+            <column name="is_deleted" type="BOOLEAN" defaultValueBoolean="false"/>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </addColumn>
+        <addColumn tableName="orders">
+            <column name="is_deleted" type="BOOLEAN" defaultValueBoolean="false"/>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </addColumn>
+        <addColumn tableName="drivers">
+            <column name="is_deleted" type="BOOLEAN" defaultValueBoolean="false"/>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

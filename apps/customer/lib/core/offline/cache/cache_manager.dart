@@ -1,9 +1,47 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class CacheManager {
+  static const Set<String> _cacheTables = {
+    'orders',
+    'profile',
+    'documents',
+    'settings',
+    'last_location',
+    'milestones',
+  };
+
+  /// Order statuses considered "active" for offline active-orders views.
+  static const Set<String> _activeStatuses = {
+    'pending',
+    'active',
+    'truck_assigned',
+    'en_route_pickup',
+    'arrived_pickup',
+    'picked_up',
+    'in_transit',
+    'arriving',
+  };
+
+  /// Filters [results] (already in `updated_at DESC` order) down to active
+  /// orders and then truncates to [limit]. The truncation MUST happen after
+  /// the filter — applying a SQL `LIMIT` first would let a run of
+  /// recently-updated inactive orders push active orders out of the result
+  /// set (issue #7739).
+  @visibleForTesting
+  static List<Map<String, dynamic>> filterActiveOrders(
+    List<Map<String, dynamic>> results, {
+    required int limit,
+  }) {
+    return results
+        .where((item) => _activeStatuses.contains(item['status']))
+        .take(limit)
+        .toList();
+  }
+
   dynamic _safeDecode(String json) {
     try {
       return jsonDecode(json);
@@ -11,6 +49,18 @@ class CacheManager {
       return null;
     }
   }
+
+  Map<String, dynamic>? _decodeMap(String json) {
+    final decoded = _safeDecode(json);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return null;
+  }
+
   static const _dbName = 'truxify_cache.db';
 
   Database? _database;
@@ -35,15 +85,19 @@ class CacheManager {
 
     _database = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE IF NOT EXISTS orders (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
+            status TEXT,
             payload TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )
+        ''');
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)
         ''');
         await db.execute('''
           CREATE TABLE IF NOT EXISTS profile (
@@ -85,6 +139,12 @@ class CacheManager {
           )
         ''');
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''ALTER TABLE orders ADD COLUMN status TEXT''');
+          await db.execute('''CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)''');
+        }
+      },
     );
 
     return _database!;
@@ -106,6 +166,7 @@ class CacheManager {
         {
           'id': id,
           'type': item['type'] ?? 'order',
+          'status': item['status']?.toString(),
           'payload': jsonEncode(item),
           'updated_at': updatedAt,
         },
@@ -115,23 +176,11 @@ class CacheManager {
 
     await batch.commit(noResult: true);
   }
+  set databaseForTesting(Database? db) => _database = db;
 
   Future<List<Map<String, dynamic>>> getOrders({bool activeOnly = false, int limit = 20}) async {
     final db = await open();
-    final rows = await db.query(
-      'orders',
-      orderBy: 'updated_at DESC',
-      limit: limit,
-    );
-
-    final results = rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
-        ...payload,
-        '_cached_at': row['updated_at'],
-      };
-    }).toList();
-
+    final List<Map<String, dynamic>> rows;
     if (activeOnly) {
       const activeStatuses = {
         'pending',
@@ -143,7 +192,34 @@ class CacheManager {
         'in_transit',
         'arriving'
       };
-      return results.where((item) => activeStatuses.contains(item['status'])).toList();
+      final statusIn = activeStatuses.map((s) => "'$s'").join(', ');
+      rows = await db.rawQuery(
+        "SELECT * FROM orders WHERE status IN ($statusIn) ORDER BY updated_at DESC LIMIT $limit",
+      );
+    } else {
+      rows = await db.query(
+        'orders',
+        orderBy: 'updated_at DESC',
+        limit: limit,
+      );
+    }
+
+    final results = <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final payload = _decodeMap(row['payload'] as String);
+      if (payload == null) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('orders', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      results.add(<String, dynamic>{
+        ...payload,
+        '_cached_at': row['updated_at'],
+      });
     }
 
     return results;
@@ -170,8 +246,12 @@ class CacheManager {
     }
 
     final decoded = _safeDecode(rows.first['value'] as String);
-      if (decoded == null) return null;
-      final payload = decoded as Map<String, dynamic>;
+    if (decoded is! Map) {
+      await db.delete('profile', where: 'key = ?', whereArgs: ['profile']);
+      return null;
+    }
+
+    final payload = Map<String, dynamic>.from(decoded);
     return <String, dynamic>{
       ...payload,
       '_cached_at': rows.first['updated_at'],
@@ -207,13 +287,26 @@ class CacheManager {
   Future<List<Map<String, dynamic>>> getDocuments() async {
     final db = await open();
     final rows = await db.query('documents', orderBy: 'updated_at DESC');
-    return rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
+
+    final results = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final decoded = _safeDecode(row['payload'] as String);
+      if (decoded is! Map) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('documents', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      final payload = Map<String, dynamic>.from(decoded);
+      results.add(<String, dynamic>{
         ...payload,
         '_cached_at': row['updated_at'],
-      };
-    }).toList();
+      });
+    }
+
+    return results;
   }
 
   Future<void> cacheSettings(Map<String, dynamic> settings) async {
@@ -242,7 +335,13 @@ class CacheManager {
     final result = <String, dynamic>{};
 
     for (final row in rows) {
-      result[row['key'] as String] = _safeDecode(row['value'] as String);
+      final key = row['key'] as String;
+      final decoded = _safeDecode(row['value'] as String);
+      if (decoded == null) {
+        await db.delete('settings', where: 'key = ?', whereArgs: [key]);
+        continue;
+      }
+      result[key] = decoded;
     }
 
     return result;
@@ -282,11 +381,14 @@ class CacheManager {
     final batch = db.batch();
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
-    for (final item in milestones) {
+    for (var index = 0; index < milestones.length; index++) {
+      final item = milestones[index];
+      final milestoneId = _stableId(item, const ['id', 'milestoneId', 'milestone_id']) ??
+          '${item['title'] ?? 'milestone'}_$index';
       batch.insert(
         'milestones',
         {
-          'id': '${orderId}_${item['title'] ?? 'milestone'}',
+          'id': '${orderId}_$milestoneId',
           'order_id': orderId,
           'title': item['title'] ?? 'Milestone',
           'completed': item['completed'] == true ? 1 : 0,
@@ -316,6 +418,9 @@ class CacheManager {
   }
 
   Future<int> clearTable(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     return db.delete(tableName);
   }
@@ -337,6 +442,9 @@ class CacheManager {
   }
 
   Future<int> getCacheSize(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     final result = await db.rawQuery('SELECT COUNT(*) as cnt FROM $tableName');
     if (result.isEmpty) return 0;

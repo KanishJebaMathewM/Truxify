@@ -10,7 +10,79 @@ const REQUIRED_RPC_FUNCTIONS = [
   'withdraw_funds_tx',
   'complete_trip_tx',
   'submit_rating_tx',
+  'cancel_order_tx',
+  'cancel_stale_order_tx',
 ];
+
+const REQUIRED_INDEXES = [
+  // Real index names as created by docs/supabase_setup.sql and
+  // supabase/migrations/. The previous *_idx names matched no DDL anywhere,
+  // so the check always reported them missing. Each entry also carries the
+  // table the index lives on, because pg_indexes is queried per table
+  // instead of assuming every index sits on `trips`.
+  { name: 'idx_profiles_role', table: 'profiles' },
+  { name: 'idx_orders_customer', table: 'orders' },
+  { name: 'idx_orders_driver', table: 'orders' },
+  { name: 'idx_trucks_driver', table: 'trucks' },
+  // Composite index: (driver_id, status, trip_date DESC) — replaces the
+  // redundant single-column idx_trips_driver and serves all three hot
+  // query shapes in driverRoutes.js (lines 1477, 1489, 1531).
+  { name: 'idx_trips_driver_status_date', table: 'trips' },
+  // Composite index: (driver_id, trip_display_id) — serves ownership-check
+  // lookups at driverRoutes.js lines 629, 684, 726, 768.
+  { name: 'idx_trips_driver_display', table: 'trips' },
+  { name: 'idx_load_offers_status', table: 'load_offers' },
+];
+
+/**
+ * Composite indexes that back the hottest multi-column access paths.
+ *
+ * Single-column indexes on each of driver_id, status and trip_date cannot
+ * satisfy a query filtering on the first two and ordering by the third —
+ * Postgres falls back to a bitmap AND plus an explicit sort. These are
+ * verified separately so a missing migration surfaces at deploy time rather
+ * than as unexplained latency.
+ */
+const REQUIRED_COMPOSITE_INDEXES = [
+  {
+    table: 'trips',
+    name: 'idx_trips_driver_status_date',
+    columns: ['driver_id', 'status', 'trip_date'],
+    servedBy: 'driver earnings and trip-history queries',
+  },
+  {
+    table: 'trips',
+    name: 'idx_trips_driver_display',
+    columns: ['driver_id', 'trip_display_id'],
+    servedBy: 'per-trip ownership checks',
+  },
+];
+
+/**
+ * Check the declared composite indexes against a list of index names.
+ *
+ * @param {string[]} existingIndexNames Index names present in the database.
+ * @returns {Array<{name: string, table: string, present: boolean, servedBy: string}>}
+ */
+export function checkCompositeIndexes(existingIndexNames) {
+  const present = new Set(existingIndexNames || []);
+  return REQUIRED_COMPOSITE_INDEXES.map((index) => ({
+    name: index.name,
+    table: index.table,
+    columns: index.columns,
+    servedBy: index.servedBy,
+    present: present.has(index.name),
+  }));
+}
+
+export { REQUIRED_COMPOSITE_INDEXES };
+
+const TABLE_CATEGORIES = {
+  core: ['profiles', 'orders', 'trips', 'trucks'],
+  marketplace: ['load_offers', 'bids', 'routes'],
+  financial: ['wallet_transactions', 'escrow_transactions'],
+  support: ['support_tickets', 'faqs', 'notifications'],
+};
 
 const icons = {
   pass: '✓',
@@ -63,12 +135,14 @@ export function parseOpenApiRpcFunctions(openApiDocument) {
   );
 }
 
-export function buildSummary(tableResults, functionResults) {
+export function buildSummary(tableResults, functionResults, indexResults = []) {
   return {
     tablesChecked: tableResults.length,
     missingTables: tableResults.filter((result) => !result.ok).length,
     functionsChecked: functionResults.length,
     missingFunctions: functionResults.filter((result) => !result.ok).length,
+    indexesChecked: indexResults.length,
+    missingIndexes: indexResults.filter((result) => !result.ok).length,
   };
 }
 
@@ -89,7 +163,10 @@ function printSection(title, results, useColor) {
 }
 
 function printSummary(summary, useColor) {
-  const hasWarnings = summary.missingTables > 0 || summary.missingFunctions > 0;
+  const hasWarnings =
+    summary.missingTables > 0 ||
+    summary.missingFunctions > 0 ||
+    summary.missingIndexes > 0;
 
   console.log(`\n${colorize('Schema Verification Summary', 'bold', useColor)}\n`);
   console.log(`Tables Checked: ${summary.tablesChecked}`);
@@ -97,6 +174,9 @@ function printSummary(summary, useColor) {
   console.log('');
   console.log(`Functions Checked: ${summary.functionsChecked}`);
   console.log(`Missing Functions: ${summary.missingFunctions}`);
+  console.log('');
+  console.log(`Indexes Checked: ${summary.indexesChecked}`);
+  console.log(`Missing Indexes: ${summary.missingIndexes}`);
   console.log('');
 
   if (hasWarnings) {
@@ -179,8 +259,69 @@ async function verifyRpcFunctions(supabaseUrl, supabaseKey) {
   }
 }
 
+/**
+ * Verify that every index in REQUIRED_INDEXES exists in pg_indexes.
+ *
+ * Uses the Supabase service-role key to query the pg_catalog.pg_indexes
+ * view via the REST API. If the catalog view is not accessible (e.g. the
+ * anon key is used instead of service role), the function returns a
+ * skipped-with-warning result for each index rather than a hard failure,
+ * so the script exits with a non-zero code only when indexes are
+ * definitively absent.
+ *
+ * @param {string} supabaseUrl
+ * @param {string} supabaseKey  Must be the service-role key to read pg_catalog.
+ * @returns {Promise<Array<{name: string, ok: boolean, message?: string}>>}
+ */
+export async function verifyIndexes(supabaseUrl, supabaseKey) {
+  try {
+    // Fetch every index in the public schema from pg_catalog, keyed by
+    // (table, name), so each REQUIRED_INDEXES entry is checked against the
+    // table it actually belongs to rather than a trips-only filter.
+    const endpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/pg_indexes?select=indexname,tablename,schemaname`;
+    const response = await fetch(endpoint, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      // Catalog not exposed — degrade gracefully.
+      return REQUIRED_INDEXES.map(({ name, table }) => ({
+        name,
+        table,
+        ok: false,
+        message: `pg_indexes not accessible (HTTP ${response.status}) — run migration and verify manually`,
+      }));
+    }
+
+    const rows = await response.json();
+    const present = new Set(
+      rows
+        .filter((r) => r.schemaname === 'public')
+        .map((r) => `${r.tablename}:${r.indexname}`)
+    );
+
+    return REQUIRED_INDEXES.map(({ name, table }) => ({
+      name,
+      table,
+      ok: present.has(`${table}:${name}`),
+      message: present.has(`${table}:${name}`) ? undefined : 'index not found in pg_indexes — migration may not have run',
+    }));
+  } catch (error) {
+    return REQUIRED_INDEXES.map(({ name, table }) => ({
+      name,
+      table,
+      ok: false,
+      message: `could not verify indexes: ${error.message}`,
+    }));
+  }
+}
+
 async function main() {
-  const useColor = process.stdout.isTTY && process.env.NO_COLOR == null;
+  const useColor = process.stdout.isTTY && process.env.NO_COLOR === null;
   loadEnvironment();
 
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -216,14 +357,20 @@ async function main() {
   }
 
   const functionResults = await verifyRpcFunctions(supabaseUrl, supabaseKey);
+  const indexResults = await verifyIndexes(supabaseUrl, supabaseKey);
 
   printSection('Table Verification', tableResults, useColor);
   printSection('RPC Verification', functionResults, useColor);
+  printSection('Index Verification', indexResults, useColor);
 
-  const summary = buildSummary(tableResults, functionResults);
+  const summary = buildSummary(tableResults, functionResults, indexResults);
   printSummary(summary, useColor);
 
-  return summary.missingTables === 0 && summary.missingFunctions === 0 ? 0 : 1;
+  return summary.missingTables === 0 &&
+    summary.missingFunctions === 0 &&
+    summary.missingIndexes === 0
+    ? 0
+    : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

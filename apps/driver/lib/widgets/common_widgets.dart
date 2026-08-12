@@ -15,7 +15,7 @@ class AppCard extends StatelessWidget {
     this.border,
     this.elevation = 0,
   });
-
+  
   final Widget child;
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry? margin;
@@ -38,6 +38,7 @@ class AppCard extends StatelessWidget {
     
     if (onTap != null) {
       content = InkWell(
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: content,
       );
@@ -688,7 +689,7 @@ class StackedCapacityBar extends StatelessWidget {
               color: TruxifyColors.subtleBorder,
             ),
             LinearProgressIndicator(
-              value: thisLoad.clamp(0.0, 1.0),
+              value: thisLoad.clamp(0.0, 1.0).toDouble(),
               minHeight: 12,
               backgroundColor: Colors.transparent,
               color: TruxifyColors.accent,

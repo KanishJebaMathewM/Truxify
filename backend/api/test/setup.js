@@ -10,11 +10,20 @@
 // Required by auth.js middleware to read x-user-id/x-user-role headers
 // directly from the request instead of verifying a Firebase token.
 process.env.BYPASS_AUTH = 'true';
+// Explicit opt-in for the header-based test bypass. It is independent of
+// NODE_ENV and only ever set here (the dedicated test harness) so a stray
+// NODE_ENV=test deployment can never impersonate users.
+process.env.ENABLE_TEST_AUTH = 'true';
 process.env.DEV_ACCESS_TOKEN = 'test-dev-token-123';
 process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
-process.env.ESCROW_MATIC_PER_PAISA = '0.01';
-process.env.MAX_ESCROW_MATIC = '1000';
+process.env.ESCROW_MATIC_PER_PAISA = '0.000004';
+process.env.MAX_ESCROW_MATIC = '10000';
 process.env.DRIVER_LOGIN_OTP = '1234';
+
+// Deterministic test-only secret for WIM bypass packet signing. It is long
+// enough to satisfy the minimum-length policy and is NEVER used as a fallback
+// in application code — it only exists here so tests can exercise signing.
+process.env.WIM_SIGNING_SECRET = 'test-wim-signing-secret-0123456789abcdef-0123456789abcdef';
 
 // Suppress noisy console.error output from the routes — they log
 // pricing errors and DB failures to stderr when tests trigger them.

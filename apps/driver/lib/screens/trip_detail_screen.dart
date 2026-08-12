@@ -4,11 +4,18 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:url_launcher/url_launcher.dart';
 import '../services/geocode_service.dart';
+import '../services/gps_tracking_service.dart';
+import '../services/location_service.dart';
 import '../services/route_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/common_widgets.dart';
+import 'chat_screen.dart';
+import 'delivery_otp_screen.dart';
+
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class TripDetailScreen extends StatefulWidget {
   final Trip trip;
@@ -22,17 +29,51 @@ class TripDetailScreen extends StatefulWidget {
 class _TripDetailScreenState extends State<TripDetailScreen> {
   final MapController _mapController = MapController();
   late Future<_RouteResult?> _routeFuture;
+  late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
+  bool _isOffline = false;
+
+  // ── GPS tracking for active trips ──────────────────────────────────
+  final GpsTrackingService _gpsTracking = GpsTrackingService();
+  WsConnectionStatus _wsStatus = WsConnectionStatus.disconnected;
+
+  /// Statuses that require live GPS emission.
+  static const _activeStatuses = {
+    TripStatusType.active,
+  };
 
   @override
   void initState() {
     super.initState();
     _routeFuture = _loadRouteForTrip(widget.trip.route);
+    _maybeStartGpsTracking();
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      final offline = results.every((result) => result == ConnectivityResult.none);
+      if (mounted) setState(() => _isOffline = offline);
+    });
   }
 
   @override
   void dispose() {
+    _connectivitySubscription.cancel();
     _mapController.dispose();
+    // Disconnect WebSocket to prevent memory/battery leaks on screen exit.
+    _gpsTracking.stop();
     super.dispose();
+  }
+
+  /// Start GPS emission only if this trip is in an active status.
+  void _maybeStartGpsTracking() {
+    if (!_activeStatuses.contains(widget.trip.status)) return;
+
+    _gpsTracking.connectionStatus.listen((status) {
+      if (mounted) setState(() => _wsStatus = status);
+    });
+
+    // Fire-and-forget; errors surface via debugPrint inside the service.
+    _gpsTracking.startForTrip(tripDisplayId: widget.trip.tripId).catchError(
+      (e) => debugPrint('[TripDetailScreen] GPS tracking error: $e'),
+    );
   }
   Future<void> _openGoogleMapsRoute() async {
     final routeResult = await _routeFuture;
@@ -61,7 +102,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           const SnackBar(content: Text('Unable to open Google Maps')),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[TripDetailScreen] Failed to open Google Maps: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to open Google Maps')),
@@ -69,6 +111,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       }
     }
   }
+
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -233,6 +276,97 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       ),
     );
   }
+  
+  Widget _buildCargoHandlingSection(BuildContext context, TripItem item) {
+  final hasNotes = (item.specialRequirements ?? '').trim().isNotEmpty;
+
+  if (!item.isFragile && item.isStackable && !hasNotes) {
+    return const SizedBox.shrink();
+  }
+
+  return Container(
+    margin: const EdgeInsets.only(top: 8),
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: Theme.of(context).brightness == Brightness.dark
+          ? TruxifyColors.darkSecondaryBackground
+          : TruxifyColors.secondaryBackground,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: [
+            if (item.isFragile)
+              _cargoBadge(
+                icon: Icons.warning_amber_rounded,
+                label: 'Fragile',
+                color: Colors.orange,
+              ),
+            if (!item.isStackable)
+              _cargoBadge(
+                icon: Icons.layers_clear,
+                label: 'Non-stackable',
+                color: TruxifyColors.errorRed,
+              ),
+          ],
+        ),
+        if (hasNotes) ...[
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.notes_rounded, size: 14, color: TruxifyColors.hintText),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  item.specialRequirements!.trim(),
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+Widget _cargoBadge({
+  required IconData icon,
+  required String label,
+  required Color color,
+}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +415,26 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isOffline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                color: TruxifyColors.errorRed,
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_off, color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Offline Mode. Progress saved locally.',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             // 1. Route Hero Card
             Container(
               width: double.infinity,
@@ -384,10 +538,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                             Text(
                               'Earnings',
                               style: GoogleFonts.dmSans(
-                                color:Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withValues(alpha: 0.6),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                             ),
@@ -626,62 +777,80 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: item.delivered
-                              ? TruxifyColors.success
-                              : TruxifyColors.errorRed,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.customerName,
-                              style: GoogleFonts.dmSans(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: item.delivered
+                                  ? TruxifyColors.success
+                                  : TruxifyColors.errorRed,
                             ),
-                            const SizedBox(height: 2),
-                            Row(
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  item.goods,
+                                  item.customerName,
                                   style: GoogleFonts.dmSans(
-                                    fontSize: 11,
-                                    color: TruxifyColors.adaptiveSecondaryText(context),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
-                                Text(
-                                  ' → ${item.destination}',
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 11,
-                                    color: TruxifyColors.accent,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    Text(
+                                      item.goods,
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: TruxifyColors.adaptiveSecondaryText(context),
+                                      ),
+                                    ),
+                                    Text(
+                                      ' → ${item.destination}',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: TruxifyColors.accent,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
+                          ),
+                          Text(
+                            item.earnings,
+                            style: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: TruxifyColors.accent,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ChatScreen(trip: trip),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, color: TruxifyColors.accent, size: 20),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.only(left: 12),
+                          ),
+                        ],
                       ),
-                      Text(
-                        item.earnings,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.accent,
-                        ),
-                      ),
+                      _buildCargoHandlingSection(context, item),
                     ],
                   ),
                 );
@@ -712,6 +881,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  _buildPaymentRow(
+                      'Escrow status', (widget.trip.escrowStatus ?? 'pending').toUpperCase()),
+                  const Divider(),
                   _buildPaymentRow(
                       'Base freight', breakdown?.baseFreight ?? '₹0'),
                   const Divider(),
@@ -748,6 +920,113 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                 ],
               ),
             ),
+
+            // OTP Confirm Delivery CTA — shown only for active trips
+            if (trip.status == TripStatusType.active)
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [TruxifyColors.accentDark, TruxifyColors.accent],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: TruxifyColors.accentDark.withValues(alpha: 0.35),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    id: 'btn_enter_otp_confirm_delivery',
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      final released = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => DeliveryOtpScreen(
+                            orderId: trip.tripId,
+                            orderDisplayId: trip.tripId,
+                            dropLat: trip.dropLat,
+                            dropLng: trip.dropLng,
+                            amountInr: trip.earnings.replaceAll('₹', '').trim(),
+                          ),
+                        ),
+                      );
+                      if (released == true && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                const Icon(Icons.check_circle_rounded,
+                                    color: Colors.white, size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Payment released! ${trip.earnings} credited.',
+                                  style: GoogleFonts.dmSans(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                            backgroundColor: Colors.green.shade700,
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                        Navigator.of(context).pop();
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.pin_rounded,
+                                color: Colors.white, size: 22),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Enter OTP & Confirm Delivery',
+                                  style: GoogleFonts.dmSans(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Get the 6-digit OTP from customer to release payment',
+                                  style: GoogleFonts.dmSans(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded,
+                              color: Colors.white, size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
 
             // 5. Blockchain Receipt
             Container(
@@ -823,12 +1102,12 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       ),
     );
   }
-
   Future<_RouteResult?> _loadRouteForTrip(String routeLabel) async {
     try {
       final normalized = routeLabel.replaceAll('->', '→').replaceAll('=>', '→');
       final parts = normalized.split('→');
       final startLabel = parts.isNotEmpty ? parts[0].trim() : '';
+
       final endLabel = parts.length > 1 ? parts[1].trim() : '';
 
       final start = startLabel.isNotEmpty
@@ -849,7 +1128,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
       final result = _RouteResult(start: start, end: end, routePoints: routePoints);
       return result;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[TripDetailScreen] Route resolution failed: $e');
       return null;
     }
   }

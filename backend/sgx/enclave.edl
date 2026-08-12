@@ -1,0 +1,9 @@
+enclave {
+    trusted {
+        public int ecall_verify_kyc_document([in, string] const char* doc_payload, [out, size=quote_max_len] char* out_attestation_quote, size_t quote_max_len);
+    };
+
+    untrusted {
+        void ocall_print_log([in, string] const char* str);
+    };
+};

@@ -18,10 +18,47 @@ function sanitizeLogLevel(level) {
 
 const rootLogger = pino({
   level: resolveLogLevel(),
+
+  redact: {
+    paths: [
+      // Request headers
+      'req.headers.authorization',
+      'req.headers.cookie',
+
+      // Generic headers
+      'headers.authorization',
+      'headers.cookie',
+
+      // Axios errors
+      'err.config.headers.authorization',
+
+      // Common secrets
+      'authorization',
+      'cookie',
+      'password',
+      'accessToken',
+      'refreshToken',
+      'apiKey',
+      'secret',
+      'clientSecret',
+
+      // Nested payloads
+      '*.password',
+      '*.accessToken',
+      '*.refreshToken',
+      '*.apiKey',
+    ],
+    censor: '[REDACTED]',
+  },
+
   ...(isDev && {
     transport: {
       target: 'pino-pretty',
-      options: { colorize: true, translateTime: 'SYS:standard', ignore: 'pid,hostname' },
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+      },
     },
   }),
 });

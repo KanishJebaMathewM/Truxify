@@ -6,23 +6,157 @@ import logger from '../backend/api/src/middleware/logger.js';
 
 const require = createRequire(import.meta.url);
 
+// wasm-bindgen modules built with `wasm-pack build --target nodejs` are not
+// plain WASI binaries: besides the wasi_snapshot_preview1 namespace they import
+// wasm-bindgen glue from `env` (memory + __wbindgen_malloc/realloc/free/throw).
+// Instantiating the bare .wasm without that glue throws a LinkError, which the
+// old code swallowed and /wasm/* answered {success:true, data:null} for.
+function buildWasmBindgenGlue(instanceRef) {
+    const allocExport = {
+        __wbindgen_malloc: ['__wbindgen_malloc', '__wbindgen_export_0'],
+        __wbindgen_realloc: ['__wbindgen_realloc', '__wbindgen_export_1'],
+        __wbindgen_free: ['__wbindgen_free', '__wbindgen_export_2'],
+    };
+
+    const callExport = (names, args) => {
+        const exports = instanceRef.current && instanceRef.current.exports;
+        for (const name of names) {
+            if (exports && typeof exports[name] === 'function') {
+                return exports[name](...args);
+            }
+        }
+        throw new Error(`wasm-bindgen allocator glue not exported (tried ${names.join(', ')})`);
+    };
+
+    return {
+        __wbindgen_malloc: (...args) => callExport(allocExport.__wbindgen_malloc, args),
+        __wbindgen_realloc: (...args) => callExport(allocExport.__wbindgen_realloc, args),
+        __wbindgen_free: (...args) => callExport(allocExport.__wbindgen_free, args),
+        __wbindgen_throw: (ptr, len) => {
+            const memory = (instanceRef.current && instanceRef.current.exports.memory) || instanceRef.memory;
+            if (!memory) {
+                throw new Error('wasm-bindgen threw before a memory was available');
+            }
+            const bytes = new Uint8Array(memory.buffer, ptr, len);
+            throw new Error(new TextDecoder().decode(bytes));
+        },
+        __wbindgen_exn_store: () => {
+            throw new Error('wasm-bindgen exception storage is not supported');
+        },
+    };
+}
+
+// Builds the import object for a wasm-bindgen module, filling in exactly the
+// `env` namespace entries the module declares (memory + allocator/panic glue)
+// plus the provided WASI namespace. Unknown imports are left unprovided so a
+// genuinely unsupported module still fails loudly instead of silently no-opping.
+function buildWasmImportObject(module, wasi) {
+    const imports = {};
+    if (wasi) {
+        imports.wasi_snapshot_preview1 = wasi.wasiImport;
+    }
+
+    const instanceRef = { current: null, memory: null };
+    const glue = buildWasmBindgenGlue(instanceRef);
+
+    const required = WebAssembly.Module.imports(module);
+    const env = {};
+    for (const imp of required) {
+        if (imp.module !== 'env') continue;
+        if (imp.kind === 'memory') {
+            instanceRef.memory = new WebAssembly.Memory({
+                initial: imp.minimum || 17,
+                maximum: imp.maximum,
+            });
+            env.memory = instanceRef.memory;
+        } else if (typeof glue[imp.name] === 'function') {
+            env[imp.name] = glue[imp.name];
+        }
+    }
+
+    if (Object.keys(env).length > 0) {
+        imports.env = env;
+    }
+    return { imports, bind: (instance) => { instanceRef.current = instance; } };
+}
+
 class EdgeRuntime {
     constructor() {
         this.wasmModules = new Map();
         this.edgeFunctions = new Map();
         this.isInitialized = false;
+        this.wasmError = null;
         this.memoryLimit = 128 * 1024 * 1024; // 128MB
         this.timeoutLimit = 5000; // 5 seconds
 
         logger.info('✅ Edge Runtime initialized');
     }
 
+    // Native JS implementations used when the wasm binary is absent or fails
+    // to instantiate, so /wasm/* keeps returning genuine results.
+    jsFallbackExports() {
+        return {
+            calculate_route: (params) => {
+                const basePrice = (params.distance || 0) * 10.0;
+                const weightFactor = (params.weight || 0) / 1000.0;
+                return {
+                    estimated_price: basePrice * (1.0 + weightFactor * 0.5),
+                    estimated_time: (params.distance || 0) / 40.0,
+                    route_id: `route_${Date.now()}`,
+                    status: 'calculated'
+                };
+            },
+            process_driver_location: (drivers) => (drivers || []).map((driver) => {
+                const updated = { ...driver };
+                if (driver.speed > 80) updated.status = 'fast';
+                else if (driver.speed > 50) updated.status = 'normal';
+                else updated.status = 'slow';
+                return updated;
+            }),
+            optimize_loads: (loads, capacity) => {
+                const selected = [];
+                let remaining = capacity || 0;
+                (loads || []).forEach((weight, i) => {
+                    if (weight <= remaining) {
+                        selected.push(i);
+                        remaining -= weight;
+                    }
+                });
+                return selected;
+            },
+            calculate_eta: (distance, speed, trafficFactor) =>
+                distance / (speed * Math.max(1.0 - (trafficFactor || 0), 0.1)),
+            filter_drivers: (drivers, minRating) =>
+                (drivers || []).filter((d) => d.status !== 'offline' && d.rating >= (minRating || 0)),
+            aggregate_prices: (prices) =>
+                prices && prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0,
+            hash_data: (data) => createHash('sha256').update(String(data)).digest('hex'),
+            compress_data: (data) => {
+                if (!data || data.length === 0) return [];
+                const compressed = [];
+                let count = 1;
+                for (let i = 1; i < data.length; i++) {
+                    if (data[i] === data[i - 1]) {
+                        count += 1;
+                    } else {
+                        compressed.push(data[i - 1], count);
+                        count = 1;
+                    }
+                }
+                compressed.push(data[data.length - 1], count);
+                return compressed;
+            },
+            get_stats: () => ({ memory_used_mb: 4.2, active_functions: 8 })
+        };
+    }
+
     async initialize() {
         if (this.isInitialized) return;
 
-        try {
-            const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm.wasm';
-            if (fs.existsSync(wasmPath)) {
+        const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm_routing.wasm';
+
+        if (fs.existsSync(wasmPath)) {
+            try {
                 const wasmBytes = fs.readFileSync(wasmPath);
                 const wasi = new WASI({
                     args: [],
@@ -33,75 +167,32 @@ class EdgeRuntime {
                     ),
                     preopens: { '/': './' }
                 });
-                const importObject = { wasi_snapshot_preview1: wasi.wasiImport };
-                const module = await WebAssembly.instantiate(wasmBytes, importObject);
+                const module = new WebAssembly.Module(wasmBytes);
+                const { imports, bind } = buildWasmImportObject(module, wasi);
+                const { instance } = await WebAssembly.instantiate(module, imports);
+                bind(instance);
                 this.wasmModules.set('default', {
                     module,
                     wasi,
-                    instance: module.instance,
-                    exports: module.instance.exports
+                    instance,
+                    exports: instance.exports
                 });
                 logger.info('✅ WASM binary module loaded');
-            } else {
-                logger.warn('⚠️ WASM binary file not found, initializing native JS calculation fallback engine');
+            } catch (err) {
+                // A LinkError here used to be swallowed, leaving /wasm/* to answer
+                // {success:true, data:null}. Record the real failure and fall back
+                // to the native JS engine so callers get genuine results.
+                this.wasmError = err.message;
+                logger.error(`WASM module failed to load: ${err.message}`);
                 this.wasmModules.set('default', {
-                    exports: {
-                        calculate_route: (params) => {
-                            const basePrice = (params.distance || 0) * 10.0;
-                            const weightFactor = (params.weight || 0) / 1000.0;
-                            return {
-                                estimated_price: basePrice * (1.0 + weightFactor * 0.5),
-                                estimated_time: (params.distance || 0) / 40.0,
-                                route_id: `route_${Date.now()}`,
-                                status: 'calculated'
-                            };
-                        },
-                        process_driver_location: (drivers) => (drivers || []).map((driver) => {
-                            const updated = { ...driver };
-                            if (driver.speed > 80) updated.status = 'fast';
-                            else if (driver.speed > 50) updated.status = 'normal';
-                            else updated.status = 'slow';
-                            return updated;
-                        }),
-                        optimize_loads: (loads, capacity) => {
-                            const selected = [];
-                            let remaining = capacity || 0;
-                            (loads || []).forEach((weight, i) => {
-                                if (weight <= remaining) {
-                                    selected.push(i);
-                                    remaining -= weight;
-                                }
-                            });
-                            return selected;
-                        },
-                        calculate_eta: (distance, speed, trafficFactor) =>
-                            distance / (speed * Math.max(1.0 - (trafficFactor || 0), 0.1)),
-                        filter_drivers: (drivers, minRating) =>
-                            (drivers || []).filter((d) => d.status !== 'offline' && d.rating >= (minRating || 0)),
-                        aggregate_prices: (prices) =>
-                            prices && prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0,
-                        hash_data: (data) => createHash('sha256').update(String(data)).digest('hex'),
-                        compress_data: (data) => {
-                            if (!data || data.length === 0) return [];
-                            const compressed = [];
-                            let count = 1;
-                            for (let i = 1; i < data.length; i++) {
-                                if (data[i] === data[i - 1]) {
-                                    count += 1;
-                                } else {
-                                    compressed.push(data[i - 1], count);
-                                    count = 1;
-                                }
-                            }
-                            compressed.push(data[data.length - 1], count);
-                            return compressed;
-                        },
-                        get_stats: () => ({ memory_used_mb: 4.2, active_functions: 8 })
-                    }
+                    exports: this.jsFallbackExports()
                 });
             }
-        } catch (err) {
-            logger.error(`WASM initialization warning: ${err.message}`);
+        } else {
+            logger.warn('⚠️ WASM binary file not found, initializing native JS calculation fallback engine');
+            this.wasmModules.set('default', {
+                exports: this.jsFallbackExports()
+            });
         }
 
         this.isInitialized = true;
@@ -109,14 +200,23 @@ class EdgeRuntime {
 
     async executeEdgeFunction(functionName, params) {
         const moduleEntry = this.wasmModules.get('default');
+        const wasmFn = moduleEntry && moduleEntry.exports &&
+            typeof moduleEntry.exports[functionName] === 'function';
 
-        if (moduleEntry && moduleEntry.exports && !moduleEntry.instance && typeof moduleEntry.exports[functionName] === 'function') {
-            try {
-                const result = await this.executeWithTimeout(() => moduleEntry.exports[functionName](...params), this.timeoutLimit);
-                return { success: true, result };
-            } catch (err) {
-                logger.error(`Edge function '${functionName}' failed: ${err.message}`);
-                return { success: false, error: err.message };
+        // Prefer the real wasm export; it executes off the main thread in the
+        // worker below. Otherwise fall back to a native JS implementation so
+        // callers get genuine results instead of null.
+        if (!(wasmFn && moduleEntry.instance)) {
+            const jsFallback = this.jsFallbackExports();
+            const fallbackFn = wasmFn ? moduleEntry.exports[functionName] : jsFallback[functionName];
+            if (typeof fallbackFn === 'function') {
+                try {
+                    const result = await this.executeWithTimeout(() => fallbackFn(...params), this.timeoutLimit);
+                    return { success: true, result };
+                } catch (err) {
+                    logger.error(`Edge function '${functionName}' failed: ${err.message}`);
+                    return { success: false, error: err.message };
+                }
             }
         }
 
@@ -133,10 +233,53 @@ class EdgeRuntime {
                 const { WASI } = require('wasi');
                 const wasmBytes = fs.readFileSync(wasmPath);
                 const wasi = new WASI({ args: [], env: {}, preopens: {} });
+
+                // Same wasm-bindgen glue as the main thread: supply env.memory
+                // and __wbindgen_* allocator/panic imports the module needs.
+                let envMemory = null;
+                const instanceRef = { current: null };
+                const allocExport = {
+                    __wbindgen_malloc: ['__wbindgen_malloc', '__wbindgen_export_0'],
+                    __wbindgen_realloc: ['__wbindgen_realloc', '__wbindgen_export_1'],
+                    __wbindgen_free: ['__wbindgen_free', '__wbindgen_export_2']
+                };
+                const callExport = (names, args) => {
+                    const exports = instanceRef.current && instanceRef.current.exports;
+                    for (const name of names) {
+                        if (exports && typeof exports[name] === 'function') return exports[name](...args);
+                    }
+                    throw new Error('wasm-bindgen allocator glue not exported');
+                };
+                const glue = {
+                    __wbindgen_malloc: (...args) => callExport(allocExport.__wbindgen_malloc, args),
+                    __wbindgen_realloc: (...args) => callExport(allocExport.__wbindgen_realloc, args),
+                    __wbindgen_free: (...args) => callExport(allocExport.__wbindgen_free, args),
+                    __wbindgen_throw: (ptr, len) => {
+                        const memory = (instanceRef.current && instanceRef.current.exports.memory) || envMemory;
+                        throw new Error(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)));
+                    },
+                    __wbindgen_exn_store: () => { throw new Error('wasm-bindgen exception storage is not supported'); }
+                };
+
+                const module = new WebAssembly.Module(wasmBytes);
+                const env = {};
+                for (const imp of WebAssembly.Module.imports(module)) {
+                    if (imp.module !== 'env') continue;
+                    if (imp.kind === 'memory') {
+                        envMemory = new WebAssembly.Memory({
+                            initial: imp.minimum || 17,
+                            maximum: imp.maximum
+                        });
+                        env.memory = envMemory;
+                    } else if (typeof glue[imp.name] === 'function') {
+                        env[imp.name] = glue[imp.name];
+                    }
+                }
                 const importObject = { wasi_snapshot_preview1: wasi.wasiImport };
-                const { instance } = new WebAssembly.Instance(
-                    new WebAssembly.Module(wasmBytes), importObject
-                );
+                if (Object.keys(env).length > 0) importObject.env = env;
+
+                const instance = new WebAssembly.Instance(module, importObject);
+                instanceRef.current = instance;
                 const func = instance.exports[functionName];
                 if (!func) throw new Error('Function ' + functionName + ' not found');
                 const result = func(...params);
@@ -146,7 +289,7 @@ class EdgeRuntime {
             }
         `;
 
-            const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm.wasm';
+            const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm_routing.wasm';
 
             const worker = new Worker(workerCode, {
                 eval: true,

@@ -1,5 +1,5 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
 
 const CHALLENGE_PERIOD = 24 * 60 * 60; // 1 day in seconds
 

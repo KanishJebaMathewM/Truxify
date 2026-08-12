@@ -56,7 +56,8 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(opts = {}) {
+  const { pickupLat, pickupLng, dropLat, dropLng } = opts || {};
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -166,7 +167,8 @@ function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
 
-export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {
+export async function getRouteGeometry(opts = {}) {
+  const { originLat, originLng, destLat, destLng } = opts || {};
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
@@ -229,7 +231,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       try {
         await redisClient.set(cacheKey, JSON.stringify(feature), 'EX', ROUTE_CACHE_TTL_SECONDS);
       } catch (err) {
-        logger.error('[osrm] Redis set error (geometry):', err.message);
+        logger.error({ event: 'OSRM_REDIS_SET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis set error (geometry)');
       }
     }
     return feature;
@@ -247,7 +249,8 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   });
 }
 
-export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
+export function buildStraightLineGeometry(opts = {}) {
+  const { originLat, originLng, destLat, destLng } = opts || {};
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
     !Number.isFinite(destLat) || !Number.isFinite(destLng)

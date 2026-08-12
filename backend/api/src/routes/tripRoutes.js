@@ -322,29 +322,33 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // caller owns or is assigned to. Never trust a client-supplied trip_id.
     // This runs BEFORE the idempotency short-circuit below, otherwise a
     // replayed batch would return 202 and skip authorization entirely.
-    if (req.user.role !== 'admin') {
-      const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
+    // The order lookup is also reused to resolve display ids to orders.id
+    // (uuid) for the trip_events write below, so it runs for every role
+    // (admins simply skip the per-trip 403 check).
+    let orderByDisplayId = new Map();
+    const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
 
-      if (tripIds.length > 0) {
-        // Trip ids sent by the app are trip display ids ('TX-' + order display id),
-        // not the orders.id uuid. Map them back to the bare order display id before
-        // looking up the owning order, otherwise every batch is rejected with 403.
-        const orderDisplayIds = tripIds.map(tripId =>
-          typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
-        );
+    if (tripIds.length > 0) {
+      // Trip ids sent by the app are trip display ids ('TX-' + order display id),
+      // not the orders.id uuid. Map them back to the bare order display id before
+      // looking up the owning order, otherwise every batch is rejected with 403.
+      const orderDisplayIds = tripIds.map(tripId =>
+        typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
+      );
 
-        const { data: ownedOrders, error: ownershipError } = await supabase
-          .from('orders')
-          .select('order_display_id, driver_id, customer_id')
-          .in('order_display_id', orderDisplayIds);
+      const { data: ownedOrders, error: ownershipError } = await supabase
+        .from('orders')
+        .select('id, order_display_id, driver_id, customer_id')
+        .in('order_display_id', orderDisplayIds);
 
-        if (ownershipError) {
-          logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
-          return res.status(500).json({ error: 'Internal Server Error' });
-        }
+      if (ownershipError) {
+        logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
+      }
 
-        const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
+      orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
 
+      if (req.user.role !== 'admin') {
         for (const tripId of tripIds) {
           const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
           const order = orderByDisplayId.get(orderDisplayId);
@@ -376,10 +380,25 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     const recordsToInsert = events.map(event => {
       const safeMetadata = deepSanitize(event.payload, SENSITIVE_FIELDS);
 
+      // The app sends the trip display id ('TX-' + order display id), but
+      // trip_events.trip_id is a uuid column that GET /trips/:id/events reads
+      // as orders.id. Resolve the display id through the ownership lookup
+      // (which maps display ids to orders); a raw orders.id uuid is passed
+      // through unchanged.
+      const rawTripId = event.trip_id;
+      let tripUuid = null;
+      if (rawTripId) {
+        const orderDisplayId = typeof rawTripId === 'string' && rawTripId.startsWith('TX-')
+          ? rawTripId.slice(3)
+          : rawTripId;
+        const matchedOrder = orderByDisplayId.get(orderDisplayId);
+        tripUuid = matchedOrder ? matchedOrder.id : (typeof rawTripId === 'string' ? rawTripId : null);
+      }
+
       return {
         event_id: event.id,
         user_id: userId,
-        trip_id: event.trip_id || null,
+        trip_id: tripUuid,
         event_type: event.type,
         event_timestamp: event.occurred_at,
         latitude: event.payload?.lat !== undefined ? Number(event.payload.lat) : null,

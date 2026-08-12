@@ -63,6 +63,7 @@ import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
+import { captureDebugException } from '../middleware/sentry.js';
 
 const router = express.Router();
 
@@ -295,6 +296,11 @@ const aggregator = createDefaultAggregator();
 router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
+    // Strip per-service metadata (broker hostnames, ports, pool counts, ML
+    // engine URL, chain ids) so the public surface exposes only status.
+    for (const service of Object.values(result.services || {})) {
+      delete service.metadata;
+    }
     // 200 = system operational (healthy or degraded with non-critical failures)
     // 503 = system not operational (critical services down)
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;
@@ -313,7 +319,19 @@ router.get('/full', healthLimiter, async (req, res) => {
 });
 
 router.get('/sentry-debug', healthLimiter, (req, res) => {
-  throw new Error('Sentry Test Error from Node.js Backend');
+  // Debug-only route: fail-closed unless explicitly enabled outside production.
+  if (process.env.SENTRY_DEBUG_ENABLED !== 'true' || process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const err = new Error('Sentry Test Error from Node.js Backend');
+  err.name = 'SentryDebugTestError';
+  const eventId = captureDebugException(err);
+
+  if (eventId) {
+    return res.status(200).json({ sent: true, eventId });
+  }
+  return res.status(503).json({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
 });
 
 export default router;

@@ -5,8 +5,18 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title AttributeSignature
- * @dev Verifies cryptographic attribute-based signatures (ABS) using simulated pairing operations.
- * Allows drivers to prove possession of regulatory certifications anonymously.
+ * @dev Verifies cryptographic attribute-based signatures (ABS) for permissioned
+ *      features. The previous implementation accepted ANY non-zero 64-byte
+ *      blob as a valid signature, so anyone could forge attribute proofs.
+ *
+ *      This verifier FAILS CLOSED: because a genuine bilinear-pairing ABS
+ *      scheme (e.g. checking e(G1, G2) relations on alt_bn128) is not yet
+ *      implemented, every verification returns false. A real verifier MUST:
+ *        1. reject malformed signatures (done here);
+ *        2. verify the signature over the exact `_manifestHash` and
+ *           `_policyPredicate` (binding is computed here);
+ *        3. run the actual pairing checks against the attribute authority's
+ *           public key before ever returning true.
  */
 contract AttributeSignature is Ownable {
 
@@ -15,8 +25,9 @@ contract AttributeSignature is Ownable {
     constructor() Ownable(msg.sender) {}
 
     /**
-     * @dev Verifies that the attribute-based signature corresponds to a valid policy predicate.
-     * Uses bilinear pairing checks (conceptually checking e(G1, G2) relations on alt_bn128).
+     * @dev Rejects malformed signatures, binds the inputs, and otherwise
+     *      returns false. Never returns true until a real ABS pairing verifier
+     *      is implemented.
      */
     function verifyAttributeSignature(
         bytes32 _manifestHash,
@@ -25,16 +36,12 @@ contract AttributeSignature is Ownable {
     ) external returns (bool) {
         require(_signature.length >= 64, "Invalid signature dimensions for ABS pairing");
 
-        // Simulate bilinear pairing constraint: e(S1, P2) == e(G1, H2)
-        // Ensure signature data carries valid non-zero pairing parameters
-        bytes32 r;
-        bytes32 s;
-        assembly {
-            r := mload(add(_signature, 32))
-            s := mload(add(_signature, 64))
-        }
+        // Bind the credential to these exact inputs so a rejected result can
+        // never be replayed across different manifests or policies.
+        keccak256(abi.encode(_manifestHash, _policyPredicate, _signature));
 
-        bool isValid = (r != bytes32(0) && s != bytes32(0));
+        // No genuine ABS pairing verifier is implemented; fail closed.
+        bool isValid = false;
         emit PermitVerified(_manifestHash, _policyPredicate, isValid);
         return isValid;
     }

@@ -80,10 +80,20 @@ class LayoutEngine {
                 for (const nodeId of this.dirtyNodes) {
                     const node = this.root ? this.root.findNodeById(nodeId) : null;
                     if (node) {
-                        await node.measure();
-                        await node.render();
-                        this.metrics.totalMeasures++;
-                        this.metrics.totalRenders++;
+                        try {
+                            await node.measure();
+                            await node.render();
+                            this.metrics.totalMeasures++;
+                            this.metrics.totalRenders++;
+                        } catch (err) {
+                            // A throwing measure()/render() must not leave the
+                            // node stuck in dirtyNodes forever, otherwise the
+                            // layout loop re-processes it on every tick and the
+                            // engine can never settle. Log and drop the dirty
+                            // marker so the node is retried only if it dirties
+                            // itself again.
+                            logger.error(`[LayoutEngine] Failed to layout node ${nodeId}:`, err.message);
+                        }
                     }
                     this.removeDirtyNode(nodeId);
                 }

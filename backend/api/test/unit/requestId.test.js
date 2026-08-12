@@ -105,4 +105,14 @@ describe('requestLogger', () => {
       expect.objectContaining({ durationMs: expect.any(Number) })
     );
   });
+
+  it('never logs a negative durationMs', () => {
+    const req = { requestId: 'test-id', method: 'GET', originalUrl: '/api/health' };
+    const res = makeRes(200);
+    requestLogger(req, res, vi.fn());
+    // Force a "finish" that fires instantly; the clamped duration must be >= 0.
+    res.emit('finish');
+    const payload = logger.info.mock.calls[0][0];
+    expect(payload.durationMs).toBeGreaterThanOrEqual(0);
+  });
 });

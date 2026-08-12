@@ -229,16 +229,50 @@ class CausalImpact:
             
             impact = CausalImpact(data, pre_period, post_period)
             impact.run()
-            
-            summary = impact.summary()
-            report = impact.report()
-            
+
+            # ``impact.summary()`` returns a formatted string table (not a
+            # dict), and this package version has no ``report()`` method, so
+            # the numeric values are read directly from the posterior
+            # ``inferences`` DataFrame. The derivations mirror the library's
+            # own summary computations so the reported numbers are consistent.
+            post_inf = impact.inferences.loc[impact.params["post_period"][0]:impact.params["post_period"][1], :]
+            post_resp = post_inf["response"]
+            post_pred = post_inf["point_pred"]
+            post_pred_lower = post_inf["point_pred_lower"]
+            post_pred_upper = post_inf["point_pred_upper"]
+
+            mean_pred = float(post_pred.mean())
+            absolute_effect = float((post_resp - post_pred).mean())
+            absolute_lower = float((post_resp - post_pred_upper).mean())
+            absolute_upper = float((post_resp - post_pred_lower).mean())
+            relative_effect = (absolute_effect / mean_pred * 100) if mean_pred != 0 else 0.0
+
+            # Approximate p-value from the counterfactual prediction interval
+            # (same normal-approximation used by the causalimpact package).
+            from scipy.stats import norm
+            std_pred = (float(post_pred_upper.mean()) - mean_pred) / 1.96
+            z_score = (0 - mean_pred) / std_pred if std_pred != 0 else 0.0
+            p_value = float(norm.cdf(z_score))
+
+            confidence_interval = [absolute_lower, absolute_upper]
+            report = (
+                f"Average absolute effect {absolute_effect:.4f} "
+                f"({relative_effect:.2f}%) with a 95% interval of "
+                f"[{absolute_lower:.4f}, {absolute_upper:.4f}]. "
+                f"P-value: {p_value:.4f}."
+            )
+
             return {
-                'absolute_effect': summary.get('absolute_effect', 0),
-                'relative_effect': summary.get('relative_effect', 0),
-                'p_value': summary.get('p_value', 1.0),
-                'confidence_interval': summary.get('confidence_interval', [0, 0]),
-                'summary': summary,
+                'absolute_effect': absolute_effect,
+                'relative_effect': relative_effect,
+                'p_value': p_value,
+                'confidence_interval': confidence_interval,
+                'summary': {
+                    'absolute_effect': absolute_effect,
+                    'relative_effect': relative_effect,
+                    'p_value': p_value,
+                    'confidence_interval': confidence_interval,
+                },
                 'report': report
             }
         except Exception as e:

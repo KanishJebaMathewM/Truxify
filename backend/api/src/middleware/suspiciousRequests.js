@@ -41,7 +41,11 @@ export default function suspiciousRequests(req, res, next) {
   const body = JSON.stringify(req.body || {});
   const query = JSON.stringify(req.query || {});
   const url = req.originalUrl || "";
-  const ua = req.headers["user-agent"] || "";
+  const rawUa = req.headers["user-agent"];
+  // A repeated user-agent header arrives as an array; take the first value
+  // and clamp the length so a hostile agent string cannot inject log lines.
+  const ua = (Array.isArray(rawUa) ? rawUa[0] : rawUa) || "";
+  const uaForLog = typeof ua === "string" ? ua.slice(0, 256) : String(ua).slice(0, 256);
 
   const findings = [];
 
@@ -67,7 +71,7 @@ export default function suspiciousRequests(req, res, next) {
       method: req.method,
       path: req.originalUrl,
       findings,
-      userAgent: ua,
+      userAgent: uaForLog,
     }, "Suspicious request detected");
 
     const blocking = findings.filter(f =>

@@ -1,7 +1,7 @@
 ﻿import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
-import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { acquireLock, releaseLock, renewLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 
@@ -14,7 +14,13 @@ const DEFAULT_FUNDING_TTL_MINUTES = 30;
 const MAX_ATTEMPTS = 10;
 const BASE_BACKOFF_MS = 60_000;
 const LOCK_KEY = 'escrow:funding:reconciliation:lock';
-const LOCK_TTL_SECONDS = 120;
+const LOCK_TTL_MS = 120_000;
+const LOCK_RENEW_INTERVAL_MS = 30_000;
+// Per-order lock TTL must comfortably exceed the longest per-order
+// operation (escrow refund submit + on-chain confirmation can take
+// 60+ seconds) so the lock never expires mid-processing and a second
+// instance cannot re-process the same order concurrently (issue #11178).
+const ORDER_LOCK_TTL_MS = 180_000;
 // PostgREST caps a single response at 1000 rows; page through the stale set
 // deterministically so a large stuck funding queue is drained rather than
 // only ever processing the leading slice (#9219).
@@ -34,7 +40,7 @@ function dueForRetry(order) {
 
 async function finalizeOrRevert(order, orderRepository) {
   const lockKey = `escrow_lock:${order.id}`;
-  const lockValue = await acquireLock(lockKey, 30000);
+  const lockValue = await acquireLock(lockKey, ORDER_LOCK_TTL_MS);
   if (!lockValue) {
     logger.info(`[escrow-funding] Order ${order.order_display_id} locked by another process, skipping.`);
     return;
@@ -280,20 +286,44 @@ export async function reconcileStaleFunding(orderRepository) {
   if (!orderRepository) throw new Error('reconcileStaleFunding requires an OrderRepository instance');
   if (fundingRunning) return;
   fundingRunning = true;
-  let globalLockAcquired = false;
+  let globalLockToken = null;
+  let lockRenewalTimer = null;
+
+  const stopLockRenewal = () => {
+    if (lockRenewalTimer) {
+      clearInterval(lockRenewalTimer);
+      lockRenewalTimer = null;
+    }
+  };
 
   try {
     if (redisClient) {
       try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+        globalLockToken = await acquireLock(LOCK_KEY, LOCK_TTL_MS);
       } catch (err) {
         logger.error('[escrow-funding] Failed to acquire Redis global lock, skipping batch:', err.message);
         return;
       }
-      if (!globalLockAcquired) {
+      if (!globalLockToken) {
         logger.info('[escrow-funding] Global lock held by another instance, skipping batch.');
         return;
       }
+      // Hold the global lock for the entire batch and extend it on a
+      // background interval (ownership-verified renewal) so a long
+      // per-order blockchain operation can never let the global lock
+      // expire mid-batch and allow another reconciliation instance to
+      // process the same orders concurrently (issue #11178).
+      lockRenewalTimer = setInterval(async () => {
+        try {
+          const renewed = await renewLock(LOCK_KEY, globalLockToken, LOCK_TTL_MS);
+          if (!renewed) {
+            logger.warn('[escrow-funding] Global lock no longer owned by this instance.');
+          }
+        } catch (err) {
+          logger.warn('[escrow-funding] Failed to renew global lock:', err.message);
+        }
+      }, LOCK_RENEW_INTERVAL_MS);
+      lockRenewalTimer.unref?.();
     }
 
     const ttlMinutes = Number(process.env.ESCROW_FUNDING_TTL_MINUTES);
@@ -317,22 +347,16 @@ export async function reconcileStaleFunding(orderRepository) {
           continue;
         }
         if (!dueForRetry(order)) continue;
-        if (globalLockAcquired && redisClient) {
-          try {
-            await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-          } catch (err) {
-            logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
-          }
-        }
         await finalizeOrRevert(order, orderRepository);
       }
 
       if (staleOrders.length < STALE_FUNDING_PAGE_SIZE) break;
     }
   } finally {
-    if (globalLockAcquired && redisClient) {
+    stopLockRenewal();
+    if (globalLockToken && redisClient) {
       try {
-        await redisClient.del(LOCK_KEY);
+        await releaseLock(LOCK_KEY, globalLockToken);
       } catch (err) {
         logger.warn('[escrow-funding] Failed to release global lock:', err.message);
       }

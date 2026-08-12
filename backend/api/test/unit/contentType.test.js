@@ -1,19 +1,9 @@
-/**
- * Unit tests for backend/api/src/middleware/contentType.js
- *
- * Coverage:
- *   - Returns 415 for POST/PUT/PATCH without content-type header
- *   - Returns 415 for POST/PUT/PATCH with unsupported content-type
- *   - Calls next() for POST/PUT/PATCH with application/json
- *   - Calls next() for POST/PUT/PATCH with application/x-www-form-urlencoded
- *   - Calls next() for POST/PUT/PATCH with multipart/form-data
- *   - Ignores GET/DELETE requests (calls next() without checking)
- *   - Ignores charset parameter in content-type comparison
- *
- * Run with: npx vitest run test/unit/contentType.test.js
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requireJsonContent } from '../../src/middleware/contentType.js';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 function createMocks(overrides = {}) {
   const jsonMock = vi.fn();
@@ -35,19 +25,44 @@ function createMocks(overrides = {}) {
   };
 }
 
-describe('requireJsonContent', () => {
-  let req;
-  let res;
-  let next;
+describe('contentType', () => {
+  it('is a function', async () => {
+    const mod = await import('../../src/middleware/contentType.js');
+    expect(typeof (mod.requireJsonContent || mod.default)).toBe('function');
+  });
 
-  beforeEach(() => {
-    req = { method: 'POST', headers: {} };
-    res = {
-      status: vi.fn(() => ({
-        json: vi.fn(),
-      })),
-    };
-    next = vi.fn();
+  describe('array-valued content-type header', () => {
+    it('accepts the first value when the header is a repeated array', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': ['application/json', 'text/plain'] } },
+      });
+      requireJsonContent(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('returns 415 when the array holds an unsupported media type', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': ['text/plain'] } },
+      });
+      requireJsonContent(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(415);
+      expect(res._jsonMock).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'Unsupported Media Type.', received: 'text/plain' }),
+      );
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('returns 415 without throwing when the array is empty', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': [] } },
+      });
+      expect(() => requireJsonContent(req, res, next)).not.toThrow();
+      expect(res.status).toHaveBeenCalledWith(415);
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 
   describe('POST requests', () => {

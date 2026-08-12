@@ -187,6 +187,23 @@ describe('validateQuery middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  it('returns 400 instead of 500 when schema.safeParse throws on a malformed query', () => {
+    const throwingSchema = {
+      safeParse: () => {
+        throw new Error('malformed query value');
+      },
+    };
+    const req = { query: {} };
+    const res = makeRes();
+    const next = makeNext();
+    validateQuery(throwingSchema)(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'Validation failed' })
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
 
 
 });

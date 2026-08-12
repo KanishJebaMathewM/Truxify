@@ -200,7 +200,8 @@ const getOrderResource = async (req) => {
 };
 
 
-router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+  const { id } = req.params;
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
@@ -210,7 +211,7 @@ router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
-  if (!id || !id.trim()) {
+  if (!req.params.id || !req.params.id.trim()) {
     return res.status(400).json({ error: 'Invalid order id' });
   }
   let geofenceRadiusM;
@@ -640,7 +641,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   }
 
   try {
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance');
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
@@ -1076,7 +1077,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
+      const { error: upErr } = await createUserClient(req.token).storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -1097,7 +1098,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
+      const { error: upErr } = await createUserClient(req.token).storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -1154,6 +1155,13 @@ router.get('/history', authenticate, userLimiter, requirePolicy('order:view-hist
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
 
+  if (page < 1) {
+    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
+  }
+  if (limit < 1 || limit > 100) {
+    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
+  }
+
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
     return res.json(result);
@@ -1187,6 +1195,13 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
+
+  if (page < 1) {
+    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
+  }
+  if (limit < 1 || limit > 100) {
+    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
+  }
 
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);

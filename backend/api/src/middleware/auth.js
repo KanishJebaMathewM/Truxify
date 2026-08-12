@@ -159,7 +159,9 @@ export async function verifyAuthToken(token) {
       userProfile = profile;
 
       if (userProfile) {
-        const cacheTtl = Math.min(TTL_SECONDS, Math.max(1, tokenRemaining));
+        // Clamp the cached profile TTL to the token's remaining lifetime so a
+        // cached profile can never outlive the access token that authorised it.
+        const cacheTtl = Math.max(1, Math.min(TTL_SECONDS, tokenRemaining));
         await setCachedProfile(firebaseUid, {
           id: userProfile.id,
           uid: userProfile.firebase_uid,

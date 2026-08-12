@@ -35,7 +35,7 @@ export function errorHandler(err, req, res, next) {
 
   // Handle Zod validation errors
   if (err && err.name === 'ZodError') {
-    logger.warn({ requestId: req.requestId, errors: err.errors }, 'Zod validation failed');
+    logger.warn({ requestId: req.requestId, errors: err.issues }, 'Zod validation failed');
     return res.status(400).json({
       success: false,
       error: 'Validation failed',

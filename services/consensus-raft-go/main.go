@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/rand"
 	"net/http"
@@ -72,6 +73,27 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
+	return true
+}
+
+// maxRequestBodyBytes caps request bodies decoded by this service (1 MiB) so
+// an oversized or streamed body cannot be buffered into memory.
+const maxRequestBodyBytes = 1 << 20
+
+// decodeJSONBody decodes r.Body into v with a 1 MiB cap. It writes a 413 and
+// returns false when the body exceeds the cap; the net/http server drains and
+// closes the connection afterwards so it is not left in an unsafe state.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return false
+	}
 	return true
 }
 
@@ -413,7 +435,15 @@ func (rn *RaftNode) sendHeartbeats() {
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
 				rn.matchIndex[res.url] = newMatch
-				rn.nextIndex[res.url] = newMatch + 1
+			}
+			// nextIndex must never lag matchIndex+1. Repairing it separately
+			// matters when a stale failure response has already decremented
+			// nextIndex below what the follower is known to hold: newMatch
+			// would then not exceed matchIndex, and nesting this update inside
+			// that check would leave nextIndex stuck low forever, re-sending
+			// entries the follower already has on every heartbeat.
+			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
+				rn.nextIndex[res.url] = next
 			}
 		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
 			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
@@ -551,8 +581,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RequestVoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -596,8 +625,7 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req AppendEntriesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -692,8 +720,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		Command string `json:"command"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 

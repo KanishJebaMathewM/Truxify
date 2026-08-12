@@ -4,20 +4,24 @@ const NAME = 'websocket';
 
 function check() {
   const wsState = globalThis.__truxify_wsState;
-  if (wsState && typeof wsState === 'object') {
-    const pubSub = wsState.pubSub;
-    return {
-      status: wsState.hasWebSocketServer ? HealthStatus.HEALTHY : HealthStatus.DEGRADED,
-      metadata: {
-        hasServer: Boolean(wsState.hasWebSocketServer),
-        hasHeartbeat: Boolean(wsState.hasWsHeartbeatInterval),
-        isSchedulerActive: Boolean(wsState.isSchedulerActive),
-        pubSubEnabled: Boolean(pubSub && pubSub.enabled),
-        pubSubReady: Boolean(pubSub && pubSub.ready),
-      },
-    };
+  if (!wsState || typeof wsState !== 'object') {
+    // No WebSocket server state was registered: fail closed instead of
+    // reporting a server that never started as healthy.
+    return { status: HealthStatus.UNHEALTHY, message: 'no_websocket_server' };
   }
-  return { status: HealthStatus.HEALTHY, message: 'active' };
+  const pubSub = wsState.pubSub;
+  const hasServer = Boolean(wsState.hasWebSocketServer);
+  return {
+    status: hasServer ? HealthStatus.HEALTHY : HealthStatus.UNHEALTHY,
+    message: hasServer ? 'active' : 'server_not_running',
+    metadata: {
+      hasServer,
+      hasHeartbeat: Boolean(wsState.hasWsHeartbeatInterval),
+      isSchedulerActive: Boolean(wsState.isSchedulerActive),
+      pubSubEnabled: Boolean(pubSub && pubSub.enabled),
+      pubSubReady: Boolean(pubSub && pubSub.ready),
+    },
+  };
 }
 
 export default function websocketHealth(opts) {

@@ -1627,6 +1627,7 @@ begin
   update trips
     set status   = 'completed',
         end_time = p_end_time,
+        net_earnings = p_net_earnings,
         updated_at = now()
     where trip_display_id = p_trip_display_id;
 
@@ -1666,7 +1667,8 @@ drop function if exists complete_trip_tx(uuid, uuid, text);
 create or replace function complete_trip_tx(
   p_order_id uuid,
   p_otp_id uuid,
-  p_release_tx_hash text default null
+  p_release_tx_hash text default null,
+  p_hours_driven numeric(4,2) default 0.00
 )
 returns table(driver_id uuid)
 language plpgsql
@@ -1730,10 +1732,13 @@ begin
     raise exception 'No active trip found for this order — cannot complete trip';
   end if;
 
-  -- Update trip record
+  -- Update trip record, persisting net_earnings so the sum-based earnings
+  -- readers (driverEarningsService, statements, driver app) report the payout
+  -- the wallet credit below actually made (issue #8941)
   update trips
   set status = 'completed',
       end_time = to_char(now(), 'HH24:MI'),
+      net_earnings = v_order.total_amount,
       updated_at = now()
   where trip_display_id = v_trip_display_id;
 
@@ -1795,12 +1800,13 @@ begin
   );
 
   -- Update daily earnings summary
-  insert into earnings_daily (driver_id, day_date, amount, trip_count)
-  values (v_order.driver_id, current_date, v_order.total_amount, 1)
+  insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
+  values (v_order.driver_id, current_date, v_order.total_amount, 1, p_hours_driven)
   on conflict (driver_id, day_date)
   do update set
     amount = earnings_daily.amount + excluded.amount,
-    trip_count = earnings_daily.trip_count + 1;
+    trip_count = earnings_daily.trip_count + 1,
+    hours_driven = earnings_daily.hours_driven + excluded.hours_driven;
 
   driver_id := v_order.driver_id;
   return next;

@@ -10,6 +10,7 @@ import {
   DEADHEAD_COLUMNS,
   DEADHEAD_MAX_GAP_DAYS,
   DEADHEAD_MAX_ROWS,
+  EARNINGS_MAX_ROWS,
   EARNINGS_TRIP_COLUMNS,
   buildWeeklyChart,
   countDeadheadTripsSaved,
@@ -54,6 +55,12 @@ describe('column selection', () => {
   it('caps the deadhead scan', () => {
     expect(DEADHEAD_MAX_ROWS).toBeGreaterThan(0);
     expect(Number.isFinite(DEADHEAD_MAX_ROWS)).toBe(true);
+  });
+
+  it('caps the period earnings query at the PostgREST response limit', () => {
+    expect(EARNINGS_MAX_ROWS).toBeGreaterThan(0);
+    expect(EARNINGS_MAX_ROWS).toBeLessThanOrEqual(1000);
+    expect(Number.isFinite(EARNINGS_MAX_ROWS)).toBe(true);
   });
 });
 
@@ -162,17 +169,23 @@ describe('sumEarnings', () => {
 });
 
 describe('buildWeeklyChart', () => {
-  it('always returns seven day buckets', () => {
-    expect(buildWeeklyChart([], BASE)).toHaveLength(7);
+  it('always returns seven day buckets for the week period', () => {
+    expect(buildWeeklyChart([], { period: 'week', now: BASE })).toHaveLength(7);
   });
 
-  it('buckets earnings onto the correct weekday', () => {
+  it('returns one bucket for the day period and thirty for the month period', () => {
+    expect(buildWeeklyChart([], { period: 'day', now: BASE })).toHaveLength(1);
+    expect(buildWeeklyChart([], { period: 'month', now: BASE })).toHaveLength(30);
+  });
+
+  it('buckets earnings onto the correct calendar date', () => {
     const chart = buildWeeklyChart(
       [{ trip_date: daysFrom(BASE, 0), total_earnings: 5000 }],
-      BASE
+      { period: 'week', now: BASE }
     );
-    const total = chart.reduce((sum, bucket) => sum + bucket.earnings, 0);
-    expect(total).toBe(5000);
+    const bucketsWithEarnings = chart.filter((b) => b.earnings > 0);
+    expect(bucketsWithEarnings).toHaveLength(1);
+    expect(bucketsWithEarnings[0].day).toBe(daysFrom(BASE, 0));
   });
 
   it('accumulates multiple trips on the same day', () => {
@@ -181,15 +194,31 @@ describe('buildWeeklyChart', () => {
         { trip_date: daysFrom(BASE, 0), total_earnings: 5000 },
         { trip_date: daysFrom(BASE, 0), total_earnings: 3000 },
       ],
-      BASE
+      { period: 'week', now: BASE }
     );
     expect(chart.reduce((s, b) => s + b.earnings, 0)).toBe(8000);
+  });
+
+  it('does not merge the same weekday across different weeks', () => {
+    // 2026-07-12 and 2026-08-02 are exactly 21 days apart, so they share a
+    // weekday. They must land in distinct date buckets.
+    const chart = buildWeeklyChart(
+      [
+        { trip_date: '2026-07-12', total_earnings: 1000 },
+        { trip_date: '2026-08-02', total_earnings: 2000 },
+      ],
+      { period: 'month', now: new Date('2026-08-10T00:00:00.000Z') }
+    );
+    const bucketsWithEarnings = chart.filter((b) => b.earnings > 0);
+    expect(bucketsWithEarnings).toHaveLength(2);
+    expect(bucketsWithEarnings[0].day).toBe('2026-07-12');
+    expect(bucketsWithEarnings[1].day).toBe('2026-08-02');
   });
 
   it('ignores trips with an unparseable date', () => {
     const chart = buildWeeklyChart(
       [{ trip_date: 'not-a-date', total_earnings: 5000 }],
-      BASE
+      { period: 'week', now: BASE }
     );
     expect(chart.reduce((s, b) => s + b.earnings, 0)).toBe(0);
   });
@@ -197,14 +226,14 @@ describe('buildWeeklyChart', () => {
   it('treats a null total_earnings as zero', () => {
     const chart = buildWeeklyChart(
       [{ trip_date: daysFrom(BASE, 0), total_earnings: null }],
-      BASE
+      { period: 'week', now: BASE }
     );
     expect(chart.every((b) => Number.isFinite(b.earnings))).toBe(true);
   });
 
   it('handles empty and non-array input', () => {
-    expect(buildWeeklyChart(null, BASE)).toHaveLength(7);
-    expect(buildWeeklyChart(undefined, BASE)).toHaveLength(7);
+    expect(buildWeeklyChart(null, { period: 'week', now: BASE })).toHaveLength(7);
+    expect(buildWeeklyChart(undefined, { period: 'week', now: BASE })).toHaveLength(7);
   });
 });
 

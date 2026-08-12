@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
+import 'package:provider/provider.dart';
 import 'app.dart';
 import 'core/firebase_config.dart';
 import 'package:truxify_driver/config/env.dart';
+import 'providers/text_scale_provider.dart';
+
+import 'providers/language_provider.dart';
 import 'services/background_sync_service.dart';
 
 Future<void> main() async {
@@ -69,7 +73,16 @@ Future<void> main() async {
 
   // Wrap runApp in a guarded zone to capture uncaught async errors.
   runZonedGuarded(() {
-    runApp(const TruxifyApp());
+    final languageProvider = LanguageProvider();
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => TextScaleProvider()),
+          ChangeNotifierProvider.value(value: languageProvider),
+        ],
+        child: TruxifyApp(languageProvider: languageProvider),
+      ),
+    );
   }, (error, stackTrace) {
     CrashReportingService.captureException(
       error,

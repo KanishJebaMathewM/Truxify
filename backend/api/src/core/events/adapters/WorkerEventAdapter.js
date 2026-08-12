@@ -1,5 +1,5 @@
 import { EventPublisher } from '../EventPublisher.js';
-import { EventSubscriber as EventSubscriberBase } from '../EventSubscriber.js';
+import { EventSubscriber } from '../EventSubscriber.js';
 import logger from '../../../middleware/logger.js';
 
 export class WorkerEventAdapter extends EventPublisher {
@@ -100,15 +100,15 @@ export class WorkerEventAdapter extends EventPublisher {
 
   _emitWorkerEvent(workerName, event) {
     const handlers = this._messageHandlers.get(workerName) || [];
-      for (const handler of handlers) {
-        try {
-          const result = handler(event);
-          if (result && typeof result.catch === 'function') {
-            result.catch(err => logger.error('[WorkerEventAdapter] Handler error:', err.message));
-          }
-        } catch (err) {
-          logger.error('[WorkerEventAdapter] Handler error:', err.message);
+    for (const handler of handlers) {
+      try {
+        const result = handler(event);
+        if (result && typeof result.catch === 'function') {
+          result.catch(err => logger.error('[WorkerEventAdapter] Handler error:', err.message));
         }
+      } catch (err) {
+        logger.error('[WorkerEventAdapter] Handler error:', err.message);
       }
+    }
   }
 }

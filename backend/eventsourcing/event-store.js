@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 import { BaseEvent, EVENT_SOURCES, EVENT_CATEGORIES } from '../api/src/core/events/index.js';

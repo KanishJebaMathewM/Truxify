@@ -9,17 +9,15 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Internal Server Error' }),
     };
 
-    let error;
     try {
       await mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST');
     } catch (err) {
-      error = err;
+      expect(err.message).toContain('POST');
+      expect(err.message).toContain('https://api.ml.com/predict');
+      expect(err.message).toContain('500');
+      return;
     }
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain('POST');
-    expect(error.message).toContain('https://api.ml.com/predict');
-    expect(error.message).toContain('500');
+    throw new Error('Expected rejection');
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {
@@ -29,17 +27,15 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Unauthorized' }),
     };
 
-    let error;
     try {
       await mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET');
     } catch (err) {
-      error = err;
+      expect(err.message).toContain('GET');
+      expect(err.message).toContain('https://api.ml.com/embed');
+      expect(err.message).toContain('401');
+      return;
     }
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain('GET');
-    expect(error.message).toContain('https://api.ml.com/embed');
-    expect(error.message).toContain('401');
+    throw new Error('Expected rejection');
   });
 
   it('should include method, url, and status 403 for forbidden', async () => {
@@ -49,16 +45,14 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Forbidden' }),
     };
 
-    let error;
     try {
       await mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT');
     } catch (err) {
-      error = err;
+      expect(err.message).toContain('PUT');
+      expect(err.message).toContain('https://api.ml.com/train');
+      expect(err.message).toContain('403');
+      return;
     }
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toContain('PUT');
-    expect(error.message).toContain('https://api.ml.com/train');
-    expect(error.message).toContain('403');
+    throw new Error('Expected rejection');
   });
 });

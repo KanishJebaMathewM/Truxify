@@ -26,6 +26,11 @@ vi.mock('../../src/middleware/logger.js', () => ({
   }
 }));
 
+const mockCaptureDebugException = vi.fn();
+vi.mock('../../src/middleware/sentry.js', () => ({
+  captureDebugException: (...args) => mockCaptureDebugException(...args),
+}));
+
 const { default: healthRouter } = await import('../../src/routes/healthRoutes.js');
 
 function buildApp() {
@@ -216,10 +221,30 @@ describe('GET /api/health/sentry-debug', () => {
 
   beforeEach(() => {
     app = buildApp();
+    mockCaptureDebugException.mockReset();
   });
 
-  it('triggers a Sentry debug error and returns 500', async () => {
+  it('returns 404 when the debug route is not enabled', async () => {
+    delete process.env.SENTRY_DEBUG_ENABLED;
     const res = await request(app).get('/api/health/sentry-debug');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when enabled but Sentry is not configured', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
+    mockCaptureDebugException.mockReturnValue(null);
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
+    expect(mockCaptureDebugException).toHaveBeenCalled();
+  });
+
+  it('captures a sample event and returns its id when enabled', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
+    mockCaptureDebugException.mockReturnValue('test-event-id');
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true, eventId: 'test-event-id' });
   });
 });

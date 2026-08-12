@@ -50,7 +50,7 @@ export function errorHandler(err, req, res, next) {
     });
   }
 
-  logger.error({ requestId: req.requestId, err }, 'Unhandled express exception');
+  logger.error({ requestId: req.requestId, traceId: req.traceId, err }, 'Unhandled express exception');
   
   res.status(500).json({
     success: false,

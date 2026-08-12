@@ -63,7 +63,7 @@ describe('osrm - buildRouteUrl', () => {
 });
 
 describe('osrm - buildCacheKey', ()=> {
-  it('rounds coordinates to 6 decimal places with v2 prefix', () => {
+  it('rounds coordinates to 8 decimal places with v2 prefix', () => {
     const key = buildCacheKey({
       pickupLat: 12.9715987,
       pickupLng: 77.5945627,
@@ -328,6 +328,11 @@ describe('osrm - getRouteEstimate edge cases', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('returns null for null input', async () => {

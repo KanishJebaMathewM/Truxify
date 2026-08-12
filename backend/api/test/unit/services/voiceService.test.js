@@ -28,7 +28,7 @@ const mockCreateUserClient = vi.fn();
 
 vi.mock('../../../src/config/db.js', () => ({
   supabase: mockSupabase,
-  supabaseAdmin: undefined,
+  supabaseAdmin: mockSupabase,
   createUserClient: mockCreateUserClient,
 }));
 

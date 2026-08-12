@@ -188,6 +188,7 @@ describe('tracker', () => {
         error: 'Invalid telemetry payload.',
         details: ['lat must be a valid number'],
       }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be a valid number'] }));
     });
 
     it('rejects out-of-range coordinates', async () => {
@@ -198,6 +199,7 @@ describe('tracker', () => {
         error: 'Invalid telemetry payload.',
         details: ['lat must be <= 90'],
       }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be <= 90'] }));
     });
 
     it('buffers valid location ping', async () => {

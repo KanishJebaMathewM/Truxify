@@ -45,32 +45,44 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
         deviceChanged: req.deviceChanged || false
       });
 
-      if (risk && risk.riskScore > RISK_REVIEW_THRESHOLD) {
-        // Flag for review
-        await fraudDetection.addToReviewQueue(
-          userId,
-          `Suspicious activity on ${req.path}`,
-          risk.riskScore
-        );
+      if (risk) {
+        // Clamp the risk score so a malformed service response (NaN,
+        // negative, or > 1) can never pass/fail the thresholds incorrectly.
+        const rawScore = Number(risk.riskScore);
+        const riskScore = Number.isFinite(rawScore) ? Math.min(1, Math.max(0, rawScore)) : 0;
+        risk.riskScore = riskScore;
 
-        // Block high-risk transactions
-        if (risk.riskScore > RISK_BLOCK_THRESHOLD) {
-          return res.status(403).json({
-            error: 'Transaction blocked due to suspicious activity',
-            riskScore: risk.riskScore,
-            riskLevel: risk.riskLevel
-          });
+        if (riskScore > RISK_REVIEW_THRESHOLD) {
+          // Flag for review. The reason carries the request id so review
+          // entries can be traced back to a specific request in the logs.
+          await fraudDetection.addToReviewQueue(
+            userId,
+            `Suspicious activity on ${req.path} (requestId: ${req.requestId || req.id || 'unknown'})`,
+            riskScore
+          );
+
+          // Block high-risk transactions
+          if (riskScore > RISK_BLOCK_THRESHOLD) {
+            return res.status(403).json({
+              error: 'Transaction blocked due to suspicious activity',
+              riskScore,
+              riskLevel: risk.riskLevel
+            });
+          }
         }
-      }
 
-      // Add risk info to request for downstream use
-      req.riskScore = risk?.riskScore || 0;
-      req.riskLevel = risk?.riskLevel || 'LOW';
+        // Add risk info to request for downstream use
+        req.riskScore = riskScore;
+        req.riskLevel = risk?.riskLevel || 'LOW';
+      } else {
+        req.riskScore = 0;
+        req.riskLevel = 'LOW';
+      }
     }
 
     next();
   } catch (error) {
-    logger.error('Fraud middleware error — failing closed:', error);
+    logger.error({ requestId: req.requestId, err: error }, 'Fraud middleware error — failing closed');
     return res.status(503).json({
       error: 'Fraud detection service is temporarily unavailable. Please retry.',
     });

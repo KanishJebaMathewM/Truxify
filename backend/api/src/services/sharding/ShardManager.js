@@ -188,19 +188,66 @@ class ShardManager {
     }
   }
 
-  async executeCrossShardQuery(queries) {
-    // Execute same query across all shards and combine results
-    const results = [];
+  async executeCrossShardQuery(queries, options = {}) {
+    const { mergeResults = false, sortField = null, sortOrder = 'asc', limit = null, offset = 0 } = options;
+
+    const shardNames = [];
+    const promises = [];
+
     for (const [name, shard] of this.shards) {
       if (shard.pool) {
-        try {
-          const result = await shard.pool.query(queries.query, queries.params || []);
-          results.push({ shard: name, data: result.rows });
-        } catch (error) {
-          logger.error(`Error querying shard ${name}:`, error);
-        }
+        shardNames.push(name);
+        promises.push(shard.pool.query(queries.query, queries.params || []));
       }
     }
+
+    const settled = await Promise.allSettled(promises);
+    const results = [];
+
+    for (let i = 0; i < settled.length; i++) {
+      const name = shardNames[i];
+      const res = settled[i];
+      if (res.status === 'fulfilled') {
+        results.push({ shard: name, data: res.value.rows });
+      } else {
+        logger.error(`Error querying shard ${name}:`, res.reason);
+      }
+    }
+
+    if (mergeResults) {
+      let combined = [];
+      for (const r of results) {
+        if (r.data) {
+          combined.push(...r.data);
+        }
+      }
+
+      if (sortField) {
+        combined.sort((a, b) => {
+          const valA = a[sortField];
+          const valB = b[sortField];
+          if (valA === valB) return 0;
+          if (valA == null) return 1;
+          if (valB == null) return -1;
+          
+          let comp = 0;
+          if (typeof valA === 'string' && typeof valB === 'string') {
+            comp = valA.localeCompare(valB);
+          } else {
+            comp = valA < valB ? -1 : 1;
+          }
+          return sortOrder.toLowerCase() === 'desc' ? -comp : comp;
+        });
+      }
+
+      if (limit !== null) {
+        combined = combined.slice(offset, offset + limit);
+      } else if (offset > 0) {
+        combined = combined.slice(offset);
+      }
+      return combined;
+    }
+
     return results;
   }
 

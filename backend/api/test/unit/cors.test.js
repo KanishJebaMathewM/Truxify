@@ -67,4 +67,14 @@ describe('corsMiddleware', () => {
       process.env.NODE_ENV = originalEnv
     }
   })
+
+  it('allows localhost when the origin has surrounding whitespace', async () => {
+    const { res } = await invoke('  http://localhost:8080  ')
+    expect(res.getHeader('access-control-allow-origin')).toBeTruthy()
+  })
+
+  it('allows localhost with a case-variant hostname', async () => {
+    const { res } = await invoke('http://LOCALHOST:8080')
+    expect(res.getHeader('access-control-allow-origin')).toBe('http://LOCALHOST:8080')
+  })
 })

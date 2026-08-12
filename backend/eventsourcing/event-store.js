@@ -19,6 +19,22 @@ import {
   deriveOrderStatus,
 } from '../api/src/core/orders/read-model-schema.js';
 
+/**
+ * DEPRECATED — superseded by the unified outbox pipeline (Issue #1).
+ *
+ * The authoritative order-event pipeline is:
+ *   order mutation -> event_outbox (durable, same txn) -> OUTBOX RELAY
+ *   -> Kafka -> order.consumer.js -> orders_read_model.
+ *
+ * This module (`event_store` / `snapshots` / `drivers_read_model`) is NOT wired
+ * into the API and its routes are not mounted. It is kept only as an
+ * independent reference event store. New order events MUST be produced via the
+ * outbox trigger (`trg_orders_event_outbox`, see
+ * supabase/migrations/20260810000000_event_outbox_and_read_model.sql) and
+ * consumed via backend/kafka. `orders_read_model` is shared with the
+ * authoritative pipeline (the consumer is the single active writer).
+ */
+
 // Topic names mirror the values in backend/kafka/config/kafka.config.js.
 // They are duplicated here (instead of importing TOPICS) so this package does
 // not statically depend on kafkajs, which is not part of the repo's install.

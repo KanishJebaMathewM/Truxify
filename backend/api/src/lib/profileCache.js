@@ -218,8 +218,16 @@ export async function getCachedProfile(firebaseUid) {
   try {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
+      const parsed = JSON.parse(raw);
+      // A corrupted payload that parses to a non-object (e.g. "42", "null",
+      // "some string") must not be treated as a valid cached profile.
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        cacheMisses++;
+        await redisClient.del(firebaseProfileKey(firebaseUid)).catch(() => {});
+        return null;
+      }
       cacheHits++;
-      return JSON.parse(raw);
+      return parsed;
     }
     cacheMisses++;
     return null;
@@ -250,6 +258,11 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
+  // Clamp the TTL the same way the Supabase setters do: a non-positive TTL
+  // would immediately expire the key, and an unbounded TTL could pin a
+  // stale (e.g. deactivated) profile in cache for a very long time.
+  if (!Number.isFinite(Number(ttlSeconds)) || ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       firebaseProfileKey(firebaseUid),

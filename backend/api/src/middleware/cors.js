@@ -31,8 +31,11 @@ export const corsMiddleware = cors({
     if (allowedOrigins.includes(cleanOrigin)) return callback(null, true);
 
     if (process.env.NODE_ENV !== "production") {
-      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(
-        origin,
+      // The localhost regex runs on the trimmed origin so a trailing space
+      // cannot bypass the check, and the hostname is matched
+      // case-insensitively ("LOCALHOST" is still localhost).
+      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(
+        cleanOrigin,
       );
       if (isLocalhost) return callback(null, true);
     }

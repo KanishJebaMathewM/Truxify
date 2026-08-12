@@ -528,7 +528,19 @@ export function requireRole(allowedRoles) {
     );
   }
 
-  const sanitizedAllowedRoles = allowedRoles.map(r => typeof r === "string" ? r.trim() : r);
+  // Trim each entry and drop anything that is not a non-empty string, so a
+  // misconfigured array like ['admin', 42, '   '] cannot silently produce a
+  // role check that never matches (denying every user) or worse, matches on
+  // a garbage value.
+  const sanitizedAllowedRoles = allowedRoles
+    .map(r => typeof r === "string" ? r.trim() : "")
+    .filter(r => r.length > 0);
+
+  if (sanitizedAllowedRoles.length === 0) {
+    throw new Error(
+      "requireRole middleware requires at least one non-empty role string.",
+    );
+  }
 
   return (req, res, next) => {
     if (!req.user) {

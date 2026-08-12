@@ -155,12 +155,12 @@ const consecutiveDropCount = new Map();
 // DRIVER STATE TTL & LAZY CLEANUP
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_THRESHOLD = 50;
-const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000;
+const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 300000; // default 5 min
 let lastDriverStateSweep = 0;
 
 function sweepStaleDriverState(now) {
-  if (consecutiveDropCount.size < DRIVER_STATE_SWEEP_THRESHOLD) return;
+  // Clean up stale driver state periodically regardless of Map size to
+  // prevent unbounded memory growth from drivers who stop sending telemetry.
   if (now - lastDriverStateSweep < DRIVER_STATE_SWEEP_INTERVAL_MS) return;
   lastDriverStateSweep = now;
   for (const [driverId, entry] of consecutiveDropCount) {

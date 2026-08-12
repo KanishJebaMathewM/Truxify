@@ -144,4 +144,15 @@ describe('i18n - errorTranslationInterceptor', () => {
     wrappedJson(body2);
     expect(body2.error).toBe('Translated');
   });
+
+  it('passes a non-object body through unchanged', () => {
+    mockReq.t = vi.fn();
+    capturedOriginalJson.mockReturnValue(mockRes);
+    errorTranslationInterceptor(mockReq, mockRes, mockNext);
+    const wrappedJson = mockRes.json;
+    const arr = ['a', 'b'];
+    wrappedJson(arr);
+    expect(arr).toEqual(['a', 'b']);
+    expect(mockReq.t).not.toHaveBeenCalled();
+  });
 });

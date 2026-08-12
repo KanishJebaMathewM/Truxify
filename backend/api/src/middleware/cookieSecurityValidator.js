@@ -1,6 +1,6 @@
 import logger from './logger.js';
 
-const RECOMMENDED_ATTRIBUTES = ['HttpOnly', 'SameSite', 'Path'];
+const RECOMMENDED_ATTRIBUTES = ['HttpOnly', 'SameSite', 'Path', 'Secure'];
 
 export default function cookieSecurityValidator(req, res, next) {
   const originalSetHeader = res.setHeader.bind(res);
@@ -20,8 +20,11 @@ function validateCookies(req, value) {
 
   for (const cookie of cookies) {
     const cookieValue = String(cookie);
+    // Attribute names are case-insensitive per RFC 6265 (e.g. `httponly`
+    // is equivalent to `HttpOnly`), so match on the lowercased cookie.
+    const lowerCookie = cookieValue.toLowerCase();
     const missingAttributes = RECOMMENDED_ATTRIBUTES.filter(
-      (attribute) => !cookieValue.includes(attribute)
+      (attribute) => !lowerCookie.includes(attribute.toLowerCase())
     );
 
     if (missingAttributes.length === 0) continue;

@@ -1,8 +1,8 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { loadCredential, handshake } from '../controllers/escortWalletController.js';
-import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { loadCredential, resolveCredentialSubject, handshake } from '../controllers/escortWalletController.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 
 const router = express.Router();
 
@@ -10,13 +10,15 @@ const router = express.Router();
 router.post(
     '/credential',
     authenticate,
-    // Typically, an authority or the escort driver themselves might issue/upload this.
-    // For this feature, we'll allow authenticated users to post credentials.
     [
         body('subject').isString().notEmpty().withMessage('Subject address or DID is required'),
         body('credentialType').isString().notEmpty().withMessage('Credential type is required'),
         body('schema').isObject().withMessage('Schema must be a valid JSON object')
     ],
+    // Only the escort driver themselves (for their own wallet address) or an
+    // administrator may issue a credential — never any authenticated user for
+    // an arbitrary subject.
+    requirePolicy('escort:issue-credential', resolveCredentialSubject),
     loadCredential
 );
 

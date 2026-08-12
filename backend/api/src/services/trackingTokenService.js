@@ -5,8 +5,9 @@ const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 
 export class TrackingTokenService {
-  constructor({ supabase, logger: injectedLogger }) {
+  constructor({ supabase, supabaseAdmin, logger: injectedLogger }) {
     this._supabase = supabase;
+    this._supabaseAdmin = supabaseAdmin;
     this._logger = injectedLogger || logger;
   }
 
@@ -98,6 +99,7 @@ export class TrackingTokenService {
 
     if (error) {
       this._logger.error({ error, orderDisplayId }, 'Failed to revoke tracking tokens for order');
+      throw new Error('Failed to revoke tracking tokens for order');
     }
   }
 
@@ -206,7 +208,10 @@ export class TrackingTokenService {
       return null;
     }
 
-    const { data: location, error: locationError } = await this._supabase
+    // `driver_locations` has no anon RLS policy, so the service-role client is
+    // required to read the rows written by the tracker (issue #8932).
+    const db = this._supabaseAdmin ?? this._supabase;
+    const { data: location, error: locationError } = await db
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)

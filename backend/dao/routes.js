@@ -1,11 +1,12 @@
 import express from 'express';
 import daoService from './dao.service.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Join DAO
-router.post('/dao/join', async (req, res) => {
+router.post('/dao/join', authenticate, async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -24,7 +25,7 @@ router.post('/dao/join', async (req, res) => {
 });
 
 // Leave DAO
-router.post('/dao/leave', async (req, res) => {
+router.post('/dao/leave', authenticate, async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -43,7 +44,7 @@ router.post('/dao/leave', async (req, res) => {
 });
 
 // Create proposal
-router.post('/dao/proposal/create', async (req, res) => {
+router.post('/dao/proposal/create', authenticate, async (req, res) => {
     try {
         const { title, description, callData, target, value, proposalType, proposer } = req.body;
         if (!title || !description) {
@@ -70,17 +71,17 @@ router.post('/dao/proposal/create', async (req, res) => {
 });
 
 // Cast vote
-router.post('/dao/vote/cast', async (req, res) => {
+router.post('/dao/vote/cast', authenticate, async (req, res) => {
     try {
-        const { proposalId, support, votingPower, voterAddress } = req.body;
-        if (!proposalId) {
+        const { proposalId, votingPower, voterAddress } = req.body;
+        if (!proposalId || !votingPower) {
             return res.status(400).json({
                 success: false,
-                error: 'proposalId required'
+                error: 'proposalId and votingPower required'
             });
         }
 
-        const result = await daoService.castVote(proposalId, support, votingPower, voterAddress);
+        const result = await daoService.castVote(proposalId, votingPower, voterAddress);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Vote casting error:', error);
@@ -89,7 +90,7 @@ router.post('/dao/vote/cast', async (req, res) => {
 });
 
 // Execute proposal
-router.post('/dao/proposal/execute', async (req, res) => {
+router.post('/dao/proposal/execute', authenticate, async (req, res) => {
     try {
         const { proposalId } = req.body;
         if (!proposalId) {
@@ -107,27 +108,8 @@ router.post('/dao/proposal/execute', async (req, res) => {
     }
 });
 
-// Treasury proposal
-router.post('/dao/treasury/proposal', async (req, res) => {
-    try {
-        const { recipient, amount, reason } = req.body;
-        if (!recipient || !amount) {
-            return res.status(400).json({
-                success: false,
-                error: 'recipient and amount required'
-            });
-        }
-
-        const result = await daoService.treasuryProposal(recipient, amount, reason);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Treasury proposal error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
 // Get proposal
-router.get('/dao/proposal/:proposalId', async (req, res) => {
+router.get('/dao/proposal/:proposalId', authenticate, async (req, res) => {
     try {
         const { proposalId } = req.params;
         const proposal = await daoService.getProposal(proposalId);
@@ -139,7 +121,7 @@ router.get('/dao/proposal/:proposalId', async (req, res) => {
 });
 
 // Get member
-router.get('/dao/member/:userAddress', async (req, res) => {
+router.get('/dao/member/:userAddress', authenticate, async (req, res) => {
     try {
         const { userAddress } = req.params;
         const member = await daoService.getMember(userAddress);
@@ -151,7 +133,7 @@ router.get('/dao/member/:userAddress', async (req, res) => {
 });
 
 // Get stats
-router.get('/dao/stats', async (req, res) => {
+router.get('/dao/stats', authenticate, async (req, res) => {
     try {
         const stats = await daoService.getDAOStats();
         res.json({ success: true, data: stats });

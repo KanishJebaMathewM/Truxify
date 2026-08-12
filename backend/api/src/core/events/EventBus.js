@@ -14,7 +14,7 @@ class EventBus extends EventEmitter {
     this._registry = new EventRegistry();
     this._deduplication = new Map();
     this._deduplicationWindowMs = 60000;
-    this._handlerWrappers = new WeakMap();
+    this._listenerWrappers = new Map();
     this._metrics = {
       published: 0,
       subscribed: 0,
@@ -186,25 +186,46 @@ class EventBus extends EventEmitter {
           }
         });
       };
-      this._handlerWrappers.set(handler, tracedHandler);
-      this.on(eventType, tracedHandler);
+      this._registerListener(eventType, handler, tracedHandler);
       return this;
     }
 
     if (handler && typeof handler.handle === 'function') {
       this._metrics.subscribed++;
-      const tracedHandlerInstance = (event) => handler.handle(event);
-      this._handlerWrappers.set(handler, tracedHandlerInstance);
-      this.on(eventType, tracedHandlerInstance);
+      const instanceHandler = (event) => handler.handle(event);
+      this._registerListener(eventType, handler, instanceHandler);
       return this;
     }
 
     throw new Error('subscribe() requires a function or EventHandler instance');
   }
 
+  _registerListener(eventType, handler, listener) {
+    let byHandler = this._listenerWrappers.get(eventType);
+    if (!byHandler) {
+      byHandler = new Map();
+      this._listenerWrappers.set(eventType, byHandler);
+    }
+    const listeners = byHandler.get(handler);
+    if (listeners) {
+      listeners.push(listener);
+    } else {
+      byHandler.set(handler, [listener]);
+    }
+    this.on(eventType, listener);
+  }
+
   unsubscribe(eventType, handler) {
-    if (typeof handler === 'function') {
-      this.removeListener(eventType, this._handlerWrappers.get(handler) || handler);
+    const byHandler = this._listenerWrappers.get(eventType);
+    const listeners = byHandler?.get(handler);
+    if (listeners) {
+      for (const listener of listeners) {
+        this.removeListener(eventType, listener);
+      }
+      byHandler.delete(handler);
+      if (byHandler.size === 0) {
+        this._listenerWrappers.delete(eventType);
+      }
     }
     return this;
   }

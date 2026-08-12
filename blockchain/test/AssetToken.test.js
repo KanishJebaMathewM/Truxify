@@ -252,6 +252,49 @@ describe("AssetToken", function () {
     assert.equal(await ethers.provider.getBalance(assetToken.target), 0n);
   });
 
+  it("should block plain ERC20 transfer/transferFrom so the fractional-ownership ledger cannot desync", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // Plain ERC20 transfer must revert with guidance instead of moving tokens
+    // without updating fractionalOwnership/backedTokens.
+    await assert.rejects(
+      assetToken.connect(buyer1).transfer(buyer2.address, ethers.parseEther("4")),
+      /plain ERC20 transfers disabled/
+    );
+
+    // transferFrom must be blocked the same way.
+    await assert.rejects(
+      assetToken.connect(buyer1).transferFrom(buyer1.address, buyer2.address, ethers.parseEther("4")),
+      /plain ERC20 transferFrom disabled/
+    );
+
+    // The ledgers are unchanged and buyer2 received nothing.
+    const buyer1Ownership = await assetToken.getFractionalOwnership(1, buyer1.address);
+    const buyer2Ownership = await assetToken.getFractionalOwnership(1, buyer2.address);
+    assert.equal(buyer1Ownership.amount, ethers.parseEther("10"));
+    assert.equal(buyer1Ownership.backedTokens, ethers.parseEther("10"));
+    assert.equal(buyer2Ownership.amount, 0n);
+    assert.equal(await assetToken.balanceOf(buyer2.address), 0n);
+
+    // The asset-aware path still works and keeps the ledger in sync.
+    await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4"));
+    assert.equal((await assetToken.getFractionalOwnership(1, buyer1.address)).amount, ethers.parseEther("6"));
+    assert.equal((await assetToken.getFractionalOwnership(1, buyer2.address)).amount, ethers.parseEther("4"));
+    assert.equal(await assetToken.balanceOf(buyer2.address), ethers.parseEther("4"));
+  });
+
   it("should keep the buy-back backing for tokens acquired via a secondary-market trade", async function () {
     const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
     await assetToken.connect(owner).createAsset(
@@ -420,5 +463,84 @@ describe("AssetToken", function () {
     assert.equal(assetAfter.availableTokens, T);
     assert.equal(await assetToken.getIssuedTokens(1), 0n);
     assert.equal(await assetToken.totalSupply(), 0n);
+  });
+
+  it("should charge the 1e18-normalized cost on an exact secondary-market trade", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    // tokenPrice = 1 ETH/token. buyer1 funds 10 tokens.
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // List 10 tokens at 1.5 ETH/token (price is stored in the 1e18-scaled unit).
+    await assetToken.connect(buyer1).createTradeOrder(1, ethers.parseEther("10"), ethers.parseEther("1.5"), "sell");
+
+    // Correct cost = 10 tokens * 1.5 ETH = 15 ETH. Before the 1e18
+    // normalization the contract demanded 1e18x this value and every
+    // secondary-market execution reverted with "Insufficient payment".
+    const sellerBalanceBefore = await ethers.provider.getBalance(buyer1.address);
+    await assetToken.connect(buyer2).executeTradeOrder(1, 0, {
+      value: ethers.parseEther("15")
+    });
+    const sellerBalanceAfter = await ethers.provider.getBalance(buyer1.address);
+
+    // The seller receives exactly 15 ETH (the seller pays no gas on execution).
+    assert.equal(sellerBalanceAfter - sellerBalanceBefore, ethers.parseEther("15"));
+
+    // The order is filled and buyer2 holds the escrowed tokens.
+    const order = (await assetToken.getTradeOrders(1))[0];
+    assert.equal(order.isActive, false);
+    assert.equal(order.buyer, buyer2.address);
+    const buyer2Ownership = await assetToken.getFractionalOwnership(1, buyer2.address);
+    assert.equal(buyer2Ownership.amount, ethers.parseEther("10"));
+  });
+
+  it("should floor the 1e18-normalized cost and refund excess on non-exact trade amounts", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    // tokenPrice = 1 ETH/token. buyer1 funds a fractional 1.5 tokens.
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("1.5"), {
+      value: ethers.parseEther("1.5")
+    });
+
+    // List the 1.5 tokens at price = 3 wei per token. The 1e18-normalized
+    // cost is floor(1.5e18 * 3 / 1e18) = floor(4.5) = 4 wei.
+    await assetToken.connect(buyer1).createTradeOrder(1, ethers.parseEther("1.5"), 3, "sell");
+
+    // Underpaying by even one wei must still revert.
+    await assert.rejects(
+      assetToken.connect(buyer2).executeTradeOrder(1, 0, { value: 3n }),
+      /Insufficient payment/
+    );
+
+    const sellerBalanceBefore = await ethers.provider.getBalance(buyer1.address);
+    await assetToken.connect(buyer2).executeTradeOrder(1, 0, {
+      value: 10n
+    });
+    const sellerBalanceAfter = await ethers.provider.getBalance(buyer1.address);
+
+    // The seller receives the floored 4 wei, never the 1e18x inflated value.
+    assert.equal(sellerBalanceAfter - sellerBalanceBefore, 4n);
+
+    const order = (await assetToken.getTradeOrders(1))[0];
+    assert.equal(order.isActive, false);
+    assert.equal(order.buyer, buyer2.address);
   });
 });

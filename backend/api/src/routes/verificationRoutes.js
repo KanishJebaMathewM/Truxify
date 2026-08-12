@@ -103,7 +103,7 @@ router.get('/order/:orderId', orderVerificationLimiter, authenticate, validatePa
         error: error.message,
       });
     }
-
+    logger.error({ event: 'VERIFICATION_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'Verification upload error');
     res.status(500).json({
       success: false,
       error: error.message
@@ -165,10 +165,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken, userId: bodyUserId } = req.body;
-    const userId = req.user?.id || bodyUserId;
+    const { accessToken } = req.body;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID is required' });
+      return res.status(401).json({ success: false, error: 'Not authenticated: req.user is missing.' });
     }
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
@@ -188,6 +188,7 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
 
 const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -201,7 +202,7 @@ const upload = multer({
   },
 });
 
-router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticate, async (req, res) => {
+router.post('/kyc/upload', authenticate, kycUploadLimiter, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;
     if (!req.file) {
@@ -244,7 +245,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const mlApiKey = process.env.ML_API_KEY;
 
     if (!mlBaseUrl || !mlApiKey) {
-      logger.error('[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
+      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED' }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
       return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
     }
 
@@ -254,6 +255,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
       headers: {
         'X-API-Key': mlApiKey,
       },
+      signal: AbortSignal.timeout(OCR_HTTP_TIMEOUT_MS),
     });
 
     if (!mlResponse.ok) {
@@ -287,6 +289,9 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
       data: ocrData
     });
   } catch (error) {
+    if (error?.name === 'AbortError') {
+      return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
+    }
     res.status(500).json({
       success: false,
       error: error.message

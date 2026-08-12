@@ -1,6 +1,6 @@
 import os from 'os';
 import { supabaseAdmin } from '../config/db.js';
-import { escrowRelease, getEscrowBooking, getEscrowBookingId } from './escrow.js';
+import { escrowRelease, getEscrowBooking, getEscrowBookingId, resolveExpectedDepositAmount } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, LockAcquisitionError } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
@@ -117,7 +117,7 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
 async function finalizeReleasedOrder(order, orderRepository) {
   const { data: fresh, error: readError } = await orderRepository.findOrderById(
     order.id,
-    'id, order_display_id, status, escrow_status, escrow_disabled, escrow_booking_id, escrow_release_attempts, escrow_release_last_attempt_at, escrow_release_error, release_tx_hash, escrow_released_at'
+    'id, order_display_id, status, escrow_status, escrow_disabled, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_release_attempts, escrow_release_last_attempt_at, escrow_release_error, release_tx_hash, escrow_released_at'
   );
 
   if (readError || !fresh) {
@@ -141,7 +141,11 @@ async function finalizeReleasedOrder(order, orderRepository) {
   if (!chainReleased) {
     if (fresh.escrow_status === 'release_failed') {
       // A previous release attempt failed before the tx landed — retry it.
-      const releaseResult = await escrowRelease(fresh.order_display_id);
+      const resolvedAmount = resolveExpectedDepositAmount(fresh);
+      if (resolvedAmount.error) {
+        throw new Error(resolvedAmount.error);
+      }
+      const releaseResult = await escrowRelease(fresh.order_display_id, resolvedAmount.expectedAmountWei);
       if (releaseResult.txHash) {
         await finalizeWithRelease(fresh, releaseResult.txHash, orderRepository);
       } else if (releaseResult.alreadyReleased) {

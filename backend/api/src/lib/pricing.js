@@ -18,6 +18,11 @@
 import logger from '../middleware/logger.js';
 
 export function sanitizePrice(value) {
+  // Reject empty/whitespace strings and hex-like strings ('0x10' -> 16) that
+  // Number() would coerce; only decimal numbers are meaningful for prices.
+  if (typeof value === 'string' && (value.trim() === '' || !/^-?\d*\.?\d+$/.test(value.trim()))) {
+    return 0;
+  }
   const num = Number(value);
   return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
 }
@@ -135,6 +140,22 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   if (!rateCard.handlingFee || rateCard.handlingFee < 0) {
     throw new RangeError(`handlingFee must be >= 0, got ${rateCard.handlingFee}`);
   }
+  // A caller-supplied rate card bypasses parsePositiveInt, so every numeric
+  // field must be validated here: a NaN/negative multiplier or percentage
+  // would otherwise silently zero out fees or flip the freight sign.
+  const numericFields = {
+    fragileMultiplier: { min: 0 },
+    stackableDiscount: { min: 0 },
+    tollPerKm: { min: 0 },
+    platformFeePct: { min: 0 },
+    fuelCostPct: { min: 0 },
+  };
+  for (const [field, { min }] of Object.entries(numericFields)) {
+    const value = rateCard[field];
+    if (!Number.isFinite(value) || value < min) {
+      throw new RangeError(`${field} must be a finite number >= ${min}, got ${value}`);
+    }
+  }
 
   const {
     pickupLat, pickupLng, dropLat, dropLng,
@@ -147,6 +168,10 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
     throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
+  }
+
+  if (pickupLat == null || pickupLng == null || dropLat == null || dropLng == null) {
+    throw new TypeError('computeOrderPricing: pickupLat, pickupLng, dropLat, and dropLng are required and cannot be null');
   }
 
   const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
@@ -186,8 +211,11 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 }
 
 export function convertKmToMiles(km) {
-  if (typeof km !== 'number' || Number.isNaN(km)) {
-    throw new TypeError('km must be a number');
+  if (typeof km !== 'number' || Number.isNaN(km) || !Number.isFinite(km)) {
+    throw new TypeError('km must be a finite number');
+  }
+  if (km < 0) {
+    throw new RangeError('km must be non-negative');
   }
   return km * 0.621371;
 }

@@ -1,11 +1,12 @@
 import express from 'express';
 import swapService from './swap.service.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Create swap
-router.post('/swap/create', async (req, res) => {
+router.post('/swap/create', authenticate, async (req, res) => {
     try {
         const { counterparty, tokenAddress, amount, secret } = req.body;
         if (!counterparty || !amount) {
@@ -29,7 +30,7 @@ router.post('/swap/create', async (req, res) => {
 });
 
 // Execute swap
-router.post('/swap/execute', async (req, res) => {
+router.post('/swap/execute', authenticate, async (req, res) => {
     try {
         const { swapId, secret } = req.body;
         if (!swapId || !secret) {
@@ -48,7 +49,7 @@ router.post('/swap/execute', async (req, res) => {
 });
 
 // Refund swap
-router.post('/swap/refund', async (req, res) => {
+router.post('/swap/refund', authenticate, async (req, res) => {
     try {
         const { swapId } = req.body;
         if (!swapId) {
@@ -67,7 +68,7 @@ router.post('/swap/refund', async (req, res) => {
 });
 
 // Create cross-chain swap
-router.post('/swap/cross-chain/create', async (req, res) => {
+router.post('/swap/cross-chain/create', authenticate, async (req, res) => {
     try {
         const { destChainId, counterparty, tokenAddress, amount, secret } = req.body;
         if (!destChainId || !counterparty || !amount) {
@@ -92,7 +93,7 @@ router.post('/swap/cross-chain/create', async (req, res) => {
 });
 
 // Execute cross-chain swap
-router.post('/swap/cross-chain/execute', async (req, res) => {
+router.post('/swap/cross-chain/execute', authenticate, async (req, res) => {
     try {
         const { swapId, secret, proof } = req.body;
         if (!swapId || !secret || !proof) {
@@ -111,7 +112,7 @@ router.post('/swap/cross-chain/execute', async (req, res) => {
 });
 
 // Refund cross-chain swap
-router.post('/swap/cross-chain/refund', async (req, res) => {
+router.post('/swap/cross-chain/refund', authenticate, async (req, res) => {
     try {
         const { swapId } = req.body;
         if (!swapId) {
@@ -129,8 +130,19 @@ router.post('/swap/cross-chain/refund', async (req, res) => {
     }
 });
 
+// Get stats
+router.get('/swap/stats', authenticate, async (req, res) => {
+    try {
+        const stats = await swapService.getSwapStats();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        logger.error('Stats error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Get swap
-router.get('/swap/:swapId', async (req, res) => {
+router.get('/swap/:swapId', authenticate, async (req, res) => {
     try {
         const { swapId } = req.params;
         const swap = await swapService.getSwap(swapId);
@@ -142,24 +154,13 @@ router.get('/swap/:swapId', async (req, res) => {
 });
 
 // Get cross-chain swap
-router.get('/swap/cross-chain/:swapId', async (req, res) => {
+router.get('/swap/cross-chain/:swapId', authenticate, async (req, res) => {
     try {
         const { swapId } = req.params;
         const swap = await swapService.getCrossChainSwap(swapId);
         res.json({ success: true, data: swap });
     } catch (error) {
         logger.error('Cross-chain swap fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Get stats
-router.get('/swap/stats', async (req, res) => {
-    try {
-        const stats = await swapService.getSwapStats();
-        res.json({ success: true, data: stats });
-    } catch (error) {
-        logger.error('Stats error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

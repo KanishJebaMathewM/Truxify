@@ -202,7 +202,7 @@ const upload = multer({
   },
 });
 
-router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticate, async (req, res) => {
+router.post('/kyc/upload', authenticate, kycUploadLimiter, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;
     if (!req.file) {

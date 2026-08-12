@@ -1,8 +1,19 @@
 import kafka, { TOPICS, CONSUMER_GROUPS } from '../config/kafka.config.js';
 import processedEventRepository from '../repositories/processedEvent.repository.js';
 import deadLetterRepository from '../repositories/deadLetter.repository.js';
+import orderReadModel from '../cqrs/order.read.model.js';
 import logger from '../../api/src/middleware/logger.js';
 
+// Topics whose only side effect is the order read-model projection. These are
+// applied ATOMICALLY with their idempotency record (apply_order_event), so a
+// duplicate/replayed message is a no-op and an event is never marked processed
+// before its read-model update succeeds.
+const ORDER_READ_MODEL_TOPICS = new Set([
+  TOPICS.ORDER_CREATED,
+  TOPICS.ORDER_UPDATED,
+  TOPICS.ORDER_CANCELLED,
+  TOPICS.DRIVER_ASSIGNED,
+]);
 const MAX_REPLAY_ATTEMPTS = 3;
 
 class OrderConsumer {
@@ -91,20 +102,42 @@ class OrderConsumer {
     const handlers = this.handlers;
 
     const messageHandler = async (topic, message, rawMessage) => {
-      // Idempotency claim: only the first delivery of an event may apply side
-      // effects. Kafka redelivers messages on restarts/rebalances, so without
-      // this guard PAYMENT_CONFIRMED / TRIP_COMPLETED / ESCROW_RELEASED would
-      // be processed (and credit wallets) more than once.
-      const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
-      if (eventId) {
-        const isNew = await processedEventRepository.claimProcessed(
+      // Order read-model topics: apply the event atomically with its
+      // idempotency record. If the event was already applied (duplicate,
+      // redelivery after a restart, replay, or a publish retried after a
+      // crash), applyEvent returns false and we skip all side effects.
+      if (ORDER_READ_MODEL_TOPICS.has(topic)) {
+        const eventId = message?.eventId || message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        const orderId = message?.aggregateId || message?.orderId || message?.payload?.orderId || rawMessage?.key?.toString() || null;
+
+        const applied = await orderReadModel.applyEvent({
           topic,
           eventId,
-          message?.orderId || message?.payload?.orderId || null
-        );
-        if (!isNew) {
-          logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`);
+          orderId,
+          eventType: message?.eventType,
+          payload: message?.payload,
+          version: message?.version,
+        });
+
+        if (!applied) {
+          logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`, { orderId });
           return;
+        }
+      } else {
+        // Side-effect topics (wallet credits, notifications, ...): claim the
+        // event as processed BEFORE running handlers so a redelivery can never
+        // apply the same side effect twice.
+        const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        if (eventId) {
+          const isNew = await processedEventRepository.claimProcessed(
+            topic,
+            eventId,
+            message?.orderId || message?.payload?.orderId || null
+          );
+          if (!isNew) {
+            logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`);
+            return;
+          }
         }
       }
 

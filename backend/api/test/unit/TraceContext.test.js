@@ -181,6 +181,13 @@ describe('TraceContext', () => {
     it('tolerates being called with no message at all', () => {
       expect(trace.getSpanContext(TraceContext.extractFromMessage())).toBeUndefined();
     });
+
+    it('ignores a malformed traceparent in message headers', () => {
+      const ctx = TraceContext.extractFromMessage({
+        headers: { traceparent: 'not-a-valid-traceparent' },
+      });
+      expect(trace.getSpanContext(ctx)).toBeUndefined();
+    });
   });
 
   describe('serialize() / deserialize()', () => {

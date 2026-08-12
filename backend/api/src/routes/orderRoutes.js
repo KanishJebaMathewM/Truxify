@@ -169,6 +169,7 @@ import {
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
+import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 import { DomainError } from '../services/order/domainError.js';
 import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
@@ -203,7 +204,6 @@ const getOrderResource = async (req) => {
 router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { id } = req.params;
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
-
   if (!id || !id.trim()) {
     return res.status(400).json({ error: 'Invalid order id' });
   }
@@ -214,7 +214,6 @@ router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), asyn
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
-
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);
@@ -735,6 +734,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           details: acceptErr.message,
         });
       }
+      // Driver assignment confirmed — drop any stale cached mapping so the
+      // tracker resolves the newly assigned driver on the next ping
+      // (issue #10676).
+      await invalidateDriverOrderCache(pending.driver_id);
       sendPushNotification(
         pending.driver_id,
         'Bid Accepted!',

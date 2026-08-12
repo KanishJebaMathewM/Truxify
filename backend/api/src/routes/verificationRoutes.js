@@ -165,10 +165,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken, userId: bodyUserId } = req.body;
-    const userId = req.user?.id || bodyUserId;
+    const { accessToken } = req.body;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID is required' });
+      return res.status(401).json({ success: false, error: 'Not authenticated: req.user is missing.' });
     }
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });

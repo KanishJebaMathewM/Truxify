@@ -159,9 +159,13 @@ export async function sendPushNotification(userId, title, body, notifType = 'ord
     fcmResult = await sendFcmNotification(userId, { title, body }, data);
   } catch (err) {
     logger.error({ err }, '[NotificationService] Unexpected sendFcmNotification error');
+    fcmResult = { success: false, error: err?.message ?? 'Unexpected sendFcmNotification error' };
   }
 
-  return { success: dbSuccess || Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
+  // `success` reflects the actual push (FCM) delivery, not the DB
+  // persistence side-effect. Reporting DB persistence as push success masked
+  // FCM delivery failures (see issue #11212).
+  return { success: Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
 }
 
 export const hashDeliveryOtp = hashOtp;

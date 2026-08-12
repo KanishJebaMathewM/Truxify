@@ -305,6 +305,13 @@ const WS_AUTH_TIMEOUT_MS = 10000;
 const DRIVER_ORDER_CACHE_TTL_SECONDS = 60;
 const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
 
+// Orders in these statuses no longer keep a driver pinned to an active trip.
+// A cached `driver:active-order:` mapping for one of them is stale and must be
+// invalidated — otherwise mid-trip cache hits skip driver-assignment
+// re-verification and telemetry/geofence provenance keeps binding to the
+// previous trip (issue #10676).
+const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_released']);
+
 /**
  * Retrieve the cached active order mapping for a driver.
  * Returns { orderId, orderDisplayId } or null on miss / error.
@@ -329,6 +336,7 @@ async function getCachedDriverOrder(driverId) {
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
   if (!driverId) return;
   if (!redisClient || !orderId) return;
+  if (!orderDisplayId) return;
   try {
     await redisClient.set(
       `${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`,
@@ -353,6 +361,7 @@ async function invalidateDriverOrderCache(driverId) {
     logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
+export { invalidateDriverOrderCache };
 
 function getClientIp(request) {
   // Trust only the TCP peer address. The X-Forwarded-For header is
@@ -1055,15 +1064,39 @@ export async function handleLocationPing(ws, data, req) {
       // database.  This avoids repeated Supabase queries for the same
       // driver during an active trip.
       const cached = await getCachedDriverOrder(driver_id);
+      let cacheVerified = false;
       if (cached) {
-        orderUUID = cached.orderId;
-        orderDisplayId = cached.orderDisplayId;
-      } else {
+        // A cached mapping can outlive the trip (it is only invalidated on
+        // disconnect or an order transition), so re-verify it still points at
+        // the driver's current, non-terminal order before trusting it — a bare
+        // cache hit previously skipped driver-assignment re-verification
+        // entirely (issue #10676).
+        const { data: activeOrder } = await _orderRepository.findOrderByAnyId(
+          cached.orderId,
+          'id, order_display_id, driver_id, status'
+        );
+        if (
+          activeOrder
+          && activeOrder.driver_id === driver_id
+          && !TERMINAL_ORDER_STATUSES.has(activeOrder.status)
+        ) {
+          orderUUID = cached.orderId;
+          orderDisplayId = cached.orderDisplayId || activeOrder.order_display_id;
+          cacheVerified = true;
+        } else {
+          // Stale entry (delivered/cancelled/reassigned) — drop it so the
+          // authoritative lookup below resolves the current assignment.
+          await invalidateDriverOrderCache(driver_id);
+        }
+      }
+
+      if (!cacheVerified) {
         const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id, status');
         if (order) {
           // Verify the authenticated driver is assigned to this order
           if (order.driver_id !== driver_id) {
+            await invalidateDriverOrderCache(driver_id);
             logger.warn({
               event: 'UNAUTHORIZED_ORDER_TRACKING',
               driverId: driver_id,
@@ -1078,7 +1111,18 @@ export async function handleLocationPing(ws, data, req) {
           }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          if (TERMINAL_ORDER_STATUSES.has(order.status)) {
+            // Order has ended — drop any cached mapping and do not re-bind
+            // telemetry/geofence provenance to the finished order.
+            orderUUID = null;
+            orderDisplayId = null;
+            await invalidateDriverOrderCache(driver_id);
+          } else if (orderDisplayId) {
+            await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          }
+        } else if (cached) {
+          // Cached order no longer exists — drop the stale mapping.
+          await invalidateDriverOrderCache(driver_id);
         }
       }
     } catch (err) {

@@ -8,6 +8,7 @@ class OrderConsumer {
     this.handlers = new Map();
     this.initialized = false;
     this._eventBus = externalEventBus || null;
+    this.createdConsumerGroups = [];
   }
 
   setEventBus(eventBus) {
@@ -54,6 +55,13 @@ class OrderConsumer {
       TOPICS.PAYMENT_CONFIRMED,
       TOPICS.FRAUD_DETECTED,
     ]);
+
+    this.createdConsumerGroups = [
+      CONSUMER_GROUPS.ORDER_SERVICE,
+      CONSUMER_GROUPS.NOTIFICATION_SERVICE,
+      CONSUMER_GROUPS.ANALYTICS_SERVICE,
+      CONSUMER_GROUPS.FRAUD_SERVICE,
+    ];
 
     this.initialized = true;
     logger.info('✅ Kafka consumers initialized');
@@ -213,7 +221,10 @@ class OrderConsumer {
   async startAllConsumers() {
     await this.initialize();
 
-    const consumerGroups = Object.values(CONSUMER_GROUPS);
+    // Only start consumer groups that were actually created in initialize().
+    // CONSUMER_GROUPS also declares DRIVER/PAYMENT/ESCROW groups that are not
+    // wired up yet, and startConsuming() would fail on getConsumer() for them.
+    const consumerGroups = this.createdConsumerGroups;
     for (const groupId of consumerGroups) {
       try {
         await this.startConsuming(groupId);

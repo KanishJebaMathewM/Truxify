@@ -19,6 +19,13 @@
  */
 import { supabase, supabaseAdmin } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import eventRepository from '../repositories/event.repository.js';
+import {
+  ORDER_READ_MODEL_TABLE,
+  assertOrderReadModelRow,
+  deriveOrderStatus,
+  deriveEventTypeFromTimeline,
+} from '../../api/src/core/orders/read-model-schema.js';
 
 class OrderReadModel {
   constructor(client = supabaseAdmin) {
@@ -130,6 +137,16 @@ class OrderReadModel {
 
       await this.upsertFromSnapshot(orderId, snapshot);
       return snapshot;
+      // Get snapshot from events
+      const snapshot = await eventRepository.getSnapshot(orderId);
+
+      if (snapshot) {
+        // Update read model in database
+        await this.updateReadModel(orderId, snapshot);
+        return snapshot;
+      }
+
+      return null;
     } catch (error) {
       logger.error('Failed to build read model:', error);
       throw error;
@@ -162,6 +179,48 @@ class OrderReadModel {
       timestamp: Date.now(),
     });
     return data;
+  async updateReadModel(orderId, snapshot) {
+    try {
+      // The snapshot's `data` / `status` / `timeline` shape maps onto the
+      // canonical orders_read_model columns (payload / status / timeline).
+      // event_type and version are derived from the timeline because the
+      // snapshot carries no explicit version. The row is validated against
+      // the canonical schema before the upsert so projection/schema drift
+      // fails loudly instead of writing nonexistent columns.
+      const timeline = Array.isArray(snapshot.timeline) ? snapshot.timeline : [];
+      const row = assertOrderReadModelRow({
+        order_id: orderId,
+        payload: snapshot.data ?? {},
+        event_type: deriveEventTypeFromTimeline(timeline),
+        version: timeline.length > 0 ? timeline.length : null,
+        status: snapshot.status ?? deriveOrderStatus(snapshot.data),
+        timeline,
+        updated_at: new Date().toISOString(),
+      });
+
+      // Upsert read model
+      const { data, error } = await supabase
+        .from(ORDER_READ_MODEL_TABLE)
+        .upsert([row], {
+          onConflict: 'order_id',
+          ignoreDuplicates: false,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update cache
+      this.cache.set(orderId, {
+        data: data,
+        timestamp: Date.now(),
+      });
+
+      return data;
+    } catch (error) {
+      logger.error('Failed to update read model:', error);
+      throw error;
+    }
   }
 
   async getOrderReadModel(orderId) {
@@ -177,6 +236,7 @@ class OrderReadModel {
     try {
       const { data, error } = await supabase
         .from('orders_read_model')
+        .from(ORDER_READ_MODEL_TABLE)
         .select('*')
         .eq('order_id', key)
         .single();
@@ -187,6 +247,12 @@ class OrderReadModel {
       }
 
       this.cache.set(key, { data, timestamp: Date.now() });
+      // Cache it
+      this.cache.set(orderId, {
+        data: data,
+        timestamp: Date.now(),
+      });
+
       return data;
     } catch (error) {
       logger.error('Failed to get read model:', error);
@@ -201,6 +267,10 @@ class OrderReadModel {
         .select('*');
 
       // Payload is the full order row snapshot, so filters target payload keys.
+        .from(ORDER_READ_MODEL_TABLE)
+        .select('*');
+
+      // Apply filters
       if (filters.status) {
         query = query.eq('payload->>status', filters.status);
       }
@@ -209,6 +279,10 @@ class OrderReadModel {
       }
       if (filters.driverId) {
         query = query.eq('payload->>driver_id', filters.driverId);
+        query = query.eq('payload->customer_id', filters.customerId);
+      }
+      if (filters.driverId) {
+        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);
@@ -257,6 +331,7 @@ class OrderReadModel {
     for (const status of statuses) {
       const { count, error } = await supabase
         .from('orders_read_model')
+        .from(ORDER_READ_MODEL_TABLE)
         .select('*', { count: 'exact', head: true })
         .eq('payload->>status', status);
 

@@ -17,6 +17,34 @@ const INVALID_TOKEN_CODES = new Set([
   'messaging/invalid-argument'
 ]);
 
+// Mirrors the notifications_notif_type_check CHECK constraint
+// (supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql).
+// Validating here turns a silent server-side constraint rejection into a
+// named error in the logs — the failure mode reported in #7538.
+const ALLOWED_NOTIF_TYPES = new Set([
+  'order_update',
+  'payment',
+  'load_offer',
+  'trip_update',
+  'document',
+  'system',
+  'bid_accepted',
+  'new_bid',
+  'payment_locked',
+  'payment_released',
+]);
+
+function isAllowedNotifType(notifType) {
+  if (ALLOWED_NOTIF_TYPES.has(notifType)) {
+    return true;
+  }
+  logger.error(
+    { notifType, allowed: [...ALLOWED_NOTIF_TYPES] },
+    '[NotificationService] Refusing to insert notification with a notif_type the database CHECK constraint rejects'
+  );
+  return false;
+}
+
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000];
 const RETRY_BASE_DELAY = 500;
@@ -122,6 +150,49 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   };
 }
 
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    } else if (!isAllowedNotifType(notifType)) {
+      // Logged inside isAllowedNotifType; skip the insert rather than let the
+      // database CHECK constraint reject it silently.
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+  }
+
+  return { success: true, persisted: dbSuccess, fcm: fcmResult };
+}
+
 export const hashDeliveryOtp = hashOtp;
 export const verifyDeliveryOtpHash = verifyOtpHash;
 
@@ -203,7 +274,10 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      logger.error({ err: error }, '[NotificationService] Error inserting notification');
+      logger.error(
+        { event: 'NOTIFICATION_INSERT_ERROR', error: error && error.message },
+        'Error inserting notification',
+      );
       throw error;
     }
 

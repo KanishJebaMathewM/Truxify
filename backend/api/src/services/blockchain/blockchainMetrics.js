@@ -1,5 +1,5 @@
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 class BlockchainMetrics {
@@ -104,7 +104,7 @@ class BlockchainMetrics {
           insurance_events_count: this.metrics.insuranceEventsCount,
         };
 
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('blockchain_metrics')
           .insert([aggregatedMetrics]);
 

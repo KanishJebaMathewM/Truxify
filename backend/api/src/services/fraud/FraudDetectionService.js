@@ -1,6 +1,8 @@
 import logger from '../../middleware/logger.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
 
+const CONNECTION_PAGE_SIZE = 1000;
+
 class FraudDetectionService {
   constructor() {
     this.redis = redisClient;
@@ -329,28 +331,32 @@ class FraudDetectionService {
     const safeUserId = this.sanitizeUserId(userId);
     if (!safeUserId) return [];
     // Get all connections (orders, trips, shared routes)
-    const { data: orders, error } = await supabaseAdmin
-      .from('orders')
-      .select('customer_id, driver_id')
-      .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`);
-
-    if (error) {
-      logger.error('Failed to load user fraud connections:', error);
-      return [];
-    }
-
-    if (!Array.isArray(orders)) {
-      return [];
-    }
-
     const connections = new Set();
-    orders.forEach(order => {
-      if (order.customer_id === userId && order.driver_id) {
-        connections.add(order.driver_id);
-      } else if (order.driver_id === userId && order.customer_id) {
-        connections.add(order.customer_id);
+    let offset = 0;
+    let page;
+    do {
+      const { data: orders, error } = await supabaseAdmin
+        .from('orders')
+        .select('customer_id, driver_id')
+        .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`)
+        .order('id', { ascending: true })
+        .range(offset, offset + CONNECTION_PAGE_SIZE - 1);
+
+      if (error) {
+        logger.error('Failed to load user fraud connections:', error);
+        return [];
       }
-    });
+
+      page = Array.isArray(orders) ? orders : [];
+      page.forEach(order => {
+        if (order.customer_id === userId && order.driver_id) {
+          connections.add(order.driver_id);
+        } else if (order.driver_id === userId && order.customer_id) {
+          connections.add(order.customer_id);
+        }
+      });
+      offset += page.length;
+    } while (page.length === CONNECTION_PAGE_SIZE);
 
     return Array.from(connections);
   }
@@ -362,28 +368,36 @@ class FraudDetectionService {
     if (safeIds.length === 0) return {};
 
     const BATCH_SIZE = 100;
+    const PAGE_SIZE = 1000;
     const allOrders = [];
 
     // Query in batches to avoid unbounded OR filter URL-length limits
     for (let i = 0; i < safeIds.length; i += BATCH_SIZE) {
       const batch = safeIds.slice(i, i + BATCH_SIZE);
-      const { data: batchOrders, error } = await supabaseAdmin
-        .from('orders')
-        .select('customer_id, driver_id')
-        .or(
-          batch.map(id => `customer_id.eq.${id}`).join(',') +
-          ',' +
-          batch.map(id => `driver_id.eq.${id}`).join(',')
-        );
+      const batchFilter = batch.map(id => `customer_id.eq.${id}`).join(',') + ',' +
+        batch.map(id => `driver_id.eq.${id}`).join(',');
 
-      if (error) {
-        logger.error('Failed to load batch user fraud connections:', error.message);
-        return {};
-      }
+      // Each batch's row set is paged too, since a single prolific user can
+      // still push one batch past PostgREST's 1000-row response cap.
+      let offset = 0;
+      let page;
+      do {
+        const { data: batchOrders, error } = await supabaseAdmin
+          .from('orders')
+          .select('customer_id, driver_id')
+          .or(batchFilter)
+          .order('id', { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
 
-      if (Array.isArray(batchOrders)) {
-        allOrders.push(...batchOrders);
-      }
+        if (error) {
+          logger.error('Failed to load batch user fraud connections:', error.message);
+          return {};
+        }
+
+        page = Array.isArray(batchOrders) ? batchOrders : [];
+        allOrders.push(...page);
+        offset += page.length;
+      } while (page.length === PAGE_SIZE);
     }
 
     if (!Array.isArray(allOrders)) {

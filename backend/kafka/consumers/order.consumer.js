@@ -14,12 +14,14 @@ const ORDER_READ_MODEL_TOPICS = new Set([
   TOPICS.ORDER_CANCELLED,
   TOPICS.DRIVER_ASSIGNED,
 ]);
+const MAX_REPLAY_ATTEMPTS = 3;
 
 class OrderConsumer {
   constructor({ eventBus: externalEventBus } = {}) {
     this.handlers = new Map();
     this.initialized = false;
     this._eventBus = externalEventBus || null;
+    this.createdConsumerGroups = [];
   }
 
   setEventBus(eventBus) {
@@ -66,6 +68,13 @@ class OrderConsumer {
       TOPICS.PAYMENT_CONFIRMED,
       TOPICS.FRAUD_DETECTED,
     ]);
+
+    this.createdConsumerGroups = [
+      CONSUMER_GROUPS.ORDER_SERVICE,
+      CONSUMER_GROUPS.NOTIFICATION_SERVICE,
+      CONSUMER_GROUPS.ANALYTICS_SERVICE,
+      CONSUMER_GROUPS.FRAUD_SERVICE,
+    ];
 
     this.initialized = true;
     logger.info('✅ Kafka consumers initialized');
@@ -222,7 +231,12 @@ class OrderConsumer {
         parsedMessage = JSON.parse(serialized);
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
         continue;
       }
@@ -235,7 +249,16 @@ class OrderConsumer {
         results.succeeded += 1;
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}):`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        // Cap replay attempts so a poison message is not retried forever.
+        // After the cap the dead letter is marked failed and no longer
+        // picked up by listPending(), otherwise each replay cycles the same
+        // failing entry back into the pending queue indefinitely.
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
       }
     }
@@ -247,7 +270,10 @@ class OrderConsumer {
   async startAllConsumers() {
     await this.initialize();
 
-    const consumerGroups = Object.values(CONSUMER_GROUPS);
+    // Only start consumer groups that were actually created in initialize().
+    // CONSUMER_GROUPS also declares DRIVER/PAYMENT/ESCROW groups that are not
+    // wired up yet, and startConsuming() would fail on getConsumer() for them.
+    const consumerGroups = this.createdConsumerGroups;
     for (const groupId of consumerGroups) {
       try {
         await this.startConsuming(groupId);

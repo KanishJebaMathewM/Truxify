@@ -28,6 +28,7 @@ dependencies:
   google_fonts: ^8.1.0
   fl_chart: ^0.66.0
   flutter_riverpod: ^2.5.1
+  provider: ^6.1.2
   flutter_map: ^8.1.1
   latlong2: ^0.10.1
   http: ^1.6.0

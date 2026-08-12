@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 import { BaseEvent, EVENT_SOURCES, EVENT_CATEGORIES } from '../api/src/core/events/index.js';
@@ -13,6 +13,11 @@ import {
   EventStorePersistenceError,
   toEventStoreError,
 } from './errors.js';
+import {
+  ORDER_READ_MODEL_TABLE,
+  assertOrderReadModelRow,
+  deriveOrderStatus,
+} from '../api/src/core/orders/read-model-schema.js';
 
 /**
  * DEPRECATED — superseded by the unified outbox pipeline (Issue #1).
@@ -429,17 +434,25 @@ class EventStore {
      * same payload shape (the aggregate state), so `payload->>status` and
      * `payload->>customerId` filters behave identically after warm writes and
      * after a rebuild.
+     *
+     * The row is validated against the canonical read-model schema before the
+     * upsert so a projection/schema mismatch fails loudly instead of being
+     * silently logged.
      */
     async _upsertOrderReadModel(orderId, state, eventType, version) {
+        const row = assertOrderReadModelRow({
+            order_id: orderId,
+            payload: state,
+            event_type: eventType,
+            version: version ?? state?.version,
+            status: deriveOrderStatus(state),
+            timeline: null,
+            updated_at: new Date().toISOString()
+        });
+
         const { error } = await this._client
-            .from('orders_read_model')
-            .upsert([{
-                order_id: orderId,
-                payload: state,
-                event_type: eventType,
-                version: version ?? state?.version,
-                updated_at: new Date().toISOString()
-            }], {
+            .from(ORDER_READ_MODEL_TABLE)
+            .upsert([row], {
                 onConflict: 'order_id'
             });
 
@@ -559,7 +572,7 @@ class EventStore {
 
     async getOrderReadModel(orderId) {
         const { data, error } = await this._client
-            .from('orders_read_model')
+            .from(ORDER_READ_MODEL_TABLE)
             .select('*')
             .eq('order_id', orderId)
             .single();
@@ -582,7 +595,7 @@ class EventStore {
 
     async getOrderList(filters = {}) {
         let query = this._client
-            .from('orders_read_model')
+            .from(ORDER_READ_MODEL_TABLE)
             .select('*');
 
         if (filters.status) {

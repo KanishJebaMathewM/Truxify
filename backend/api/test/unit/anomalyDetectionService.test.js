@@ -30,8 +30,11 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
+const mockSupabase = vi.hoisted(() => ({ from: vi.fn() }));
+
 vi.mock('../../src/config/db.js', () => ({
-  supabase: { from: vi.fn() },
+  supabase: mockSupabase,
+  supabaseAdmin: mockSupabase,
 }));
 
 import AnomalyDetectionService, { ANOMALY_THRESHOLDS, ANOMALY_SEVERITY } from '../../src/services/security/anomalyDetectionService.js';
@@ -197,7 +200,7 @@ describe('AnomalyDetectionService', () => {
       const avg = await service.getUserAverageWithdrawal('user-1', 'wallet-1');
 
       expect(avg).toBe(1500);
-      expect(supabase.from).toHaveBeenCalledWith('transactions');
+      expect(supabase.from).toHaveBeenCalledWith('wallet_transactions');
       expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false });
       expect(builder.limit).toHaveBeenCalledWith(1000);
     });

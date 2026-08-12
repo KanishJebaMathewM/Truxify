@@ -81,3 +81,61 @@ class TestIsShadowBetter:
         results = {"accuracy": {"production": 1.0, "shadow": 0.99}}
         # shadow == prod * threshold → not strictly better
         assert model.is_shadow_better(results) is False
+
+
+class TestEvaluateAndRollback:
+    """Database-backed tests for evaluate_test and trigger_rollback."""
+
+    def make_db_model(self):
+        from datetime import datetime
+        from services.ab_testing import ABTestVersion
+        model = ABTestModel("sqlite:///:memory:")
+        session = model.Session()
+        session.add(ABTestVersion(
+            version="v1",
+            status="production",
+            created_at=datetime.utcnow(),
+        ))
+        session.commit()
+        session.close()
+        return model
+
+    def test_get_production_version_reads_registry(self):
+        model = self.make_db_model()
+        assert model.get_production_version() == "v1"
+
+    def test_get_production_version_defaults_when_empty(self):
+        model = ABTestModel("sqlite:///:memory:")
+        assert model.get_production_version() == "production"
+
+    def test_evaluate_returns_metrics_degradation(self):
+        model = self.make_db_model()
+        model.log_metrics("t1", "production", {"accuracy": 0.9, "rmse": 5.0}, "r1")
+        model.log_metrics("t1", "shadow", {"accuracy": 0.6, "rmse": 9.0}, "r2")
+        result = model.evaluate_test("t1")
+        assert "metrics" in result
+        assert result["metrics"]["degradation"] > 0.15
+        assert result["metrics"]["mean_improvement"] < 0
+        assert result["should_rollback"] is True
+
+    def test_rollback_restores_previous_version_in_registry(self):
+        model = self.make_db_model()
+        model.log_metrics("t1", "production", {"accuracy": 0.9}, "r1")
+        model.log_metrics("t1", "shadow", {"accuracy": 0.5}, "r2")
+        result = model.trigger_rollback("t1")
+        assert result["action"] == "rollback"
+        assert result["production_version"] == "v1"
+        assert result["previous_version"] == "shadow"
+        assert result["production_version"] != result["previous_version"]
+        # The rollback actually mutated the registry.
+        assert model.get_production_version() == "v1"
+
+    def test_promote_promotes_shadow_in_registry(self):
+        model = self.make_db_model()
+        model.log_metrics("t2", "production", {"accuracy": 0.8}, "r3")
+        model.log_metrics("t2", "shadow", {"accuracy": 0.95}, "r4")
+        result = model.trigger_rollback("t2")
+        assert result["action"] == "promote"
+        assert result["production_version"] == "shadow"
+        assert result["previous_version"] == "v1"
+        assert model.get_production_version() == "shadow"

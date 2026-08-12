@@ -1,10 +1,8 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-
-const DIGILOCKER_TIMEOUT_MS = 10000;
 
 class DigilockerService {
   constructor() {
@@ -12,27 +10,101 @@ class DigilockerService {
     this.clientSecret = process.env.DIGILOCKER_CLIENT_SECRET;
     this.redirectUri = process.env.DIGILOCKER_REDIRECT_URI;
     
-    // Polygon contract integration
+    // Polygon contract integration.
+    //
+    // The two write paths target DIFFERENT contracts:
+    //   - DocumentRegistry.sol  → registerDocument() / getDocument()
+    //   - KYCVerifier.sol       → hashDocument()
+    // A single shared ABI/address silently mixed both, so one contract's
+    // address was used for the other's write path. They must be configured
+    // separately (DOCUMENT_REGISTRY_CONTRACT and KYC_VERIFIER_CONTRACT_ADDRESS).
     const rpcUrl = process.env.POLYGON_RPC_URL;
     const privateKey = process.env.RELAYER_WALLET_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    const contractAddress = process.env.DOCUMENT_REGISTRY_CONTRACT || process.env.KYC_VERIFIER_CONTRACT_ADDRESS;
 
-    if (rpcUrl && privateKey && contractAddress) {
+    const documentRegistryAddress = process.env.DOCUMENT_REGISTRY_CONTRACT;
+    const kycVerifierAddress = process.env.KYC_VERIFIER_CONTRACT_ADDRESS;
+
+    if (rpcUrl && privateKey && documentRegistryAddress && kycVerifierAddress) {
       try {
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        this.contractABI = [
+
+        // ABI for DocumentRegistry.sol only.
+        this.documentRegistryABI = [
           'function registerDocument(address driver, string memory documentType, bytes32 docHash, bool isVerified) external',
-          'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)',
-          'function hashDocument(bytes32 documentHash, address user) public'
+          'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)'
         ];
-        this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+        this.documentRegistry = new ethers.Contract(documentRegistryAddress, this.documentRegistryABI, this.wallet);
+
+        // ABI for KYCVerifier.sol only.
+        this.kycVerifierABI = [
+          'function hashDocument(bytes32 documentHash, address user) public',
+          'function isVerified(address user) public view returns (bool)'
+        ];
+        this.kycVerifier = new ethers.Contract(kycVerifierAddress, this.kycVerifierABI, this.wallet);
       } catch (err) {
-        logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
+        logger.error('Failed to initialize DocumentRegistry/KYC contracts:', err.message);
       }
     } else {
-      logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
+      logger.warn('DocumentRegistry/KYC contracts not configured: missing RPC, key, DOCUMENT_REGISTRY_CONTRACT, or KYC_VERIFIER_CONTRACT_ADDRESS');
     }
+  }
+
+  /**
+   * Probe both contracts at startup so a mismatched address/ABI fails loudly
+   * instead of silently skipping the on-chain write path (mirrors
+   * validateEscrowSetup in escrow.js).
+   *
+   * @returns {Promise<boolean>} — true only if both contracts respond.
+   */
+  async validateSetup() {
+    if (!this.documentRegistry || !this.kycVerifier) {
+      logger.warn('[DigilockerService] Setup validation skipped — contracts not initialised (env vars missing).');
+      return false;
+    }
+
+    const provider = this.documentRegistry.runner.provider;
+    const checks = [
+      {
+        name: 'DocumentRegistry',
+        contract: this.documentRegistry,
+        probe: () => this.documentRegistry.getDocument('0x0000000000000000000000000000000000000000', '')
+      },
+      {
+        name: 'KYCVerifier',
+        contract: this.kycVerifier,
+        probe: () => this.kycVerifier.isVerified('0x0000000000000000000000000000000000000000')
+      }
+    ];
+
+    let valid = true;
+    for (const { name, contract, probe } of checks) {
+      const address = contract.target;
+      try {
+        const code = await provider.getCode(address);
+        if (code === '0x') {
+          logger.error(`[DigilockerService] ❌ No contract deployed at ${address}. Check the ${name} env var in your .env.`);
+          valid = false;
+          continue;
+        }
+      } catch (err) {
+        logger.error(`[DigilockerService] ❌ Failed to query bytecode at ${address}: ${err.message}`);
+        valid = false;
+        continue;
+      }
+      try {
+        await probe();
+        logger.info(`[DigilockerService] ✅ ${name} ABI verified at ${address} — read-only eth_call succeeded.`);
+      } catch (err) {
+        logger.error(
+          `[DigilockerService] ❌ Contract at ${address} does not respond to the expected ${name} ABI. ` +
+          `This likely means ${name} is pointed at the wrong contract (swap DOCUMENT_REGISTRY_CONTRACT / KYC_VERIFIER_CONTRACT_ADDRESS).`
+        );
+        valid = false;
+      }
+    }
+
+    return valid;
   }
 
   get isMock() {
@@ -58,8 +130,7 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: DIGILOCKER_TIMEOUT_MS
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
         return {
           access_token: tokenResponse.data.access_token,
@@ -67,7 +138,7 @@ class DigilockerService {
           name: tokenResponse.data.name || 'DigiLocker User'
         };
       } catch (err) {
-        logger.error({ err }, '[DigilockerService] OAuth exchange failed');
+        logger.error('[DigilockerService] OAuth exchange failed:', err.message);
         return { success: false, error: err.message };
       }
     }
@@ -111,7 +182,7 @@ class DigilockerService {
     const serialized = JSON.stringify({ dlData, rcData, insuranceData });
     const documentHash = '0x' + crypto.createHash('sha256').update(serialized).digest('hex');
 
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile, error: profileErr } = await supabaseAdmin
       .from('profiles')
       .select('polygon_wallet_address')
       .eq('id', userId)
@@ -123,20 +194,20 @@ class DigilockerService {
 
     const walletAddress = profile?.polygon_wallet_address || '0x0000000000000000000000000000000000000000';
 
-    if (this.contract) {
+    if (this.kycVerifier) {
       try {
         logger.info(`[DigilockerService] Submitting document hash on-chain: ${documentHash} for user address: ${walletAddress}`);
-        const tx = await this.contract.hashDocument(documentHash, walletAddress);
+        const tx = await this.kycVerifier.hashDocument(documentHash, walletAddress);
         await tx.wait();
         logger.info(`[DigilockerService] Smart contract write succeeded. TX hash: ${tx.hash}`);
       } catch (err) {
         logger.warn(`[DigilockerService] Smart contract write failed: ${err.message}. Fallback to DB update.`);
       }
     } else {
-      logger.info(`[DigilockerService] Smart contract verification address/private key not set. Mocking on-chain hash submission.`);
+      logger.info(`[DigilockerService] KYCVerifier address/private key not set. Mocking on-chain hash submission.`);
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('profiles')
       .update({ is_digilocker_verified: true })
       .eq('id', userId);
@@ -175,12 +246,11 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          timeout: DIGILOCKER_TIMEOUT_MS
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
         tokenData = tokenResponse.data;
       } catch (err) {
-        logger.error({ err }, 'Digilocker token exchange failed');
+        logger.error('Digilocker token exchange failed:', err.message);
         throw new Error('Digilocker token exchange failed: ' + err.message, { cause: err });
       }
     }
@@ -209,16 +279,14 @@ class DigilockerService {
     } else {
       try {
         const listResponse = await axios.get('https://api.digitallocker.gov.in/public/oauth2/1/files/issued', {
-          headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
-          timeout: DIGILOCKER_TIMEOUT_MS
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
         });
         const files = listResponse.data?.items || [];
 
         for (const file of files) {
           if (file.doctype === 'ADLNK' || file.doctype === 'DRVLC') {
             const docResponse = await axios.get(`https://api.digitallocker.gov.in/public/oauth2/1/file/${file.uri}`, {
-              headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
-              timeout: DIGILOCKER_TIMEOUT_MS
+              headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
             });
             documents.push({
               type: file.doctype === 'DRVLC' ? 'driving_licence' : 'rc_book',
@@ -227,7 +295,7 @@ class DigilockerService {
           }
         }
       } catch (err) {
-        logger.error({ err }, 'Failed to fetch DigiLocker documents');
+        logger.error('Failed to fetch DigiLocker documents:', err.message);
         throw new Error('Failed to fetch DigiLocker documents: ' + err.message, { cause: err });
       }
     }
@@ -237,7 +305,7 @@ class DigilockerService {
     for (const doc of documents) {
       const docHash = '0x' + crypto.createHash('sha256').update(doc.data).digest('hex');
 
-      const { data: profile } = await supabase
+      const { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', driverId)
@@ -246,50 +314,17 @@ class DigilockerService {
       const walletAddress = profile?.polygon_wallet_address;
       let txHash = null;
 
-      if (this.contract && walletAddress) {
+      if (this.documentRegistry && walletAddress) {
         try {
-          const tx = await this.contract.registerDocument(walletAddress, doc.type, docHash, true);
+          const tx = await this.documentRegistry.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();
           txHash = tx.hash;
         } catch (err) {
-          logger.error({ err, docType: doc.type }, 'Blockchain registration failed');
+          logger.error(`Blockchain registration failed for ${doc.type}:`, err.message);
         }
       }
 
-      // Persist the document blob to storage so driver_documents.storage_path
-      // (NOT NULL) has a real value.
-      const docBytes = Buffer.from(typeof doc.data === 'string' ? doc.data : JSON.stringify(doc.data));
-      const storagePath = `${driverId}/${doc.type}-digilocker-${Date.now()}.json`;
-      const { error: uploadError } = await supabase.storage
-        .from('driver-documents')
-        .upload(storagePath, docBytes, {
-          contentType: 'application/json',
-          upsert: true
-        });
-
-      if (uploadError) {
-        logger.error(`Storage upload failed for ${doc.type}:`, uploadError.message);
-        syncErrors.push(`storage:${uploadError.message}`);
-        continue;
-      }
-
-      // driver_documents has no document_hash/is_verified/verification_source
-      // columns and no unique constraint on (driver_id, document_type), so
-      // upsert with onConflict is not possible. Use select-then-insert/update
-      // and map to the real schema (storage_path, mime_type, status,
-      // is_govt_verified, blockchain_tx_hash).
-      const docPayload = {
-        driver_id: driverId,
-        document_type: doc.type,
-        storage_path: storagePath,
-        mime_type: 'application/json',
-        status: isMock ? 'pending_review' : 'approved',
-        is_govt_verified: !isMock,
-        blockchain_tx_hash: txHash,
-        updated_at: new Date().toISOString()
-      };
-
-      const { data: existing, error: findError } = await supabase
+      const { data: docRecord, error: dbErr } = await supabaseAdmin
         .from('driver_documents')
         .select('id')
         .eq('driver_id', driverId)
@@ -316,8 +351,15 @@ class DigilockerService {
             .single();
 
       if (dbErr) {
-        logger.error({ err: dbErr, docType: doc.type }, 'Database record failed');
-        syncErrors.push(`db:${dbErr.message}`);
+        logger.error({ 
+          err: dbErr, 
+          driverId, 
+          docType: doc.type, 
+          docHash, 
+          message: dbErr.message,
+          hint: dbErr.hint
+        }, '[DigilockerService] Database upsert failed during sync');
+        syncErrors.push({ docType: doc.type, error: dbErr.message });
       } else {
         syncResults.push(docRecord);
       }
@@ -334,9 +376,10 @@ class DigilockerService {
     }
 
     return {
-      success: true,
+      success: syncErrors.length === 0,
       syncedDocumentsCount: syncResults.length,
       documents: syncResults,
+      errors: syncErrors,
       isMock
     };
   }

@@ -63,6 +63,12 @@ import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
+// Explicit allow-list for the driver-facing marketplace. Excludes internal
+// columns such as customer_id so drivers never see the freight owner's
+// identity and any future sensitive column is not auto-disclosed.
+const MARKETPLACE_COLUMNS =
+  'id, order_display_id, customer_name, company_name, route_label, route_subtitle, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, route_distance, route_duration, goods_type, weight, dimensions, is_stackable, is_fragile, special_handling, freight_value, fuel_cost, toll_cost, net_profit, capacity_used, truck_fill_label, space_available, badge_label, badge_emoji, is_best_profit, is_en_route, extra_distance_km, extra_earnings, route_note, distance_from_driver, status, created_at, updated_at';
+
 
 // Sanitize load filter query params to prevent injection attacks
 function sanitizeLoadFilters(query) {
@@ -197,7 +203,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
     // marketplace board must read through the service-role client.
     let query = supabaseAdmin
       .from('load_offers')
-      .select('*', { count: 'exact' });
+      .select(MARKETPLACE_COLUMNS, { count: 'exact' });
 
     let statusFilter = 'available';
     if (req.query.status) {
@@ -294,8 +300,81 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
       return res.status(500).json({ error: 'Failed to fetch load offers.' });
     }
 
+    let finalLoads = loads || [];
+
+    // RECOMMENDATION ENGINE (Only on page 1)
+    if (page === 1 && req.user && req.user.id) {
+      try {
+        // 1. Fetch driver's historical context
+        const { data: pastOrders } = await supabaseAdmin
+          .from('orders')
+          .select('pickup_address, drop_address, goods_type, freight_value')
+          .eq('driver_id', req.user.id)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        const { data: driverProfile } = await supabaseAdmin
+          .from('driver_details')
+          .select('rating, vehicle_type')
+          .eq('user_id', req.user.id)
+          .maybeSingle();
+
+        if (pastOrders && pastOrders.length > 0 && driverProfile) {
+          const pickupFreq = {};
+          const dropFreq = {};
+          const goodsFreq = {};
+          let totalValue = 0;
+
+          pastOrders.forEach(order => {
+            const pickLoc = order.pickup_address ? order.pickup_address.split(',')[0].trim() : '';
+            const dropLoc = order.drop_address ? order.drop_address.split(',')[0].trim() : '';
+            if (pickLoc) pickupFreq[pickLoc] = (pickupFreq[pickLoc] || 0) + 1;
+            if (dropLoc) dropFreq[dropLoc] = (dropFreq[dropLoc] || 0) + 1;
+            if (order.goods_type) goodsFreq[order.goods_type] = (goodsFreq[order.goods_type] || 0) + 1;
+            totalValue += (order.freight_value || 0);
+          });
+
+          const avgValue = totalValue / pastOrders.length;
+          const ratingBoost = (driverProfile.rating || 0) * 0.5;
+
+          // Score available loads
+          finalLoads.forEach(load => {
+            let score = 0;
+            const pickLoc = load.pickup_address ? load.pickup_address.split(',')[0].trim() : '';
+            const dropLoc = load.drop_address ? load.drop_address.split(',')[0].trim() : '';
+
+            if (pickupFreq[pickLoc]) score += pickupFreq[pickLoc] * 2;
+            if (dropFreq[dropLoc]) score += dropFreq[dropLoc] * 2;
+            if (load.goods_type && goodsFreq[load.goods_type]) score += goodsFreq[load.goods_type] * 3;
+            if (load.freight_value >= avgValue * 0.8) score += 2;
+            
+            score += ratingBoost;
+            load._recommendation_score = score;
+          });
+
+          const scoredLoads = finalLoads.filter(l => l._recommendation_score > ratingBoost); // must have some match besides rating
+          scoredLoads.sort((a, b) => b._recommendation_score - a._recommendation_score);
+
+          const topRecommended = scoredLoads.slice(0, 3);
+          const topIds = new Set(topRecommended.map(l => l.id));
+
+          topRecommended.forEach(l => {
+            l.is_recommended = true;
+            delete l._recommendation_score;
+          });
+
+          const rest = finalLoads.filter(l => !topIds.has(l.id));
+          rest.forEach(l => delete l._recommendation_score);
+
+          finalLoads = [...topRecommended, ...rest];
+        }
+      } catch (recError) {
+        logger.error('Error computing recommendations:', recError);
+      }
+    }
+
     // Map fields for client compatibility
-    const formattedLoads = (loads || []).map(load => ({
+    const formattedLoads = finalLoads.map(load => ({
       ...load,
       pickup: load.pickup_address,
       destination: load.drop_address,
@@ -396,7 +475,7 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse')
   try {
     const { data: load, error } = await supabaseAdmin
       .from('load_offers')
-      .select('*')
+      .select(MARKETPLACE_COLUMNS)
       .eq('id', req.params.id)
       .eq('status', 'available')
       .maybeSingle();

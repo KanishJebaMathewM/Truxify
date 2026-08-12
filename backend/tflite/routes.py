@@ -78,15 +78,21 @@ async def predict_tflite(request: PredictRequest):
     try:
         input_array = np.array(request.input_data, dtype=np.float32)
         result = inference.predict(request.model_name, input_array)
-        
+
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Prediction failed'))
+
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/predict-batch")
 async def predict_batch_tflite(request: BatchPredictRequest):
@@ -94,12 +100,17 @@ async def predict_batch_tflite(request: BatchPredictRequest):
     try:
         input_batch = [np.array(data, dtype=np.float32) for data in request.input_batch]
         result = inference.predict_batch(request.model_name, input_batch)
-        
+
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Batch prediction failed'))
+
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Batch prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

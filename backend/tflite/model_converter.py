@@ -170,41 +170,49 @@ class TFLiteInference:
         except Exception as e:
             logger.error(f"Model loading failed: {e}")
             return False
-    
+
     def predict(
         self,
         model_name: str,
         input_data: np.ndarray
     ) -> Dict:
-        """Run inference on edge device"""
+        """Run inference on edge device.
+
+        Validates that input_data.shape matches the model's expected input
+        shape. Rejects mismatches with a clear error instead of silently
+        truncating/repeating data via np.resize.
+        """
         try:
             if model_name not in self.interpreter_cache:
                 if not self.load_model(model_name):
                     return {'success': False, 'error': 'Model not loaded'}
-            
+
             cache = self.interpreter_cache[model_name]
             interpreter = cache['interpreter']
             input_details = cache['input_details']
             output_details = cache['output_details']
-            
-            # Preprocess input
-            input_shape = input_details[0]['shape']
-            if input_data.shape != input_shape:
-                input_data = np.resize(input_data, input_shape)
-            
+
+            # Validate input shape exactly matches expected shape
+            expected_shape = input_details[0]['shape']
+            if input_data.shape != tuple(expected_shape):
+                return {
+                    'success': False,
+                    'error': f"Input shape {input_data.shape} does not match expected shape {tuple(expected_shape)}"
+                }
+
             # Set input
             interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
-            
+
             # Run inference
             start_time = datetime.now()
             interpreter.invoke()
             end_time = datetime.now()
-            
+
             # Get output
             output_data = interpreter.get_tensor(output_details[0]['index'])
-            
+
             inference_time = (end_time - start_time).total_seconds() * 1000  # ms
-            
+
             return {
                 'success': True,
                 'output': output_data.tolist(),
@@ -212,7 +220,7 @@ class TFLiteInference:
                 'model_name': model_name,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
         except Exception as e:
             logger.error(f"Inference failed: {e}")
             return {'success': False, 'error': str(e)}

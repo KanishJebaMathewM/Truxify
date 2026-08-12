@@ -420,15 +420,25 @@ export class DeliveryVerificationService {
 
     // Ownership + provenance: only telemetry for THIS driver on THIS order.
     // driver_id is stamped server-side from the authenticated connection.
+    // order_display_id is cross-verified to prevent stale telemetry from a
+    // previous order for the same driver being used to satisfy the geofence.
     const latestTelemetry = await mongoDb
       .collection("telemetry")
-      .find({ driver_id: order.driver_id, order_id: order.id })
+      .find({
+        driver_id: order.driver_id,
+        order_id: order.id,
+        order_display_id: order.order_display_id,
+      })
       .sort({ server_received_at: -1 })
       .limit(1)
       .toArray();
 
     const telemetry = latestTelemetry?.[0];
-    if (!telemetry || telemetry.driver_id !== order.driver_id) {
+    if (
+      !telemetry ||
+      telemetry.driver_id !== order.driver_id ||
+      telemetry.order_display_id !== order.order_display_id
+    ) {
       throw new DomainError(409, {
         error: "Location is not available for this driver on this order.",
       });

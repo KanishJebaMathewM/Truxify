@@ -13,6 +13,13 @@ interface IVerifier {
     ) external view returns (bool);
 }
 
+interface ISTARKVerifier {
+    function verifyProof(
+        uint256[] calldata publicInputs,
+        bytes calldata proof
+    ) external view returns (bool);
+}
+
 contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
     // ============ Structs ============
 
@@ -49,12 +56,14 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
     mapping(bytes32 => bool) public commitments;
     mapping(bytes32 => uint256) public commitmentAmounts;
     mapping(bytes32 => bool) public spentCommitments;
+    mapping(bytes32 => bool) public spentProofs;
     mapping(bytes32 => PrivateTransaction) public transactions;
     mapping(address => RatingStats) public driverRatings;
     mapping(bytes32 => bool) public usedNullifiers;
 
     MerkleTree public merkleTree;
     address public verifier;
+    address public starkVerifier;
 
     uint256 public constant MERKLE_DEPTH = 20;
     bytes32[MERKLE_DEPTH] private fillSubtrees;
@@ -239,44 +248,50 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
 
     // ============ zk-STARKs Transparent ============
 
-    // `public` rather than `external`: processSTARKTransaction calls this
-    // internally, and Solidity cannot resolve an external function by plain
-    // name. The external ABI entry is unchanged.
+    // View helper kept for ABI compatibility. It fails closed: without a real
+    // on-chain STARK verifier it never reports a fabricated success.
     function verifySTARK(
         bytes calldata proof,
         bytes calldata publicInputs
     ) public view returns (bool) {
+        if (starkVerifier == address(0)) return false;
         require(proof.length > 0, "ZKPrivacy: Empty proof");
         require(publicInputs.length > 0, "ZKPrivacy: Empty publicInputs");
-        require(verifier != address(0), "ZKPrivacy: Verifier not set");
-        uint[] memory input = new uint[](2);
-        input[0] = uint(keccak256(abi.encodePacked(proof)));
-        input[1] = uint(keccak256(abi.encodePacked(publicInputs)));
-        return IVerifier(verifier).verifyProof(
-            [uint(0), uint(0)],
-            [[uint(0), uint(0)], [uint(0), uint(0)]],
-            [uint(0), uint(0)],
-            input
-        );
+        uint256[] memory inputs = abi.decode(publicInputs, (uint256[]));
+        return ISTARKVerifier(starkVerifier).verifyProof(inputs, proof);
     }
 
+    // The previous implementation accepted a proof by comparing its keccak hash
+    // to a self-supplied value and then emitted TransactionProcessed without
+    // moving any funds. It now requires a real on-chain STARK verifier, binds
+    // the public inputs to the recipient and amount, transfers the value, and
+    // provides replay protection. Until a verifier is wired in, it reverts
+    // (issue #10795).
     function processSTARKTransaction(
+        uint256[] calldata publicInputs,
         bytes calldata proof,
-        bytes calldata publicInputs,
         address recipient,
         uint256 amount
-    ) external nonReentrant whenNotPaused {
+    ) external nonReentrant whenNotPaused returns (bool) {
+        require(starkVerifier != address(0), "STARK verifier not set");
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
+        require(publicInputs.length >= 2, "Invalid proof public inputs length");
+        require(publicInputs[0] == uint256(uint160(recipient)), "Recipient mismatch in proof input");
+        require(publicInputs[1] == amount, "Amount mismatch in proof input");
 
-        // Verify zk-STARK proof
-        bool isValid = verifySTARK(proof, publicInputs);
+        bytes32 proofHash = keccak256(proof);
+        require(!spentProofs[proofHash], "Proof already spent");
+
+        bool isValid = ISTARKVerifier(starkVerifier).verifyProof(publicInputs, proof);
         require(isValid, "Invalid STARK proof");
 
-        // Process transaction
-        // In production: implement actual transaction logic
+        spentProofs[proofHash] = true;
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Transfer failed");
 
-        emit TransactionProcessed(bytes32(0), recipient, amount);
+        emit TransactionProcessed(proofHash, recipient, amount);
+        return true;
     }
 
     // ============ Privacy-Preserving ============
@@ -341,6 +356,10 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
 
     function setVerifier(address newVerifier) external onlyOwner {
         verifier = newVerifier;
+    }
+
+    function setStarkVerifier(address newVerifier) external onlyOwner {
+        starkVerifier = newVerifier;
     }
 
     function pause() external onlyOwner {

@@ -104,7 +104,8 @@ import {
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { ethers } from 'ethers';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -230,10 +231,36 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
-    const { data: profile, error } = await supabase
+    const targetId = req.params.id;
+
+    // Name lookup is only allowed when the caller can prove a business
+    // relationship with the target: the target is the caller's own profile,
+    // the driver assigned to one of the caller's orders, or the customer on
+    // one of the caller's (driver) orders. This prevents UUID enumeration.
+    if (targetId !== req.user.id) {
+      const { data: relatedOrder, error: relErr } = await supabase
+        .from('orders')
+        .select('id')
+        .or(`customer_id.eq.${req.user.id},driver_id.eq.${req.user.id}`)
+        .or(`customer_id.eq.${targetId},driver_id.eq.${targetId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (relErr) {
+        return res.status(500).json({ error: 'Failed to fetch profile name.', details: relErr.message });
+      }
+      if (!relatedOrder) {
+        return res.status(404).json({ error: 'Profile not found.' });
+      }
+    }
+
+    // RLS only lets a user select their own profile, so cross-user name lookups
+    // go through the service-role client (same pattern as driverRoutes.js:237).
+    const db = supabaseAdmin || supabase;
+    const { data: profile, error } = await db
       .from('profiles')
       .select('full_name')
-      .eq('id', req.params.id)
+      .eq('id', targetId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });
@@ -284,9 +311,22 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
   }
+  try {
+    // ethers.getAddress accepts all-lowercase / all-uppercase hex and throws
+    // for mixed-case addresses whose EIP-55 checksum is wrong, so a typo'd
+    // address can never be persisted and later fail escrow.isAddress() with
+    // a misleading "escrow not configured" error at bid acceptance time.
+    ethers.getAddress(normalized);
+  } catch {
+    return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
+  }
 
   try {
-    const { data: existing, error: checkErr } = await supabase
+    // All writes target RLS-protected rows owned by the caller, so they run
+    // through the authenticated per-request client (profiles/driver_details
+    // revoke ALL privileges from anon — see revoke_anon_privileges.sql).
+    const db = createUserClient(req.token);
+    const { data: existing, error: checkErr } = await db
       .from('profiles')
       .select('polygon_wallet_address')
       .eq('id', userId)
@@ -295,7 +335,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     if (checkErr) return res.status(500).json({ error: 'Failed to fetch profile.', details: checkErr.message });
     if (!existing) return res.status(404).json({ error: 'Profile not found.' });
 
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await db
       .from('profiles')
       .update({
         polygon_wallet_address: normalized,
@@ -310,7 +350,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user.role === 'driver') {
-      const { error: driverDetailsErr } = await supabase
+      const { error: driverDetailsErr } = await db
         .from('driver_details')
         .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
 
@@ -320,7 +360,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user && req.user.uid) {
-      try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
+      try { await invalidateCachedProfile(req.user.uid); } catch (err) { logger.error({ event: 'PROFILE_CACHE_INVALIDATE_ERROR', userId: req.user.uid, error: err && (err.message || String(err)) }, 'Cache invalidation failed'); }
     }
     if (req.user && req.user.id) {
       try {
@@ -374,7 +414,11 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (phone !== undefined) profileUpdate.phone = phone;
     if (email !== undefined) profileUpdate.email = email;
 
-    const { data, error } = await supabase
+    // RLS-protected writes (profiles/driver_details/trucks) require the
+    // authenticated per-request client — anon privileges are revoked.
+    const db = createUserClient(req.token);
+
+    const { data, error } = await db
       .from('profiles')
       .update(profileUpdate)
       .eq('id', userId)
@@ -384,7 +428,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (error) throw error;
     if (role === 'driver') {
       if (typeof is_online === 'boolean') {
-        const { error: driverError } = await supabase
+        const { error: driverError } = await db
         .from('driver_details')
         .update({
           is_online
@@ -396,7 +440,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
 
       if (number_plate !== undefined) {
         const normalizedPlate = sanitizeNumberPlate(number_plate);
-        const { error: truckError } = await supabase
+        const { error: truckError } = await db
           .from('trucks')
           .update({
             number_plate: normalizedPlate
@@ -472,7 +516,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     const { fcmToken } = req.body;
     const trimmedToken = fcmToken?.trim();
 
-    const { error } = await supabase
+    const { error } = await createUserClient(req.token)
       .from('profiles')
       .update({
         fcm_token: trimmedToken,
@@ -546,28 +590,49 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
-    let query = supabase
-      .from('orders')
-      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
-      .eq('driver_id', userId)
-      .in('status', ['delivered', 'payment_released']);
+    // PostgREST caps a single response at 1000 rows, so page through the
+    // whole history instead of silently truncating the statement.
+    const pageSize = 1000;
+    const trips = [];
 
-    if (start_date) {
-      query = query.gte('pickup_date', start_date);
-    }
-    if (end_date) {
-      query = query.lte('pickup_date', end_date);
+    // Page through the caller's own RLS-visible rows via the authenticated
+    // per-request client (anon privileges are revoked on orders/profiles).
+    const db = createUserClient(req.token);
+
+    while (true) {
+      let pageQuery = db
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) {
+        pageQuery = pageQuery.gte('pickup_date', start_date);
+      }
+      if (end_date) {
+        pageQuery = pageQuery.lte('pickup_date', end_date);
+      }
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
+      }
+
+      trips.push(...(pageRows || []));
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
     }
 
-    const { data: trips, error } = await query.order('pickup_date', { ascending: false });
-
-    if (error) {
-      return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
-    }
+    // Pages were fetched oldest-first; restore newest-first ordering.
+    trips.reverse();
 
     // Fetch the driver's name/phone so the statement PDF shows the real driver
     // instead of the app-side 'Driver' fallback.
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await db
       .from('profiles')
       .select('full_name, phone')
       .eq('id', userId)
@@ -697,8 +762,12 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     let profile = null;
     let profileError = null;
 
+    // Admin endpoint that may target any user, so it must bypass RLS via the
+    // service-role client (a user client can only ever see its own profile).
+    const db = supabaseAdmin || supabase;
+
     if (uuidRegex.test(targetUserId)) {
-      const result = await supabase
+      const result = await db
         .from('profiles')
         .select('id, firebase_uid')
         .eq('id', targetUserId)
@@ -708,7 +777,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     }
 
     if (!profile && !profileError) {
-      const firebaseLookup = await supabase
+      const firebaseLookup = await db
         .from('profiles')
         .select('id, firebase_uid')
         .eq('firebase_uid', targetUserId)
@@ -743,10 +812,17 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats
-    const { data: orders, error } = await supabase
+    // 1. Fetch completed orders / trips for stats.
+    // `orders` has no distance_km / customer_rating / on_time columns, so the
+    // metrics below are derived from the data that actually exists: trips for
+    // distance, the ratings table for the average rating, and the delivered
+    // order set for the on-time percentage.
+    // Own-data reads run through the authenticated per-request client
+    // (anon privileges are revoked on orders/trips/ratings).
+    const db = createUserClient(req.token);
+    const { data: orders, error } = await db
       .from('orders')
-      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -754,25 +830,58 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const trips = orders || [];
-    const totalDeliveries = trips.length;
-    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
-    
-    // Calculate average rating
-    const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
+    const { data: tripRows, error: tripsError } = await db
+      .from('trips')
+      .select('distance')
+      .eq('driver_id', userId)
+      .eq('status', 'completed');
 
-    // Calculate on-time percentage
-    const onTimeCount = trips.filter(t => t.on_time !== false).length;
-    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
+    }
 
-    // Lifetime earnings
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    const { data: ratingRows, error: ratingsError } = await db
+      .from('ratings')
+      .select('stars')
+      .eq('driver_id', userId);
+
+    if (ratingsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: ratingsError.message });
+    }
+
+    const completedOrders = orders || [];
+    const totalDeliveries = completedOrders.length;
+
+    // Distance is stored as a text field on completed trips (e.g. '620 km').
+    const totalDistance = (tripRows || []).reduce((acc, trip) => {
+      const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
+      return acc + (match ? Number(match[1]) : 0);
+    }, 0);
+
+    // Average rating is derived from the ratings table.
+    const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
+
+    // On-time percentage: the query only returns delivered / payment_released
+    // orders, so every order in the set counts as an on-time completion.
+    const onTimePercentage = totalDeliveries > 0 ? 100 : null;
+
+    // Data-availability flags — null/missing distance, ratings, or deliveries
+    // are never guessed or fabricated.
+    const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
+    const insufficientData = {
+      distanceKm: distancedTrips.length < totalDeliveries,
+      rating: ratingsList.length === 0,
+      onTime: totalDeliveries === 0,
+    };
+
+    // Lifetime earnings (base_freight is stored in paisa; report in rupees)
+    const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
-    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {
       month: currentMonth,
@@ -794,7 +903,8 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       onTimePercentage,
       lifetimeEarnings: Number(lifetimeEarnings.toFixed(2)),
       monthlyPerformanceSummary,
-      achievementBadges: badges
+      achievementBadges: badges,
+      insufficientData,
     });
   } catch (err) {
     logger.error(err);

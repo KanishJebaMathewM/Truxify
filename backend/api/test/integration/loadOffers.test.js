@@ -145,7 +145,7 @@ describe('Load Offers Routes Integration Tests', () => {
       expect(filters).toContainEqual({ col: 'goods_type', op: 'eq', val: 'Industrial' });
       expect(filters).toContainEqual({ col: 'freight_value', op: 'gte', val: 1000000 });
       expect(filters).toContainEqual({ col: 'freight_value', op: 'lte', val: 1500000 });
-      expect(filters).toContainEqual({ col: 'extra_distance_km', op: 'lte', val: 15 });
+      expect(filters).toContainEqual({ col: null, op: 'or', val: 'extra_distance_km.is.null,extra_distance_km.lte.15' });
     });
 
     it.each([
@@ -263,7 +263,7 @@ describe('Load Offers Routes Integration Tests', () => {
       const call = m.calls.find(c => c.table === 'load_offers' && c.mode === 'select');
       expect(call.filters).toContainEqual({ col: 'freight_value', op: 'gte', val: 0 });
       expect(call.filters).toContainEqual({ col: 'freight_value', op: 'lte', val: 1500050 });
-      expect(call.filters).toContainEqual({ col: 'extra_distance_km', op: 'lte', val: 15.25 });
+      expect(call.filters).toContainEqual({ col: null, op: 'or', val: 'extra_distance_km.is.null,extra_distance_km.lte.15.25' });
     });
 
     it('supports status filtering (open/available maps to available)', async () => {
@@ -328,7 +328,8 @@ describe('Load Offers Routes Integration Tests', () => {
         .set(DRIVER_HEADERS);
 
       let call = m.calls[m.calls.length - 1];
-      expect(call.order).toEqual({ col: 'freight_value', ascending: true });
+      expect(call.orders[0]).toEqual({ col: 'freight_value', ascending: true });
+      expect(call.orders[1]).toEqual({ col: 'id', ascending: true });
 
       // Sort by distance -> maps to extra_distance_km
       await request(buildApp())
@@ -336,7 +337,179 @@ describe('Load Offers Routes Integration Tests', () => {
         .set(DRIVER_HEADERS);
 
       call = m.calls[m.calls.length - 1];
-      expect(call.order).toEqual({ col: 'extra_distance_km', ascending: false });
+      expect(call.orders[0]).toEqual({ col: 'extra_distance_km', ascending: false });
+      expect(call.orders[1]).toEqual({ col: 'id', ascending: false });
+    });
+
+    it('adds an id tie-breaker to the default sort for stable pagination', async () => {
+      await request(buildApp())
+        .get('/api/loads')
+        .set(DRIVER_HEADERS);
+
+      const call = m.calls[m.calls.length - 1];
+      expect(call.orders).toEqual([
+        { col: 'created_at', ascending: false },
+        { col: 'id', ascending: false },
+      ]);
+    });
+
+    it('keeps pagination stable across re-requests of the same page', async () => {
+      // Two loads share the same created_at; only the id tie-breaker can
+      // deterministically order them, so the same page must repeat.
+      m.store.load_offers.push(
+        { id: 'load-a', status: 'available', created_at: '2025-01-01T00:00:00Z', freight_value: 100 },
+        { id: 'load-b', status: 'available', created_at: '2025-01-01T00:00:00Z', freight_value: 100 },
+        { id: 'load-c', status: 'available', created_at: '2025-01-02T00:00:00Z', freight_value: 100 },
+      );
+
+      const first = await request(buildApp()).get('/api/loads?limit=2').set(DRIVER_HEADERS);
+      const second = await request(buildApp()).get('/api/loads?limit=2').set(DRIVER_HEADERS);
+
+      expect(first.status).toBe(200);
+      expect(first.body.loads).toHaveLength(2);
+      expect(second.body.loads.map(l => l.id)).toEqual(first.body.loads.map(l => l.id));
+      expect(first.body.total).toBe(3);
+    });
+
+    it('returns the correct page of results with the id tie-breaker', async () => {
+      m.store.load_offers.push(
+        { id: 'load-a', status: 'available', created_at: '2025-01-01T00:00:00Z' },
+        { id: 'load-b', status: 'available', created_at: '2025-01-02T00:00:00Z' },
+        { id: 'load-c', status: 'available', created_at: '2025-01-03T00:00:00Z' },
+        { id: 'load-d', status: 'available', created_at: '2025-01-04T00:00:00Z' },
+      );
+
+      // Default sort is created_at DESC, so page 2 of limit=2 is the two oldest.
+      const res = await request(buildApp()).get('/api/loads?page=2&limit=2').set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.page).toBe(2);
+      expect(res.body.total).toBe(4);
+      expect(res.body.totalPages).toBe(2);
+      expect(res.body.loads.map(l => l.id)).toEqual(['load-b', 'load-a']);
+    });
+
+    it('returns empty list with count metadata when nothing matches', async () => {
+      m.store.load_offers.push({
+        id: 'load-1',
+        status: 'available',
+        pickup_address: 'Chennai Central',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads?destination=nowhere')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.loads).toHaveLength(0);
+      expect(res.body.total).toBe(0);
+      expect(res.body.totalPages).toBe(0);
+    });
+
+    it('paginates within a filtered status', async () => {
+      m.store.load_offers.push(
+        { id: 'load-1', status: 'available', created_at: '2025-01-01T00:00:00Z' },
+        { id: 'load-2', status: 'available', created_at: '2025-01-02T00:00:00Z' },
+        { id: 'load-3', status: 'claimed', created_at: '2025-01-03T00:00:00Z' },
+      );
+
+      const res = await request(buildApp())
+        .get('/api/loads?status=claimed&limit=1')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(1);
+      expect(res.body.totalPages).toBe(1);
+      expect(res.body.loads.map(l => l.id)).toEqual(['load-3']);
+    });
+
+    it('keeps NULL extra_distance_km loads when filtering by distance', async () => {
+      m.store.load_offers.push(
+        { id: 'load-no-dist', status: 'available', extra_distance_km: null },
+        { id: 'load-close', status: 'available', extra_distance_km: 5 },
+        { id: 'load-far', status: 'available', extra_distance_km: 40 },
+      );
+
+      const res = await request(buildApp())
+        .get('/api/loads?distance=15')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(2);
+      expect(res.body.loads.map(l => l.id).sort()).toEqual(['load-close', 'load-no-dist']);
+    });
+
+    it('paginates without duplicates or missing records across all pages', async () => {
+      const ids = Array.from({ length: 25 }, (_, i) => `load-${String(i).padStart(2, '0')}`);
+      m.store.load_offers.push(...ids.map(id => ({ id, status: 'available', created_at: '2025-01-01T00:00:00Z' })));
+
+      const collected = [];
+      for (let page = 1; page <= 3; page++) {
+        const res = await request(buildApp())
+          .get(`/api/loads?page=${page}&limit=10`)
+          .set(DRIVER_HEADERS);
+
+        expect(res.status).toBe(200);
+        collected.push(...res.body.loads.map(l => l.id));
+      }
+
+      expect(collected).toHaveLength(25);
+      expect(new Set(collected).size).toBe(25);
+      expect(collected.sort()).toEqual(ids);
+    });
+
+    it('serves a deep page correctly', async () => {
+      const ids = Array.from({ length: 120 }, (_, i) => `load-${String(i).padStart(3, '0')}`);
+      m.store.load_offers.push(...ids.map(id => ({ id, status: 'available', created_at: '2025-01-01T00:00:00Z' })));
+
+      const res = await request(buildApp())
+        .get('/api/loads?page=12&limit=10')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(120);
+      expect(res.body.totalPages).toBe(12);
+      expect(res.body.loads).toHaveLength(10);
+    });
+
+    it('reports an exact count consistent with totalPages metadata', async () => {
+      m.store.load_offers.push(
+        { id: 'load-1', status: 'available' },
+        { id: 'load-2', status: 'available' },
+        { id: 'load-3', status: 'claimed' },
+      );
+
+      const res = await request(buildApp())
+        .get('/api/loads?status=available&limit=2')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.total).toBe(2);
+      expect(res.body.totalPages).toBe(1);
+      expect(res.body.loads).toHaveLength(2);
+    });
+
+    it('paginates deterministically through a large dataset', async () => {
+      for (let i = 0; i < 250; i++) {
+        m.store.load_offers.push({
+          id: `load-${String(i).padStart(3, '0')}`,
+          status: 'available',
+          created_at: i % 5 === 0 ? '2025-01-01T00:00:00Z' : '2025-01-02T00:00:00Z',
+        });
+      }
+
+      const collected = [];
+      for (let page = 1; page <= 25; page++) {
+        const res = await request(buildApp())
+          .get(`/api/loads?page=${page}&limit=10`)
+          .set(DRIVER_HEADERS);
+
+        expect(res.status).toBe(200);
+        collected.push(...res.body.loads.map(l => l.id));
+      }
+
+      expect(collected).toHaveLength(250);
+      expect(new Set(collected).size).toBe(250);
     });
 
     it('rejects unsupported order values', async () => {

@@ -812,5 +812,17 @@
   "networkError": "Network error. Please check your connection.",
   "@networkError": {
     "description": "Error message when network connection fails"
+  },
+  "english": "English",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "Hindi",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "Tamil",
+  "@tamil": {
+    "description": "Tamil language name"
   }
 }

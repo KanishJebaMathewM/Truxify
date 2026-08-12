@@ -71,7 +71,7 @@ class TokenizationService {
             }
             const totalCost = parseFloat(asset.tokenPrice) * amount;
 
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.purchaseFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
@@ -105,9 +105,10 @@ class TokenizationService {
         }
     }
 
-    async sellFraction(assetId, amount, userAddress) {
+    async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            const tx = await this.token.sellFraction(
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
                 { gasLimit: 150000 }

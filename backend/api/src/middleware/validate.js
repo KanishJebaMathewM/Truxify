@@ -1,3 +1,22 @@
+import logger from './logger.js';
+
+/**
+ * Format a Zod validation error into a flat array of field+message objects
+ * suitable for returning as an HTTP 400 body.
+ *
+ * @param {object} error - A Zod error object with an `issues` array.
+ *   Each issue has at least { path: string[], message: string }.
+ * @returns {Array<{field: string, message: string}>} Formatted issues with
+ *   `field` set to the dot-joined path or "body" if empty, and
+ *   `message` set to the issue message.
+ *
+ * @example
+ * // Given a Zod error for missing "email" in the request body:
+ * const formatted = formatValidationIssues(error);
+ * // => [{ field: "body.email", message: "Required" }]
+ *
+ * @since 1.0.0
+ */
 export function formatValidationIssues(error) {
   return error.issues.map((issue) => ({
     field: issue.path.length > 0 ? issue.path.join(".") : "body",
@@ -31,6 +50,10 @@ export function validateBody(schema) {
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
+      logger.warn(
+        { event: 'VALIDATION_ERROR', type: 'body', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+        'Body validation failed',
+      );
       return res.status(400).json({
         error: "Validation failed",
         details: formatValidationIssues(result.error),
@@ -47,6 +70,10 @@ export function validateParams(schema) {
     const result = schema.safeParse(req.params);
 
     if (!result.success) {
+      logger.warn(
+        { event: 'VALIDATION_ERROR', type: 'params', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+        'Params validation failed',
+      );
       return res.status(400).json({
         error: "Validation failed",
         details: formatValidationIssues(result.error),
@@ -64,6 +91,10 @@ export function validateQuery(schema) {
       const result = schema.safeParse(req.query);
 
       if (!result.success) {
+        logger.warn(
+          { event: 'VALIDATION_ERROR', type: 'query', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+          'Query validation failed',
+        );
         return res.status(400).json({
           error: "Validation failed",
           details: formatValidationIssues(result.error),

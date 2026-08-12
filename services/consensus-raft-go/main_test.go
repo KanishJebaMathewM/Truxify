@@ -440,3 +440,68 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	}
 }
 
+func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.CommitIndex = 1
+
+	// Setup log with an existing entry
+	node.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: time.Now()},
+	}
+
+	// Try to commit the exact same (order_id, command)
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no new entry was appended
+	if len(node.Log) != 1 {
+		t.Errorf("expected log length 1 (no duplicate appended), got %d", len(node.Log))
+	}
+}
+
+func TestHandleCommitOrderInvalidTransition(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+
+	// Case 1: Start with non-CREATED command (should fail)
+	reqPayload1 := `{"order_id": "ord-1", "command": "DISPATCHED"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload1))
+	w1 := httptest.NewRecorder()
+	node.HandleCommitOrder(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 when starting with DISPATCHED, got %d", w1.Code)
+	}
+
+	// Case 2: Valid CREATED
+	reqPayload2 := `{"order_id": "ord-1", "command": "CREATED"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload2))
+	w2 := httptest.NewRecorder()
+	node.HandleCommitOrder(w2, req2)
+
+	// Case 3: Out of order transition CREATED -> DELIVERED (should fail)
+	reqPayload3 := `{"order_id": "ord-1", "command": "DELIVERED"}`
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload3))
+	w3 := httptest.NewRecorder()
+	node.HandleCommitOrder(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for out-of-order transition CREATED -> DELIVERED, got %d", w3.Code)
+	}
+}
+
+

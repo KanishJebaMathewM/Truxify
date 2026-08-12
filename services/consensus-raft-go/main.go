@@ -684,6 +684,39 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	return true
 }
 
+var validTransitions = map[string][]string{
+	"":           {"CREATED"},
+	"CREATED":    {"DISPATCHED", "CANCELLED"},
+	"DISPATCHED": {"IN_TRANSIT", "CANCELLED"},
+	"IN_TRANSIT": {"DELIVERED", "CANCELLED"},
+	"DELIVERED":  {"COMPLETED"},
+	"COMPLETED":  {},
+	"CANCELLED":  {},
+}
+
+func (rn *RaftNode) getOrderStateLocked(orderID string) string {
+	currentState := ""
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == orderID {
+			currentState = rn.Log[i].Command
+		}
+	}
+	return currentState
+}
+
+func isValidTransition(current, next string) bool {
+	allowed, exists := validTransitions[current]
+	if !exists {
+		return false
+	}
+	for _, a := range allowed {
+		if a == next {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleCommitOrder accepts a committed order entry on the leader.
 func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -740,17 +773,35 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry := LogEntry{
-		Index:     uint64(len(rn.Log) + 1),
-		Term:      rn.CurrentTerm,
-		Command:   req.Command,
-		OrderID:   req.OrderID,
-		Timestamp: time.Now(),
+	var existingEntry *LogEntry
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == req.OrderID && rn.Log[i].Command == req.Command {
+			existingEntry = &rn.Log[i]
+			break
+		}
 	}
 
-	// Append to the local log first. CommitIndex is NOT advanced here: the entry
-	// must first be replicated to a quorum of followers (Raft §5.3).
-	rn.Log = append(rn.Log, entry)
+	var entry LogEntry
+	if existingEntry != nil {
+		entry = *existingEntry
+	} else {
+		current := rn.getOrderStateLocked(req.OrderID)
+		if !isValidTransition(current, req.Command) {
+			rn.mu.Unlock()
+			http.Error(w, "Invalid state transition", http.StatusBadRequest)
+			return
+		}
+
+		entry = LogEntry{
+			Index:     uint64(len(rn.Log) + 1),
+			Term:      rn.CurrentTerm,
+			Command:   req.Command,
+			OrderID:   req.OrderID,
+			Timestamp: time.Now(),
+		}
+		rn.Log = append(rn.Log, entry)
+		rn.persistState()
+	}
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before

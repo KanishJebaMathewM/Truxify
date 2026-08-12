@@ -19,7 +19,7 @@ class _CrossDockSyncScreenState extends State<CrossDockSyncScreen> {
     _service.syncStream.listen((data) {
       if (mounted) setState(() => _session = data);
     });
-    _service.simulateSynchronization();
+    _service.simulateNetworkSync();
   }
 
   @override
@@ -32,10 +32,10 @@ class _CrossDockSyncScreenState extends State<CrossDockSyncScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('JIT Cross-Dock Sync'),
-        backgroundColor: Colors.blueGrey[900],
+        title: const Text('LTL Network Sync AI'),
+        backgroundColor: Colors.indigo[900],
       ),
-      backgroundColor: Colors.blueGrey[50],
+      backgroundColor: Colors.grey[200],
       body: _session == null
           ? const Center(child: CircularProgressIndicator())
           : _buildDashboard(),
@@ -44,36 +44,19 @@ class _CrossDockSyncScreenState extends State<CrossDockSyncScreen> {
 
   Widget _buildDashboard() {
     final s = _session!;
-    Color statusColor = Colors.orange;
-    if (s.status == 'Perfect Sync') statusColor = Colors.green;
-    if (s.status == 'Synchronizing') statusColor = Colors.blue;
 
     return Column(
       children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          color: statusColor,
-          child: Column(
-            children: [
-              Text(s.status.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 2)),
-              const SizedBox(height: 8),
-              Text(s.adviceText, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16)),
-            ],
-          ),
-        ),
+        _buildStatusHeader(s),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _buildFacilityHeader(s),
+              _buildTargetCard(s),
               const SizedBox(height: 24),
-              _buildDeltaVisualizer(s, statusColor),
-              const SizedBox(height: 24),
-              const Text('LIVE TELEMETRY', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-              const SizedBox(height: 8),
-              _buildTruckCard(s.selfTruck, true),
-              _buildTruckCard(s.partnerTruck, false),
+              const Text('INBOUND FLEET TELEMETRY', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const SizedBox(height: 12),
+              ...s.networkTrucks.map((truck) => _buildTruckCard(truck)),
             ],
           ),
         )
@@ -81,97 +64,140 @@ class _CrossDockSyncScreenState extends State<CrossDockSyncScreen> {
     );
   }
 
-  Widget _buildFacilityHeader(CrossDockSession s) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
-        leading: Icon(Icons.compare_arrows, color: Colors.blueGrey[900], size: 36),
-        title: Text(s.facilityName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        subtitle: Text(s.facilityLocation),
-      ),
-    );
-  }
+  Widget _buildStatusHeader(CrossDockSession s) {
+    Color headerColor;
+    IconData icon;
+    
+    if (s.isSpeedAdjusted) {
+      headerColor = Colors.orange[800]!;
+      icon = Icons.speed;
+    } else if (s.networkTrucks.any((t) => t.isDelayed)) {
+      headerColor = Colors.red[800]!;
+      icon = Icons.warning;
+    } else {
+      headerColor = Colors.indigo[800]!;
+      icon = Icons.device_hub;
+    }
 
-  Widget _buildDeltaVisualizer(CrossDockSession s, Color statusColor) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 500),
+      width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey[300]!)),
+      color: headerColor,
       child: Column(
         children: [
-          const Text('ETA DELTA', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-          const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
             children: [
-              Text('${s.syncDeltaMinutes}', style: TextStyle(color: statusColor, fontSize: 64, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 8),
-              const Text('MINUTES', style: TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.bold)),
+              Icon(icon, color: Colors.white, size: 36),
+              const SizedBox(width: 12),
+              const Text('CROSS-DOCK MESH NETWORK', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
             ],
-          )
+          ),
+          const SizedBox(height: 16),
+          Text(s.status.toUpperCase(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          if (s.isSpeedAdjusted) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(12)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.arrow_downward, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Text('NEW TARGET: ${s.recommendedSpeedMph.toInt()} MPH', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            )
+          ]
         ],
       ),
     );
   }
 
-  Widget _buildTruckCard(TruckTelemetry t, bool isSelf) {
+  Widget _buildTargetCard(CrossDockSession s) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: isSelf ? BorderSide(color: Colors.blueGrey[300]!, width: 2) : BorderSide.none),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.indigo[50],
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.indigo, width: 2),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Icon(isSelf ? Icons.local_shipping : Icons.rv_hookup, color: Colors.blueGrey[700]),
-                    const SizedBox(width: 8),
-                    Text(t.truckId, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.blueGrey[50], borderRadius: BorderRadius.circular(12)),
-                  child: Text(t.role, style: TextStyle(color: Colors.blueGrey[900], fontWeight: FontWeight.bold, fontSize: 12)),
-                )
+                const Text('TERMINAL DESTINATION', style: TextStyle(color: Colors.indigo, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                const SizedBox(height: 4),
+                Text(s.targetTerminal, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ],
             ),
-            const Divider(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                _buildMetric('Distance', '${t.distanceToDockMiles.toInt()} mi'),
-                _buildMetric('Arrival ETA', '${t.estimatedArrivalMinutes} min'),
-                _buildMetric('Target Speed', '${t.targetSpeedMph.toInt()} MPH', isHighlighted: true),
+                const Text('SYNC ETA', style: TextStyle(color: Colors.indigo, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                const SizedBox(height: 4),
+                Text(s.synchronizedEta, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: s.isSpeedAdjusted ? Colors.orange[800] : Colors.indigo[900])),
               ],
             ),
-            if (isSelf && t.currentSpeedMph != t.targetSpeedMph) ...[
-              const SizedBox(height: 16),
-              LinearProgressIndicator(
-                value: t.currentSpeedMph / 80,
-                backgroundColor: Colors.grey[200],
-                color: t.currentSpeedMph > t.targetSpeedMph ? Colors.red : Colors.orange,
-              ),
-              const SizedBox(height: 4),
-              Text('Current Speed: ${t.currentSpeedMph.toInt()} MPH (Adjust to Target)', style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
-            ]
           ],
         ),
       ),
     );
   }
 
-  Widget _buildMetric(String label, String value, {bool isHighlighted = false}) {
-    return Column(
-      children: [
-        Text(value, style: TextStyle(color: isHighlighted ? Colors.blueGrey[900] : Colors.black87, fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
+  Widget _buildTruckCard(InboundTruck t) {
+    bool isMe = t.truckId.contains('You');
+    Color cardColor = isMe ? Colors.blue[50]! : Colors.white;
+    Color statusColor = t.isDelayed ? Colors.red : Colors.green;
+
+    return Card(
+      color: cardColor,
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: isMe ? 2 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: isMe ? Colors.blue : Colors.transparent, width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.truckId, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isMe ? Colors.blue[900] : Colors.black87)),
+                Text('From: ${t.origin}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.speed, size: 16, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text('${t.currentSpeedMph.toInt()} mph', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+                  child: Text('ETA: ${t.eta}', style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                )
+              ],
+            )
+          ],
+        ),
+      ),
     );
   }
 }

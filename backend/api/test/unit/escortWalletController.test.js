@@ -10,6 +10,10 @@ const { didMock } = vi.hoisted(() => ({
 
 vi.mock('../../../did/did.service.js', () => ({ default: didMock }));
 
+vi.mock('../../src/config/db.js', () => ({
+  supabase: { from: vi.fn() },
+}));
+
 vi.mock('express-validator', () => ({
   validationResult: vi.fn(() => ({ isEmpty: () => true, array: () => [] })),
 }));
@@ -56,6 +60,14 @@ describe('escortWalletController', () => {
       const { req, res, next } = makeReqRes({ body: { subject: '0x1', credentialType: 'X', schema: {} } });
       await loadCredential(req, res, next);
       expect(next).toHaveBeenCalled();
+    });
+
+    it('rejects a backdated validUntil without issuing', async () => {
+      const { req, res, next } = makeReqRes({ body: { subject: '0x1', credentialType: 'T', schema: {}, validUntil: 1000 } });
+      await loadCredential(req, res, next);
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(didMock.issueCredential).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
     });
   });
 

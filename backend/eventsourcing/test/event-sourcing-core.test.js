@@ -388,6 +388,46 @@ describe('EventStoreCore — snapshots', () => {
     assert.equal(state.reason, 'user request');
     assert.equal(state.version, 13);
   });
+
+  test('two instances: instance B snapshots at the DB version including instance A events despite a stale warm cache', async () => {
+    const db = new InMemoryDb();
+    const instanceA = createCore({ db, threshold: 5 });
+    const instanceB = createCore({ db, threshold: 5 });
+    const orderId = 'order_two_instances';
+
+    // Instance A appends events; instance B warms its cache at version 4.
+    await appendChain(instanceA, orderId, [
+      { type: 'ORDER_CREATED', payload: { customerId: 'c', amount: 1, pickup: 'p', dropoff: 'd' } },
+      { type: 'ORDER_UPDATED', payload: { amount: 2 } },
+      { type: 'ORDER_UPDATED', payload: { amount: 3 } },
+      { type: 'ORDER_UPDATED', payload: { amount: 4 } },
+    ]);
+    assert.equal((await instanceB.getAggregateState(orderId)).version, 4);
+
+    // Instance A commits one more event past the threshold; instance B's
+    // in-memory cache has not seen it and stays stale.
+    await appendChain(instanceA, orderId, [
+      { type: 'ORDER_UPDATED', payload: { amount: 5, fromInstance: 'A' } },
+    ]);
+    assert.equal((await instanceB.getAggregateState(orderId)).version, 4);
+
+    // checkSnapshot must use the DB-authoritative version (5), not the cached
+    // stream, and rebuild the snapshot state from fresh rows.
+    assert.equal(await instanceB.checkSnapshot(orderId), true);
+
+    const snapshot = await instanceB.getSnapshot(orderId);
+    assert.equal(snapshot.version, 5);
+    assert.equal(snapshot.state.amount, 5);
+    assert.equal(snapshot.state.fromInstance, 'A');
+
+    // The snapshot check refreshed instance B's cache too.
+    assert.equal((await instanceB.getAggregateState(orderId)).version, 5);
+
+    // The snapshot is persisted, so instance A sees the same authoritative
+    // snapshot after clearing its cache.
+    instanceA.clearCache(orderId);
+    assert.equal((await instanceA.getSnapshot(orderId)).version, 5);
+  });
 });
 
 describe('EventStoreCore — optimistic concurrency', () => {

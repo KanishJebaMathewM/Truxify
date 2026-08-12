@@ -151,18 +151,27 @@ class MEVService {
     async releaseEscrow(escrowId, secret) {
         try {
             // Reveal the same 32-byte preimage the commitment was created from.
-            // Passing the raw string into the bytes32 slot zero-pads it on-chain
-            // and the digest would never match the committed secretHash.
             const preimage = toPreimageBytes32(secret);
+
+            // When MEV_PRIVATE_RELAY is enabled, submit the release as a private
+            // Flashbots bundle so it cannot be front-run; otherwise fall back to
+            // a normal public transaction.
+            if (process.env.MEV_PRIVATE_RELAY === 'true') {
+                const result = await this.releaseEscrowPrivate(escrowId, preimage);
+                await this.updateEscrowStatus(escrowId, 'released', result.txHash);
+                logger.info(`✅ Escrow ${escrowId} released via private bundle`);
+                return result;
+            }
+
             const tx = await this.escrow.releaseDepositPrivate(
                 escrowId,
                 preimage,
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();
-            
+
             await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
-            
+
             logger.info(`✅ Escrow ${escrowId} released with MEV protection`);
             return {
                 success: true,
@@ -170,50 +179,6 @@ class MEVService {
             };
         } catch (error) {
             logger.error('Escrow release failed:', error);
-            throw error;
-        }
-    }
-
-    // ============ Flashbots Integration ============
-
-    async submitFlashbotsBundle(escrowId, transactions) {
-        try {
-            // Sign transactions
-            const signedTxs = await this.signTransactions(transactions);
-            
-            // Get current block number
-            const blockNumber = await this.provider.getBlockNumber();
-            const targetBlock = blockNumber + 1;
-            
-            // Submit to Flashbots
-            const response = await axios.post(
-                `${this.flashbotsEndpoint}/eth/v1/bundle`,
-                {
-                    jsonrpc: "2.0",
-                    method: "eth_sendBundle",
-                    params: [{
-                        txs: signedTxs,
-                        blockNumber: `0x${targetBlock.toString(16)}`
-                    }],
-                    id: 1
-                }
-            );
-            
-            // Store bundle
-            await this.storeBundle({
-                escrowId,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            });
-            
-            logger.info(`✅ Flashbots bundle submitted for escrow ${escrowId}`);
-            return {
-                success: true,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            };
-        } catch (error) {
-            logger.error('Flashbots bundle submission failed:', error);
             throw error;
         }
     }

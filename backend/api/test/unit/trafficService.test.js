@@ -21,6 +21,11 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
     vi.useFakeTimers();
     delete process.env.TOMTOM_API_KEY;
     delete process.env.GOOGLE_MAPS_API_KEY;
+    // Default TomTom response for the rush-hour tests: -20% speedDiff -> 1.2x.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ flowSegmentData: { speedDiffPercent: -20 } }),
+    });
   });
 
   it('returns 1.0 when pickupLat is missing', async () => {
@@ -107,7 +112,7 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
 
     expect(mockLogger.info).toHaveBeenCalledTimes(1);
     const logCall = mockLogger.info.mock.calls[0];
-    expect(logCall[0]).toContain('Live traffic surge detected');
+    expect(logCall[0]).toContain('Live traffic data');
 
     delete process.env.TOMTOM_API_KEY;
   });
@@ -181,5 +186,41 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
     const result = await getLiveTrafficMultiplier(12.9, 77.5);
     expect(result).toBe(1.0);
     expect(mockLogger.error).toHaveBeenCalled();
+  });
+
+  it('uses the Google Distance Matrix branch when only the Google key is set', async () => {
+    process.env.GOOGLE_MAPS_API_KEY = 'google-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        rows: [{
+          elements: [{
+            duration_in_traffic: { value: 120 },
+            duration: { value: 100 },
+          }],
+        }],
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBeCloseTo(1.2, 2);
+  });
+
+  it('clamps the Google branch multiplier at the maximum', async () => {
+    process.env.GOOGLE_MAPS_API_KEY = 'google-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        rows: [{
+          elements: [{
+            duration_in_traffic: { value: 600 },
+            duration: { value: 100 },
+          }],
+        }],
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBe(2.5);
   });
 });

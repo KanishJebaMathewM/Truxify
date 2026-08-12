@@ -68,6 +68,25 @@ describe('fraudMiddleware', () => {
       await fraudDetectionMiddleware(req, res, next);
       expect(res.status).toHaveBeenCalledWith(503);
     });
+
+    // #10501: trips are mounted at /api/v1/trips in index.js, so the fraud
+    // middleware's criticalEndpoints entry must match that path (not the
+    // auth-less /api/trips mount). A v1 trip request must be treated as
+    // critical and run real-time risk scoring.
+    it('treats /api/v1/trips requests as critical (runs risk scoring)', async () => {
+      const { req, res, next } = makeReqRes({ originalUrl: '/api/v1/trips/123' });
+      await fraudDetectionMiddleware(req, res, next);
+      expect(fraudMock.getRealTimeRisk).toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('blocks high-risk /api/v1/trips requests', async () => {
+      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.95, riskLevel: 'HIGH' });
+      const { req, res, next } = makeReqRes({ originalUrl: '/api/v1/trips' });
+      await fraudDetectionMiddleware(req, res, next);
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 
   describe('networkAnalysisMiddleware', () => {

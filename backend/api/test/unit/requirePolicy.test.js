@@ -1,8 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requirePolicy } from '../../src/middleware/requirePolicy.js';
 import { policy } from '../../src/security/policyEngine.js';
 
 describe('requirePolicy Middleware', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
   it('returns 401 if req.user is missing', () => {
     const middleware = requirePolicy('READ');
     const mockReq = {};
@@ -31,5 +34,39 @@ describe('requirePolicy Middleware', () => {
     middleware(mockReq, mockRes, mockNext);
 
     expect(mockNext).toHaveBeenCalled();
+  });
+
+  it('returns 403 when resolver yields an undefined resource for an ownership-only action', async () => {
+    const middleware = requirePolicy('order:view-driver-location', async () => ({ order: undefined }));
+    const mockReq = { user: { id: 'user-1', role: 'customer' } };
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const mockNext = vi.fn();
+
+    middleware(mockReq, mockRes, mockNext);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockRes.status).toHaveBeenCalledWith(403);
+    expect(mockNext).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the resource resolver rejects', async () => {
+    const middleware = requirePolicy('order:view-driver-location', async () => {
+      throw new Error('boom');
+    });
+    const mockReq = { user: { id: 'user-1', role: 'customer' } };
+    const mockRes = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const mockNext = vi.fn();
+
+    middleware(mockReq, mockRes, mockNext);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockRes.status).toHaveBeenCalledWith(500);
+    expect(mockNext).not.toHaveBeenCalled();
   });
 });

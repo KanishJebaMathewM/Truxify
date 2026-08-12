@@ -15,6 +15,25 @@ describe('errors', () => {
       expect(err.name).toBe('AppError')
       expect(err).toBeInstanceOf(Error)
     })
+
+    it('leaves statusCode undefined when not provided', () => {
+      const err = new AppError('plain')
+      expect(err.statusCode).toBeUndefined()
+    })
+  })
+
+  describe('ValidationError', () => {
+    it('defaults to 400', () => {
+      const err = new ValidationError()
+      expect(err.statusCode).toBe(400)
+      expect(err.message).toBe('Validation Error')
+    })
+
+    it('accepts a custom message while keeping the 400 status', () => {
+      const err = new ValidationError('Bad payload')
+      expect(err.message).toBe('Bad payload')
+      expect(err.statusCode).toBe(400)
+    })
   })
 
   describe('NotFoundError', () => {
@@ -29,14 +48,6 @@ describe('errors', () => {
       const err = new NotFoundError('No such order')
       expect(err.message).toBe('No such order')
       expect(err.statusCode).toBe(404)
-    })
-  })
-
-  describe('ValidationError', () => {
-    it('defaults to 400', () => {
-      const err = new ValidationError()
-      expect(err.statusCode).toBe(400)
-      expect(err.message).toBe('Validation Error')
     })
   })
 

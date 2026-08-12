@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ethers } from 'ethers';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 // Generic field validation helpers
@@ -179,6 +180,16 @@ export const updateWalletSchema = z.object({
   wallet_address: z.string().regex(
     /^0x[a-fA-F0-9]{40}$/,
     'Must be a valid 0x-prefixed 42-character wallet address'
+  ).refine(
+    (address) => {
+      try {
+        ethers.getAddress(address);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Wallet address has an invalid EIP-55 checksum' }
   ),
 }).strict();
 
@@ -249,6 +260,11 @@ export const earningsSummarySchema = z.object({
   period: z.enum(['weekly', 'monthly']).optional(),
 }).strict();
 
+export const updateDocumentStatusSchema = z.object({
+  status: z.enum(['Approved', 'Rejected', 'Pending']),
+  rejection_reason: z.string().optional()
+});
+
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
@@ -304,6 +320,12 @@ export const oracleVerifyCrosschainSchema = z.object({
     .string()
     .min(1, 'blockchainHash is required')
     .regex(/^0x[a-fA-F0-9]+$/, { message: 'blockchainHash must be a 0x-prefixed hex string' }),
+}).strict();
+
+export const oracleGasPriceSyncSchema = z.object({
+  gasGwei: z.number().positive('gasGwei must be a positive number'),
+  idempotencyKey: z.string().min(1, 'idempotencyKey is required').max(128),
+  timestamp: z.number().optional(),
 }).strict();
 
 export const verifyOrderParamsSchema = z.object({
@@ -384,3 +406,18 @@ export const shareTrackingSchema = z.object({}).strict();
 export const publicTrackingTokenSchema = z.object({
   token: z.string().min(1, 'Tracking token is required').max(512),
 });
+
+export const reportGripDataSchema = z.object({
+  latitude: latitudeSchema,
+  longitude: longitudeSchema,
+  grip_index: coerceNumber(
+    z.number({ invalid_type_error: "grip_index must be a number" })
+      .min(0, { message: 'Grip index must be between 0 and 10' })
+      .max(10, { message: 'Grip index must be between 0 and 10' })
+  ),
+  slip_events_count: coerceNumber(
+    z.number({ invalid_type_error: "slip_events_count must be a number" })
+      .nonnegative({ message: 'slip_events_count must be >= 0' })
+  ).optional().default(0),
+}).strict();
+

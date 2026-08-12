@@ -7,6 +7,8 @@ import logger from '../backend/api/src/middleware/logger.js';
 
 const execAsync = promisify(exec);
 
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function runSnyk(command, options = {}) {
     return new Promise((resolve, reject) => {
         exec(command, options, (error, stdout, stderr) => {
@@ -147,7 +149,7 @@ class SnykService {
             const results = JSON.parse(stdout);
             this.scanResults.push({
                 type: 'code',
-                path,
+                path: safePath,
                 timestamp: new Date().toISOString(),
                 results
             });
@@ -191,7 +193,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             
@@ -214,7 +217,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             
@@ -236,7 +240,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             

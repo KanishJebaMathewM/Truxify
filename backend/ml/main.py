@@ -27,17 +27,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.models.eta_prediction import eta_predictor
-from fastapi import HTTPException
 
 from app.models.demand_forecast import (
     predict_demand,
     train_demand_forecast_model,
+    rollback_demand_forecast_model,
     FEATURE_NAMES,
 )
 from app.models.price_prediction import (
     predict_price,
     train_price_model,
+    close_weather_resources,
     PriceModelDataUnavailableError,
+)
+from app.execution import (
+    run_inference,
+    close_inference_executor,
+    inference_capacity,
 )
 from app.models.bilateral_matcher import match_bilateral
 from app.models.driver_profit import driver_profit_predictor
@@ -63,9 +69,6 @@ loaded_models: set[str] = set()
 
 
 import os
-
-MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", "10"))
-INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
 
 app = FastAPI(
     title="Truxify ML Engine",
@@ -97,11 +100,6 @@ app.add_middleware(
 )
 
 
-@app.get("/sentry-debug")
-async def trigger_error():
-    division_by_zero = 1 / 0
-
-
 @app.on_event("startup")
 async def startup_event():
     from app.models.base import preload_all_models
@@ -111,7 +109,18 @@ async def startup_event():
     loaded_models.update(persisted_models)
     if eta_predictor.model is not None:
         loaded_models.add("eta_prediction")
-    logger.info("ML Engine startup complete — loaded: %s", sorted(loaded_models))
+    logger.info(
+        "ML Engine startup complete — loaded: %s, inference capacity: %d",
+        sorted(loaded_models),
+        inference_capacity(),
+    )
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("ML Engine shutting down — releasing executor and HTTP clients")
+    close_inference_executor()
+    close_weather_resources()
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +436,15 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
         input.nearby_drivers,
     ]
     try:
-        demand = await asyncio.to_thread(predict_demand, features)
+        # predict_demand runs CPU-bound gradient-boosting inference (and may
+        # auto-train on first use); run it off the event loop so it cannot
+        # stall unrelated requests or /health.
+        demand = await run_inference(predict_demand, features)
         if demand is None:
             raise HTTPException(status_code=503, detail="Model not available")
         return DemandForecastOutput(predicted_demand=demand)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Demand prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Prediction failed")
@@ -443,10 +457,10 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 @app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
-        # predict_price performs blocking weather lookups (requests.get) and
-        # CPU-bound model scoring; run it in a worker thread so it never blocks
+        # predict_price performs CPU-bound model scoring and blocking weather
+        # HTTP lookups; run it on a bounded inference worker so it never blocks
         # the FastAPI event loop and stalls other ML endpoints.
-        result = await asyncio.to_thread(
+        result = await run_inference(
             predict_price,
             distance_km=input.distance_km,
             cargo_weight_kg=input.cargo_weight_kg,
@@ -489,10 +503,14 @@ async def bilateral_match_endpoint(input: BilateralMatchInput, _auth=Depends(ver
     try:
         loads = [load.model_dump() for load in input.loads]
         drivers = [driver.model_dump() for driver in input.drivers]
-        result = match_bilateral(loads, drivers)
+        # Hungarian assignment over the cost matrix is CPU-bound; run off the
+        # event loop so a large matching job cannot stall the service.
+        result = await run_inference(match_bilateral, loads, drivers)
         return BilateralMatchOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Bilateral matching failed: %s", e)
         raise HTTPException(status_code=500, detail="Matching failed")
@@ -505,7 +523,10 @@ async def bilateral_match_endpoint(input: BilateralMatchInput, _auth=Depends(ver
 @app.post("/predict/driver-profit", response_model=DriverProfitOutput)
 async def predict_driver_profit_endpoint(input: DriverProfitInput, _auth=Depends(verify_api_key)):
     try:
-        result = driver_profit_predictor.predict(
+        # Gradient-boosting inference (incl. per-stage prediction spread) is
+        # CPU-bound; run off the event loop.
+        result = await run_inference(
+            driver_profit_predictor.predict,
             route_distance=input.route_distance,
             fuel_price=input.fuel_price,
             toll_estimate=input.toll_estimate,
@@ -516,6 +537,8 @@ async def predict_driver_profit_endpoint(input: DriverProfitInput, _auth=Depends
         return DriverProfitOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Driver profit prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Driver profit prediction failed")
@@ -531,10 +554,14 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
         packages = [pkg.model_dump() for pkg in input.packages]
         truck = input.truck.model_dump()
         addresses = [addr.model_dump() for addr in input.delivery_addresses]
-        result = await asyncio.to_thread(optimise_packing, packages, truck, addresses)
+        # 3-D bin packing and nearest-neighbour sequencing are CPU-bound; run
+        # off the event loop so large packing jobs cannot stall the service.
+        result = await run_inference(optimise_packing, packages, truck, addresses)
         return PackingOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Packing optimisation failed: %s", e)
         raise HTTPException(status_code=500, detail="Packing optimisation failed")
@@ -547,12 +574,17 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
 @app.post("/recommend/loads", response_model=RecommendOutput)
 async def recommend_loads_endpoint(input: RecommendLoadsInput, _auth=Depends(verify_api_key)):
     try:
-        result = collaborative_filter.recommend_loads(
+        # Recommend does numpy scoring but may lazy-load the persisted SVD
+        # model from disk (blocking I/O); run off the event loop.
+        result = await run_inference(
+            collaborative_filter.recommend_loads,
             user_id=input.user_id,
             booking_history=input.booking_history,
             top_n=input.top_n,
         )
         return RecommendOutput(**result)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Load recommendation failed: %s", e)
         raise HTTPException(status_code=500, detail="Load recommendation failed")
@@ -565,12 +597,15 @@ async def recommend_loads_endpoint(input: RecommendLoadsInput, _auth=Depends(ver
 @app.post("/recommend/trucks", response_model=RecommendOutput)
 async def recommend_trucks_endpoint(input: RecommendTrucksInput, _auth=Depends(verify_api_key)):
     try:
-        result = collaborative_filter.recommend_trucks(
+        result = await run_inference(
+            collaborative_filter.recommend_trucks,
             user_id=input.user_id,
             booking_history=input.booking_history,
             top_n=input.top_n,
         )
         return RecommendOutput(**result)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Truck recommendation failed: %s", e)
         raise HTTPException(status_code=500, detail="Truck recommendation failed")
@@ -583,7 +618,10 @@ async def recommend_trucks_endpoint(input: RecommendTrucksInput, _auth=Depends(v
 @app.post("/score/trust", response_model=TrustScoreOutput)
 async def trust_score_endpoint(input: TrustScoreInput, _auth=Depends(verify_api_key)):
     try:
-        result = trust_scorer.predict(
+        # RandomForest risk classification is CPU-bound and may lazily train a
+        # model on first use; run off the event loop.
+        result = await run_inference(
+            trust_scorer.predict,
             cancellation_rate=input.cancellation_rate,
             on_time_pct=input.on_time_pct,
             avg_rating=input.avg_rating,
@@ -593,6 +631,8 @@ async def trust_score_endpoint(input: TrustScoreInput, _auth=Depends(verify_api_
         return TrustScoreOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Trust scoring failed: %s", e)
         raise HTTPException(status_code=500, detail="Trust scoring failed")
@@ -608,10 +648,15 @@ async def deadhead_endpoint(input: DeadheadInput, _auth=Depends(verify_api_key))
         driver_dest = input.driver_destination.model_dump()
         truck_specs = input.truck_specs.model_dump()
         loads = [load.model_dump() for load in input.available_loads]
-        result = await asyncio.to_thread(find_return_loads, driver_dest, truck_specs, input.arrival_time, loads)
+        # Haversine scoring over every load is CPU-bound; run off the loop.
+        result = await run_inference(
+            find_return_loads, driver_dest, truck_specs, input.arrival_time, loads
+        )
         return DeadheadOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Deadhead matching failed: %s", e)
         raise HTTPException(status_code=500, detail="Deadhead matching failed")
@@ -628,10 +673,15 @@ async def mid_trip_endpoint(input: MidTripInput, _auth=Depends(verify_api_key)):
         route = [wp.model_dump() for wp in input.remaining_route]
         capacity = input.available_capacity.model_dump()
         loads = [load.model_dump() for load in input.nearby_loads]
-        result = await asyncio.to_thread(find_mid_trip_loads, current_loc, route, capacity, loads)
+        # Haversine scoring over every nearby load is CPU-bound; run off loop.
+        result = await run_inference(
+            find_mid_trip_loads, current_loc, route, capacity, loads
+        )
         return MidTripOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Mid-trip reoptimisation failed: %s", e)
         raise HTTPException(status_code=500, detail="Mid-trip reoptimisation failed")
@@ -646,7 +696,7 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
     timeout = int(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
     try:
         metrics = await asyncio.wait_for(
-            asyncio.to_thread(train_demand_forecast_model),
+            run_inference(train_demand_forecast_model),
             timeout=timeout,
         )
         return TrainResponse(status="success", metrics=metrics)
@@ -658,12 +708,30 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail="Training failed")
 
 
+@app.post("/train/demand/rollback")
+async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
+    """Roll back the demand-forecast model to its previously-promoted version.
+
+    This is the real rollback path for the model actually retrained by
+    /train/demand and the n8n weekly retraining workflow. It is
+    intentionally separate from /ab-testing/rollback/{test_id}, which
+    belongs to the unrelated ETA shadow-traffic A/B testing system and has
+    no knowledge of the demand-forecast model or its versions.
+    """
+    try:
+        result = await asyncio.to_thread(rollback_demand_forecast_model)
+        return result
+    except Exception as e:
+        logger.error("Demand model rollback failed: %s", e)
+        raise HTTPException(status_code=500, detail="Rollback failed")
+
+
 @app.post("/train/price", response_model=TrainResponse)
 async def train_price_endpoint(_auth=Depends(verify_api_key)):
     timeout = int(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
     try:
         metrics = await asyncio.wait_for(
-            asyncio.to_thread(train_price_model),
+            run_inference(train_price_model),
             timeout=timeout,
         )
         return TrainResponse(status="success", metrics=metrics)
@@ -715,16 +783,21 @@ class PredictiveMaintenanceOutput(BaseModel):
 @app.post("/predict/maintenance", response_model=PredictiveMaintenanceOutput)
 async def predict_maintenance_endpoint(input: PredictiveMaintenanceInput, _auth=Depends(verify_api_key)):
     try:
-        result = predictive_maintenance.predict(
+        # Rule-based + statistical risk scoring is CPU-bound; run off the
+        # event loop so it cannot stall other endpoints or /health.
+        result = await run_inference(
+            predictive_maintenance.predict,
             engine_temperature=input.engine_temperature,
             tire_pressure=input.tire_pressure,
             oil_level=input.oil_level,
             coolant_level=input.coolant_level,
-            mileage=input.mileage
+            mileage=input.mileage,
         )
         return PredictiveMaintenanceOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Predictive maintenance prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Predictive maintenance prediction failed")
@@ -762,7 +835,7 @@ async def verify_kyc_endpoint(file: UploadFile = File(...), _auth=Depends(verify
         if len(image_bytes) > max_file_size_bytes:
             raise HTTPException(status_code=422, detail="File too large. Maximum size is 5 MB.")
 
-        text = ocr_verifier.extract_text(image_bytes)
+        text = await run_inference(ocr_verifier.extract_text, image_bytes)
         if text is None:
             # OCR failed (undecodable image, Tesseract unavailable, ...).
             # Never fall back to a simulated licence: report unverified.

@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../controllers/app_controller.dart';
+import '../providers/text_scale_provider.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
 import '../data/mock_data.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/language_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -419,7 +422,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: AppLocalizations.of(context)!.applyLanguage,
                     onPressed: () async {
                       final controller = TruxifyScope.of(context);
+                      final languageProvider = LanguageProvider.of(context);
                       final langCode = _langCodeForName(selectedLang);
+                      languageProvider.changeLocale(langCode);
                       await controller.setLocale(langCode);
                       if (mounted) {
                         setState(() {
@@ -1051,6 +1056,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   height: 1,
                   color: _borderColor(context),
                 ),
+                Consumer<TextScaleProvider>(
+                  builder: (context, scaleProvider, child) {
+                    return SwitchListTile.adaptive(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                      title: Text(
+                        'Enable Large Text',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Optimized for dashboard mounting',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                      value: scaleProvider.isLargeText,
+                      onChanged: (val) => scaleProvider.toggleScale(val),
+                      activeColor: TruxifyColors.accent,
+                    );
+                  },
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
                 ListTile(
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -1115,7 +1150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
-                    AppLocalizations.of(context)!.languageLabel,
+                    AppLocalizations.of(context)!.language,
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -1129,8 +1164,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: Icon(Icons.chevron_right_rounded,
-                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  trailing: DropdownButton<String>(
+                    value: ['en', 'hi', 'ta'].contains(_langCodeForName(_currentLanguage))
+                        ? _langCodeForName(_currentLanguage)
+                        : 'en',
+                    underline: const SizedBox(),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'en',
+                        child: Text(AppLocalizations.of(context)!.english),
+                      ),
+                      DropdownMenuItem(
+                        value: 'hi',
+                        child: Text(AppLocalizations.of(context)!.hindi),
+                      ),
+                      DropdownMenuItem(
+                        value: 'ta',
+                        child: Text(AppLocalizations.of(context)!.tamil),
+                      ),
+                    ],
+                    onChanged: (newCode) async {
+                      if (newCode != null) {
+                        final languageProvider = LanguageProvider.of(context);
+                        final controller = TruxifyScope.of(context);
+                        languageProvider.changeLocale(newCode);
+                        await controller.setLocale(newCode);
+                        if (mounted) {
+                          setState(() {
+                            _currentLanguage = _nameForLanguageCode(newCode);
+                          });
+                        }
+                      }
+                    },
+                  ),
                   onTap: () => _showLanguageSheet(context),
                 ),
                 Divider(

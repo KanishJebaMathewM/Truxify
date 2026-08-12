@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -8,10 +8,11 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { GpsLog } from '../models/GpsLog.js';
 import { ebpfLoader } from '../../../../ebpf/loader.js';
+import { createLocationEventBus } from './locationEventBus.js';
 
 const TELEMETRY_SCHEMA = {
-  lat: { type: 'number', required: true, min: -90, max: 90 },
-  lng: { type: 'number', required: true, min: -180, max: 180 },
+  lat: { type: 'number', required: false, min: -90, max: 90 },
+  lng: { type: 'number', required: false, min: -180, max: 180 },
   latitude: { type: 'number', required: false, min: -90, max: 90 },
   longitude: { type: 'number', required: false, min: -180, max: 180 },
   driver_id: { type: 'string', required: false, minLen: 1, maxLen: 64 },
@@ -25,6 +26,14 @@ const TELEMETRY_SCHEMA = {
 
 function validateTelemetryPayload(data) {
   const errors = [];
+
+  const hasLatLng = data.lat !== undefined && data.lat !== null && data.lng !== undefined && data.lng !== null;
+  const hasLatLong = data.latitude !== undefined && data.latitude !== null && data.longitude !== undefined && data.longitude !== null;
+  
+  if (!hasLatLng && !hasLatLong) {
+    errors.push('At least one coordinate pair (lat/lng or latitude/longitude) is required');
+  }
+
   for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
     const value = data[field];
     if (rules.required && (value === undefined || value === null)) {
@@ -65,8 +74,9 @@ let _orderRepository = null;
 let telemetryDropCounter = 0;
 const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
-// In-memory mapping of active client subscriptions
-const trackingSubscriptions = new Map();
+// In-memory mapping of active client subscriptions (process-local by design;
+// distributed fan-out across replicas is handled by the locationEventBus).
+let trackingSubscriptions = new Map();
 
 // Dedicated Redis subscriber instance for multi-replica WebSocket broadcasting
 let redisSubClient = null;
@@ -127,6 +137,12 @@ const locationChannels = new Map();
 // Used during disconnect cleanup so channels are properly removed when the last
 // subscriber for a display ID disconnects.
 const displayIdToLocationChannelKeys = new Map();
+
+// Redis Pub/Sub fan-out bus that distributes location events across API
+// replicas so a driver connected to Replica A reaches a customer connected to
+// Replica B. Local subscribers are still stored only in `trackingSubscriptions`;
+// the bus only relays validated events between processes.
+let locationEventBus = null;
 
 // =====================================================================
 // CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
@@ -294,6 +310,7 @@ const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
  * Returns { orderId, orderDisplayId } or null on miss / error.
  */
 async function getCachedDriverOrder(driverId) {
+  if (!driverId) return null;
   if (!redisClient) return null;
   try {
     const cached = await redisClient.get(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
@@ -301,7 +318,7 @@ async function getCachedDriverOrder(driverId) {
       return JSON.parse(cached);
     }
   } catch (err) {
-    logger.error('Redis driver order cache get error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache get error');
   }
   return null;
 }
@@ -310,6 +327,7 @@ async function getCachedDriverOrder(driverId) {
  * Store the driver → active order mapping in Redis.
  */
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
+  if (!driverId) return;
   if (!redisClient || !orderId) return;
   try {
     await redisClient.set(
@@ -319,7 +337,7 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
       DRIVER_ORDER_CACHE_TTL_SECONDS,
     );
   } catch (err) {
-    logger.error('Redis driver order cache set error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache set error');
   }
 }
 
@@ -327,11 +345,12 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
  * Invalidate cached active order for a driver.
  */
 async function invalidateDriverOrderCache(driverId) {
+  if (!driverId) return;
   if (!redisClient) return;
   try {
     await redisClient.del(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
   } catch (err) {
-    logger.error('Redis driver order cache invalidate error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
 
@@ -527,12 +546,120 @@ async function authenticateWs(ws, token) {
     }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
-    logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
+    logger.info({ userId: ws.user.id }, 'WS Authenticated user');
   } catch (err) {
     logger.error({ err }, 'WS Auth failed');
     ws.send(JSON.stringify({ error: 'Unauthorized: Invalid token', code: 4001 }));
     ws.close(4001, 'Unauthorized: Invalid token');
   }
+}
+
+/**
+ * Build the client-facing `location_update` payload. This is the exact wire
+ * format consumed by existing WebSocket clients and is byte-identical whether
+ * produced by the publishing replica or reconstructed from a distributed event.
+ */
+function buildClientLocationPayload({ driverId, orderDisplayId, lat, lng, speed, bearing, timestampIso }) {
+  return JSON.stringify({
+    event: 'location_update',
+    data: {
+      driver_id: driverId,
+      order_display_id: orderDisplayId,
+      latitude: lat,
+      longitude: lng,
+      speed,
+      bearing,
+      timestamp: timestampIso,
+    },
+  });
+}
+
+/**
+ * Rebuild the client-facing payload from a validated internal Pub/Sub event.
+ */
+function buildClientPayloadFromInternalEvent(event) {
+  return buildClientLocationPayload({
+    driverId: event.driverId,
+    orderDisplayId: event.orderDisplayId,
+    lat: event.location.lat,
+    lng: event.location.lng,
+    speed: event.location.speed,
+    bearing: event.location.bearing,
+    timestampIso: event.timestamp,
+  });
+}
+
+/**
+ * Deliver a location payload to a subscription map's local subscribers.
+ *
+ * Semantics preserved from the original implementation:
+ *   - clients subscribed to the order (`orderDisplayId`) receive it
+ *   - clients subscribed to the driver (`driverId`) receive it
+ *   - only open sockets (readyState 1) receive it
+ *
+ * A client subscribed to both the order and the driver receives the payload
+ * exactly ONCE (the previous code could send it twice for such a client).
+ *
+ * @param {Map} subscriptionMap - this replica's local subscription registry.
+ * @param {string} payload - serialized client-facing payload.
+ * @param {string|null} orderDisplayId - order routing key.
+ * @param {string|null} driverId - driver routing key.
+ * @param {object} [metricsBus] - location event bus used to record delivery metrics.
+ * @returns {number} number of sockets that received the payload.
+ */
+function deliverLocationToLocalSubscribers(subscriptionMap, payload, orderDisplayId, driverId, metricsBus) {
+  const bus = metricsBus || locationEventBus;
+  const deliveredSockets = new Set();
+  let delivered = 0;
+
+  if (orderDisplayId && subscriptionMap.has(orderDisplayId)) {
+    for (const client of subscriptionMap.get(orderDisplayId)) {
+      if (client.readyState === 1 && !deliveredSockets.has(client)) {
+        deliveredSockets.add(client);
+        client.send(payload);
+        delivered++;
+      }
+    }
+  }
+
+  if (driverId && subscriptionMap.has(driverId)) {
+    for (const client of subscriptionMap.get(driverId)) {
+      if (client.readyState === 1 && !deliveredSockets.has(client)) {
+        deliveredSockets.add(client);
+        client.send(payload);
+        delivered++;
+      }
+    }
+  }
+
+  bus?.recordDelivery(delivered);
+  return delivered;
+}
+
+/**
+ * Build the handler invoked for every VALID distributed location event received
+ * on a replica. The publishing replica already delivered the event locally, so
+ * its own events (matching sourceInstanceId) are skipped — this is what
+ * prevents duplicate delivery to local clients.
+ *
+ * @param {object} [targetBus] - bus instance that received the event
+ *   (defaults to the module-level bus; required for multi-instance tests).
+ * @param {Map} [subscriptionMap] - local subscription registry to deliver to
+ *   (defaults to the module-level registry).
+ */
+function createLocationEventHandler(targetBus, subscriptionMap) {
+  return (event) => {
+    const bus = targetBus || locationEventBus;
+    if (!bus) return;
+    if (event.sourceInstanceId === bus.getInstanceId()) return;
+
+    const payload = buildClientPayloadFromInternalEvent(event);
+    const map = subscriptionMap || trackingSubscriptions;
+    const delivered = deliverLocationToLocalSubscribers(map, payload, event.orderDisplayId, event.driverId, bus);
+    if (delivered === 0) {
+      bus.recordNoSubscribers();
+    }
+  };
 }
 
 /**
@@ -548,6 +675,14 @@ export function initWebSocketServer(server, orderRepository) {
   const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
   wsServer = wss;
+
+  // Start the distributed location fan-out. When Redis is unavailable this
+  // degrades to local-only delivery; the WebSocket server keeps working.
+  if (!locationEventBus) {
+    locationEventBus = createLocationEventBus();
+    locationEventBus.init(redisClient);
+    locationEventBus.subscribe(createLocationEventHandler());
+  }
 
   server.on('upgrade', async (request, socket, head) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
@@ -587,14 +722,14 @@ export function initWebSocketServer(server, orderRepository) {
     });
 
     ws.on('close', () => {
-      logger.info('🔌 WebSocket connection closed.');
+      logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
 
     ws.on('error', (err) => {
-      logger.error('🔌 WebSocket client error:', err.message);
+      logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
@@ -627,7 +762,7 @@ export function initWebSocketServer(server, orderRepository) {
       };
       ws.authenticated = true;
       logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
-      logger.info('🔌 New WebSocket connection established on /ws/tracking');
+      logger.info('New WebSocket connection established on /ws/tracking');
       return;
     }
 
@@ -643,13 +778,13 @@ export function initWebSocketServer(server, orderRepository) {
       }
     }, WS_AUTH_TIMEOUT_MS);
     ws.once('close', () => clearTimeout(authTimeout));
-    logger.info('🔌 New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
+    logger.info('New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
   });
 
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('🔌 Terminating unresponsive WebSocket client.');
+        logger.info('Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -739,7 +874,7 @@ export async function handleTrackingMessage(ws, message, req) {
             status: 'authenticated',
             user_id: ws.user?.id ?? ws.driverId,
           }));
-          logger.info('🔌 New WebSocket connection established on /ws/tracking (first-frame auth)');
+          logger.info('New WebSocket connection established on /ws/tracking (first-frame auth)');
         }
         return;
       }
@@ -808,10 +943,26 @@ export async function handleLocationPing(ws, data, req) {
   const lat = data.lat !== undefined ? data.lat : data.latitude;
   const lng = data.lng !== undefined ? data.lng : data.longitude;
 
-  // Reject frames with null or undefined coordinates before validation
+  // Cross-field validation: require at least one complete coordinate pair.
+  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
+  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
+  if (!hasLatLng && !hasLatLong) {
+    return ws.send(JSON.stringify({
+      error: 'Invalid telemetry payload',
+      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
+    }));
+  }
+
+  // Reject frames with null or undefined resolved coordinates before schema validation
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
+
+  // Normalize the alternate latitude/longitude names into the canonical
+  // lat/lng keys so schema validation, sanitization and persistence
+  // downstream all operate on the resolved coordinates.
+  data.lat = lat;
+  data.lng = lng;
 
   // Fix 3 + dead-code fix: run the payload through the schema validator/
   const normalizedForValidation = {
@@ -826,24 +977,6 @@ export async function handleLocationPing(ws, data, req) {
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
   if (normalizedValidationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
-  }
-
-  // Schema-validate and sanitize the telemetry payload before further
-  // processing (issue #5758). Enforces field ranges and string lengths that
-  // the inline guards above do not cover.
-  const validationErrors = validateTelemetryPayload(data);
-  if (validationErrors) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload', details: validationErrors }));
-  }
-
-  // Cross-field validation: require at least one complete coordinate pair.
-  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
-  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
-  if (!hasLatLng && !hasLatLong) {
-    return ws.send(JSON.stringify({
-      error: 'Invalid telemetry payload',
-      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
-    }));
   }
 
   const sanitized = sanitizeTelemetryData(data);
@@ -998,6 +1131,45 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
+  // Upsert the driver's live location into `driver_locations` (fire-and-forget
+  // so the WebSocket broadcast path is never blocked). This is the only writer
+  // for the table that feeds new-trip nearby-driver notifications and public
+  // shared tracking. The service-role client is required — RLS grants anon
+  // nothing on `driver_locations`, so an anon write would always be rejected.
+  // Deactivating any prior active row keeps exactly one live row per driver,
+  // matching the `drivers` view's `sync_drivers_update()` trigger (issue #8932).
+  if (supabaseAdmin) {
+    void (async () => {
+      try {
+        await supabaseAdmin
+          .from('driver_locations')
+          .update({ is_active: false })
+          .eq('driver_id', driver_id)
+          .eq('is_active', true);
+        const { error } = await supabaseAdmin
+          .from('driver_locations')
+          .insert({
+            driver_id,
+            latitude: lat,
+            longitude: lng,
+            is_active: true,
+            last_updated_at: new Date(serverNow).toISOString(),
+          });
+        if (error) {
+          logger.error(
+            { error, driver_id },
+            '[Tracker] Failed to write driver location',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, driver_id },
+          '[Tracker] Failed to write driver location',
+        );
+      }
+    })();
+  }
+
   // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
   // GpsLog mongoose schema. Fire-and-forget — the write must not block the
   // WebSocket broadcast path. The bulk telemetry flush to the raw `telemetry`
@@ -1021,19 +1193,43 @@ export async function handleLocationPing(ws, data, req) {
     });
   }
 
-  const broadcastPayload = JSON.stringify({
-    event: 'location_update',
-    data: {
-      driver_id,
-      order_display_id: orderDisplayId,
-      latitude: sanitized.lat,
-      longitude: sanitized.lng,
-      speed: sanitized.speed ?? 0,
-      bearing: sanitized.bearing ?? 0,
-      timestamp: new Date(serverNow)
-    }
+  const timestampIso = new Date(serverNow).toISOString();
+  const broadcastPayload = buildClientLocationPayload({
+    driverId: driver_id,
+    orderDisplayId: orderDisplayId ?? null,
+    lat: sanitized.lat,
+    lng: sanitized.lng,
+    speed: sanitized.speed ?? 0,
+    bearing: sanitized.bearing ?? 0,
+    timestampIso,
   });
 
+  // ── Distributed fan-out (multi-replica) ──────────────────────────────
+  // Publish a compact internal event to the shared Redis channel so every API
+  // replica can deliver this update to its own local subscribers. Best-effort
+  // and fire-and-forget — local delivery below never depends on Redis.
+  if (locationEventBus) {
+    void locationEventBus.publish({
+      type: 'location_update',
+      v: 1,
+      sourceInstanceId: locationEventBus.getInstanceId(),
+      driverId: driver_id,
+      orderDisplayId: orderDisplayId ?? null,
+      sequence: serverNow,
+      timestamp: timestampIso,
+      location: {
+        lat: sanitized.lat,
+        lng: sanitized.lng,
+        speed: sanitized.speed ?? 0,
+        bearing: sanitized.bearing ?? 0,
+      },
+    });
+  }
+
+  // Local delivery to this replica's own order/driver subscribers. The
+  // publishing replica's Pub/Sub consumer skips self-originated events, so a
+  // client on this replica receives the update exactly once.
+  deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
   initRedisTrackerPubSub();
 
   if (redisClient) {
@@ -1290,6 +1486,14 @@ export async function closeWebSocketServer() {
     logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
   }
 
+  // Close the distributed location fan-out: unsubscribe and release the
+  // dedicated Redis subscriber connection. Done regardless of whether the WS
+  // server itself was ever started.
+  if (locationEventBus) {
+    await locationEventBus.close();
+    locationEventBus = null;
+  }
+
   if (!wsServer) {
     return;
   }
@@ -1375,7 +1579,7 @@ export async function handleSubscribe(ws, data) {
     }
   }
 
-  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info({ targetId }, 'Client subscribed to telemetry updates');
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -1450,7 +1654,7 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
-    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
+    logger.info({ targetId }, 'Client unsubscribed from updates');
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -1459,7 +1663,7 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info({ key }, 'Removed socket subscription due to disconnect');
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
@@ -1474,7 +1678,7 @@ async function removeClientFromAllSubscriptions(ws) {
               supabase.removeChannel(channel);
             }
             locationChannels.delete(uuidKey);
-            logger.info(`🔌 Removed Supabase Realtime channel for order "${uuidKey}" on last subscriber disconnect.`);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber disconnect');
           }
         }
         displayIdToLocationChannelKeys.delete(key);
@@ -1569,6 +1773,19 @@ export const __testing = {
   getTrackingSubscriptions() {
     return trackingSubscriptions;
   },
+  setTrackingSubscriptions(map) {
+    trackingSubscriptions = map;
+  },
+  setLocationEventBus(bus) {
+    locationEventBus = bus;
+  },
+  getLocationEventBus() {
+    return locationEventBus;
+  },
+  createLocationEventHandler,
+  getLocationEventBusMetrics() {
+    return locationEventBus ? locationEventBus.getMetrics() : null;
+  },
   flushTelemetryBuffer,
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
@@ -1598,12 +1815,22 @@ export const __testing = {
     telemetryFlushBuffer = [];
   },
   getShutdownState() {
-    return {
+    const state = {
       isSchedulerActive,
       hasTelemetryFlushInterval: Boolean(telemetryFlushTimeout),
       hasWebSocketServer: Boolean(wsServer),
       hasWsHeartbeatInterval: Boolean(wsHeartbeatInterval),
     };
+    // Expose live (not snapshot) distributed fan-out state so the health check
+    // can report whether Redis Pub/Sub is operational.
+    Object.defineProperty(state, 'pubSub', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return locationEventBus ? locationEventBus.getState() : null;
+      },
+    });
+    return state;
   },
   setShutdownState({ telemetryInterval = null, heartbeatInterval = null, server = null } = {}) {
     telemetryFlushTimeout = telemetryInterval;

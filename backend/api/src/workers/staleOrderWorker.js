@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import logger from '../middleware/logger.js';
-import { supabase, supabaseAdmin, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
+import { acquireLock, renewLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
@@ -12,15 +13,16 @@ let staleOrderRunning = false;
 const STALE_ORDER_CANCELLATION_REASON = 'Stale order: no accepted bid within 24 hours.';
 
 // Distributed batch lock: only ONE replica may run the hourly stale sweep at a
-// time. Same pattern as escrowFundingReconciliation / escrowRefundReconciliation.
+// time. The lock is owner-aware (see ../lib/redisLock.js): every acquisition
+// returns a UUID owner token, and renewals/releases verify ownership via an
+// atomic Lua script, so a slow replica can never renew or delete a lock that a
+// newer owner holds. Same pattern as escrowReleaseReconciliation.
 const LOCK_KEY = 'stale:order:cancellation:lock';
-const LOCK_TTL_SECONDS = 120;
+const LOCK_TTL_MS = 120_000;
 
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_STALE_ORDER_AGE_MS = 24 * 60 * 60 * 1000;
 const CONCURRENCY_LIMIT = 5;
-
-let staleOrderClient = null;
 
 export const startStaleOrderWorker = (orderRepository) => {
   if (staleOrderWorkerTask) {
@@ -29,12 +31,7 @@ export const startStaleOrderWorker = (orderRepository) => {
   }
 
   const repository = orderRepository || new OrderRepository(supabaseAdmin || supabase);
-  if (orderRepository) {
-    staleOrderClient = orderRepository.supabase;
-  } else if (supabaseAdmin) {
-    staleOrderClient = supabaseAdmin;
-  } else {
-    staleOrderClient = supabase;
+  if (!orderRepository && !supabaseAdmin) {
     logger.warn(
       '[StaleOrderWorker] Service-role client not configured - falling back to the anon-key client. RLS will block stale-order reads/writes.'
     );
@@ -54,33 +51,48 @@ export const startStaleOrderWorker = (orderRepository) => {
 /**
  * Run one stale-order sweep.
  *
- * Replica safety: a Redis NX lock (plus an in-memory re-entrancy guard) ensures
- * only one replica executes the batch. Per-order safety is enforced by the
- * atomic `cancel_stale_order_tx` RPC: it locks the order row FOR UPDATE and
- * only cancels an order that is still 'pending' and older than the cutoff, so
- * a concurrent bid acceptance (which also locks the row) produces exactly one
- * valid winner. Side effects (load-offer cancellation, customer notification)
- * run ONLY when the RPC returns the cancelled row; a lost race returns zero
- * rows and is treated as expected, never as an error.
+ * Replica safety: an owner-aware Redis lock (plus an in-memory re-entrancy
+ * guard) ensures only one replica executes the batch.
+ *
+ * Lock lifecycle:
+ *   1. acquireLock() returns a per-acquisition UUID owner token.
+ *   2. The owner token is renewed (via the owner-checked renewLock()) before
+ *      every order cancellation. If renewal fails — the TTL lapsed and another
+ *      replica may now own the lock — the worker stops sweeping immediately
+ *      instead of continuing as a phantom owner.
+ *   3. releaseLock() is called in `finally` and only deletes the key if the
+ *      current process still owns it (atomic Lua GET+DEL), so a late-arriving
+ *      old owner can never delete a newer owner's lock.
+ *
+ * Per-order safety is enforced by the atomic `cancel_stale_order_tx` RPC: it
+ * locks the order row FOR UPDATE and only cancels an order that is still
+ * 'pending' and older than the cutoff, so a concurrent bid acceptance (which
+ * also locks the row) produces exactly one valid winner. Side effects
+ * (load-offer cancellation, customer notification) run ONLY when the RPC
+ * returns the cancelled row; a lost race returns zero rows and is treated as
+ * expected, never as an error.
  */
 export async function reconcileStaleOrders(repository) {
   if (!repository) throw new Error('reconcileStaleOrders requires an OrderRepository instance');
   if (staleOrderRunning) return;
   staleOrderRunning = true;
-  let globalLockAcquired = false;
+  let lockOwnerToken = null;
 
   try {
-    if (redisClient) {
-      try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
-      } catch (err) {
-        logger.error('[StaleOrderWorker] Failed to acquire Redis global lock, skipping batch:', err.message);
-        return;
+    try {
+      lockOwnerToken = await acquireLock(LOCK_KEY, LOCK_TTL_MS);
+    } catch (err) {
+      if (err instanceof LockAcquisitionError) {
+        logger.error(`[StaleOrderWorker] Redis unavailable while acquiring global lock, skipping batch: ${err.message}`);
+      } else {
+        logger.error(`[StaleOrderWorker] Failed to acquire Redis global lock, skipping batch: ${err.message}`);
       }
-      if (!globalLockAcquired) {
-        logger.info('[StaleOrderWorker] Global lock held by another replica, skipping batch.');
-        return;
-      }
+      return;
+    }
+
+    if (lockOwnerToken === null) {
+      logger.info('[StaleOrderWorker] Global lock held by another replica, skipping batch.');
+      return;
     }
 
     const staleSince = new Date(Date.now() - DEFAULT_STALE_ORDER_AGE_MS).toISOString();
@@ -106,20 +118,27 @@ export async function reconcileStaleOrders(repository) {
     const metrics = { found: staleOrders.length, cancelled: 0, skipped: 0, errors: 0 };
 
     let index = 0;
+    let ownershipLost = false;
+
     async function workerPool() {
-      while (index < staleOrders.length) {
+      while (!ownershipLost) {
         const currentIndex = index++;
+        if (currentIndex >= staleOrders.length) return;
         const order = staleOrders[currentIndex];
-        if (order) {
-          if (globalLockAcquired && redisClient) {
-            try {
-              await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-            } catch (err) {
-              logger.warn('[StaleOrderWorker] Failed to refresh lock:', err.message);
-            }
-          }
-          await cancelStaleOrder(order, staleSince, repository, metrics);
+        if (!order) continue;
+
+        // Owner-checked renewal (atomic Lua GET + PEXPIRE). A false result
+        // means our lock TTL lapsed and a new owner may hold the lock — stop
+        // treating ourselves as the owner and abort the sweep, then let the
+        // `finally` block run the owner-checked release (a safe no-op).
+        const renewed = await renewLock(LOCK_KEY, lockOwnerToken, LOCK_TTL_MS);
+        if (!renewed) {
+          ownershipLost = true;
+          logger.warn('[StaleOrderWorker] Lost ownership of the global lock, stopping sweep early.');
+          return;
         }
+
+        await cancelStaleOrder(order, staleSince, repository, metrics);
       }
     }
 
@@ -139,11 +158,12 @@ export async function reconcileStaleOrders(repository) {
   } catch (err) {
     logger.error(`[StaleOrderWorker] Unexpected error during cleanup: ${err.message}`);
   } finally {
-    if (globalLockAcquired && redisClient) {
-      try {
-        await redisClient.del(LOCK_KEY);
-      } catch (err) {
-        logger.warn('[StaleOrderWorker] Failed to release global lock:', err.message);
+    if (lockOwnerToken) {
+      // Owner-checked release: a no-op if the lock expired and a new replica
+      // took over. Never deletes a lock we no longer own.
+      const released = await releaseLock(LOCK_KEY, lockOwnerToken);
+      if (!released) {
+        logger.warn('[StaleOrderWorker] Failed to release global lock (ownership lost or Redis unavailable).');
       }
     }
     staleOrderRunning = false;
@@ -177,20 +197,6 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
       return;
     }
 
-    // Re-fetch the order inside the loop with a status filter to close the
-    // window between the batch SELECT and the per-order UPDATE.
-    const { data: current, error: refetchErr } = await staleOrderClient
-      .from('orders')
-      .select('id, customer_id, order_display_id, escrow_status, refund_tx_hash, escrow_refund_attempts')
-      .eq('id', staleOrder.id)
-      .eq('status', 'pending')
-      .maybeSingle();
-
-    if (refetchErr) {
-      logger.error(`[StaleOrderWorker] Failed to re-fetch order ${staleOrder.id}: ${refetchErr.message}`);
-      return;
-    }
-
     const won = Array.isArray(cancelled) ? cancelled.length > 0 : Boolean(cancelled);
     if (!won) {
       metrics.skipped += 1;
@@ -209,10 +215,6 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
     await repository.updateLoadOffer(orderDisplayId, { status: 'cancelled' }).catch((offerErr) => {
       logger.warn(`[StaleOrderWorker] Failed to cancel load offer for order ${orderDisplayId}: ${offerErr.message}`);
     });
-    await staleOrderClient
-      .from('load_offers')
-      .update({ status: 'cancelled' })
-      .eq('order_display_id', current.order_display_id);
 
     // Send a notification to the customer
     try {
@@ -232,131 +234,6 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
   } catch (err) {
     metrics.errors += 1;
     logger.error(`[StaleOrderWorker] Error processing stale order ${staleOrder.id}: ${err.message}`);
-  }
-}
-
-/**
- * Cancel an order that has no escrow involvement (escrow_status NULL or
- * 'pending'). The UPDATE is guarded on status='pending' AND escrow_status
- * NULL/'pending', so a concurrently accepted order is never overwritten.
- *
- * @returns {Promise<boolean>} true when the order was actually cancelled
- */
-async function cancelPlain(current) {
-  const { data: cancelled, error: updateErr } = await staleOrderClient
-    .from('orders')
-    .update({
-      status: 'cancelled',
-      cancellation_reason: STALE_ORDER_CANCELLATION_REASON,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', current.id)
-    .eq('status', 'pending')
-    .or('escrow_status.is.null,escrow_status.eq.pending')
-    .select('id');
-
-  if (updateErr) {
-    logger.error(`[StaleOrderWorker] Failed to cancel order ${current.id}: ${updateErr.message}`);
-    return false;
-  }
-
-  return Boolean(cancelled && cancelled.length > 0);
-}
-
-/**
- * Cancel an order whose escrow is (or was) funded, routing the refund through
- * the same pipeline used by orderLifecycleService.cancelOrder: first place the
- * order into 'refund_pending' with a guarded update, then submit/confirm the
- * refund, then finalise to 'refunded'. Any failure lands the order in
- * 'refund_pending'/'refund_failed' so the escrow-refund reconciliation worker
- * retries it.
- *
- * @returns {Promise<boolean>} true when the order was actually cancelled
- */
-async function cancelWithRefund(current, escrowStatus) {
-  const attemptAt = new Date().toISOString();
-
-  // Guarded transition: only an order that is STILL pending AND in the exact
-  // escrow state we observed may enter refund reconciliation. This is the
-  // serialisation point that prevents two workers from double-refunding.
-  const { data: pendingOrder, error: pendingErr } = await staleOrderClient
-    .from('orders')
-    .update({
-      status: 'cancelled',
-      cancellation_reason: STALE_ORDER_CANCELLATION_REASON,
-      escrow_status: 'refund_pending',
-      escrow_refund_error: null,
-      escrow_refund_attempts: (current.escrow_refund_attempts ?? 0) + 1,
-      escrow_refund_last_attempt_at: attemptAt,
-      updated_at: attemptAt,
-    })
-    .eq('id', current.id)
-    .eq('status', 'pending')
-    .eq('escrow_status', escrowStatus)
-    .select('id');
-
-  if (pendingErr) {
-    logger.error(`[StaleOrderWorker] Failed to place order ${current.order_display_id} into refund reconciliation: ${pendingErr.message}`);
-    return false;
-  }
-
-  if (!pendingOrder || pendingOrder.length === 0) {
-    return false;
-  }
-
-  let refundTxHash = current.refund_tx_hash ?? null;
-  try {
-    if (refundTxHash) {
-      await confirmEscrowRefund(refundTxHash);
-    } else {
-      const submitted = await submitEscrowRefund(current.order_display_id);
-      if (submitted.waitForConfirmation) {
-        const receipt = await submitted.waitForConfirmation();
-        refundTxHash = receipt.hash ?? submitted.txHash;
-      } else {
-        // Escrow contract may not be initialised — record the tx hash and let
-        // the escrow-refund reconciliation worker finalise confirmation.
-        refundTxHash = submitted.txHash;
-      }
-    }
-
-    const refundedAt = new Date().toISOString();
-    const { error: finalErr } = await staleOrderClient
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        escrow_status: 'refunded',
-        refund_tx_hash: refundTxHash,
-        escrow_refunded_at: refundedAt,
-        escrow_refund_error: null,
-        updated_at: refundedAt,
-      })
-      .eq('id', current.id)
-      .in('escrow_status', ['refund_pending', 'refund_failed'])
-      .select('id');
-
-    if (finalErr) {
-      logger.error(`[StaleOrderWorker] Refund confirmed for ${current.order_display_id} but final order update failed: ${finalErr.message}`);
-    }
-
-    return true;
-  } catch (refundErr) {
-    const failedAt = new Date().toISOString();
-    const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
-    await staleOrderClient
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        escrow_status: nextEscrowStatus,
-        refund_tx_hash: refundTxHash,
-        escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
-        escrow_refund_last_attempt_at: failedAt,
-        updated_at: failedAt,
-      })
-      .eq('id', current.id)
-      .in('escrow_status', ['refund_pending', 'refund_failed']);
-    logger.error(`[StaleOrderWorker] Refund failed for order ${current.order_display_id}: ${refundErr.message}`);
-    return true;
   }
 }
 

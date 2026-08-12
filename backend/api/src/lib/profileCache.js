@@ -102,19 +102,31 @@ function getRedisClient() {
  * @param {string} firebaseUid - The expected Firebase UID.
  * @param {object|null} cachedProfile - The cached profile to validate.
  *   Must have: isActive (boolean), uid (string matching firebaseUid), id (string),
- *   role (string). Optional: fullName (string|null), phone (string|null).
+ *   role (string). Optional: fullName (string|null), phone (string|null), updatedAt (string|null).
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedProfile(firebaseUid, cachedProfile) {
-  if (typeof firebaseUid !== "string" || !firebaseUid.trim()) {
+  if (typeof firebaseUid !== 'string' || !firebaseUid.trim()) {
     return false;
   }
   if (
     !cachedProfile ||
-    typeof cachedProfile !== "object" ||
+    typeof cachedProfile !== 'object' ||
     Array.isArray(cachedProfile)
   ) {
     return false;
+  }
+
+  // Reject objects with unexpected fields to enforce strict schema
+  const ALLOWED_FIELDS = new Set([
+    'isActive', 'uid', 'id', 'role',
+    'fullName', 'phone', 'updatedAt',
+  ]);
+  const profileKeys = Object.keys(cachedProfile);
+  for (const key of profileKeys) {
+    if (!ALLOWED_FIELDS.has(key)) {
+      return false;
+    }
   }
   if (typeof cachedProfile.isActive !== "boolean") {
     return false;
@@ -161,6 +173,9 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {
+  if (typeof userId !== "string" || !userId.trim()) {
+    return false;
+  }
   if (
     !cachedProfile ||
     typeof cachedProfile !== "object" ||
@@ -312,6 +327,7 @@ export async function setCachedSupabaseProfile(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !profile) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       supabaseProfileKey(userId),
@@ -385,6 +401,7 @@ export async function setCachedCustomerStats(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !stats) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       customerStatsKey(userId),
@@ -434,6 +451,7 @@ export async function setCachedDriverDetails(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !details) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       driverDetailsKey(userId),

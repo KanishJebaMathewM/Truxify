@@ -34,6 +34,57 @@ void main() {
       expect(() => ws.send('plain string'), returnsNormally);
     });
 
+    test('send reports false when not connected (no silent pretend-success)', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      // A disconnected socket must NOT claim the message was handed off.
+      expect(ws.send({'test': 'data'}), isFalse);
+      expect(ws.send('plain string'), isFalse);
+    });
+
+    test('sendResult reports failed when not connected', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      expect(ws.sendResult({'test': 'data'}), WsSendResult.failed);
+      expect(ws.sendResult('plain string'), WsSendResult.failed);
+    });
+
+    test('sendResult reports failed while connecting', () async {
+      // No server is listening; after connect() the wrapper is in the
+      // connecting/reconnecting states, never `connected`.
+      final ws = ResilientWebSocket('ws://localhost:1/nonexistent');
+      await ws.connect();
+      expect(
+        ws.sendResult({'test': 'data'}),
+        WsSendResult.failed,
+        reason: 'Messages must never be accepted while the socket is not '
+            'confirmed connected.',
+      );
+      await ws.close();
+    });
+
+    test('sendResult reports failed after close', () async {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      await ws.close();
+      expect(ws.sendResult('anything'), WsSendResult.failed);
+    });
+
+    test('connection state starts disconnected', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      expect(ws.connectionStateValue, WsConnectionState.disconnected);
+      expect(ws.isConnected, isFalse);
+    });
+
+    test('connection state transitions to disconnected after close', () async {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      final states = <WsConnectionState>[];
+      final sub = ws.connectionState.listen(states.add);
+      await ws.close();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await sub.cancel();
+      expect(states, isNotEmpty);
+      expect(states.last, WsConnectionState.disconnected);
+      expect(ws.isConnected, isFalse);
+    });
+
     test('close is safe when not connected', () async {
       final ws = ResilientWebSocket('ws://localhost:8080/ws');
       // close() should not throw when called on an unconnected instance.

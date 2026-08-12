@@ -35,7 +35,7 @@ describe('BlockchainMonitor', () => {
 
   it('wires event handlers for all supported event names', () => {
     monitor.setupEventHandlers();
-    const expected = ['PaymentReceived', 'InsuranceClaimApproved', 'InsuranceClaimRejected', 'GeofenceBreach', 'BalanceUpdateFailed', 'SmartContractRevert'];
+    const expected = ['BookingCreated', 'PaymentReleased', 'BookingCancelled', 'BookingStarted', 'CancellationPenaltyApplied', 'BookingDisputed', 'DisputeResolved', 'WithdrawalReady', 'Withdrawn', 'EmergencyRecovered', 'RelayerUpdated'];
     for (const name of expected) {
       expect(typeof monitor.eventHandlers[name]).toBe('function');
     }

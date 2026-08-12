@@ -7,6 +7,7 @@ import http from 'http'
 import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -163,6 +164,7 @@ import {
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
 import { startDevicePruningWorker } from './workers/devicePruningWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
@@ -174,6 +176,7 @@ import {
   stopOutboxRelayWorker,
 } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -486,6 +489,9 @@ app.use(requestLogger)
 app.use(hppProtection)
 app.use(suspiciousRequests)
 
+// Sanitize all responses to prevent response-header injection before routes run.
+app.use(responseSanitizer)
+
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
 // allowed types match the parsers registered above.
@@ -712,8 +718,6 @@ setupSwagger(app)
 
 // Root route
 app.get('/', getRoot)
-
-app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
 app.use(notFound)

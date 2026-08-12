@@ -733,15 +733,21 @@ export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
+  parseWeightKg,
+  parseWeightKgSafe,
+  parseDimensions,
 };
 
 class MLService {
   async handleResponse(response, url = '', method = 'GET') {
+    if (!response) {
+      throw new Error(`[MLService] Invalid response object for ${method} ${url}`);
+    }
     let data;
     try {
       data = await response.json();
     } catch (e) {
-      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
+      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status || 'unknown'})`);
     }
 
     if (response.status === 401) {

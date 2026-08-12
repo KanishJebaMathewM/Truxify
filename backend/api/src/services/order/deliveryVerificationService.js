@@ -27,6 +27,7 @@ import {
 } from "../escrow.js";
 import logger from "../../middleware/logger.js";
 import { OrderTimelineService } from "./orderTimelineService.js";
+import { invalidateDriverOrderCache } from "../../sockets/tracker.js";
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
@@ -773,6 +774,15 @@ export class DeliveryVerificationService {
             otpRecordId: otpRecord.id,
             orderId,
           });
+        }
+
+        // The trip is complete (payment_released) — drop the cached
+        // driver→order mapping so telemetry/geofence provenance and the
+        // tracker's cache-first lookup no longer report the driver on the
+        // finished order (issue #10676).
+        const tripDriverId = tripData?.driver_id || order.driver_id;
+        if (tripDriverId) {
+          await invalidateDriverOrderCache(tripDriverId);
         }
 
         // The trip is complete (payment_released) — kill any active public

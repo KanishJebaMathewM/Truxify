@@ -169,6 +169,27 @@ describe('Pricing Service Unit Tests', () => {
       expect(() => computeOrderPricing({ ...defaultInput, weightTonnes: NaN })).toThrow(RangeError);
     });
 
+    it('treats a NaN tollFactor as 1 (no extra toll)', () => {
+      const input = { ...defaultInput, tollFactor: NaN };
+      const result = computeOrderPricing(input, mockRateCard);
+      // Same as the base tollFactor of 1.
+      expect(result.tollEstimate).toBe(20000);
+    });
+
+    it('falls back to haversine for a negative roadDistanceKm', () => {
+      const input = {
+        pickupLat: 0,
+        pickupLng: 0,
+        dropLat: 0.89932,
+        dropLng: 0,
+        weightTonnes: 10,
+        roadDistanceKm: -5,
+      };
+      const result = computeOrderPricing(input, mockRateCard);
+      expect(result.distanceKm).toBeGreaterThan(99);
+      expect(result.distanceKm).toBeLessThan(101);
+    });
+
     it('throws RangeError if computed rate becomes <= 0', () => {
       const weirdRateCard = { ...mockRateCard, fragileMultiplier: 0 };
       const input = { ...defaultInput, isFragile: true };

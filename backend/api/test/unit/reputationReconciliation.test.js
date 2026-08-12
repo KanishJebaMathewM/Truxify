@@ -36,7 +36,9 @@ function makeSupabaseMock() {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         lt: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
+          order: vi.fn(() => ({
+            limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
+          })),
         })),
       })),
       delete: vi.fn(() => ({
@@ -84,12 +86,20 @@ describe('reputationReconciliation', () => {
   });
 
   function withFailedReputations(rows) {
+    const limitObj = {
+      limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
+    };
+    const orderObj = {
+      order: vi.fn(() => limitObj),
+    };
+    const ltObj = {
+      lt: vi.fn(() => orderObj),
+    };
+    const selectObj = {
+      select: vi.fn(() => ltObj),
+    };
     const queryBuilder = {
-      select: vi.fn(() => ({
-        lt: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
-        })),
-      })),
+      ...selectObj,
       delete: vi.fn(() => ({
         eq: vi.fn(() => Promise.resolve({ error: null })),
       })),
@@ -266,5 +276,36 @@ describe('reputationReconciliation', () => {
       vi.advanceTimersByTime(60_000);
       expect(mockAwardReputationPoints).not.toHaveBeenCalled();
     });
+  });
+
+  it('skips processing for rows within the exponential backoff period', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+
+    const nowIso = new Date().toISOString();
+    const fiveMinsAgoIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const row1 = { id: 'row-backoff-1', driver_wallet: '0xwallet1', stars: 5, retry_count: 1, last_attempt_at: nowIso };
+    const row2 = { id: 'row-backoff-2', driver_wallet: '0xwallet2', stars: 5, retry_count: 1, last_attempt_at: fiveMinsAgoIso };
+
+    withFailedReputations([row1, row2]);
+    mockAwardReputationPoints.mockResolvedValue({ txHash: '0xtxhash' });
+
+    await reconcileFailedReputationUpdates();
+
+    expect(mockAwardReputationPoints).not.toHaveBeenCalledWith('0xwallet1', 5);
+    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet2', 5);
+  });
+
+  it('orders the query by last_attempt_at ascending to prevent starvation', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+
+    const queryBuilder = withFailedReputations([]);
+
+    await reconcileFailedReputationUpdates();
+
+    const orderMock = queryBuilder.select().lt().order;
+    expect(orderMock).toHaveBeenCalledWith('last_attempt_at', { ascending: true, nullsFirst: true });
   });
 });

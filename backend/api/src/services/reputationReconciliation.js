@@ -8,6 +8,7 @@ const LOCK_KEY = 'reputation:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
 const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
 const MAX_RETRIES = 10;
+const BASE_BACKOFF_MS = 60_000; // Base backoff for exponential retries (1 minute)
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
@@ -54,6 +55,7 @@ export async function reconcileFailedReputationUpdates() {
       .from('reputation_failures')
       .select('*')
       .lt('retry_count', MAX_RETRIES)
+      .order('last_attempt_at', { ascending: true, nullsFirst: true })
       .limit(50);
 
     if (error) {
@@ -66,6 +68,20 @@ export async function reconcileFailedReputationUpdates() {
     }
 
     for (const row of failedReputations ?? []) {
+      const retryCount = row.retry_count ?? 0;
+
+      // Exponential backoff logic based on last_attempt_at
+      if (retryCount > 0 && row.last_attempt_at) {
+        const lastAttemptTime = new Date(row.last_attempt_at).getTime();
+        const backoffMs = Math.pow(2, retryCount - 1) * BASE_BACKOFF_MS;
+        const nextRetryTime = lastAttemptTime + backoffMs;
+
+        if (Date.now() < nextRetryTime) {
+          logger.info(`[reputation-reconciliation] Row ${row.id} in backoff period (retry ${retryCount}), skipping until ${new Date(nextRetryTime).toISOString()}`);
+          continue;
+        }
+      }
+
       let claimError;
       let claimKey;
       if (redisClient) {

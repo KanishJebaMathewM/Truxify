@@ -924,7 +924,7 @@ describe('authenticate middleware - Redis caching', () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(redisClientMock.set).toHaveBeenCalledWith(
       'user:profile:nonexistent-firebase-uid',
-      JSON.stringify({ isActive: false }),
+      JSON.stringify({ isActive: false, notFound: true }),
       'EX',
       TOMBSTONE_TTL_SECONDS
     );

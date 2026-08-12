@@ -499,7 +499,7 @@ export class DeliveryVerificationService {
           // then enforced by escrowReleaseFn against the same expected figure,
           // so a booking funded with Y ≠ X can never be released while the app
           // pays the driver X from its own funds.
-          let expectedAmountWei = null;
+          let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;

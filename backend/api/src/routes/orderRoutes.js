@@ -204,6 +204,7 @@ const getOrderResource = async (req) => {
 router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { id } = req.params;
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
+  const { id } = req.params;
 
   const lat = parseFloat(driver_lat);
   const lng = parseFloat(driver_lng);

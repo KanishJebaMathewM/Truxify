@@ -216,29 +216,33 @@ export class OrderMilestoneService {
       let escrowAlreadyReleased = false;
 
       if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
-        try {
-          const resolvedAmount = resolveExpectedDepositAmount(order);
-          let expectedAmountWei = resolvedAmount.expectedAmountWei ?? null;
-          if (expectedAmountWei === null && order.total_amount != null) {
-            expectedAmountWei = paisaToMaticWei(order.total_amount);
+        if (order.escrow_status === 'released') {
+          escrowAlreadyReleased = true;
+        } else {
+          try {
+            const resolvedAmount = resolveExpectedDepositAmount(order);
+            let expectedAmountWei = resolvedAmount.expectedAmountWei ?? null;
+            if (expectedAmountWei === null && order.total_amount != null) {
+              expectedAmountWei = paisaToMaticWei(order.total_amount);
+            }
+            const releaseResult = await escrowRelease(
+              order.order_display_id,
+              expectedAmountWei,
+            );
+            if (releaseResult.txHash) {
+              releaseTxHash = releaseResult.txHash;
+            } else if (releaseResult.alreadyReleased) {
+              escrowAlreadyReleased = true;
+            } else {
+              throw new Error('Escrow release returned no transaction hash');
+            }
+          } catch (releaseErr) {
+            logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
+            throw new DomainError(503, {
+              error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
+              retryable: true
+            });
           }
-          const releaseResult = await escrowRelease(
-            order.order_display_id,
-            expectedAmountWei,
-          );
-          if (releaseResult.txHash) {
-            releaseTxHash = releaseResult.txHash;
-          } else if (releaseResult.alreadyReleased) {
-            escrowAlreadyReleased = true;
-          } else {
-            throw new Error('Escrow release returned no transaction hash');
-          }
-        } catch (releaseErr) {
-          logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
-          throw new DomainError(503, {
-            error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
-            retryable: true
-          });
         }
       } else {
         logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);

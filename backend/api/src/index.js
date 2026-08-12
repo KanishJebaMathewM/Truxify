@@ -24,12 +24,14 @@ import cookieSecurityValidator from './middleware/cookieSecurityValidator.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
+import { validateWimConfig } from './config/wim.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
 import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { validateEscrowSetup } from './services/escrow.js'
 import digilockerService from './services/digilockerService.js'
 
@@ -240,6 +242,20 @@ if (!process.env.WEBHOOK_SECRET) {
   } else {
     logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
+}
+
+// ============================================================================
+// 🆕 WIM BYPASS VALIDATION
+// ============================================================================
+// WIM bypass credentials are HMAC-signed with a server secret. Without a
+// properly configured secret the process must fail fast rather than ever
+// issue an unsigned or weakly-signed bypass credential.
+try {
+  validateWimConfig();
+  logger.info('✅ WIM bypass signing configuration is valid.')
+} catch (err) {
+  logger.fatal(err.message)
+  process.exit(1)
 }
 
 // ============================================================================

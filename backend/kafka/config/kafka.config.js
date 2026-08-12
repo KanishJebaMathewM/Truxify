@@ -31,6 +31,7 @@ export const TOPICS = {
   FRAUD_DETECTED: 'fraud.detected',
   ETA_UPDATED: 'eta.updated',
   LOCATION_UPDATED: 'location.updated',
+  TELEMETRY_DRIVER_COMPACTED: 'telemetry.driver.compacted',
 };
 
 export const CONSUMER_GROUPS = {
@@ -84,11 +85,13 @@ class KafkaConfig {
       topic,
       numPartitions: 3,
       replicationFactor: 1,
-      configEntries: [
-        { name: 'retention.ms', value: '604800000' }, // 7 days
-        { name: 'cleanup.policy', value: 'delete' },
-        { name: 'delete.retention.ms', value: '604800000' },
-      ],
+      configEntries: topic === TOPICS.TELEMETRY_DRIVER_COMPACTED
+        ? [{ name: 'cleanup.policy', value: 'compact' }]
+        : [
+            { name: 'retention.ms', value: '604800000' }, // 7 days
+            { name: 'cleanup.policy', value: 'delete' },
+            { name: 'delete.retention.ms', value: '604800000' },
+          ],
     }));
     
     await admin.createTopics({

@@ -254,7 +254,7 @@ export const updateDocumentStatusSchema = z.object({
   rejection_reason: z.string().optional()
 });
 
-export const syncWeightSchema = z.object({
+export const syncWeightInternalSchema = z.object({
   truck_id: z.string().min(1, "Truck ID is required"),
   axles: z.array(z.object({
     position: z.string().min(1, "Axle position is required"),

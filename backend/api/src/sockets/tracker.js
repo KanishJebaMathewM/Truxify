@@ -1414,7 +1414,7 @@ async function loadRecoveryFile() {
     }
   } catch (err) {
     logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
-    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (_) { /* ignore */ }
+    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (unlinkErr) { logger.warn('[TRUXIFY RECOVERY] Failed to unlink recovery file:', unlinkErr.message); }
   }
 }
 

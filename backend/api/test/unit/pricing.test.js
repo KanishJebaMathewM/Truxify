@@ -175,6 +175,17 @@ describe('Pricing Service Unit Tests', () => {
       expect(() => computeOrderPricing(input, weirdRateCard)).toThrow(RangeError);
     });
 
+    it('throws RangeError when a rate card numeric field is NaN', () => {
+      for (const field of ['tollPerKm', 'platformFeePct', 'fuelCostPct', 'stackableDiscount']) {
+        const bad = { ...mockRateCard, [field]: NaN };
+        expect(() => computeOrderPricing(defaultInput, bad)).toThrow(RangeError);
+      }
+    });
+
+    it('throws RangeError when a rate card numeric field is negative', () => {
+      const bad = { ...mockRateCard, tollPerKm: -1 };
+      expect(() => computeOrderPricing(defaultInput, bad)).toThrow(RangeError);
+    });
     it('returns 0 for NaN or negative tollFactor instead of propagating NaN', () => {
       const resNaN = computeOrderPricing({ ...defaultInput, tollFactor: NaN });
       expect(resNaN.tollEstimate).toBe(20000); // defaults to tollFactor = 1

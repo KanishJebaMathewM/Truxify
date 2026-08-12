@@ -7,7 +7,15 @@ export const correlationContext = new AsyncLocalStorage();
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function correlationIdMiddleware(req, res, next) {
-  const header = req.headers['x-correlation-id'];
+  let header = req.headers['x-correlation-id'];
+
+  // A repeated `x-correlation-id` header arrives as an array. Take the first
+  // value so a client that legitimately repeats the header keeps its
+  // correlation id instead of silently getting a fresh UUID.
+  if (Array.isArray(header)) {
+    header = header[0];
+  }
+
   const correlationId =
     typeof header === 'string' && SAFE_CORRELATION_ID.test(header.trim())
       ? header.trim()

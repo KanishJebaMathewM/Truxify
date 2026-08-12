@@ -114,6 +114,25 @@ describe('apiResponse helpers', () => {
 
 
 describe('paginated edge cases', () => {
+  it('handles a zero limit without producing Infinity', () => {
+    const result = paginated([], 1, 0, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+    expect(Number.isFinite(result.pagination.totalPages)).toBe(true);
+  });
+
+  it('handles a negative limit without producing Infinity', () => {
+    const result = paginated([], 1, -5, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+  });
+
+  it('handles a non-finite limit gracefully', () => {
+    const result = paginated([], 1, NaN, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+  });
+
   it('handles page 0 gracefully', () => {
     const result = paginated([{ id: 1 }], 0, 10, 1);
     expect(result.pagination.page).toBe(0);

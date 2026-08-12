@@ -8,7 +8,7 @@ import { zkDidVerifier } from './did_verifier.js';
 class ZKIDService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        this._wallet = null;
         this.zkidAddress = process.env.ZKID_CONTRACT_ADDRESS;
 
         // ABI mirrors the deployed ZKIdentity.sol surface only. The contract
@@ -22,12 +22,32 @@ class ZKIDService {
             'function revokedCredentials(bytes32 credentialHash) external view returns (bool)'
         ];
 
-        this.zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
-
         // Generate identity secret
         this.identitySecret = crypto.randomBytes(32);
 
         logger.info('✅ ZK-ID Service initialized');
+    }
+
+    // The wallet and contract are created lazily so importing this module
+    // never crashes when PRIVATE_KEY is unset. Callers that actually sign or
+    // read on-chain state get a clear validation error instead.
+    getWallet() {
+        if (this._wallet) return this._wallet;
+
+        const privateKey = process.env.PRIVATE_KEY;
+        if (!privateKey || !privateKey.trim()) {
+            throw new Error('PRIVATE_KEY environment variable is required to use the ZK-ID service');
+        }
+
+        this._wallet = new ethers.Wallet(privateKey.trim(), this.provider);
+        return this._wallet;
+    }
+
+    getZkidContract() {
+        if (this._zkid) return this._zkid;
+
+        this._zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.getWallet());
+        return this._zkid;
     }
 
     // ============ Identity Management ============
@@ -43,7 +63,7 @@ class ZKIDService {
             // the identity hash as the credential merkle root.
             const didURI = zkDidVerifier.createDidUri(userAddress);
 
-            const tx = await this.zkid.registerDID(didURI, identityHash, {
+            const tx = await this.getZkidContract().registerDID(didURI, identityHash, {
                 gasLimit: 200000
             });
             const receipt = await tx.wait();
@@ -100,7 +120,7 @@ class ZKIDService {
 
     async revokeCredential(credentialHash) {
         try {
-            const tx = await this.zkid.revokeCredential(credentialHash, {
+            const tx = await this.getZkidContract().revokeCredential(credentialHash, {
                 gasLimit: 100000
             });
             const receipt = await tx.wait();
@@ -123,7 +143,7 @@ class ZKIDService {
         try {
             // On-chain revocation check against the real contract getter, plus
             // the issued credential record persisted by issueCredential.
-            const isRevoked = await this.zkid.revokedCredentials(credentialHash);
+            const isRevoked = await this.getZkidContract().revokedCredentials(credentialHash);
 
             const { data: credentialRow } = await supabase
                 .from('zkid_credentials')
@@ -143,7 +163,7 @@ class ZKIDService {
                         issuedAt: credentialRow.issued_at,
                         expiresAt: null,
                         revoked: Boolean(credentialRow.revoked),
-                        issuer: this.wallet.address
+                        issuer: this.getWallet().address
                     }
                     : null,
                 timestamp: new Date().toISOString()
@@ -176,7 +196,7 @@ class ZKIDService {
 
             let verified = false;
             if (identity?.user_address) {
-                verified = await this.zkid.verifyZkProof(
+                verified = await this.getZkidContract().verifyZkProof(
                     identity.user_address,
                     proofHash,
                     nullifierHash
@@ -271,7 +291,7 @@ class ZKIDService {
             // the owning address is known.
             let didDocument = null;
             if (identityRow?.user_address) {
-                const doc = await this.zkid.didRegistry(identityRow.user_address);
+                const doc = await this.getZkidContract().didRegistry(identityRow.user_address);
                 didDocument = {
                     didURI: doc[0],
                     credentialMerkleRoot: doc[1],
@@ -311,7 +331,7 @@ class ZKIDService {
                 issuedAt: credentialRow.issued_at,
                 expiresAt: null,
                 revoked: Boolean(credentialRow.revoked),
-                issuer: this.wallet.address
+                issuer: this.getWallet().address
             };
         } catch (error) {
             logger.error('Credential fetch failed:', error);

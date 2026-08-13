@@ -15,6 +15,23 @@ let intervalId = null;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Classifies a dispatchPayout failure as "ambiguous": the payout may already
+ * have been committed at the gateway before the request timed out/errored, so
+ * it is unsafe to assume nothing left the platform. These errors must NOT lead
+ * to restoring reserved funds (which would double-pay the driver).
+ */
+function isAmbiguousDispatchError(err) {
+  const msg = String((err && err.message) || "").toLowerCase();
+  return (
+    /timeout|timed out|etimedout|econnreset|econnrefused|enotfound|network|socket|eai_again/.test(
+      msg,
+    ) ||
+    /[^0-9]5\d\d\b/.test(msg) ||
+    /unknown error/.test(msg)
+  );
+}
+
+/**
  * Atomically claims a pending withdrawal for this worker BEFORE the payout is
  * dispatched. The update is conditioned on payout_attempted_at IS NULL, so at
  * most one concurrent sweep can win the claim; losers skip the row entirely.
@@ -166,6 +183,17 @@ export async function settlePendingWithdrawals() {
         //    in between is detected and settled (not failed) on the next sweep.
         await recordDispatchOutcome(withdrawal.id, settlementRef);
       } catch (err) {
+        if (isAmbiguousDispatchError(err)) {
+          // The payout may already have been committed at the gateway before
+          // the request errored (timeout/network/5xx/unknown). Restoring the
+          // reserved funds here would double-pay the driver, so leave the
+          // withdrawal pending for manual reconciliation / the next sweep.
+          logger.error(
+            `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} dispatch returned ambiguous error — leaving pending for reconciliation: ${err.message}`,
+          );
+          continue;
+        }
+
         // The payout never left the platform — safe to restore the reserved
         // funds to wallet_confirmed.
         logger.error(

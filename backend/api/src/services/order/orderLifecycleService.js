@@ -1,4 +1,5 @@
 import { DomainError } from './domainError.js';
+import { createHash } from 'crypto';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
 import { invalidateDriverOrderCache } from '../../sockets/tracker.js';
@@ -114,14 +115,28 @@ export class OrderLifecycleService {
         logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
       }
 
+      // Atomic, idempotent creation. The create_order_tx RPC inserts the order,
+      // its default timeline, and the load offer in a single transaction, so a
+      // partial failure can no longer leave orphaned rows. The idempotency key
+      // is derived from the request content so retried / duplicate submissions
+      // are de-duplicated instead of creating multiple orders.
+      const idempotencyKey = `create_order:${createHash('sha256').update(JSON.stringify({
+        customerId,
+        pickup_address,
+        drop_address,
+        weight_tonnes,
+        goods_type,
+        pickup_date,
+        pickup_time,
+      })).digest('hex')}`;
+
       const MAX_ID_RETRIES = ORDER_DISPLAY_ID_MAX_RETRIES;
       let order = null;
-      let orderErr = null;
-      let orderDisplayId = null;
+      let lastErr = null;
 
       for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
-        orderDisplayId = generateOrderDisplayId();
-        const result = await this.orderRepository.createOrder({
+        const orderDisplayId = generateOrderDisplayId();
+        const orderData = {
           order_display_id: orderDisplayId,
           customer_id: customerId,
           status: 'pending',
@@ -137,52 +152,56 @@ export class OrderLifecycleService {
           estimated_price: estimatedPrice,
           payment_method_id, upi_id,
           waypoints: optimizedWaypoints,
-        });
+        };
+        const loadOfferData = {
+          customer_name: customerName || 'Customer',
+          route_label: `${pickup_address.split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
+          route_subtitle: `${weight_tonnes} tonnes \u2022 ${goods_type}`,
+          pickup_address, pickup_lat, pickup_lng,
+          drop_address, drop_lat, drop_lng,
+          goods_type,
+          weight: `${weight_tonnes} tonnes`,
+          freight_value: pricing.totalAmount,
+          fuel_cost: pricing.fuelCost,
+          toll_cost: pricing.tollEstimate,
+          net_profit: pricing.netProfit,
+          extra_distance_km: pricing.distanceKm,
+          status: 'available',
+          waypoints: optimizedWaypoints,
+        };
 
-        order = result.data;
-        orderErr = result.error;
-
-        if (!orderErr || orderErr.code !== '23505') break;
-        logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+        try {
+          const txResult = await createOrderTransactional({
+            idempotencyKey,
+            orderData,
+            timelineData: null,
+            loadOfferData,
+          });
+          order = {
+            id: txResult.order_id,
+            order_display_id: txResult.display_id,
+            status: txResult.status,
+          };
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          // Retry only on a display-id uniqueness collision; surface everything
+          // else (the RPC already rolled back any partial writes).
+          if (
+            err?.code === '23505' ||
+            (err?.message && /duplicate key.*order_display_id/i.test(err.message))
+          ) {
+            logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+            continue;
+          }
+          throw err;
+        }
       }
 
-      if (orderErr) {
-        logger.error('Order Insertion Error:', orderErr.message);
-        throw new DomainError(500, { error: 'Failed to create order record.', details: orderErr.message });
-      }
-
-      const { error: timelineErr } = await this.orderTimelineService.generateDefaultTimeline(orderDisplayId);
-
-      if (timelineErr) {
-        logger.error('Timeline Insertion Error:', timelineErr.message);
-        await this.orderRepository.deleteOrder(order.id);
-        throw new DomainError(500, { error: 'Failed to create order timeline.', details: timelineErr.message });
-      }
-
-      const { error: offerErr } = await this.orderRepository.createLoadOffer({
-        order_display_id: orderDisplayId,
-        customer_id: customerId,
-        customer_name: customerName || 'Customer',
-        route_label: `${pickup_address.split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
-        route_subtitle: `${weight_tonnes} tonnes \u2022 ${goods_type}`,
-        pickup_address, pickup_lat, pickup_lng,
-        drop_address, drop_lat, drop_lng,
-        goods_type,
-        weight: `${weight_tonnes} tonnes`,
-        freight_value: pricing.totalAmount,
-        fuel_cost: pricing.fuelCost,
-        toll_cost: pricing.tollEstimate,
-        net_profit: pricing.netProfit,
-        extra_distance_km: pricing.distanceKm,
-        status: 'available',
-        waypoints: optimizedWaypoints,
-      });
-
-      if (offerErr) {
-        logger.error('Load Offer Insertion Error:', offerErr.message);
-        await this.orderTimelineService.deleteTimeline(orderDisplayId);
-        await this.orderRepository.deleteOrder(order.id);
-        throw new DomainError(500, { error: 'Failed to create load offer.', details: offerErr.message });
+      if (lastErr) {
+        logger.error('Order Insertion Error:', lastErr.message);
+        throw new DomainError(500, { error: 'Failed to create order record.', details: lastErr.message });
       }
 
       return { order };

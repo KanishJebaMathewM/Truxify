@@ -83,7 +83,7 @@ BEGIN
         goods_type, weight_tonnes, length_ft, width_ft, height_ft,
         is_stackable, is_fragile, special_requirements,
         base_freight, toll_estimate, platform_fee, total_amount, estimated_price,
-        payment_method_id, upi_id
+        payment_method_id, upi_id, waypoints
     ) VALUES (
         p_order_data->>'order_display_id',
         v_customer_id,
@@ -112,7 +112,8 @@ BEGIN
         (p_order_data->>'total_amount')::INTEGER,
         (p_order_data->>'estimated_price')::INTEGER,
         (p_order_data->>'payment_method_id')::UUID,
-        p_order_data->>'upi_id'
+        p_order_data->>'upi_id',
+        COALESCE((p_order_data->'waypoints')::JSONB, '[]'::jsonb)
     )
     RETURNING id, status INTO v_order_id, v_status;
 
@@ -151,7 +152,7 @@ BEGIN
             drop_address, drop_lat, drop_lng,
             goods_type, weight,
             freight_value, fuel_cost, toll_cost, net_profit, extra_distance_km,
-            status
+            status, waypoints
         ) VALUES (
             p_order_data->>'order_display_id',
             v_customer_id,
@@ -171,7 +172,8 @@ BEGIN
             (p_load_offer_data->>'toll_cost')::INTEGER,
             (p_load_offer_data->>'net_profit')::INTEGER,
             (p_load_offer_data->>'extra_distance_km')::INTEGER,
-            COALESCE(p_load_offer_data->>'status', 'available')
+            COALESCE(p_load_offer_data->>'status', 'available'),
+            COALESCE((p_load_offer_data->'waypoints')::JSONB, '[]'::jsonb)
         );
     END IF;
 

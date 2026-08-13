@@ -31,6 +31,9 @@ func TestNewRaftNodeInit(t *testing.T) {
 	if q := node.quorum(); q != 2 {
 		t.Errorf("expected quorum 2 for 3-node cluster, got %d", q)
 	}
+	if node.liveAck == nil {
+		t.Errorf("expected liveAck to be initialized")
+	}
 }
 
 func TestRaftLogUpToDate(t *testing.T) {
@@ -126,6 +129,10 @@ func TestLeaderReplicatesEntryToFollowersBeforeCommit(t *testing.T) {
 	node1.CurrentTerm = 1
 	node1.nextIndex = map[string]uint64{s2.URL: 1, s3.URL: 1}
 	node1.matchIndex = map[string]uint64{s2.URL: 0, s3.URL: 0}
+	// Both followers have acknowledged an AppendEntries round, so the /commit
+	// admission gate sees a live quorum; replication of the new entry is still
+	// verified before success is returned below.
+	node1.liveAck = map[string]bool{s2.URL: true, s3.URL: true}
 	node1.mu.Unlock()
 
 	body := strings.NewReader(`{"order_id":"ord-repl-1","command":"CREATED"}`)
@@ -176,9 +183,10 @@ func TestLeaderReplicatesEntryToFollowersBeforeCommit(t *testing.T) {
 	}
 }
 
-// TestCommitDoesNotReturnSuccessWithoutQuorumReplication verifies the leader
-// appends the entry locally but does not advance CommitIndex (and returns 503)
-// when followers are unreachable for AppendEntries.
+// TestCommitDoesNotReturnSuccessWithoutQuorumReplication verifies the /commit
+// admission gate fails fast: a leader that has not completed a single successful
+// AppendEntries round (no evidence of a live quorum) rejects the request with
+// 503 before appending anything to its local log.
 func TestCommitDoesNotReturnSuccessWithoutQuorumReplication(t *testing.T) {
 	bypassAuth = true
 	defer func() { bypassAuth = false }()
@@ -193,9 +201,8 @@ func TestCommitDoesNotReturnSuccessWithoutQuorumReplication(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Seed matchIndex up to the current commit level (0) so the liveness
-	// pre-check passes, while the peers themselves remain unreachable for
-	// AppendEntries replication.
+	// Leader with zero successful AppendEntries rounds: liveAck is empty, so
+	// the admission gate must reject the request up front.
 	node.mu.Lock()
 	node.Role = Leader
 	node.LeaderID = "node1"
@@ -212,17 +219,138 @@ func TestCommitDoesNotReturnSuccessWithoutQuorumReplication(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without a live quorum, got %d", resp.StatusCode)
+	}
+
+	// Fail-fast: nothing is appended to the leader's log, so a later retry
+	// cannot create a duplicate entry.
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.Log) != 0 {
+		t.Errorf("expected no entry appended without a live quorum, got %v", node.Log)
+	}
+	if node.CommitIndex != 0 || node.LastApplied != 0 {
+		t.Errorf("expected commit_index/last_applied 0 without a live quorum, got commit=%d applied=%d",
+			node.CommitIndex, node.LastApplied)
+	}
+}
+
+// TestCommitAdmissionPassesOnLiveAckButStillRequiresReplication verifies that
+// once a leader has live-quorum evidence (a previous successful AppendEntries
+// round) the admission gate lets a new entry through, but success is still only
+// returned once a quorum acknowledges the new entry: a mid-request partition
+// returns 503 with the entry left in the local log awaiting replication.
+func TestCommitAdmissionPassesOnLiveAckButStillRequiresReplication(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	unreachable := []string{"http://127.0.0.1:1", "http://127.0.0.1:2"}
+	node := NewRaftNode("node1", []string{"node2", "node3"}, unreachable)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/commit" {
+			node.HandleCommitOrder(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Both followers acknowledged an earlier heartbeat, so the admission gate
+	// passes; they are now unreachable, so the new entry cannot be replicated.
+	node.mu.Lock()
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 1
+	node.nextIndex = map[string]uint64{unreachable[0]: 1, unreachable[1]: 1}
+	node.matchIndex = map[string]uint64{unreachable[0]: 0, unreachable[1]: 0}
+	node.liveAck = map[string]bool{unreachable[0]: true, unreachable[1]: true}
+	node.mu.Unlock()
+
+	body := strings.NewReader(`{"order_id":"ord-lost-2","command":"CREATED"}`)
+	resp, err := http.Post(server.URL+"/api/v1/raft/commit", "application/json", body)
+	if err != nil {
+		t.Fatalf("commit request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 without quorum replication, got %d", resp.StatusCode)
 	}
 
 	node.mu.Lock()
 	defer node.mu.Unlock()
-	if len(node.Log) != 1 || node.Log[0].OrderID != "ord-lost-1" {
-		t.Errorf("expected the entry appended to the local log, got %v", node.Log)
+	if len(node.Log) != 1 || node.Log[0].OrderID != "ord-lost-2" {
+		t.Errorf("expected the entry appended to the local log for replication, got %v", node.Log)
 	}
 	if node.CommitIndex != 0 || node.LastApplied != 0 {
 		t.Errorf("expected commit_index/last_applied 0 without quorum, got commit=%d applied=%d",
 			node.CommitIndex, node.LastApplied)
+	}
+}
+
+// TestStartElectionSeedsConservativeReplicationState verifies the leader seeds
+// nextIndex = lastLogIndex+1 and matchIndex = 0 for every follower on election
+// (Raft §5.3), never assuming a follower has replicated the leader's log before
+// an AppendEntries acknowledgement proves it.
+func TestStartElectionSeedsConservativeReplicationState(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	now := time.Now()
+	votes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/vote" {
+			json.NewEncoder(w).Encode(RequestVoteResponse{Term: 1, VoteGranted: true})
+		}
+	}))
+	defer votes.Close()
+
+	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{votes.URL, votes.URL})
+	node.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: now},
+		{Index: 2, Term: 1, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: now},
+	}
+
+	node.startElection()
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if node.Role != Leader {
+		t.Fatalf("expected node to become leader, got %s", node.Role)
+	}
+	for _, url := range node.PeerURLs {
+		if node.nextIndex[url] != 3 {
+			t.Errorf("peer %s: expected nextIndex seeded to lastLogIndex+1 (3), got %d", url, node.nextIndex[url])
+		}
+		if node.matchIndex[url] != 0 {
+			t.Errorf("peer %s: expected matchIndex seeded to 0, got %d", url, node.matchIndex[url])
+		}
+		if node.liveAck[url] {
+			t.Errorf("peer %s: expected liveAck false right after election, got true", url)
+		}
+	}
+}
+
+// TestClusterStatusReflectsLiveQuorum verifies the leader status reports
+// HEALTHY_CLUSTER only when a quorum of peers has acknowledged an AppendEntries
+// round, not based on an optimistic matchIndex seed.
+func TestClusterStatusReflectsLiveQuorum(t *testing.T) {
+	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{"p2", "p3"})
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 1
+
+	node.mu.Lock()
+	status := node.clusterStatusLocked()
+	node.mu.Unlock()
+	if status != "UNHEALTHY_CLUSTER" {
+		t.Errorf("expected UNHEALTHY_CLUSTER without a live quorum, got %s", status)
+	}
+
+	node.mu.Lock()
+	node.liveAck = map[string]bool{"p2": true, "p3": true}
+	status = node.clusterStatusLocked()
+	node.mu.Unlock()
+	if status != "HEALTHY_CLUSTER" {
+		t.Errorf("expected HEALTHY_CLUSTER with a live quorum, got %s", status)
 	}
 }
 

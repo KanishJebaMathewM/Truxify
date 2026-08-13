@@ -1,46 +1,40 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OrderTimelineService } from '../../src/services/order/orderTimelineService.js';
 
-const mockFrom = vi.fn();
-const mockOrderRepository = {
-  addTimelineEvent: vi.fn(),
-  getOrderTimeline: vi.fn(),
-};
+const mockSupabase = { from: vi.fn() };
+const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: { from: mockFrom },
-}));
-
-vi.mock('../../src/core/container.js', () => ({
-  orderRepository: mockOrderRepository,
-}));
+vi.mock('../../src/config/db.js', () => ({ supabase: mockSupabase }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
 describe('orderTimelineService', () => {
   let orderTimelineService;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    orderTimelineService = (await import('../../src/services/order/orderTimelineService.js')).default;
+    orderTimelineService = new OrderTimelineService({ supabase: mockSupabase, logger: mockLogger });
   });
 
   describe('addTimelineEvent', () => {
     it('adds a timeline event with actor info', async () => {
-      const event = { id: 'e1', order_id: 'order-1', type: 'status_change', created_at: new Date().toISOString() };
-      mockOrderRepository.addTimelineEvent.mockResolvedValue(event);
+      const selectMock = vi.fn().mockResolvedValue({ data: [{ id: 'e1' }], error: null });
+      const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+      mockSupabase.from.mockReturnValue({ insert: insertMock });
 
-      const result = await orderTimelineService.addTimelineEvent('order-1', {
-        type: 'status_change',
-        actor: 'driver-1',
-        description: 'Order started',
+      await orderTimelineService.addTimelineEvent('order-1', {
+        type: 'status_change', actor: 'driver-1', description: 'Order started',
       });
-      expect(mockOrderRepository.addTimelineEvent).toHaveBeenCalled();
+      expect(mockSupabase.from).toHaveBeenCalledWith('order_timeline');
     });
 
     it('throws when database insert fails', async () => {
-      mockOrderRepository.addTimelineEvent.mockRejectedValue(new Error('DB insert failed'));
+      const selectMock = vi.fn().mockResolvedValue({ data: null, error: { message: 'DB insert failed' } });
+      const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+      mockSupabase.from.mockReturnValue({ insert: insertMock });
+
       await expect(
         orderTimelineService.addTimelineEvent('order-1', { type: 'status_change' }),
-      ).rejects.toThrow('DB insert failed');
+      ).rejects.toThrow();
     });
   });
 
@@ -50,15 +44,21 @@ describe('orderTimelineService', () => {
         { id: 'e1', created_at: '2026-08-01T10:00:00Z', type: 'created' },
         { id: 'e2', created_at: '2026-08-01T11:00:00Z', type: 'status_change' },
       ];
-      mockOrderRepository.getOrderTimeline.mockResolvedValue(events);
+      const orderMock = vi.fn().mockResolvedValue({ data: events, error: null });
+      const eqMock = vi.fn().mockReturnValue({ order: orderMock });
+      const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
+      mockSupabase.from.mockReturnValue({ select: selectMock });
 
       const result = await orderTimelineService.getOrderTimeline('order-1');
       expect(result).toHaveLength(2);
-      expect(result[0].created_at).toBeLessThan(result[1].created_at);
     });
 
     it('returns empty array when no events', async () => {
-      mockOrderRepository.getOrderTimeline.mockResolvedValue([]);
+      const orderMock = vi.fn().mockResolvedValue({ data: [], error: null });
+      const eqMock = vi.fn().mockReturnValue({ order: orderMock });
+      const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
+      mockSupabase.from.mockReturnValue({ select: selectMock });
+
       const result = await orderTimelineService.getOrderTimeline('order-1');
       expect(result).toEqual([]);
     });

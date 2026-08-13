@@ -5,39 +5,59 @@
 
 #include <linux/bpf.h>
 #include <linux/pkt_cls.h>
+#include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <bpf/bpf_helpers.h>
+
+#define NS_PER_SEC 1000000000ULL
+#define BUCKET_CAPACITY 1000000ULL /* 1 MB burst capacity */
+#define REFILL_RATE 1000000ULL     /* bytes/sec sustained rate */
+
+struct bucket_state {
+    __u64 tokens;      /* available bytes in the bucket */
+    __u64 last_refill; /* bpf_ktime_get_ns() of the last update */
+};
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __type(key, __u32);   // Client IP
-    __type(value, __u64); // Tokens bucket count (bytes)
+    __type(key, __u32); // Client IP
+    __type(value, struct bucket_state);
 } bandwidth_bucket_map SEC(".maps");
 
 SEC("classifier")
 int tc_bandwidth_shaper(struct __sk_buff *skb) {
-    void *data_end = (void *)(long)ctx_data_end_sim; // Simulating skb data end
-    void *data = (void *)(long)ctx_data_sim;
+    void *data_end = (void *)(long)skb->data_end;
+    void *data = (void *)(long)skb->data;
 
-    struct iphdr ip;
-    // Load IP header from skb offset
-    if (skb->len < sizeof(ip))
+    struct ethhdr *eth = data;
+    struct iphdr *ip = (void *)eth + sizeof(*eth);
+    if ((void *)ip + sizeof(*ip) > data_end)
         return TC_ACT_OK;
 
-    __u32 client_ip = 0x7F000001; // Mock loopback IP
-    __u64 limit = 1000000;        // 1 MB bandwidth bucket capacity
-    
-    __u64 *tokens = bpf_map_lookup_elem(&bandwidth_bucket_map, &client_ip);
-    if (tokens) {
-        if (*tokens > limit) {
-            return TC_ACT_SHOT; // Drop packet exceeding bandwidth limit
-        }
-        __u64 new_tokens = *tokens + skb->len;
-        bpf_map_update_elem(&bandwidth_bucket_map, &client_ip, &new_tokens, BPF_EXIST);
+    // Key the bucket on the real source IP of the packet, not a fixed loopback
+    // address, otherwise every client shares one hardcoded bucket.
+    __u32 client_ip = ip->saddr;
+    __u64 now = bpf_ktime_get_ns();
+
+    struct bucket_state *bucket = bpf_map_lookup_elem(&bandwidth_bucket_map, &client_ip);
+    if (bucket) {
+        // Refill the bucket with the rate elapsed since the last update,
+        // capped at capacity. Without this the counter only ever grows and
+        // the client is blackholed forever once the initial budget is spent.
+        __u64 elapsed_ns = now > bucket->last_refill ? now - bucket->last_refill : 0;
+        __u64 tokens = bucket->tokens + (elapsed_ns / NS_PER_SEC) * REFILL_RATE;
+        if (tokens > BUCKET_CAPACITY)
+            tokens = BUCKET_CAPACITY;
+        bucket->tokens = tokens;
+        bucket->last_refill = now;
+
+        if (tokens < skb->len)
+            return TC_ACT_SHOT; // Drop packet exceeding sustained rate
+        bucket->tokens = tokens - skb->len;
     } else {
-        __u64 start_tokens = skb->len;
-        bpf_map_update_elem(&bandwidth_bucket_map, &client_ip, &start_tokens, BPF_NOEXIST);
+        struct bucket_state init = { BUCKET_CAPACITY, now };
+        bpf_map_update_elem(&bandwidth_bucket_map, &client_ip, &init, BPF_ANY);
     }
 
     return TC_ACT_OK;

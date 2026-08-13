@@ -22,10 +22,12 @@ contract DAO is Ownable {
     mapping(uint256 => mapping(address => uint256)) public votesCast;
     mapping(address => bytes32) public voterIdentity;
     mapping(bytes32 => address) public identityOwner;
+    mapping(uint256 => mapping(address => bool)) public votesReleased;
 
     event ProposalCreated(uint256 indexed proposalId, string description, uint256 deadline);
     event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost);
     event VoterRegistered(address indexed voter, bytes32 indexed identity);
+    event VotesReleased(uint256 indexed proposalId, address indexed voter, uint256 refund);
 
     constructor(address _tokenAddress) Ownable(msg.sender) {
         governanceToken = IERC20(_tokenAddress);

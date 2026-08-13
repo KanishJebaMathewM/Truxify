@@ -85,14 +85,14 @@ describe("ZK proof verification", function () {
     );
   });
 
-  it("rejects zero/empty proofs in zkSTARKVerifier", async function () {
+  it("fails closed for every proof in zkSTARKVerifier", async function () {
     const zkSTARKVerifier = await (await ethers.getContractFactory("zkSTARKVerifier")).deploy();
     await zkSTARKVerifier.waitForDeployment();
 
     assert.equal(await zkSTARKVerifier.verifyProof("0x", "0x1234"), false);
     assert.equal(await zkSTARKVerifier.verifyProof("0x1234", "0x"), false);
     assert.equal(await zkSTARKVerifier.verifyProof("0x0000", "0x0000"), false);
-    assert.equal(await zkSTARKVerifier.verifyProof("0x1234", "0x5678"), true);
+    assert.equal(await zkSTARKVerifier.verifyProof("0x1234", "0x5678"), false);
   });
 
   it("rejects zero proofs in KYCVerifier.verifyKYC", async function () {

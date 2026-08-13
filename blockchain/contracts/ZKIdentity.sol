@@ -50,6 +50,6 @@ contract ZKIdentity is Ownable {
         if (revokedCredentials[_nullifierHash]) return false;
 
         // Verify validity of proof hash against registered merkle root
-        return _proofHash != bytes32(0);
+        return _proofHash != bytes32(0) && _proofHash == doc.credentialMerkleRoot;
     }
 }

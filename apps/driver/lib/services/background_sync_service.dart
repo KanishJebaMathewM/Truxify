@@ -83,10 +83,12 @@ class BackgroundSyncService {
         } else {
           token = Supabase.instance.client.auth.currentSession?.accessToken;
         }
-      } catch (_) {
+      } catch (e) {
         // Firebase/Supabase are not initialized in the background isolate.
         // Fall back to the auth token persisted by the main isolate in
         // OS-backed secure storage (issue #5739) — never SharedPreferences.
+        debugPrint('[BackgroundSyncService] Auth token fetch failed, '
+            'falling back to secure storage: $e');
         token = await AuthTokenStore.read();
       }
 

@@ -89,6 +89,11 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
     const key = cacheKey(req, idempotencyKey);
 
+    // Captured cache-write promise on the Redis path so the lock can be held
+    // until the SET is durable (see releaseLock). Declared in outer scope so
+    // both the lock logic and the patched res.json can share it.
+    let pendingCacheSet = null;
+
     try {
       let cached = null;
 
@@ -147,10 +152,24 @@ export function requireIdempotency(ttlSeconds = 3600) {
         }
 
         let lockReleased = false;
-        const releaseLock = () => {
+        let cacheWritePromise = null;
+        const releaseLock = async () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.del(lockKey).catch((err) => {
+          // Hold the lock until the idempotency result is durably written so a
+          // concurrent duplicate cannot acquire the lock (just released) and
+          // re-execute the handler before the cached response exists.
+          if (cacheWritePromise) {
+            try {
+              await cacheWritePromise;
+            } catch (err) {
+              logger.error(
+                { err, lockKey },
+                '[Idempotency] Cache write failed before releasing lock.'
+              );
+            }
+          }
+          await redisClient.del(lockKey).catch((err) => {
             logger.error(
               { err, lockKey },
               '[Idempotency] Failed to release Redis lock.'
@@ -197,7 +216,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
           const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
 
           if (redisClient) {
-            redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
+            cacheWritePromise = redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
               logger.error({ event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message }, '[Idempotency] Failed to cache response');
             });
           } else {

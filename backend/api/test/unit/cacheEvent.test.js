@@ -149,6 +149,17 @@ describe('CacheEvent', () => {
       expect(parsed.namespace).toBe(original.namespace);
       expect(parsed.entityId).toBe(original.entityId);
     });
+
+    it('preserves the originInstanceId through a round-trip', () => {
+      const original = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profile',
+        key: 'profile:user-1',
+        originInstanceId: 'instance-abc',
+      });
+      const json = serializeCacheEvent(original);
+      const parsed = JSON.parse(json);
+      expect(parsed.originInstanceId).toBe('instance-abc');
+    });
   });
 
   describe('deserializeCacheEvent', () => {

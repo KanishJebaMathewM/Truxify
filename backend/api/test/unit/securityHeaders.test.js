@@ -55,6 +55,23 @@ describe('securityHeaders', () => {
     );
   });
 
+  it('sends HSTS for a direct secure (TLS) request', () => {
+    const headers = {};
+    const req = { secure: true, headers: {} };
+    const res = {
+      getHeader(name) {
+        return headers[String(name).toLowerCase()];
+      },
+      setHeader(name, value) {
+        headers[String(name).toLowerCase()] = value;
+      },
+    };
+    securityHeaders(req, res, () => {});
+    expect(headers['strict-transport-security']).toBe(
+      'max-age=31536000; includeSubDomains'
+    );
+  });
+
   it('preserves headers an earlier layer already set', async () => {
     const res = await request(
       createApp({

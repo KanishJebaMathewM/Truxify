@@ -5,6 +5,21 @@
  * existing Content-Security-Policy configuration.
  */
 
+/**
+ * Default HSTS max-age (seconds). The value is overridable via
+ * SECURE_HSTS_MAX_AGE with a hard floor of 1 day so a deployment cannot
+ * accidentally weaken the header to a near-zero value.
+ */
+const DEFAULT_HSTS_MAX_AGE = 31536000; // 1 year
+const MIN_HSTS_MAX_AGE = 86400; // 1 day
+
+function resolveHstsMaxAge() {
+  const raw = Number(process.env.SECURE_HSTS_MAX_AGE);
+  return Number.isFinite(raw) && raw >= MIN_HSTS_MAX_AGE
+    ? Math.floor(raw)
+    : DEFAULT_HSTS_MAX_AGE;
+}
+
 export default function securityHeaders(req, res, next) {
   // Prevent MIME-type sniffing
   if (!res.getHeader('X-Content-Type-Options')) {
@@ -24,7 +39,7 @@ export default function securityHeaders(req, res, next) {
   // Enforce HTTPS for sensitive headers
   if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
     if (!res.getHeader('Strict-Transport-Security')) {
-      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      res.setHeader('Strict-Transport-Security', `max-age=${resolveHstsMaxAge()}; includeSubDomains`);
     }
   }
 

@@ -18,9 +18,14 @@ function getTimeoutMs() {
  * @returns {Promise<string|null>} Formatted location string or null if failed
  */
 export async function reverseGeocode(lat, lon) {
-  if (lat == null || lon == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lon))) return null;
+  if (lat == null || lon == null) return null;
   const numLat = Number(lat);
   const numLon = Number(lon);
+  // Reject NaN/Infinity and hex-like strings ('0x10' -> 16) that Number()
+  // would otherwise coerce into a bogus coordinate.
+  if (!Number.isFinite(numLat) || !Number.isFinite(numLon)) return null;
+  if (typeof lat === 'string' && !/^-?\d*\.?\d+$/.test(lat.trim())) return null;
+  if (typeof lon === 'string' && !/^-?\d*\.?\d+$/.test(lon.trim())) return null;
   if (numLat < -90 || numLat > 90 || numLon < -180 || numLon > 180) return null;
 
   // Round coordinates to ~100m precision (3 decimal places) to maximize cache hits
@@ -51,7 +56,13 @@ export async function reverseGeocode(lat, lon) {
     // Handle rate-limiting with Retry-After support
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
-      const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 60000) : 60000;
+      const parsedRetry = Number.parseInt(retryAfter, 10);
+      // Guard against a malformed Retry-After header: NaN would make the
+      // wait NaN and setTimeout fire immediately (no backoff at all).
+      const retrySeconds = Number.isFinite(parsedRetry) && parsedRetry > 0
+        ? parsedRetry
+        : 60;
+      const waitMs = Math.min(retrySeconds * 1000, 60000);
       logger.warn({ waitMs, lat: roundedLat, lon: roundedLon }, '[ReverseGeocode] Rate-limited, retrying after Retry-After delay');
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       response = await fetch(url, {

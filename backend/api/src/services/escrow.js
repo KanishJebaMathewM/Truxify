@@ -185,6 +185,9 @@ export const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
  * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
  */
 export function paisaToMaticWei(paisa) {
+  if (paisa == null) {
+    throw new TypeError('paisa argument is required');
+  }
   const numeric = Number(paisa);
   if (!Number.isFinite(numeric) || numeric < 0) {
     throw new RangeError(`Invalid paisa amount: ${paisa}`);

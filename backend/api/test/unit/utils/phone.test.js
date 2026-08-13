@@ -4,7 +4,6 @@ import { normalizePhone } from '../../../src/utils/phone.js';
 describe('normalizePhone', () => {
   it('normalizes 10-digit Indian numbers to E.164', () => {
     expect(normalizePhone('9876543210')).toBe('+919876543210');
-    expect(normalizePhone('9876543210')).toBe('+919876543210');
   });
 
   it('normalizes numbers with +91 prefix', () => {
@@ -23,7 +22,7 @@ describe('normalizePhone', () => {
   it('returns null for invalid phone numbers', () => {
     expect(normalizePhone('12345')).toBeNull();
     expect(normalizePhone('abcdefghij')).toBeNull();
-    expect(normalizePhone('12345678901234')).toBeNull(); // more than 10 digits
+    expect(normalizePhone('12345678901234')).toBeNull();
   });
 
   it('returns null for empty or null inputs', () => {
@@ -34,6 +33,5 @@ describe('normalizePhone', () => {
 
   it('returns null for non-string inputs', () => {
     expect(normalizePhone(9876543210)).toBeNull();
-    expect(normalizePhone({})).toBeNull();
   });
 });

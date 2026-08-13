@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -50,7 +51,8 @@ class DriverEarningsService {
   DateTime? _parseDate(String dateStr) {
     try {
       return DateTime.parse(dateStr);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[DriverEarningsService] Failed to parse date "$dateStr": $e');
       return null;
     }
   }
@@ -144,7 +146,11 @@ class DriverEarningsService {
             final dateStr = e['day_date'];
             if (dateStr == null) return false;
             final date = DateTime.tryParse(dateStr.toString());
-            if (date == null) return false;
+            if (date == null) {
+              debugPrint('[DriverEarningsService] Failed to parse day_date '
+                  '"$dateStr" in earnings summary; skipping row.');
+              return false;
+            }
             return !date.isBefore(start) && date.isBefore(end);
           })
           .toList();

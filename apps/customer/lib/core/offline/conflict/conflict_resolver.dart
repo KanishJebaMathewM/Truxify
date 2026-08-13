@@ -34,7 +34,7 @@ class ConflictResolver {
     final stopByTripStop = <String, TripEvent>{};
     final lifecycleByTrip = <String, TripEvent>{};
     final routeEvents = <TripEvent>[];
-    final podByTrip = <String, TripEvent>{};
+    final podByTripStop = <String, TripEvent>{};
 
     for (final event in sorted) {
       switch (event.type) {
@@ -53,8 +53,12 @@ class ConflictResolver {
           stopByTripStop.putIfAbsent(key, () => event);
           break;
         case 'podMetadata':
-          final key = event.tripId;
-          podByTrip[key] = _mergePodMetadata(podByTrip[key], event);
+          // Key per stop (like stopArrival), not per trip: a multi-stop trip
+          // shares one tripId, so a trip-level key collapsed every stop's POD
+          // into a single event, overwriting occurredAt with the last-merged
+          // stop and losing each stop's attachment boundaries (#11713).
+          final key = '${event.tripId}:${event.payload['stopId']}';
+          podByTripStop[key] = _mergePodMetadata(podByTripStop[key], event);
           break;
         case 'routeDeviation':
           routeEvents.add(event);
@@ -74,7 +78,7 @@ class ConflictResolver {
       ...gpsByTrip.values,
       ...otpByStop.values,
       ...stopByTripStop.values,
-      ...podByTrip.values,
+      ...podByTripStop.values,
       ...routeEvents,
       ...lifecycleByTrip.values,
     ]

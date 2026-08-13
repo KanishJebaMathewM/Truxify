@@ -216,7 +216,7 @@ export class OrderLifecycleService {
     return measureExecution('OrderLifecycleService.getOrderHistory', async () => {
       const { data: history, error, count } = await this.orderRepository.findOrdersWithCount(
         customerId,
-        'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at',
+        'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, truck_number, created_at',
         { page, limit }
       );
 

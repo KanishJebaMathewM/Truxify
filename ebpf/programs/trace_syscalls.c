@@ -54,7 +54,12 @@ int trace_process_fork(struct trace_event_raw_sched_process_fork *args)
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[1];
+    char filename[256];
+    // args->args[1] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[1]) < 0) {
+        return 0;
+    }
     bpf_printk("Opening file: %s\n", filename);
     
     return 0;

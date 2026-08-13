@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -20,7 +21,7 @@ class ImageCompressionService {
         return File(compressedFile.path);
       }
     } catch (e) {
-      print('Compression error: $e');
+      debugPrint('Compression error: $e');
     }
     return file; // Fallback to original if compression fails
   }

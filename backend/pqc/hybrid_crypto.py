@@ -2,6 +2,7 @@ import json
 import hashlib
 import time
 from datetime import datetime
+from typing import Dict
 import numpy as np
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -57,6 +58,18 @@ class HybridCrypto:
         
         return hybrid_keys
     
+    @staticmethod
+    def _rsa_oaep_max_plaintext(public_key) -> int:
+        """Max OAEP-SHA256 plaintext bytes for the RSA key: k - 2*hLen - 2.
+
+        k = key size in bytes, hLen = 32 (SHA-256). Used to reject oversized
+        payloads up front instead of letting the ciphertext primitive throw
+        (issue #11676).
+        """
+        key_size_bytes = public_key.key_size // 8
+        hlen = hashes.SHA256().digest_size
+        return key_size_bytes - 2 * hlen - 2
+
     def hybrid_encrypt(self, data: bytes, hybrid_key: Dict) -> Dict:
         """Encrypt using hybrid approach"""
         try:
@@ -65,9 +78,26 @@ class HybridCrypto:
                 hybrid_key['quantum']['public']
             )
             
-            # Classical RSA encryption of data + quantum secret
-            encrypted_data = hybrid_key['classical']['public'].encrypt(
-                data + quantum_secret,
+            secret_len = len(quantum_secret)
+            public_key = hybrid_key['classical']['public']
+
+            # Injective framing: 4-byte big-endian length prefix + data +
+            # quantum secret. The prefix disambiguates a data payload that
+            # genuinely ends with the secret bytes (issue #11676).
+            frame_header_len = 4
+            max_plaintext = self._rsa_oaep_max_plaintext(public_key)
+            if len(data) + frame_header_len + secret_len > max_plaintext:
+                raise ValueError(
+                    f"Data too large for RSA-OAEP: {len(data)} bytes exceeds "
+                    f"the {max_plaintext - frame_header_len - secret_len}-byte "
+                    "per-call limit. Chunk large payloads before encrypting."
+                )
+
+            framed = len(data).to_bytes(frame_header_len, 'big') + data + quantum_secret
+
+            # Classical RSA encryption of the framed payload
+            encrypted_data = public_key.encrypt(
+                framed,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
@@ -110,17 +140,24 @@ class HybridCrypto:
                 )
             )
             
-            # Remove quantum secret from decrypted data
+            # Recover data via the 4-byte length prefix. A trailing-secret
+            # comparison alone was non-injective: genuine data ending with the
+            # same bytes was silently truncated (issue #11676).
             secret_len = len(quantum_secret)
-            if len(decrypted) < secret_len:
+            if len(decrypted) < 4 + secret_len:
                 raise ValueError(
-                    f"Decrypted payload length ({len(decrypted)}) is shorter than quantum secret size ({secret_len})"
+                    f"Decrypted payload length ({len(decrypted)}) is shorter than "
+                    f"the framing header + quantum secret ({4 + secret_len})"
                 )
-            
-            if decrypted[-secret_len:] != quantum_secret:
-                raise ValueError("Quantum secret suffix verification failed on decrypted payload")
 
-            return decrypted[:-secret_len]
+            payload_len = int.from_bytes(decrypted[:4], 'big')
+            if payload_len > len(decrypted) - 4 - secret_len:
+                raise ValueError("Invalid length prefix in decrypted payload")
+
+            if decrypted[4 + payload_len:] != quantum_secret:
+                raise ValueError("Quantum secret verification failed on decrypted payload")
+
+            return decrypted[4:4 + payload_len]
             
         except Exception as e:
             logger.error(f"Hybrid decryption failed: {e}")

@@ -80,6 +80,51 @@ describe('correlationIdMiddleware', () => {
     expect(req.correlationId).toBe(validUuid);
     expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', validUuid);
   });
+
+  it('takes the first value when the header is an array', () => {
+    const req = makeReq({ 'x-correlation-id': ['first-id-789', 'second-id-000'] });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toBe('first-id-789');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', 'first-id-789');
+  });
+
+  it('falls back to a random UUID when the array header has no usable string', () => {
+    const req = makeReq({ 'x-correlation-id': [] });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
+
+  it('reads the header case-insensitively (X-Correlation-ID)', () => {
+    const req = makeReq({ 'X-Correlation-ID': 'mixed-case-header-1' });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toBe('mixed-case-header-1');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', 'mixed-case-header-1');
+  });
+
+  it('reads the header case-insensitively (x-correlation-ID)', () => {
+    const req = makeReq({ 'x-correlation-ID': 'mixed-case-header-2' });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).toBe('mixed-case-header-2');
+  });
+
+  it('does not crash when res has no setHeader method', () => {
+    const req = makeReq({ 'x-correlation-id': 'no-set-header-id' });
+    const res = { on: vi.fn() };
+    const next = vi.fn();
+    expect(() => correlationIdMiddleware(req, res, next)).not.toThrow();
+    expect(req.correlationId).toBe('no-set-header-id');
+    expect(next).toHaveBeenCalledOnce();
+  });
 });
 
 

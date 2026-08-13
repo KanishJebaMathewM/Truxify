@@ -46,13 +46,10 @@ contract ZKIdentity is Ownable {
         bytes32 _nullifierHash
     ) external view returns (bool) {
         DIDDocument memory doc = didRegistry[_identity];
-        require(doc.registeredAt != 0, "ZKIdentity: identity is not registered");
-        if (doc.isRevoked) return false;
+        if (doc.isRevoked || doc.registeredAt == 0) return false;
         if (revokedCredentials[_nullifierHash]) return false;
 
-        // Bind the proof to the root the identity committed to at
-        // registration: a proof is only valid if it commits to the exact
-        // credential merkle root this identity registered.
-        return _proofHash == doc.credentialMerkleRoot;
+        // Verify validity of proof hash against registered merkle root
+        return _proofHash != bytes32(0) && _proofHash == doc.credentialMerkleRoot;
     }
 }

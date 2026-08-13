@@ -475,7 +475,18 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
       otp: "123456",
     });
     expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n);
-    expect(repo.executeRpc).not.toHaveBeenCalled();
+    // The retry path skips the geofence check but must still finalize the trip
+    // and credit the wallet via complete_trip_tx (service_role, no OTP) so a
+    // driver is not left unpaid when the original RPC never ran (issue #11188).
+    expect(repo.executeRpc).toHaveBeenCalledWith(
+      "complete_trip_tx",
+      expect.objectContaining({
+        p_order_id: "order-geo-1",
+        p_otp_id: null,
+        p_release_tx_hash: "0xrelease",
+      }),
+      null,
+    );
     expect(repo.updateOrder).toHaveBeenCalled();
     expect(result.escrowUpdateFailed).toBe(false);
   });

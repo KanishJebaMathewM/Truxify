@@ -186,7 +186,9 @@ class OfflineFirstSyncService {
       );
 
       return response.statusCode == 200 || response.statusCode == 202;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[OfflineFirstSyncService] Sync failed for event '
+          '${event.eventId} (${event.eventType}): $e');
       return false;
     }
   }

@@ -38,6 +38,7 @@ function matchesSignature(buffer, signature) {
  * regardless of what extension or Content-Type the client supplied.
  */
 export function detectDocumentMimeType(buffer) {
+  // Guard: null, undefined, or non-buffer input returns null gracefully
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return null;
   }
@@ -86,6 +87,7 @@ const SIGS = {
   'image/gif': [0x47, 0x49, 0x46, 0x38],
 };
 export function matchesMimeSignature(buffer, mimeType) {
+  // Guard: null/non-buffer input returns false safely
   if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
   const exp = SIGS[mimeType];
   if (!exp) return true;

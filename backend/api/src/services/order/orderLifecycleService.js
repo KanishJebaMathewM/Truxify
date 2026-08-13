@@ -9,6 +9,8 @@ import {
   submitEscrowRefund,
   submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
+  getEscrowBookingId,
+  getEscrowBooking,
   paisaToMaticWei,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
@@ -740,9 +742,18 @@ export class OrderLifecycleService {
           try {
             let receipt;
 
-            if (refundTxHash) {
+            // Guard against double submission: check the authoritative on-chain
+            // booking state before issuing another cancel tx. The contract
+            // reverts cancelBooking for an already-cancelled booking, which the
+            // app would otherwise misinterpret as a refund failure.
+            const bookingId = getEscrowBookingId(workingOrder.order_display_id);
+            const onChainBooking = await getEscrowBooking(bookingId);
+            const alreadyCancelled =
+              onChainBooking && Number(onChainBooking.status) === 2; // BookingStatus.Cancelled
+
+            if (refundTxHash && !alreadyCancelled) {
               receipt = await confirmEscrowRefund(refundTxHash);
-            } else {
+            } else if (!alreadyCancelled) {
               const submitted = driverFeeWei > 0n
                 ? await submitEscrowCancelWithPenalty(workingOrder.order_display_id, driverFeeWei)
                 : await submitEscrowRefund(workingOrder.order_display_id);
@@ -759,6 +770,9 @@ export class OrderLifecycleService {
               });
 
               receipt = await submitted.waitForConfirmation();
+            } else {
+              logger.info(`[escrow] Booking ${workingOrder.order_display_id} already cancelled on-chain; skipping duplicate refund submission.`);
+              receipt = { hash: refundTxHash ?? null, alreadyCancelled: true };
             }
 
             const refundedAt = new Date().toISOString();

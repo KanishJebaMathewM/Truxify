@@ -185,8 +185,7 @@ describe('RPC/route persist escrow_amount_wei (issue #5825)', () => {
       src.indexOf('// ============================================================================\n// 16.'),
     );
     expect(changeDropSection).toContain('escrow_amount_wei: newAmountWei.toString()');
-    // paisaToMaticWei already returns a bigint, so the route no longer wraps
-    // it in an extra BigInt(...) call.
     expect(changeDropSection).toContain('paisaToMaticWei(pricing.totalAmount)');
+    expect(changeDropSection).toContain('BigInt(paisaToMaticWei(pricing.totalAmount))');
   });
 });

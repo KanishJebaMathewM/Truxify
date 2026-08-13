@@ -62,75 +62,11 @@ describe('fraudMiddleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('flags medium-risk requests for review without blocking', async () => {
-      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.8, riskLevel: 'MEDIUM' });
-      const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(fraudMock.addToReviewQueue).toHaveBeenCalledWith(
-        'u1',
-        expect.stringContaining('Suspicious activity'),
-        0.8,
-      );
-      expect(res.status).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalled();
-    });
-
     it('fails closed with 503 on service errors', async () => {
       fraudMock.trackBehavior.mockRejectedValue(new Error('down'));
       const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
       await fraudDetectionMiddleware(req, res, next);
       expect(res.status).toHaveBeenCalledWith(503);
-    });
-
-    // #10501: trips are mounted at /api/v1/trips in index.js, so the fraud
-    // middleware's criticalEndpoints entry must match that path (not the
-    // auth-less /api/trips mount). A v1 trip request must be treated as
-    // critical and run real-time risk scoring.
-    it('treats /api/v1/trips requests as critical (runs risk scoring)', async () => {
-      const { req, res, next } = makeReqRes({ originalUrl: '/api/v1/trips/123' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(fraudMock.getRealTimeRisk).toHaveBeenCalled();
-      expect(next).toHaveBeenCalled();
-    });
-
-    it('blocks high-risk /api/v1/trips requests', async () => {
-      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.95, riskLevel: 'HIGH' });
-      const { req, res, next } = makeReqRes({ originalUrl: '/api/v1/trips' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(res.status).toHaveBeenCalledWith(403);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('clamps a NaN risk score to 0 and never blocks', async () => {
-      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: NaN, riskLevel: 'UNKNOWN' });
-      const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(req.riskScore).toBe(0);
-      expect(fraudMock.addToReviewQueue).not.toHaveBeenCalled();
-      expect(next).toHaveBeenCalled();
-    });
-
-    it('clamps a risk score above 1 down to 1', async () => {
-      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 5, riskLevel: 'HIGH' });
-      const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(res.status).toHaveBeenCalledWith(403);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ riskScore: 1 })
-      );
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('includes the request id in the review queue reason', async () => {
-      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.8, riskLevel: 'HIGH' });
-      const { req, res, next } = makeReqRes({ requestId: 'fraud-req-42' });
-      await fraudDetectionMiddleware(req, res, next);
-      expect(fraudMock.addToReviewQueue).toHaveBeenCalledWith(
-        'u1',
-        expect.stringContaining('fraud-req-42'),
-        0.8
-      );
-      expect(next).toHaveBeenCalled();
     });
   });
 

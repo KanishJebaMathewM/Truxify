@@ -38,27 +38,6 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 1,
       "position": [650, 300]
-    },
-    {
-      "parameters": {
-        "url": "http://api:5000/api/oracle/gas-price",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "method": "POST",
-        "jsonParameters": true,
-        "bodyParametersJson": "={{ JSON.stringify({ gasGwei: $json.gasGwei, idempotencyKey: $json.idempotencyKey, timestamp: $json.timestamp }) }}",
-        "options": {}
-      },
-      "name": "Sync Gas Price",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 1,
-      "position": [850, 300],
-      "credentials": {
-        "httpHeaderAuth": {
-          "name": "Truxify Internal API Key",
-          "id": ""
-        }
-      }
     }
   ],
   "connections": {
@@ -83,23 +62,6 @@
           }
         ]
       ]
-    },
-    "Compute Idempotency & Format": {
-      "main": [
-        [
-          {
-            "node": "Sync Gas Price",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "credentials": {
-    "httpHeaderAuth": {
-      "name": "Truxify Internal API Key",
-      "id": ""
     }
   }
 }

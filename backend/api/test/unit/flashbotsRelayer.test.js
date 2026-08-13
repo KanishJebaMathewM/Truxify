@@ -37,25 +37,30 @@ describe('FlashbotsRelayerService (issue #10183)', () => {
   it('sendPrivateBundle posts an eth_sendBundle request to the relay', async () => {
     process.env.RELAYER_WALLET_PRIVATE_KEY = KEY;
     process.env.FLASHBOTS_RELAY_URL = 'https://relay.example.com';
-    axios.post.mockResolvedValue({ data: { result: '0x1234' } });
+    axios.post.mockResolvedValue({ data: { result: { bundleHash: '0x1234' } } });
 
     const relayer = getMevRelayer();
     const bundle = { signedBundle: ['0x01'], targetBlock: 12345 };
     const result = await relayer.sendPrivateBundle(bundle);
 
     expect(axios.post).toHaveBeenCalledTimes(1);
-    const [url, body, opts] = axios.post.mock.calls[0];
+    const [url, rawBody, opts] = axios.post.mock.calls[0];
     expect(url).toBe('https://relay.example.com');
+
+    // Flashbots requires the payload to be sent as the raw JSON string so the
+    // X-Flashbots-Signature can be verified against the exact signed bytes.
+    expect(typeof rawBody).toBe('string');
+    const body = JSON.parse(rawBody);
     expect(body.method).toBe('eth_sendBundle');
     expect(body.params[0].txs).toEqual(['0x01']);
     expect(body.params[0].blockNumber).toBe('0x3039');
     expect(body.params[0].version).toBe('v3');
-    expect(opts.timeout).toBeGreaterThan(0);
+    expect(opts.headers['Content-Type']).toBe('application/json');
+    expect(opts.headers['X-Flashbots-Signature']).toMatch(/^0x[0-9a-fA-F]{40}:/);
     expect(result).toEqual({
       success: true,
       bundleHash: '0x1234',
       targetBlock: 12345,
-      relayUrl: 'https://relay.example.com',
     });
   });
 
@@ -68,6 +73,6 @@ describe('FlashbotsRelayerService (issue #10183)', () => {
     const relayer = getMevRelayer();
     await expect(
       relayer.sendPrivateBundle({ signedBundle: ['0x01'], targetBlock: 1 })
-    ).rejects.toThrow(/Flashbots bundle rejected/);
+    ).rejects.toThrow(/chain does not support this address/);
   });
 });

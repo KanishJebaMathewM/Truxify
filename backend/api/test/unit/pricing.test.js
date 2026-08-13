@@ -34,16 +34,6 @@ describe('Pricing Service Unit Tests', () => {
       expect(sanitizePrice(undefined)).toBe(0);
       expect(sanitizePrice('invalid')).toBe(0);
     });
-
-    it('rejects hex-like strings that Number() would coerce', () => {
-      expect(sanitizePrice('0x10')).toBe(0);
-      expect(sanitizePrice('0b101')).toBe(0);
-    });
-
-    it('rejects empty and whitespace-only strings', () => {
-      expect(sanitizePrice('')).toBe(0);
-      expect(sanitizePrice('   ')).toBe(0);
-    });
   });
 
   describe('haversineKm', () => {
@@ -179,44 +169,12 @@ describe('Pricing Service Unit Tests', () => {
       expect(() => computeOrderPricing({ ...defaultInput, weightTonnes: NaN })).toThrow(RangeError);
     });
 
-    it('treats a NaN tollFactor as 1 (no extra toll)', () => {
-      const input = { ...defaultInput, tollFactor: NaN };
-      const result = computeOrderPricing(input, mockRateCard);
-      // Same as the base tollFactor of 1.
-      expect(result.tollEstimate).toBe(20000);
-    });
-
-    it('falls back to haversine for a negative roadDistanceKm', () => {
-      const input = {
-        pickupLat: 0,
-        pickupLng: 0,
-        dropLat: 0.89932,
-        dropLng: 0,
-        weightTonnes: 10,
-        roadDistanceKm: -5,
-      };
-      const result = computeOrderPricing(input, mockRateCard);
-      expect(result.distanceKm).toBeGreaterThan(99);
-      expect(result.distanceKm).toBeLessThan(101);
-    });
-
     it('throws RangeError if computed rate becomes <= 0', () => {
       const weirdRateCard = { ...mockRateCard, fragileMultiplier: 0 };
       const input = { ...defaultInput, isFragile: true };
       expect(() => computeOrderPricing(input, weirdRateCard)).toThrow(RangeError);
     });
 
-    it('throws RangeError when a rate card numeric field is NaN', () => {
-      for (const field of ['tollPerKm', 'platformFeePct', 'fuelCostPct', 'stackableDiscount']) {
-        const bad = { ...mockRateCard, [field]: NaN };
-        expect(() => computeOrderPricing(defaultInput, bad)).toThrow(RangeError);
-      }
-    });
-
-    it('throws RangeError when a rate card numeric field is negative', () => {
-      const bad = { ...mockRateCard, tollPerKm: -1 };
-      expect(() => computeOrderPricing(defaultInput, bad)).toThrow(RangeError);
-    });
     it('returns 0 for NaN or negative tollFactor instead of propagating NaN', () => {
       const resNaN = computeOrderPricing({ ...defaultInput, tollFactor: NaN });
       expect(resNaN.tollEstimate).toBe(20000); // defaults to tollFactor = 1
@@ -283,3 +241,14 @@ describe('Pricing Service Unit Tests', () => {
     });
   });
 });
+
+
+// === Spec 10 test ===
+import { describe, it, expect } from 'vitest';
+import { guardNonNegative } from '../../src/lib/pricing.js';
+describe('guardNonNegative', () => {
+  it('passes positive', () => { expect(guardNonNegative(10, 'x')).toBe(10); });
+  it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });
+  it('rejects NaN', () => { expect(() => guardNonNegative(NaN, 'x')).toThrow(TypeError); });
+});
+

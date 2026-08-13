@@ -56,6 +56,7 @@ class _TripsScreenState extends State<TripsScreen> {
   String? _tripsError;
   String? _nextTripsCursor;
   bool _hasMoreTrips = true;
+  int _tripsRequestToken = 0;
   bool _isOfflineTripsData = false;
   DateTime? _offlineTripsSavedAt;
 
@@ -99,6 +100,7 @@ class _TripsScreenState extends State<TripsScreen> {
   }
 
   Future<void> _loadTrips() async {
+    final token = ++_tripsRequestToken;
     setState(() {
       _isLoadingTrips = true;
       _tripsError = null;
@@ -129,6 +131,7 @@ class _TripsScreenState extends State<TripsScreen> {
       }));
 
       if (!mounted) return;
+      if (token != _tripsRequestToken) return;
 
       setState(() {
         _trips = trips;
@@ -157,6 +160,7 @@ class _TripsScreenState extends State<TripsScreen> {
       final cached = await TripCache.load();
       if (cached != null && cached.trips.isNotEmpty) {
         if (!mounted) return;
+        if (token != _tripsRequestToken) return;
         setState(() {
           _trips = cached.trips;
           _tripStopsByTripId = cached.stopsByTripId;
@@ -187,7 +191,8 @@ class _TripsScreenState extends State<TripsScreen> {
 
   Future<void> _loadMoreTrips() async {
     if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
-    
+    final token = _tripsRequestToken;
+
     setState(() {
       _isLoadingMoreTrips = true;
     });
@@ -218,12 +223,31 @@ class _TripsScreenState extends State<TripsScreen> {
       }));
 
       if (!mounted) return;
+      if (token != _tripsRequestToken) {
+        setState(() {
+          _isLoadingMoreTrips = false;
+        });
+        return;
+      }
+
+      final existingIds = {
+        for (final t in _trips) t['trip_display_id']?.toString() ?? '',
+      };
+      final uniqueNewTrips = newTrips.where((t) {
+        final id = t['trip_display_id']?.toString() ?? '';
+        return id.isNotEmpty && !existingIds.contains(id);
+      }).toList();
 
       setState(() {
-        _trips.addAll(newTrips);
-        _tripStopsByTripId.addAll(stopsByTrip);
-        _routePointsByTripId.addAll(routePointsByTrip);
-        _itemsByTripId.addAll(itemsByTrip);
+        _trips.addAll(uniqueNewTrips);
+        for (final t in uniqueNewTrips) {
+          final id = t['trip_display_id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            _tripStopsByTripId[id] = stopsByTrip[id] ?? const [];
+            _routePointsByTripId[id] = routePointsByTrip[id] ?? const [];
+            _itemsByTripId[id] = itemsByTrip[id] ?? const [];
+          }
+        }
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;

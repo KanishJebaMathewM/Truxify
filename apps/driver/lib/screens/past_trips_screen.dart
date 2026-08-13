@@ -26,6 +26,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   String? _tripsError;
   String? _nextTripsCursor;
   bool _hasMoreTrips = true;
+  int _tripsRequestToken = 0;
 
   bool _isLoadingReputation = true;
   double? _platformRating;
@@ -58,6 +59,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
 
   Future<void> _loadTrips() async {
     if (!mounted) return;
+    final token = ++_tripsRequestToken;
     setState(() {
       _isLoadingTrips = true;
       _tripsError = null;
@@ -70,6 +72,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
       final tripsList = result['trips'] as List<Map<String, dynamic>>;
 
       if (!mounted) return;
+      if (token != _tripsRequestToken) return;
       setState(() {
         _trips = tripsList;
         _nextTripsCursor = result['nextCursor'] as String?;
@@ -88,6 +91,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
 
   Future<void> _loadMoreTrips() async {
     if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
+    final token = _tripsRequestToken;
 
     setState(() {
       _isLoadingMoreTrips = true;
@@ -102,8 +106,23 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
       final newTrips = result['trips'] as List<Map<String, dynamic>>;
 
       if (!mounted) return;
+      if (token != _tripsRequestToken) {
+        setState(() {
+          _isLoadingMoreTrips = false;
+        });
+        return;
+      }
+
+      final existingIds = {
+        for (final t in _trips) t['trip_display_id']?.toString() ?? '',
+      };
+      final uniqueNewTrips = newTrips.where((t) {
+        final id = t['trip_display_id']?.toString() ?? '';
+        return id.isNotEmpty && !existingIds.contains(id);
+      }).toList();
+
       setState(() {
-        _trips.addAll(newTrips);
+        _trips.addAll(uniqueNewTrips);
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;

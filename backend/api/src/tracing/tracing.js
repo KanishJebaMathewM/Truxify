@@ -90,7 +90,7 @@ class Tracing {
         if (!this.isInitialized) {
             this.initialize();
         }
-        return this.provider ? this.provider.getTracer(name) : trace.getTracer(name);
+        return this.provider.getTracer(name);
     }
 
     createSpan(name, options = {}) {

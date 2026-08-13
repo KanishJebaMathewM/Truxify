@@ -16,6 +16,7 @@ contract ZKCP is Ownable {
         uint256 amount;
         bytes32 dataHashCommitment;
         uint256 refundTimelock;
+        bool keyRevealed;
         bool completed;
     }
 
@@ -60,6 +61,7 @@ contract ZKCP is Ownable {
         bytes32 derivedHash = sha256(abi.encodePacked(_decryptionKey));
         require(derivedHash == agreement.dataHashCommitment, "Decryption key mismatch");
 
+        agreement.keyRevealed = true;
         agreement.completed = true;
         payable(agreement.seller).transfer(agreement.amount);
 
@@ -69,6 +71,8 @@ contract ZKCP is Ownable {
     function refundBuyer(bytes32 _agreementId) external {
         EscrowAgreement storage agreement = agreements[_agreementId];
         require(!agreement.completed, "Agreement already completed");
+        require(msg.sender == agreement.buyer, "Only buyer can refund");
+        require(!agreement.keyRevealed, "Cannot refund after key revealed");
         require(block.timestamp >= agreement.refundTimelock, "Timelock not expired");
 
         agreement.completed = true;

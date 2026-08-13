@@ -100,15 +100,8 @@ export async function verifyAuthToken(token) {
       .from("profiles")
       .select("id, firebase_uid, role, full_name, phone, is_active")
       .eq("firebase_uid", firebaseUid)
+      .eq("is_active", true)
       .maybeSingle();
-
-      const userClient = createUserClient?.(token) || supabase;
-      const { data: profile, error } = await userClient
-        .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone")
-        .eq("firebase_uid", firebaseUid)
-        .eq("is_active", true)
-        .maybeSingle();
 
       if (error) {
         throw new Error("Database query failed verification: " + error.message);
@@ -129,7 +122,6 @@ export async function verifyAuthToken(token) {
         }, cacheTtl);
       }
     }
-  }
 
   if (!userProfile) {
     throw new Error("User profile not found in database.");
@@ -406,6 +398,8 @@ export async function authenticate(req, res, next) {
             tombstonePayload,
             TOMBSTONE_TTL_SECONDS,
           );
+        } catch (err) {
+          logger.error({ err }, "Cache set failed");
         }
       }
       if (supabaseUserId) {
@@ -420,6 +414,7 @@ export async function authenticate(req, res, next) {
         }
       }
 
+      if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
           hint: "Contact support to reactivate your account.",
@@ -450,11 +445,11 @@ export async function authenticate(req, res, next) {
       }
     }
     if (supabaseUserId) {
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      const ttlSeconds =
-        isSupabaseToken && Number.isFinite(decoded?.exp)
-          ? Math.min(TTL_SECONDS, decoded.exp - nowSeconds)
-          : TTL_SECONDS;
+      // For Supabase tokens, use fixed TTL instead of deriving from unverified JWT exp claim.
+      // The unverified decoded.exp could be forged by an attacker to extend cache TTL indefinitely.
+      // The token was already verified via supabase.auth.getUser() above, so we trust it,
+      // but we don't rely on its exp claim for cache TTL (issue #11187).
+      const ttlSeconds = TTL_SECONDS;
       try {
         await setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
       } catch (err) {

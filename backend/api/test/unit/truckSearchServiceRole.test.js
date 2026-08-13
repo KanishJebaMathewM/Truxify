@@ -33,7 +33,7 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: {
     collection: () => ({
       find: () => ({
-        toArray: () => Promise.resolve(mockTelemetryResults),
+        limit: () => ({ toArray: () => Promise.resolve(mockTelemetryResults) }),
       }),
     }),
   },

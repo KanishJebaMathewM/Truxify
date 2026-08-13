@@ -1,7 +1,50 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 import logger from '../../middleware/logger.js';
-import { redisClient } from '../../config/db.js';
+import { redisClient, pgPool } from '../../config/db.js';
+
+// Canonical state centroids (approximate) used to map coordinates to the
+// nearest configured state. A nearest-centroid (Voronoi) assignment is
+// inherently non-overlapping: every coordinate resolves to exactly one state,
+// and every returned state key exists in a shard's `states` array so
+// getShardForState never falls back to the default shard (issue #11394).
+const STATE_CENTROIDS = [
+  // North
+  ['delhi', [28.6139, 77.209]],
+  ['up', [26.8, 80.9]],
+  ['punjab', [31.0, 75.0]],
+  ['haryana', [29.0, 76.0]],
+  ['rajasthan', [27.0, 74.0]],
+  ['j&k', [33.5, 75.5]],
+  ['himachal', [31.5, 77.5]],
+  ['uttarakhand', [30.0, 79.0]],
+  // South
+  ['tamilnadu', [11.0, 78.5]],
+  ['karnataka', [15.0, 75.5]],
+  ['kerala', [10.5, 76.5]],
+  ['andhra', [16.0, 80.0]],
+  ['telangana', [18.0, 79.0]],
+  ['pondicherry', [11.9, 79.8]],
+  // East
+  ['westbengal', [23.0, 87.5]],
+  ['bihar', [25.6, 85.1]],
+  ['odisha', [20.5, 85.5]],
+  ['jharkhand', [23.5, 85.5]],
+  ['assam', [26.2, 92.0]],
+  ['sikkim', [27.3, 88.5]],
+  ['nagaland', [26.0, 94.5]],
+  ['manipur', [24.5, 93.8]],
+  ['meghalaya', [25.5, 91.5]],
+  ['mizoram', [23.5, 92.8]],
+  ['arunachal', [28.0, 94.5]],
+  ['tripura', [23.8, 91.8]],
+  // West
+  ['maharashtra', [19.5, 75.5]],
+  ['gujarat', [22.5, 72.5]],
+  ['madhyapradesh', [23.0, 78.5]],
+  ['goa', [15.3, 74.1]],
+  ['chhattisgarh', [21.5, 82.0]],
+];
 
 class ShardManager {
   constructor() {
@@ -15,7 +58,7 @@ class ShardManager {
     const missingPasswords = [];
 
     // North Zone - Delhi, UP, Punjab, Haryana, Rajasthan
-    const northPassword = process.env.SHARD_PASSWORD_NORTH || process.env.SHARD_PASSWORD;
+    const northPassword = process.env.SHARD_PASSWORD_NORTH;
     if (!northPassword) missingPasswords.push('SHARD_PASSWORD_NORTH');
     this.shards.set('north', {
       name: 'north',
@@ -29,7 +72,7 @@ class ShardManager {
     });
 
     // South Zone - Tamil Nadu, Karnataka, Kerala, AP, Telangana
-    const southPassword = process.env.SHARD_PASSWORD_SOUTH || process.env.SHARD_PASSWORD;
+    const southPassword = process.env.SHARD_PASSWORD_SOUTH;
     if (!southPassword) missingPasswords.push('SHARD_PASSWORD_SOUTH');
     this.shards.set('south', {
       name: 'south',
@@ -43,7 +86,7 @@ class ShardManager {
     });
 
     // East Zone - WB, Bihar, Odisha, Jharkhand, NE States
-    const eastPassword = process.env.SHARD_PASSWORD_EAST || process.env.SHARD_PASSWORD;
+    const eastPassword = process.env.SHARD_PASSWORD_EAST;
     if (!eastPassword) missingPasswords.push('SHARD_PASSWORD_EAST');
     this.shards.set('east', {
       name: 'east',
@@ -57,7 +100,7 @@ class ShardManager {
     });
 
     // West Zone - Maharashtra, Gujarat, MP, Goa
-    const westPassword = process.env.SHARD_PASSWORD_WEST || process.env.SHARD_PASSWORD;
+    const westPassword = process.env.SHARD_PASSWORD_WEST;
     if (!westPassword) missingPasswords.push('SHARD_PASSWORD_WEST');
     this.shards.set('west', {
       name: 'west',
@@ -71,13 +114,7 @@ class ShardManager {
     });
 
     if (missingPasswords.length > 0) {
-      if (process.env.SHARDING_ENABLED === 'true') {
-        throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
-      }
-      logger.warn(
-        `Sharding not enabled — missing shard password env vars: ${missingPasswords.join(', ')}. ` +
-        'Set SHARDING_ENABLED=true (with the SHARD_PASSWORD_* vars) to require shard credentials.'
-      );
+      throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
     }
 
     // Initialize connection pools
@@ -121,28 +158,38 @@ class ShardManager {
   }
 
   getStateFromCoordinates(lat, lng) {
-    // Simplified: Map coordinates to states
-    // In production, use reverse geocoding API
-    if (lat > 24 && lat < 36 && lng > 68 && lng < 88) return 'delhi';
-    // Maharashtra must be checked before Tamil Nadu since Mumbai's coordinates
-    // (lat ~19, lng ~73) would otherwise match the Tamil Nadu bounding box
-    if (lat > 16 && lat < 24 && lng > 68 && lng < 78) return 'maharashtra';
-    if (lat > 8 && lat < 20 && lng > 72 && lng < 82) return 'tamilnadu';
-    // North-East must be checked before West Bengal since Guwahati (Assam, ~26, ~91)
-    // lies within the West Bengal bounding box
-    if (lat > 25 && lat < 28 && lng > 90 && lng < 97) return 'assam';
-    if (lat > 20 && lat < 28 && lng > 82 && lng < 92) return 'westbengal';
-    return 'delhi';
+    // Map coordinates to the nearest canonical state centroid. This replaces the
+    // previous overlapping bounding boxes that could never return several
+    // configured states (e.g. kerala, andhra, bihar, goa, odisha) and that
+    // mis-routed Bihar (Patna) to the north shard (issue #11394).
+    if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+      return process.env.DEFAULT_SHARD_STATE || 'delhi';
+    }
+    let bestState = process.env.DEFAULT_SHARD_STATE || 'delhi';
+    let bestDist = Infinity;
+    for (const [state, centroid] of STATE_CENTROIDS) {
+      const dLat = lat - centroid[0];
+      const dLng = lng - centroid[1];
+      const dist = dLat * dLat + dLng * dLng;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestState = state;
+      }
+    }
+    return bestState;
   }
 
   async getConnectionForOrder(orderId) {
     // Get order location from cache or database
     const location = await this.getOrderLocation(orderId);
-    if (location) {
+    if (location && typeof location.lat === 'number' && typeof location.lng === 'number') {
       const shardName = this.getShardForLocation(location.lat, location.lng);
       return this.getShardConnection(shardName);
     }
-    return this.getShardConnection('north');
+    // No resolvable coordinates — route by the configured/default state rather
+    // than pinning every unknown order to a constant.
+    const state = (location && location.state) || process.env.DEFAULT_SHARD_STATE || 'delhi';
+    return this.getShardConnection(this.getShardForState(state));
   }
 
   async getShardConnection(shardName) {
@@ -164,8 +211,29 @@ class ShardManager {
     if (cached) {
       return JSON.parse(cached);
     }
-    // In production, fetch from main DB
-    return { lat: 28.6139, lng: 77.2090 };
+    // Resolve the real pickup location from the authoritative orders table when
+    // a primary PostgreSQL connection is configured. This prevents every
+    // uncached order from being silently pinned to a hard-coded location
+    // (issue #11394). The lookup is best-effort: on any failure we fall back to
+    // the configurable default state instead of a constant.
+    if (pgPool) {
+      try {
+        const { rows } = await pgPool.query(
+          'SELECT pickup_lat, pickup_lng FROM orders WHERE id = $1 LIMIT 1',
+          [orderId]
+        );
+        if (rows.length > 0 && rows[0].pickup_lat != null && rows[0].pickup_lng != null) {
+          return {
+            lat: Number(rows[0].pickup_lat),
+            lng: Number(rows[0].pickup_lng),
+          };
+        }
+      } catch (err) {
+        logger.warn(`[ShardManager] Failed to resolve location for order ${orderId}: ${err.message}`);
+      }
+    }
+    // Truly unknown: fall back to the configurable default state.
+    return { lat: null, lng: null, state: process.env.DEFAULT_SHARD_STATE || 'delhi' };
   }
 
   async executeQuery(query, params = [], shardName = null) {

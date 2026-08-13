@@ -19,7 +19,9 @@ class TokenizationService {
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
             'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
-            'function getTotalTradeOrders() external view returns (uint256)'
+            'function getTotalTradeOrders() external view returns (uint256)',
+            'event AssetCreated(uint256 indexed assetId, string name, address indexed owner)',
+            'event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller)'
         ];
 
         this.token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
@@ -42,19 +44,22 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            // Get asset ID from logs
-            const assetId = await this.token.getTotalAssets();
+            // Get the asset ID from the AssetCreated event args in the receipt
+            // logs, not from getTotalAssets() (a count): the count diverges
+            // from the on-chain ID under concurrent creation, deletions, or
+            // non-contiguous IDs (issue #11674).
+            const assetId = this._extractIdFromLogs(receipt, 'AssetCreated', 'assetId');
 
             await this.storeAsset({
                 ...assetData,
-                assetId: assetId.toString(),
+                assetId: assetId,
                 txHash: receipt.hash
             });
 
             logger.info(`✅ Asset created: ${assetId}`);
             return {
                 success: true,
-                assetId: assetId.toString(),
+                assetId: assetId,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -149,11 +154,15 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            const orderId = await this.token.getTotalTradeOrders();
+            // Get the order ID from the TradeOrderCreated event args in the
+            // receipt logs, not from getTotalTradeOrders() (a count): the
+            // count diverges from the on-chain ID under concurrent creation,
+            // deletions, or non-contiguous IDs (issue #11674).
+            const orderId = this._extractIdFromLogs(receipt, 'TradeOrderCreated', 'orderId');
 
             await this.storeTradeOrder({
                 assetId,
-                orderId: orderId.toString(),
+                orderId: orderId,
                 userAddress,
                 amount,
                 price,
@@ -164,7 +173,7 @@ class TokenizationService {
             logger.info(`✅ Trade order created: ${orderId}`);
             return {
                 success: true,
-                orderId: orderId.toString(),
+                orderId: orderId,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -309,6 +318,23 @@ class TokenizationService {
     }
 
     // ============ Database Operations ============
+
+    _extractIdFromLogs(receipt, eventName, idFieldName) {
+        const tokenAddress = this.tokenAddress.toLowerCase();
+        for (const log of receipt.logs) {
+            if (log.address && log.address.toLowerCase() !== tokenAddress) continue;
+            try {
+                const parsed = this.token.interface.parseLog(log);
+                if (parsed && parsed.name === eventName && parsed.args[idFieldName] !== undefined) {
+                    return parsed.args[idFieldName].toString();
+                }
+            } catch {
+                // Log not described by this contract's ABI — skip (e.g. token
+                // transfers or third-party emits in the same receipt).
+            }
+        }
+        throw new Error(`${eventName} event not found in transaction receipt logs`);
+    }
 
     async storeAsset(data) {
         const { error } = await supabase

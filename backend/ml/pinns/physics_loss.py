@@ -11,8 +11,9 @@ class PhysicsConstrainedLoss:
 
     def compute_physics_residual(self, speed: float, slope: float, mass: float, predicted_wear: float) -> float:
         # F_net = m * a + m * g * sin(theta)
+        # slope is provided in degrees; convert to radians for np.sin
         g = 9.81
-        force = mass * (speed * 0.05) + mass * g * np.sin(slope)
+        force = mass * (speed * 0.05) + mass * g * np.sin(np.radians(slope))
         
         # Physical constraint: Wear must be non-negative and proportional to applied force
         expected_min_wear = max(0.0, force * 1e-6)

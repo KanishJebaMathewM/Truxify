@@ -91,26 +91,31 @@ describe('wimBypass service', () => {
       expect(result).toHaveProperty('signature');
     });
 
-    it('packet includes all original payload fields', () => {
-      const payload = {
+    it('packet includes all original credential fields', () => {
+      const credential = {
+        credentialId: 'cred-1',
+        measurementId: 'm-1',
         truckId: 'truck-123',
+        orderDisplayId: 'BOL-456',
         safetyScore: 90,
-        bolId: 'BOL-456',
-        axleWeight: 15000,
+        axleWeightLbs: 15000,
+        capacityLbs: 20000,
+        eligible: true,
+        issuedAt: '2026-01-01T00:00:00.000Z',
+        expiresAt: '2026-01-02T00:00:00.000Z',
       };
-      const result = createSignedWimPacket(payload);
+      const result = createSignedWimPacket(credential);
       expect(result.packet.truckId).toBe('truck-123');
       expect(result.packet.safetyScore).toBe(90);
       expect(result.packet.bolId).toBe('BOL-456');
       expect(result.packet.axleWeight).toBe(15000);
+      expect(result.packet.credentialId).toBe('cred-1');
     });
 
-    it('packet includes a timestamp', () => {
-      const before = Date.now();
-      const result = createSignedWimPacket({ truckId: 'truck-123' });
-      const after = Date.now();
-      expect(result.packet.timestamp).toBeGreaterThanOrEqual(before);
-      expect(result.packet.timestamp).toBeLessThanOrEqual(after);
+    it('packet includes the issuedAt timestamp', () => {
+      const issuedAt = '2026-01-01T00:00:00.000Z';
+      const result = createSignedWimPacket({ truckId: 'truck-123', issuedAt });
+      expect(result.packet.timestamp).toBe(issuedAt);
     });
 
     it('signature is a 64-character hex string (SHA-256)', () => {

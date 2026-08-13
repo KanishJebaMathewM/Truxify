@@ -4,20 +4,30 @@ import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
-const PAYMENT_RECEIVED_EVENT = 'PaymentReceived(address indexed driver, uint256 amount, uint256 timestamp)';
-const INSURANCE_CLAIM_APPROVED_EVENT = 'InsuranceClaimApproved(uint256 indexed claimId, uint256 amount)';
-const INSURANCE_CLAIM_REJECTED_EVENT = 'InsuranceClaimRejected(uint256 indexed claimId, string reason)';
-const GEOFENCE_BREACH_EVENT = 'GeofenceBreach(uint256 indexed shipmentId, address driver)';
-const BALANCE_UPDATE_FAILED_EVENT = 'BalanceUpdateFailed(address indexed wallet, string reason)';
-const SMART_CONTRACT_REVERT_EVENT = 'SmartContractRevert(bytes indexed txHash, string reason)';
+const BOOKING_CREATED_EVENT = 'event BookingCreated(uint256 indexed bookingId, address indexed customer, address indexed driver, uint256 amount)';
+const PAYMENT_RELEASED_EVENT = 'event PaymentReleased(uint256 indexed bookingId, address indexed driver, uint256 amount)';
+const BOOKING_CANCELLED_EVENT = 'event BookingCancelled(uint256 indexed bookingId, address indexed customer, uint256 refundAmount)';
+const BOOKING_STARTED_EVENT = 'event BookingStarted(uint256 indexed bookingId, address indexed driver, uint256 amount)';
+const CANCELLATION_PENALTY_APPLIED_EVENT = 'event CancellationPenaltyApplied(uint256 indexed bookingId, address indexed driver, uint256 driverAmount, address customer, uint256 refundAmount)';
+const BOOKING_DISPUTED_EVENT = 'event BookingDisputed(uint256 indexed bookingId, address indexed raisedBy)';
+const DISPUTE_RESOLVED_EVENT = 'event DisputeResolved(uint256 indexed bookingId, address indexed driver, uint256 driverAmount, address indexed customer, uint256 refundAmount)';
+const WITHDRAWAL_READY_EVENT = 'event WithdrawalReady(uint256 indexed bookingId, address indexed recipient, uint256 amount)';
+const WITHDRAWN_EVENT = 'event Withdrawn(address indexed recipient, uint256 amount)';
+const EMERGENCY_RECOVERED_EVENT = 'event EmergencyRecovered(address indexed recipient, uint256 amount)';
+const RELAYER_UPDATED_EVENT = 'event RelayerUpdated(address indexed newRelayer)';
 
 const ESCROW_ABI = [
-  'event PaymentReceived(address indexed driver, uint256 amount, uint256 timestamp)',
-  'event InsuranceClaimApproved(uint256 indexed claimId, uint256 amount)',
-  'event InsuranceClaimRejected(uint256 indexed claimId, string reason)',
-  'event GeofenceBreach(uint256 indexed shipmentId, address driver)',
-  'event BalanceUpdateFailed(address indexed wallet, string reason)',
-  'event SmartContractRevert(bytes indexed txHash, string reason)',
+  BOOKING_CREATED_EVENT,
+  PAYMENT_RELEASED_EVENT,
+  BOOKING_CANCELLED_EVENT,
+  BOOKING_STARTED_EVENT,
+  CANCELLATION_PENALTY_APPLIED_EVENT,
+  BOOKING_DISPUTED_EVENT,
+  DISPUTE_RESOLVED_EVENT,
+  WITHDRAWAL_READY_EVENT,
+  WITHDRAWN_EVENT,
+  EMERGENCY_RECOVERED_EVENT,
+  RELAYER_UPDATED_EVENT,
 ];
 
 class BlockchainMonitor {
@@ -85,12 +95,17 @@ class BlockchainMonitor {
 
   setupEventHandlers() {
     this.eventHandlers = {
-      'PaymentReceived': this.handlePaymentReceived.bind(this),
-      'InsuranceClaimApproved': this.handleInsuranceClaimApproved.bind(this),
-      'InsuranceClaimRejected': this.handleInsuranceClaimRejected.bind(this),
-      'GeofenceBreach': this.handleGeofenceBreach.bind(this),
-      'BalanceUpdateFailed': this.handleBalanceUpdateFailed.bind(this),
-      'SmartContractRevert': this.handleSmartContractRevert.bind(this),
+      'BookingCreated': this.handleBookingCreated.bind(this),
+      'PaymentReleased': this.handlePaymentReleased.bind(this),
+      'BookingCancelled': this.handleBookingCancelled.bind(this),
+      'BookingStarted': this.handleBookingStarted.bind(this),
+      'CancellationPenaltyApplied': this.handleCancellationPenaltyApplied.bind(this),
+      'BookingDisputed': this.handleBookingDisputed.bind(this),
+      'DisputeResolved': this.handleDisputeResolved.bind(this),
+      'WithdrawalReady': this.handleWithdrawalReady.bind(this),
+      'Withdrawn': this.handleWithdrawn.bind(this),
+      'EmergencyRecovered': this.handleEmergencyRecovered.bind(this),
+      'RelayerUpdated': this.handleRelayerUpdated.bind(this),
     };
   }
 
@@ -151,15 +166,33 @@ class BlockchainMonitor {
     }
   }
 
-  async handlePaymentReceived(args, log) {
-    const [driver, amount, timestamp] = args;
+  async handleBookingCreated(args, log) {
+    const [bookingId, customer, driver, amount] = args;
 
     const alert = {
-      type: 'PAYMENT_RECEIVED',
-      severity: 'MEDIUM',
+      type: 'BOOKING_CREATED',
+      severity: 'LOW',
+      bookingId: bookingId.toString(),
+      customer,
       driver,
       amount: amount.toString(),
-      timestamp: parseInt(timestamp),
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
+  }
+
+  async handlePaymentReleased(args, log) {
+    const [bookingId, driver, amount] = args;
+
+    const alert = {
+      type: 'PAYMENT_RELEASED',
+      severity: 'MEDIUM',
+      bookingId: bookingId.toString(),
+      driver,
+      amount: amount.toString(),
       txHash: log.transactionHash,
       blockNumber: log.blockNumber,
     };
@@ -169,13 +202,31 @@ class BlockchainMonitor {
     this.metricsService?.recordPaymentEvent('success');
   }
 
-  async handleInsuranceClaimApproved(args, log) {
-    const [claimId, amount] = args;
+  async handleBookingCancelled(args, log) {
+    const [bookingId, customer, refundAmount] = args;
 
     const alert = {
-      type: 'INSURANCE_CLAIM_APPROVED',
+      type: 'BOOKING_CANCELLED',
       severity: 'MEDIUM',
-      claimId: claimId.toString(),
+      bookingId: bookingId.toString(),
+      customer,
+      refundAmount: refundAmount.toString(),
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
+  }
+
+  async handleBookingStarted(args, log) {
+    const [bookingId, driver, amount] = args;
+
+    const alert = {
+      type: 'BOOKING_STARTED',
+      severity: 'LOW',
+      bookingId: bookingId.toString(),
+      driver,
       amount: amount.toString(),
       txHash: log.transactionHash,
       blockNumber: log.blockNumber,
@@ -183,83 +234,129 @@ class BlockchainMonitor {
 
     await this.storeEvent(alert);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordInsuranceEvent('approved');
   }
 
-  async handleInsuranceClaimRejected(args, log) {
-    const [claimId, reason] = args;
+  async handleCancellationPenaltyApplied(args, log) {
+    const [bookingId, driver, driverAmount, customer, refundAmount] = args;
 
     const alert = {
-      type: 'INSURANCE_CLAIM_REJECTED',
-      severity: 'HIGH',
-      claimId: claimId.toString(),
-      reason,
-      txHash: log.transactionHash,
-      blockNumber: log.blockNumber,
-    };
-
-    await this.storeEvent(alert);
-    await this.alertRouter?.route(alert);
-    this.metricsService?.recordInsuranceEvent('rejected');
-
-    if (alert.severity === 'HIGH' || alert.severity === 'CRITICAL') {
-      await this.escalationHandler?.escalate(alert);
-    }
-  }
-
-  async handleGeofenceBreach(args, log) {
-    const [shipmentId, driver] = args;
-
-    const alert = {
-      type: 'GEOFENCE_BREACH',
-      severity: 'HIGH',
-      shipmentId: shipmentId.toString(),
+      type: 'CANCELLATION_PENALTY_APPLIED',
+      severity: 'MEDIUM',
+      bookingId: bookingId.toString(),
       driver,
+      driverAmount: driverAmount.toString(),
+      customer,
+      refundAmount: refundAmount.toString(),
       txHash: log.transactionHash,
       blockNumber: log.blockNumber,
     };
 
     await this.storeEvent(alert);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordGeofenceBreach();
-    await this.escalationHandler?.escalate(alert);
   }
 
-  async handleBalanceUpdateFailed(args, log) {
-    const [wallet, reason] = args;
+  async handleBookingDisputed(args, log) {
+    const [bookingId, raisedBy] = args;
 
     const alert = {
-      type: 'BALANCE_UPDATE_FAILED',
-      severity: 'CRITICAL',
-      wallet,
-      reason,
+      type: 'BOOKING_DISPUTED',
+      severity: 'HIGH',
+      bookingId: bookingId.toString(),
+      raisedBy,
       txHash: log.transactionHash,
       blockNumber: log.blockNumber,
-      timestamp: new Date().toISOString(),
     };
 
     await this.storeEvent(alert);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordBalanceUpdateFailure();
     await this.escalationHandler?.escalate(alert);
   }
 
-  async handleSmartContractRevert(args, log) {
-    const [txHash, reason] = args;
+  async handleDisputeResolved(args, log) {
+    const [bookingId, driver, driverAmount, customer, refundAmount] = args;
 
     const alert = {
-      type: 'SMART_CONTRACT_REVERT',
-      severity: 'CRITICAL',
-      txHash: '0x' + txHash.slice(2).padEnd(64, '0'),
-      reason,
+      type: 'DISPUTE_RESOLVED',
+      severity: 'MEDIUM',
+      bookingId: bookingId.toString(),
+      driver,
+      driverAmount: driverAmount.toString(),
+      customer,
+      refundAmount: refundAmount.toString(),
+      txHash: log.transactionHash,
       blockNumber: log.blockNumber,
-      timestamp: new Date().toISOString(),
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
+    this.metricsService?.recordPaymentEvent('success');
+  }
+
+  async handleWithdrawalReady(args, log) {
+    const [bookingId, recipient, amount] = args;
+
+    const alert = {
+      type: 'WITHDRAWAL_READY',
+      severity: 'MEDIUM',
+      bookingId: bookingId.toString(),
+      recipient,
+      amount: amount.toString(),
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
+  }
+
+  async handleWithdrawn(args, log) {
+    const [recipient, amount] = args;
+
+    const alert = {
+      type: 'WITHDRAWN',
+      severity: 'MEDIUM',
+      recipient,
+      amount: amount.toString(),
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
+    this.metricsService?.recordPaymentEvent('success');
+  }
+
+  async handleEmergencyRecovered(args, log) {
+    const [recipient, amount] = args;
+
+    const alert = {
+      type: 'EMERGENCY_RECOVERED',
+      severity: 'CRITICAL',
+      recipient,
+      amount: amount.toString(),
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
     };
 
     await this.storeEvent(alert);
     await this.alertRouter?.route(alert);
     this.metricsService?.recordContractRevert();
     await this.escalationHandler?.escalate(alert);
+  }
+
+  async handleRelayerUpdated(args, log) {
+    const [newRelayer] = args;
+
+    const alert = {
+      type: 'RELAYER_UPDATED',
+      severity: 'MEDIUM',
+      newRelayer,
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    };
+
+    await this.storeEvent(alert);
+    await this.alertRouter?.route(alert);
   }
 
   async storeEvent(alert) {

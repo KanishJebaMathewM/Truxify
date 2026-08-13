@@ -182,19 +182,13 @@ describe('tracker', () => {
     it('rejects invalid coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 'abc', lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
-        error: 'Invalid telemetry payload.',
-        details: ['lat must be a valid number'],
-      }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be a valid number'] }));
     });
 
     it('rejects out-of-range coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 100, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
-        error: 'Invalid telemetry payload.',
-        details: ['lat must be <= 90'],
-      }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be <= 90'] }));
     });
 
     it('buffers valid location ping', async () => {

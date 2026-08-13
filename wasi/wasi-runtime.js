@@ -1,6 +1,7 @@
 import { WASI } from '@wasmer/wasi';
 import fs from 'fs';
 import path from 'path';
+import { Worker } from 'worker_threads';
 import logger from '../backend/api/src/middleware/logger.js';
 
 class WASIRuntime {
@@ -95,7 +96,8 @@ class WASIRuntime {
                 instance,
                 wasi,
                 module,
-                created: Date.now()
+                created: Date.now(),
+                started: false
             });
             
             logger.info(`✅ WASI module loaded: ${id}`);
@@ -108,32 +110,25 @@ class WASIRuntime {
     }
 
     async executeFunction(instanceId, functionName, ...args) {
-        try {
-            const entry = this.instances.get(instanceId);
-            if (!entry) {
-                throw new Error(`Instance ${instanceId} not found`);
-            }
-            
-            const { instance, wasi } = entry;
-            
-            // Check timeout
-            if (Date.now() - entry.created > this.capabilities.timeout) {
-                throw new Error('Instance timeout');
-            }
-            
-            // Start WASI runtime before invoking any exports — WASI must be
-            // initialized before the WASM module can safely use stdin/stdout/stderr
-            wasi.start(instance);
-            
-            // Execute function
-            const result = instance.exports[functionName](...args);
-            
-            return result;
-            
-        } catch (error) {
-            logger.error('Function execution failed:', error);
-            throw error;
+        const entry = this.instances.get(instanceId);
+        if (!entry) {
+            throw new Error(`Instance ${instanceId} not found`);
         }
+
+        // Start the WASI runtime exactly once — re-invoking wasi.start on
+        // every call re-runs the module _start (a no-op or error after the
+        // first run) which can corrupt module state across invocations.
+        if (!entry.started) {
+            entry.wasi.start(entry.instance);
+            entry.started = true;
+        }
+
+        // Run the guest export under a real execution watchdog. Unlike the
+        // previous admission-only timestamp check, this executes the call in
+        // a terminable Worker so a runaway/looping module is hard-stopped
+        // when capabilities.timeout elapses instead of pinning the
+        // event-loop thread indefinitely.
+        return withHardTimeout(entry.module, functionName, args, this.capabilities.timeout);
     }
 
     async readFile(instanceId, path) {
@@ -247,6 +242,72 @@ class WASIRuntime {
         this.instances.clear();
         logger.info('✅ WASI instances cleaned up');
     }
+}
+
+// Runs a guest export under a real execution watchdog. The call is executed
+// inside a Worker so that, unlike a timestamp comparison at entry, a
+// runaway/looping module can be hard-terminated via worker.terminate() when
+// `timeout` elapses instead of pinning the event-loop thread indefinitely.
+function withHardTimeout(module, functionName, args, timeout) {
+    return new Promise((resolve, reject) => {
+        const workerCode = `
+            const { parentPort, workerData } = require('worker_threads');
+            const { module, functionName, args } = workerData;
+            try {
+                const { WASI } = require('wasi');
+                const wasi = new WASI({ args: [], env: {}, preopens: {} });
+                const importObject = {
+                    wasi_snapshot_preview1: wasi.wasiImport,
+                    env: { memory: new WebAssembly.Memory({ initial: 256 }) },
+                };
+                const instance = new WebAssembly.Instance(module, importObject);
+                // Start the WASI runtime exactly once inside the worker — the
+                // module's _start must not be re-invoked on subsequent calls.
+                wasi.start(instance);
+                const func = instance.exports[functionName];
+                if (typeof func !== 'function') {
+                    throw new Error('Function ' + functionName + ' not found');
+                }
+                const result = func(...args);
+                parentPort.postMessage({ success: true, result });
+            } catch (err) {
+                parentPort.postMessage({ success: false, error: err.message });
+            }
+        `;
+
+        const worker = new Worker(workerCode, {
+            eval: true,
+            workerData: { module, functionName, args },
+        });
+
+        const timer = setTimeout(() => {
+            worker.terminate();
+            logger.error(`Guest function '${functionName}' timed out after ${timeout}ms`);
+            reject(new Error(`Execution timeout after ${timeout}ms`));
+        }, timeout);
+
+        worker.on('message', (msg) => {
+            clearTimeout(timer);
+            if (msg.success) {
+                resolve(msg.result);
+            } else {
+                reject(new Error(msg.error));
+            }
+        });
+
+        worker.on('error', (err) => {
+            clearTimeout(timer);
+            logger.error(`Guest function worker error: ${err.message}`);
+            reject(err);
+        });
+
+        worker.on('exit', (code) => {
+            if (code !== 0) {
+                clearTimeout(timer);
+                reject(new Error(`Worker exited with code ${code}`));
+            }
+        });
+    });
 }
 
 export default new WASIRuntime();

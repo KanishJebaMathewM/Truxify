@@ -289,11 +289,13 @@ class VoiceAIService:
                 voice_profile = self.voice_profiles.get(language_code, 'English Female')
             
             # Generate audio with ElevenLabs
+            # eleven_monolingual_v1 only supports English; use multilingual for others
+            model = "eleven_monolingual_v1" if language_code == 'en' else "eleven_multilingual_v2"
             audio = await asyncio.to_thread(
                 generate,
                 text=text,
                 voice=voice_profile,
-                model="eleven_monolingual_v1"
+                model=model
             )
             
             # Cache in Redis

@@ -26,6 +26,23 @@ const ANOMALY_SEVERITY = {
   CRITICAL: 'CRITICAL',
 };
 
+// Withdrawal amounts are stored as MATIC strings. Float summation of values
+// like '0.1' drifts (ten 0.1 rows sum to 0.9999999999999999), so the baseline
+// is accumulated as exact integer minor units on a fixed 18-decimal scale and
+// converted back to a plain number only once at the end (#11498).
+const DECIMAL_SCALE = 10n ** 18n;
+
+function amountToMinorUnits(amount) {
+  const s = String(amount ?? '').trim();
+  if (!s || !Number.isFinite(Number(s))) return 0n;
+  const negative = s.startsWith('-');
+  const abs = negative ? s.slice(1) : s;
+  const [intPart, fracPart = ''] = abs.split('.');
+  const frac = (fracPart + '000000000000000000').slice(0, 18);
+  let units = BigInt(intPart || '0') * DECIMAL_SCALE + BigInt(frac || '0');
+  return negative ? -units : units;
+}
+
 class AnomalyDetectionService {
   constructor(deps = {}) {
     this.alertRouter = deps.alertRouter;
@@ -123,8 +140,8 @@ class AnomalyDetectionService {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2;
       }
 
-      const total = data.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-      return total / data.length;
+      const totalUnits = data.reduce((sum, t) => sum + amountToMinorUnits(t.amount), 0n);
+      return Number(totalUnits) / data.length / 1e18;
     } catch (err) {
       logger.warn('[AnomalyDetectionService] Failed to calculate average withdrawal:', err.message);
       return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2;

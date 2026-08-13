@@ -30,6 +30,7 @@ class BlockchainMonitor {
     this.provider = null;
     this.contract = null;
     this.isListening = false;
+    this.isScanning = false;
     this.lastBlockScanned = 0;
     this.eventHandlers = {};
   }
@@ -98,9 +99,15 @@ class BlockchainMonitor {
     const pollInterval = parseInt(process.env.BLOCKCHAIN_POLL_INTERVAL_MS || '12000', 10);
 
     setInterval(async () => {
+      if (this.isScanning) {
+        logger.warn('[BlockchainMonitor] Previous block scan still in progress. Skipping interval tick to avoid duplicate event processing.');
+        return;
+      }
+
       try {
         if (!this.isListening || !this.provider) return;
 
+        this.isScanning = true;
         const currentBlock = await this.provider.getBlockNumber();
         if (currentBlock > this.lastBlockScanned) {
           await this.scanBlockRange(this.lastBlockScanned + 1, currentBlock);
@@ -109,6 +116,8 @@ class BlockchainMonitor {
       } catch (err) {
         logger.error('[BlockchainMonitor] Polling error:', err.message);
         Sentry.captureException(err);
+      } finally {
+        this.isScanning = false;
       }
     }, pollInterval);
   }

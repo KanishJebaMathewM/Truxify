@@ -117,4 +117,57 @@ describe('BlockchainMonitor', () => {
     await monitor.stopListening();
     expect(monitor.isListening).toBe(false);
   });
+
+  it('skips interval ticks while a scan is already in progress (re-entrancy guard)', async () => {
+    const { monitor, metricsService } = buildMonitor();
+    let capturedCallback;
+    vi.stubGlobal('setInterval', (cb) => {
+      capturedCallback = cb;
+      return 1;
+    });
+
+    let resolveBlockNumber;
+    monitor.isListening = true;
+    monitor.lastBlockScanned = 0;
+    monitor.provider = {
+      getBlockNumber: vi.fn(() => new Promise((resolve) => { resolveBlockNumber = resolve; })),
+      getLogs: vi.fn().mockResolvedValue([]),
+    };
+    monitor.startPollingBlocks();
+
+    const firstTick = capturedCallback();
+    expect(monitor.isScanning).toBe(true);
+
+    await capturedCallback();
+    expect(monitor.provider.getBlockNumber).toHaveBeenCalledTimes(1);
+
+    resolveBlockNumber(5);
+    await firstTick;
+
+    expect(monitor.isScanning).toBe(false);
+    expect(metricsService.recordBlockScan).toHaveBeenCalledWith(5);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('clears isScanning in a finally block even when the scan throws', async () => {
+    const { monitor } = buildMonitor();
+    let capturedCallback;
+    vi.stubGlobal('setInterval', (cb) => {
+      capturedCallback = cb;
+      return 1;
+    });
+
+    monitor.isListening = true;
+    monitor.provider = {
+      getBlockNumber: vi.fn().mockRejectedValue(new Error('rpc down')),
+    };
+    monitor.startPollingBlocks();
+
+    await capturedCallback();
+
+    expect(monitor.isScanning).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
 });

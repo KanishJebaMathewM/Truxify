@@ -185,7 +185,7 @@ export const updateWalletSchema = z.object({
       try {
         ethers.getAddress(address);
         return true;
-      } catch {
+      } catch (err) {
         return false;
       }
     },

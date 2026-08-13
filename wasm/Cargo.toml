@@ -11,3 +11,8 @@ wasm-bindgen = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
+ed25519_dalek = "2"
+k256 = { version = "0.13", features = ["ecdsa"] }
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["os_rng"] }

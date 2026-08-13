@@ -216,7 +216,7 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
 
     const { data: truck, error: insertErr } = await supabase
       .from('trucks')
-      .insert({ name, truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
+      .insert({ name: sanitizeTruckName(name), truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
       .select('id, name, truck_type, number_plate, max_capacity_tons, created_at')
       .single();
 

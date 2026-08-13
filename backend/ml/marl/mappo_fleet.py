@@ -22,8 +22,19 @@ class MappoFleetBalancer:
         value_estimate = float(np.dot(global_state, self.critic_weights))
         action_logits = np.dot(global_state, self.actor_weights)
         
-        # Softmax probability mapping for load dispatch selection
-        probs = np.exp(action_logits) / np.sum(np.exp(action_logits))
+        # Numerically stable softmax for load dispatch selection.
+        # Subtracting the max prevents overflow when logits are large and
+        # avoids the inf/inf -> NaN -> argmax=0 collapse.
+        max_logit = np.max(action_logits)
+        z = action_logits - max_logit
+        e = np.exp(z)
+        sum_e = np.sum(e)
+        if not np.isfinite(sum_e) or sum_e <= 0:
+            # Degenerate all -inf case: fall back to a uniform distribution
+            # so the agent still selects a valid (non-NaN) action.
+            probs = np.full_like(action_logits, 1.0 / len(action_logits))
+        else:
+            probs = e / sum_e
         selected_agent = int(np.argmax(probs))
 
         return {

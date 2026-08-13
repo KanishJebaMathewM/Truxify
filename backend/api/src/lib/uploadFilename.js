@@ -67,6 +67,10 @@ export function sanitizeUploadFilename(originalName, fallback = 'upload') {
     const lastDot = name.lastIndexOf('.');
     const extension = lastDot > 0 ? name.slice(lastDot, lastDot + 12) : '';
     name = name.slice(0, MAX_FILENAME_LENGTH - extension.length) + extension;
+    // The truncated extension could reintroduce a leading dot or a traversal
+    // segment (e.g. extension ".." from a name like "a...."); re-run the
+    // normalization pass on the truncated result.
+    name = name.replace(/\.{2,}/g, '.').replace(/^\.+/, '');
   }
 
   const stem = (name.split('.')[0] || '').toLowerCase();

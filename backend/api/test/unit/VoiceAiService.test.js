@@ -1,36 +1,85 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'path';
 
-vi.mock('../../src/config/db.js', () => ({}));
+const mocks = vi.hoisted(() => ({
+  openaiCreate: vi.fn(),
+  axiosPost: vi.fn(),
+  fs: {
+    createReadStream: vi.fn(() => ({})),
+    existsSync: vi.fn(() => true),
+    unlinkSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
+}));
+
+vi.mock('node:fs', () => ({ default: mocks.fs }));
+
+vi.mock('openai', () => ({
+  OpenAI: class {
+    constructor() {
+      this.audio = { transcriptions: { create: mocks.openaiCreate } };
+      this.chat = { completions: { create: mocks.openaiCreate } };
+    }
+  },
+}));
+
+vi.mock('axios', () => ({
+  default: { post: mocks.axiosPost },
+}));
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 describe('VoiceAiService', () => {
-  let VoiceAiService;
+  let service;
+  const AUDIO_PATH = path.resolve(process.cwd(), 'uploads', 'voice', 'command.mp3');
 
   beforeEach(async () => {
-    vi.clearAllMocks();
+    process.env.OPENAI_API_KEY = 'test-api-key';
+    mocks.openaiCreate.mockReset();
+    mocks.axiosPost.mockReset();
+    mocks.fs.unlinkSync.mockReset();
+    mocks.openaiCreate
+      .mockResolvedValueOnce({ text: 'where is my truck' })
+      .mockResolvedValueOnce({ choices: [{ message: { content: 'Your truck is at the depot.' } }] });
+    mocks.axiosPost.mockResolvedValue({ data: { _isTtsStream: true } });
+
     vi.resetModules();
-    VoiceAiService = (await import('../../src/services/voice/VoiceAiService.js')).default;
+    service = (await import('../../src/services/voice/VoiceAiService.js')).default;
   });
 
-  describe('processVoiceCommand', () => {
-    it('parses accept command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('accept the bid');
-      expect(result).toHaveProperty('intent');
-      expect(result).toHaveProperty('entities');
-    });
+  it('default export is a VoiceAiService instance exposing processVoiceQuery', () => {
+    expect(service).toBeTruthy();
+    expect(typeof service.processVoiceQuery).toBe('function');
+  });
 
-    it('parses reject command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('reject the order');
-      expect(result.intent).toMatch(/reject|cancel/);
-    });
+  it('rejects audio paths outside the uploads/voice directory', async () => {
+    await expect(
+      service.processVoiceQuery('C:\\windows\\system32\\noise.mp3', 'en')
+    ).rejects.toThrow(/Security Error: Invalid file path detected\./);
+  });
 
-    it('parses navigate command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('navigate to the pickup');
-      expect(result.intent).toMatch(/navigate|location/);
-    });
+  it('transcribes the audio, answers it and returns the TTS stream', async () => {
+    const result = await service.processVoiceQuery(AUDIO_PATH, 'en');
 
-    it('returns null intent for unrecognized command', async () => {
-      const result = await VoiceAiService.processVoiceCommand('asdfghjkl random text');
-      expect(result.intent).toBeNull();
-    });
+    expect(mocks.openaiCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.axiosPost).toHaveBeenCalledTimes(1);
+    expect(mocks.axiosPost.mock.calls[0][0]).toContain('api.elevenlabs.io');
+    expect(result).toEqual({ _isTtsStream: true });
+  });
+
+  it('falls back to English for unsupported languages', async () => {
+    await service.processVoiceQuery(AUDIO_PATH, 'fr');
+
+    const completionCall = mocks.openaiCreate.mock.calls[1][0];
+    const systemContent = completionCall.messages[0].content;
+    expect(systemContent).toContain('English');
+  });
+
+  it('cleans up the temporary audio file after processing', async () => {
+    await service.processVoiceQuery(AUDIO_PATH, 'en');
+    expect(mocks.fs.unlinkSync).toHaveBeenCalledWith(AUDIO_PATH);
   });
 });

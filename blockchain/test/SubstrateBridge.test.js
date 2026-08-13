@@ -8,17 +8,41 @@ describe("SubstrateBridge Cross-Chain Engine", function () {
     const bridge = await SubstrateBridge.deploy();
 
     const msgHash = ethers.keccak256(ethers.toUtf8Bytes("XCM_TX_BILL_OF_LADING_101"));
-    
-    // Mock 65-byte ECDSA signature
-    const mockSignature = ethers.concat([
-      ethers.toBeHex(1, 32),
-      ethers.toBeHex(2, 32),
-      ethers.toBeHex(27, 1)
-    ]);
 
-    const tx = await bridge.relayXcmMessage(msgHash, 2000, relayer.address, 500, mockSignature);
+    // Owner-signed ECDSA signature over the message hash
+    const signature = await owner.signMessage(ethers.getBytes(msgHash));
+
+    const tx = await bridge.relayXcmMessage(msgHash, 2000, relayer.address, 500, signature);
     await tx.wait();
 
     expect(await bridge.processedMessages(msgHash)).to.equal(true);
+  });
+
+  it("Should reject a relay when the signature is not from the owner", async function () {
+    const [owner, relayer, attacker] = await ethers.getSigners();
+    const SubstrateBridge = await ethers.getContractFactory("SubstrateBridge");
+    const bridge = await SubstrateBridge.deploy();
+
+    const msgHash = ethers.keccak256(ethers.toUtf8Bytes("XCM_TX_BILL_OF_LADING_101"));
+
+    const forgedSignature = await attacker.signMessage(ethers.getBytes(msgHash));
+
+    await expect(
+      bridge.relayXcmMessage(msgHash, 2000, relayer.address, 500, forgedSignature)
+    ).to.be.revertedWith("Invalid bridge transaction signature");
+  });
+
+  it("Should reject a relay from a non-owner caller", async function () {
+    const [owner, relayer, attacker] = await ethers.getSigners();
+    const SubstrateBridge = await ethers.getContractFactory("SubstrateBridge");
+    const bridge = await SubstrateBridge.deploy();
+
+    const msgHash = ethers.keccak256(ethers.toUtf8Bytes("XCM_TX_BILL_OF_LADING_101"));
+
+    const signature = await owner.signMessage(ethers.getBytes(msgHash));
+
+    await expect(
+      bridge.connect(attacker).relayXcmMessage(msgHash, 2000, relayer.address, 500, signature)
+    ).to.be.revertedWith("OwnableUnauthorizedAccount");
   });
 });

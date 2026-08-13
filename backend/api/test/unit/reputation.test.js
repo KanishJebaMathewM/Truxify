@@ -238,7 +238,6 @@ describe('reputation service', () => {
 
 
 // === Spec 23 test ===
-import { describe, it, expect } from 'vitest';
 import { clampRating, aggregateRating } from '../../src/services/reputation.js';
 describe('clampRating', () => {
   it('5.5 → 5', () => { expect(clampRating(5.5)).toBe(5); });

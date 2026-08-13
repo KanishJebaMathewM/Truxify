@@ -43,7 +43,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
       limit: safeLimit,
       total: safeTotal,
       totalPages,
-      hasNextPage: safePage < totalPages,
+      hasNextPage: safePage > 0 && safePage < totalPages,
       hasPrevPage: safePage > 1,
     },
   };

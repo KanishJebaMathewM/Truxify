@@ -26,3 +26,13 @@ assert.strictEqual(logs.length, 1);
 assert.strictEqual(logs[0].gapSize, 3);
 
 console.log('✅ Divergence Detector tests passed successfully.');
+
+
+// === Spec 37 test ===
+import { describe, it, expect } from 'vitest';
+import { assertContinuity, SequenceGapError } from '../../event-store.js';
+describe('assertContinuity', () => {
+  it('next', () => { expect(assertContinuity(5, 6)).toBe(6); });
+  it('gap', () => { expect(() => assertContinuity(5, 7)).toThrow(SequenceGapError); });
+});
+

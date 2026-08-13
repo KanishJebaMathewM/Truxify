@@ -42,6 +42,13 @@ export async function acquireLock(resourceKey, ttlMs = 30_000) {
     );
   }
 
+  if (!resourceKey || typeof resourceKey !== 'string') {
+    throw new LockAcquisitionError(
+      resourceKey ?? 'undefined',
+      'resourceKey must be a non-empty string'
+    );
+  }
+
   const lockValue = crypto.randomUUID();
 
   try {

@@ -41,7 +41,6 @@ export default function cacheControlVerifier(req, res, next) {
     if (warnings.length > 0) {
       logger.warn(
         {
-          requestId: req.requestId || req.id,
           method: req.method,
           path: req.originalUrl,
           missingHeaders: warnings,

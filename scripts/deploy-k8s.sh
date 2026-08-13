@@ -1,3 +1,21 @@
+<<<<<<< HEAD
+#!/bin/bash
+# Kubernetes deployment script for Truxify API and ML services.
+set -e
+
+NAMESPACE="${1:-truxify}"
+MANIFESTS_DIR="$(dirname "${BASH_SOURCE[0]}")/../k8s"
+
+echo "[deploy-k8s] Deploying Truxify to namespace '${NAMESPACE}'..."
+
+if [ ! -d "${MANIFESTS_DIR}" ]; then
+  echo "[deploy-k8s] Error: k8s manifests directory not found at ${MANIFESTS_DIR}"
+  exit 1
+fi
+
+kubectl apply -f "${MANIFESTS_DIR}/" --namespace="${NAMESPACE}"
+echo "[deploy-k8s] Deployment complete."
+=======
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -33,6 +51,15 @@ apply "${K8S_DIR}/secrets.yaml"
 # 3. Storage.
 apply "${K8S_DIR}/pvcs/storage-pvcs.yaml"
 
+# 3.5. Prerequisite service accounts / RBAC.
+# These must exist before the deployments that reference them are created,
+# otherwise the API pods get stuck in FailedCreate.
+if [ -d "${K8S_DIR}/authorization" ]; then
+  for manifest in "${K8S_DIR}"/authorization/*.yaml; do
+    apply "${manifest}"
+  done
+fi
+
 # 4. Deployments.
 for manifest in "${K8S_DIR}"/deployements/*.yaml; do
   apply "${manifest}"
@@ -60,4 +87,12 @@ if [ "${ISTIO_ENABLED:-0}" = "1" ]; then
   fi
 fi
 
+# 8. Post-deploy sanity check: fail fast if a referenced service account is missing.
+if ! "${KUBECTL_BIN}" get serviceaccount api-service-account -n truxify >/dev/null 2>&1; then
+  echo "ERROR: api-service-account service account is missing in namespace truxify." >&2
+  echo "The api-deployment references it and its pods will fail to start." >&2
+  exit 1
+fi
+
 echo "==> Deployment complete. Check status with: kubectl get pods -n truxify"
+>>>>>>> upstream/main

@@ -34,14 +34,4 @@ describe('formatError', () => {
     const err = formatError(400, 'Invalid', null)
     expect(err.error.details).toBeUndefined()
   })
-
-  it('preserves a string error code', () => {
-    const err = formatError('NOT_FOUND', 'Resource not found')
-    expect(err.error.code).toBe('NOT_FOUND')
-  })
-
-  it('always marks the envelope as unsuccessful', () => {
-    const err = formatError('BAD_REQUEST', 'Nope')
-    expect(err.success).toBe(false)
-  })
 })

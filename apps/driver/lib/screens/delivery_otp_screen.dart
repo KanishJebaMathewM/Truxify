@@ -140,8 +140,10 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
           _withinGeofence = d <= _geofenceRadius;
         });
       }
-    } catch (_) {
-      // GPS unavailable — silent fail
+    } catch (e) {
+      // GPS unavailable — log the reason so stale distance/geofence state is
+      // diagnosable instead of silently never updating (#12495).
+      debugPrint('DeliveryOtpScreen: GPS lookup failed: $e');
     }
   }
 

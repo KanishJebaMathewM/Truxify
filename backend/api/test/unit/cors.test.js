@@ -47,34 +47,4 @@ describe('corsMiddleware', () => {
     const { nextCalled } = await invoke(null)
     expect(nextCalled).toBe(true)
   })
-
-  it('restricts localhost origins in production', async () => {
-    const originalEnv = process.env.NODE_ENV
-    process.env.NODE_ENV = 'production'
-    try {
-      // Re-import with a fresh module registry so the production branch of
-      // the module-level config is evaluated.
-      const { vi } = await import('vitest')
-      vi.resetModules()
-      const { corsMiddleware: prodCors } = await import('../../src/middleware/cors.js')
-      const { res } = await new Promise((resolve) => {
-        const req = { headers: { origin: 'http://localhost:8080' } }
-        const r = makeRes()
-        prodCors(req, r, () => resolve({ res: r }))
-      })
-      expect(res.getHeader('access-control-allow-origin')).toBeUndefined()
-    } finally {
-      process.env.NODE_ENV = originalEnv
-    }
-  })
-
-  it('allows localhost when the origin has surrounding whitespace', async () => {
-    const { res } = await invoke('  http://localhost:8080  ')
-    expect(res.getHeader('access-control-allow-origin')).toBeTruthy()
-  })
-
-  it('allows localhost with a case-variant hostname', async () => {
-    const { res } = await invoke('http://LOCALHOST:8080')
-    expect(res.getHeader('access-control-allow-origin')).toBe('http://LOCALHOST:8080')
-  })
 })

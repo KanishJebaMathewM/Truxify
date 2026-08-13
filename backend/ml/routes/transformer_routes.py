@@ -32,22 +32,9 @@ class TrainRequest(BaseModel):
     epochs: int = 50
     batch_size: int = 32
 
-def _validate_horizon(request: ForecastRequest, pred_len: int) -> None:
-    """The transformer output head is sized for a fixed ``pred_len``; reject any
-    requested horizon that does not match so the response never lies about the
-    number of forecast points returned."""
-    if request.horizon != pred_len:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"horizon must equal the model's fixed prediction length ({pred_len})"
-            ),
-        )
-
 @router.post("/demand/forecast")
 async def forecast_demand(request: ForecastRequest):
     """Forecast demand using transformer"""
-    _validate_horizon(request, demand_model.transformer.pred_len)
     try:
         # Convert to tensor
         x = torch.tensor(request.data, dtype=torch.float32)
@@ -61,7 +48,7 @@ async def forecast_demand(request: ForecastRequest):
             'success': True,
             'data': {
                 'predictions': predictions.tolist(),
-                'horizon': demand_model.transformer.pred_len,
+                'horizon': request.horizon,
                 'type': 'demand'
             },
             'timestamp': datetime.now().isoformat()
@@ -75,7 +62,6 @@ async def forecast_demand(request: ForecastRequest):
 @router.post("/traffic/forecast")
 async def forecast_traffic(request: ForecastRequest):
     """Forecast traffic using transformer"""
-    _validate_horizon(request, traffic_model.transformer.pred_len)
     try:
         x = torch.tensor(request.data, dtype=torch.float32)
         if len(x.shape) == 2:
@@ -87,7 +73,7 @@ async def forecast_traffic(request: ForecastRequest):
             'success': True,
             'data': {
                 'predictions': predictions.tolist(),
-                'horizon': traffic_model.transformer.pred_len,
+                'horizon': request.horizon,
                 'type': 'traffic'
             },
             'timestamp': datetime.now().isoformat()
@@ -101,7 +87,6 @@ async def forecast_traffic(request: ForecastRequest):
 @router.post("/price/forecast")
 async def forecast_price(request: ForecastRequest):
     """Forecast price using transformer"""
-    _validate_horizon(request, price_model.transformer.pred_len)
     try:
         x = torch.tensor(request.data, dtype=torch.float32)
         if len(x.shape) == 2:
@@ -113,7 +98,7 @@ async def forecast_price(request: ForecastRequest):
             'success': True,
             'data': {
                 'predictions': predictions.tolist(),
-                'horizon': price_model.transformer.pred_len,
+                'horizon': request.horizon,
                 'type': 'price'
             },
             'timestamp': datetime.now().isoformat()

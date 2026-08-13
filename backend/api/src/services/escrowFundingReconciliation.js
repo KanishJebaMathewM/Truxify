@@ -1,9 +1,8 @@
-﻿import { redisClient, supabaseAdmin } from '../config/db.js';
+import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
-import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status
 // 'funding' but whose escrow deposit never lands within the funding TTL are
@@ -60,63 +59,21 @@ async function finalizeOrRevert(order, orderRepository) {
 
     if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
       logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
-      // Mirror the careful revert path below: submitEscrowRefund resolves with
-      // { txHash: null, error } / missing txHash on chain failures instead of
-      // throwing, so only clear the funding as refunded once the refund
-      // actually submitted AND confirmed on-chain.
-      let refundResult;
       try {
-        refundResult = await submitEscrowRefund(order.order_display_id);
-      } catch (err) {
-        refundResult = { txHash: null, error: err.message };
-        logger.error(`[escrow-funding] Refund failed for cancelled order ${order.order_display_id}: ${err.message}`);
-      }
-
-      if (refundResult?.error || !refundResult?.txHash) {
-        const refundError = refundResult?.error || 'escrow refund was not submitted';
-        logger.error(
-          `[escrow-funding] Skipping refunded clear for ${order.order_display_id}: refund not confirmed (${refundError})`
-        );
-        await orderRepository.updateOrderWithFilter(order.id, {
-          escrow_status: 'refund_failed',
-          escrow_refund_error: refundError,
+        await submitEscrowRefund(order.order_display_id);
+        await orderRepository.updateOrder(order.id, {
+          escrow_status: 'refunded',
+          escrow_refund_error: null,
           updated_at: new Date().toISOString(),
-        }, [
-          { op: 'eq', column: 'escrow_status', value: 'funding' },
-          { op: 'eq', column: 'id', value: order.id },
-        ], 'id').catch((err) => {
-          logger.error(`[escrow-funding] Failed to record refund failure for ${order.order_display_id}: ${err.message}`);
         });
-        return;
-      }
-
-      try {
-        await refundResult.waitForConfirmation();
       } catch (err) {
-        logger.error(`[escrow-funding] Refund confirmation failed for cancelled order ${order.order_display_id}: ${err.message}`);
-        await orderRepository.updateOrderWithFilter(order.id, {
+        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
+        await orderRepository.updateOrder(order.id, {
           escrow_status: 'refund_failed',
-          escrow_refund_error: `refund confirmation failed: ${err.message}`,
+          escrow_refund_error: err.message,
           updated_at: new Date().toISOString(),
-        }, [
-          { op: 'eq', column: 'escrow_status', value: 'funding' },
-          { op: 'eq', column: 'id', value: order.id },
-        ], 'id').catch((err) => {
-          logger.error(`[escrow-funding] Failed to record confirmation failure for ${order.order_display_id}: ${err.message}`);
         });
-        return;
       }
-
-      await orderRepository.updateOrderWithFilter(order.id, {
-        escrow_status: 'refunded',
-        escrow_refund_error: null,
-        updated_at: new Date().toISOString(),
-      }, [
-        { op: 'eq', column: 'escrow_status', value: 'funding' },
-        { op: 'eq', column: 'id', value: order.id },
-      ], 'id').catch((err) => {
-        logger.error(`[escrow-funding] Failed to mark cancelled order ${order.order_display_id} as refunded: ${err.message}`);
-      });
       return;
     }
 
@@ -149,11 +106,6 @@ async function finalizeOrRevert(order, orderRepository) {
           });
           return;
         }
-
-        // Driver assignment confirmed — drop any stale cached mapping so the
-        // tracker resolves the newly assigned driver on the next ping
-        // (issue #10676).
-        await invalidateDriverOrderCache(pending.driver_id);
 
         sendPushNotification(
           pending.driver_id,
@@ -244,12 +196,6 @@ async function finalizeOrRevert(order, orderRepository) {
     if (revertErr) {
       logger.error(`[escrow-funding] Failed to revert order ${order.order_display_id}: ${revertErr.message}`);
     } else {
-      // Driver released back to pool — drop any stale cached mapping so the
-      // tracker resolves the driver's next assignment (issue #10676).
-      const releasedDriverId = order.pending_bid_acceptance?.driver_id;
-      if (releasedDriverId) {
-        await invalidateDriverOrderCache(releasedDriverId);
-      }
       sendPushNotification(
         order.customer_id,
         'Bid Acceptance Expired',

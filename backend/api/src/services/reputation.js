@@ -231,3 +231,22 @@ export async function getDriverReputation(walletAddress) {
     }
   });
 }
+
+
+// === Spec 23: ===
+// === Spec 23: rating bounds ===
+const MIN_R = 1.00, MAX_R = 5.00;
+export function clampRating(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return MIN_R;
+  if (n < MIN_R) return MIN_R;
+  if (n > MAX_R) return MAX_R;
+  return Math.round(n * 100) / 100;
+}
+export function aggregateRating(r) {
+  if (!Array.isArray(r) || r.length === 0) return MIN_R;
+  const valid = r.filter((x) => Number.isFinite(Number(x)));
+  if (valid.length === 0) return MIN_R;
+  return clampRating(valid.reduce((a,b) => a + Number(b), 0) / valid.length);
+}
+

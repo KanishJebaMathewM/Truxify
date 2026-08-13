@@ -78,28 +78,56 @@ async def predict_tflite(request: PredictRequest):
     try:
         input_array = np.array(request.input_data, dtype=np.float32)
         result = inference.predict(request.model_name, input_array)
+<<<<<<< HEAD
         
+=======
+
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Prediction failed'))
+
+>>>>>>> upstream/main
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+<<<<<<< HEAD
+=======
+    except HTTPException:
+        raise
+>>>>>>> upstream/main
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> upstream/main
 @router.post("/predict-batch")
 async def predict_batch_tflite(request: BatchPredictRequest):
     """Run batch TFLite inference"""
     try:
         input_batch = [np.array(data, dtype=np.float32) for data in request.input_batch]
         result = inference.predict_batch(request.model_name, input_batch)
+<<<<<<< HEAD
         
+=======
+
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Batch prediction failed'))
+
+>>>>>>> upstream/main
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+<<<<<<< HEAD
+=======
+    except HTTPException:
+        raise
+>>>>>>> upstream/main
     except Exception as e:
         logger.error(f"Batch prediction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -109,23 +137,46 @@ async def quantize_model(request: ConvertRequest):
     """Quantize model for edge deployment"""
     try:
         import tensorflow as tf
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> upstream/main
         model = tf.keras.Sequential([
             tf.keras.layers.Dense(128, activation='relu', input_shape=(784,)),
             tf.keras.layers.Dense(10, activation='softmax')
         ])
+<<<<<<< HEAD
         
         quantized_model = optimizer.quantize_weights(model, request.quantization)
         
+=======
+
+        result = optimizer.quantize_weights(model, request.quantization, request.name)
+
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', 'Quantization failed'))
+
+>>>>>>> upstream/main
         return {
             'success': True,
             'data': {
                 'quantization': request.quantization,
                 'model_quantized': True,
+<<<<<<< HEAD
+=======
+                'model_path': result.get('model_path'),
+                'size_bytes': result.get('size_bytes'),
+>>>>>>> upstream/main
                 'timestamp': datetime.now().isoformat()
             },
             'timestamp': datetime.now().isoformat()
         }
+<<<<<<< HEAD
+=======
+    except HTTPException:
+        raise
+>>>>>>> upstream/main
     except Exception as e:
         logger.error(f"Quantization error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

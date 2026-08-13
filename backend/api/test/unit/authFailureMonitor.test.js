@@ -49,3 +49,21 @@ describe('shouldIgnoreError', () => {
     expect(shouldIgnoreError(err)).toBe(false);
   });
 });
+
+
+// === Spec 4 test ===
+import { describe, it, expect, vi } from 'vitest';
+import { checkBoundOrFailClosed } from '../../src/middleware/authFailureMonitor.js';
+describe('checkBoundOrFailClosed', () => {
+  it('allows under limit', async () => {
+    const r = { incr: vi.fn().mockResolvedValue(1) };
+    expect((await checkBoundOrFailClosed(r, '1.2.3.4')).allowed).toBe(true);
+  });
+  it('denies when banned', async () => {
+    const r = { incr: vi.fn().mockResolvedValue(10) };
+    const out = await checkBoundOrFailClosed(r, '1.2.3.4', { maxAttempts: 5 });
+    expect(out.allowed).toBe(false);
+    expect(out.reason).toBe('banned');
+  });
+});
+

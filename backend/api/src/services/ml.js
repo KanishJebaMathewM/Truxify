@@ -72,6 +72,22 @@ function parseDimensions(dimensions) {
 }
 
 /**
+ * Normalize a load_offer's monetary value to paisa (1 INR = 100 paisa).
+ * `payment_inr` is stored in INR; `freight_value` is stored in paisa.
+ * Both are converted to a single unit (paisa) so arithmetic and the
+ * downstream `extra_earnings` field stay consistent.
+ */
+function toPaisa(offer) {
+  if (offer.payment_inr != null) {
+    return Math.round(Number(offer.payment_inr) * 100);
+  }
+  if (offer.freight_value != null) {
+    return Math.round(Number(offer.freight_value));
+  }
+  return 0;
+}
+
+/**
  * Utility: build headers with optional API key
  */
 function getHeaders() {
@@ -638,7 +654,7 @@ export async function matchEnRouteLoads({
         width_m: dims.width,
         height_m: dims.height,
         pickup_deadline: o.pickup_deadline ? new Date(o.pickup_deadline).toISOString() : new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
-        payment_inr: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
+        payment_inr: toPaisa(o),
       };
     })
     .filter(l => Number.isFinite(l.weight_kg) && l.weight_kg > 0);
@@ -680,7 +696,7 @@ export async function matchEnRouteLoads({
           detour_km: dtKm,
           distance_to_pickup_km: dtKm,
           match_score: Math.max(0, 1 - dtKm / maxDetourKm),
-          estimated_earnings: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
+          estimated_earnings: toPaisa(o),
           _fallback: true,
         };
       })
@@ -700,8 +716,8 @@ export async function matchEnRouteLoads({
         ...o,
         detour_km: rec.detour_km ?? rec.distance_to_pickup_km ?? 0,
         extra_earnings: rec.estimated_earnings
-          ? Math.round(rec.estimated_earnings * 100) // convert to paisa for consistency
-          : (o.freight_value || 0),
+          ? Math.round(rec.estimated_earnings)
+          : (o.freight_value != null ? Math.round(Number(o.freight_value)) : 0),
         match_score: rec.match_score ?? 0,
         extra_distance_km: rec.detour_km ?? 0,
         ml_used: mlUsed,

@@ -58,3 +58,11 @@ export function verifyOtpHash(otp, otpRecord) {
   }
   return false;
 }
+
+export function generateOtpSecret(length = 6) {
+  const len = Math.max(4, Math.min(10, Number(length) || 6));
+  const min = Math.pow(10, len - 1);
+  const max = Math.pow(10, len) - 1;
+  return String(crypto.randomInt(min, max + 1));
+}
+

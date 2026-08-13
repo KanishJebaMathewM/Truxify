@@ -1,7 +1,22 @@
-import { hashOtp, verifyOtpHash } from '../../src/lib/otpHashing.js';
+import { hashOtp, verifyOtpHash, generateOtpSecret } from '../../src/lib/otpHashing.js';
 import crypto from 'crypto';
 
 describe('otpHashing', () => {
+  describe('generateOtpSecret', () => {
+    it('generates a numeric string of requested length', () => {
+      const otp6 = generateOtpSecret(6);
+      expect(otp6).toMatch(/^\d{6}$/);
+
+      const otp4 = generateOtpSecret(4);
+      expect(otp4).toMatch(/^\d{4}$/);
+    });
+
+    it('clamps requested length within bounds [4, 10]', () => {
+      expect(generateOtpSecret(2)).toMatch(/^\d{4}$/);
+      expect(generateOtpSecret(20)).toMatch(/^\d{10}$/);
+    });
+  });
+
   describe('hashOtp', () => {
     it('generates different hashes and salts for the same OTP', () => {
       const otp = '123456';

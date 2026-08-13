@@ -94,6 +94,22 @@ class FakeLocationQueueStore implements LocationQueueStore {
   }
 
   @override
+  Future<int> deleteOldestMilestones(int count) async {
+    final candidates = rows
+        .where((r) => r['kind'] == 'milestone')
+        .toList()
+      ..sort((a, b) {
+        final byTime = (a['created_at'] as int).compareTo(b['created_at'] as int);
+        if (byTime != 0) return byTime;
+        return (a['id'] as int).compareTo(b['id'] as int);
+      });
+    final doomed = candidates.take(count).map((r) => r['id']).toSet();
+    final before = rows.length;
+    rows.removeWhere((r) => doomed.contains(r['id']));
+    return before - rows.length;
+  }
+
+  @override
   Future<Map<String, dynamic>?> findByIdempotencyKey(String key) async {
     for (final row in rows) {
       if (row['idempotency_key'] == key) return row;
@@ -253,6 +269,75 @@ void main() {
       expect(locations.last.payload['data']['lat'], 21.0 + 14 * 0.01);
       // Oldest location was dropped first.
       expect(locations.first.payload['data']['lat'], isNot(21.0));
+    });
+
+    test('all-milestones overflow drops oldest milestones (capacity honored)', () async {
+      // 12 milestones alone exceed the max of 10. A location enqueue then
+      // triggers the trim; with no droppable locations, the oldest milestones
+      // must be evicted so the queue comes back under capacity.
+      for (var i = 0; i < 12; i++) {
+        await queue.enqueueMilestone(
+          orderId: 'order-1',
+          milestone: 'MS-$i',
+          driverId: 'driver-1',
+        );
+      }
+      await queue.enqueueLocation(loc(lat: 21.5, lng: 72.5));
+
+      final total = await queue.count();
+      expect(total, lessThanOrEqualTo(10),
+          reason: 'capacity must be honored even with only milestones');
+
+      final pending = await queue.pending();
+      final locations =
+          pending.where((i) => i.kind == QueueItemKind.location).toList();
+      final milestones =
+          pending.where((i) => i.kind == QueueItemKind.milestone).toList();
+
+      // The triggering location survives.
+      expect(locations, hasLength(1));
+      expect(locations.single.payload['data']['lat'], 21.5);
+      // 12 milestones trimmed down to 9 to fit capacity (10 - 1 location).
+      expect(milestones, hasLength(9));
+    });
+
+    test('1-location/500-milestone overflow trims to capacity, retains location', () async {
+      final bigQueue = OfflineLocationQueue(
+        store: store,
+        maxEntries: 500,
+        duplicateWindow: const Duration(seconds: 120),
+        duplicateDistanceMeters: 15.0,
+        coalesceWindow: const Duration(seconds: 60),
+        coalesceDistanceMeters: 500.0,
+      );
+
+      await bigQueue.enqueueLocation(loc(lat: 21.0, lng: 72.0));
+      for (var i = 0; i < 500; i++) {
+        await bigQueue.enqueueMilestone(
+          orderId: 'order-1',
+          milestone: 'MS-$i',
+          driverId: 'driver-1',
+        );
+      }
+      // enqueueMilestone does not trim; a follow-up location enqueue triggers
+      // the trim. The single location cannot be dropped, so the oldest
+      // milestone(s) must be evicted instead of overflowing by one.
+      await bigQueue.enqueueLocation(loc(lat: 21.99, lng: 72.99));
+
+      final total = await bigQueue.count();
+      expect(total, lessThanOrEqualTo(500),
+          reason: 'must not exceed maxEntries by one');
+
+      final pending = await bigQueue.pending();
+      final locations =
+          pending.where((i) => i.kind == QueueItemKind.location).toList();
+      final milestones =
+          pending.where((i) => i.kind == QueueItemKind.milestone).toList();
+
+      // Both locations survive (newest fix is never dropped).
+      expect(locations, hasLength(2));
+      // 500 milestones trimmed down to 498 to fit capacity (500 - 2 locations).
+      expect(milestones, hasLength(498));
     });
   });
 

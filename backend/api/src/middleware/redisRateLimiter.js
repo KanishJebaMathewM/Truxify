@@ -123,6 +123,9 @@ return {1, count + 1}
 `;
 
 export async function checkSlidingWindow(redis, key, nowMs, windowMs, limit, member) {
+  if (!key || typeof key !== 'string') {
+    throw new Error('[RateLimiter] checkSlidingWindow: key must be a non-empty string');
+  }
   const result = await redis.eval(SLIDING_WINDOW_LUA, 1, key, nowMs, windowMs, limit, member);
   return { allowed: result[0] === 1, count: result[1] };
 }

@@ -49,11 +49,9 @@ export function verifyOtpHash(otp, otpRecord) {
 
 // === Spec 12: ===
 // === Spec 12: constant-time hex compare ===
-import crypto from 'crypto';
 export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
   try { return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex')); }
   catch (_) { return false; }
 }
-

@@ -159,10 +159,11 @@ type RaftNode struct {
 	// never accepts new entries without evidence of a reachable quorum.
 	liveAck            map[string]bool
 	httpClient         *http.Client
+	// rng is this node's own source of randomness for election timeouts. It is
+	// only accessed while holding mu, so a per-node Rand is safe for concurrent
+	// use across election goroutines of different nodes.
+	rng *rand.Rand
 }
-
-// rng is a source of randomness for election timeouts.
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 	heartbeatMs := envInt("RAFT_HEARTBEAT_MS", 100)
@@ -189,6 +190,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		matchIndex:         make(map[string]uint64),
 		liveAck:            make(map[string]bool),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
+		rng:                rand.New(rand.NewSource(rand.Int63())),
 	}
 }
 
@@ -210,7 +212,7 @@ func (rn *RaftNode) quorum() int {
 func (rn *RaftNode) randomElectionTimeout() time.Duration {
 	minMs := int(rn.electionTimeoutMin / time.Millisecond)
 	maxMs := int(rn.electionTimeoutMax / time.Millisecond)
-	return time.Duration(minMs+rng.Intn(maxMs-minMs+1)) * time.Millisecond
+	return time.Duration(minMs+rn.rng.Intn(maxMs-minMs+1)) * time.Millisecond
 }
 
 // stepDownLocked resets the node to follower when a higher term is observed.

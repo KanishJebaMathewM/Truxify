@@ -206,8 +206,19 @@ export async function getCachedProfile(firebaseUid) {
   try {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
-      cacheHits++;
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        cacheHits++;
+        return parsed;
+      }
+      // Corrupt payload (not a plain object): treat as a miss and purge the key
+      cacheMisses++;
+      try {
+        await redisClient.del(firebaseProfileKey(firebaseUid));
+      } catch (delErr) {
+        // Ignore failures on background cleanup deletion
+      }
+      return null;
     }
     cacheMisses++;
     return null;

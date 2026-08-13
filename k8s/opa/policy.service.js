@@ -2,6 +2,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import crypto from 'crypto';
 import logger from '../../backend/api/src/middleware/logger.js';
 
 const execAsync = promisify(exec);
@@ -49,46 +51,48 @@ class OPAService {
                 throw new Error(`Policy ${policyName} not found`);
             }
 
-            // Write input to temp file
-            const inputPath = '/tmp/opa_input.json';
+            // Write input to a unique temp file per call
+            const inputPath = path.join(os.tmpdir(), `opa_input_${crypto.randomUUID()}.json`);
             fs.writeFileSync(inputPath, JSON.stringify(input));
 
-            // Evaluate policy
-            const { stdout, stderr } = await execAsync(
-                `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.allow"`
-            );
-
-            if (stderr) {
-                logger.error('OPA evaluation error:', stderr);
-                throw new Error(stderr);
-            }
-
-            const result = JSON.parse(stdout);
-            const allowed = result.result && result.result[0]?.value === true;
-
-            // Get violations
-            const violations = [];
-            if (!allowed) {
-                const { stdout: denyStdout } = await execAsync(
-                    `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.deny"`
+            try {
+                // Evaluate policy
+                const { stdout, stderr } = await execAsync(
+                    `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.allow"`
                 );
-                const denyResult = JSON.parse(denyStdout);
-                if (denyResult.result) {
-                    for (const r of denyResult.result) {
-                        violations.push(r.value);
+
+                if (stderr) {
+                    logger.error('OPA evaluation error:', stderr);
+                    throw new Error(stderr);
+                }
+
+                const result = JSON.parse(stdout);
+                const allowed = result.result && result.result[0]?.value === true;
+
+                // Get violations
+                const violations = [];
+                if (!allowed) {
+                    const { stdout: denyStdout } = await execAsync(
+                        `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.deny"`
+                    );
+                    const denyResult = JSON.parse(denyStdout);
+                    if (denyResult.result) {
+                        for (const r of denyResult.result) {
+                            violations.push(r.value);
+                        }
                     }
                 }
+
+                return {
+                    allowed,
+                    violations,
+                    policy: policyName,
+                    timestamp: new Date().toISOString()
+                };
+            } finally {
+                // Cleanup temp file
+                fs.unlinkSync(inputPath);
             }
-
-            // Cleanup
-            fs.unlinkSync(inputPath);
-
-            return {
-                allowed,
-                violations,
-                policy: policyName,
-                timestamp: new Date().toISOString()
-            };
         } catch (error) {
             logger.error('Policy evaluation failed:', error);
             return {

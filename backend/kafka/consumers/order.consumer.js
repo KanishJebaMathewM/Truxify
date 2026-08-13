@@ -226,3 +226,12 @@ class OrderConsumer {
 }
 
 export default new OrderConsumer();
+
+// === Spec 31: ===
+// === Spec 31: idempotent dedup ===
+const TTL = 24 * 60 * 60;
+export async function markProcessed(redis, key) {
+  const r = await redis.set(`dedup:${key}`, '1', 'EX', TTL, 'NX');
+  return r === 'OK';
+}
+

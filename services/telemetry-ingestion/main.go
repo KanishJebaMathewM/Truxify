@@ -105,6 +105,16 @@ func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 		math.Cos(lat1*(math.Pi/180.0))*math.Cos(lat2*(math.Pi/180.0))*
 			math.Sin(dLon/2)*math.Sin(dLon/2)
 
+	// Floating-point rounding (and slightly out-of-range inputs) can push `a`
+	// outside [0,1], making math.Sqrt(1-a) NaN and every comparison false.
+	// Clamp so the computation is numerically safe for all valid inputs.
+	if a < 0 {
+		a = 0
+	}
+	if a > 1 {
+		a = 1
+	}
+
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusMeters * c
 }
@@ -523,6 +533,48 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 // Handle Geofence Check
+
+// geofenceRequest is the payload of the /geofence check endpoint. RadiusM is a
+// pointer so an absent radius_meters is distinguishable from an explicit 0.
+type geofenceRequest struct {
+	DriverID  string   `json:"driver_id"`
+	TargetLat float64  `json:"target_latitude"`
+	TargetLng float64  `json:"target_longitude"`
+	RadiusM   *float64 `json:"radius_meters"`
+}
+
+// maxGeofenceRadiusMeters bounds how large a geofence radius may be so an
+// absurd value cannot be fed into the comparison.
+const maxGeofenceRadiusMeters = 500_000.0
+
+// defaultGeofenceRadiusMeters is used when radius_meters is absent.
+const defaultGeofenceRadiusMeters = 500.0
+
+// validateGeofenceInput validates radius and target coordinates before they
+// are used. An absent radius defaults to 500 m; an explicit 0 is a valid
+// exact-position check; negatives/oversized radii and out-of-range targets are
+// rejected with an error.
+func validateGeofenceInput(req *geofenceRequest) (float64, error) {
+	radius := defaultGeofenceRadiusMeters
+	if req.RadiusM != nil {
+		if *req.RadiusM < 0 {
+			return 0, fmt.Errorf("radius_meters cannot be negative")
+		}
+		if *req.RadiusM > maxGeofenceRadiusMeters {
+			return 0, fmt.Errorf("radius_meters exceeds the maximum allowed geofence")
+		}
+		radius = *req.RadiusM
+	}
+
+	if math.IsNaN(req.TargetLat) || math.IsNaN(req.TargetLng) ||
+		req.TargetLat < -90 || req.TargetLat > 90 ||
+		req.TargetLng < -180 || req.TargetLng > 180 {
+		return 0, fmt.Errorf("target latitude or longitude out of plausible bounds")
+	}
+
+	return radius, nil
+}
+
 func handleGeofence(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -534,15 +586,16 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		DriverID  string  `json:"driver_id"`
-		TargetLat float64 `json:"target_latitude"`
-		TargetLng float64 `json:"target_longitude"`
-		RadiusM   float64 `json:"radius_meters"`
-	}
+	var req geofenceRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	radius, err := validateGeofenceInput(&req)
+	if err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -570,10 +623,6 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ping := entry.ping
-	radius := req.RadiusM
-	if radius == 0 {
-		radius = 500.0 // Default 500 meters geofence
-	}
 
 	dist := haversineDistance(ping.Latitude, ping.Longitude, req.TargetLat, req.TargetLng)
 	within := dist <= radius

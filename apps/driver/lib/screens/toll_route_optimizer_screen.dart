@@ -28,16 +28,23 @@ class _TollRouteOptimizerScreenState extends State<TollRouteOptimizerScreen> {
       setState(() {
         _routes = routes;
         _isLoading = false;
-        try {
-          _selectedRouteId = routes.firstWhere((r) => r.isRecommended).routeId;
-        } catch (_) {}
+        // Fall back to the first route when none is flagged as recommended,
+        // instead of letting firstWhere throw StateError on an empty/no-match list.
+        _selectedRouteId = routes.isNotEmpty
+            ? routes.firstWhere((r) => r.isRecommended, orElse: () => routes.first).routeId
+            : null;
       });
     }
   }
 
   void _startNavigation() {
-    if (_selectedRouteId == null) return;
-    final selected = _routes.firstWhere((r) => r.routeId == _selectedRouteId);
+    if (_selectedRouteId == null || _routes.isEmpty) return;
+    final selected = _routes.firstWhere(
+      (r) => r.routeId == _selectedRouteId,
+      // Never throw StateError if the previously selected route is gone;
+      // fall back to the first available route.
+      orElse: () => _routes.first,
+    );
     
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

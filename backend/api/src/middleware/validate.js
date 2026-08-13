@@ -94,9 +94,20 @@ export function validateQuery(schema) {
       });
       return next();
     } catch (err) {
-      return res.status(500).json({
-        error: "Internal query validation error",
-        details: err.message,
+      // A malformed query (e.g. a huge nested value that overflows the schema
+      // parser) is a client error, not a server fault: report it as a 400.
+      logger.warn(
+        {
+          event: 'VALIDATION_ERROR',
+          type: 'query',
+          requestId: req.requestId || req.id,
+          error: err.message,
+        },
+        'Query validation threw',
+      );
+      return res.status(400).json({
+        error: "Validation failed",
+        details: [{ field: "query", message: err.message }],
       });
     }
   };

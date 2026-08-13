@@ -127,7 +127,11 @@ class DiffusionTrainer:
             
             # Validate
             if val_data is not None:
-                val_loss = self.validate(val_loader)
+                val_loss = self.validate(
+                    val_loader,
+                    condition_loader,
+                    require_condition=(condition_loader is not None),
+                )
                 self.val_losses.append(val_loss)
             
             # Log
@@ -145,31 +149,63 @@ class DiffusionTrainer:
             'final_val_loss': self.val_losses[-1] if self.val_losses else None
         }
     
-    def validate(self, dataloader: DataLoader) -> float:
-        """Validate model"""
+    def validate(
+        self,
+        dataloader: DataLoader,
+        condition_loader: Optional[DataLoader] = None,
+        require_condition: bool = False
+    ) -> float:
+        """Validate model.
+
+        For conditional diffusion models the same ``condition`` loader used by
+        ``train_epoch`` must be threaded through here, otherwise validation
+        measures an unrelated unconditional objective (train/validation skew).
+        """
+        if require_condition and condition_loader is None:
+            raise ValueError(
+                "condition_loader is required for validation of a conditional "
+                "model but was not provided."
+            )
+
         self.model.eval()
         val_loss = 0.0
         num_batches = 0
-        
+
+        condition_iter = iter(condition_loader) if condition_loader is not None else None
+
         with torch.no_grad():
             for x in tqdm(dataloader, desc="Validating"):
                 x = x[0].to(self.device)
-                
+
+                # Rebuild the same (x, condition) input used during training.
+                condition = None
+                if condition_iter is not None:
+                    try:
+                        condition = next(condition_iter)[0]
+                    except StopIteration:
+                        condition_iter = iter(condition_loader)
+                        condition = next(condition_iter)[0]
+                    condition = condition.to(self.device)
+
                 # Sample timesteps
                 t = torch.randint(0, self.model.num_timesteps, (x.shape[0],), device=self.device)
-                
+
                 # Add noise
                 noise = torch.randn_like(x)
                 x_noisy = self.model.add_noise(x, t, noise)
-                
+
+                # Combine with condition (1:1 with training layout)
+                if condition is not None:
+                    x_noisy = torch.cat([x_noisy, condition], dim=-1)
+
                 # Predict noise
                 predicted_noise = self.model.denoise(x_noisy, t)
-                
+
                 # Loss
                 loss = nn.MSELoss()(predicted_noise, noise)
                 val_loss += loss.item()
                 num_batches += 1
-        
+
         return val_loss / num_batches
     
     def generate_routes(self, num_routes: int = 10, route_length: int = 50) -> torch.Tensor:

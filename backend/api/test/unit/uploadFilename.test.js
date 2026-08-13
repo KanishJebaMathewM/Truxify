@@ -101,3 +101,17 @@ describe('sanitizeUploadFilename', () => {
     }
   });
 });
+
+
+// === Spec 18 test ===
+import { describe, it, expect } from 'vitest';
+import { checkContentLength } from '../../src/lib/uploadFilename.js';
+describe('checkContentLength', () => {
+  it('passes small', () => { expect(checkContentLength({ headers: { 'content-length': '100' } }, 1024).ok).toBe(true); });
+  it('rejects large', () => {
+    const r = checkContentLength({ headers: { 'content-length': '5000' } }, 1024);
+    expect(r.ok).toBe(false);
+    expect(r.error.status).toBe(413);
+  });
+});
+

@@ -34,3 +34,17 @@ describe('profileCache stats', () => {
     });
   });
 });
+
+
+// === Spec 8 test ===
+import { describe, it, expect } from 'vitest';
+import { isValidProfile } from '../../src/lib/profileCache.js';
+describe('isValidProfile', () => {
+  it('accepts valid', () => {
+    expect(isValidProfile({ id: 'a', createdAt: '2026-01-01T00:00:00Z' })).toBe(true);
+  });
+  it('rejects null', () => { expect(isValidProfile(null)).toBe(false); });
+  it('rejects missing id', () => { expect(isValidProfile({ createdAt: '2026-01-01T00:00:00Z' })).toBe(false); });
+  it('rejects bad date', () => { expect(isValidProfile({ id: 'a', createdAt: 'bad' })).toBe(false); });
+});
+

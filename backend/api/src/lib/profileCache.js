@@ -478,3 +478,16 @@ export async function invalidateCachedSupabaseProfileAll(userId) {
     logCacheError("invalidateCachedSupabaseProfileAll", err);
   }
 }
+
+
+// === Spec 8: ===
+// === Spec 8: profile cache schema validation ===
+export function isValidProfile(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return false;
+  if (typeof value.id !== 'string' || value.id.length === 0) return false;
+  if (typeof value.createdAt !== 'string') return false;
+  if (Number.isNaN(Date.parse(value.createdAt))) return false;
+  return true;
+}
+

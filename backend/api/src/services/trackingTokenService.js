@@ -197,6 +197,11 @@ export class TrackingTokenService {
   }
 
   async getDriverLocation(orderDisplayId) {
+    if (!this._supabaseAdmin) {
+      this._logger.error('getDriverLocation requires service-role client');
+      throw new Error('Service-role client required for driver location tracking');
+    }
+
     const { data: order, error: orderError } = await this._supabase
       .from('orders')
       .select('driver_id')
@@ -209,8 +214,7 @@ export class TrackingTokenService {
 
     // `driver_locations` has no anon RLS policy, so the service-role client is
     // required to read the rows written by the tracker (issue #8932).
-    const db = this._supabaseAdmin ?? this._supabase;
-    const { data: location, error: locationError } = await db
+    const { data: location, error: locationError } = await this._supabaseAdmin
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)

@@ -26,21 +26,3 @@ CREATE POLICY "Drivers read own maintenance-photos"
     bucket_id = 'maintenance-photos'
     AND (storage.foldername(name))[1] = get_profile_id()::text
   );
-
--- Drivers can upload maintenance photos into their own folder
-DROP POLICY IF EXISTS "Drivers insert own maintenance-photos" ON storage.objects;
-CREATE POLICY "Drivers insert own maintenance-photos"
-  ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'maintenance-photos'
-    AND (storage.foldername(name))[1] = get_profile_id()::text
-  );
-
--- Drivers can delete maintenance photos from their own folder
-DROP POLICY IF EXISTS "Drivers delete own maintenance-photos" ON storage.objects;
-CREATE POLICY "Drivers delete own maintenance-photos"
-  ON storage.objects FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'maintenance-photos'
-    AND (storage.foldername(name))[1] = get_profile_id()::text
-  );

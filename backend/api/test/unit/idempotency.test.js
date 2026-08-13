@@ -60,7 +60,7 @@ describe('requireIdempotency middleware', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
-      error: 'X-Idempotency-Key must be a non-empty string.',
+      error: 'X-Idempotency-Key header is required for this action.',
     });
     expect(next).not.toHaveBeenCalled();
   });
@@ -286,9 +286,30 @@ describe('requireIdempotency middleware', () => {
     expect(lockCall[4]).toBeGreaterThanOrEqual(120000);
   });
 
-  // NOTE: The duplicate-lock polling path (returns 409 when a slow handler holds
-  // the lock) is intentionally omitted here. Testing it reliably requires either
-  // vi.useFakeTimers() (which is incompatible with the CI sandbox's 15s timeout)
-  // or a mock that advances time independently. The cache-hit path above provides
-  // equivalent coverage for the de-duplication contract.
+  it('rejects a duplicate while the original slow handler still holds the lock', async () => {
+    vi.useFakeTimers();
+    try {
+      const middleware = requireIdempotency();
+      // No cached response yet, and the original request still holds the lock:
+      // the lock key is present and the re-acquire attempt fails.
+      mockRedisRef.mock.get.mockImplementation((key) =>
+        key.endsWith(':lock') ? Promise.resolve('1') : Promise.resolve(null)
+      );
+      mockRedisRef.mock.set.mockResolvedValue(null);
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'dup-key' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      const duplicate = middleware(req, res, next);
+      await vi.advanceTimersByTimeAsync(200 * 50 + 10);
+      await duplicate;
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Duplicate request being processed' });
+      expect(next).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

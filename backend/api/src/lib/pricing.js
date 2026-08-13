@@ -200,3 +200,13 @@ export function convertKmToMiles(km) {
 }
 
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM };
+
+
+// === Spec 10: ===
+// === Spec 10: non-negative validation ===
+export function guardNonNegative(value, label = 'value') {
+  if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite, got ${value}`);
+  if (value < 0) return 0;
+  return value;
+}
+

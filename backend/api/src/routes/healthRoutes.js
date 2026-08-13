@@ -296,11 +296,6 @@ const aggregator = createDefaultAggregator();
 router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
-    // Strip per-service metadata (broker hostnames, ports, pool counts, ML
-    // engine URL, chain ids) so the public surface exposes only status.
-    for (const service of Object.values(result.services || {})) {
-      delete service.metadata;
-    }
     // 200 = system operational (healthy or degraded with non-critical failures)
     // 503 = system not operational (critical services down)
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;

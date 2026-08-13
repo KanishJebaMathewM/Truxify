@@ -79,25 +79,16 @@ export class OutboxService {
   /**
    * Mark an event as failed and increment retry_count.
    */
- async markFailed(eventId, errorMessage) {
-  // First fetch the current retry_count — no RPC function exists for increment.
-  const { data: current } = await supabase
-    .from('outbox_events')
-    .select('retry_count')
-    .eq('id', eventId)
-    .single();
-
-  const newRetryCount = (current?.retry_count ?? 0) + 1;
-
-  const { error } = await supabase
-    .from('outbox_events')
-    .update({
-      status: 'failed',
-      last_error: String(errorMessage).slice(0, 1000),
-      retry_count: newRetryCount,
-      last_attempted_at: new Date().toISOString(),
-    })
-    .eq('id', eventId);
+  async markFailed(eventId, errorMessage) {
+    const { error } = await supabase
+      .from('outbox_events')
+      .update({
+        status: 'failed',
+        last_error: String(errorMessage).slice(0, 1000),
+        retry_count: supabase.rpc('increment', { row_id: eventId }),
+        last_attempted_at: new Date().toISOString(),
+      })
+      .eq('id', eventId);
 
     if (error) {
       logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });

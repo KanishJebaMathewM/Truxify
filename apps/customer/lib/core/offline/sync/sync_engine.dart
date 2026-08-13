@@ -53,6 +53,11 @@ class SyncEngine {
     if (_isSyncing) return 0;
     _isSyncing = true;
     try {
+      // Recover events orphaned in the transient `syncing` state by a failed DB
+      // write mid-loop. This must run on every pass (not just at init) so an
+      // event stranding in `syncing` is retried while the app is alive rather
+      // than only on the next cold start.
+      await db.reconcileStuckSyncing();
       return await _syncPendingInternal();
     } finally {
       _isSyncing = false;

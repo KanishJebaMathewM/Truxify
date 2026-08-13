@@ -9,6 +9,7 @@ class FakeOfflineEventDb extends OfflineEventDb {
   final List<Map<String, dynamic>> rejected = [];
   final List<Map<String, dynamic>> failed = [];
   final List<String> synced = [];
+  int reconcileCallCount = 0;
 
   @override
   Future<List<TripEvent>> pendingEvents({int limit = 50}) async =>
@@ -31,6 +32,12 @@ class FakeOfflineEventDb extends OfflineEventDb {
 
   @override
   Future<void> markSyncing(String id) async {}
+
+  @override
+  Future<int> reconcileStuckSyncing() async {
+    reconcileCallCount++;
+    return 0;
+  }
 }
 
 void main() {
@@ -77,5 +84,23 @@ void main() {
     expect(db.failed, [
       {'id': 'evt-eligible', 'retryCount': 1},
     ]);
+  });
+
+  test('syncPending reconciles stuck `syncing` events on every pass (issue #11408)', () async {
+    final db = FakeOfflineEventDb();
+    db.pending.add(event('evt-1'));
+    final engine = SyncEngine(
+      db: db,
+      apiBaseUrl: 'http://localhost:8080',
+      maxRetries: 5,
+    );
+
+    await engine.syncPending();
+    expect(db.reconcileCallCount, 1);
+
+    // The recovery path must also run on subsequent passes while the app is
+    // alive, not only at init.
+    await engine.syncPending();
+    expect(db.reconcileCallCount, 2);
   });
 }

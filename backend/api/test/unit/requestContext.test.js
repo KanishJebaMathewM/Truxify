@@ -2,10 +2,27 @@
  * Unit tests for backend/api/src/lib/requestContext.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { requestContext, getRequestCache } from '../../src/lib/requestContext.js';
+import { requestContext, getRequestCache, safeParseContext } from '../../src/lib/requestContext.js';
 import { RequestCache } from '../../src/lib/requestCache.js';
 
 describe('requestContext', () => {
+  describe('safeParseContext', () => {
+    it('returns parsed object for valid JSON string', () => {
+      const res = safeParseContext('{"tenantId":"123"}');
+      expect(res).toEqual({ tenantId: '123' });
+    });
+
+    it('returns fallback object on malformed JSON input', () => {
+      const res = safeParseContext('{invalid-json', { default: true });
+      expect(res).toEqual({ default: true });
+    });
+
+    it('returns fallback for empty or non-string inputs', () => {
+      expect(safeParseContext(null)).toEqual({});
+      expect(safeParseContext(123)).toEqual({});
+    });
+  });
+
   describe('getRequestCache', () => {
     it('returns null when called outside a request context', () => {
       const cache = getRequestCache();

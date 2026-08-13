@@ -135,16 +135,34 @@ class OfflineFirstSyncService {
     if (db == null) return [];
 
     final rows = await db.query('sync_events', orderBy: 'queued_at ASC');
-    return rows.map((row) => OfflineSyncEvent(
-      eventId: row['event_id'] as String,
-      eventType: row['event_type'] as String,
-      payload: jsonDecode(row['payload'] as String) as Map<String, dynamic>,
-      queuedAt: DateTime.fromMillisecondsSinceEpoch(row['queued_at'] as int),
-      isSynced: (row['is_synced'] as int) == 1,
-      syncedAt: row['synced_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(row['synced_at'] as int)
-          : null,
-    )).toList();
+
+    // Skip rows that cannot be decoded instead of letting one of them throw
+    // out of the snapshot. This feeds [databaseStream]; a single corrupt row
+    // used to leave the dashboard permanently stale (issue #12426).
+    final events = <OfflineSyncEvent>[];
+    for (final row in rows) {
+      final event = OfflineSyncEvent.fromRow(row);
+      if (event == null) {
+        debugPrint('offline-sync: skipping undecodable sync_events row in snapshot');
+        continue;
+      }
+      events.add(event);
+    }
+    return events;
+  }
+
+  /// Marks a row that [OfflineSyncEvent.fromRow] rejected as dead-lettered.
+  /// Addressed by `rowid` because `event_id` is one of the columns that may be
+  /// the reason the row is undecodable.
+  Future<void> _deadLetterRow(Database db, Map<String, Object?> row) async {
+    final rowId = row['rowid'];
+    if (rowId is! int) return;
+    await db.update(
+      'sync_events',
+      {'state': stateDeadLetter},
+      where: 'rowid = ?',
+      whereArgs: [rowId],
+    );
   }
 
   Future<void> _emitDbSnapshot() async {
@@ -216,6 +234,8 @@ class OfflineFirstSyncService {
 
     final unsynced = await db.query(
       'sync_events',
+      // rowid is selected so an undecodable row can still be addressed.
+      columns: ['rowid', '*'],
       where: 'is_synced = 0 AND state = ?',
       whereArgs: [statePending],
       orderBy: 'queued_at ASC',
@@ -225,18 +245,31 @@ class OfflineFirstSyncService {
 
     final batchSize = 10;
     for (int i = 0; i < unsynced.length; i += batchSize) {
-      final batch = unsynced.skip(i).take(batchSize).toList();
-      final results = await Future.wait(
-        batch.map((row) => _syncSingleEvent(OfflineSyncEvent(
-          eventId: row['event_id'] as String,
-          eventType: row['event_type'] as String,
-          payload: jsonDecode(row['payload'] as String) as Map<String, dynamic>,
-          queuedAt: DateTime.fromMillisecondsSinceEpoch(row['queued_at'] as int),
-        ))),
-      );
+      final rows = unsynced.skip(i).take(batchSize).toList();
 
-      for (int j = 0; j < batch.length; j++) {
-        final eventId = batch[j]['event_id'] as String;
+      // Decode before dispatching. A row that cannot be decoded can never be
+      // POSTed, so it is terminal: dead-letter it via the same state the retry
+      // ceiling uses, rather than letting it throw out of the pass (which
+      // stranded every well-formed event behind it) or be re-read on every
+      // connectivity change forever.
+      final batch = <Map<String, Object?>>[];
+      final events = <OfflineSyncEvent>[];
+      for (final row in rows) {
+        final event = OfflineSyncEvent.fromRow(row);
+        if (event == null) {
+          debugPrint('offline-sync: dead-lettering undecodable sync_events row');
+          await _deadLetterRow(db, row);
+          continue;
+        }
+        batch.add(row);
+        events.add(event);
+      }
+      if (events.isEmpty) continue;
+
+      final results = await Future.wait(events.map(_syncSingleEvent));
+
+      for (int j = 0; j < events.length; j++) {
+        final eventId = events[j].eventId;
         if (results[j]) {
           // Successfully synced: remove the row so the local store does not
           // grow without bound (is_synced alone kept every historical row).

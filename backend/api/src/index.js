@@ -32,7 +32,6 @@ import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { validateEscrowSetup } from './services/escrow.js'
 import digilockerService from './services/digilockerService.js'
 
@@ -163,19 +162,13 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import {
-  startOutboxRelayWorker,
-  stopOutboxRelayWorker,
-} from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 

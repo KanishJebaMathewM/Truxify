@@ -153,7 +153,7 @@ export async function findHandoffCandidates({
           lng: Number(d.lng),
           last_seen_at: d.last_seen_at,
         }))
-        .filter((d) => d.from_driver !== fromDriverId && d.driver_id !== fromDriverId)
+        .filter((d) => d.driver_id !== fromDriverId)
         .map((d) => ({
           driver_id: d.driver_id,
           name: d.name,

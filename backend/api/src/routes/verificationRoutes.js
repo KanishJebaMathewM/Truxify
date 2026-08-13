@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
@@ -61,7 +61,8 @@ const kycUploadLimiter = rateLimit({
 router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { data: order, error: orderError } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: order, error: orderError } = await userClient
       .from('orders')
       .select('id, customer_id, driver_id')
       .eq('id', orderId)
@@ -202,7 +203,7 @@ const upload = multer({
   },
 });
 
-router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticate, async (req, res) => {
+router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;
     if (!req.file) {

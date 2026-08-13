@@ -216,6 +216,7 @@ class RegionService {
     async replicateToRegion(region, data) {
         try {
             await axios.post(`${region.endpoint}/api/replication/receive`, data);
+            await this.redis.set(`replication:${region.name}:last_sync`, Date.now());
         } catch (error) {
             logger.error(`Failed to replicate to ${region.name}:`, error);
         }

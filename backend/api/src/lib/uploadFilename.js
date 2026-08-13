@@ -82,7 +82,18 @@ export function sanitizeUploadFilename(originalName, fallback = 'upload') {
 // === Spec 18: max body size ===
 const DEFAULT_MAX = 25 * 1024 * 1024;
 export function checkContentLength(req, maxBytes = DEFAULT_MAX) {
-  const len = Number(req.headers?.['content-length'] || 0);
+  const raw = req.headers?.['content-length'];
+  if (raw === undefined || raw === null || raw === '') {
+    const err = new Error('Content-Length header is required');
+    err.status = 411; err.code = 'LENGTH_REQUIRED';
+    return { ok: false, error: err };
+  }
+  const len = Number(raw);
+  if (!Number.isFinite(len) || len < 0) {
+    const err = new Error('Content-Length must be a non-negative integer');
+    err.status = 400; err.code = 'BAD_REQUEST';
+    return { ok: false, error: err };
+  }
   if (len > maxBytes) {
     const err = new Error(`body ${len} > max ${maxBytes}`);
     err.status = 413; err.code = 'PAYLOAD_TOO_LARGE';

@@ -43,11 +43,11 @@ class SyncService {
       final pendingPoDs = await LocalDbService.instance.getPendingPoDs();
       for (final pod in pendingPoDs) {
         final orderId = pod['order_id'] as String?;
-        final stopId = pod['stop_id'] as String;
-        final tripId = pod['trip_display_id'] as String;
+        final stopId = pod['stop_id']?.toString();
+        final tripId = pod['trip_display_id']?.toString();
         final photoPath = pod['photo_path'] as String?;
         final signaturePath = pod['signature_path'] as String?;
-        final podId = pod['id'] as int;
+        final podId = int.tryParse(pod['id']?.toString() ?? '');
 
         try {
           if (orderId != null && (photoPath != null || signaturePath != null)) {

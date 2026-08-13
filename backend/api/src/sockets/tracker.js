@@ -1434,7 +1434,14 @@ async function loadRecoveryFile() {
     if (fs.existsSync(RECOVERY_FILE_PATH)) {
       const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
       if (content) {
-        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
+        const records = [];
+        for (const line of content.split('\n').filter(Boolean)) {
+          try {
+            records.push(JSON.parse(line));
+          } catch (err) {
+            logger.error('[TRUXIFY RECOVERY] Skipping malformed recovery line:', err.message);
+          }
+        }
         if (records.length > 0) {
           await telemetryWriteBuffer.prepend(records);
           logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);

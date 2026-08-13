@@ -35,6 +35,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   // ── GPS tracking for active trips ──────────────────────────────────
   final GpsTrackingService _gpsTracking = GpsTrackingService();
   WsConnectionStatus _wsStatus = WsConnectionStatus.disconnected;
+  StreamSubscription<WsConnectionStatus>? _wsStatusSubscription;
 
   /// Statuses that require live GPS emission.
   static const _activeStatuses = {
@@ -56,6 +57,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   @override
   void dispose() {
     _connectivitySubscription.cancel();
+    // Cancel the broadcast-stream listener so it never outlives the widget
+    // and retains the disposed State (issue #11711).
+    _wsStatusSubscription?.cancel();
+    _wsStatusSubscription = null;
     _mapController.dispose();
     // Disconnect WebSocket to prevent memory/battery leaks on screen exit.
     _gpsTracking.stop();
@@ -66,7 +71,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   void _maybeStartGpsTracking() {
     if (!_activeStatuses.contains(widget.trip.status)) return;
 
-    _gpsTracking.connectionStatus.listen((status) {
+    _wsStatusSubscription = _gpsTracking.connectionStatus.listen((status) {
       if (mounted) setState(() => _wsStatus = status);
     });
 

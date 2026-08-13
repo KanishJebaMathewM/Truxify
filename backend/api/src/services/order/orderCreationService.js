@@ -6,7 +6,7 @@ import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { DomainError } from './bidAcceptanceService.js';
 import logger from '../../middleware/logger.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
-import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } from '../../lib/orderDisplayId.js';
+import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES, generateIdempotencyKey } from '../../lib/orderDisplayId.js';
 
 // Targeting knobs for the new-trip driver broadcast. Env-configurable so a
 // burst of order creations can never trigger an unbounded notification fan-out.
@@ -193,10 +193,12 @@ export async function createOrder({ orderData, userId, user }) {
   let order = null;
   let orderErr = null;
   let orderDisplayId = null;
+  const idempotencyKey = generateIdempotencyKey();
 
   for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
     orderDisplayId = generateOrderDisplayId();
     const { data: rpcData, error: rpcErr } = await (supabaseAdmin ?? supabase).rpc('create_order_tx', {
+      p_idempotency_key: idempotencyKey,
       p_order_display_id: orderDisplayId,
       p_customer_id: userId,
       p_customer_name: user?.fullName || 'Customer',

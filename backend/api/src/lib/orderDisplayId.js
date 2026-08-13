@@ -47,3 +47,16 @@ export function isValidOrderDisplayId(displayId) {
   if (typeof displayId !== 'string') return false;
   return /^#FF\d{8}[A-Z0-9]{12}$/.test(displayId);
 }
+
+/**
+ * Generate a client-supplied-style idempotency key (RFC 4122 v4 UUID) used to
+ * make create_order_tx durable-idempotent. The key is stable for the lifetime
+ * of a createOrder request (and its internal display-id retry loop) so that a
+ * retried transaction returns the originally created order instead of
+ * duplicating it (issue #11411).
+ *
+ * @returns {string} an RFC 4122 v4 UUID
+ */
+export function generateIdempotencyKey() {
+  return crypto.randomUUID();
+}

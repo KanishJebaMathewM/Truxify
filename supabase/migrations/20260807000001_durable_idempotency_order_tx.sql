@@ -39,6 +39,7 @@ REVOKE ALL ON order_idempotency_records FROM anon, authenticated;
 
 -- Extend or replace create_order_tx RPC for single atomic database transaction
 CREATE OR REPLACE FUNCTION create_order_tx(
+  p_idempotency_key TEXT,
   p_order_display_id TEXT,
   p_customer_id UUID,
   p_customer_name TEXT,
@@ -82,6 +83,7 @@ DECLARE
   v_status TEXT;
   v_created_at TIMESTAMPTZ;
   v_customer_id UUID;
+  v_existing_order_id UUID;
 BEGIN
   -- Resolve the customer identity: only the service-role backend may supply a
   -- p_customer_id. Any other caller is bound to their own JWT-derived profile
@@ -98,6 +100,34 @@ BEGIN
       RAISE EXCEPTION 'Unauthorized: cannot create orders as another customer';
     END IF;
   END IF;
+
+  -- Durable idempotency: consult the order_idempotency_records table created
+  -- by this migration. If a prior attempt already completed for this key,
+  -- return that order instead of creating a duplicate order + timeline +
+  -- load offer (which would corrupt marketplace state / double-charge escrow).
+  SELECT order_id INTO v_existing_order_id
+  FROM order_idempotency_records
+  WHERE idempotency_key = p_idempotency_key
+    AND order_id IS NOT NULL;
+
+  IF v_existing_order_id IS NOT NULL THEN
+    SELECT id, status, created_at
+      INTO v_order_id, v_status, v_created_at
+    FROM orders
+    WHERE id = v_existing_order_id;
+    RETURN json_build_object(
+      'id', v_order_id,
+      'order_display_id', p_order_display_id,
+      'status', v_status,
+      'created_at', v_created_at
+    );
+  END IF;
+
+  -- Reserve this key so a concurrent or retried call short-circuits above
+  -- instead of inserting a fresh order.
+  INSERT INTO order_idempotency_records (idempotency_key, status, order_id)
+  VALUES (p_idempotency_key, 'in_progress', NULL)
+  ON CONFLICT (idempotency_key) DO NOTHING;
 
   -- 1. Insert into orders
   INSERT INTO orders (
@@ -148,8 +178,14 @@ BEGIN
     p_drop_address, p_drop_lat, p_drop_lng,
     p_goods_type, p_weight_text,
     p_total_amount, p_fuel_cost, p_toll_estimate, p_net_profit, p_extra_distance_km,
-    'available'
+      'available'
   );
+
+  -- Record durable idempotency completion so any retry with the same key
+  -- short-circuits and returns this order instead of duplicating it.
+  UPDATE order_idempotency_records
+  SET status = 'completed', order_id = v_order_id, updated_at = NOW()
+  WHERE idempotency_key = p_idempotency_key;
 
   RETURN json_build_object(
     'id', v_order_id,

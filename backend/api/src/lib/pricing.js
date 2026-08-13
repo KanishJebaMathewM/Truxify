@@ -19,7 +19,8 @@ import logger from '../middleware/logger.js';
 
 export function sanitizePrice(value) {
   const num = Number(value);
-  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+  const clamped = Math.max(MIN_FREIGHT_PAISa, Math.min(MAX_FREIGHT_PAISa, num));
+  return Number.isFinite(clamped) && clamped >= 0 ? Math.round(clamped) : MIN_FREIGHT_PAISa;
 }
 
 const EARTH_RADIUS_KM = 6371.0088;

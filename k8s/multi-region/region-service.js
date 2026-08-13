@@ -8,6 +8,7 @@ class RegionService {
         this.regions = [];
         this.activeRegions = [];
         this.primaryRegion = null;
+        this._healthInterval = null;
         this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
         
         // Load region config
@@ -57,7 +58,8 @@ class RegionService {
     // ============ Health Checks ============
 
     async startHealthChecks() {
-        clearInterval(window.__interval); window.__interval = setInterval(async () => {
+        if (this._healthInterval) clearInterval(this._healthInterval);
+        this._healthInterval = setInterval(async () => {
             await this.checkAllRegions();
         }, 10000); // Every 10 seconds
     }

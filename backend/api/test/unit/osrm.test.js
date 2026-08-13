@@ -382,7 +382,6 @@ describe('osrm - getRouteEstimate edge cases', () => {
 });
 
 // === Spec 22 test ===
-import { describe, it, expect, vi } from 'vitest';
 import { routeWithFailover } from '../../src/services/osrm.js';
 describe('routeWithFailover', () => {
   it('uses primary', async () => {

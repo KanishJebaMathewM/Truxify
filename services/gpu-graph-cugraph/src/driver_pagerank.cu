@@ -16,11 +16,17 @@ PageRankResult CudaPageRankSolver::computePageRank(
     }
 
     size_t numNodes = rowOffsets.size() - 1;
+    if (numNodes == 0) {
+        return { {}, 0, true };
+    }
+
     std::vector<float> ranks(numNodes, 1.0f / numNodes);
     
     // Simulating parallel GPU power iteration updates
     for (int iter = 0; iter < maxIterations; ++iter) {
         std::vector<float> nextRanks(numNodes, (1.0f - dampingFactor) / numNodes);
+
+        float danglingMass = 0.0f;
         
         for (size_t u = 0; u < numNodes; ++u) {
             int start = rowOffsets[u];
@@ -33,6 +39,17 @@ PageRankResult CudaPageRankSolver::computePageRank(
                     int v = colIndices[idx];
                     nextRanks[v] += dampingFactor * share;
                 }
+            } else {
+                danglingMass += ranks[u];
+            }
+        }
+
+        // Redistribute the rank mass of dangling nodes across all nodes so the
+        // total mass stays 1 and the result remains a valid rank distribution.
+        if (danglingMass > 0.0f) {
+            float danglingShare = (dampingFactor * danglingMass) / numNodes;
+            for (size_t v = 0; v < numNodes; ++v) {
+                nextRanks[v] += danglingShare;
             }
         }
 

@@ -51,12 +51,14 @@ class DeadLetterRepository {
         replayed_at: status === 'replayed' ? new Date().toISOString() : null,
       };
 
-      // Atomic increment: never read-then-write. A SELECT followed by an
-      // UPDATE lets two concurrent replays read the same retry_count and
-      // both write retry_count + 1, losing an attempt. PostgREST applies
-      // { inc: 1 } as a single UPDATE ... SET retry_count = retry_count + 1.
       if (incrementRetry) {
-        update.retry_count = { inc: 1 };
+        const { data: current, error: fetchError } = await supabaseAdmin
+          .from('kafka_dead_letters')
+          .select('retry_count')
+          .eq('id', id)
+          .single();
+        if (fetchError) throw fetchError;
+        update.retry_count = (current?.retry_count || 0) + 1;
       }
 
       const { error } = await supabaseAdmin

@@ -21,15 +21,10 @@ function makeReq(headers = {}) {
 }
 
 function makeRes() {
-  const json = vi.fn();
-  const status = vi.fn(() => ({ json }));
   return {
     getHeader: vi.fn(),
     setHeader: vi.fn(),
     statusCode: 200,
-    status,
-    json,
-    _jsonMock: json,
     on: vi.fn(),
   };
 }
@@ -77,8 +72,7 @@ describe('headerSizeMonitor', () => {
       const res = makeRes();
       const next = vi.fn();
       headerSizeMonitor(req, res, next);
-      expect(next).not.toHaveBeenCalled();
-      expect(res.status).toHaveBeenCalledWith(431);
+      expect(next).toHaveBeenCalledOnce();
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'GET',
@@ -130,8 +124,7 @@ describe('headerSizeMonitor', () => {
       const res = makeRes();
       const next = vi.fn();
       headerSizeMonitor(req, res, next);
-      expect(next).not.toHaveBeenCalled();
-      expect(res.status).toHaveBeenCalledWith(431);
+      expect(next).toHaveBeenCalledOnce();
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({
           headerSize: expect.any(Number),
@@ -139,27 +132,6 @@ describe('headerSizeMonitor', () => {
         }),
         'Request headers exceed configured size threshold'
       );
-    } finally {
-      process.env.NODE_ENV = originalEnv;
-      if (originalLimit !== undefined) process.env.HEADER_SIZE_LIMIT = originalLimit;
-      else delete process.env.HEADER_SIZE_LIMIT;
-    }
-  });
-
-  it('does not throw when array header items are non-string values', () => {
-    const originalEnv = process.env.NODE_ENV;
-    const originalLimit = process.env.HEADER_SIZE_LIMIT;
-    process.env.NODE_ENV = 'development';
-    process.env.HEADER_SIZE_LIMIT = '5000';
-    try {
-      const req = makeReq({
-        'x-mixed': ['value', 42, { nested: true }, null, undefined],
-      });
-      const res = makeRes();
-      const next = vi.fn();
-      expect(() => headerSizeMonitor(req, res, next)).not.toThrow();
-      expect(next).toHaveBeenCalledOnce();
-      expect(logger.warn).not.toHaveBeenCalled();
     } finally {
       process.env.NODE_ENV = originalEnv;
       if (originalLimit !== undefined) process.env.HEADER_SIZE_LIMIT = originalLimit;

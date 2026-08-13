@@ -192,7 +192,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     );
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
-      debugPrint('Tracking WebSocket message received');
+      debugPrint('Tracking WebSocket message received: $message');
       if (message is! String) return;
       try {
         if (message == 'pong') return;
@@ -218,7 +218,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           }
         } else if (payload['event'] == 'milestone_update') {
           // Refresh timeline whenever the driver hits a new milestone.
-          debugPrint('[LiveTracking] Milestone update received');
+          debugPrint('[LiveTracking] Milestone update received: ${payload['data']}');
           _loadTimeline();
         } else if (payload['event'] == null && payload['error'] != null) {
           debugPrint('[LiveTracking] WS server error: ${payload['error']}');
@@ -285,6 +285,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Future<void> _loadOrder() async {
     try {
       final order = await _orderService.fetchOrderById(widget.orderId);
+
+      debugPrint('ORDER DATA = $order');
 
       if (!mounted) return;
 
@@ -373,7 +375,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     _supabaseRealtimeChannel!.onBroadcast(
       event: 'location',
       callback: (payload) {
-        debugPrint('Received Supabase Realtime location update');
+        debugPrint('Received Supabase Realtime location update: $payload');
         final lat = (payload['lat'] as num?)?.toDouble();
         final lng = (payload['lng'] as num?)?.toDouble();
         if (lat != null && lng != null && mounted) {
@@ -840,7 +842,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             value: widget.orderId,
           ),
           callback: (payload) {
-            debugPrint('Realtime order update received');
+            debugPrint('Realtime order update: ${payload.newRecord}');
             _loadOrder();
             _loadTimeline();
           },

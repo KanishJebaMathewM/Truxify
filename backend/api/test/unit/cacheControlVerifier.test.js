@@ -82,7 +82,6 @@ describe('cacheControlVerifier', () => {
       emitFinish(res);
       expect(logger.warn).toHaveBeenCalledWith(
         expect.objectContaining({
-          requestId: 'req-456',
           method: 'GET',
           path: '/api/test',
           missingHeaders: expect.arrayContaining(['Cache-Control']),

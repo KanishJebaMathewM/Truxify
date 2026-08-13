@@ -76,7 +76,6 @@ afterEach(() => {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
-  supabaseAdmin: null,
   supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,

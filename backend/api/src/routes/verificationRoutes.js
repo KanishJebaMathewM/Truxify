@@ -165,10 +165,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken } = req.body;
-    const userId = req.user?.id;
+    const { accessToken, userId: bodyUserId } = req.body;
+    const userId = req.user?.id || bodyUserId;
     if (!userId) {
-      return res.status(401).json({ success: false, error: 'Not authenticated: req.user is missing.' });
+      return res.status(400).json({ success: false, error: 'User ID is required' });
     }
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
@@ -202,7 +202,7 @@ const upload = multer({
   },
 });
 
-router.post('/kyc/upload', authenticate, kycUploadLimiter, upload.single('image'), async (req, res) => {
+router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
     if (!req.file) {

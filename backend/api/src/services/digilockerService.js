@@ -21,12 +21,16 @@ class DigilockerService {
       try {
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        this.contractABI = [
+        this.documentRegistryABI = [
           'function registerDocument(address driver, string memory documentType, bytes32 docHash, bool isVerified) external',
           'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)',
-          'function hashDocument(bytes32 documentHash, address user) public'
         ];
-        this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+        this.documentRegistry = new ethers.Contract(contractAddress, this.documentRegistryABI, this.wallet);
+        const kycVerifierAddress = process.env.KYC_VERIFIER_CONTRACT || contractAddress;
+        this.kycVerifierABI = [
+          'function hashDocument(bytes32 documentHash, address user) public',
+        ];
+        this.kycVerifier = new ethers.Contract(kycVerifierAddress, this.kycVerifierABI, this.wallet);
       } catch (err) {
         logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
       }

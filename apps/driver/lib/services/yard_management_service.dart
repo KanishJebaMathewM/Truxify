@@ -1,52 +1,73 @@
 import 'dart:async';
-import 'dart:math';
-import '../models/yard_assignment_model.dart';
+import '../models/yard_management_model.dart';
 
 class YardManagementService {
-  final _controller = StreamController<YardAssignment>.broadcast();
-  Timer? _timer;
+  final _sessionController = StreamController<YardManagementSession>.broadcast();
+  
+  Stream<YardManagementSession> get yardStream => _sessionController.stream;
 
-  Stream<YardAssignment> streamYardNavigation(String facilityName) {
-    _startSimulation(facilityName);
-    return _controller.stream;
+  List<YardTrailer> _trailers = [];
+  List<YardInstruction> _instructions = [];
+
+  void initializeYard() {
+    _trailers = [
+      YardTrailer(trailerId: 'TR-1045', status: 'Loaded', location: 'Spot A1'),
+      YardTrailer(trailerId: 'TR-2201', status: 'Empty', location: 'Spot B4'),
+      YardTrailer(trailerId: 'TR-0992', status: 'Maintenance', location: 'Spot C2'),
+      YardTrailer(trailerId: 'TR-3410', status: 'Loaded', location: 'Dock 1'),
+    ];
+
+    _emitState('Listening to Dispatch WebSockets', false);
   }
 
-  void _startSimulation(String facilityName) {
-    _timer?.cancel();
-    
-    double currentDistance = 500.0; // Start 500 meters away at the gate
+  void simulateIncomingDispatchInstruction() async {
+    _emitState('Syncing Dispatch Instructions...', true);
 
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (currentDistance <= 0) {
-        _controller.add(_createAssignment(facilityName, 0, 'At Destination'));
-        timer.cancel();
-        return;
-      }
+    await Future.delayed(const Duration(seconds: 1));
 
-      currentDistance -= (Random().nextDouble() * 10 + 5); // Move closer 5-15 meters per sec
-      if (currentDistance < 0) currentDistance = 0;
-
-      String status = currentDistance > 450 ? 'Pending Entry' : 'Navigating Yard';
-      
-      _controller.add(_createAssignment(facilityName, currentDistance, status));
-    });
-  }
-
-  YardAssignment _createAssignment(String facilityName, double distance, String status) {
-    return YardAssignment(
-      facilityName: facilityName,
-      assignmentType: 'Live Load',
-      targetId: 'Dock Door 42-B',
-      latitude: 41.8781,
-      longitude: -87.6298,
-      status: status,
-      distanceToTargetMeters: distance,
-      instructions: 'Proceed past guard shack, take 2nd left, dock is on the right side.',
+    _instructions.add(
+      YardInstruction(
+        instructionId: 'CMD-9941',
+        trailerId: 'TR-1045',
+        targetLocation: 'Dock 3',
+        issuedAt: DateTime.now(),
+      )
     );
+
+    _emitState('New Instruction Received', false);
+  }
+
+  void completeInstruction(String instructionId) async {
+    _emitState('Confirming Move via WebSockets...', true);
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    // Find the instruction
+    int cmdIndex = _instructions.indexWhere((i) => i.instructionId == instructionId);
+    if (cmdIndex != -1) {
+      _instructions[cmdIndex].isCompleted = true;
+      
+      // Update trailer location
+      String targetTrailer = _instructions[cmdIndex].trailerId;
+      int trIndex = _trailers.indexWhere((t) => t.trailerId == targetTrailer);
+      if (trIndex != -1) {
+        _trailers[trIndex].location = _instructions[cmdIndex].targetLocation;
+      }
+    }
+
+    _emitState('Yard Grid Synchronized', false);
+  }
+
+  void _emitState(String status, bool isSyncing) {
+    _sessionController.add(YardManagementSession(
+      status: status,
+      trailers: List.from(_trailers),
+      activeInstructions: _instructions.where((i) => !i.isCompleted).toList(),
+      isSyncing: isSyncing,
+    ));
   }
 
   void dispose() {
-    _timer?.cancel();
-    _controller.close();
+    _sessionController.close();
   }
 }

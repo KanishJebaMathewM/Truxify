@@ -197,6 +197,9 @@ abstract class AppLocalizations {
   /// Success message after biometric authentication
   String get biometricAuthSuccessful;
 
+  /// Message shown when biometric auth succeeds but no backend session exists
+  String get biometricAuthRequiresSignIn;
+
   /// Validation message when phone number field is empty
   String get pleaseEnterPhone;
 

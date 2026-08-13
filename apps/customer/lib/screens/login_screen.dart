@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
+import '../services/supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/breakpoints.dart'; // XL: added
 import '../widgets/app_logo.dart';
@@ -106,13 +107,43 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (authenticated) {
+        // Biometric auth only proves the device is unlocked; we must still
+        // restore a real backend session before entering the app, otherwise the
+        // user is left on the login screen believing they are signed in.
+        final session = SupabaseService.client.auth.currentSession;
+        final hasValidSession = session != null &&
+            (session.expiresAt == null ||
+                session.expiresAt! * 1000 >
+                    DateTime.now().millisecondsSinceEpoch);
+
+        if (!hasValidSession) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context)!
+                  .biometricAuthRequiresSignIn),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          return;
+        }
+
+        try {
+          await SupabaseService.client.auth.refreshSession();
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  AppLocalizations.of(context)!.error(e.toString())),
+            ),
+          );
+          return;
+        }
+
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                AppLocalizations.of(context)!.biometricAuthSuccessful),
-            duration: const Duration(seconds: 4),
-          ),
+        Navigator.of(context).pushReplacement(
+          AppPageRoute(builder: (_) => const TruxifyShellScreen()),
         );
       }
     } catch (e) {

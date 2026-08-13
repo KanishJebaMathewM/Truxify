@@ -107,6 +107,9 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get biometricAuthSuccessful => 'बायोमेट्रिक प्रमाणीकरण यशस्वी';
 
+  String get biometricAuthRequiresSignIn =>
+      'बायोमेट्रिक अनलॉक यशस्वी झाला, पण तुमचे सत्र पुनर्संचयित करण्यासाठी तुम्हाला साइन इन करणे आवश्यक आहे.';
+
   @override
   String get pleaseEnterPhone => 'कृपया तुमचा फोन नंबर प्रविष्ट करा';
 

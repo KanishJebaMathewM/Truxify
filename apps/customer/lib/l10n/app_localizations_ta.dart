@@ -107,6 +107,9 @@ class AppLocalizationsTa extends AppLocalizations {
   @override
   String get biometricAuthSuccessful => 'பயோமெட்ரிக் அங்கீகாரம் வெற்றிகரமாக முடிந்தது';
 
+  String get biometricAuthRequiresSignIn =>
+      'பயோமெட்ரிக் திறப்பு வெற்றியடைந்தது, ஆனால் உங்கள் அமர்வை மீட்டமைக்க நீங்கள் உள்நுழைய வேண்டும்.';
+
   @override
   String get pleaseEnterPhone => 'உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்';
 

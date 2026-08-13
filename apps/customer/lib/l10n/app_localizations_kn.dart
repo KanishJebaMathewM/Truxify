@@ -107,6 +107,9 @@ class AppLocalizationsKn extends AppLocalizations {
   @override
   String get biometricAuthSuccessful => 'ಬಯೋಮೆಟ್ರಿಕ್ ದೃಢೀಕರಣ ಯಶಸ್ವಿಯಾಗಿದೆ';
 
+  String get biometricAuthRequiresSignIn =>
+      'ಬಯೋಮೆಟ್ರಿಕ್ ಅನ್ಲಾಕ್ ಯಶಸ್ವಿಯಾಗಿದೆ, ಆದರೆ ನಿಮ್ಮ ಸೆಷನ್ ಪುನಃಸ್ಥಾಪಿಸಲು ನೀವು ಸೈನ್ ಇನ್ ಮಾಡಬೇಕು.';
+
   @override
   String get pleaseEnterPhone => 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ';
 

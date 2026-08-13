@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../services/supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
@@ -25,8 +25,14 @@ class _SplashScreenState extends State<SplashScreen> {
     _navigationTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
 
-      // If the user is already authenticated, skip login.
-      final isAuthenticated = FirebaseAuth.instance.currentUser != null;
+      // The data/offline layer authenticates with the Supabase session, so the
+      // gate must check for a valid Supabase session rather than just a (possibly
+      // stale) Firebase user.
+      final session = SupabaseService.client.auth.currentSession;
+      final isAuthenticated = session != null &&
+          (session.expiresAt == null ||
+              session.expiresAt! * 1000 >
+                  DateTime.now().millisecondsSinceEpoch);
 
       Navigator.of(context).pushReplacement(
         AppPageRoute(

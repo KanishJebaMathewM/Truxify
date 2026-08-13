@@ -32,6 +32,9 @@ export function isPayoutProviderConfigured() {
 }
 
 export async function dispatchPayout({ driverId, withdrawal }) {
+  if (!Number.isFinite(withdrawal.amount) || withdrawal.amount <= 0) {
+    throw new Error(`Invalid withdrawal amount: ${withdrawal.amount}. Amount must be a positive number.`);
+  }
   const provider = process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   const webhookUrl = process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL;
 

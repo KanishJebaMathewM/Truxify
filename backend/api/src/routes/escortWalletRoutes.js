@@ -1,8 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { loadCredential, resolveCredentialSubject, handshake } from '../controllers/escortWalletController.js';
-import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 
 const router = express.Router();

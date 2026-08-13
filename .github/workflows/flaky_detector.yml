@@ -1,0 +1,54 @@
+name: Automated Flaky Test Detector & Bisect Runner
+
+on:
+  pull_request:
+    branches: [ main, peer ]
+
+jobs:
+  detect-flaky-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-size: 18
+
+      - name: Install dependencies
+        run: |
+          cd backend/api
+          npm install
+
+      - name: Run Multi-Iteration Parallel Test Runner
+        id: run-tests
+        run: |
+          cd backend/api
+          # Run test suites 50 times repeatedly to detect non-deterministic flaky outcomes
+          pass_count=0
+          fail_count=0
+          for i in {1..50}; do
+            if npm test; then
+              pass_count=$((pass_count+1))
+            else
+              fail_count=$((fail_count+1))
+            fi
+          done
+          echo "Passes: $pass_count, Failures: $fail_count"
+          if [ $fail_count -gt 0 ] && [ $pass_count -gt 0 ]; then
+            echo "::set-output name=flaky::true"
+          else
+            echo "::set-output name=flaky::false"
+          fi
+
+      - name: Execute Git Bisect Runner
+        if: steps.run-tests.outputs.flaky == 'true'
+        run: |
+          git bisect start
+          git bisect bad HEAD
+          git bisect good HEAD~10
+          git bisect run npm test
+          git bisect reset

@@ -54,3 +54,12 @@ export default function securityHeaders(req, res, next) {
   // Do NOT override an existing CSP
   next();
 }
+
+// === Spec 11: ===
+// === Spec 11: prevent HSTS header duplication ===
+export function setHstsHeader(res) {
+  if (!res.getHeader || res.getHeader('Strict-Transport-Security')) return false;
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  return true;
+}
+

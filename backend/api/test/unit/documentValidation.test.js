@@ -70,3 +70,18 @@ describe('validateDocumentBuffer', () => {
     expect(validateDocumentBuffer(PDF_BYTES, undefined)).toBe('application/pdf');
   });
 });
+
+
+// === Spec 7 test ===
+import { describe, it, expect } from 'vitest';
+import { matchesMimeSignature } from '../../src/lib/documentValidation.js';
+describe('matchesMimeSignature', () => {
+  it('matches PNG', () => {
+    expect(matchesMimeSignature(Buffer.from([0x89, 0x50, 0x4E, 0x47]), 'image/png')).toBe(true);
+  });
+  it('rejects fake PNG', () => {
+    expect(matchesMimeSignature(Buffer.from([0xFF, 0xD8, 0xFF]), 'image/png')).toBe(false);
+  });
+  it('rejects short buffer', () => { expect(matchesMimeSignature(Buffer.from([0x89]), 'image/png')).toBe(false); });
+});
+

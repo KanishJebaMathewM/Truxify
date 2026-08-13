@@ -20,7 +20,11 @@ spec:
     spec:
       containers:
       - name: ml-engine
+<<<<<<< HEAD
+        image: truxify/ml:latest
+=======
         image: ghcr.io/kanishjebamathewm/truxify-ml:latest
+>>>>>>> upstream/main
         imagePullPolicy: Always
         ports:
         - containerPort: 8000

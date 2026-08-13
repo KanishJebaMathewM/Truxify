@@ -104,3 +104,26 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
     }
   };
 }
+
+
+// === Spec 2: ===
+// === Spec 2: atomic Lua sliding window rate limiter ===
+const SLIDING_WINDOW_LUA = `
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - windowMs)
+local count = redis.call('ZCARD', key)
+if count >= limit then return {0, count} end
+redis.call('ZADD', key, now, member)
+redis.call('PEXPIRE', key, windowMs)
+return {1, count + 1}
+`;
+
+export async function checkSlidingWindow(redis, key, nowMs, windowMs, limit, member) {
+  const result = await redis.eval(SLIDING_WINDOW_LUA, 1, key, nowMs, windowMs, limit, member);
+  return { allowed: result[0] === 1, count: result[1] };
+}
+

@@ -10,9 +10,6 @@ let mockPgPool = null;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
-  // supabaseHealth probes through supabaseAdmin (falling back to supabase)
-  // since the anon client can't read `profiles` post revoke_anon_privileges.
-  get supabaseAdmin() { return mockSupabase; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return mockFirebaseAdmin; },
@@ -216,7 +213,7 @@ describe('GET /api/health/full (Centralized Health Aggregation)', () => {
     const res = await request(app).get('/api/health/full');
 
     expect(res.body.services.workers.status).toBe('healthy');
-    expect(res.body.services.workers.metadata).toBeUndefined();
+    expect(res.body.services.workers.metadata.workerCount).toBe(3);
   });
 
   it('reports degraded when a worker is not running', async () => {

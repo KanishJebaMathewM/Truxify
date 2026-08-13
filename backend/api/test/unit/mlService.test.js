@@ -9,15 +9,9 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Internal Server Error' }),
     };
 
-    try {
-      await mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST');
-    } catch (err) {
-      expect(err.message).toContain('POST');
-      expect(err.message).toContain('https://api.ml.com/predict');
-      expect(err.message).toContain('500');
-      return;
-    }
-    throw new Error('Expected rejection');
+    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST'))
+      .rejects
+      .toThrow(/POST.*https:\/\/api\.ml\.com\/predict.*500/);
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {
@@ -27,15 +21,9 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Unauthorized' }),
     };
 
-    try {
-      await mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET');
-    } catch (err) {
-      expect(err.message).toContain('GET');
-      expect(err.message).toContain('https://api.ml.com/embed');
-      expect(err.message).toContain('401');
-      return;
-    }
-    throw new Error('Expected rejection');
+    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET'))
+      .rejects
+      .toThrow(/GET.*https:\/\/api\.ml\.com\/embed.*401/);
   });
 
   it('should include method, url, and status 403 for forbidden', async () => {
@@ -45,14 +33,8 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Forbidden' }),
     };
 
-    try {
-      await mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT');
-    } catch (err) {
-      expect(err.message).toContain('PUT');
-      expect(err.message).toContain('https://api.ml.com/train');
-      expect(err.message).toContain('403');
-      return;
-    }
-    throw new Error('Expected rejection');
+    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT'))
+      .rejects
+      .toThrow(/PUT.*https:\/\/api\.ml\.com\/train.*403/);
   });
 });

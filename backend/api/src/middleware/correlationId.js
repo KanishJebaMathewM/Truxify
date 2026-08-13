@@ -4,14 +4,9 @@ import logger from './logger.js';
 
 export const correlationContext = new AsyncLocalStorage();
 
-const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
-
 export function correlationIdMiddleware(req, res, next) {
   const header = req.headers['x-correlation-id'];
-  const correlationId =
-    typeof header === 'string' && SAFE_CORRELATION_ID.test(header.trim())
-      ? header.trim()
-      : randomUUID();
+  const correlationId = (typeof header === 'string' && header.trim()) ? header.trim() : randomUUID();
 
   req.correlationId = correlationId;
   res.setHeader('X-Correlation-ID', correlationId);
@@ -24,3 +19,12 @@ export function correlationIdMiddleware(req, res, next) {
   const store = { correlationId };
   correlationContext.run(store, next);
 }
+
+
+// === Spec 14: ===
+// === Spec 14: AsyncLocalStorage for correlation IDs ===
+import { AsyncLocalStorage } from 'node:async_hooks';
+const storage = new AsyncLocalStorage();
+export function getCorrelationStore() { return storage.getStore() || {}; }
+export function runWithCorrelationId(cid, fn) { return storage.run({ correlationId: cid, startedAt: Date.now() }, fn); }
+

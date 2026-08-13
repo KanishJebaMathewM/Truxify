@@ -332,7 +332,8 @@ app.use(headerSizeMonitor);
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
 //   - Docker Compose (no proxy)                 → 0
 //   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
-const trustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const _parsedTrustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const trustProxy = Number.isFinite(_parsedTrustProxy) ? _parsedTrustProxy : 1
 app.set('trust proxy', trustProxy)
 
 // ============================================================================

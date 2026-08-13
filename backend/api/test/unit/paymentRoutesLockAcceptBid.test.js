@@ -37,7 +37,6 @@ vi.mock('../../src/core/container.js', () => ({
 vi.mock('../../src/config/db.js', () => ({
   supabase: {},
   createUserClient: vi.fn(),
-  redisClient: null,
 }));
 
 vi.mock('../../src/lib/redisLock.js', () => ({

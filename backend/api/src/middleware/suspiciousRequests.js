@@ -71,7 +71,7 @@ export default function suspiciousRequests(req, res, next) {
     }, "Suspicious request detected");
 
     const blocking = findings.filter(f =>
-      ['Path Traversal'].includes(f)
+      ['SQL Injection', 'Path Traversal'].includes(f)
     );
     if (blocking.length) {
       return res.status(403).json({ error: 'Request blocked: suspicious content detected' });
@@ -80,3 +80,23 @@ export default function suspiciousRequests(req, res, next) {
 
   next();
 }
+
+// === Spec 6: ===
+// === Spec 6: prevent prototype pollution ===
+const FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor']);
+export function sanitizeKey(k) {
+  if (typeof k !== 'string') return null;
+  if (FORBIDDEN.has(k)) return null;
+  if (k.startsWith('__') || k.includes('..')) return null;
+  return k;
+}
+export function sanitizeQueryParams(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const safe = sanitizeKey(k);
+    if (safe !== null) out[safe] = v;
+  }
+  return out;
+}
+

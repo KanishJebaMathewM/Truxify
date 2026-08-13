@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+<<<<<<< HEAD
+=======
 	"errors"
+>>>>>>> upstream/main
 	"log"
 	"math/rand"
 	"net/http"
@@ -76,6 +79,8 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+<<<<<<< HEAD
+=======
 // maxRequestBodyBytes caps request bodies decoded by this service (1 MiB) so
 // an oversized or streamed body cannot be buffered into memory.
 const maxRequestBodyBytes = 1 << 20
@@ -97,6 +102,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool 
 	return true
 }
 
+>>>>>>> upstream/main
 // isValidOrderID reports whether an order id is well-formed.
 func isValidOrderID(id string) bool {
 	if id == "" || len(id) > 64 {
@@ -153,6 +159,10 @@ type RaftNode struct {
 	heartbeatInterval  time.Duration
 	nextIndex          map[string]uint64
 	matchIndex         map[string]uint64
+<<<<<<< HEAD
+=======
+	peerLive           map[string]bool
+>>>>>>> upstream/main
 	httpClient         *http.Client
 }
 
@@ -167,7 +177,11 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionMaxMs = electionMinMs
 	}
 
+<<<<<<< HEAD
 	return &RaftNode{
+=======
+	rn := &RaftNode{
+>>>>>>> upstream/main
 		NodeID:             id,
 		CurrentTerm:        0,
 		Role:               Follower,
@@ -182,8 +196,87 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
 		nextIndex:          make(map[string]uint64),
 		matchIndex:         make(map[string]uint64),
+<<<<<<< HEAD
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
+=======
+		peerLive:           make(map[string]bool),
+		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
+	}
+	rn.loadState()
+	return rn
+}
+
+type RaftState struct {
+	CurrentTerm uint64     `json:"current_term"`
+	VotedFor    string     `json:"voted_for"`
+	Log         []LogEntry `json:"log"`
+}
+
+func (rn *RaftNode) stateFilePath() string {
+	path := os.Getenv("RAFT_STATE_FILE")
+	if path == "none" {
+		return ""
+	}
+	if path == "" {
+		path = "raft_state_" + rn.NodeID + ".json"
+	}
+	return path
+}
+
+func (rn *RaftNode) persistState() {
+	path := rn.stateFilePath()
+	if path == "" {
+		return
+	}
+	state := RaftState{
+		CurrentTerm: rn.CurrentTerm,
+		VotedFor:    rn.VotedFor,
+		Log:         rn.Log,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		log.Printf("[%s] Error marshaling raft state: %v", rn.NodeID, err)
+		return
+	}
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		log.Printf("[%s] Error writing temporary raft state file: %v", rn.NodeID, err)
+		return
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		log.Printf("[%s] Error renaming temporary raft state file to %s: %v", rn.NodeID, path, err)
+		return
+	}
+}
+
+func (rn *RaftNode) loadState() {
+	path := rn.stateFilePath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Printf("[%s] Error reading raft state file: %v", rn.NodeID, err)
+		return
+	}
+	var state RaftState
+	if err := json.Unmarshal(data, &state); err != nil {
+		log.Printf("[%s] Error unmarshaling raft state: %v", rn.NodeID, err)
+		return
+	}
+	rn.CurrentTerm = state.CurrentTerm
+	rn.VotedFor = state.VotedFor
+	if state.Log != nil {
+		rn.Log = state.Log
+	} else {
+		rn.Log = make([]LogEntry, 0)
+	}
+	log.Printf("[%s] Restored state from %s: Term=%d VotedFor=%q LogEntries=%d", rn.NodeID, path, rn.CurrentTerm, rn.VotedFor, len(rn.Log))
+>>>>>>> upstream/main
 }
 
 func (rn *RaftNode) lastLogIndex() uint64 {
@@ -219,6 +312,10 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 		rn.Role = Follower
 	}
 	rn.lastLeaderSeen = time.Now()
+<<<<<<< HEAD
+=======
+	rn.persistState()
+>>>>>>> upstream/main
 }
 
 // startElection campaigns for leadership: bump term, vote for self, and
@@ -232,6 +329,10 @@ func (rn *RaftNode) startElection() {
 	rn.LeaderID = ""
 	rn.electionStarted = time.Now()
 	rn.electionTimeout = rn.randomElectionTimeout()
+<<<<<<< HEAD
+=======
+	rn.persistState()
+>>>>>>> upstream/main
 
 	req := RequestVoteRequest{
 		Term:         rn.CurrentTerm,
@@ -270,6 +371,7 @@ func (rn *RaftNode) startElection() {
 		// follower's log matches its own and works backward from the end.
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
+<<<<<<< HEAD
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
 			// Optimistically assume each follower has replicated the leader's
@@ -278,6 +380,15 @@ func (rn *RaftNode) startElection() {
 			// up, instead of until the first heartbeat succeeds; actual
 			// replication is still required to commit new entries.
 			rn.matchIndex[url] = rn.lastLogIndex()
+=======
+		rn.peerLive = make(map[string]bool, len(rn.PeerURLs))
+		for _, url := range rn.PeerURLs {
+			rn.nextIndex[url] = rn.lastLogIndex() + 1
+			// Seed matchIndex to 0 on election per Raft spec; let sendHeartbeats'
+			// existing monotonic update learn the true match index.
+			rn.matchIndex[url] = 0
+			rn.peerLive[url] = false
+>>>>>>> upstream/main
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -431,6 +542,10 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
+<<<<<<< HEAD
+=======
+			rn.peerLive[res.url] = true
+>>>>>>> upstream/main
 			// Follower accepted the prefix; monotonically record highest matching index.
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
@@ -489,8 +604,13 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 // heartbeat completes.
 func (rn *RaftNode) leaderHasQuorumLocked() bool {
 	acked := 1 // self
+<<<<<<< HEAD
 	for _, m := range rn.matchIndex {
 		if m >= rn.CommitIndex {
+=======
+	for url, m := range rn.matchIndex {
+		if rn.peerLive[url] && m >= rn.CommitIndex {
+>>>>>>> upstream/main
 			acked++
 		}
 	}
@@ -581,7 +701,12 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RequestVoteRequest
+<<<<<<< HEAD
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+=======
 	if !decodeJSONBody(w, r, &req) {
+>>>>>>> upstream/main
 		return
 	}
 
@@ -600,6 +725,10 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		rn.VotedFor = req.CandidateID
 		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
+<<<<<<< HEAD
+=======
+		rn.persistState()
+>>>>>>> upstream/main
 	}
 
 	resp.Term = rn.CurrentTerm
@@ -625,7 +754,12 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req AppendEntriesRequest
+<<<<<<< HEAD
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+=======
 	if !decodeJSONBody(w, r, &req) {
+>>>>>>> upstream/main
 		return
 	}
 
@@ -645,12 +779,29 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 		// once per term. Record the acknowledged leader as this term's vote
 		// when none has been cast yet, so a later candidate in the same term
 		// cannot obtain a second vote.
+<<<<<<< HEAD
 		if rn.VotedFor == "" || rn.VotedFor == req.LeaderID {
 			rn.VotedFor = req.LeaderID
 		}
 		rn.lastLeaderSeen = time.Now()
 
 		if rn.appendLogFromLeaderLocked(req) {
+=======
+		votedForChanged := false
+		if rn.VotedFor == "" || rn.VotedFor == req.LeaderID {
+			if rn.VotedFor != req.LeaderID {
+				rn.VotedFor = req.LeaderID
+				votedForChanged = true
+			}
+		}
+		rn.lastLeaderSeen = time.Now()
+
+		success, logChanged := rn.appendLogFromLeaderLocked(req)
+		if success {
+			if votedForChanged || logChanged {
+				rn.persistState()
+			}
+>>>>>>> upstream/main
 			if req.LeaderCommit > rn.CommitIndex {
 				last := uint64(len(rn.Log))
 				if req.LeaderCommit < last {
@@ -678,22 +829,36 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 
 // appendLogFromLeaderLocked appends replicated entries after checking log
 // consistency with the previous entry.
+<<<<<<< HEAD
 func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	if req.PrevLogIndex > uint64(len(rn.Log)) {
 		return false
+=======
+func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) (bool, bool) {
+	if req.PrevLogIndex > uint64(len(rn.Log)) {
+		return false, false
+>>>>>>> upstream/main
 	}
 	if req.PrevLogIndex > 0 {
 		prev := rn.Log[req.PrevLogIndex-1]
 		if prev.Term != req.PrevLogTerm {
+<<<<<<< HEAD
 			return false
 		}
 	}
+=======
+			return false, false
+		}
+	}
+	logChanged := false
+>>>>>>> upstream/main
 	for i, e := range req.Entries {
 		idx := int(req.PrevLogIndex) + 1 + i
 		if idx <= len(rn.Log) {
 			if rn.Log[idx-1].Term != e.Term {
 				rn.Log = rn.Log[:idx-1]
 				rn.Log = append(rn.Log, req.Entries[i:]...)
+<<<<<<< HEAD
 				return true
 			}
 		} else {
@@ -702,6 +867,51 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 		}
 	}
 	return true
+=======
+				logChanged = true
+				return true, logChanged
+			}
+		} else {
+			rn.Log = append(rn.Log, req.Entries[i:]...)
+			logChanged = true
+			return true, logChanged
+		}
+	}
+	return true, logChanged
+}
+
+var validTransitions = map[string][]string{
+	"":           {"CREATED"},
+	"CREATED":    {"DISPATCHED", "CANCELLED"},
+	"DISPATCHED": {"IN_TRANSIT", "CANCELLED"},
+	"IN_TRANSIT": {"DELIVERED", "CANCELLED"},
+	"DELIVERED":  {"COMPLETED"},
+	"COMPLETED":  {},
+	"CANCELLED":  {},
+}
+
+func (rn *RaftNode) getOrderStateLocked(orderID string) string {
+	currentState := ""
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == orderID {
+			currentState = rn.Log[i].Command
+		}
+	}
+	return currentState
+}
+
+func isValidTransition(current, next string) bool {
+	allowed, exists := validTransitions[current]
+	if !exists {
+		return false
+	}
+	for _, a := range allowed {
+		if a == next {
+			return true
+		}
+	}
+	return false
+>>>>>>> upstream/main
 }
 
 // HandleCommitOrder accepts a committed order entry on the leader.
@@ -720,7 +930,12 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		Command string `json:"command"`
 	}
 
+<<<<<<< HEAD
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+=======
 	if !decodeJSONBody(w, r, &req) {
+>>>>>>> upstream/main
 		return
 	}
 
@@ -759,6 +974,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+<<<<<<< HEAD
 	entry := LogEntry{
 		Index:     uint64(len(rn.Log) + 1),
 		Term:      rn.CurrentTerm,
@@ -770,6 +986,36 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	// Append to the local log first. CommitIndex is NOT advanced here: the entry
 	// must first be replicated to a quorum of followers (Raft §5.3).
 	rn.Log = append(rn.Log, entry)
+=======
+	var existingEntry *LogEntry
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == req.OrderID && rn.Log[i].Command == req.Command {
+			existingEntry = &rn.Log[i]
+			break
+		}
+	}
+	var entry LogEntry
+	if existingEntry != nil {
+		entry = *existingEntry
+	} else {
+		current := rn.getOrderStateLocked(req.OrderID)
+		if !isValidTransition(current, req.Command) {
+			rn.mu.Unlock()
+			http.Error(w, "Invalid state transition", http.StatusBadRequest)
+			return
+		}
+
+		entry = LogEntry{
+			Index:     uint64(len(rn.Log) + 1),
+			Term:      rn.CurrentTerm,
+			Command:   req.Command,
+			OrderID:   req.OrderID,
+			Timestamp: time.Now(),
+		}
+		rn.Log = append(rn.Log, entry)
+		rn.persistState()
+	}
+>>>>>>> upstream/main
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before

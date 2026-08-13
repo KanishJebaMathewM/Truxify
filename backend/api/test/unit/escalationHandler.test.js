@@ -15,7 +15,7 @@ vi.mock('../../middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
-const { default: EscalationHandler, ESCALATION_LEVELS, ESCALATION_THRESHOLDS } = require('../../src/services/blockchain/escalationHandler.js');
+const { EscalationHandler } = require('../../src/services/blockchain/escalationHandler.js');
 
 describe('EscalationHandler', () => {
   let handler;

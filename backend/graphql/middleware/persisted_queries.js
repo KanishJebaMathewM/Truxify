@@ -1,16 +1,39 @@
-// Stub for spec 40
-// === Spec 40: max AST depth ===
-const MAX = 7;
-export function countAstDepth(node, cur = 0) {
-  if (!node) return cur;
-  if (cur > MAX) return cur;
-  let m = cur;
-  for (const c of node.selectionSet?.selections || []) m = Math.max(m, countAstDepth(c, cur + 1));
-  return m;
-}
-export function enforceMaxDepth(ast, max = MAX) {
-  const d = countAstDepth(ast);
-  if (d > max) throw new Error(`depth ${d} > ${max}`);
-  return d;
+import crypto from 'crypto';
+
+/**
+ * GraphQL Automatic Persisted Queries (APQ) & CDN Edge Caching Middleware
+ */
+export class GraphqlPersistedQueriesEngine {
+  constructor() {
+    this.hashStore = new Map();
+  }
+
+  registerQuery(queryString) {
+    const hash = crypto.createHash('sha256').update(queryString).digest('hex');
+    this.hashStore.set(hash, queryString);
+    return hash;
+  }
+
+  getQueryByHash(hash) {
+    return this.hashStore.get(hash) || null;
+  }
+
+  processEdgeRequest(queryHash, fullQueryString = null) {
+    if (fullQueryString) {
+      const generatedHash = this.registerQuery(fullQueryString);
+      if (generatedHash !== queryHash) {
+        throw new Error("InvalidQueryHash: Query hash does not match content");
+      }
+      return { status: "registered", query: fullQueryString };
+    }
+
+    const cachedQuery = this.getQueryByHash(queryHash);
+    if (!cachedQuery) {
+      return { status: "APQ_miss", error: "PersistedQueryNotFound" };
+    }
+
+    return { status: "APQ_hit", query: cachedQuery };
+  }
 }
 
+export const persistedQueriesEngine = new GraphqlPersistedQueriesEngine();

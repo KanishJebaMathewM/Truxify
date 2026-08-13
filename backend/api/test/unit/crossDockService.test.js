@@ -36,9 +36,10 @@ function chainable(key, terminalKey = 'maybeSingle') {
 }
 
 const fromMock = vi.fn((table) => chainable(table));
+const rpcMock = vi.fn((name, args) => chainable('rpc:' + name));
 
 vi.mock('../../src/config/db.js', () => ({
-  supabaseAdmin: { from: fromMock, rpc: (name, args) => chainable('rpc:' + name) },
+  supabaseAdmin: { from: fromMock, rpc: rpcMock },
   isSupabaseConnected: () => true,
 }));
 
@@ -87,6 +88,17 @@ describe('crossDockService', () => {
       await expect(
         svc.findHandoffCandidates({ orderId: 'o1', crossDockLat: 999, crossDockLng: 0 }),
       ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('calls the get_nearby_active_drivers RPC with the DDL param contract', async () => {
+      await svc.findHandoffCandidates({ orderId: 'o1', crossDockLat: 19.076, crossDockLng: 72.8777, radiusKm: 50, limit: 20 });
+
+      expect(rpcMock).toHaveBeenCalledWith('get_nearby_active_drivers', {
+        origin_lat: 19.076,
+        origin_lng: 72.8777,
+        radius_meters: 50000,
+        freshness_seconds: expect.any(Number),
+      });
     });
   });
 

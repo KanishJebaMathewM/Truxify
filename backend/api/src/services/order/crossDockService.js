@@ -50,6 +50,8 @@ const HANDOFF_WINDOW_MINUTES = parseInt(process.env.CROSS_DOCK_HANDOFF_WINDOW_MI
 const OTP_TTL_MINUTES = parseInt(process.env.CROSS_DOCK_OTP_TTL_MINUTES || '30', 10);
 const MAX_OTP_ATTEMPTS = parseInt(process.env.CROSS_DOCK_OTP_MAX_ATTEMPTS || '5', 10);
 const SEARCH_RADIUS_KM = parseFloat(process.env.CROSS_DOCK_SEARCH_RADIUS_KM || '50');
+// How recent a relay driver's location must be to count as "active".
+const DRIVER_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.CROSS_DOCK_LOCATION_FRESHNESS_SECONDS || '900', 10);
 
 const TABLE = 'cross_dock_transfers';
 
@@ -123,17 +125,17 @@ export async function findHandoffCandidates({
     // .maybeSingle() on it — that would treat the array as a single object and
     // throw, silently forcing the fallback path. We read the array directly.
     const { data: rpcDrivers, error: rpcError } = await supabaseAdmin.rpc('get_nearby_active_drivers', {
-      p_lat: crossDockLat,
-      p_lng: crossDockLng,
-      p_radius_km: radiusKm,
-      p_limit: limit,
+      origin_lat: crossDockLat,
+      origin_lng: crossDockLng,
+      radius_meters: radiusKm * 1000,
+      freshness_seconds: DRIVER_LOCATION_FRESHNESS_SECONDS,
     });
 
     let drivers = [];
     if (!rpcError && Array.isArray(rpcDrivers)) {
       drivers = rpcDrivers;
     } else if (rpcError) {
-      logger.debug?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
+      logger.error?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
     }
 
     if (drivers.length === 0) {

@@ -368,7 +368,9 @@ export async function getCachedCustomerStats(userId) {
     logCacheError("getCachedCustomerStats", err);
     try {
       await redisClient.del(customerStatsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedCustomerStats.del", delErr);
+    }
     return null;
   }
 }
@@ -418,7 +420,9 @@ export async function getCachedDriverDetails(userId) {
     logCacheError("getCachedDriverDetails", err);
     try {
       await redisClient.del(driverDetailsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedDriverDetails.del", delErr);
+    }
     return null;
   }
 }

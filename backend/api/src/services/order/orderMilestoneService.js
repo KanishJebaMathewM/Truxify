@@ -20,7 +20,7 @@ import {
 import { escrowRelease, markEscrowBookingStarted, paisaToMaticWei, resolveExpectedDepositAmount } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
-import { broadcastOrderMilestone } from '../../sockets/tracker.js';
+import { broadcastOrderMilestone, invalidateDriverOrderCache } from '../../sockets/tracker.js';
 
 export class OrderMilestoneService {
   constructor(args = {}) {
@@ -328,6 +328,13 @@ export class OrderMilestoneService {
 
       // Broadcast "Delivered" milestone to connected WebSocket clients
       broadcastOrderMilestone(order.order_display_id, 'Delivered', 'payment_released');
+
+      // Trip is complete — drop the cached driver→order mapping so the tracker
+      // no longer reports the driver on the finished order (issue #10676).
+      const completeDriverId = tripData?.driver_id || order.driver_id;
+      if (completeDriverId) {
+        await invalidateDriverOrderCache(completeDriverId);
+      }
 
       return {
         status: 200,

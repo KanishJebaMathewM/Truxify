@@ -62,6 +62,19 @@ describe('fraudMiddleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    it('flags medium-risk requests for review without blocking', async () => {
+      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.8, riskLevel: 'MEDIUM' });
+      const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
+      await fraudDetectionMiddleware(req, res, next);
+      expect(fraudMock.addToReviewQueue).toHaveBeenCalledWith(
+        'u1',
+        expect.stringContaining('Suspicious activity'),
+        0.8,
+      );
+      expect(res.status).not.toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+    });
+
     it('fails closed with 503 on service errors', async () => {
       fraudMock.trackBehavior.mockRejectedValue(new Error('down'));
       const { req, res, next } = makeReqRes({ originalUrl: '/api/orders' });
@@ -86,6 +99,18 @@ describe('fraudMiddleware', () => {
       await fraudDetectionMiddleware(req, res, next);
       expect(res.status).toHaveBeenCalledWith(403);
       expect(next).not.toHaveBeenCalled();
+    });
+
+    it('includes the request id in the review queue reason', async () => {
+      fraudMock.getRealTimeRisk.mockResolvedValue({ riskScore: 0.8, riskLevel: 'HIGH' });
+      const { req, res, next } = makeReqRes({ requestId: 'fraud-req-42' });
+      await fraudDetectionMiddleware(req, res, next);
+      expect(fraudMock.addToReviewQueue).toHaveBeenCalledWith(
+        'u1',
+        expect.stringContaining('fraud-req-42'),
+        0.8
+      );
+      expect(next).toHaveBeenCalled();
     });
   });
 

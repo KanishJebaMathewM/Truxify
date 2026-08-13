@@ -179,7 +179,13 @@ export function scrubPii(value, path = '') {
   if (typeof value === 'string') {
     // Redact 16-digit card numbers that may be embedded in strings.
     const CARD_NUMBER_PATTERN = /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/g;
-    return value.replace(CARD_NUMBER_PATTERN, '[REDACTED]');
+    let scrubbed = value.replace(CARD_NUMBER_PATTERN, '[REDACTED]');
+    // Redact full 10-digit Indian mobile numbers (starting 6-9) that may be
+    // embedded in log/metadata strings. Partial numbers (e.g. last 4 digits
+    // shown in UIs) are left alone.
+    const PHONE_PATTERN = /\b[6-9]\d{9}\b/g;
+    scrubbed = scrubbed.replace(PHONE_PATTERN, '[REDACTED]');
+    return scrubbed;
   }
 
   return value;

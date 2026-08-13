@@ -189,6 +189,13 @@ const WS_AUTH_TIMEOUT_MS = 10000;
 const DRIVER_ORDER_CACHE_TTL_SECONDS = 60;
 const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
 
+// Orders in these statuses no longer keep a driver pinned to an active trip.
+// A cached `driver:active-order:` mapping for one of them is stale and must be
+// invalidated — otherwise mid-trip cache hits skip driver-assignment
+// re-verification and telemetry/geofence provenance keeps binding to the
+// previous trip (issue #10676).
+const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_released']);
+
 /**
  * Retrieve the cached active order mapping for a driver.
  * Returns { orderId, orderDisplayId } or null on miss / error.
@@ -213,6 +220,7 @@ async function getCachedDriverOrder(driverId) {
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
   if (!driverId) return;
   if (!redisClient || !orderId) return;
+  if (!orderDisplayId) return;
   try {
     await redisClient.set(
       `${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`,
@@ -237,6 +245,7 @@ async function invalidateDriverOrderCache(driverId) {
     logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
+export { invalidateDriverOrderCache };
 
 function getClientIp(request) {
   // Trust only the TCP peer address. The X-Forwarded-For header is
@@ -942,15 +951,39 @@ export async function handleLocationPing(ws, data, req) {
       // database.  This avoids repeated Supabase queries for the same
       // driver during an active trip.
       const cached = await getCachedDriverOrder(driver_id);
+      let cacheVerified = false;
       if (cached) {
-        orderUUID = cached.orderId;
-        orderDisplayId = cached.orderDisplayId;
-      } else {
+        // A cached mapping can outlive the trip (it is only invalidated on
+        // disconnect or an order transition), so re-verify it still points at
+        // the driver's current, non-terminal order before trusting it — a bare
+        // cache hit previously skipped driver-assignment re-verification
+        // entirely (issue #10676).
+        const { data: activeOrder } = await _orderRepository.findOrderByAnyId(
+          cached.orderId,
+          'id, order_display_id, driver_id, status'
+        );
+        if (
+          activeOrder
+          && activeOrder.driver_id === driver_id
+          && !TERMINAL_ORDER_STATUSES.has(activeOrder.status)
+        ) {
+          orderUUID = cached.orderId;
+          orderDisplayId = cached.orderDisplayId || activeOrder.order_display_id;
+          cacheVerified = true;
+        } else {
+          // Stale entry (delivered/cancelled/reassigned) — drop it so the
+          // authoritative lookup below resolves the current assignment.
+          await invalidateDriverOrderCache(driver_id);
+        }
+      }
+
+      if (!cacheVerified) {
         const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id, status');
         if (order) {
           // Verify the authenticated driver is assigned to this order
           if (order.driver_id !== driver_id) {
+            await invalidateDriverOrderCache(driver_id);
             logger.warn({
               event: 'UNAUTHORIZED_ORDER_TRACKING',
               driverId: driver_id,
@@ -965,7 +998,18 @@ export async function handleLocationPing(ws, data, req) {
           }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          if (TERMINAL_ORDER_STATUSES.has(order.status)) {
+            // Order has ended — drop any cached mapping and do not re-bind
+            // telemetry/geofence provenance to the finished order.
+            orderUUID = null;
+            orderDisplayId = null;
+            await invalidateDriverOrderCache(driver_id);
+          } else if (orderDisplayId) {
+            await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          }
+        } else if (cached) {
+          // Cached order no longer exists — drop the stale mapping.
+          await invalidateDriverOrderCache(driver_id);
         }
       }
     } catch (err) {
@@ -1143,6 +1187,151 @@ export async function handleLocationPing(ws, data, req) {
  * the shared telemetryBuffer module. tracker.js exposes a thin `__testing`
  * surface so the existing unit-test contracts keep working.
  */
+async function flushTelemetryBuffer() {
+  if (currentFlushPromise) {
+    return currentFlushPromise;
+  }
+
+  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
+    flushBackoffMs = 1000;
+    return;
+  }
+
+  if (!getMongoDb()) {
+    logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
+    return;
+  }
+
+  if (flushMutex) return;
+  flushMutex = true;
+
+  // Atomic buffer swap: take everything pending (retry queue first, then the
+  // active buffer) and reset both. Any ping that arrives while the insert is
+  // in flight lands in the fresh active buffer, and on failure the taken
+  // records are prepended back so oldest data retries first. Taking a merged
+  // snapshot (instead of aliasing the active buffer as the flush buffer)
+  // avoids re-queueing the same array twice on transient failures.
+  const recordsToFlush = telemetryFlushBuffer.length > 0
+    ? [...telemetryFlushBuffer, ...(await telemetryWriteBuffer.toArray())]
+    : await telemetryWriteBuffer.toArray();
+  telemetryFlushBuffer = [];
+  await telemetryWriteBuffer.clear();
+
+  if (recordsToFlush.length === 0) {
+    flushMutex = false;
+    return;
+  }
+
+  currentFlushPromise = (async () => {
+    logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
+
+    try {
+      const collection = getMongoDb().collection('telemetry');
+      await collection.insertMany(recordsToFlush, { ordered: false });
+      telemetryTotalFlushed += recordsToFlush.length;
+      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
+      flushBackoffMs = 1000;
+    } catch (err) {
+      const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
+
+      if (isBulkWriteError) {
+        if (err.writeErrors && err.writeErrors.length > 0) {
+          const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
+            `doc ${e.index}: ${e.err?.message || 'unknown'}`
+          ).join('; ');
+          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
+        } else {
+          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
+        }
+        const failed = err.writeErrors
+          ? recordsToFlush.filter((_, i) => err.writeErrors.some(e => e.index === i))
+          : [];
+        if (failed.length > 0) {
+          const overflowDrop = await telemetryWriteBuffer.prepend(failed);
+          if (overflowDrop > 0) {
+            telemetryTotalDropped += overflowDrop;
+            telemetryOverflowDropped += overflowDrop;
+            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
+          }
+        }
+      } else {
+        flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
+        const overflowDrop = await telemetryWriteBuffer.prepend(recordsToFlush);
+        if (overflowDrop > 0) {
+          telemetryTotalDropped += overflowDrop;
+          telemetryOverflowDropped += overflowDrop;
+          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
+        }
+      }
+    } finally {
+      currentFlushPromise = null;
+      flushMutex = false;
+    }
+  })();
+
+  return currentFlushPromise;
+}
+
+function monitorBufferSize() {
+  const activeLen = telemetryWriteBuffer.length;
+  const flushLen = telemetryFlushBuffer.length;
+  const totalLen = activeLen + flushLen;
+  const usagePct = totalLen / MAX_BUFFER_SIZE;
+  if (usagePct >= BUFFER_CRIT_THRESHOLD) {
+    logger.warn(
+      `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
+      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
+      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
+    );
+  } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
+    logger.warn(
+      `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
+      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
+      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
+    );
+  }
+}
+
+function scheduleNextFlush() {
+  if (!isSchedulerActive) return;
+
+  telemetryFlushTimeout = setTimeout(async () => {
+    try {
+      await flushTelemetryBuffer();
+    } finally {
+      scheduleNextFlush();
+    }
+  }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
+}
+
+async function loadRecoveryFile() {
+  try {
+    if (fs.existsSync(RECOVERY_FILE_PATH)) {
+      const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
+      if (content) {
+        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
+        if (records.length > 0) {
+          await telemetryWriteBuffer.prepend(records);
+          logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
+        }
+      }
+      fs.unlinkSync(RECOVERY_FILE_PATH);
+    }
+  } catch (err) {
+    logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
+    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (unlinkErr) { logger.warn('[TRUXIFY RECOVERY] Failed to unlink recovery file:', unlinkErr.message); }
+  }
+}
+
+async function initTelemetryScheduler() {
+  await loadRecoveryFile();
+  isSchedulerActive = true;
+  scheduleNextFlush();
+  
+  telemetryMonitorInterval = setInterval(() => {
+    monitorBufferSize();
+  }, BUFFER_MONITOR_INTERVAL_MS);
+}
 
 export async function closeWebSocketServer() {
   if (telemetryFlushTimeout) {

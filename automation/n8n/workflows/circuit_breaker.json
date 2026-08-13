@@ -42,6 +42,7 @@
           "boolean": [
             {
               "value1": "={{ $json.isAnomalyDetected }}",
+              "operation": "equal",
               "value2": true
             }
           ]
@@ -112,5 +113,6 @@
       "name": "Truxify Internal API Key",
       "id": ""
     }
-  }
+  },
+  "_annotation": "FIX #11499: The 'If Anomaly > Threshold' node was missing an 'operation' on its boolean condition, so the comparison was never evaluated and 'Execute Emergency Pause' never fired. Added 'operation': 'equal' so the circuit breaker actually trips when isAnomalyDetected == true. Regression check: automation/n8n/scripts/check_circuit_breaker_if.py."
 }

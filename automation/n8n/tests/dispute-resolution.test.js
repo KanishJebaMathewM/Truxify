@@ -17,6 +17,26 @@ function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(REPO_ROOT, relativePath), "utf8");
 }
 
+// Returns just the lines of one top-level compose service, so an assertion
+// cannot be satisfied by the variable being wired into some *other* service.
+// Deliberately text-based rather than YAML-parsed: both compose files currently
+// carry committed merge-conflict markers on main, so they do not parse as YAML.
+// Only a sibling service key at the same indent ends the block; conflict marker
+// lines sit at column 0 and are skipped over rather than truncating it.
+function composeServiceBlock(relativePath, service) {
+  const lines = readRepoFile(relativePath).split("\n");
+  const start = lines.findIndex((l) => new RegExp(`^ {2}${service}:\\s*$`).test(l));
+  assert.notStrictEqual(start, -1, `${relativePath} must define a '${service}' service`);
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^ {2}[A-Za-z_][A-Za-z0-9_-]*:/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
 function nodeByName(name) {
   return workflow.nodes.find((n) => n.name === name);
 }
@@ -128,15 +148,17 @@ test("every alert/escalation email routes to $env.ADMIN_ALERT_EMAIL", () => {
 });
 
 test("ADMIN_ALERT_EMAIL is plumbed into the n8n container and documented", () => {
+  // Scoped to the n8n service block: the workflow runs in that container, so
+  // the variable reaching any other service would not deliver the alerts.
   assert.match(
-    readRepoFile("docker-compose.yml"),
+    composeServiceBlock("docker-compose.yml", "n8n"),
     /ADMIN_ALERT_EMAIL=\$\{ADMIN_ALERT_EMAIL:-/,
-    "dev compose must pass ADMIN_ALERT_EMAIL to n8n with a fallback",
+    "dev compose must pass ADMIN_ALERT_EMAIL to the n8n service with a fallback",
   );
   assert.match(
-    readRepoFile("docker-compose.prod.yml"),
+    composeServiceBlock("docker-compose.prod.yml", "n8n"),
     /ADMIN_ALERT_EMAIL:\s*\$\{ADMIN_ALERT_EMAIL:\?/,
-    "prod compose must require ADMIN_ALERT_EMAIL (:? form) so alerts cannot be misrouted",
+    "prod compose must require ADMIN_ALERT_EMAIL (:? form) on the n8n service so alerts cannot be misrouted",
   );
   // Must ship EMPTY: docker compose interpolates from .env, so any default here
   // would satisfy the prod `:?` guard and re-route alerts to a placeholder.

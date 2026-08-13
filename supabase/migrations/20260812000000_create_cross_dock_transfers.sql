@@ -102,4 +102,12 @@ CREATE POLICY cross_dock_update_policy ON public.cross_dock_transfers
       SELECT 1 FROM public.profiles p
       WHERE p.id = get_profile_id() AND p.role = 'admin'
     )
+  )
+  WITH CHECK (
+    get_profile_id() = from_driver_id
+    OR get_profile_id() = to_driver_id
+    OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = get_profile_id() AND p.role = 'admin'
+    )
   );

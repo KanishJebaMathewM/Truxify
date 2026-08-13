@@ -6,11 +6,25 @@
 namespace TruxifyCuda {
 
 namespace {
-// Euclidean distance between two locations.
+// Mean Earth radius (meters) for the great-circle approximation.
+constexpr float kEarthRadiusMeters = 6371000.0f;
+constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
+
+// Great-circle (haversine) distance in meters between two geographic
+// locations. `Location.x` is longitude (degrees) and `Location.y` is
+// latitude (degrees); both are converted to radians before the haversine
+// formula is applied. This replaces the previous Euclidean-on-degrees
+// metric, which treated one degree of longitude equal to one degree of
+// latitude and ignored meridian convergence.
 float distance(const Location& a, const Location& b) {
-    float dx = b.x - a.x;
-    float dy = b.y - a.y;
-    return std::sqrt(dx * dx + dy * dy);
+    float lat1 = a.y * kDeg2Rad;
+    float lat2 = b.y * kDeg2Rad;
+    float dLat = (b.y - a.y) * kDeg2Rad;
+    float dLng = (b.x - a.x) * kDeg2Rad;
+    float h = std::sin(dLat * 0.5f) * std::sin(dLat * 0.5f) +
+              std::cos(lat1) * std::cos(lat2) *
+                  std::sin(dLng * 0.5f) * std::sin(dLng * 0.5f);
+    return 2.0f * kEarthRadiusMeters * std::asin(std::sqrt(h));
 }
 } // namespace
 

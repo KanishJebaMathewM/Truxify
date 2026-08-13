@@ -81,6 +81,10 @@ class DigilockerService {
   }
 
   async verifyDocuments(userId, accessToken) {
+    if (!accessToken) {
+      logger.warn('[DigilockerService] verifyDocuments called with null/undefined accessToken');
+      return { success: false, error: 'Access token is required', is_digilocker_verified: false };
+    }
     if (!this.isMock) {
       logger.warn('[DigilockerService] DigiLocker integration not configured; refusing auto-approval');
       return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };

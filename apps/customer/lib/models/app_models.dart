@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+String _rupees(num paise) => '₹${(paise / 100).toStringAsFixed(2)}';
+
 class RouteDraft {
   const RouteDraft({
     required this.pickup,
@@ -128,22 +130,22 @@ class TruckResultData {
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
     final rawPrice = json['price'];
     final priceStr = rawPrice is num
-        ? '₹${(rawPrice / 100).round()}'
-        : (rawPrice?.toString() ?? '₹0');
+        ? _rupees(rawPrice)
+        : (rawPrice?.toString() ?? '₹0.00');
 
     final rawBaseFreight = json['baseFreight'];
     final baseFreightStr = rawBaseFreight is num
-        ? '₹${(rawBaseFreight / 100).round()}'
+        ? _rupees(rawBaseFreight)
         : null;
 
     final rawTollEstimate = json['tollEstimate'];
     final tollEstimateStr = rawTollEstimate is num
-        ? '₹${(rawTollEstimate / 100).round()}'
+        ? _rupees(rawTollEstimate)
         : null;
 
     final rawPlatformFee = json['platformFee'];
     final platformFeeStr = rawPlatformFee is num
-        ? '₹${(rawPlatformFee / 100).round()}'
+        ? _rupees(rawPlatformFee)
         : null;
 
     final etaMinutes = json['etaMinutes'];

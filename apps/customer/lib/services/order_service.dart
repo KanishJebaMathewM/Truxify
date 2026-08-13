@@ -285,11 +285,11 @@ class OrderService {
 
       if (results.isEmpty) return null;
 
-      // Extract price values from results and calculate min/max
+      // Extract price values (in paise) from results and calculate min/max.
+      // Keep paise precision end-to-end; rounding is done only at the UI edge.
       final prices = results
           .map((r) => r['price'] as num?)
           .whereType<num>()
-          .map((p) => p.round())
           .toList();
 
       if (prices.isEmpty) return null;

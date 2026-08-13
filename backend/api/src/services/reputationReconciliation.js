@@ -91,6 +91,7 @@ export async function reconcileFailedReputationUpdates() {
           logger.warn(`[reputation-reconciliation] Award succeeded but failed to remove pending row ${row.id}: ${deleteError.message}`);
         }
       } catch (err) {
+        logger.warn(`[reputation-reconciliation] Reputation update failed for ${row.driver_wallet}: ${err?.message ?? String(err)}`);
         const newRetryCount = (row.retry_count ?? 0) + 1;
         await supabaseAdmin.from('reputation_failures').upsert({
           id: row.id,

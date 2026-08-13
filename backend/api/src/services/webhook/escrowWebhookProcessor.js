@@ -7,7 +7,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Escrow statuses a release/withdrawal webhook may legitimately reconcile.
 const RELEASE_RECONCILABLE_STATUSES = ['funded', 'release_failed'];
 // Escrow statuses a cancellation/refund webhook may legitimately reconcile.
-const REFUND_RECONCILABLE_STATUSES = ['funded', 'refund_pending', 'refund_failed'];
+const REFUND_RECONCILABLE_STATUSES = ['funded', 'refund_pending', 'refund_failed', 'refunded'];
 
 function requireDb() {
   if (!supabaseAdmin) {
@@ -221,7 +221,7 @@ async function handleWithdrawalSettled(payload) {
   const now = new Date().toISOString();
   const txHash = payload.txHash || null;
 
-  const isRefund = ['refund_pending', 'refund_failed'].includes(order.escrow_status);
+  const isRefund = ['refunded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
 
   // Idempotency: the same withdrawal webhook may be delivered more than once.
   // If the order already reflects the intended terminal state, short-circuit.

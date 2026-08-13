@@ -241,6 +241,45 @@ describe('processEscrowWebhookEvent — idempotency (crash-after-side-effect / d
     expect(updatePayloads().filter(p => p.escrow_status === 'refunded')).toHaveLength(0);
   });
 
+  it('ignores a duplicate WithdrawalReady when the order is already refunded', async () => {
+    // Regression: a benign duplicate withdrawal delivery for an already-refunded
+    // order must short-circuit (no throw, no order re-apply) instead of becoming
+    // a permanent poison DLQ message.
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD8',
+      driver_id: null,
+      escrow_status: 'refunded',
+      release_tx_hash: null,
+      refund_tx_hash: '0xref',
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD8' })
+    ).resolves.toEqual({ received: true });
+
+    expect(updatePayloads().filter(p => p.escrow_status === 'refunded')).toHaveLength(0);
+  });
+
+  it('ignores a duplicate Withdrawn when the order is already refunded', async () => {
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD9',
+      driver_id: null,
+      escrow_status: 'refunded',
+      release_tx_hash: null,
+      refund_tx_hash: '0xref',
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('Withdrawn', { orderId: '#OD9' })
+    ).resolves.toEqual({ received: true });
+
+    expect(updatePayloads().filter(p => p.escrow_status === 'refunded')).toHaveLength(0);
+  });
+
   it('ignores a duplicate WithdrawalReady when the order is already released', async () => {
     const order = {
       id: 'order-uuid',

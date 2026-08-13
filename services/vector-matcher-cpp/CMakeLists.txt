@@ -18,3 +18,10 @@ add_executable(vector-matcher-cpp
 
 target_compile_options(vector-matcher-cpp PRIVATE -O3)
 target_link_libraries(vector-matcher-cpp PRIVATE Threads::Threads)
+
+# Host-side regression tests for the 3D bin-packing routine.
+add_executable(vector-matcher-tests
+    test/test_matcher.cpp
+)
+
+target_link_libraries(vector-matcher-tests PRIVATE vector_matcher)

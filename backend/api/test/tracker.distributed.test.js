@@ -10,6 +10,7 @@ vi.mock('../src/config/db.js', () => ({
   get redisClient() { return db.redis; },
   get firebaseAdmin() { return null; },
   get supabase() { return null; },
+  get supabaseAdmin() { return null; },
 }));
 
 vi.mock('../src/middleware/logger.js', () => ({
@@ -65,9 +66,9 @@ function makeOrderRepo() {
  * subscription registry and connected to the shared hub. Mirrors what each API
  * process does with its own `trackingSubscriptions` + subscriber connection.
  */
-function createReplica(hub, instanceId, subscriptionMap) {
+function createReplica(hub, instanceId, subscriptionMap, publisher) {
   const bus = createLocationEventBus({
-    publisher: hubPublisher(hub),
+    publisher: publisher || hubPublisher(hub),
     subscriberFactory: () => hub.createSubscriber(),
     channel: CHANNEL,
     instanceId,
@@ -355,6 +356,80 @@ describe('distributed location fan-out (multi-replica)', () => {
     // No subscriber on replica B for this order/driver.
     expect(busB.getMetrics().delivered).toBe(0);
     expect(busB.getMetrics().droppedNoSubscribers).toBe(1);
+  });
+
+  it('CASE 11 — Redis publish failure: local delivery proceeds exactly once with no duplicate fallback', async () => {
+    hub = new InMemoryHub();
+    mapA = new Map();
+    mapB = new Map();
+    const failingPublisher = {
+      publish: vi.fn().mockRejectedValue(new Error('redis down')),
+    };
+    busA = createReplica(hub, 'instance-A', mapA, failingPublisher);
+    busB = createReplica(hub, 'instance-B', mapB);
+    buses.push(busA, busB);
+    __testing.setTrackingSubscriptions(mapA);
+    __testing.setLocationEventBus(busA);
+
+    const customerA = makeWs('ws-A-cust');
+    const dualA = makeWs('ws-A-dual');
+    subscribe(mapA, customerA, 'OD-1');
+    subscribe(mapA, dualA, 'OD-1');
+    subscribe(mapA, dualA, 'D-1');
+
+    const driver = makeWs('D-1', { role: 'driver' });
+    await ping(driver);
+
+    // The publish failed, but the single authoritative local pass still
+    // delivered exactly one frame to each eligible subscriber — including a
+    // dual order+driver subscriber — with no re-delivery from a fallback path.
+    expect(failingPublisher.publish).toHaveBeenCalledTimes(1);
+    expect(busA.getMetrics().publishFailures).toBe(1);
+    expect(customerA.send).toHaveBeenCalledTimes(1);
+    expect(dualA.send).toHaveBeenCalledTimes(1);
+    expect(busA.getMetrics().delivered).toBe(2);
+    // Nothing reached the remote replica.
+    expect(busB.getMetrics().received).toBe(0);
+    expect(busB.getMetrics().delivered).toBe(0);
+  });
+
+  it('CASE 12 — single fan-out path preserves event order across replicas', async () => {
+    setupTwoReplicas();
+    const customerB = makeWs('ws-B-cust');
+    subscribe(mapB, customerB, 'OD-1');
+
+    vi.useFakeTimers();
+    try {
+      const base = Date.now();
+      const driver = makeWs('D-1', { role: 'driver' });
+      vi.setSystemTime(base);
+      await ping(driver);
+      vi.setSystemTime(base + 1000);
+      await ping(driver);
+      vi.setSystemTime(base + 2000);
+      await ping(driver);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Every ping was accepted by the single fan-out path exactly once and the
+    // embedded server sequence reflects publish order (no interleaving from a
+    // second delivery mechanism).
+    const sequences = hub.published.map((m) => JSON.parse(m.message).sequence);
+    expect(sequences).toHaveLength(3);
+    expect([...sequences].sort((a, b) => a - b)).toEqual(sequences);
+    expect(sequences[1]).toBeGreaterThan(sequences[0]);
+    expect(sequences[2]).toBeGreaterThan(sequences[1]);
+
+    // The remote replica delivered exactly one frame per event, in order.
+    expect(customerB.send).toHaveBeenCalledTimes(3);
+    expect(busB.getMetrics().received).toBe(3);
+    expect(busB.getMetrics().delivered).toBe(3);
+    const frames = customerB.send.mock.calls.map(([msg]) => JSON.parse(msg));
+    expect(frames.map((f) => f.event)).toEqual(['location_update', 'location_update', 'location_update']);
+    const timestamps = frames.map((f) => new Date(f.data.timestamp).getTime());
+    expect(timestamps[1]).toBeGreaterThan(timestamps[0]);
+    expect(timestamps[2]).toBeGreaterThan(timestamps[1]);
   });
 
   it('one location event produces exactly one delivery per eligible client across both replicas', async () => {

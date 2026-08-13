@@ -78,10 +78,11 @@ const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir
 // distributed fan-out across replicas is handled by the locationEventBus).
 let trackingSubscriptions = new Map();
 
-// Dedicated Redis subscriber instance for multi-replica WebSocket broadcasting
+// Dedicated Redis subscriber instance for multi-replica WebSocket broadcasting.
+// Only milestone events still use this legacy Pub/Sub path; location events are
+// fanned out exclusively through `locationEventBus` (single authoritative path).
 let redisSubClient = null;
 const TRACKER_CHANNELS = {
-  LOCATION: 'tracker:location_updates',
   MILESTONE: 'tracker:milestone_updates',
 };
 
@@ -100,7 +101,7 @@ function initRedisTrackerPubSub() {
 
   try {
     redisSubClient = redisClient.duplicate();
-    redisSubClient.subscribe(TRACKER_CHANNELS.LOCATION, TRACKER_CHANNELS.MILESTONE, (err) => {
+    redisSubClient.subscribe(TRACKER_CHANNELS.MILESTONE, (err) => {
       if (err) {
         logger.error({ err }, '[Tracker] Failed to subscribe to Redis tracker channels');
       } else {
@@ -111,11 +112,7 @@ function initRedisTrackerPubSub() {
     redisSubClient.on('message', (channel, message) => {
       try {
         const parsed = JSON.parse(message);
-        if (channel === TRACKER_CHANNELS.LOCATION) {
-          const { orderDisplayId, driver_id, payload } = parsed;
-          if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
-          if (driver_id) deliverToLocalSubscribers(driver_id, payload);
-        } else if (channel === TRACKER_CHANNELS.MILESTONE) {
+        if (channel === TRACKER_CHANNELS.MILESTONE) {
           const { orderDisplayId, payload } = parsed;
           if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
         }
@@ -1270,27 +1267,14 @@ export async function handleLocationPing(ws, data, req) {
     });
   }
 
-  // Local delivery to this replica's own order/driver subscribers. The
-  // publishing replica's Pub/Sub consumer skips self-originated events, so a
-  // client on this replica receives the update exactly once.
+  // Local delivery to this replica's own order/driver subscribers. This is the
+  // single authoritative delivery pass: the publishing replica's event-bus
+  // consumer skips self-originated events, so a client on this replica receives
+  // the update exactly once, and remote replicas deliver exactly once through
+  // the distributed event-bus path. The legacy `TRACKER_CHANNELS.LOCATION`
+  // Pub/Sub publish (which looped back to the publishing replica and delivered
+  // the same frame again on every replica) has been removed.
   deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
-  initRedisTrackerPubSub();
-
-  if (redisClient) {
-    const pubSubMessage = JSON.stringify({
-      orderDisplayId,
-      driver_id,
-      payload: broadcastPayload,
-    });
-    redisClient.publish(TRACKER_CHANNELS.LOCATION, pubSubMessage).catch((err) => {
-      logger.error({ err }, '[Tracker] Redis publish error for location update');
-      if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-      if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-    });
-  } else {
-    if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-    if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-  }
 
   // Publish to Supabase Realtime channel driver-location:{orderId}
   // Reuse cached channel to avoid creating a new channel per ping.

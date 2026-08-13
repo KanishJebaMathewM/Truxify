@@ -9,6 +9,8 @@
 #include <cctype>
 #include <cstring>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -30,6 +32,21 @@ typedef int socklen_t;
 // Total request byte budget per connection. Oversized requests are answered
 // with 413 instead of being buffered, bounding memory per connection.
 const size_t MAX_REQUEST_BYTES = 64 * 1024;
+
+// Caps the number of locations a single /matrix request may carry. The output
+// is one JSON object per ordered pair (O(N^2)), so an unbounded count turns a
+// small request body into hundreds of MB of CPU/memory amplification.
+const size_t MAX_LOCATIONS = 512;
+
+// Bounds the number of connections handled concurrently. Each accepted
+// connection runs on its own thread; without a cap a flood of idle (slowloris)
+// connections would spawn unbounded threads and exhaust the process.
+const int MAX_CONCURRENT = 256;
+
+// Shared state for the bounded connection pool below.
+static std::mutex pool_mu;
+static std::condition_variable pool_cv;
+static int pool_active = 0;
 
 // Applies read/write idle timeouts so a slow or idle client cannot stall a
 // handler thread forever: recv returns after the timeout instead of blocking
@@ -265,6 +282,8 @@ void handle_client(SOCKET client) {
         std::vector<Location> locs = parse_locations(body);
         if (locs.empty()) {
             response = build_response("{\"success\":false,\"error\":\"no locations provided\"}", "400 Bad Request");
+        } else if (locs.size() > MAX_LOCATIONS) {
+            response = build_response("{\"error\":\"too many locations\"}", "413 Request Entity Too Large");
         } else {
             response = build_response(compute_matrix_json(locs), "200 OK");
         }
@@ -324,11 +343,22 @@ int main() {
 
         set_socket_timeouts(client);
 
-        // Handle each connection on its own thread so an idle or slow client
-        // can never block the accept loop (and thus the whole service).
+        // Admit the connection only once the number of in-flight handlers
+        // drops below MAX_CONCURRENT. This bounds thread/stack usage so a
+        // flood of idle (slowloris) connections cannot exhaust the process.
+        {
+            std::unique_lock<std::mutex> lk(pool_mu);
+            pool_cv.wait(lk, [] { return pool_active < MAX_CONCURRENT; });
+            ++pool_active;
+        }
         std::thread([client]() {
             handle_client(client);
             closesocket(client);
+            {
+                std::unique_lock<std::mutex> lk(pool_mu);
+                --pool_active;
+            }
+            pool_cv.notify_one();
         }).detach();
     }
 }

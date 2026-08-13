@@ -104,8 +104,7 @@ import {
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
-import { ethers } from 'ethers';
+import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -231,36 +230,10 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
-    const targetId = req.params.id;
-
-    // Name lookup is only allowed when the caller can prove a business
-    // relationship with the target: the target is the caller's own profile,
-    // the driver assigned to one of the caller's orders, or the customer on
-    // one of the caller's (driver) orders. This prevents UUID enumeration.
-    if (targetId !== req.user.id) {
-      const { data: relatedOrder, error: relErr } = await supabase
-        .from('orders')
-        .select('id')
-        .or(`customer_id.eq.${req.user.id},driver_id.eq.${req.user.id}`)
-        .or(`customer_id.eq.${targetId},driver_id.eq.${targetId}`)
-        .limit(1)
-        .maybeSingle();
-
-      if (relErr) {
-        return res.status(500).json({ error: 'Failed to fetch profile name.', details: relErr.message });
-      }
-      if (!relatedOrder) {
-        return res.status(404).json({ error: 'Profile not found.' });
-      }
-    }
-
-    // RLS only lets a user select their own profile, so cross-user name lookups
-    // go through the service-role client (same pattern as driverRoutes.js:237).
-    const db = supabaseAdmin || supabase;
-    const { data: profile, error } = await db
+    const { data: profile, error } = await supabase
       .from('profiles')
       .select('full_name')
-      .eq('id', targetId)
+      .eq('id', req.params.id)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });
@@ -311,22 +284,9 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
   }
-  try {
-    // ethers.getAddress accepts all-lowercase / all-uppercase hex and throws
-    // for mixed-case addresses whose EIP-55 checksum is wrong, so a typo'd
-    // address can never be persisted and later fail escrow.isAddress() with
-    // a misleading "escrow not configured" error at bid acceptance time.
-    ethers.getAddress(normalized);
-  } catch {
-    return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
-  }
 
   try {
-    // All writes target RLS-protected rows owned by the caller, so they run
-    // through the authenticated per-request client (profiles/driver_details
-    // revoke ALL privileges from anon — see revoke_anon_privileges.sql).
-    const db = createUserClient(req.token);
-    const { data: existing, error: checkErr } = await db
+    const { data: existing, error: checkErr } = await supabase
       .from('profiles')
       .select('polygon_wallet_address')
       .eq('id', userId)
@@ -335,7 +295,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     if (checkErr) return res.status(500).json({ error: 'Failed to fetch profile.', details: checkErr.message });
     if (!existing) return res.status(404).json({ error: 'Profile not found.' });
 
-    const { error: updateErr } = await db
+    const { error: updateErr } = await supabase
       .from('profiles')
       .update({
         polygon_wallet_address: normalized,
@@ -350,7 +310,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user.role === 'driver') {
-      const { error: driverDetailsErr } = await db
+      const { error: driverDetailsErr } = await supabase
         .from('driver_details')
         .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
 
@@ -414,11 +374,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (phone !== undefined) profileUpdate.phone = phone;
     if (email !== undefined) profileUpdate.email = email;
 
-    // RLS-protected writes (profiles/driver_details/trucks) require the
-    // authenticated per-request client — anon privileges are revoked.
-    const db = createUserClient(req.token);
-
-    const { data, error } = await db
+    const { data, error } = await supabase
       .from('profiles')
       .update(profileUpdate)
       .eq('id', userId)
@@ -428,7 +384,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (error) throw error;
     if (role === 'driver') {
       if (typeof is_online === 'boolean') {
-        const { error: driverError } = await db
+        const { error: driverError } = await supabase
         .from('driver_details')
         .update({
           is_online
@@ -440,7 +396,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
 
       if (number_plate !== undefined) {
         const normalizedPlate = sanitizeNumberPlate(number_plate);
-        const { error: truckError } = await db
+        const { error: truckError } = await supabase
           .from('trucks')
           .update({
             number_plate: normalizedPlate
@@ -516,7 +472,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     const { fcmToken } = req.body;
     const trimmedToken = fcmToken?.trim();
 
-    const { error } = await createUserClient(req.token)
+    const { error } = await supabase
       .from('profiles')
       .update({
         fcm_token: trimmedToken,
@@ -595,12 +551,8 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     const pageSize = 1000;
     const trips = [];
 
-    // Page through the caller's own RLS-visible rows via the authenticated
-    // per-request client (anon privileges are revoked on orders/profiles).
-    const db = createUserClient(req.token);
-
     while (true) {
-      let pageQuery = db
+      let pageQuery = supabase
         .from('orders')
         .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
         .eq('driver_id', userId)
@@ -632,7 +584,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
 
     // Fetch the driver's name/phone so the statement PDF shows the real driver
     // instead of the app-side 'Driver' fallback.
-    const { data: profile, error: profileError } = await db
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('full_name, phone')
       .eq('id', userId)
@@ -762,12 +714,8 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     let profile = null;
     let profileError = null;
 
-    // Admin endpoint that may target any user, so it must bypass RLS via the
-    // service-role client (a user client can only ever see its own profile).
-    const db = supabaseAdmin || supabase;
-
     if (uuidRegex.test(targetUserId)) {
-      const result = await db
+      const result = await supabase
         .from('profiles')
         .select('id, firebase_uid')
         .eq('id', targetUserId)
@@ -777,7 +725,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     }
 
     if (!profile && !profileError) {
-      const firebaseLookup = await db
+      const firebaseLookup = await supabase
         .from('profiles')
         .select('id, firebase_uid')
         .eq('firebase_uid', targetUserId)
@@ -817,10 +765,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
     // metrics below are derived from the data that actually exists: trips for
     // distance, the ratings table for the average rating, and the delivered
     // order set for the on-time percentage.
-    // Own-data reads run through the authenticated per-request client
-    // (anon privileges are revoked on orders/trips/ratings).
-    const db = createUserClient(req.token);
-    const { data: orders, error } = await db
+    const { data: orders, error } = await supabase
       .from('orders')
       .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
@@ -830,7 +775,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const { data: tripRows, error: tripsError } = await db
+    const { data: tripRows, error: tripsError } = await supabase
       .from('trips')
       .select('distance')
       .eq('driver_id', userId)
@@ -840,7 +785,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
     }
 
-    const { data: ratingRows, error: ratingsError } = await db
+    const { data: ratingRows, error: ratingsError } = await supabase
       .from('ratings')
       .select('stars')
       .eq('driver_id', userId);

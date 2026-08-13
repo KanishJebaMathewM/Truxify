@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+/* global vi: writable */
+import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../../middleware/logger.js', () => ({ default: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } }));
 

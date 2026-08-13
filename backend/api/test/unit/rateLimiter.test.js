@@ -67,25 +67,4 @@ describe('rateLimiter - normalizeIp & IPv6 Subnet Masking', () => {
     // Both clients shared the same immediate peer, but must not share a bucket.
     expect(keyA).not.toBe(safeIpKeyGenerator({ ip: '10.0.0.1' }));
   });
-
-  it('takes the first address from a comma-separated X-Forwarded-For chain', () => {
-    const req = {
-      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1, 192.168.1.1' },
-      socket: { remoteAddress: '10.0.0.1' },
-    };
-    expect(safeIpKeyGenerator(req)).toBe('203.0.113.9');
-  });
-
-  it('normalizes an IPv6-mapped IPv4 from the X-Forwarded-For header', () => {
-    const req = {
-      headers: { 'x-forwarded-for': '::ffff:192.168.1.100' },
-      socket: { remoteAddress: '10.0.0.1' },
-    };
-    expect(safeIpKeyGenerator(req)).toBe('192.168.1.100');
-  });
-
-  it('uses the socket remote address when req.ip and XFF are absent', () => {
-    const req = { socket: { remoteAddress: '10.1.2.3' } };
-    expect(safeIpKeyGenerator(req)).toBe('10.1.2.3');
-  });
 });

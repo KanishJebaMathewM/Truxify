@@ -223,7 +223,7 @@ begin
   -- Update daily earnings summary, accumulating hours_driven alongside the
   -- payout amount (canonical form from docs/supabase_setup.sql)
   insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
-  values (v_order.driver_id, current_date, coalesce(v_order.bid_amount, v_order.total_amount), 1, p_hours_driven)
+  values (v_order.driver_id, (now() AT TIME ZONE 'UTC')::date, coalesce(v_order.bid_amount, v_order.total_amount), 1, p_hours_driven)
   on conflict (driver_id, day_date)
   do update set
     amount = earnings_daily.amount + excluded.amount,

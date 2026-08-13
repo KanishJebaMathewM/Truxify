@@ -39,3 +39,10 @@ function validateCookies(req, value) {
     );
   }
 }
+
+export function isSecureCookieConfig(cookieHeader) {
+  if (!cookieHeader || typeof cookieHeader !== 'string') return false;
+  const lower = cookieHeader.toLowerCase();
+  return RECOMMENDED_ATTRIBUTES.every((attr) => lower.includes(attr.toLowerCase()));
+}
+

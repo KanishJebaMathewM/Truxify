@@ -102,4 +102,18 @@ describe('cookieSecurityValidator', () => {
       expect(mockLogger.warn).not.toHaveBeenCalled();
     });
   });
+
+  describe('isSecureCookieConfig', () => {
+    it('returns true when all attributes are present', async () => {
+      const { isSecureCookieConfig } = await import('../../src/middleware/cookieSecurityValidator.js');
+      expect(isSecureCookieConfig('session=123; HttpOnly; Secure; SameSite=Strict; Path=/')).toBe(true);
+    });
+
+    it('returns false when any recommended attribute is missing', async () => {
+      const { isSecureCookieConfig } = await import('../../src/middleware/cookieSecurityValidator.js');
+      expect(isSecureCookieConfig('session=123; Path=/')).toBe(false);
+      expect(isSecureCookieConfig(null)).toBe(false);
+    });
+  });
 });
+

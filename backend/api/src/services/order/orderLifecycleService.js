@@ -334,7 +334,7 @@ export class OrderLifecycleService {
         sendPushNotification(
           offer.customer_id,
           'New Bid Received',
-          `A driver has submitted a bid of ₹${bidAmount} for your order.`,
+          `A driver has submitted a bid of ₹${(bidAmount / 100).toFixed(2)} for your order.`,
           'order_update',
           { loadOfferId, bidId: bid.id }
         ).catch(err => logger.error(`[FCM] Failed to notify customer of new bid: ${err.message}`));

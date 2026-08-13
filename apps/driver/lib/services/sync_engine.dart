@@ -13,6 +13,10 @@ class SyncEngine {
   static Database? _db;
   static bool _isSyncing = false;
 
+  /// Maximum number of failed sync attempts before an event is dead-lettered
+  /// so it is never re-POSTed indefinitely.
+  static const int maxRetries = 5;
+
   /// Backend base URL, injected at build time via --dart-define.
   /// Mirrors ApiClient so this service never bakes in a hardcoded
   /// cleartext host (previously `http://10.0.2.2:5000`).
@@ -38,7 +42,7 @@ class SyncEngine {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sync_queue (
@@ -46,9 +50,19 @@ class SyncEngine {
             trip_id TEXT,
             event_type TEXT NOT NULL,
             payload TEXT NOT NULL,
-            occurred_at TEXT NOT NULL
+            occurred_at TEXT NOT NULL,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            state TEXT NOT NULL DEFAULT 'pending'
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+              "ALTER TABLE sync_queue ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
+          await db.execute(
+              "ALTER TABLE sync_queue ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'");
+        }
       },
     );
   }
@@ -69,6 +83,8 @@ class SyncEngine {
       'event_type': eventType,
       'payload': jsonEncode(payload),
       'occurred_at': occurredAt,
+      'retry_count': 0,
+      'state': 'pending',
     });
 
     debugPrint('[SyncEngine] Queued $eventType for trip $tripId.');
@@ -88,7 +104,11 @@ class SyncEngine {
       if (connectivityResults.contains(ConnectivityResult.none)) return;
 
       final db = await database;
-      final events = await db.query('sync_queue', orderBy: 'occurred_at ASC');
+      final events = await db.query(
+        'sync_queue',
+        where: "state = 'pending'",
+        orderBy: 'occurred_at ASC',
+      );
       if (events.isEmpty) return;
 
       final user = FirebaseAuth.instance.currentUser;
@@ -120,8 +140,10 @@ class SyncEngine {
         body: jsonEncode(requestBody),
       );
 
-      if (response.statusCode == 202) {
-        // Successfully synced, clear the queue
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        // Successfully synced, clear the queue. Any 2xx is treated as success
+        // (the backend returns 200 for an empty batch and 202 otherwise), so a
+        // 200 does not leave the events in the queue for duplicate re-delivery.
         final eventIds = events.map((e) => e['id']).toList();
         await db.delete(
           'sync_queue',
@@ -131,6 +153,18 @@ class SyncEngine {
         debugPrint('[SyncEngine] Successfully synced ${events.length} events.');
       } else {
         debugPrint('[SyncEngine] Sync failed with status ${response.statusCode}');
+        // Increment the per-event retry counter and dead-letter events that
+        // have exhausted their attempts so they are never re-POSTed forever.
+        final failedIds = events.map((e) => e['id']).toList();
+        await db.rawUpdate(
+          'UPDATE sync_queue SET retry_count = retry_count + 1 WHERE id IN (${List.filled(failedIds.length, '?').join(',')})',
+          failedIds,
+        );
+        await db.rawUpdate(
+          "UPDATE sync_queue SET state = 'dead_lettered' WHERE retry_count >= $maxRetries AND state = 'pending'",
+        );
+        debugPrint(
+            '[SyncEngine] Sync failed, marked ${failedIds.length} events for retry (max $maxRetries attempts).');
       }
     } catch (e) {
       debugPrint('[SyncEngine] Sync exception: $e');

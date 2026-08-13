@@ -46,7 +46,6 @@ describe('escapeLike', () => {
 
 
 // === Spec 17 test ===
-import { describe, it, expect } from 'vitest';
 import { escapeSqlLike } from '../../src/lib/escapeLike.js';
 describe('escapeSqlLike', () => {
   it('escapes %', () => { expect(escapeSqlLike('100%')).toBe('100\\%'); });

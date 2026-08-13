@@ -40,20 +40,37 @@ async function claimWithdrawal(withdrawalId) {
 /**
  * Records the dispatch outcome on the already-claimed row so a crash between
  * dispatch and the completion RPC is detected and re-settled (not failed) on
- * the next sweep. Best-effort: failure to record only delays detection.
+ * the next sweep.
+ *
+ * Persisting `settlement_ref` is what lets the NEXT sweep settle a withdrawal
+ * whose payout already left the platform: without it the row stays 'pending'
+ * with `payout_attempted_at` set and the refuse-to-settle guard would freeze
+ * the driver's funds forever. We therefore retry with backoff on transient
+ * errors instead of silently dropping the write.
  */
 async function recordDispatchOutcome(withdrawalId, settlementRef) {
-  const { error } = await supabaseAdmin
-    .from("wallet_transactions")
-    .update({ settlement_ref: settlementRef })
-    .eq("id", withdrawalId)
-    .is("settlement_ref", null);
+  let lastError = null;
+  for (let attempt = 1; attempt <= SETTLE_RETRY_ATTEMPTS; attempt += 1) {
+    const { error } = await supabaseAdmin
+      .from("wallet_transactions")
+      .update({ settlement_ref: settlementRef })
+      .eq("id", withdrawalId)
+      .is("settlement_ref", null);
 
-  if (error) {
-    logger.warn(
-      `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId}: ${error.message}`,
-    );
+    if (!error) {
+      return;
+    }
+    lastError = error;
+    if (attempt < SETTLE_RETRY_ATTEMPTS) {
+      await sleep(SETTLE_RETRY_DELAYS_MS[attempt - 1]);
+    }
   }
+  // Even after retries the outcome could not be persisted. The in-memory
+  // settlementRef is still used to settle this sweep, so we surface the error
+  // to the caller rather than silently losing the reference.
+  throw new Error(
+    `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId} after ${SETTLE_RETRY_ATTEMPTS} attempts: ${lastError?.message}`,
+  );
 }
 
 /**
@@ -164,7 +181,19 @@ export async function settlePendingWithdrawals() {
 
         // 2. Persist the dispatch outcome BEFORE the completion RPC so a crash
         //    in between is detected and settled (not failed) on the next sweep.
-        await recordDispatchOutcome(withdrawal.id, settlementRef);
+        //    The payout has ALREADY left the platform here, so a failure to
+        //    persist the settlement reference must NOT fall through to the
+        //    dispatch-failure handler below (which would restore funds and
+        //    double-pay the driver). We log, keep the in-memory settlementRef
+        //    for this sweep's settle call, and let the next sweep retry the
+        //    write.
+        try {
+          await recordDispatchOutcome(withdrawal.id, settlementRef);
+        } catch (recordErr) {
+          logger.error(
+            `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} payout dispatched but settlement_ref could not be persisted: ${recordErr.message}`,
+          );
+        }
       } catch (err) {
         // The payout never left the platform — safe to restore the reserved
         // funds to wallet_confirmed.

@@ -9,6 +9,8 @@ include_directories(include)
 add_library(gpu_vrp
     src/cuda_vrp.cu
 )
+<<<<<<< HEAD
+=======
 
 enable_testing()
 
@@ -18,3 +20,4 @@ add_executable(gpu_vrp_tests
 target_link_libraries(gpu_vrp_tests PRIVATE gpu_vrp)
 
 add_test(NAME gpu_vrp_tests COMMAND gpu_vrp_tests)
+>>>>>>> upstream/main

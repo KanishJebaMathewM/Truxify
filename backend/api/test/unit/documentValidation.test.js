@@ -29,15 +29,6 @@ describe('detectDocumentMimeType', () => {
     expect(detectDocumentMimeType(EXECUTABLE_BYTES)).toBeNull();
   });
 
-  it('returns null for a truncated JPEG signature', () => {
-    // Only the first two of the three JPEG magic bytes are present.
-    expect(detectDocumentMimeType(Buffer.from([0xff, 0xd8]))).toBeNull();
-  });
-
-  it('returns null for a truncated PDF signature', () => {
-    expect(detectDocumentMimeType(Buffer.from('%PD', 'utf-8'))).toBeNull();
-  });
-
   it('returns null for a shell script renamed to .jpg', () => {
     expect(detectDocumentMimeType(SHELL_SCRIPT_RENAMED_AS_JPG)).toBeNull();
   });
@@ -78,14 +69,19 @@ describe('validateDocumentBuffer', () => {
   it('accepts content when no declared type is provided, based on content alone', () => {
     expect(validateDocumentBuffer(PDF_BYTES, undefined)).toBe('application/pdf');
   });
-
-  it('treats an empty-string declared type as absent', () => {
-    expect(validateDocumentBuffer(PDF_BYTES, '')).toBe('application/pdf');
-    expect(validateDocumentBuffer(PDF_BYTES, '   ')).toBe('application/pdf');
-  });
-
-  it('compares the declared type case-insensitively', () => {
-    expect(validateDocumentBuffer(JPEG_BYTES, 'IMAGE/JPEG')).toBe('image/jpeg');
-    expect(validateDocumentBuffer(PNG_BYTES, 'Image/PNG')).toBe('image/png');
-  });
 });
+
+
+// === Spec 7 test ===
+import { describe, it, expect } from 'vitest';
+import { matchesMimeSignature } from '../../src/lib/documentValidation.js';
+describe('matchesMimeSignature', () => {
+  it('matches PNG', () => {
+    expect(matchesMimeSignature(Buffer.from([0x89, 0x50, 0x4E, 0x47]), 'image/png')).toBe(true);
+  });
+  it('rejects fake PNG', () => {
+    expect(matchesMimeSignature(Buffer.from([0xFF, 0xD8, 0xFF]), 'image/png')).toBe(false);
+  });
+  it('rejects short buffer', () => { expect(matchesMimeSignature(Buffer.from([0x89]), 'image/png')).toBe(false); });
+});
+

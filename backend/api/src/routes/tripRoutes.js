@@ -73,7 +73,7 @@
 
 import express from 'express';
 import { z } from 'zod';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
@@ -83,21 +83,6 @@ import logger from '../middleware/logger.js';
 const router = express.Router();
 const DEFAULT_EVENTS_LIMIT = 100;
 const MAX_EVENTS_LIMIT = 500;
-
-/**
- * Builds the Supabase client for a request. End-user queries must run as the
- * authenticated user (per-request client carrying the JWT) so Row Level
- * Security authorizes them — the anon client fails RLS and trips every
- * endpoint (ownership 403, inserts 500, empty reads, broken idempotency).
- * Admins and token-less (dev/test bypass) requests fall back to the admin
- * client.
- */
-function getUserSupabaseClient(req) {
-  if (!req.token || req.user?.role === 'admin') {
-    return supabaseAdmin || supabase;
-  }
-  return createUserClient(req.token);
-}
 
 function parsePositiveIntegerQuery(value, fallback, max) {
   if (value === undefined) return { value: fallback };
@@ -301,9 +286,6 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
   }
 
   try {
-    // orders, trip_events and processed_batches are RLS-protected with no anon
-    // access, so every read/write here must run as the authenticated caller.
-    const db = createUserClient(req.token);
     // 1. Validate per-event-type payloads and strip sensitive fields
     for (const event of events) {
       // Explicit coordinate validation for telemetry frames
@@ -340,33 +322,29 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // caller owns or is assigned to. Never trust a client-supplied trip_id.
     // This runs BEFORE the idempotency short-circuit below, otherwise a
     // replayed batch would return 202 and skip authorization entirely.
-    const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
-    // Trip ids sent by the app are trip display ids ('TX-' + order display id).
-    // They are resolved to the owning order's UUID and that UUID is what gets
-    // stored in trip_events.trip_id (#10243), matching GET /:id/events which
-    // filters trip_events by orders.id.
-    const orderByDisplayId = new Map();
+    if (req.user.role !== 'admin') {
+      const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
 
-    if (tripIds.length > 0) {
-      const orderDisplayIds = tripIds.map(tripId =>
-        typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
-      );
+      if (tripIds.length > 0) {
+        // Trip ids sent by the app are trip display ids ('TX-' + order display id),
+        // not the orders.id uuid. Map them back to the bare order display id before
+        // looking up the owning order, otherwise every batch is rejected with 403.
+        const orderDisplayIds = tripIds.map(tripId =>
+          typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
+        );
 
-      const { data: ownedOrders, error: ownershipError } = await db
-        .from('orders')
-        .select('id, order_display_id, driver_id, customer_id')
-        .in('order_display_id', orderDisplayIds);
+        const { data: ownedOrders, error: ownershipError } = await supabase
+          .from('orders')
+          .select('order_display_id, driver_id, customer_id')
+          .in('order_display_id', orderDisplayIds);
 
-      if (ownershipError) {
-        logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
-        return res.status(500).json({ error: 'Internal Server Error' });
-      }
+        if (ownershipError) {
+          logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
+          return res.status(500).json({ error: 'Internal Server Error' });
+        }
 
-      for (const order of ownedOrders || []) {
-        orderByDisplayId.set(order.order_display_id, order);
-      }
+        const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
 
-      if (req.user.role !== 'admin') {
         for (const tripId of tripIds) {
           const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
           const order = orderByDisplayId.get(orderDisplayId);
@@ -382,7 +360,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 
     // 3. Check Idempotency (Prevent double processing)
     // We check if this exact batch has already been processed recently.
-    const { data: existingBatch } = await db
+    const { data: existingBatch } = await supabase
       .from('processed_batches')
       .select('id')
       .eq('idempotency_key', idempotencyKey)
@@ -401,7 +379,9 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       return {
         event_id: event.id,
         user_id: userId,
-        trip_id: resolveTripId(event.trip_id, orderByDisplayId),
+        trip_id: (typeof event.trip_id === 'string' && event.trip_id.startsWith('TX-'))
+          ? event.trip_id.slice(3)
+          : (event.trip_id || null),
         event_type: event.type,
         event_timestamp: event.occurred_at,
         latitude: event.payload?.lat !== undefined ? Number(event.payload.lat) : null,
@@ -414,7 +394,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // 3. Bulk Insert / Upsert into the trip_events table
     // Upsert ensures that if a specific event ID already exists, it just updates it
     // rather than failing the whole batch.
-    const { error: insertError } = await db
+    const { error: insertError } = await supabase
       .from('trip_events')
       .upsert(recordsToInsert, { onConflict: 'event_id' });
 
@@ -435,9 +415,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // 4. Log the successful batch using the idempotency key
     // This prevents the same batch from being uploaded again if the client crashes
     // before it can mark them as synced in its local SQLite db.
-    // processed_batches only exposes SELECT to authenticated users, so the
-    // insert runs through the service-role client.
-    const { error: idempotencyError } = await (supabaseAdmin || supabase)
+    const { error: idempotencyError } = await supabase
       .from('processed_batches')
       .insert({
         idempotency_key: idempotencyKey,
@@ -577,10 +555,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       }
     }
 
-    // trip_events is RLS-protected (users read own events, no anon access), so
-    // the event rows are read through the authenticated per-request client.
-    const db = createUserClient(req.token);
-    let eventsQuery = db
+    let eventsQuery = supabase
       .from('trip_events')
       .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at', { count: 'exact' })
       .eq('trip_id', tripId);
@@ -651,19 +626,6 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
 // ============================================================================
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Resolves a client-supplied trip id to the owning order's UUID for storage in
-// trip_events.trip_id (#10243). Already-UUID values pass through unchanged;
-// trip display ids ('TX-' + order display id) are mapped via the order lookup
-// performed by the batch endpoint. Unresolvable ids fall back to null.
-function resolveTripId(rawTripId, orderByDisplayId) {
-  if (!rawTripId) return null;
-  if (UUID_REGEX.test(rawTripId)) return rawTripId;
-  const orderDisplayId = typeof rawTripId === 'string' && rawTripId.startsWith('TX-')
-    ? rawTripId.slice(3)
-    : rawTripId;
-  return orderByDisplayId.get(orderDisplayId)?.id ?? null;
-}
 
 function isAdmin(user) {
   return user?.role === 'admin';

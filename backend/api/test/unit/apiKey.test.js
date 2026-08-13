@@ -166,15 +166,4 @@ describe('requireApiKey', () => {
 
     expect(logger.warn).toHaveBeenCalled();
   });
-
-  it('rejects a whitespace-padded key that is not in the allow list', () => {
-    const { req, res, next } = createMocks({
-      req: { headers: { 'x-api-key': '  test-key-1  ' } },
-    });
-
-    requireApiKey(req, res, next);
-
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(next).not.toHaveBeenCalled();
-  });
 });

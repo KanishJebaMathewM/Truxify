@@ -68,8 +68,21 @@ class TraceabilityService {
         }
     }
 
-    _parseProductCreated(receipt) {
+    _parseShipmentCreated(receipt) {
         for (const log of receipt.logs) {
+            try {
+                const parsed = this.contract.interface.parseLog(log);
+                if (parsed && parsed.name === 'ShipmentCreated') {
+                    return parsed.args[0].toString();
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        throw new Error('ShipmentCreated event not found in receipt');
+    }
+
+    _parseProductCreated(receipt) {        for (const log of receipt.logs) {
             try {
                 const parsed = this.contract.interface.parseLog(log);
                 if (parsed && parsed.name === 'ProductCreated') {
@@ -94,21 +107,7 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
-            let shipmentId;
-            for (const log of receipt.logs) {
-                try {
-                    const parsed = this.contract.interface.parseLog(log);
-                    if (parsed && parsed.name === 'ShipmentCreated') {
-                        shipmentId = parsed.args.shipmentId;
-                        break;
-                    }
-                } catch (e) {
-                    // Not a matching event, continue
-                }
-            }
-            if (!shipmentId) {
-                shipmentId = await this.contract.getTotalShipments();
-            }
+            const shipmentId = this._parseShipmentCreated(receipt);
 
             await this.storeShipment({
                 productId,

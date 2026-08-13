@@ -153,4 +153,70 @@ describe('FraudDetectionService', () => {
       expect(network.isInFraudRing).toBe(false);
     });
   });
+
+  describe('_flushPendingUpserts', () => {
+    function makeProfile(userId) {
+      return {
+        user_id: userId,
+        events: [{ type: 'typing', timestamp: Date.now(), data: {} }],
+        patterns: {
+          typingSpeed: [],
+          mouseMovements: [],
+          deviceFingerprint: null,
+          locationHistory: [],
+          transactionPatterns: [],
+        },
+        last_activity: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    }
+
+    it('retains pending upserts when the DB upsert fails so they are retried', async () => {
+      mockFrom.mockReturnValue(chain({
+        upsert: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'connection reset' },
+        }),
+      }));
+
+      FraudDetectionService.pendingUpserts.set('user-fail', makeProfile('user-fail'));
+
+      await FraudDetectionService._flushPendingUpserts();
+
+      // The failed entry must NOT be lost — it stays in the map for retry.
+      expect(FraudDetectionService.pendingUpserts.size).toBe(1);
+      expect(FraudDetectionService.pendingUpserts.has('user-fail')).toBe(true);
+
+      // On the next flush, with a healthy DB, the entry is persisted and cleared.
+      mockFrom.mockReturnValue(chain({
+        upsert: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }));
+
+      await FraudDetectionService._flushPendingUpserts();
+
+      expect(FraudDetectionService.pendingUpserts.size).toBe(0);
+    });
+
+    it('keeps a newer pending update that arrives during a successful flush', async () => {
+      let resolveUpsert;
+      mockFrom.mockReturnValue(chain({
+        upsert: vi.fn().mockImplementation(() => new Promise((res) => {
+          resolveUpsert = () => res({ data: [], error: null });
+        })),
+      }));
+
+      FraudDetectionService.pendingUpserts.set('user-race', makeProfile('user-race'));
+      const flushPromise = FraudDetectionService._flushPendingUpserts();
+
+      // A newer update for the same user replaces the snapshot entry.
+      FraudDetectionService.pendingUpserts.set('user-race', makeProfile('user-race'));
+
+      resolveUpsert();
+      await flushPromise;
+
+      // The older snapshot was persisted; the newer in-flight update must remain.
+      expect(FraudDetectionService.pendingUpserts.size).toBe(1);
+      expect(FraudDetectionService.pendingUpserts.has('user-race')).toBe(true);
+    });
+  });
 });

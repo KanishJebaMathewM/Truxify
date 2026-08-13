@@ -148,8 +148,8 @@ class FraudDetectionService {
     // Capture the current batch without clearing the map yet. The map must
     // not be emptied before the write succeeds, otherwise a failed/interrupted
     // upsert silently loses the pending risk-score updates.
-    const entries = Array.from(this.pendingUpserts.entries());
-    const records = entries.map(([, record]) => record);
+    const snapshot = Array.from(this.pendingUpserts.entries());
+    const records = snapshot.map(([, record]) => record);
 
     try {
       const { error: dbErr } = await supabaseAdmin
@@ -161,8 +161,15 @@ class FraudDetectionService {
         return; // keep pending entries queued for the next flush
       }
 
-      // Only clear the entries we successfully persisted.
-      entries.forEach(([key]) => this.pendingUpserts.delete(key));
+      // Only drop the entries we actually persisted. A newer update for the
+      // same user may have arrived during the await and replaced the map value
+      // with a fresh object reference — that entry is still pending and must be
+      // kept for the next flush.
+      for (const [key, record] of snapshot) {
+        if (this.pendingUpserts.get(key) === record) {
+          this.pendingUpserts.delete(key);
+        }
+      }
     } catch (error) {
       logger.error('[FraudDetection] Batch upsert error:', error);
       // Keep pending entries queued so updates are not silently lost.

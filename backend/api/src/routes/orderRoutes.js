@@ -1040,6 +1040,7 @@ const POD_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const POD_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 const podUpload = multer({
+import { isValidDisplayId } from '../utils/orderDisplayIdValidation.js';
   storage: multer.memoryStorage(),
   limits: { fileSize: POD_MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {

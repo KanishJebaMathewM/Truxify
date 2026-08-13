@@ -1,5 +1,9 @@
 import './style.css';
 
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const inviteBtn = document.getElementById('inviteDriverBtn');
     const modal = document.getElementById('inviteModal');
@@ -33,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         li.innerHTML = `
             <div class="driver-info">
-                <strong>${email.split('@')[0]}</strong>
+                <strong>${escapeHtml(email.split('@')[0])}</strong>
                 <span>Invite Pending</span>
             </div>
             <div class="status resting" style="background: rgba(59, 130, 246, 0.2); color: var(--primary);">Pending</div>

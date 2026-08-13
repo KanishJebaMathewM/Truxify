@@ -44,6 +44,7 @@ import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
+import { supabaseAdmin } from '../config/db.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
@@ -616,14 +617,33 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`)
       return { txHash: null, bookingId, alreadyReleased: true }
     }
-    if (booking && expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+    // Always verify the on-chain booking amount against the authoritative
+    // server figure (the order's escrow_amount_wei). When the caller does not
+    // supply expectedAmountWei, resolve it server-side from the order so the
+    // amount guard can never be skipped.
+    let authoritativeAmountWei = expectedAmountWei
+    if (authoritativeAmountWei === null && supabaseAdmin) {
+      try {
+        const { data: orderRow } = await supabaseAdmin
+          .from('orders')
+          .select('escrow_amount_wei')
+          .eq('order_display_id', orderDisplayId)
+          .maybeSingle()
+        if (orderRow?.escrow_amount_wei != null) {
+          authoritativeAmountWei = orderRow.escrow_amount_wei
+        }
+      } catch (lookupErr) {
+        logger.warn(`[escrow] Failed to resolve escrow_amount_wei for ${orderDisplayId}: ${lookupErr.message}`)
+      }
+    }
+    if (booking && authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
       logger.error(
-        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(expectedAmountWei)} wei — refusing to release.`
+        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(authoritativeAmountWei)} wei — refusing to release.`
       )
       return {
         txHash: null,
         bookingId,
-        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei). Refusing to release payment.`,
+        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei). Refusing to release payment.`,
         code: 'DEPOSIT_AMOUNT_MISMATCH',
       }
     }

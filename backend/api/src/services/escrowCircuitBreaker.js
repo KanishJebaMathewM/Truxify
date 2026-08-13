@@ -31,7 +31,7 @@ export async function isEscrowPaused() {
     return value === '1';
   } catch (err) {
     logger.error(
-      { err: err && err.message, event: 'ESCROW_CIRCUIT_BREAKER_READ_ERROR' },
+      { err, event: 'ESCROW_CIRCUIT_BREAKER_READ_ERROR' },
       '[escrow-circuit-breaker] Failed to read pause flag from Redis — failing open.'
     );
     return false;
@@ -65,7 +65,7 @@ export async function setEscrowPaused(paused) {
     return { paused, updatedAt: now, persisted: true };
   } catch (err) {
     logger.error(
-      { err: err && err.message, event: 'ESCROW_CIRCUIT_BREAKER_WRITE_ERROR' },
+      { err, event: 'ESCROW_CIRCUIT_BREAKER_WRITE_ERROR' },
       `[escrow-circuit-breaker] Failed to persist pause=${paused}.`
     );
     throw err;

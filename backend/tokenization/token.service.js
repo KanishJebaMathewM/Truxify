@@ -112,7 +112,7 @@ class TokenizationService {
 
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),

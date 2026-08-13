@@ -165,7 +165,10 @@ class EdgeRuntime {
                             /^(PATH|HOME|TMP|USER|LANG|LC_|RUST_|WASM_)/.test(k)
                         )
                     ),
-                    preopens: { '/': './' }
+                    // Only expose a dedicated, read-only data directory to the
+                    // guest. Mounting the whole CWD ('.') would hand the guest
+                    // backend source, .env files and secrets.
+                    preopens: { '/data': './wasm-data' }
                 });
                 const module = new WebAssembly.Module(wasmBytes);
                 const { imports, bind } = buildWasmImportObject(module, wasi);
@@ -211,7 +214,7 @@ class EdgeRuntime {
             const fallbackFn = wasmFn ? moduleEntry.exports[functionName] : jsFallback[functionName];
             if (typeof fallbackFn === 'function') {
                 try {
-                    const result = await this.executeWithTimeout(() => fallbackFn(...params), this.timeoutLimit);
+                    const result = await this.executeWithTimeout(fallbackFn, this.timeoutLimit, params);
                     return { success: true, result };
                 } catch (err) {
                     logger.error(`Edge function '${functionName}' failed: ${err.message}`);
@@ -298,6 +301,7 @@ class EdgeRuntime {
                     maxOldGenerationSizeMb: 64,
                     maxYoungGenerationSizeMb: 16,
                     stackSizeMb: 2,
+                    maxCPUMilliseconds: this.timeoutLimit,
                 },
             });
 
@@ -327,20 +331,57 @@ class EdgeRuntime {
         });
     }
 
-    async executeWithTimeout(fn, timeout) {
+    // Runs `fn` in a separate worker thread so that a synchronous infinite loop
+    // in guest/native code can be terminated (via worker.terminate()) and cannot
+    // block the main event loop. The `resourceLimits.maxCPUMilliseconds` guard
+    // additionally aborts runaway CPU-bound code. `fn` must be a self-contained
+    // (closure-free) function serializable via toString(), and `args` its
+    // parameters.
+    async executeWithTimeout(fn, timeout, args = []) {
+        const { Worker } = require('worker_threads');
+
         return new Promise((resolve, reject) => {
+            const worker = new Worker(
+                `
+                const { parentPort, workerData } = require('worker_threads');
+                const { fnSource, args } = workerData;
+                try {
+                    const fn = eval('(' + fnSource + ')');
+                    const result = fn(...args);
+                    parentPort.postMessage({ ok: true, result });
+                } catch (e) {
+                    parentPort.postMessage({ ok: false, error: e.message });
+                }
+                `,
+                {
+                    eval: true,
+                    workerData: { fnSource: fn.toString(), args },
+                    resourceLimits: { maxCPUMilliseconds: timeout },
+                }
+            );
+
             const timer = setTimeout(() => {
+                worker.terminate();
                 reject(new Error(`Execution timeout after ${timeout}ms`));
             }, timeout);
 
-            try {
-                const result = fn();
+            worker.on('message', (msg) => {
                 clearTimeout(timer);
-                resolve(result);
-            } catch (error) {
+                if (msg.ok) resolve(msg.result);
+                else reject(new Error(msg.error));
+            });
+
+            worker.on('error', (err) => {
                 clearTimeout(timer);
-                reject(error);
-            }
+                reject(err);
+            });
+
+            worker.on('exit', (code) => {
+                if (code !== 0 && code !== 1) {
+                    clearTimeout(timer);
+                    reject(new Error(`Worker exited with code ${code}`));
+                }
+            });
         });
     }
 

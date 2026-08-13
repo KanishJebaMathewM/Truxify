@@ -22,7 +22,7 @@ function isTransientHttpStatus(status) {
   if (status === null) return false;
   if (status === 408) return true;
   if (status >= 500 && status <= 599) return true;
-  if (status === 429 || status === 408) return true;
+  if (status === 429) return true;
   return false;
 }
 

@@ -52,6 +52,9 @@ export function detectDocumentMimeType(buffer) {
  * message on failure; returns the verified MIME type on success.
  */
 export function validateDocumentBuffer(buffer, declaredMimeType) {
+  if (buffer == null) {
+    throw new DocumentValidationError('Document buffer is null or undefined.');
+  }
   const detected = detectDocumentMimeType(buffer);
 
   if (!detected || !ALLOWED_DOCUMENT_MIME_TYPES.includes(detected)) {

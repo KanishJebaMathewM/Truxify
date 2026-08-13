@@ -68,7 +68,16 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       let isAuthorized = false;
 
       if (req.user.role === 'iot_device') {
-        isAuthorized = req.user.id === loadId;
+        // Look up the device-to-load assignment via the iot_device_loads table.
+        // The previous check (device_id === load_id) was semantically wrong since
+        // a device UUID and a load UUID are never meaningfully comparable.
+        const { data: assignment } = await supabaseAdmin
+          .from('iot_device_loads')
+          .select('id')
+          .eq('device_id', req.user.id)
+          .eq('load_id', loadId)
+          .maybeSingle();
+        isAuthorized = !!assignment;
       } else {
         isAuthorized = load.customer_id === req.user.id;
         if (!isAuthorized && load.order_display_id) {

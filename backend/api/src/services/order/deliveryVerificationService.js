@@ -482,9 +482,12 @@ export class DeliveryVerificationService {
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
-        if (!isRetryForStuckEscrow) {
-          await this.assertDriverAtDropoff(order);
-        }
+        // Geofence must still apply on the stuck-escrow retry path. The retry
+        // flag only relaxes OTP-readiness and the Postgres RPC guard below; it
+        // must never bypass the driver-at-dropoff control, which would let a
+        // release be re-attempted without physical presence at the drop-off
+        // location (issue #11670).
+        await this.assertDriverAtDropoff(order);
 
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;

@@ -46,7 +46,13 @@ export class ContextPropagator {
     if (!event) return event;
 
     const serialized = TraceContext.serialize();
-    const enriched = { ...event };
+    // Preserve the event's prototype (e.g. BaseEvent getters such as
+    // eventType/eventId) — a plain `{ ...event }` spread drops them, so
+    // subscribers would receive events where event.eventType is undefined.
+    const enriched = Object.assign(
+      Object.create(Object.getPrototypeOf(event)),
+      event
+    );
 
     if (enriched.metadata && typeof enriched.metadata === 'object') {
       enriched.metadata = {

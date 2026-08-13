@@ -282,7 +282,7 @@ export function createLocationEventBus(options = {}) {
 
   function handleMessage(rawMessage) {
     metrics.received++;
-    let event = null;
+    let event;
     try {
       event = JSON.parse(rawMessage);
     } catch (err) {

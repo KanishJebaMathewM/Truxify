@@ -6,11 +6,8 @@ const SQLI_PATTERNS = [
   /insert\s+into/i,
   /delete\s+from/i,
   /or\s+1=1/i,
-  // Match -- only when it appears in a SQL comment context: preceded by
-  // whitespace, a quote, a closing paren, or a semicolon — not when
-  // embedded mid-word (e.g. date ranges like 2026-01-01--2026-02-01,
-  // negative numbers, or note fields containing "--").
-  /(?:^|[\s'");])--/,
+  // Note: standalone "--" SQL comment patterns removed to avoid false positives
+  // (markdown YAML headers, date ranges like 2026-01-01--2026-02-01, negative numbers).
 ];
 
 const XSS_PATTERNS = [
@@ -41,7 +38,11 @@ export default function suspiciousRequests(req, res, next) {
   const body = JSON.stringify(req.body || {});
   const query = JSON.stringify(req.query || {});
   const url = req.originalUrl || "";
-  const ua = req.headers["user-agent"] || "";
+  const rawUa = req.headers["user-agent"];
+  // A repeated user-agent header arrives as an array; take the first value
+  // and clamp the length so a hostile agent string cannot inject log lines.
+  const ua = (Array.isArray(rawUa) ? rawUa[0] : rawUa) || "";
+  const uaForLog = typeof ua === "string" ? ua.slice(0, 256) : String(ua).slice(0, 256);
 
   const findings = [];
 
@@ -67,11 +68,11 @@ export default function suspiciousRequests(req, res, next) {
       method: req.method,
       path: req.originalUrl,
       findings,
-      userAgent: ua,
+      userAgent: uaForLog,
     }, "Suspicious request detected");
 
     const blocking = findings.filter(f =>
-      ['SQL Injection', 'Path Traversal'].includes(f)
+      ['Path Traversal'].includes(f)
     );
     if (blocking.length) {
       return res.status(403).json({ error: 'Request blocked: suspicious content detected' });

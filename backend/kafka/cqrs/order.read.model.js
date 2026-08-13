@@ -193,3 +193,15 @@ class OrderReadModel {
 }
 
 export default new OrderReadModel();
+
+
+// === Spec 27: ===
+// === Spec 27: schema validation on read model ===
+const REQ = ['orderId', 'status', 'updatedAt'];
+export function validateOrderProjection(o) {
+  if (!o || typeof o !== 'object') return false;
+  for (const k of REQ) if (o[k] == null) return false;
+  if (Number.isNaN(Date.parse(o.updatedAt))) return false;
+  return true;
+}
+

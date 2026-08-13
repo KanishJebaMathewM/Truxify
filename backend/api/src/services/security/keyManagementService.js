@@ -106,12 +106,17 @@ class KeyManagementService {
   async storeEncryptedKey(userId, walletAddress, encryptedKeyData, deviceId, version = 1) {
     return measureExecution('KeyManagementService.storeEncryptedKey', async () => {
       try {
-        // Deactivate any previously active row for this user/wallet scope so
-        // exactly one active row exists and retrieveEncryptedKey's
-        // .eq('active', true).single() never 406s on multiple rows.
+        // Deactivate and archive any previously active row for this
+        // user/wallet scope so exactly one active row exists and
+        // retrieveEncryptedKey's .eq('active', true).single() never 406s on
+        // multiple rows. A single update covers both concerns.
         const { error: deactivateError } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
-          .update({ active: false })
+          .update({
+            active: false,
+            archived_at: new Date().toISOString(),
+            archive_reason: 'rotated',
+          })
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
           .eq('active', true);
@@ -122,18 +127,6 @@ class KeyManagementService {
         }
 
         const keyId = crypto.randomUUID();
-
-        // Deactivate any previously active key for this user+wallet
-        await (supabaseAdmin || supabase)
-          .from('encrypted_wallet_keys')
-          .update({
-            active: false,
-            archived_at: new Date().toISOString(),
-            archive_reason: 'rotated',
-          })
-          .eq('user_id', userId)
-          .eq('wallet_address', walletAddress)
-          .eq('active', true);
 
         const { data, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')

@@ -30,23 +30,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 // ---------------------------------------------------------------------------
-// Known pre-existing dead URLs (NOT introduced by this check).
-//
-// automation/n8n/dispute_resolution.json calls endpoints the API has never
-// mounted (/api/contracts/*, /api/notifications/*, /api/admin/escalate).
-// Those workflows are out of scope for the #10155 circuit-breaker regression
-// and are tracked separately; once the real endpoints exist, remove the entry
-// and the check will enforce them again. Any OTHER URL (including all
-// /api/internal/* circuit-breaker calls) is still strictly validated.
-// ---------------------------------------------------------------------------
-const KNOWN_BROKEN_URLS = new Set([
-  '/api/contracts/freeze',
-  '/api/contracts/resolve',
-  '/api/notifications/dispute',
-  '/api/admin/escalate',
-]);
-
-// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -268,10 +251,6 @@ for (const file of walkJson(automationDir)) {
     if (parsed.path === '/' || parsed.path === '/health') continue;
 
     if (parsed.target === 'api') {
-      if (KNOWN_BROKEN_URLS.has(parsed.path)) {
-        checked.push({ file: path.relative(REPO_ROOT, file), raw, target: 'api-known-broken' });
-        continue;
-      }
       checked.push({ file: path.relative(REPO_ROOT, file), raw, target: 'api' });
       if (!matches(parsed.path, knownApiPaths)) {
         failures.push({ file: path.relative(REPO_ROOT, file), raw, path: parsed.path, target: 'api' });

@@ -257,13 +257,22 @@ begin
   returning true into v_applied;
 
   if v_applied then
+    -- Only a strictly newer event may overwrite the read model. Without this
+    -- guard, coalesce() picked excluded.version whenever it was non-null and
+    -- payload was overwritten unconditionally, so a stale/out-of-order event
+    -- could downgrade version and clobber the row with old data (#11717).
+    -- A pre-existing row with NULL version is still overwritable (legacy rows
+    -- never carried a version), matching the previous behaviour.
     insert into orders_read_model (order_id, payload, event_type, version, updated_at)
     values (p_order_id, p_payload, p_event_type, p_version, now())
     on conflict (order_id) do update
     set payload     = excluded.payload,
         event_type  = excluded.event_type,
-        version     = coalesce(excluded.version, orders_read_model.version),
-        updated_at  = now();
+        version     = excluded.version,
+        updated_at  = now()
+    where orders_read_model.version is null
+       or excluded.version > orders_read_model.version
+    returning true into v_applied;
   end if;
 
   return jsonb_build_object('applied', coalesce(v_applied, false));

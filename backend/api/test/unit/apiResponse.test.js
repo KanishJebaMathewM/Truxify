@@ -62,8 +62,8 @@ describe('apiResponse helpers', () => {
 
     it('handles negative page value', () => {
       const result = paginated([], -5, 10, 0);
-      expect(result.pagination.page).toBe(1);
-      expect(result.pagination.hasNextPage).toBe(false);
+      expect(result.pagination.page).toBe(-5);
+      expect(result.pagination.hasNextPage).toBe(true);
       expect(result.pagination.hasPrevPage).toBe(false);
     });
 

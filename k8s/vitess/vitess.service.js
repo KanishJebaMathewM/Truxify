@@ -83,9 +83,12 @@ class VitessService {
         }
     }
 
-    async executeRead(query, params = []) {
+    async executeRead(query, params = [], shardKey = null) {
         try {
-            const [rows] = await this.readPool.execute(query, params);
+            const connection = shardKey
+                ? await this.getShardConnection(this.getShard(shardKey))
+                : this.readPool;
+            const [rows] = await connection.execute(query, params);
             return rows;
         } catch (error) {
             logger.error('Read query failed:', error);
@@ -93,9 +96,12 @@ class VitessService {
         }
     }
 
-    async executeWrite(query, params = []) {
+    async executeWrite(query, params = [], shardKey = null) {
         try {
-            const [rows] = await this.writePool.execute(query, params);
+            const connection = shardKey
+                ? await this.getShardConnection(this.getShard(shardKey))
+                : this.writePool;
+            const [rows] = await connection.execute(query, params);
             return rows;
         } catch (error) {
             logger.error('Write query failed:', error);

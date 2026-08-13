@@ -104,7 +104,7 @@ class _AutomatedIftaJurisdictionScreenState extends State<AutomatedIftaJurisdict
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.assessment, size: 80, color: Colors.grey[350]),
+          Icon(Icons.assessment, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 16),
           Text('No report generated yet.', style: TextStyle(color: Colors.grey[600])),
         ],

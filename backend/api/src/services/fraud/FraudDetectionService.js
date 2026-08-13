@@ -104,7 +104,13 @@ class FraudDetectionService {
     // Check Redis cache
     const cached = this.redis ? await this.redis.get(`behavior:${userId}`) : null;
     if (cached) {
-      return JSON.parse(cached);
+      try {
+        return JSON.parse(cached);
+      } catch (err) {
+        // Corrupt cache entry — log and fall through to the in-memory / DB
+        // paths so a single bad entry cannot 500 the fraud check.
+        logger.error(`[FraudDetection] Corrupt cached behavior profile for user ${userId}: ${err.message}`);
+      }
     }
 
     // Check in-memory cache (written by trackBehavior during Redis outages)

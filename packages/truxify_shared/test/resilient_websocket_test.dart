@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -165,6 +168,36 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 50));
       expect(connectCount, 0);
       await ws.close();
+    });
+
+    test('buffers outbound while disconnected and replays on connect', () async {
+      // Local echo server so we can observe what the wrapper actually sends.
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final received = <dynamic>[];
+      server.transform(WebSocketTransformer()).listen((socket) {
+        socket.listen((message) => received.add(message));
+      });
+      final port = server.port;
+
+      final ws = ResilientWebSocket('ws://127.0.0.1:$port/ws');
+      // Issued while disconnected — must be queued, not dropped.
+      expect(ws.send('hello'), isFalse);
+      expect(ws.send({'a': 1}), isFalse);
+
+      await ws.connect();
+      // Drain happens synchronously inside connect(); give the server a moment to
+      // echo the replayed frames back to its own listener.
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      await ws.close();
+      await server.close();
+
+      expect(received, contains('hello'));
+      expect(
+        received.whereType<String>().any((s) => s.contains('"a"')),
+        isTrue,
+        reason: 'Non-string payloads must be JSON-encoded before replay.',
+      );
     });
   });
 }

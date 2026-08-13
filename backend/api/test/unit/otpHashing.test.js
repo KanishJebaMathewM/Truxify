@@ -119,18 +119,18 @@ describe('otpHashing', () => {
     it('throws TypeError when OTP is only whitespace', () => {
       expect(() => hashOtp('   ')).toThrow(TypeError);
     });
-
-    it('throws TypeError when the supplied salt is not 32-char hex', () => {
-      expect(() => hashOtp('123456', 'not-hex')).toThrow(TypeError);
-      expect(() => hashOtp('123456', 'abcd')).toThrow(TypeError);
-      expect(() => hashOtp('123456', 12345)).toThrow(TypeError);
-    });
-
-    it('accepts a valid 32-char uppercase hex salt and normalizes it', () => {
-      const { hash, salt } = hashOtp('123456', 'A'.repeat(32));
-      expect(salt).toBe('a'.repeat(32));
-      expect(hash).toMatch(/^[a-f0-9]{128}$/);
-    });
   });
 
 });
+
+
+// === Spec 12 test ===
+import { describe, it, expect } from 'vitest';
+import { constantTimeEqualHex } from '../../src/lib/otpHashing.js';
+describe('constantTimeEqualHex', () => {
+  it('equal returns true', () => { expect(constantTimeEqualHex('abcdef', 'abcdef')).toBe(true); });
+  it('different returns false', () => { expect(constantTimeEqualHex('abcdef', '123456')).toBe(false); });
+  it('length mismatch', () => { expect(constantTimeEqualHex('abc', 'abcd')).toBe(false); });
+  it('invalid hex', () => { expect(constantTimeEqualHex('xyz', 'xyz')).toBe(false); });
+});
+

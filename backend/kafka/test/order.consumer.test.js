@@ -48,13 +48,17 @@ vi.mock('../config/kafka.config.js', () => ({
 
 const {
   applyEventMock,
-  claimProcessedMock,
+  claimProcessingMock,
+  markCompletedMock,
+  markFailedMock,
   storeMock,
   listPendingMock,
   markStatusMock,
 } = vi.hoisted(() => ({
   applyEventMock: vi.fn(),
-  claimProcessedMock: vi.fn(),
+  claimProcessingMock: vi.fn(),
+  markCompletedMock: vi.fn().mockResolvedValue(),
+  markFailedMock: vi.fn().mockResolvedValue(),
   storeMock: vi.fn().mockResolvedValue({ id: 'dlq-1' }),
   listPendingMock: vi.fn().mockResolvedValue([]),
   markStatusMock: vi.fn().mockResolvedValue(),
@@ -68,7 +72,9 @@ vi.mock('../cqrs/order.read.model.js', () => ({
 
 vi.mock('../repositories/processedEvent.repository.js', () => ({
   default: {
-    claimProcessed: claimProcessedMock,
+    claimProcessing: claimProcessingMock,
+    markCompleted: markCompletedMock,
+    markFailed: markFailedMock,
   },
 }));
 
@@ -156,11 +162,12 @@ describe('OrderConsumer side-effect topics', () => {
     vi.clearAllMocks();
     captured.messageHandler = null;
     orderConsumer.handlers.clear();
-    claimProcessedMock.mockResolvedValue(true);
+    orderConsumer.setEventBus(null);
+    claimProcessingMock.mockResolvedValue(true);
   });
 
-  it('claims a side-effect event as processed before running handlers', async () => {
-    const handler = vi.fn();
+  it('claims a side-effect event as processing, then completes it after handlers succeed', async () => {
+    const handler = vi.fn().mockResolvedValue();
     orderConsumer.registerHandler('payment.confirmed', handler);
     await orderConsumer.startConsuming('order-service');
 
@@ -170,17 +177,19 @@ describe('OrderConsumer side-effect topics', () => {
       { key: Buffer.from(ORDER_ID) }
     );
 
-    expect(claimProcessedMock).toHaveBeenCalledWith('payment.confirmed', 'evt-pay-1', ORDER_ID);
+    expect(claimProcessingMock).toHaveBeenCalledWith('payment.confirmed', 'evt-pay-1', ORDER_ID);
     expect(handler).toHaveBeenCalled();
+    expect(markCompletedMock).toHaveBeenCalledWith('payment.confirmed', 'evt-pay-1');
+    expect(markFailedMock).not.toHaveBeenCalled();
     expect(orderReadModel.applyEvent).not.toHaveBeenCalled();
   });
 
-  it('skips a duplicate side-effect event', async () => {
+  it('skips a duplicate side-effect event without touching the claim state', async () => {
     const handler = vi.fn();
     orderConsumer.registerHandler('payment.confirmed', handler);
     await orderConsumer.startConsuming('order-service');
 
-    claimProcessedMock.mockResolvedValue(false);
+    claimProcessingMock.mockResolvedValue(false);
     await captured.messageHandler(
       'payment.confirmed',
       { metadata: { eventId: 'evt-pay-1' }, orderId: ORDER_ID },
@@ -188,5 +197,56 @@ describe('OrderConsumer side-effect topics', () => {
     );
 
     expect(handler).not.toHaveBeenCalled();
+    expect(markCompletedMock).not.toHaveBeenCalled();
+    expect(markFailedMock).not.toHaveBeenCalled();
+  });
+
+  it('marks a side-effect event failed when a handler throws (event retryable)', async () => {
+    const handler = vi.fn().mockRejectedValue(new Error('wallet provider down'));
+    orderConsumer.registerHandler('payment.confirmed', handler);
+    await orderConsumer.startConsuming('order-service');
+
+    await captured.messageHandler(
+      'payment.confirmed',
+      { metadata: { eventId: 'evt-pay-2' }, orderId: ORDER_ID },
+      { key: Buffer.from(ORDER_ID) }
+    );
+
+    expect(handler).toHaveBeenCalled();
+    expect(markFailedMock).toHaveBeenCalledWith('payment.confirmed', 'evt-pay-2');
+    expect(markCompletedMock).not.toHaveBeenCalled();
+    // The failed message is still dead-lettered for manual inspection.
+    expect(storeMock).toHaveBeenCalled();
+  });
+
+  it('marks a side-effect event failed when the EventBus fan-out throws', async () => {
+    const handler = vi.fn().mockResolvedValue();
+    orderConsumer.registerHandler('payment.confirmed', handler);
+    const throwingEventBus = {
+      publish: vi.fn().mockRejectedValue(new Error('event bus down')),
+    };
+    orderConsumer.setEventBus(throwingEventBus);
+    await orderConsumer.startConsuming('order-service');
+
+    await captured.messageHandler(
+      'payment.confirmed',
+      { metadata: { eventId: 'evt-pay-3' }, orderId: ORDER_ID },
+      { key: Buffer.from(ORDER_ID) }
+    );
+
+    expect(markFailedMock).toHaveBeenCalledWith('payment.confirmed', 'evt-pay-3');
+    expect(markCompletedMock).not.toHaveBeenCalled();
+  });
+
+  it('does not claim or resolve the claim for order read-model topics', async () => {
+    const handler = vi.fn().mockResolvedValue();
+    orderConsumer.registerHandler('order.created', handler);
+    await orderConsumer.startConsuming('order-service');
+
+    await captured.messageHandler('order.created', orderEventMessage(), { key: Buffer.from(ORDER_ID) });
+
+    expect(claimProcessingMock).not.toHaveBeenCalled();
+    expect(markCompletedMock).not.toHaveBeenCalled();
+    expect(markFailedMock).not.toHaveBeenCalled();
   });
 });

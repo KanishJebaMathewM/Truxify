@@ -146,18 +146,17 @@ describe('headerSizeMonitor', () => {
     }
   });
 
-  it('does not throw when array header items are non-string values', () => {
+  it('honours a custom HEADER_SIZE_LIMIT env override', () => {
     const originalEnv = process.env.NODE_ENV;
     const originalLimit = process.env.HEADER_SIZE_LIMIT;
     process.env.NODE_ENV = 'development';
-    process.env.HEADER_SIZE_LIMIT = '5000';
+    process.env.HEADER_SIZE_LIMIT = '1000';
     try {
-      const req = makeReq({
-        'x-mixed': ['value', 42, { nested: true }, null, undefined],
-      });
+      const req = makeReq({ 'x-mid': 'b'.repeat(500) });
       const res = makeRes();
       const next = vi.fn();
-      expect(() => headerSizeMonitor(req, res, next)).not.toThrow();
+      headerSizeMonitor(req, res, next);
+      // 500-byte value + header name stays under the 1000-byte limit.
       expect(next).toHaveBeenCalledOnce();
       expect(logger.warn).not.toHaveBeenCalled();
     } finally {

@@ -80,14 +80,24 @@ class WASIRuntime {
                 returnOnExit: true,
             });
             
-            // Create WASM instance
+            // Create WASM instance. wasm-bindgen modules built with
+            // `wasm-pack build --target nodejs` import glue from `env`
+            // (memory + __wbindgen_malloc/realloc/free/throw) in addition to
+            // wasi_snapshot_preview1, so supply the exact imports the module
+            // declares instead of a bare memory-only env namespace.
             const module = await WebAssembly.compile(wasmBytes);
-            const instance = await WebAssembly.instantiate(module, {
-                wasi_snapshot_preview1: wasi.wasiImport,
-                env: {
-                    memory: new WebAssembly.Memory({ initial: 256 }),
-                },
-            });
+            const { imports, bind } = this.buildWasmImportObject(module, wasi);
+            const instance = await WebAssembly.instantiate(module, imports);
+            bind(instance);
+
+            // Reactor module: run the WASI start/initialize entry point once
+            // at load time (as wasm-bindgen reactors require) instead of
+            // calling wasi.start() after every invocation.
+            if (typeof wasi.initialize === 'function') {
+                wasi.initialize(instance);
+            } else {
+                wasi.start(instance);
+            }
             
             // Store instance
             const id = `wasi_${Date.now()}`;
@@ -114,87 +124,97 @@ class WASIRuntime {
                 throw new Error(`Instance ${instanceId} not found`);
             }
             
-            const { instance, wasi } = entry;
+            const { instance } = entry;
             
             // Check timeout
             if (Date.now() - entry.created > this.capabilities.timeout) {
                 throw new Error('Instance timeout');
             }
             
-            // Start WASI runtime before invoking any exports — WASI must be
-            // initialized before the WASM module can safely use stdin/stdout/stderr
-            wasi.start(instance);
-            
             // Execute function
             const result = instance.exports[functionName](...args);
-            
+
             return result;
-            
+
         } catch (error) {
             logger.error('Function execution failed:', error);
             throw error;
         }
     }
 
-    async readFile(instanceId, path) {
-        this.validatePath(path);
-        const result = await this.executeFunction(instanceId, 'wasi_read_file', path);
-        return result;
+    // wasm-bindgen modules built with `wasm-pack build --target nodejs` are
+    // not plain WASI binaries: besides the wasi_snapshot_preview1 namespace
+    // they import wasm-bindgen glue from `env` (memory +
+    // __wbindgen_malloc/realloc/free/throw). Instantiating the bare .wasm
+    // without that glue throws a LinkError.
+    buildWasmBindgenGlue(instanceRef) {
+        const allocExport = {
+            __wbindgen_malloc: ['__wbindgen_malloc', '__wbindgen_export_0'],
+            __wbindgen_realloc: ['__wbindgen_realloc', '__wbindgen_export_1'],
+            __wbindgen_free: ['__wbindgen_free', '__wbindgen_export_2'],
+        };
+
+        const callExport = (names, args) => {
+            const exports = instanceRef.current && instanceRef.current.exports;
+            for (const name of names) {
+                if (exports && typeof exports[name] === 'function') {
+                    return exports[name](...args);
+                }
+            }
+            throw new Error(`wasm-bindgen allocator glue not exported (tried ${names.join(', ')})`);
+        };
+
+        return {
+            __wbindgen_malloc: (...args) => callExport(allocExport.__wbindgen_malloc, args),
+            __wbindgen_realloc: (...args) => callExport(allocExport.__wbindgen_realloc, args),
+            __wbindgen_free: (...args) => callExport(allocExport.__wbindgen_free, args),
+            __wbindgen_throw: (ptr, len) => {
+                const memory = (instanceRef.current && instanceRef.current.exports.memory) || instanceRef.memory;
+                if (!memory) {
+                    throw new Error('wasm-bindgen threw before a memory was available');
+                }
+                const bytes = new Uint8Array(memory.buffer, ptr, len);
+                throw new Error(new TextDecoder().decode(bytes));
+            },
+            __wbindgen_exn_store: () => {
+                throw new Error('wasm-bindgen exception storage is not supported');
+            },
+        };
     }
 
-    async writeFile(instanceId, path, content) {
-        this.validatePath(path);
-        const result = await this.executeFunction(instanceId, 'wasi_write_file', path, content);
-        return result;
-    }
+    // Builds the import object for a wasm-bindgen module, filling in exactly
+    // the `env` namespace entries the module declares (memory + allocator/
+    // panic glue) plus the provided WASI namespace. Unknown imports are left
+    // unprovided so a genuinely unsupported module still fails loudly instead
+    // of silently no-opping.
+    buildWasmImportObject(module, wasi) {
+        const imports = {};
+        if (wasi) {
+            imports.wasi_snapshot_preview1 = wasi.wasiImport;
+        }
 
-    async listDirectory(instanceId, path) {
-        this.validatePath(path);
-        const result = await this.executeFunction(instanceId, 'wasi_list_directory', path);
-        return JSON.parse(result);
-    }
+        const instanceRef = { current: null, memory: null };
+        const glue = this.buildWasmBindgenGlue(instanceRef);
 
-    async createDirectory(instanceId, path) {
-        this.validatePath(path);
-        const result = await this.executeFunction(instanceId, 'wasi_create_directory', path);
-        return result;
-    }
+        const required = WebAssembly.Module.imports(module);
+        const env = {};
+        for (const imp of required) {
+            if (imp.module !== 'env') continue;
+            if (imp.kind === 'memory') {
+                instanceRef.memory = new WebAssembly.Memory({
+                    initial: imp.minimum || 17,
+                    maximum: imp.maximum,
+                });
+                env.memory = instanceRef.memory;
+            } else if (typeof glue[imp.name] === 'function') {
+                env[imp.name] = glue[imp.name];
+            }
+        }
 
-    async deleteFile(instanceId, path) {
-        this.validatePath(path);
-        const result = await this.executeFunction(instanceId, 'wasi_delete_file', path);
-        return result;
-    }
-
-    async httpRequest(instanceId, url, method, headers, body) {
-        this.validateUrl(url);
-        const request = JSON.stringify({ url, method, headers, body });
-        const result = await this.executeFunction(instanceId, 'wasi_http_request', request);
-        return JSON.parse(result);
-    }
-
-    async getTime(instanceId) {
-        return await this.executeFunction(instanceId, 'wasi_get_time');
-    }
-
-    async getTimeMs(instanceId) {
-        return await this.executeFunction(instanceId, 'wasi_get_time_ms');
-    }
-
-    async sleep(instanceId, ms) {
-        return await this.executeFunction(instanceId, 'wasi_sleep', ms);
-    }
-
-    async getProcessId(instanceId) {
-        return await this.executeFunction(instanceId, 'wasi_get_process_id');
-    }
-
-    async getEnvVar(instanceId, name) {
-        return await this.executeFunction(instanceId, 'wasi_get_env_var', name);
-    }
-
-    async getCurrentDir(instanceId) {
-        return await this.executeFunction(instanceId, 'wasi_get_current_dir');
+        if (Object.keys(env).length > 0) {
+            imports.env = env;
+        }
+        return { imports, bind: (instance) => { instanceRef.current = instance; } };
     }
 
     validatePath(requestedPath) {

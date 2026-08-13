@@ -71,29 +71,15 @@ class DeferredRedisStore {
   }
 
   increment(key) {
-    try {
-      return this.activeStore().increment(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis increment failed, continuing without rate limit');
-      return 1;
-    }
+    return this.activeStore().increment(key);
   }
 
   decrement(key) {
-    try {
-      return this.activeStore().decrement(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis decrement failed, continuing without rate limit');
-      return 0;
-    }
+    return this.activeStore().decrement(key);
   }
 
   resetKey(key) {
-    try {
-      return this.activeStore().resetKey(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis resetKey failed, continuing without rate limit');
-    }
+    return this.activeStore().resetKey(key);
   }
 
   resetAll() {

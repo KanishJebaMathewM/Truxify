@@ -103,6 +103,10 @@ BEGIN
        WHERE id = p_order_id
          AND status = 'pending'
       RETURNING *;
+    IF v_order.status = 'truck_assigned' OR v_order.driver_id IS NOT NULL THEN
+      UPDATE load_offers SET status='available', updated_at=now() WHERE order_display_id = v_order.order_display_id AND status='claimed';
+      UPDATE load_bids SET status='rejected', updated_at=now() WHERE load_id = (SELECT id FROM load_offers WHERE order_display_id = v_order.order_display_id) AND status='accepted';
+    END IF;
     RETURN;
   END IF;
 
@@ -115,6 +119,10 @@ BEGIN
      WHERE id = p_order_id
        AND status = 'pending'
     RETURNING *;
+  IF v_order.status = 'truck_assigned' OR v_order.driver_id IS NOT NULL THEN
+    UPDATE load_offers SET status='available', updated_at=now() WHERE order_display_id = v_order.order_display_id AND status='claimed';
+    UPDATE load_bids SET status='rejected', updated_at=now() WHERE load_id = (SELECT id FROM load_offers WHERE order_display_id = v_order.order_display_id) AND status='accepted';
+  END IF;
 END;
 $$;
 

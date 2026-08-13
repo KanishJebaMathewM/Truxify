@@ -31,7 +31,7 @@ describe('FraudDetectionService stats', () => {
 
     it('buckets scores into risk bands', async () => {
       dbMock.supabaseAdmin.from.mockReturnValue({
-        select: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: [
+        select: vi.fn(() => ({ order: vi.fn(() => ({ range: vi.fn().mockResolvedValue({ data: [
           { risk_score: 0.9 }, { risk_score: 0.5 }, { risk_score: 0.2 },
         ] }) })) })),
       });
@@ -44,17 +44,17 @@ describe('FraudDetectionService stats', () => {
     });
 
     it('caps the query at 1000 rows', async () => {
-      const limit = vi.fn().mockResolvedValue({ data: [], });
+      const range = vi.fn().mockResolvedValue({ data: [], });
       dbMock.supabaseAdmin.from.mockReturnValue({
-        select: vi.fn(() => ({ order: vi.fn(() => ({ limit })) })),
+        select: vi.fn(() => ({ order: vi.fn(() => ({ range })) })),
       });
       await FraudDetectionService.getFraudStats();
-      expect(limit).toHaveBeenCalledWith(1000);
+      expect(range).toHaveBeenCalledWith(0, 999);
     });
 
     it('handles a null scores payload', async () => {
       dbMock.supabaseAdmin.from.mockReturnValue({
-        select: vi.fn(() => ({ order: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: null }) })) })),
+        select: vi.fn(() => ({ order: vi.fn(() => ({ range: vi.fn().mockResolvedValue({ data: null }) })) })),
       });
       const stats = await FraudDetectionService.getFraudStats();
       expect(stats.total).toBe(0);

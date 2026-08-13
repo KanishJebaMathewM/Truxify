@@ -235,7 +235,6 @@ class OrderReadModel {
 
     try {
       const { data, error } = await supabase
-        .from('orders_read_model')
         .from(ORDER_READ_MODEL_TABLE)
         .select('*')
         .eq('order_id', key)

@@ -96,7 +96,7 @@ class _CollaborativeDispatchScreenState extends State<CollaborativeDispatchScree
   Widget _buildLoadCard(DispatchLoadItem load) {
     bool isLocked = load.isLocked;
     bool isLockedByMe = load.lockedByUserId == 'ME';
-    Color lockColor = isLocked ? Color(int.parse(load.lockedColorHex!)) : Colors.transparent;
+    Color lockColor = isLocked ? Color(int.tryParse(load.lockedColorHex ?? '') ?? 0xFF888888) : Colors.transparent;
 
     return GestureDetector(
       onTap: () {

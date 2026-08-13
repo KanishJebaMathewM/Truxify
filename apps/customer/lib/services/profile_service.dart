@@ -21,7 +21,8 @@ class ProfileService {
     try {
       final decoded = jsonDecode(cached);
       if (decoded is Map<String, dynamic>) return decoded;
-    } catch (_) {
+    } catch (e) {
+      developer.log('Discarding corrupt cached profile: $e');
       // Invalid cache entries are cleared so future fallbacks do not crash.
     }
     await _secureStorage.delete(key: _profileCacheKey);

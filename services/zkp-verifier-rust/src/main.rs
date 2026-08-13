@@ -9,6 +9,11 @@ use tokio::net::{TcpListener, TcpStream};
 /// Address the verification microservice listens on (matches `EXPOSE 8087`).
 const BIND_ADDR: &str = "0.0.0.0:8087";
 
+/// Upper bound on the HTTP request body accepted by the verifier (1 MiB).
+/// Bodies larger than this, and streamed bodies that claim a huge
+/// `Content-Length`, are rejected with 413 before they can exhaust memory.
+const MAX_BODY: usize = 1024 * 1024;
+
 /// Dev-only Ed25519 verifying public key (hex-encoded).
 ///
 /// A verification key is public material: it is safe to ship inside the
@@ -128,6 +133,39 @@ fn parse_content_length(head: &str) -> usize {
     0
 }
 
+/// True when the declared `Content-Length` exceeds the accepted body cap.
+fn body_exceeds_limit(content_length: usize) -> bool {
+    content_length > MAX_BODY
+}
+
+/// Reads and discards up to `max` remaining body bytes so leftover request
+/// data does not poison the connection before we respond. Bounded so a peer
+/// that declares a huge `Content-Length` cannot force us to read it all.
+async fn drain_remaining(stream: &mut TcpStream, max: usize) {
+    let mut chunk = [0u8; 4096];
+    let mut drained = 0usize;
+    while drained < max {
+        let n = match stream.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        drained += n;
+    }
+}
+
+/// Writes a `413 Content Too Large` response after draining the connection.
+async fn respond_payload_too_large(stream: &mut TcpStream) {
+    drain_remaining(stream, MAX_BODY).await;
+    let _ = stream
+        .write_all(&http_response(
+            "413 Content Too Large",
+            "{\"error\":\"request body too large\"}",
+        ))
+        .await;
+    let _ = stream.flush().await;
+}
+
 /// Builds a minimal HTTP/1.1 JSON response with `Connection: close`.
 fn http_response(status_line: &str, body: &str) -> Vec<u8> {
     let body = body.as_bytes();
@@ -191,20 +229,44 @@ async fn handle_connection(mut stream: TcpStream) {
     let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
     let content_length = parse_content_length(&head);
 
-    // Read the remaining body bytes.
-    while buf.len() < header_end + content_length {
+    // Reject oversized bodies up front (413): the declared length comes from
+    // an unauthenticated client, so it must be capped before we buffer a byte.
+    if body_exceeds_limit(content_length) {
+        respond_payload_too_large(&mut stream).await;
+        return;
+    }
+
+    // Read the remaining body bytes, stopping as soon as the cap is reached so
+    // a peer that lies about `Content-Length` cannot force unbounded buffering.
+    while buf.len() < header_end + content_length && buf.len() < header_end + MAX_BODY {
         let n = match stream.read(&mut chunk).await {
-            Ok(0) => return,
+            Ok(0) => break,
             Ok(n) => n,
             Err(_) => return,
         };
         buf.extend_from_slice(&chunk[..n]);
     }
 
+    // The body exceeded the cap despite a small declared length (streamed):
+    // reject with 413 after draining the connection.
+    if buf.len() >= header_end + MAX_BODY && buf.len() < header_end + content_length {
+        respond_payload_too_large(&mut stream).await;
+        return;
+    }
+
     let (method, path) = parse_request_line(&head);
     let body =
         String::from_utf8_lossy(&buf[header_end..header_end + content_length]).to_string();
     let (status, payload) = route(&method, &path, &body);
+
+    // Drain any unread body bytes before responding so the connection can be
+    // closed/reused safely without leftover request data. Chunk reads may have
+    // overshot the declared length, hence the saturating subtraction.
+    drain_remaining(
+        &mut stream,
+        (header_end + content_length).saturating_sub(buf.len()),
+    )
+    .await;
 
     let _ = stream.write_all(&http_response(status, &payload)).await;
     let _ = stream.flush().await;
@@ -371,6 +433,29 @@ mod tests {
     fn unknown_route_returns_404() {
         let (status, _) = route("GET", "/nope", "");
         assert_eq!(status, "404 Not Found");
+    }
+
+    #[test]
+    fn parse_content_length_reads_header() {
+        let head = "POST /verify HTTP/1.1\r\nHost: x\r\nContent-Length: 42\r\n\r\n";
+        assert_eq!(parse_content_length(head), 42);
+    }
+
+    #[test]
+    fn parse_content_length_defaults_to_zero() {
+        assert_eq!(parse_content_length("GET /health HTTP/1.1\r\n\r\n"), 0);
+    }
+
+    #[test]
+    fn oversized_content_length_is_rejected() {
+        let head = "POST /verify HTTP/1.1\r\nContent-Length: 4294967296\r\n\r\n";
+        assert!(body_exceeds_limit(parse_content_length(head)));
+    }
+
+    #[test]
+    fn body_within_limit_is_accepted() {
+        let head = format!("POST /verify HTTP/1.1\r\nContent-Length: {MAX_BODY}\r\n\r\n");
+        assert!(!body_exceeds_limit(parse_content_length(&head)));
     }
 
     #[test]

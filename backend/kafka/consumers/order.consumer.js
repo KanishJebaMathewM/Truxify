@@ -226,3 +226,12 @@ class OrderConsumer {
 }
 
 export default new OrderConsumer();
+
+// === Spec 28: ===
+// === Spec 28: envelope version fallback ===
+export const DEFAULT_ENVELOPE_VERSION = 'v1';
+export function resolveEnvelopeVersion(h) {
+  if (!h || typeof h !== 'object') return DEFAULT_ENVELOPE_VERSION;
+  return h.version || h['x-schema-version'] || DEFAULT_ENVELOPE_VERSION;
+}
+

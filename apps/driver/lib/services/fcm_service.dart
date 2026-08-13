@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
 
@@ -69,7 +70,8 @@ class FcmService {
 
   static Future<void> _unregisterTokenFromBackend(String token) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser == null) {
+    final supabaseUser = _currentSupabaseUser();
+    if (firebaseUser == null && supabaseUser == null) {
       debugPrint('[FCM] No authenticated user, skipping token unregister.');
       return;
     }
@@ -80,6 +82,7 @@ class FcmService {
         '/api/devices/unregister',
         body: <String, dynamic>{
           'fcmToken': token,
+          'userId': firebaseUser?.uid ?? supabaseUser?.id,
         },
       );
       debugPrint('[FCM] Device token unregistered successfully.');
@@ -87,6 +90,16 @@ class FcmService {
       debugPrint('[FCM] Failed to unregister device token: $e');
     } finally {
       apiClient.dispose();
+    }
+  }
+
+  /// Returns the currently signed-in Supabase user, or null if Supabase is
+  /// not configured/initialized or no user is signed in.
+  static User? _currentSupabaseUser() {
+    try {
+      return Supabase.instance.client.auth.currentUser;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -100,7 +113,8 @@ class FcmService {
 
   static Future<void> _sendTokenToBackend(String? token) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
-    final userId = firebaseUser?.uid;
+    final supabaseUser = _currentSupabaseUser();
+    final userId = firebaseUser?.uid ?? supabaseUser?.id;
     if (userId == null) {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
@@ -111,6 +125,7 @@ class FcmService {
         '/api/profile/fcm-token',
         body: <String, dynamic>{
           'fcmToken': token,
+          'userId': userId,
         },
       );
       debugPrint('[FCM] Token updated successfully on backend.');

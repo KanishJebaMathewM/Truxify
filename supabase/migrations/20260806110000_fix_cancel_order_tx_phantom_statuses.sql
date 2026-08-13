@@ -46,17 +46,18 @@ BEGIN
     RAISE EXCEPTION 'Order escrow status does not allow cancellation.';
   END IF;
 
-  UPDATE orders
-  SET
-    status = 'cancelled',
-    cancellation_reason = COALESCE(p_cancellation_reason, v_order.cancellation_reason),
-    escrow_status = 'refund_pending',
-    escrow_refund_error = NULL,
-    escrow_refund_attempts = COALESCE(v_order.escrow_refund_attempts, 0) + 1,
-    escrow_refund_last_attempt_at = NOW(),
-    updated_at = NOW()
-  WHERE id = p_order_id
-  RETURNING * INTO v_order;
+  IF v_order.escrow_disabled THEN
+    UPDATE orders SET status='cancelled', cancellation_reason=COALESCE(p_cancellation_reason, v_order.cancellation_reason), updated_at=now() WHERE id=p_order_id RETURNING * INTO v_order;
+  ELSE
+    UPDATE orders SET status='cancelled', cancellation_reason=COALESCE(p_cancellation_reason, v_order.cancellation_reason),
+                     escrow_status='refund_pending', escrow_refund_error=NULL,
+                     escrow_refund_attempts=COALESCE(v_order.escrow_refund_attempts,0)+1,
+                     escrow_refund_last_attempt_at=now(), updated_at=now() WHERE id=p_order_id RETURNING * INTO v_order;
+  END IF;
+  IF v_order.status = 'truck_assigned' OR v_order.driver_id IS NOT NULL THEN
+    UPDATE load_offers SET status='available', updated_at=now() WHERE order_display_id = v_order.order_display_id AND status='claimed';
+    UPDATE load_bids SET status='rejected', updated_at=now() WHERE load_id = (SELECT id FROM load_offers WHERE order_display_id = v_order.order_display_id) AND status='accepted';
+  END IF;
 
   RETURN v_order;
 END;

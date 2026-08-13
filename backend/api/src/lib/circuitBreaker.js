@@ -58,6 +58,9 @@ export class CircuitBreaker {
   }
 
   async execute(fn, ...args) {
+    if (typeof fn !== 'function') {
+      throw new TypeError('circuitBreaker execute: fn must be a function');
+    }
     const currentState = this.getState();
 
     if (currentState === CircuitState.OPEN) {

@@ -42,6 +42,10 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
     }
 
     const userId = req.user?.id ?? req.ip;
+    if (!routeKey || !userId) {
+      logger.warn({ routeKey, userId }, '[RateLimiter] Skipping - missing routeKey or userId');
+      return next();
+    }
     const key = `rl:${routeKey}:${userId}`;
     const now = Date.now();
     const windowStart = now - windowMs;

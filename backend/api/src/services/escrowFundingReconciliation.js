@@ -117,6 +117,7 @@ async function finalizeOrRevert(order, orderRepository) {
       }
 
       await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_status: 'funded',
         escrow_funding_attempts: 0,
         escrow_funding_error: null,
         escrow_funding_last_attempt_at: null,

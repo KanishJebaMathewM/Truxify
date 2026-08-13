@@ -1,62 +1,52 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
-
-let logger;
-beforeEach(async () => {
-  logger = (await import('../../src/middleware/logger.js')).default;
-  vi.clearAllMocks();
-});
-
-function makeReq(q = {}) { return { query: { ...q } }; }
-function makeRes() {
-  const h = {};
-  return {
-    getHeader: vi.fn(n => h[n]),
-    setHeader: vi.fn((n, v) => { h[n] = v; }),
-    status: vi.fn(function(s) { this.statusCode = s; return this; }),
-    json: vi.fn(function(b) { return this; }),
-    on: vi.fn(),
-  };
-}
+import { describe, it, expect } from 'vitest';
+import { validatePagination } from '../../src/lib/validatePagination.js';
 
 describe('validatePagination', () => {
-  let vp;
-  beforeEach(async () => {
-    const mod = await import('../../src/middleware/pagination.js');
-    vp = mod.validatePagination;
+  it('returns valid pagination for default values', () => {
+    const result = validatePagination();
+    expect(result.page).toBe(1);
+    expect(result.pageSize).toBe(20);
+    expect(result.offset).toBe(0);
+    expect(result.limit).toBe(20);
+    expect(result.error).toBeUndefined();
   });
 
-  it('defaults limit=10 offset=0', async () => {
-    const req = makeReq(), res = makeRes(), next = vi.fn();
-    vp()(req, res, next);
-    expect(req.pagination.limit).toBe(10);
-    expect(req.pagination.offset).toBe(0);
+  it('returns error for NaN page', () => {
+    const result = validatePagination({ page: NaN });
+    expect(result.error).toBeTruthy();
+    expect(result.error).toContain('page');
   });
 
-  it('caps limit at 100', async () => {
-    const req = makeReq({ limit: '999' }), res = makeRes(), next = vi.fn();
-    vp()(req, res, next);
-    expect(req.pagination.limit).toBe(100);
+  it('returns error for negative page', () => {
+    const result = validatePagination({ page: -1 });
+    expect(result.error).toBeTruthy();
   });
 
-  it('returns 400 for non-numeric limit', async () => {
-    const req = makeReq({ limit: 'abc' }), res = makeRes(), next = vi.fn();
-    vp()(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(400);
+  it('returns error for page=0', () => {
+    const result = validatePagination({ page: 0 });
+    expect(result.error).toBeTruthy();
   });
 
-  it('computes page offset correctly', async () => {
-    const req = makeReq({ page: '3', limit: '10' }), res = makeRes(), next = vi.fn();
-    vp()(req, res, next);
-    expect(req.pagination.offset).toBe(20);
+  it('returns error for pageSize > 200', () => {
+    const result = validatePagination({ pageSize: 300 });
+    expect(result.error).toBeTruthy();
+    expect(result.error).toContain('pageSize');
   });
 
-  it('caps offset at 10000', async () => {
-    const req = makeReq({ offset: '50000' }), res = makeRes(), next = vi.fn();
-    vp()(req, res, next);
-    expect(req.pagination.offset).toBe(10000);
+  it('returns error for pageSize <= 0', () => {
+    expect(validatePagination({ pageSize: 0 }).error).toBeTruthy();
+    expect(validatePagination({ pageSize: -5 }).error).toBeTruthy();
+  });
+
+  it('returns error when offset exceeds MAX_OFFSET', () => {
+    const result = validatePagination({ page: 100001, pageSize: 20 });
+    expect(result.error).toContain('MAX_OFFSET');
+  });
+
+  it('returns valid result for page=2', () => {
+    const result = validatePagination({ page: 2, pageSize: 10 });
+    expect(result.page).toBe(2);
+    expect(result.offset).toBe(10);
+    expect(result.error).toBeUndefined();
   });
 });

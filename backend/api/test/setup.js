@@ -20,11 +20,6 @@ process.env.ESCROW_MATIC_PER_PAISA = '0.000004';
 process.env.MAX_ESCROW_MATIC = '10000';
 process.env.DRIVER_LOGIN_OTP = '1234';
 
-// Deterministic test-only secret for WIM bypass packet signing. It is long
-// enough to satisfy the minimum-length policy and is NEVER used as a fallback
-// in application code — it only exists here so tests can exercise signing.
-process.env.WIM_SIGNING_SECRET = 'test-wim-signing-secret-0123456789abcdef-0123456789abcdef';
-
 // Suppress noisy console.error output from the routes — they log
 // pricing errors and DB failures to stderr when tests trigger them.
 // We still fail the test if the response status is wrong.

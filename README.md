@@ -400,3 +400,4 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
+

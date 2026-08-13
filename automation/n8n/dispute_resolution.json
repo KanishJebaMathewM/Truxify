@@ -18,8 +18,26 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/payments/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
+        "method": "POST",
+        "url": "={{$json.body.record.order_api_url}}/api/contracts/freeze",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.INTERNAL_RELAYER_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tripId",
+              "value": "={{$json.body.record.id}}"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -29,11 +47,33 @@
         0
       ],
       "id": "freeze-escrow",
-      "name": "Check Escrow Status"
+      "name": "Freeze Smart Contract Escrow",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/timeline",
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Freeze Smart Contract Escrow Failed for Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}",
+        "textBody": "=CRITICAL: The Freeze Smart Contract Escrow step failed after 3 retries for Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}. Smart contract payment was not frozen. Immediate manual intervention required.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -200
+      ],
+      "id": "alert-admin-freeze-failed",
+      "name": "Alert Admin — Escrow Freeze Failed"
+    },
+    {
+      "parameters": {
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/dispute-evidence",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -43,26 +83,30 @@
         0
       ],
       "id": "fetch-evidence",
-      "name": "Fetch Order Timeline"
+      "name": "Fetch GPS Trail & OTP Logs"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/support/tickets",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/notifications/dispute",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "subject",
-              "value": "Dispute Opened: Delivery Unconfirmed"
+              "name": "tripId",
+              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}"
             },
             {
-              "name": "category",
-              "value": "payment"
+              "name": "driverPhone",
+              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.driver_phone}}"
             },
             {
-              "name": "description",
-              "value": "Dispute opened for trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}. Evidence gathered from the order timeline."
+              "name": "customerPhone",
+              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.customer_phone}}"
+            },
+            {
+              "name": "message",
+              "value": "Dispute opened for trip. Smart contract payment frozen."
             }
           ]
         },
@@ -75,7 +119,7 @@
         0
       ],
       "id": "notify-parties",
-      "name": "Open Support Ticket"
+      "name": "Notify Driver & Customer"
     },
     {
       "parameters": {
@@ -93,7 +137,7 @@
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -110,7 +154,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{$json.order.status}}",
+              "value1": "={{$json.status}}",
               "value2": "disputed"
             }
           ]
@@ -128,21 +172,17 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/support/tickets",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/admin/escalate",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "subject",
-              "value": "Escalation: Arbitration Required for Trip"
+              "name": "tripId",
+              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}"
             },
             {
-              "name": "category",
-              "value": "payment"
-            },
-            {
-              "name": "description",
-              "value": "Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}} remained disputed after 24 hours. Review the order timeline for evidence."
+              "name": "evidence",
+              "value": "={{$node[\"Fetch GPS Trail & OTP Logs\"].json}}"
             }
           ]
         },
@@ -155,7 +195,7 @@
         0
       ],
       "id": "escalate-admin",
-      "name": "Escalate as Support Ticket"
+      "name": "Escalate to Admin Arbitration Queue"
     },
     {
       "parameters": {
@@ -174,8 +214,30 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$json.body.record.order_api_url}}/api/payments/{{$json.body.record.id}}/status",
+        "method": "POST",
+        "url": "={{$json.body.record.order_api_url}}/api/contracts/resolve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.INTERNAL_RELAYER_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "tripId",
+              "value": "={{$json.body.record.id}}"
+            },
+            {
+              "name": "action",
+              "value": "={{$json.body.action}}"
+            }
+          ]
+        },
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -185,7 +247,27 @@
         200
       ],
       "id": "release-or-refund",
-      "name": "Verify Escrow Release"
+      "name": "Release or Refund Smart Contract Escrow",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Release or Refund Escrow Failed for Trip {{$json.body.record.id}}",
+        "textBody": "=CRITICAL: The Release or Refund Smart Contract Escrow step failed after 3 retries for Trip {{$json.body.record.id}}. Smart contract payment was not released/refunded. Immediate manual intervention required.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        400,
+        200
+      ],
+      "id": "alert-admin-release-failed",
+      "name": "Alert Admin — Escrow Release Failed"
     }
   ],
   "connections": {
@@ -205,6 +287,13 @@
         [
           {
             "node": "fetch-evidence",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "alert-admin-freeze-failed",
             "type": "main",
             "index": 0
           }
@@ -271,6 +360,18 @@
         [
           {
             "node": "release-or-refund",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "release-or-refund": {
+      "main": [
+        [],
+        [
+          {
+            "node": "alert-admin-release-failed",
             "type": "main",
             "index": 0
           }

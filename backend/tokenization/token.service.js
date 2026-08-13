@@ -2,6 +2,58 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
+const WEI_UNIT = 10n ** 18n;
+
+/**
+ * Compute the exact wei cost of an amount of tokens at a given price.
+ *
+ * Both inputs are decimal strings (e.g. "0.1" ETH/token and "3" tokens). The
+ * contract multiplies the two wei values and divides by 1e18, so we replicate
+ * that with integer math only — no `parseFloat` — which avoids the float
+ * drift that previously lost wei (e.g. 0.1 * 3 rounded to 0.30000000000000004).
+ *
+ * @param {string|number} price   price per token in ether units
+ * @param {string|number} amount  number of tokens in ether units
+ * @param {boolean} roundUp       match the contract's ceiling (purchase) vs floor (trade)
+ * @returns {bigint} total cost in wei
+ */
+function tokenCostWei(price, amount, roundUp = true) {
+    const priceWei = ethers.parseEther(price.toString());
+    const amountWei = ethers.parseEther(amount.toString());
+    const product = priceWei * amountWei;
+    return roundUp ? (product + WEI_UNIT - 1n) / WEI_UNIT : product / WEI_UNIT;
+}
+
+/**
+ * Extract an argument from the first matching event in a transaction receipt.
+ *
+ * The on-chain asset/trade IDs are assigned inside the same transaction that
+ * performs the mint/order, so reading them from the emitted event is
+ * race-free. This replaces the previous `getTotalAssets()` / `getTotalTradeOrders()`
+ * counters, which were a TOCTOU: after the tx was mined but before the count
+ * was read, a concurrent create could shift the value and produce a wrong ID.
+ *
+ * @param {object} receipt  ethers v6 transaction receipt with `.logs`
+ * @param {object} contract ethers Contract (or object exposing `.interface`)
+ * @param {string} eventName
+ * @param {number} argIndex
+ * @returns {any} the requested event argument, or null if not found
+ */
+function extractEventArg(receipt, contract, eventName, argIndex = 0) {
+    if (!receipt || !contract || !contract.interface) return null;
+    for (const log of receipt.logs || []) {
+        try {
+            const parsed = contract.interface.parseLog(log);
+            if (parsed && parsed.name === eventName) {
+                return parsed.args[argIndex];
+            }
+        } catch {
+            // log emitted by a different contract / not decodable here
+        }
+    }
+    return null;
+}
+
 class TokenizationService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -19,7 +71,9 @@ class TokenizationService {
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
             'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
-            'function getTotalTradeOrders() external view returns (uint256)'
+            'function getTotalTradeOrders() external view returns (uint256)',
+            'event AssetCreated(uint256 indexed assetId, string name, address indexed owner)',
+            'event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller)'
         ];
 
         this.token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
@@ -42,8 +96,9 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            // Get asset ID from logs
-            const assetId = await this.token.getTotalAssets();
+            // Derive the asset ID from the emitted event (race-free) instead of
+            // reading the asset counter, which is a TOCTOU after mining.
+            const assetId = extractEventArg(receipt, this.token, 'AssetCreated', 0);
 
             await this.storeAsset({
                 ...assetData,
@@ -69,14 +124,14 @@ class TokenizationService {
             if (!asset) {
                 throw new Error('Asset not found');
             }
-            const totalCost = parseFloat(asset.tokenPrice) * amount;
+            const totalCost = tokenCostWei(asset.tokenPrice, amount, true);
 
             const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.purchaseFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
                 {
-                    value: ethers.parseEther(totalCost.toString()),
+                    value: totalCost,
                     gasLimit: 200000
                 }
             );
@@ -86,7 +141,7 @@ class TokenizationService {
                 assetId,
                 userAddress,
                 amount,
-                totalCost,
+                totalCost: ethers.formatEther(totalCost),
                 type: 'purchase',
                 txHash: receipt.hash
             });
@@ -96,7 +151,7 @@ class TokenizationService {
                 success: true,
                 assetId,
                 amount,
-                totalCost,
+                totalCost: ethers.formatEther(totalCost),
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -149,7 +204,9 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            const orderId = await this.token.getTotalTradeOrders();
+            // Derive the order ID from the emitted event (race-free) instead of
+            // reading the trade counter, which is a TOCTOU after mining.
+            const orderId = extractEventArg(receipt, this.token, 'TradeOrderCreated', 0);
 
             await this.storeTradeOrder({
                 assetId,
@@ -205,13 +262,13 @@ class TokenizationService {
                 throw new Error(`Trade order ${order.orderId} is not active`);
             }
 
-            const totalCost = parseFloat(order.price) * parseFloat(order.amount);
+            const totalCost = tokenCostWei(order.price, order.amount, false);
 
             const tx = await this.token.executeTradeOrder(
                 assetId,
                 orderIndex,
                 {
-                    value: ethers.parseEther(totalCost.toString()),
+                    value: totalCost,
                     gasLimit: 200000
                 }
             );
@@ -221,7 +278,7 @@ class TokenizationService {
                 assetId,
                 userAddress: buyerAddress,
                 amount: order.amount,
-                totalCost,
+                totalCost: ethers.formatEther(totalCost),
                 type: 'trade',
                 txHash: receipt.hash,
                 orderId: order.orderId

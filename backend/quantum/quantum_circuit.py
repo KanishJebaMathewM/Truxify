@@ -8,7 +8,12 @@ from qiskit_optimization.algorithms import MinimumEigenOptimizer
 from qiskit_algorithms.minimum_eigensolvers import QAOA
 from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
+<<<<<<< HEAD
 from typing import Dict, List, Tuple, Any
+=======
+from typing import Dict, List, Tuple, Any, Optional
+import itertools
+>>>>>>> upstream/main
 import logging
 
 logger = logging.getLogger(__name__)
@@ -97,25 +102,46 @@ class QUBOFormatter:
         logger.info("✅ QUBO Formatter initialized")
     
     def formulate_route_optimization(self, graph: nx.Graph) -> QuadraticProgram:
+<<<<<<< HEAD
         """Formulate route optimization as QUBO"""
         # Create quadratic program
         qubo = QuadraticProgram()
         
+=======
+        """Formulate route optimization as QUBO.
+
+        The objective minimizes the total edge weight. To prevent the trivial
+        empty-route optimum (x_i = 0 for every edge), we add:
+          * degree constraints: every node must have exactly degree 2, and
+          * connectivity (subtour-elimination) constraints: no proper subset of
+            nodes may form its own closed cycle, guaranteeing a single route.
+        Together these force a valid Hamiltonian cycle as the optimum.
+        """
+        # Create quadratic program
+        qubo = QuadraticProgram()
+
+>>>>>>> upstream/main
         # Add binary variables for each edge
         edge_vars = {}
         for i, (u, v) in enumerate(graph.edges()):
             var_name = f'x_{u}_{v}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
+<<<<<<< HEAD
         
         # Objective: minimize total distance
         # Constraint: each node must have degree 2 (Hamiltonian cycle)
         
         # Objective function
+=======
+
+        # Objective: minimize total distance
+>>>>>>> upstream/main
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
             objective[(var, var)] = weight
+<<<<<<< HEAD
         
         qubo.minimize(quadratic=objective)
         
@@ -134,6 +160,67 @@ class QUBOFormatter:
             qaoa = QAOA(optimizer=COBYLA(), reps=1)
             optimizer = MinimumEigenOptimizer(qaoa)
             
+=======
+
+        qubo.minimize(quadratic=objective)
+
+        # Degree constraints: each node must have degree exactly 2.
+        for node in graph.nodes():
+            incident = [
+                var for (u, v), var in edge_vars.items()
+                if u == node or v == node
+            ]
+            if not incident:
+                continue
+            qubo.linear_constraint(
+                linear={var: 1 for var in incident},
+                sense='==',
+                rhs=2,
+                name=f'degree_{node}',
+            )
+
+        # Connectivity / subtour-elimination constraints: for every proper
+        # non-empty subset S of nodes, the number of selected edges entirely
+        # inside S must be <= |S| - 1. This forbids disconnected cycles and
+        # guarantees the selected edges form a single connected cycle. Only
+        # applied for small graphs to avoid the exponential subset blow-up.
+        nodes = list(graph.nodes())
+        if len(nodes) <= 8:
+            for size in range(2, len(nodes)):
+                for subset in itertools.combinations(nodes, size):
+                    s = set(subset)
+                    inner = [
+                        var for (u, v), var in edge_vars.items()
+                        if u in s and v in s
+                    ]
+                    if len(inner) <= size - 1:
+                        continue
+                    qubo.linear_constraint(
+                        linear={var: 1 for var in inner},
+                        sense='<=',
+                        rhs=size - 1,
+                        name=f'subtour_{size}_{"_".join(str(n) for n in subset)}',
+                    )
+
+        self.qubo = qubo
+        self.variables = list(edge_vars.values())
+
+        return qubo
+
+    def solve_qubo(self, qubo: QuadraticProgram,
+                   eigensolver: Optional[Any] = None) -> Dict:
+        """Solve QUBO using quantum optimizer.
+
+        By default a QAOA based MinimumEigenOptimizer is used. A classical
+        eigensolver (e.g. NumPyMinimumEigensolver) may be passed in for fast,
+        deterministic solving in tests or resource-constrained environments.
+        """
+        try:
+            if eigensolver is None:
+                eigensolver = QAOA(optimizer=COBYLA(), reps=1)
+            optimizer = MinimumEigenOptimizer(eigensolver)
+
+>>>>>>> upstream/main
             # Solve
             result = optimizer.solve(qubo)
             

@@ -92,6 +92,28 @@ class DeferredRedisStore {
 }
 
 /**
+ * Expands an IPv6 address into its 8 text groups, resolving the "::"
+ * shorthand to the correct number of zero groups.
+ *
+ * The previous /64 masking split on ":" and took the first four tokens, which
+ * mis-split compressed forms like `2001:db8::a:b` and produced non-canonical,
+ * bypassable bucket keys. Returns null when the input cannot be a full IPv6
+ * address.
+ */
+function expandIpv6Groups(ip) {
+  if (ip.includes("::")) {
+    const [left, right] = ip.split("::");
+    const leftGroups = left ? left.split(":") : [];
+    const rightGroups = right ? right.split(":") : [];
+    const missing = 8 - leftGroups.length - rightGroups.length;
+    if (missing < 1) return null;
+    return [...leftGroups, ...Array(missing).fill("0"), ...rightGroups];
+  }
+  const groups = ip.split(":");
+  return groups.length === 8 ? groups : null;
+}
+
+/**
  * Normalizes an IP address, converting IPv6 mapped IPv4 and masking IPv6 to /64 subnets.
  */
 export function normalizeIp(rawIp) {
@@ -102,9 +124,9 @@ export function normalizeIp(rawIp) {
   if (ip === "::1") return "127.0.0.1";
 
   if (ip.includes(":")) {
-    const parts = ip.split(":");
-    if (parts.length >= 4) {
-      return `${parts.slice(0, 4).join(":")}::/64`;
+    const groups = expandIpv6Groups(ip);
+    if (groups) {
+      return `${groups.slice(0, 4).join(":").toLowerCase()}::/64`;
     }
   }
   return ip;

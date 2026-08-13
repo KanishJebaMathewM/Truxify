@@ -8,14 +8,11 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
 
-    // These must match the actual mount paths in index.js. Trips are mounted
-    // at /api/v1/trips (with authenticate + this middleware); the bare
-    // /api/trips mount has no auth/middleware, so matching it would be moot.
-    // See issue #10501.
     const criticalEndpoints = [
       '/api/orders',
       '/api/payments',
-      '/api/v1/trips'
+      '/api/escrow',
+      '/api/trips'
     ];
 
     const isCritical = criticalEndpoints.some(endpoint => req.originalUrl.startsWith(endpoint));

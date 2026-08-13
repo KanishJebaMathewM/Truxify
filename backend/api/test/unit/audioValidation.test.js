@@ -76,6 +76,12 @@ describe('detectAudioMimeType', () => {
     expect(detectAudioMimeType(AAC_ADTS)).toBe('audio/aac');
   });
 
+  it('detects the alternate ADTS AAC sync pattern (0xFFF9)', () => {
+    // The second AAC signature covers the 0xFFF9 header variant.
+    const altAac = withHeader([0xff, 0xf9, 0x50, 0x80]);
+    expect(detectAudioMimeType(altAac)).toBe('audio/aac');
+  });
+
   it('rejects a RIFF container that is not WAVE', () => {
     const avi = Buffer.alloc(64);
     avi.write('RIFF', 0, 'ascii');
@@ -106,6 +112,13 @@ describe('detectAudioMimeType', () => {
     expect(detectAudioMimeType(Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00]))).toBeNull();
     // ISO box length present but truncated before "ftyp".
     expect(detectAudioMimeType(Buffer.from([0x00, 0x00, 0x00, 0x20, 0x66]))).toBeNull();
+  });
+
+  it('requires two bytes for an MPEG frame sync', () => {
+    // A single 0xFF byte is not long enough for the frame-sync check.
+    expect(detectAudioMimeType(Buffer.from([0xff]))).toBeNull();
+    // 0xFF followed by a byte without the 11-bit sync pattern is not MPEG.
+    expect(detectAudioMimeType(Buffer.from([0xff, 0x10]))).toBeNull();
   });
 });
 

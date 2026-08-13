@@ -85,4 +85,62 @@ describe("TruxifyUpgradeable escrow access control", function () {
     assert.equal(escrow.customer, attacker.address);
     assert.equal(escrow.amount, amount);
   });
+
+  it("rejects resolving a disputed escrow from a non-admin address", async function () {
+    const escrowId = await createEscrow();
+    await truxify.connect(admin).disputeEscrow(escrowId);
+    await assertRejectsWith(
+      truxify.connect(attacker).resolveDisputedEscrow(escrowId, customer.address),
+      "AccessControl"
+    );
+    const escrow = await truxify.getEscrow(escrowId);
+    assert.equal(escrow.disputed, true);
+    assert.equal(escrow.released, false);
+  });
+
+  it("rejects resolving an escrow that is not disputed", async function () {
+    const escrowId = await createEscrow();
+    await assertRejectsWith(
+      truxify.connect(admin).resolveDisputedEscrow(escrowId, customer.address),
+      "Not disputed"
+    );
+  });
+
+  it("rejects resolving a disputed escrow to an unrelated address", async function () {
+    const escrowId = await createEscrow();
+    await truxify.connect(admin).disputeEscrow(escrowId);
+    await assertRejectsWith(
+      truxify.connect(admin).resolveDisputedEscrow(escrowId, attacker.address),
+      "Recipient must be a party to the escrow"
+    );
+    const escrow = await truxify.getEscrow(escrowId);
+    assert.equal(escrow.released, false);
+  });
+
+  it("refunds the customer when the dispute is resolved in their favor", async function () {
+    const escrowId = await createEscrow();
+    await truxify.connect(admin).disputeEscrow(escrowId);
+
+    const balanceBefore = await ethers.provider.getBalance(customer.address);
+    await truxify.connect(admin).resolveDisputedEscrow(escrowId, customer.address);
+
+    const escrow = await truxify.getEscrow(escrowId);
+    assert.equal(escrow.released, true);
+    assert.equal(escrow.disputed, true);
+    const balanceAfter = await ethers.provider.getBalance(customer.address);
+    assert.equal(balanceAfter - balanceBefore, ethers.parseEther("1"));
+  });
+
+  it("pays the driver when the dispute is resolved in their favor", async function () {
+    const escrowId = await createEscrow();
+    await truxify.connect(admin).disputeEscrow(escrowId);
+
+    const balanceBefore = await ethers.provider.getBalance(driver.address);
+    await truxify.connect(admin).resolveDisputedEscrow(escrowId, driver.address);
+
+    const escrow = await truxify.getEscrow(escrowId);
+    assert.equal(escrow.released, true);
+    const balanceAfter = await ethers.provider.getBalance(driver.address);
+    assert.equal(balanceAfter - balanceBefore, ethers.parseEther("1"));
+  });
 });

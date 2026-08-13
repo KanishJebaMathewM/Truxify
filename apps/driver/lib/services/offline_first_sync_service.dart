@@ -18,6 +18,21 @@ class OfflineFirstSyncService {
   final StreamController<bool> _connectionController = StreamController<bool>.broadcast();
   final StreamController<List<OfflineSyncEvent>> _dbController = StreamController<List<OfflineSyncEvent>>.broadcast();
 
+  /// In-flight sync-pass guard: at most one pass runs at a time. Triggers
+  /// that arrive mid-pass set [_syncQueued] so a follow-up pass drains any
+  /// events queued during the previous one (issue #11712).
+  bool _isSyncing = false;
+  bool _syncQueued = false;
+
+  /// Hard retry ceiling before an event is dead-lettered (never re-POSTed on
+  /// every connectivity change).
+  static const int maxRetries = 3;
+
+  /// Event states: pending events are synced, dead-lettered events are
+  /// terminal and retained for diagnostics only.
+  static const String statePending = 'pending';
+  static const String stateDeadLetter = 'dead_letter';
+
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<List<OfflineSyncEvent>> get databaseStream => _dbController.stream;
 
@@ -42,7 +57,7 @@ class OfflineFirstSyncService {
     final dbPath = p.join(dir.path, 'offline_sync.db');
     _db = await openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sync_events (
@@ -52,7 +67,8 @@ class OfflineFirstSyncService {
             queued_at INTEGER NOT NULL,
             is_synced INTEGER NOT NULL DEFAULT 0,
             synced_at INTEGER,
-            retry_count INTEGER NOT NULL DEFAULT 0
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            state TEXT NOT NULL DEFAULT 'pending'
           )
         ''');
       },
@@ -60,6 +76,11 @@ class OfflineFirstSyncService {
         if (oldVersion < 2) {
           await db.execute(
             'ALTER TABLE sync_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            "ALTER TABLE sync_events ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
           );
         }
       },
@@ -91,6 +112,7 @@ class OfflineFirstSyncService {
       'payload': jsonEncode(event.payload),
       'queued_at': event.queuedAt.millisecondsSinceEpoch,
       'is_synced': 0,
+      'state': statePending,
     });
 
     _emitDbSnapshot();
@@ -169,13 +191,33 @@ class OfflineFirstSyncService {
     }
   }
 
+  /// Runs at most one sync pass at a time, coalescing triggers that arrive
+  /// while a pass is already in flight. A pass that finished while new events
+  /// were being queued triggers a follow-up pass so nothing is left behind.
   Future<void> _processSyncQueue() async {
+    if (_isSyncing) {
+      _syncQueued = true;
+      return;
+    }
+    _isSyncing = true;
+    try {
+      do {
+        _syncQueued = false;
+        await _runSyncPass();
+      } while (_syncQueued);
+    } finally {
+      _isSyncing = false;
+    }
+  }
+
+  Future<void> _runSyncPass() async {
     final db = _db;
     if (db == null) return;
 
     final unsynced = await db.query(
       'sync_events',
-      where: 'is_synced = 0',
+      where: 'is_synced = 0 AND state = ?',
+      whereArgs: [statePending],
       orderBy: 'queued_at ASC',
     );
 
@@ -194,24 +236,28 @@ class OfflineFirstSyncService {
       );
 
       for (int j = 0; j < batch.length; j++) {
+        final eventId = batch[j]['event_id'] as String;
         if (results[j]) {
-          await db.update(
-            'sync_events',
-            {
-              'is_synced': 1,
-              'synced_at': DateTime.now().millisecondsSinceEpoch,
-            },
-            where: 'event_id = ?',
-            whereArgs: [batch[j]['event_id']],
-          );
+          // Successfully synced: remove the row so the local store does not
+          // grow without bound (is_synced alone kept every historical row).
+          await db.delete('sync_events', where: 'event_id = ?', whereArgs: [eventId]);
         } else {
           final retries = batch[j]['retry_count'] as int? ?? 0;
-          if (retries < 3) {
+          if (retries + 1 >= maxRetries) {
+            // Retry ceiling reached: dead-letter the event so it is never
+            // re-POSTed on every connectivity change forever.
+            await db.update(
+              'sync_events',
+              {'state': stateDeadLetter},
+              where: 'event_id = ?',
+              whereArgs: [eventId],
+            );
+          } else {
             await db.update(
               'sync_events',
               {'retry_count': retries + 1},
               where: 'event_id = ?',
-              whereArgs: [batch[j]['event_id']],
+              whereArgs: [eventId],
             );
           }
         }

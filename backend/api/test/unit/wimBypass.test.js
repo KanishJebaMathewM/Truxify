@@ -130,5 +130,43 @@ describe('wimBypass service', () => {
       expect(result.packet).toBeDefined();
       expect(result.signature).toBeDefined();
     });
+
+  describe('maxWeightLimit edge cases', () => {
+    it('returns false when maxWeightLimit is undefined', () => {
+      const result = evaluateBypassEligibility({
+        safetyScore: 90,
+        axleWeight: 15000,
+        // maxWeightLimit intentionally omitted
+      });
+      expect(result).toBe(false);
+    });
+
+    it('returns false when maxWeightLimit is null', () => {
+      const result = evaluateBypassEligibility({
+        safetyScore: 90,
+        axleWeight: 15000,
+        maxWeightLimit: null,
+      });
+      expect(result).toBe(false);
+    });
+
+    it('returns false when maxWeightLimit is a string', () => {
+      const result = evaluateBypassEligibility({
+        safetyScore: 90,
+        axleWeight: 15000,
+        maxWeightLimit: '20000',
+      });
+      expect(result).toBe(false);
+    });
+
+    it('returns false when axleWeight is undefined but maxWeightLimit is present', () => {
+      const result = evaluateBypassEligibility({
+        safetyScore: 90,
+        // axleWeight intentionally omitted
+        maxWeightLimit: 20000,
+      });
+      expect(result).toBe(false);
+    });
+  });
   });
 });

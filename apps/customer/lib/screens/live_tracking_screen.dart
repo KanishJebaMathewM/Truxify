@@ -182,12 +182,27 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         if (mounted) setState(() => _wsConnected = true);
         final session = SupabaseService.client.auth.currentSession;
         final token = session?.accessToken ?? '';
-        _trackingWebSocket?.send({
-          'event': 'auth',
-          'data': {
-            'token': token,
-          },
-        });
+        // (Re)send the auth frame on every (re)connect. The ResilientWebSocket
+        // outbound queue replays anything issued while disconnected, so this is
+        // never lost on a reconnect window.
+        final authSent = _trackingWebSocket?.send({
+              'event': 'auth',
+              'data': {
+                'token': token,
+              },
+            }) ??
+            false;
+        debugPrint('[LiveTracking] auth frame send result: $authSent');
+        // Re-establish the tracking subscription on every (re)connect so a missed
+        // `authenticated` frame cannot silently drop location updates.
+        final subSent = _trackingWebSocket?.send({
+              'event': 'subscribe_tracking',
+              'data': {
+                'order_display_id': widget.orderId,
+              },
+            }) ??
+            false;
+        debugPrint('[LiveTracking] subscribe_tracking frame send result: $subSent');
       },
     );
 

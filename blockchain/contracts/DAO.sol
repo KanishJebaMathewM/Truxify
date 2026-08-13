@@ -20,9 +20,11 @@ contract DAO is Ownable {
     IERC20 public governanceToken;
     Proposal[] public proposals;
     mapping(uint256 => mapping(address => uint256)) public votesCast;
+    mapping(uint256 => mapping(address => bool)) public votesReleased;
 
     event ProposalCreated(uint256 indexed proposalId, string description, uint256 deadline);
     event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost);
+    event VotesReleased(uint256 indexed proposalId, address indexed voter, uint256 refund);
 
     constructor(address _tokenAddress) Ownable(msg.sender) {
         governanceToken = IERC20(_tokenAddress);
@@ -55,5 +57,28 @@ contract DAO is Ownable {
         proposal.voteCount += _votes;
 
         emit VotedQuadratic(_proposalId, msg.sender, _votes, tokenCost);
+    }
+
+    /**
+     * @dev Return the governance tokens deposited for a proposal once the
+     *      voting window has closed. The contract holds the voter's final
+     *      quadratic cost (votes^2) in escrow while voting is open; this is
+     *      the only exit path so participation is not a permanent token burn
+     *      (issue #11663).
+     */
+    function releaseVotes(uint256 _proposalId) external {
+        Proposal storage proposal = proposals[_proposalId];
+        require(block.timestamp >= proposal.votingDeadline, "Voting period not ended");
+
+        uint256 votes = votesCast[_proposalId][msg.sender];
+        require(votes > 0, "No votes to release");
+        require(!votesReleased[_proposalId][msg.sender], "Votes already released");
+
+        votesReleased[_proposalId][msg.sender] = true;
+
+        uint256 refund = votes * votes;
+        require(governanceToken.transfer(msg.sender, refund), "Token transfer failed");
+
+        emit VotesReleased(_proposalId, msg.sender, refund);
     }
 }

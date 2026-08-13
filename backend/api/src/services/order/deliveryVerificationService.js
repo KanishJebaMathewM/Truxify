@@ -419,15 +419,25 @@ export class DeliveryVerificationService {
 
     // Ownership + provenance: only telemetry for THIS driver on THIS order.
     // driver_id is stamped server-side from the authenticated connection.
+    // order_display_id is cross-verified to prevent stale telemetry from a
+    // previous order for the same driver being used to satisfy the geofence.
     const latestTelemetry = await mongoDb
       .collection("telemetry")
-      .find({ driver_id: order.driver_id, order_id: order.id })
+      .find({
+        driver_id: order.driver_id,
+        order_id: order.id,
+        order_display_id: order.order_display_id,
+      })
       .sort({ server_received_at: -1 })
       .limit(1)
       .toArray();
 
     const telemetry = latestTelemetry?.[0];
-    if (!telemetry || telemetry.driver_id !== order.driver_id) {
+    if (
+      !telemetry ||
+      telemetry.driver_id !== order.driver_id ||
+      telemetry.order_display_id !== order.order_display_id
+    ) {
       throw new DomainError(409, {
         error: "Location is not available for this driver on this order.",
       });
@@ -481,9 +491,12 @@ export class DeliveryVerificationService {
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
-        if (!isRetryForStuckEscrow) {
-          await this.assertDriverAtDropoff(order);
-        }
+        // Geofence must still apply on the stuck-escrow retry path. The retry
+        // flag only relaxes OTP-readiness and the Postgres RPC guard below; it
+        // must never bypass the driver-at-dropoff control, which would let a
+        // release be re-attempted without physical presence at the drop-off
+        // location (issue #11670).
+        await this.assertDriverAtDropoff(order);
 
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;
@@ -765,6 +778,41 @@ export class DeliveryVerificationService {
           logger.info(
             `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
+
+          // The order is already `payment_released` (that is what defines a
+          // stuck-escrow retry), but `complete_trip_tx` may never have run —
+          // e.g. the original call failed after the on-chain release landed —
+          // leaving the driver's wallet uncredited. Call `complete_trip_tx`
+          // (service_role, no OTP) now: it is idempotent on
+          // `status = 'payment_released'`, so an already-finalized order
+          // short-circuits without double-crediting the wallet, while a
+          // never-finalized order gets its wallet credited exactly once
+          // (issue #11188).
+          const retryRpcResult = await this.orderRepository.executeRpc(
+            "complete_trip_tx",
+            {
+              p_order_id: orderId,
+              p_otp_id: null,
+              p_release_tx_hash: releaseTxHash,
+            },
+            supabaseAdmin,
+          );
+          if (retryRpcResult.error) {
+            logger.error(
+              "[verify-delivery] complete_trip_tx failed on stuck-escrow retry for order",
+              orderId,
+              ":",
+              retryRpcResult.error.message,
+            );
+            throw new DomainError(503, {
+              error:
+                "Failed to finalize trip and credit wallet. Please retry.",
+              details: retryRpcResult.error.message,
+              retryable: true,
+            });
+          }
+          tripData = retryRpcResult.data;
+
           // The verified OTP is consumed on the retry path too so it cannot be
           // replayed by a later attempt. It is only consumed after the release
           // is confirmed, so a failed release leaves the OTP intact for the

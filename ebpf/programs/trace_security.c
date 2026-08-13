@@ -17,7 +17,12 @@ struct {
 SEC("tracepoint/syscalls/sys_enter_open")
 int trace_file_open(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     bpf_printk("File open: %s\n", filename);
     
     return 0;
@@ -27,7 +32,12 @@ int trace_file_open(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_execve(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the executable path; it cannot
+    // be dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     bpf_printk("Process executed: %s\n", filename);
     
     return 0;

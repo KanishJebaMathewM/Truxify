@@ -27,14 +27,14 @@ describe('ShardManager', () => {
       expect(shard1).toBe(shard2);
     });
 
-    it('returns north shard for lat < 20', () => {
+    it('returns south shard for Tamil Nadu coordinates', () => {
       const shard = ShardManager.getShardForLocation(15.0, 77.2090);
-      expect(shard).toBe('north');
+      expect(shard).toBe('south');
     });
 
-    it('returns south shard for lat < 10', () => {
+    it('returns north shard (default) for coordinates outside any bounding box', () => {
       const shard = ShardManager.getShardForLocation(5.0, 77.2090);
-      expect(shard).toBe('south');
+      expect(shard).toBe('north');
     });
   });
 

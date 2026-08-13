@@ -58,3 +58,24 @@ export default function authFailureMonitor(req, res, next) {
 
   next();
 }
+
+// === Spec 4: ===
+// === Spec 4: fail-closed when Redis is unreachable ===
+export async function checkBoundOrFailClosed(redis, ip, opts = {}) {
+  const { maxAttempts = 5, redisTimeoutMs = 250 } = opts;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('redis_timeout')), redisTimeoutMs);
+  });
+  try {
+    const count = await Promise.race([redis.incr(`authfail:${ip}`), timeout]);
+    clearTimeout(timer);
+    if (Number(count) >= maxAttempts) return { allowed: false, reason: 'banned' };
+    return { allowed: true, count: Number(count) };
+  } catch (err) {
+    if (timer) clearTimeout(timer);
+    if (err.message === 'redis_timeout') return { allowed: false, reason: 'security_unavailable' };
+    throw err;
+  }
+}
+

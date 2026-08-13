@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import logger from '../../middleware/logger.js';
+import logger from '../../src/middleware/logger.js';
 
-vi.mock('../../middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: {
     warn: vi.fn(),
     info: vi.fn(),
@@ -52,7 +52,6 @@ describe('shouldIgnoreError', () => {
 
 
 // === Spec 4 test ===
-import { describe, it, expect, vi } from 'vitest';
 import { checkBoundOrFailClosed } from '../../src/middleware/authFailureMonitor.js';
 describe('checkBoundOrFailClosed', () => {
   it('allows under limit', async () => {

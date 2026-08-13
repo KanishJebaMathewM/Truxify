@@ -170,50 +170,27 @@ class TFLiteInference:
         except Exception as e:
             logger.error(f"Model loading failed: {e}")
             return False
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> upstream/main
     def predict(
         self,
         model_name: str,
         input_data: np.ndarray
     ) -> Dict:
-<<<<<<< HEAD
-        """Run inference on edge device"""
-=======
         """Run inference on edge device.
 
         Validates that input_data.shape matches the model's expected input
         shape. Rejects mismatches with a clear error instead of silently
         truncating/repeating data via np.resize.
         """
->>>>>>> upstream/main
         try:
             if model_name not in self.interpreter_cache:
                 if not self.load_model(model_name):
                     return {'success': False, 'error': 'Model not loaded'}
-<<<<<<< HEAD
-            
-=======
 
->>>>>>> upstream/main
             cache = self.interpreter_cache[model_name]
             interpreter = cache['interpreter']
             input_details = cache['input_details']
             output_details = cache['output_details']
-<<<<<<< HEAD
-            
-            # Preprocess input
-            input_shape = input_details[0]['shape']
-            if input_data.shape != input_shape:
-                input_data = np.resize(input_data, input_shape)
-            
-            # Set input
-            interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
-            
-=======
 
             # Validate input shape exactly matches expected shape
             expected_shape = input_details[0]['shape']
@@ -226,26 +203,16 @@ class TFLiteInference:
             # Set input
             interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
 
->>>>>>> upstream/main
             # Run inference
             start_time = datetime.now()
             interpreter.invoke()
             end_time = datetime.now()
-<<<<<<< HEAD
-            
-            # Get output
-            output_data = interpreter.get_tensor(output_details[0]['index'])
-            
-            inference_time = (end_time - start_time).total_seconds() * 1000  # ms
-            
-=======
 
             # Get output
             output_data = interpreter.get_tensor(output_details[0]['index'])
 
             inference_time = (end_time - start_time).total_seconds() * 1000  # ms
 
->>>>>>> upstream/main
             return {
                 'success': True,
                 'output': output_data.tolist(),
@@ -253,11 +220,7 @@ class TFLiteInference:
                 'model_name': model_name,
                 'timestamp': datetime.now().isoformat()
             }
-<<<<<<< HEAD
-            
-=======
 
->>>>>>> upstream/main
         except Exception as e:
             logger.error(f"Inference failed: {e}")
             return {'success': False, 'error': str(e)}
@@ -313,22 +276,6 @@ class TFLiteInference:
 
 class EdgeAIOptimizer:
     """Optimize models for edge deployment"""
-<<<<<<< HEAD
-    
-    def __init__(self):
-        logger.info("✅ Edge AI Optimizer initialized")
-    
-    def quantize_weights(
-        self,
-        model: tf.keras.Model,
-        quantization_type: str = 'float16'
-    ) -> tf.keras.Model:
-        """Quantize model weights"""
-        try:
-            # Apply quantization
-            converter = tf.lite.TFLiteConverter.from_keras_model(model)
-            
-=======
 
     def __init__(self):
         logger.info("✅ Edge AI Optimizer initialized")
@@ -348,31 +295,12 @@ class EdgeAIOptimizer:
         try:
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
 
->>>>>>> upstream/main
             if quantization_type == 'float16':
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 converter.target_spec.supported_types = [tf.float16]
             elif quantization_type == 'int8':
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-<<<<<<< HEAD
-            
-            # Convert
-            tflite_model = converter.convert()
-            
-            # Save quantized model
-            quantized_path = "models/quantized_model.tflite"
-            with open(quantized_path, 'wb') as f:
-                f.write(tflite_model)
-            
-            logger.info(f"✅ Model quantized: {quantization_type}")
-            
-            return model
-            
-        except Exception as e:
-            logger.error(f"Quantization failed: {e}")
-            return model
-=======
 
             tflite_model = converter.convert()
 
@@ -394,7 +322,6 @@ class EdgeAIOptimizer:
         except Exception as e:
             logger.error(f"Quantization failed: {e}")
             return {'success': False, 'error': str(e)}
->>>>>>> upstream/main
     
     def prune_model(
         self,

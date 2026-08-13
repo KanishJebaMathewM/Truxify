@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/rand"
 	"net/http"
@@ -75,6 +76,27 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// maxRequestBodyBytes caps request bodies decoded by this service (1 MiB) so
+// an oversized or streamed body cannot be buffered into memory.
+const maxRequestBodyBytes = 1 << 20
+
+// decodeJSONBody decodes r.Body into v with a 1 MiB cap. It writes a 413 and
+// returns false when the body exceeds the cap; the net/http server drains and
+// closes the connection afterwards so it is not left in an unsafe state.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
 // isValidOrderID reports whether an order id is well-formed.
 func isValidOrderID(id string) bool {
 	if id == "" || len(id) > 64 {
@@ -131,6 +153,7 @@ type RaftNode struct {
 	heartbeatInterval  time.Duration
 	nextIndex          map[string]uint64
 	matchIndex         map[string]uint64
+	peerLive           map[string]bool
 	httpClient         *http.Client
 }
 
@@ -160,6 +183,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
 		nextIndex:          make(map[string]uint64),
 		matchIndex:         make(map[string]uint64),
+		peerLive:           make(map[string]bool),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
 }
@@ -248,14 +272,13 @@ func (rn *RaftNode) startElection() {
 		// follower's log matches its own and works backward from the end.
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
+		rn.peerLive = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
-			// Optimistically assume each follower has replicated the leader's
-			// full log (consistent with nextIndex). This keeps the admission
-			// gate passable immediately after election when all followers are
-			// up, instead of until the first heartbeat succeeds; actual
-			// replication is still required to commit new entries.
-			rn.matchIndex[url] = rn.lastLogIndex()
+			// Seed matchIndex to 0 on election per Raft spec; let sendHeartbeats'
+			// existing monotonic update learn the true match index.
+			rn.matchIndex[url] = 0
+			rn.peerLive[url] = false
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -409,6 +432,7 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
+			rn.peerLive[res.url] = true
 			// Follower accepted the prefix; monotonically record highest matching index.
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
@@ -467,8 +491,8 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 // heartbeat completes.
 func (rn *RaftNode) leaderHasQuorumLocked() bool {
 	acked := 1 // self
-	for _, m := range rn.matchIndex {
-		if m >= rn.CommitIndex {
+	for url, m := range rn.matchIndex {
+		if rn.peerLive[url] && m >= rn.CommitIndex {
 			acked++
 		}
 	}
@@ -559,8 +583,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RequestVoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -604,8 +627,7 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req AppendEntriesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -684,6 +706,39 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	return true
 }
 
+var validTransitions = map[string][]string{
+	"":           {"CREATED"},
+	"CREATED":    {"DISPATCHED", "CANCELLED"},
+	"DISPATCHED": {"IN_TRANSIT", "CANCELLED"},
+	"IN_TRANSIT": {"DELIVERED", "CANCELLED"},
+	"DELIVERED":  {"COMPLETED"},
+	"COMPLETED":  {},
+	"CANCELLED":  {},
+}
+
+func (rn *RaftNode) getOrderStateLocked(orderID string) string {
+	currentState := ""
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == orderID {
+			currentState = rn.Log[i].Command
+		}
+	}
+	return currentState
+}
+
+func isValidTransition(current, next string) bool {
+	allowed, exists := validTransitions[current]
+	if !exists {
+		return false
+	}
+	for _, a := range allowed {
+		if a == next {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleCommitOrder accepts a committed order entry on the leader.
 func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -700,8 +755,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		Command string `json:"command"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -740,17 +794,35 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry := LogEntry{
-		Index:     uint64(len(rn.Log) + 1),
-		Term:      rn.CurrentTerm,
-		Command:   req.Command,
-		OrderID:   req.OrderID,
-		Timestamp: time.Now(),
+	var existingEntry *LogEntry
+	for i := range rn.Log {
+		if rn.Log[i].OrderID == req.OrderID && rn.Log[i].Command == req.Command {
+			existingEntry = &rn.Log[i]
+			break
+		}
 	}
 
-	// Append to the local log first. CommitIndex is NOT advanced here: the entry
-	// must first be replicated to a quorum of followers (Raft §5.3).
-	rn.Log = append(rn.Log, entry)
+	var entry LogEntry
+	if existingEntry != nil {
+		entry = *existingEntry
+	} else {
+		current := rn.getOrderStateLocked(req.OrderID)
+		if !isValidTransition(current, req.Command) {
+			rn.mu.Unlock()
+			http.Error(w, "Invalid state transition", http.StatusBadRequest)
+			return
+		}
+
+		entry = LogEntry{
+			Index:     uint64(len(rn.Log) + 1),
+			Term:      rn.CurrentTerm,
+			Command:   req.Command,
+			OrderID:   req.OrderID,
+			Timestamp: time.Now(),
+		}
+		rn.Log = append(rn.Log, entry)
+		rn.persistState()
+	}
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before

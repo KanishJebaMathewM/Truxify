@@ -75,6 +75,7 @@ const profileCacheRef = vi.hoisted(() => ({
   setCachedCustomerStats: vi.fn().mockResolvedValue(undefined),
   getCachedDriverDetails: vi.fn().mockResolvedValue(null),
   setCachedDriverDetails: vi.fn().mockResolvedValue(undefined),
+  isValidCachedSupabaseProfile: vi.fn(() => true),
 }));
 
 vi.mock('../../src/config/db.js', () => ({
@@ -133,12 +134,13 @@ describe('getProfile', () => {
   });
 
   it('returns cached profile on cache hit (skips DB)', async () => {
-    const cachedProfile = { id: 'user-123', role: 'driver', full_name: 'Cached John' };
+    const cachedProfile = { id: 'user-123', isActive: true, role: 'driver', full_name: 'Cached John' };
     profileCacheRef.getCachedSupabaseProfile.mockResolvedValueOnce(cachedProfile);
 
     const result = await getProfile('user-123');
     expect(result).toEqual(cachedProfile);
     expect(profileCacheRef.getCachedSupabaseProfile).toHaveBeenCalledWith('user-123');
+    expect(profileCacheRef.isValidCachedSupabaseProfile).toHaveBeenCalledWith('user-123', cachedProfile);
     expect(profileCacheRef.setCachedSupabaseProfile).not.toHaveBeenCalled();
   });
 

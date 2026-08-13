@@ -7,7 +7,9 @@ services:
       - ./:/liquibase/changelog
     environment:
       - LIQUIBASE_COMMAND_CHANGELOG_FILE=changelog-master.xml
-      - LIQUIBASE_COMMAND_URL=jdbc:postgresql://postgres:5432/truxify
+      # The changelogs are a legacy standalone demo schema; this container has
+      # its own dedicated database and never touches the application "truxify" DB.
+      - LIQUIBASE_COMMAND_URL=jdbc:postgresql://postgres:5432/truxify_liquibase
       - LIQUIBASE_COMMAND_USERNAME=postgres
       - LIQUIBASE_COMMAND_PASSWORD=password
     command: update
@@ -19,7 +21,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=truxify
+      - POSTGRES_DB=truxify_liquibase
     ports:
       - "5432:5432"
     volumes:

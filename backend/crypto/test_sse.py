@@ -29,12 +29,15 @@ class TestSSE(unittest.TestCase):
         index_a = self.engine.build_encrypted_index(doc_id_a, [shared_keyword, "Delhi"])
         index_b = self.engine.build_encrypted_index(doc_id_b, [shared_keyword, "Mumbai"])
 
-        trapdoor = self.engine.generate_trapdoor(shared_keyword)
-        match = self.engine.search_index(trapdoor, index_a)
-        self.assertIn(doc_id_a, match)
+        # Merge the per-document indexes into a single global index.
+        global_index = {}
+        for index in (index_a, index_b):
+            for trapdoor, doc_ids in index.items():
+                global_index.setdefault(trapdoor, set()).update(doc_ids)
 
-        match = self.engine.search_index(trapdoor, index_b)
-        self.assertIn(doc_id_b, match)
+        trapdoor = self.engine.generate_trapdoor(shared_keyword)
+        match = self.engine.search_index(trapdoor, global_index)
+        self.assertEqual(match, {doc_id_a, doc_id_b})
 
 if __name__ == '__main__':
     unittest.main()

@@ -177,17 +177,26 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
       urlFactory: buildUrl,
-      onConnect: () {
+      onConnect: () async {
         debugPrint('WebSocket connected, authenticating...');
-        if (mounted) setState(() => _wsConnected = true);
-        final session = SupabaseService.client.auth.currentSession;
-        final token = session?.accessToken ?? '';
-        _trackingWebSocket?.send({
-          'event': 'auth',
-          'data': {
-            'token': token,
-          },
-        });
+        if (!mounted) return;
+        setState(() => _wsConnected = true);
+        try {
+          // Refresh the Supabase session so we never send a stale/expired token
+          // after a long trip. Fall back to the current session if refresh fails.
+          final res = await SupabaseService.client.auth.refreshSession();
+          final token = res.session?.accessToken ??
+              SupabaseService.client.auth.currentSession?.accessToken ??
+              '';
+          _trackingWebSocket?.send({
+            'event': 'auth',
+            'data': {
+              'token': token,
+            },
+          });
+        } catch (_) {
+          if (mounted) setState(() => _wsConnected = false);
+        }
       },
     );
 
@@ -222,7 +231,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           _loadTimeline();
         } else if (payload['event'] == null && payload['error'] != null) {
           debugPrint('[LiveTracking] WS server error: ${payload['error']}');
+          // Auth/subscribe was rejected (e.g. token expired). Mark disconnected
+          // and schedule a re-auth by forcing a fresh reconnect, which re-runs
+          // onConnect (refresh + re-auth). Avoids silently dropping tracking.
           if (mounted) setState(() => _wsConnected = false);
+          _scheduleReAuth();
         }
       } catch (e) {
         debugPrint('Error parsing tracking WebSocket message: $e');
@@ -234,6 +247,23 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     });
 
     _trackingWebSocket!.connect();
+  }
+
+  /// Re-establishes the tracking socket after an auth/subscribe error so the
+  /// server-side session can be refreshed and re-validated. A short backoff
+  /// prevents a tight reconnect loop when the backend keeps rejecting us.
+  void _scheduleReAuth() {
+    if (!mounted || _trackingWebSocket == null) return;
+    Future<void>.delayed(const Duration(seconds: 3), () async {
+      if (!mounted || _trackingWebSocket == null) return;
+      try {
+        await SupabaseService.client.auth.refreshSession();
+      } catch (_) {
+        // Ignore — the reconnect below surfaces the connection state; a fresh
+        // onConnect will re-attempt auth with whatever token is available.
+      }
+      await _trackingWebSocket!.connect();
+    });
   }
 
   void _updateTruckPosition(LatLng newPosition) {

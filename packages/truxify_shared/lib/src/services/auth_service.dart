@@ -104,13 +104,6 @@ class AuthService {
   Future<UserCredential> verifyOtp(
       String verificationId, String smsCode) async {
     if (_auth == null) throw Exception('Firebase Auth is not available');
-<<<<<<< HEAD
-    final credential = PhoneAuthProvider.credential(
-      verificationId: verificationId,
-      smsCode: smsCode,
-    );
-    return _auth.signInWithCredential(credential);
-=======
     if (!_validateOtp(smsCode)) {
       throw ArgumentError(_lastAuthError ?? 'Invalid OTP');
     }
@@ -124,7 +117,6 @@ class AuthService {
     } finally {
       _isAuthenticating = false;
     }
->>>>>>> upstream/main
   }
 
   /// Sign out the current user.

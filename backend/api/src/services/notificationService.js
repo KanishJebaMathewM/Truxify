@@ -90,6 +90,20 @@ function isInvalidTokenError(code) {
   return INVALID_TOKEN_CODES.has(code);
 }
 
+/**
+ * Validates an FCM topic name format.
+ * FCM topic names must be: alphanumeric, 1-64 chars, no spaces, no special chars.
+ * @param {string} topic
+ * @returns {string|null} Error message or null if valid
+ */
+function validateFcmTopicName(topic) {
+  if (typeof topic !== 'string') return 'Topic must be a string';
+  if (topic.length === 0) return 'Topic cannot be empty';
+  if (topic.length > 64) return 'Topic must be 64 characters or fewer';
+  if (!/^[a-zA-Z0-9_/.-]+$/.test(topic)) return 'Topic contains invalid characters';
+  return null;
+}
+
 export async function sendFcmNotification(userId, notification, data = {}) {
   if (!firebaseAdmin || !firebaseAdmin.messaging) {
     logger.warn('[FCM] Firebase not configured — skipping push notification');

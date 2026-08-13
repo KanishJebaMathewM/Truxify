@@ -16,6 +16,7 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
         uint256 amount;
         bool released;
         uint256 blockMin;
+        uint256 blockMax;
         bytes32 secretHash;
     }
 
@@ -24,6 +25,8 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
     address public trustedRelayer;
 
     uint256 public constant REFUND_WINDOW = 5760;
+    uint256 public constant MAX_RELEASE_WINDOW = 5760;
+    uint256 public constant MAX_RELEASE_DELAY = 5760;
 
     event DepositCreated(uint256 indexed depositId, address indexed shipper, address indexed driver, uint256 amount);
     event DepositReleasedMEV(uint256 indexed depositId, address indexed driver, uint256 amount);
@@ -48,12 +51,23 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
      * @dev The SHIPPER is responsible for minting the secret preimage and
      * committing keccak256(preimage) as _secretHash. The relayer can only
      * release after it learns the preimage out of band (e.g. a private
-     * Flashbots bundle); if it never does, refundDeposit returns the funds
-     * after blockMin + REFUND_WINDOW.
+     * Flashbots bundle) AND between _blockMin and _blockMin + MAX_RELEASE_WINDOW;
+     * if it never does, refundDeposit returns the funds after blockMin + REFUND_WINDOW.
+     *
+     * @param _driver The driver that will receive the released funds.
+     * @param _secretHash keccak256 of the secret preimage committed by the shipper.
+     * @param _blockMin The first block at which release is permitted. Must be strictly
+     * in the future so the "Release window not open" guard is not dead code.
      */
-    function createProtectedDeposit(address payable _driver, bytes32 _secretHash) external payable returns (uint256 depositId) {
+    function createProtectedDeposit(
+        address payable _driver,
+        bytes32 _secretHash,
+        uint256 _blockMin
+    ) external payable returns (uint256 depositId) {
         require(msg.value > 0, "Deposit must be > 0");
         require(_driver != address(0), "Invalid driver address");
+        require(_blockMin > block.number, "blockMin must be in the future");
+        require(_blockMin - block.number <= MAX_RELEASE_DELAY, "blockMin too far in the future");
 
         depositId = ++depositCount;
         deposits[depositId] = ProtectedDeposit({
@@ -61,7 +75,8 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
             driver: _driver,
             amount: msg.value,
             released: false,
-            blockMin: block.number,
+            blockMin: _blockMin,
+            blockMax: _blockMin + MAX_RELEASE_WINDOW,
             secretHash: _secretHash
         });
 
@@ -70,11 +85,13 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
 
     /**
      * @dev Private Flashbots bundle release function, enforcing block deadlines & preimage verification.
+     * Release is gated by: not yet released, block.number within [blockMin, blockMax], and a valid preimage.
      */
     function releaseDepositPrivate(uint256 _depositId, bytes32 _preimage) external onlyRelayer nonReentrant {
         ProtectedDeposit storage dep = deposits[_depositId];
         require(!dep.released, "Already released");
         require(block.number >= dep.blockMin, "Release window not open");
+        require(block.number <= dep.blockMax, "Release window closed");
         require(keccak256(abi.encodePacked(_preimage)) == dep.secretHash, "Invalid preimage");
 
         dep.released = true;

@@ -119,6 +119,18 @@ describe('otpHashing', () => {
     it('throws TypeError when OTP is only whitespace', () => {
       expect(() => hashOtp('   ')).toThrow(TypeError);
     });
+
+    it('throws TypeError when the supplied salt is not 32-char hex', () => {
+      expect(() => hashOtp('123456', 'not-hex')).toThrow(TypeError);
+      expect(() => hashOtp('123456', 'abcd')).toThrow(TypeError);
+      expect(() => hashOtp('123456', 12345)).toThrow(TypeError);
+    });
+
+    it('accepts a valid 32-char uppercase hex salt and normalizes it', () => {
+      const { hash, salt } = hashOtp('123456', 'A'.repeat(32));
+      expect(salt).toBe('a'.repeat(32));
+      expect(hash).toMatch(/^[a-f0-9]{128}$/);
+    });
   });
 
 });

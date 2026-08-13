@@ -270,6 +270,7 @@ class GlobalStore extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...snapshot.state };
         
+        this.notifyStateDiff(oldState, this.state);
         this.emit('snapshotRestored', { oldState, newState: this.state });
         logger.debug(`Snapshot restored: ${snapshot.id}`);
     }
@@ -286,6 +287,7 @@ class GlobalStore extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...this.history[this.historyIndex] };
         
+        this.notifyStateDiff(oldState, this.state);
         this.emit('undo', { oldState, newState: this.state });
         logger.debug('Undo performed');
         
@@ -302,6 +304,7 @@ class GlobalStore extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...this.history[this.historyIndex] };
         
+        this.notifyStateDiff(oldState, this.state);
         this.emit('redo', { oldState, newState: this.state });
         logger.debug('Redo performed');
         
@@ -348,6 +351,18 @@ class GlobalStore extends EventEmitter {
             }
         }
     }
+
+    // Notify subscribers of every key whose value changed between two states.
+    // Used by undo/redo/restoreSnapshot/atomic, which mutate the whole state
+    // object at once and cannot go through set()/update().
+    notifyStateDiff(oldState, newState) {
+        const keys = new Set([...Object.keys(oldState), ...Object.keys(newState)]);
+        for (const key of keys) {
+            if (!Object.is(oldState[key], newState[key])) {
+                this.notifyListeners(key, newState[key]);
+            }
+        }
+    }
     
     // ============ Atomic Updates ============
     
@@ -357,6 +372,7 @@ class GlobalStore extends EventEmitter {
         
         try {
             Object.assign(this.state, updates);
+            this.notifyStateDiff(oldState, this.state);
             this.emit('atomicUpdate', { oldState, newState: this.state });
             logger.debug(`Atomic update: ${Object.keys(updates).join(', ')}`);
         } catch (error) {

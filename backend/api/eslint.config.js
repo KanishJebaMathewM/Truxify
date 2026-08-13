@@ -11,6 +11,7 @@ export default [
         ...globals.jest,
         ...globals.browser,
         fetch: 'readonly',
+        __ENV: 'readonly',
       }
     },
     rules: {

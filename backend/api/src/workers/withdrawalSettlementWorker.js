@@ -123,7 +123,7 @@ export async function settlePendingWithdrawals() {
 
   const { data: withdrawals, error } = await supabaseAdmin
     .from("wallet_transactions")
-    .select("id, driver_id, amount, payout_attempted_at, settlement_ref")
+      .select("id, driver_id, amount, payout_attempted_at, settlement_ref, settle_attempts")
     .eq("txn_type", "withdrawal")
     .eq("status", "pending")
     .is("settled_at", null)
@@ -209,9 +209,35 @@ export async function settlePendingWithdrawals() {
         `[WithdrawalSettlementWorker] Settled withdrawal ${withdrawal.id} (ref: ${settlementRef}).`,
       );
     } catch (err) {
+      // The payout has already left the platform (payout_attempted_at is set),
+      // so funds must NEVER be restored. Instead we bound the retries: once the
+      // per-row settle attempt count exceeds the limit we mark the row terminal
+      // (settlement_failed) so it is excluded from the next sweep, and emit a
+      // one-time alert for manual reconciliation (issue #11395).
+      const attempts = (withdrawal.settle_attempts || 0) + 1;
+      const terminal = attempts >= SETTLE_RETRY_ATTEMPTS;
+
       logger.error(
-        `[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} deferred — payout already dispatched, funds NOT restored: ${err.message}`,
+        `[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} ${terminal ? "FAILED TERMINALLY" : "deferred"} — payout already dispatched, funds NOT restored: ${err.message}`,
       );
+
+      const { error: recErr } = await supabaseAdmin.rpc("record_settle_failure", {
+        p_withdrawal_id: withdrawal.id,
+        p_error: String(err.message || "Unknown error").slice(0, 1000),
+        p_terminal: terminal,
+      });
+
+      if (recErr) {
+        logger.error(
+          `[WithdrawalSettlementWorker] Failed to record settle failure for ${withdrawal.id}: ${recErr.message}`,
+        );
+      } else if (terminal) {
+        // One-time terminal alert — the row is now settlement_failed and will
+        // no longer be selected by the pending sweep.
+        logger.error(
+          `[WithdrawalSettlementWorker] ALERT: withdrawal ${withdrawal.id} marked settlement_failed after ${attempts} settle attempts — manual reconciliation required (payout already dispatched).`,
+        );
+      }
     }
   }
 }

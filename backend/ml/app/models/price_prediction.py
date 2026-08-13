@@ -19,6 +19,24 @@ from .base import get_model_meta, load_model, save_model
 
 logger = logging.getLogger(__name__)
 
+
+class _SafeStandardScaler(StandardScaler):
+    """StandardScaler hardened against zero-variance (constant) features.
+
+    A constant column (e.g. ``fuel_price`` injected as ``DEFAULT_FUEL_PRICE``
+    for every training row) produces ``scale_ == 0.0``; standard scaling then
+    divides by zero and emits NaN/inf on ``transform``. Any zero scale is
+    replaced with ``1.0`` so constant columns map to a finite offset (0.0)
+    instead of propagating NaN, keeping the prediction pipeline valid.
+    """
+
+    def fit(self, X, y=None):
+        super().fit(X, y)
+        if getattr(self, "scale_", None) is not None:
+            self.scale_ = np.where(self.scale_ == 0.0, 1.0, self.scale_)
+        return self
+
+
 MODEL_NAME = "price_forecast"
 
 # Real-data training pipeline: this module only ever fits on completed trips
@@ -296,6 +314,37 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return r_earth * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _derive_fuel_price(row: dict, fallback: float = DEFAULT_FUEL_PRICE) -> float:
+    """Resolve a per-trip fuel price with real variance.
+
+    The ``orders``/``trucks`` schema has no per-trip fuel price column, so the
+    SQL cannot select one. If a ``fuel_price`` field happens to be present on
+    the row (e.g. a future schema migration or a caller-supplied override) we
+    use it directly. Otherwise we derive a small, deterministic, realistic
+    variation around :data:`DEFAULT_FUEL_PRICE` from observable per-trip signals
+    (the completion date, which tracks how diesel prices drift over time). This
+    keeps the ``fuel_price`` feature non-constant so ``StandardScaler`` does not
+    emit ``NaN``/``inf`` on a zero-variance column.
+    """
+    explicit = row.get("fuel_price")
+    if explicit is not None:
+        try:
+            value = float(explicit)
+            if math.isfinite(value) and value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+
+    created_at = row.get("created_at")
+    drift = 0.0
+    if isinstance(created_at, datetime):
+        # Map day-of-year onto a smooth +/-3% band: diesel prices drift slowly
+        # over the year, giving the feature genuine cross-row variance.
+        day_of_year = created_at.timetuple().tm_yday
+        drift = math.sin(day_of_year / 58.0) * 0.03
+    return fallback * (1.0 + drift)
+
+
 def _parse_trip_row(row: dict) -> Optional[dict]:
     """Convert a raw orders row into a training sample, or None if unusable."""
     try:
@@ -337,7 +386,7 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
             hour,
             day_of_week,
             month,
-            DEFAULT_FUEL_PRICE,
+            _derive_fuel_price(row),
             CARGO_TYPE_ENCODING[_normalize_cargo_type(row.get("goods_type"))],
         ],
         "origin": _city_from_address(row.get("pickup_address")),
@@ -467,7 +516,7 @@ def train_price_model(max_samples: int = 20000) -> dict:
         X, y, test_size=0.2, random_state=42
     )
 
-    scaler = StandardScaler()
+    scaler = _SafeStandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 

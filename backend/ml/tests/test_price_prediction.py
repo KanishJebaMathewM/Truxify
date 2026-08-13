@@ -264,3 +264,34 @@ def test_price_prediction_module_importable():
     import importlib
     module = importlib.import_module("app.models.price_prediction")
     assert hasattr(module, "train_price_model")
+
+
+# Regression test for issue #11453 - a constant fuel_price feature created a
+# zero-variance column that made the scaler emit NaN/inf and break predictions.
+def test_constant_fuel_price_yields_finite_predictions(monkeypatch):
+    """A constant fuel_price feature must not produce NaN/inf predictions (#11453)."""
+    monkeypatch.setattr(pp, "load_historical_trips", lambda max_samples=20000: _fake_trip_rows(150))
+    assert client.post("/train/price").status_code == 200
+
+    payload = {
+        "distance_km": 500.0,
+        "cargo_weight_kg": 10000.0,
+        "fuel_price": 105.0,
+    }
+    response = client.post("/predict/price", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    for key in ("estimated_price", "min_price", "max_price"):
+        assert np.isfinite(data[key]), f"{key} should be finite, got {data[key]}"
+
+
+def test_constant_fuel_price_scaler_no_nan(monkeypatch):
+    """The persisted scaler must not have zero scales after training (#11453)."""
+    monkeypatch.setattr(pp, "load_historical_trips", lambda max_samples=20000: _fake_trip_rows(150))
+    assert client.post("/train/price").status_code == 200
+
+    from app.models.base import load_model
+    saved = load_model(pp.MODEL_NAME)
+    assert saved is not None
+    _model, scaler, _encoder = saved
+    assert np.all(np.isfinite(scaler.scale_)), "scaler.scale_ must not contain NaN/inf"

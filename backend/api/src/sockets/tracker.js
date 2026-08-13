@@ -1092,23 +1092,30 @@ export async function handleLocationPing(ws, data, req) {
         const idToLookup = orderUUID || orderDisplayId;
         const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
         if (order) {
-          // Verify the authenticated driver is assigned to this order
-          if (order.driver_id !== driver_id) {
-            logger.warn({
-              event: 'UNAUTHORIZED_ORDER_TRACKING',
-              driverId: driver_id,
-              orderId: order.id,
-              orderDisplayId: order.order_display_id,
-              assignedDriverId: order.driver_id,
-            }, 'Driver attempted to submit location for order they are not assigned to');
-            return ws.send(JSON.stringify({
-              error: 'Not authorized to track this order',
-              orderId: orderDisplayId || orderUUID,
-            }));
-          }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
           await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+        }
+      }
+
+      // ── Authorization check (runs regardless of cache hit or miss) ─
+      // The authorization guard must always execute so that a stale cache entry
+      // for a previously-assigned driver cannot authorize a reassigned driver.
+      if (orderUUID && orderDisplayId) {
+        const idToLookup = orderUUID || orderDisplayId;
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        if (order && order.driver_id !== driver_id) {
+          logger.warn({
+            event: 'UNAUTHORIZED_ORDER_TRACKING',
+            driverId: driver_id,
+            orderId: order.id,
+            orderDisplayId: order.order_display_id,
+            assignedDriverId: order.driver_id,
+          }, 'Driver attempted to submit location for order they are not assigned to');
+          return ws.send(JSON.stringify({
+            error: 'Not authorized to track this order',
+            orderId: orderDisplayId || orderUUID,
+          }));
         }
       }
     } catch (err) {
@@ -1686,6 +1693,27 @@ async function handleUnsubscribe(ws, data) {
         }
       } catch (err) {
         logger.error('Redis subscription cleanup error:', err.message);
+      }
+    }
+
+    // Clean up Supabase Realtime channel when the last subscriber for this
+    // display ID disconnects. Without this, channels for driver-only orders
+    // (where only the driver subscribes) are never removed, leaking channels.
+    if (trackingSubscriptions.get(targetId).size === 0) {
+      trackingSubscriptions.delete(targetId);
+      const channelKeys = displayIdToLocationChannelKeys.get(targetId);
+      if (channelKeys) {
+        for (const uuidKey of channelKeys) {
+          if (locationChannels.has(uuidKey)) {
+            const channel = locationChannels.get(uuidKey);
+            if (supabase) {
+              supabase.removeChannel(channel);
+            }
+            locationChannels.delete(uuidKey);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber unsubscribe');
+          }
+        }
+        displayIdToLocationChannelKeys.delete(targetId);
       }
     }
 

@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -63,8 +65,8 @@ class TruxifyController extends ChangeNotifier {
       final savedCode = prefs.getString(_languageKey) ?? 'en';
       _locale = Locale(savedCode);
       notifyListeners();
-    } catch (_) {
-      // Ignore shared preferences loading errors, fallback to English
+    } catch (e) {
+      developer.log('Failed to load language preference, falling back to English: $e');
     }
   }
 
@@ -76,8 +78,8 @@ class TruxifyController extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_languageKey, languageCode);
-    } catch (_) {
-      // Ignore shared preferences errors
+    } catch (e) {
+      developer.log('Failed to save language preference: $e');
     }
   }
 }

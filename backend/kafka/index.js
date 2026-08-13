@@ -62,3 +62,14 @@ process.on('SIGINT', async () => {
 });
 
 main();
+
+
+// === Spec 35: ===
+// === Spec 35: deterministic partition key ===
+import crypto from 'crypto';
+export function derivePartitionKey(orderId) {
+  if (!orderId) return '0';
+  const h = crypto.createHash('sha256').update(String(orderId)).digest();
+  return h.readUInt32BE(0).toString();
+}
+

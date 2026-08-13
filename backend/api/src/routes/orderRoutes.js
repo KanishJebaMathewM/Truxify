@@ -1231,4 +1231,99 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async 
   }
 });
 
+// GET /api/orders/:id/bids - customer views bids on their order
+router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const bids = await orderLifecycleService.getBidsForOrder(req.params.id, req.user.id);
+    return res.json({ bids });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Order bids fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch bids.' });
+  }
+});
+
+// POST /api/orders/:id/bids/:bidId/accept - customer accepts a bid
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const result = await orderLifecycleService.acceptBid(req.params.id, req.params.bidId, req.user.id);
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Bid acceptance error:', err);
+    return res.status(500).json({ error: 'Failed to accept bid.' });
+  }
+});
+
+// POST /api/orders/:id/ratings - customer submits rating for a driver
+router.post('/:id/ratings', authenticate, userLimiter, validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
+  try {
+    const { stars, comment } = req.body;
+    const result = await orderLifecycleService.submitRating(req.params.id, req.user.id, stars, comment, createUserClient(req.user.id));
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Rating submission error:', err);
+    return res.status(500).json({ error: 'Failed to submit rating.' });
+  }
+});
+
+// POST /api/orders/:id/bids - driver submits bid on a load offer
+router.post('/:id/bids', authenticate, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+  try {
+    const { bid_amount } = req.body;
+    const result = await orderLifecycleService.submitBid(req.params.id, req.user.id, bid_amount);
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Bid submission error:', err);
+    return res.status(500).json({ error: 'Failed to submit bid.' });
+  }
+});
+
+// GET /api/orders/load-offers/en-route - find en-route load opportunities for active driver
+router.get('/load-offers/en-route', authenticate, requireRole(['driver']), async (req, res) => {
+  try {
+    const { currentLat, currentLng, maxDetourKm } = req.query;
+    if (!currentLat || !currentLng) {
+      return res.status(400).json({ error: 'currentLat and currentLng query parameters are required.' });
+    }
+
+    const { data: offers } = await supabase
+      .from('load_offers')
+      .select('id, pickup_lat, pickup_lng, drop_lat, drop_lng, weight, dimensions, pickup_deadline, payment_inr, freight_value, status')
+      .eq('status', 'available');
+
+    if (!offers || offers.length === 0) {
+      return res.json({ recommendations: [], mlUsed: false });
+    }
+
+    const result = await matchEnRouteLoads({
+      currentLat: Number(currentLat),
+      currentLng: Number(currentLng),
+      offers,
+      maxDetourKm: maxDetourKm ? Number(maxDetourKm) : 50,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    logger.error('En-route loads error:', err);
+    return res.status(500).json({ error: 'Failed to fetch en-route load offers.' });
+  }
+});
+
 export default router;

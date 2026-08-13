@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-  { ignores: ['coverage/**', 'tests/load/**'] },
+  { ignores: ['coverage/**'] },
   js.configs.recommended,
   {
     languageOptions: {
@@ -28,18 +28,14 @@ export default [
       globals: {
         ...globals.node,
         ...globals.jest,
+        vi: 'writable',
         describe: 'readonly',
         it: 'readonly',
         expect: 'readonly',
         beforeEach: 'readonly',
         afterEach: 'readonly',
         test: 'readonly',
-        beforeAll: 'readonly',
-        afterAll: 'readonly',
       }
-    },
-    rules: {
-      'no-redeclare': 'off',
     },
   },
 ];

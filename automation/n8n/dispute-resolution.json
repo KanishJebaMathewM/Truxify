@@ -18,12 +18,21 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/status",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/freeze",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "4e78b8a5-d8ca-43bc-9cb7-78fe7ea9b10c",
-      "name": "Check Escrow Status",
+      "name": "Freeze Payment Contract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -90,12 +99,29 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/orders/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/timeline",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/generate-dispute-pdf",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "gpsTrail",
+              "value": "={{$node[\"Query MongoDB GPS Trail\"].json}}"
+            },
+            {
+              "name": "otpLogs",
+              "value": "={{$node[\"Query Supabase OTP Logs\"].json}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "f512c1b1-21c2-4632-bd88-12cd2a8aefaa",
-      "name": "Fetch Order Timeline",
+      "name": "Package Dispute PDF",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -106,28 +132,28 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/support/tickets",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/notify-dispute",
         "sendBody": true,
         "bodyParametersUi": {
           "parameter": [
             {
-              "name": "subject",
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "title",
               "value": "Dispute Flagged: Delivery Unconfirmed"
             },
             {
-              "name": "category",
-              "value": "payment"
-            },
-            {
-              "name": "description",
-              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Evidence gathered from the GPS trail and OTP logs."
+              "name": "body",
+              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}."
             }
           ]
         },
         "options": {}
       },
       "id": "76bcca3e-51c3-4d44-be12-2cde2a5bdeee",
-      "name": "Open Support Ticket",
+      "name": "Notify Both Parties",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -168,7 +194,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{$json.order.status}}",
+              "value1": "={{$json.status}}",
               "value2": "disputed"
             }
           ]
@@ -186,16 +212,15 @@
     {
       "parameters": {
         "operation": "insert",
-        "table": "order_timeline",
+        "table": "arbitration_records",
         "data": {
-          "order_display_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
-          "milestone": "Escalated to Arbitration",
-          "completed": false,
-          "sort_order": 100
+          "booking_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+          "status": "pending",
+          "details": "Escalated after 24h of inactivity"
         }
       },
       "id": "dc12cbb5-a87f-47bc-9b2f-9811abecdd33",
-      "name": "Record Escalation Event",
+      "name": "Create Arbitration Record",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
@@ -236,12 +261,25 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$json.body.bookingId}}/status",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/release",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            },
+            {
+              "name": "recipient",
+              "value": "={{$json.body.recipient}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "cc897db2-6d2c-47bc-ad78-87efcdbc5a8f",
-      "name": "Verify Escrow Release",
+      "name": "Release Escrow Payment",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -275,14 +313,14 @@
       "main": [
         [
           {
-            "node": "Check Escrow Status",
+            "node": "Freeze Payment Contract",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Escrow Status": {
+    "Freeze Payment Contract": {
       "main": [
         [
           {
@@ -309,7 +347,7 @@
       "main": [
         [
           {
-            "node": "Fetch Order Timeline",
+            "node": "Package Dispute PDF",
             "type": "main",
             "index": 0
           }
@@ -320,25 +358,25 @@
       "main": [
         [
           {
-            "node": "Fetch Order Timeline",
+            "node": "Package Dispute PDF",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Fetch Order Timeline": {
+    "Package Dispute PDF": {
       "main": [
         [
           {
-            "node": "Open Support Ticket",
+            "node": "Notify Both Parties",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Open Support Ticket": {
+    "Notify Both Parties": {
       "main": [
         [
           {
@@ -375,7 +413,7 @@
       "main": [
         [
           {
-            "node": "Record Escalation Event",
+            "node": "Create Arbitration Record",
             "type": "main",
             "index": 0
           },
@@ -391,7 +429,7 @@
       "main": [
         [
           {
-            "node": "Verify Escrow Release",
+            "node": "Release Escrow Payment",
             "type": "main",
             "index": 0
           }

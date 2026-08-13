@@ -660,7 +660,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final displayName = (decoded['display_name'] as String?)?.trim();
         if (displayName != null && displayName.isNotEmpty) return displayName;
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[_resolveCurrentLocationAddress] reverse geocode failed: $e');
       return 'Location Unavailable';
     }
     return 'Location Unavailable';

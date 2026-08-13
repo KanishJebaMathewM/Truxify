@@ -19,6 +19,31 @@ const ANOMALY_THRESHOLDS = {
  */
 const ANOMALY_STATS_MAX_ROWS = 1000;
 
+/**
+ * Monetary amounts are represented as MATIC values that arrive as JS numbers or
+ * numeric strings. IEEE-754 `double` summation drifts (the classic
+ * `0.1 + 0.2 !== 0.3`) and biases the average/std-dev/z-score that gate the
+ * LARGE_WITHDRAWAL security control. We therefore accumulate amounts as exact
+ * integers using a fixed scale (1 MATIC === AMOUNT_SCALE internal units) and
+ * only coerce back to a Number at the final threshold comparison.
+ */
+const AMOUNT_SCALE = 1000000n;
+
+function toAmountUnits(value) {
+  if (value === null || value === undefined || value === '') return 0n;
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return 0n;
+  const sign = num < 0 ? -1n : 1n;
+  const abs = Math.abs(num);
+  const intPart = Math.trunc(abs);
+  const fracUnits = Math.round((abs - intPart) * Number(AMOUNT_SCALE));
+  return sign * (BigInt(intPart) * AMOUNT_SCALE + BigInt(fracUnits));
+}
+
+function fromAmountUnits(units) {
+  return Number(units) / Number(AMOUNT_SCALE);
+}
+
 const ANOMALY_SEVERITY = {
   LOW: 'LOW',
   MEDIUM: 'MEDIUM',
@@ -78,22 +103,23 @@ class AnomalyDetectionService {
         return null;
       }
 
-      const amount = parseFloat(transaction.amount || 0);
+      const amount = toAmountUnits(transaction.amount || 0);
+      const threshold = BigInt(ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL) * AMOUNT_SCALE;
 
-      if (amount < ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL) {
+      if (amount < threshold) {
         return null;
       }
 
       const userAvgWithdrawal = await this.getUserAverageWithdrawal(userId, walletAddress);
       const stdDev = await this.getUserWithdrawalStdDev(userId, walletAddress);
 
-      const zScore = (amount - userAvgWithdrawal) / (stdDev || 1);
+      const zScore = (fromAmountUnits(amount) - userAvgWithdrawal) / (stdDev || 1);
 
       if (zScore > 3) {
         return {
           type: 'LARGE_WITHDRAWAL',
           severity: 'HIGH',
-          amount,
+          amount: fromAmountUnits(amount),
           expectedAverage: userAvgWithdrawal,
           zScore,
           message: `Withdrawal ${Math.round(zScore)}x standard deviation above average`,
@@ -123,8 +149,8 @@ class AnomalyDetectionService {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2;
       }
 
-      const total = data.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-      return total / data.length;
+      const total = data.reduce((sum, t) => sum + toAmountUnits(t.amount), 0n);
+      return fromAmountUnits(total) / data.length;
     } catch (err) {
       logger.warn('[AnomalyDetectionService] Failed to calculate average withdrawal:', err.message);
       return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2;
@@ -147,9 +173,11 @@ class AnomalyDetectionService {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 4;
       }
 
-      const amounts = data.map(t => parseFloat(t.amount) || 0);
-      const avg = amounts.reduce((a, b) => a + b) / amounts.length;
-      const variance = amounts.reduce((sum, a) => sum + Math.pow(a - avg, 2), 0) / amounts.length;
+      const units = data.map(t => toAmountUnits(t.amount));
+      const count = units.length;
+      const sum = units.reduce((a, b) => a + b, 0n);
+      const avg = fromAmountUnits(sum) / count;
+      const variance = units.reduce((sum, u) => sum + Math.pow(fromAmountUnits(u) - avg, 2), 0) / count;
       return Math.sqrt(variance);
     } catch (err) {
       logger.warn('[AnomalyDetectionService] Failed to calculate std dev:', err.message);

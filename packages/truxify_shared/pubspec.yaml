@@ -27,4 +27,5 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  firebase_auth_mocks: ^0.15.2
 

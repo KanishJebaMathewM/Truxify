@@ -31,8 +31,10 @@ def main() -> int:
         sql = open(path, encoding="utf-8", errors="replace").read()
 
         for match in FUNC_RE.finditer(sql):
-            # The header is everything before the `AS $$` body marker.
-            header = BODY_RE.split(sql[match.start() : match.start() + 4000])[0]
+            # The header is everything before the `AS $$` body marker. Search the
+            # whole remainder of the file so that long function definitions (whose
+            # header exceeds 4000 chars) are not truncated and misclassified.
+            header = BODY_RE.split(sql[match.start() :])[0]
             latest[match.group(1)] = (
                 os.path.basename(path),
                 bool(re.search(r"security\s+definer", header, re.I)),

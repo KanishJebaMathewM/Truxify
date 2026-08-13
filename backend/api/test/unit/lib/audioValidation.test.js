@@ -58,8 +58,9 @@ describe('audioValidation — detectAudioMimeType', () => {
   })
 
   it('returns audio/mp4 for ISO base media ftyp box', () => {
-    // ftyp at offset 4
-    const buf = hexToBuffer('00000000 00000000 66747970 69736F6D')
+    // ftyp box at offset 4 (after 4-byte box length)
+    // 4 dummy bytes + ftyp (4 bytes) + brand (4 bytes) = 12 bytes
+    const buf = hexToBuffer('00000008 66747970 4D344120')
     expect(detectAudioMimeType(buf)).toBe('audio/mp4')
   })
 

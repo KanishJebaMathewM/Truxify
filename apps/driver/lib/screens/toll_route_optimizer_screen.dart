@@ -28,11 +28,22 @@ class _TollRouteOptimizerScreenState extends State<TollRouteOptimizerScreen> {
       setState(() {
         _routes = routes;
         _isLoading = false;
-        // Fall back to the first route when none is flagged as recommended,
-        // instead of letting firstWhere throw StateError on an empty/no-match list.
-        _selectedRouteId = routes.isNotEmpty
-            ? routes.firstWhere((r) => r.isRecommended, orElse: () => routes.first).routeId
-            : null;
+        // Never throw StateError when no route is flagged recommended: log the
+        // fallback and select the first route so the optimizer still behaves
+        // predictably (#12494).
+        if (routes.isNotEmpty) {
+          final recommended = routes.where((r) => r.isRecommended).toList();
+          if (recommended.isNotEmpty) {
+            _selectedRouteId = recommended.first.routeId;
+          } else {
+            debugPrint(
+              'TollRouteOptimizer: no recommended route, falling back to first route',
+            );
+            _selectedRouteId = routes.first.routeId;
+          }
+        } else {
+          _selectedRouteId = null;
+        }
       });
     }
   }

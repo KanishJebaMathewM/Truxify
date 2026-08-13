@@ -18,7 +18,7 @@ class KeyRotationService {
     this.rotationLocks = new Set();
   }
 
-  async initiateKeyRotation(userId, walletAddress, currentPrivateKey, newPrivateKey, reason = 'routine') {
+  async initiateKeyRotation(userId, walletAddress, currentPrivateKey, newPrivateKey, reason = 'routine', requestIp = null) {
     return measureExecution('KeyRotationService.initiateKeyRotation', async () => {
       const lockKey = `${userId}:${walletAddress}`;
 
@@ -48,7 +48,7 @@ class KeyRotationService {
           completed_at: new Date().toISOString(),
         });
 
-        await this.logKeyRotationEvent(userId, walletAddress, reason, 'success');
+        await this.logKeyRotationEvent(userId, walletAddress, reason, 'success', null, requestIp);
 
         logger.info('[KeyRotationService] Key rotation completed:', rotationId);
 
@@ -63,7 +63,7 @@ class KeyRotationService {
         logger.error('[KeyRotationService] Key rotation failed:', err.message);
         Sentry.captureException(err);
 
-        await this.logKeyRotationEvent(userId, walletAddress, reason, 'failed', err.message);
+        await this.logKeyRotationEvent(userId, walletAddress, reason, 'failed', err.message, requestIp);
 
         this.rotationLocks.delete(lockKey);
 
@@ -238,7 +238,7 @@ class KeyRotationService {
     }
   }
 
-  async logKeyRotationEvent(userId, walletAddress, reason, status, errorMessage = null) {
+  async logKeyRotationEvent(userId, walletAddress, reason, status, errorMessage = null, requestIp = null) {
     try {
       await supabase
         .from('key_rotation_audit_log')
@@ -249,7 +249,7 @@ class KeyRotationService {
           status,
           error_message: errorMessage,
           timestamp: new Date().toISOString(),
-          ip_address: process.env.REQUEST_IP || 'unknown',
+          ip_address: requestIp || process.env.REQUEST_IP || 'unknown',
         }]);
     } catch (err) {
       logger.error('[KeyRotationService] Failed to log rotation event:', err.message);

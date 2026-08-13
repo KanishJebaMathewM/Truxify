@@ -37,6 +37,25 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/freeze",
+        "options": {}
+      },
+      "id": "freeze-escrow-payment",
+      "name": "Freeze Escrow Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        600,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
         "toEmail": "admin@truxify.com",
         "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
@@ -236,6 +255,25 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$json.body.bookingId}}/release",
+        "options": {}
+      },
+      "id": "release-escrow-payment",
+      "name": "Release Escrow Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        350,
+        600
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
         "method": "GET",
         "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$json.body.bookingId}}/status",
         "options": {}
@@ -286,12 +324,7 @@
       "main": [
         [
           {
-            "node": "Query MongoDB GPS Trail",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Query Supabase OTP Logs",
+            "node": "Freeze Escrow Payment",
             "type": "main",
             "index": 0
           }
@@ -391,7 +424,30 @@
       "main": [
         [
           {
-            "node": "Verify Escrow Release",
+            "node": "Release Escrow Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Freeze Escrow Payment": {
+      "main": [
+        [
+          {
+            "node": "Query MongoDB GPS Trail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Supabase OTP Logs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Escrow Freeze Failed",
             "type": "main",
             "index": 0
           }
@@ -399,6 +455,24 @@
       ]
     },
     "Release Escrow Payment": {
+      "main": [
+        [
+          {
+            "node": "Verify Escrow Release",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Escrow Release Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Escrow Release": {
       "main": [
         [],
         [

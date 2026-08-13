@@ -26,3 +26,15 @@ assert.strictEqual(logs.length, 1);
 assert.strictEqual(logs[0].gapSize, 3);
 
 console.log('✅ Divergence Detector tests passed successfully.');
+
+
+// === Spec 38 test ===
+import { describe, it, expect } from 'vitest';
+import { iterateEventsInChunks } from '../../event-store.js';
+describe('iterateEventsInChunks', () => {
+  it('async iterator', () => {
+    const c = { query: async () => [] };
+    expect(typeof iterateEventsInChunks(c, 10)[Symbol.asyncIterator]).toBe('function');
+  });
+});
+

@@ -1,10 +1,8 @@
 import axios from 'axios';
 import crypto from 'crypto';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 const voiceDb = supabaseAdmin || supabase;
 import logger from '../middleware/logger.js';
-
-const ORDER_CONTEXT_COLUMNS = 'order_display_id, status, eta, escrow_status, pickup_address, drop_address';
 
 const MAX_CACHE_SIZE = 100;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -41,7 +39,7 @@ function cacheAudio(id, buffer, userId) {
   trimCache();
 }
 
-async function getBookingContext(bookingId, userId, token) {
+async function getBookingContext(bookingId, userId) {
   if (!userId) {
     return null;
   }
@@ -51,8 +49,7 @@ async function getBookingContext(bookingId, userId, token) {
 
   // Orders table is the real order model (there is no bookings table).
   try {
-    const client = token ? createUserClient(token) : voiceDb;
-    let orderQuery = client.from('orders').select(ORDER_CONTEXT_COLUMNS);
+    let orderQuery = voiceDb.from('orders').select('*');
     if (isUuid) {
       orderQuery = orderQuery.eq('id', bookingId);
     } else {
@@ -74,8 +71,8 @@ async function getBookingContext(bookingId, userId, token) {
   return null;
 }
 
-export async function processVoiceQuery(userId, bookingId, audioBuffer, filename, token) {
-  const bookingData = await getBookingContext(bookingId, userId, token);
+export async function processVoiceQuery(userId, bookingId, audioBuffer, filename) {
+  const bookingData = await getBookingContext(bookingId, userId);
   
   if (!process.env.OPENAI_API_KEY || !process.env.ELEVENLABS_API_KEY) {
     logger.warn('Missing OpenAI or ElevenLabs API keys. Using mock Voice AI pipeline.');

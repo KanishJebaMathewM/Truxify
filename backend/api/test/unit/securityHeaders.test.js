@@ -90,3 +90,19 @@ describe('securityHeaders', () => {
     expect(res.body).toEqual({ ok: true });
   });
 });
+
+
+// === Spec 11 test ===
+import { describe, it, expect } from 'vitest';
+import { setHstsHeader } from '../../src/middleware/securityHeaders.js';
+describe('setHstsHeader', () => {
+  it('sets when missing', () => {
+    const r = { _h: {}, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };
+    expect(setHstsHeader(r)).toBe(true);
+  });
+  it('skips when set', () => {
+    const r = { _h: { 'Strict-Transport-Security': 'x' }, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };
+    expect(setHstsHeader(r)).toBe(false);
+  });
+});
+

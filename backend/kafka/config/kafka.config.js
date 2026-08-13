@@ -174,7 +174,7 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId || event.orderId,
+            key: key || event.eventId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
@@ -209,7 +209,7 @@ class KafkaConfig {
           }
           const parentContext = propagation.extract(context.active(), normalizedHeaders);
 
-          logger.debug(`📥 Message received: ${topic}`, { key: message.key ? message.key.toString() : null });
+          logger.debug(`📥 Message received: ${topic}`, { key: message.key.toString() });
 
           await context.with(parentContext, async () => {
             await messageHandler(topic, value, message);

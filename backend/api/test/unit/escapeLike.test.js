@@ -43,3 +43,14 @@ describe('escapeLike', () => {
     expect(typeof result).toBe('string');
   });
 });
+
+
+// === Spec 17 test ===
+import { describe, it, expect } from 'vitest';
+import { escapeSqlLike } from '../../src/lib/escapeLike.js';
+describe('escapeSqlLike', () => {
+  it('escapes %', () => { expect(escapeSqlLike('100%')).toBe('100\\%'); });
+  it('escapes _', () => { expect(escapeSqlLike('a_b')).toBe('a\\_b'); });
+  it('null unchanged', () => { expect(escapeSqlLike(null)).toBeNull(); });
+});
+

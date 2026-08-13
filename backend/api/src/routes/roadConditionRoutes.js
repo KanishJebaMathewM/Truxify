@@ -12,7 +12,6 @@ const roadConditionLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
   store: createStore('rl:road-conditions:'),
 });
 

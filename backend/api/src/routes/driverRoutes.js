@@ -1194,7 +1194,6 @@ const predictProfitLimiter = rateLimit({
   message: { error: 'Too many prediction requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore('rl:predict-profit:'),
 });
 
 router.post(

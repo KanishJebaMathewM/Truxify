@@ -15,10 +15,15 @@ class LanguageProvider extends ChangeNotifier {
     if (scope != null && scope.notifier != null) {
       return scope.notifier!;
     }
-    return _defaultInstance;
+    throw FlutterError(
+      'LanguageProvider.of() called with a context that does not contain a '
+      'LanguageProviderScope.\n'
+      'This usually happens because the context is not a descendant of a '
+      'LanguageProviderScope widget. In non-UI contexts (background isolates, '
+      'notification handlers, deep links) inject the real provider instance or '
+      'read the persisted locale directly instead of relying on a static decoy.',
+    );
   }
-
-  static final LanguageProvider _defaultInstance = LanguageProvider();
 }
 
 class LanguageProviderScope extends InheritedNotifier<LanguageProvider> {

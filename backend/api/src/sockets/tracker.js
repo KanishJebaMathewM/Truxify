@@ -393,6 +393,17 @@ function enforceWsUpgradeMemoryLimit(ipAddress) {
   return entry.count <= WS_UPGRADE_RATE_LIMIT;
 }
 
+const WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS = 30000;
+
+// Periodically purge expired per-IP upgrade-limit entries so the in-memory
+// fallback map does not grow unbounded during a Redis outage.
+function sweepWsUpgradeMemoryLimits() {
+  const now = Date.now();
+  for (const [key, e] of wsUpgradeMemoryLimits) {
+    if (now >= e.resetAt) wsUpgradeMemoryLimits.delete(key);
+  }
+}
+
 export async function isWebSocketUpgradeAllowed(request) {
   const ipAddress = getClientIp(request);
   const key = `ws:upgrade:${ipAddress}`;
@@ -807,6 +818,12 @@ export function initWebSocketServer(server, orderRepository) {
       wsHeartbeatInterval = null;
     }
   });
+
+  // Periodically purge expired per-IP WebSocket upgrade-limit entries, so the
+  // in-memory fallback map does not leak during Redis outages.
+  wsUpgradeLimitsCleanupInterval = setInterval(() => {
+    sweepWsUpgradeMemoryLimits();
+  }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
 
   if (!isSchedulerActive) {
     initTelemetryScheduler();
@@ -1487,6 +1504,11 @@ export async function closeWebSocketServer() {
   if (wsHeartbeatInterval) {
     clearInterval(wsHeartbeatInterval);
     wsHeartbeatInterval = null;
+  }
+
+  if (wsUpgradeLimitsCleanupInterval) {
+    clearInterval(wsUpgradeLimitsCleanupInterval);
+    wsUpgradeLimitsCleanupInterval = null;
   }
 
   // Wait for MongoDB to be available before final flush

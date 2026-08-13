@@ -153,7 +153,7 @@ export function validatePricePrediction(raw) {
  * @returns {number|null} Price in paisa (rounded to nearest integer)
  */
 export function convertToPaisa(priceInInr) {
-  if (typeof priceInInr !== 'number' || !Number.isFinite(priceInInr)) {
+  if (typeof priceInInr !== 'number' || !Number.isFinite(priceInInr) || priceInInr < 0) {
     return null;
   }
   return Math.round(priceInInr * 100 + Number.EPSILON);

@@ -56,6 +56,16 @@ describe('reverseGeocode', () => {
     expect(await reverseGeocode(23.0, -185.0)).toBeNull();
   });
 
+  it('returns null for Infinity coordinates', async () => {
+    expect(await reverseGeocode(Infinity, 72.5)).toBeNull();
+    expect(await reverseGeocode(23.0, -Infinity)).toBeNull();
+  });
+
+  it('returns null for hex-like string coordinates', async () => {
+    expect(await reverseGeocode('0x10', '72.5')).toBeNull();
+    expect(await reverseGeocode('23.0', '0x1A')).toBeNull();
+  });
+
   it('returns cached value from Redis when available', async () => {
     mockRedisGet.mockResolvedValue('MG Road, Mumbai');
     const result = await reverseGeocode(19.076, 72.8777);
@@ -89,6 +99,27 @@ describe('reverseGeocode', () => {
 
     const result = await reverseGeocode(19.076, 72.8777);
     expect(result).toBeNull();
+  });
+
+  it('retries after the Retry-After delay on a 429 response', async () => {
+    mockRedisGet.mockResolvedValue(null);
+    // First call: 429 with a 1-second Retry-After. Second call succeeds.
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => '1' },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          address: { road: 'MG Road', city: 'Mumbai' },
+        }),
+      });
+
+    const result = await reverseGeocode(19.076, 72.8777);
+    expect(result).toBe('MG Road, Mumbai');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
   it('rounds coordinates to 3 decimal places for cache key', async () => {

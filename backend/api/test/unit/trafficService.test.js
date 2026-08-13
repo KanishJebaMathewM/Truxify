@@ -28,9 +28,15 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
     expect(result).toBe(1.0);
   });
 
-  it('returns 1.0 when coordinates are 0,0', async () => {
+  it('treats 0,0 as valid coordinates and applies the traffic multiplier', async () => {
+    // The equator/prime meridian (lat/lng 0) are valid coordinates and must
+    // not be short-circuited by a falsy guard. During morning rush hour (UTC)
+    // the rush-hour surge multiplier is applied.
+    vi.setSystemTime(new Date('2025-01-01T08:00:00Z'));
+
     const result = await getLiveTrafficMultiplier(0, 0);
-    expect(result).toBe(1.0);
+    expect(result).toBeGreaterThanOrEqual(1.2);
+    expect(result).toBeLessThanOrEqual(2.5);
   });
 
   it('returns 1.0 outside rush hours', async () => {

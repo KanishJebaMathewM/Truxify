@@ -22,9 +22,21 @@ create table if not exists gps_offline_data (
 create index if not exists idx_gps_offline_data_peer_unsynced
   on gps_offline_data (peerId, synced);
 
--- The WebRTC service uses the service/client key; keep rows locked down for
--- any row-level requests.
+-- The WebRTC service uses the service key; scope this policy to service_role
+-- only. Without a TO clause it applied to every role (anon/authenticated too)
+-- and, because permissive policies OR together, defeated the owner-scoped
+-- policy below and exposed every peer's payloads cross-tenant (#11720).
 alter table gps_offline_data enable row level security;
 
 create policy gps_offline_data_service_policy on gps_offline_data
-  for all using (true) with check (true);
+  for all to service_role
+  using (true) with check (true);
+
+-- Owner-scoped access for non-service clients: an authenticated user may only
+-- read/write their own peer's payloads. Column names fold to lowercase, so
+-- peerId is referenced as peerId (unquoted -> peerid) and compared to the
+-- caller's profile id.
+create policy gps_offline_data_owner_policy on gps_offline_data
+  for all to authenticated
+  using (peerId = get_profile_id())
+  with check (peerId = get_profile_id());

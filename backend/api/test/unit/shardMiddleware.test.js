@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 vi.hoisted(() => {
   process.env.SHARD_PASSWORD_NORTH = 'mock';

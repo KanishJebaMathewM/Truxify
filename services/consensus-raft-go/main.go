@@ -156,7 +156,9 @@ type RaftNode struct {
 	// liveAck records which peers have acknowledged at least one successful
 	// AppendEntries round in the current leadership term. It is reset whenever
 	// a new leader is elected and drives the /commit admission gate so a leader
-	// never accepts new entries without evidence of a reachable quorum.
+	// never accepts new entries without evidence of a reachable quorum. A peer
+	// is also dropped from liveAck whenever a heartbeat fails or is rejected, so
+	// liveness reflects recent contact instead of a once-set flag.
 	liveAck            map[string]bool
 	httpClient         *http.Client
 }
@@ -429,6 +431,9 @@ func (rn *RaftNode) sendHeartbeats() {
 
 	for _, res := range results {
 		if res.err != nil {
+			// Peer unreachable: drop it from the live quorum so a stale ack
+			// cannot count toward a phantom majority.
+			rn.liveAck[res.url] = false
 			continue
 		}
 		if res.resp.Term > rn.CurrentTerm {
@@ -451,9 +456,14 @@ func (rn *RaftNode) sendHeartbeats() {
 			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
 				rn.nextIndex[res.url] = next
 			}
-		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
-			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
-			rn.nextIndex[res.url]--
+		} else {
+			// Peer rejected the append (log mismatch or down): it must not
+			// count toward the live quorum until a fresh success response.
+			rn.liveAck[res.url] = false
+			if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
+				// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
+				rn.nextIndex[res.url]--
+			}
 		}
 	}
 

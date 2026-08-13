@@ -4,11 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+<<<<<<< HEAD
+=======
+	"os"
+>>>>>>> upstream/main
 	"strings"
 	"testing"
 	"time"
 )
 
+<<<<<<< HEAD
+=======
+func init() {
+	os.Setenv("RAFT_STATE_FILE", "none")
+}
+
+>>>>>>> upstream/main
 func TestNewRaftNodeInit(t *testing.T) {
 	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{"http://localhost:8081", "http://localhost:8082"})
 	if node.NodeID != "node1" {
@@ -438,6 +449,10 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	if !updatedSeen.After(oldTime) {
 		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
 	}
+<<<<<<< HEAD
+}
+
+=======
 }func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
 	bypassAuth = true
 	defer func() { bypassAuth = false }()
@@ -539,6 +554,46 @@ func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
 	}
 }
 
+func TestRaftStatePersistAndLoad(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "raft_state_test_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+	tmpFile.Close()
+
+	os.Setenv("RAFT_STATE_FILE", tmpPath)
+	defer os.Setenv("RAFT_STATE_FILE", "none")
+
+	node := NewRaftNode("test-node-1", nil, nil)
+	node.CurrentTerm = 5
+	node.VotedFor = "candidate-1"
+	node.Log = []LogEntry{
+		{Index: 1, Term: 2, Command: "CREATED", OrderID: "ord-1", Timestamp: time.Now()},
+		{Index: 2, Term: 3, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: time.Now()},
+	}
+
+	// Persist
+	node.persistState()
+
+	// Create new node and load
+	node2 := NewRaftNode("test-node-1", nil, nil)
+	if node2.CurrentTerm != 5 {
+		t.Errorf("expected term 5, got %d", node2.CurrentTerm)
+	}
+	if node2.VotedFor != "candidate-1" {
+		t.Errorf("expected VotedFor 'candidate-1', got %s", node2.VotedFor)
+	}
+	if len(node2.Log) != 2 {
+		t.Errorf("expected 2 log entries, got %d", len(node2.Log))
+	} else {
+		if node2.Log[0].Command != "CREATED" || node2.Log[1].Command != "DISPATCHED" {
+			t.Errorf("restored log entries commands mismatch")
+		}
+	}
+}
+
 // TestHandleCommitOrderRejectsOversizedBody verifies the service returns 413
 // for a body larger than the 1 MiB cap instead of buffering it into memory.
 func TestHandleCommitOrderRejectsOversizedBody(t *testing.T) {
@@ -575,3 +630,4 @@ func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
 		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
 	}
 }
+>>>>>>> upstream/main

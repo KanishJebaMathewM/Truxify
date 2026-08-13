@@ -235,3 +235,17 @@ describe('reputation service', () => {
     });
   });
 });
+
+
+// === Spec 23 test ===
+import { describe, it, expect } from 'vitest';
+import { clampRating, aggregateRating } from '../../src/services/reputation.js';
+describe('clampRating', () => {
+  it('5.5 → 5', () => { expect(clampRating(5.5)).toBe(5); });
+  it('0.5 → 1', () => { expect(clampRating(0.5)).toBe(1); });
+  it('NaN → 1', () => { expect(clampRating(NaN)).toBe(1); });
+});
+describe('aggregateRating', () => {
+  it('avg', () => { expect(aggregateRating([4, 5, 3])).toBe(4); });
+});
+

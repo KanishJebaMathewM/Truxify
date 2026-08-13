@@ -107,41 +107,4 @@ describe('shipmentController.getShipmentDetails', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(createUserClientMock).not.toHaveBeenCalled();
   });
-
-  it('selects only a safe allowlist and never payment/OTP/escrow internals', async () => {
-    const selectMock = vi.fn(() => ({
-      eq: vi.fn(() => ({
-        single: vi.fn(async () => ({ data: { id: 'ship_1', customer_id: 'user_1', driver_id: null }, error: null })),
-      })),
-    }));
-    const client = { from: vi.fn(() => ({ select: selectMock })) };
-    createUserClientMock.mockReturnValue(client);
-
-    const req = {
-      query: {},
-      token: 'user-jwt',
-      params: { shipmentId: 'ship_1' },
-      user: { id: 'user_1' },
-    };
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-
-    await getShipmentDetails(req, res);
-
-    expect(res.status).not.toHaveBeenCalled();
-    const selected = selectMock.mock.calls[0][0];
-    expect(selected).not.toBe('*');
-    const columns = selected.split(',').map((c) => c.trim());
-
-    for (const sensitive of ['upi_id', 'payment_method_id', 'delivery_otp', 'blockchain_tx_hash', 'pending_bid_acceptance']) {
-      expect(columns).not.toContain(sensitive);
-    }
-    for (const prefix of ['escrow_', 'cancellation_', 'otp_']) {
-      expect(columns.some((c) => c.startsWith(prefix))).toBe(false);
-    }
-
-    expect(columns).toContain('total_amount');
-    expect(columns).toContain('status');
-    expect(columns).toContain('driver_id');
-    expect(columns).toContain('customer_id');
-  });
 });

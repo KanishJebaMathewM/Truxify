@@ -39,9 +39,11 @@ export default function securityHeaders(req, res, next) {
   // Enforce HTTPS for sensitive headers
   if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
     if (!res.getHeader('Strict-Transport-Security')) {
-      res.setHeader('Strict-Transport-Security', `max-age=${resolveHstsMaxAge()}; includeSubDomains`);
+      const preload = process.env.SECURE_HSTS_PRELOAD === 'true' ? '; preload' : '';
+      res.setHeader('Strict-Transport-Security', `max-age=${resolveHstsMaxAge()}; includeSubDomains${preload}`);
     }
   }
+
 
   // Control referrer information
   if (!res.getHeader('Referrer-Policy')) {

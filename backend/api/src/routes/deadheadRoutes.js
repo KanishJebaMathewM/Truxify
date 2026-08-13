@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody } from '../middleware/validate.js';
+import { createStore } from '../middleware/rateLimiter.js';
 import { matchDeadheadSchema } from '../validation/requestSchemas.js';
 import { matchDeadhead } from '../services/ml.js';
 import logger from '../middleware/logger.js';
@@ -15,6 +16,7 @@ const deadheadLimiter = rateLimit({
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:deadhead:'),
 });
 
 router.post(

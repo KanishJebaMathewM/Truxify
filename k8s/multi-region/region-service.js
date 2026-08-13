@@ -23,29 +23,44 @@ class RegionService {
     }
 
     loadRegionConfig() {
-        const config = process.env.REGIONS ? JSON.parse(process.env.REGIONS) : [
-            {
-                name: 'us-east-1',
-                endpoint: process.env.US_EAST_ENDPOINT || 'https://us-east.truxify.com',
-                cluster: 'us-east',
-                primary: true,
-                weight: 33
-            },
-            {
-                name: 'eu-west-1',
-                endpoint: process.env.EU_WEST_ENDPOINT || 'https://eu-west.truxify.com',
-                cluster: 'eu-west',
-                primary: false,
-                weight: 33
-            },
-            {
-                name: 'ap-south-1',
-                endpoint: process.env.AP_SOUTH_ENDPOINT || 'https://ap-south.truxify.com',
-                cluster: 'ap-south',
-                primary: false,
-                weight: 34
+        let config;
+        if (process.env.REGIONS) {
+            try {
+                config = JSON.parse(process.env.REGIONS);
+            } catch (err) {
+                logger.error(`Invalid REGIONS env var (must be valid JSON). Value: ${process.env.REGIONS}`);
+                logger.error(`JSON parse error: ${err.message}`);
+                process.exit(1);
             }
-        ];
+            if (!Array.isArray(config)) {
+                logger.error(`REGIONS env var must be a JSON array of region objects. Value: ${process.env.REGIONS}`);
+                process.exit(1);
+            }
+        } else {
+            config = [
+                {
+                    name: 'us-east-1',
+                    endpoint: process.env.US_EAST_ENDPOINT || 'https://us-east.truxify.com',
+                    cluster: 'us-east',
+                    primary: true,
+                    weight: 33
+                },
+                {
+                    name: 'eu-west-1',
+                    endpoint: process.env.EU_WEST_ENDPOINT || 'https://eu-west.truxify.com',
+                    cluster: 'eu-west',
+                    primary: false,
+                    weight: 33
+                },
+                {
+                    name: 'ap-south-1',
+                    endpoint: process.env.AP_SOUTH_ENDPOINT || 'https://ap-south.truxify.com',
+                    cluster: 'ap-south',
+                    primary: false,
+                    weight: 34
+                }
+            ];
+        }
 
         this.regions = config;
         this.activeRegions = config.filter(r => r.active !== false);

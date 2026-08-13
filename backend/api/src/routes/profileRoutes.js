@@ -230,10 +230,14 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
+    // Scope to authenticated user to prevent PII enumeration via arbitrary UUIDs
+    const targetId = req.user?.id;
+    if (!targetId) return res.status(403).json({ error: 'Forbidden' });
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('full_name')
-      .eq('id', req.params.id)
+      .eq('id', targetId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });

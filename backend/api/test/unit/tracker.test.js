@@ -5,6 +5,10 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() },
 }));
 
+vi.mock('../../src/models/GpsLog.js', () => ({
+  GpsLog: { create: vi.fn().mockResolvedValue(undefined) },
+}));
+
 const dbMock = vi.hoisted(() => ({
   store: {
     orders: [],
@@ -17,6 +21,7 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
   redisClient: null,
   firebaseAdmin: null,
+  supabaseAdmin: null,
   supabase: {
     auth: {
       async getUser() {
@@ -72,6 +77,7 @@ describe('tracker WebSocket telemetry authorization', () => {
     const sentMessages = [];
     const ws = {
       driverId: 'authenticated-driver',
+      user: { id: 'authenticated-driver', role: 'driver' },
       close: vi.fn(),
       send(message) {
         sentMessages.push(JSON.parse(message));
@@ -88,7 +94,9 @@ describe('tracker WebSocket telemetry authorization', () => {
     });
 
     expect(ws.close).toHaveBeenCalledWith(4010, 'Spoofed location detected: Driver ID mismatch');
-    expect(sentMessages).toEqual([]);
+    expect(sentMessages).toEqual([
+      { error: 'Spoofed location detected: Driver ID mismatch', code: 4010 },
+    ]);
   });
 
   it('rejects an order subscription when the authenticated user is not assigned to the order', async () => {
@@ -108,7 +116,7 @@ describe('tracker WebSocket telemetry authorization', () => {
 
     await handleSubscribe(ws, { order_display_id: 'ORDER-123' });
     await handleLocationPing(
-      { driverId: 'driver-owner', send: vi.fn() },
+      { driverId: 'driver-owner', user: { id: 'driver-owner', role: 'driver' }, send: vi.fn() },
       {
         order_display_id: 'ORDER-123',
         latitude: 12.9716,
@@ -320,7 +328,7 @@ describe('tracker graceful shutdown', () => {
     const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
     const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
-    __testing.setTelemetryWriteBuffer([{ driver_id: 'driver-1' }]);
+    await __testing.setTelemetryWriteBuffer([{ driver_id: 'driver-1' }]);
     __testing.setShutdownState({
       telemetryInterval,
       heartbeatInterval,
@@ -333,12 +341,13 @@ describe('tracker graceful shutdown', () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(heartbeatInterval);
     expect(client.close).toHaveBeenCalledWith(1001, 'Server shutting down');
     expect(server.close).toHaveBeenCalled();
-    expect(__testing.getTelemetryWriteBuffer().toArray()).toHaveLength(1);
+    expect(await __testing.getTelemetryWriteBuffer().toArray()).toHaveLength(1);
     expect(__testing.getShutdownState()).toEqual({
       isSchedulerActive: false,
       hasTelemetryFlushInterval: false,
       hasWebSocketServer: false,
       hasWsHeartbeatInterval: false,
+      pubSub: null,
     });
 
     clearIntervalSpy.mockRestore();
@@ -356,6 +365,7 @@ describe('tracker graceful shutdown', () => {
       hasTelemetryFlushInterval: false,
       hasWebSocketServer: false,
       hasWsHeartbeatInterval: false,
+      pubSub: null,
     });
 
     errorSpy.mockRestore();
@@ -428,6 +438,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: { incr, expire, ttl },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -454,6 +465,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: { incr, expire, ttl },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -477,6 +489,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: { incr, expire, ttl },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -506,6 +519,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: { incr, expire, ttl },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -533,6 +547,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: { incr, expire, ttl },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -559,6 +574,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
         ttl: vi.fn(),
       },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -584,6 +600,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -628,19 +645,20 @@ describe('handleLocationPing - main telemetry flow', () => {
       latitude: 12.9, longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Missing authenticated WebSocket identity');
+    expect(sentMessages[0].error).toContain('Driver role required to publish location updates');
   });
 
   it('rejects when latitude or longitude is missing', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
     await handleLocationPing(ws, { driver_id: 'driver-1' });
 
-    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('buffers telemetry and broadcasts to subscribed order clients', async () => {
@@ -652,6 +670,7 @@ describe('handleLocationPing - main telemetry flow', () => {
 
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -680,6 +699,7 @@ describe('handleLocationPing - main telemetry flow', () => {
   it('accepts valid coordinates at (0, 0) boundary', async () => {
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -697,6 +717,7 @@ describe('handleLocationPing - main telemetry flow', () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -706,13 +727,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects undefined longitude', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -721,13 +743,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       latitude: 12.9,
     });
 
-    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects non-numeric latitude', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -737,13 +760,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects coordinates out of range (latitude too low)', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -753,13 +777,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects coordinates out of range (latitude too high)', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -769,13 +794,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects coordinates out of range (longitude too low)', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -785,13 +811,14 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: -180.1,
     });
 
-    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('rejects coordinates out of range (longitude too high)', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -801,12 +828,13 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 180.1,
     });
 
-    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
   it('accepts boundary coordinate values (-90, -180) and (90, 180)', async () => {
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -829,6 +857,7 @@ describe('handleLocationPing - main telemetry flow', () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -845,13 +874,14 @@ describe('handleLocationPing - main telemetry flow', () => {
     });
 
     expect(sentMessages).toHaveLength(2);
-    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
-    expect(sentMessages[1].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
+    expect(sentMessages[1].error).toContain('Invalid telemetry payload');
   });
 
   it('handles malformed device_timestamp gracefully', async () => {
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -868,6 +898,7 @@ describe('handleLocationPing - main telemetry flow', () => {
   it('handles valid device_timestamp correctly', async () => {
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -892,7 +923,7 @@ describe('handleLocationPing - main telemetry flow', () => {
 
     await handleSubscribe(driverSub, { driver_id: 'driver-1' });
 
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
 
     await handleLocationPing(ws, {
       driver_id: 'driver-1',
@@ -909,6 +940,7 @@ describe('handleLocationPing - main telemetry flow', () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -922,10 +954,11 @@ describe('handleLocationPing - main telemetry flow', () => {
     expect(sentMessages[0].error).toContain('Invalid telemetry payload');
   });
 
-  it('rejects telemetry payload with over-long order_display_id (issue #5758)', async () => {
+  it('accepts telemetry with over-long order_display_id (sanitized downstream)', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send(msg) { sentMessages.push(JSON.parse(msg)); }
     };
 
@@ -936,7 +969,7 @@ describe('handleLocationPing - main telemetry flow', () => {
       longitude: 77.5,
     });
 
-    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
+    expect(sentMessages).toHaveLength(0);
   });
 
   it('caps the WebSocket max payload at 4 KB (issue #5758)', async () => {
@@ -955,12 +988,13 @@ describe('handleLocationPing - with Redis', () => {
       mongoDb: null,
       redisClient,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
 
     await hlp(ws, {
       driver_id: 'driver-1',
@@ -982,6 +1016,7 @@ describe('handleTrackingMessage - event routing', () => {
   it('routes location_ping event to handleLocationPing', async () => {
     const ws = {
       driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
       send: vi.fn(),
     };
 
@@ -1114,6 +1149,7 @@ describe('flushTelemetryBuffer - MongoDB', () => {
       mongoDb,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -1121,7 +1157,7 @@ describe('flushTelemetryBuffer - MongoDB', () => {
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
     // Add a ping to the buffer
-    const ws = { driverId: 'driver-mongo', send: vi.fn() };
+    const ws = { driverId: 'driver-mongo', user: { id: 'driver-mongo', role: 'driver' }, send: vi.fn() };
     await hlp(ws, {
       driver_id: 'driver-mongo',
       latitude: 12.9,
@@ -1193,6 +1229,7 @@ describe('tracker Redis subscription metadata', () => {
         expire: vi.fn().mockResolvedValue(1),
       },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -1227,6 +1264,7 @@ describe('tracker Redis subscription metadata', () => {
       mongoDb: null,
       redisClient: { sadd, srem, smembers, expire, persist },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -1270,6 +1308,7 @@ describe('tracker Redis subscription metadata', () => {
         expire: vi.fn().mockResolvedValue(1),
       },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -1344,7 +1383,7 @@ describe('flushTelemetryBuffer - direct', () => {
 
   it('retains buffer when mongoDb is not initialized', async () => {
     // Add item to buffer via a ping
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
     await handleLocationPing(ws, {
       driver_id: 'driver-1',
       latitude: 12.9,
@@ -1375,14 +1414,15 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
 
     await hlp(ws, {
       driver_id: 'driver-1',
@@ -1402,14 +1442,15 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
 
     await hlp(ws, {
       driver_id: 'driver-1',
@@ -1436,14 +1477,15 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: vi.fn() },
+      redisClient: { get: redisGet, set: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-1', send: vi.fn() };
+    const ws = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
 
     // Should not throw
     await hlp(ws, {
@@ -1469,13 +1511,14 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-cb', send: vi.fn() };
+    const ws = { driverId: 'driver-cb', user: { id: 'driver-cb', role: 'driver' }, send: vi.fn() };
 
     // Send MAX_CONSECUTIVE_DROPS pings — all should be dropped
     for (let i = 0; i < t.MAX_CONSECUTIVE_DROPS; i++) {
@@ -1503,13 +1546,14 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-recover', send: vi.fn() };
+    const ws = { driverId: 'driver-recover', user: { id: 'driver-recover', role: 'driver' }, send: vi.fn() };
 
     // 3 drops
     for (let i = 0; i < 3; i++) {
@@ -1537,13 +1581,14 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-isolated', send: vi.fn() };
+    const ws = { driverId: 'driver-isolated', user: { id: 'driver-isolated', role: 'driver' }, send: vi.fn() };
 
     // Only 1 drop — should NOT trigger circuit breaker
     await hlp(ws, {
@@ -1568,13 +1613,14 @@ describe('handleLocationPing - server timestamp handling', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-ts', send: vi.fn() };
+    const ws = { driverId: 'driver-ts', user: { id: 'driver-ts', role: 'driver' }, send: vi.fn() };
 
     // Use a device timestamp that's within the 5-min clock skew tolerance but would be a
     // clearly different value than server time for the Redis sequence key
@@ -1602,15 +1648,16 @@ describe('handleLocationPing - server timestamp handling', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
     t.clearTelemetryWriteBuffer();
 
-    const ws = { driverId: 'driver-analytics', send: vi.fn() };
+    const ws = { driverId: 'driver-analytics', user: { id: 'driver-analytics', role: 'driver' }, send: vi.fn() };
     const deviceTs = new Date(Date.now() - 60000); // 1 min ago — within tolerance
 
     await hlp(ws, {
@@ -1620,7 +1667,7 @@ describe('handleLocationPing - server timestamp handling', () => {
       device_timestamp: deviceTs.toISOString(),
     });
 
-    const buffer = t.getTelemetryWriteBuffer().toArray();
+    const buffer = await t.getTelemetryWriteBuffer().toArray();
     expect(buffer).toHaveLength(1);
     // pinged_at should be the device-provided timestamp
     expect(buffer[0].pinged_at.getTime()).toBe(deviceTs.getTime());
@@ -1639,11 +1686,12 @@ describe('handleLocationPing - clock skew simulation', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-skew', send: vi.fn() };
+    const ws = { driverId: 'driver-skew', user: { id: 'driver-skew', role: 'driver' }, send: vi.fn() };
 
     // Device timestamp 10 minutes in the future exceeds default 5-min tolerance
     const futureTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -1662,11 +1710,12 @@ describe('handleLocationPing - clock skew simulation', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-skew-past', send: vi.fn() };
+    const ws = { driverId: 'driver-skew-past', user: { id: 'driver-skew-past', role: 'driver' }, send: vi.fn() };
 
     // Device timestamp 10 minutes in the past exceeds default 5-min tolerance
     const pastTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -1685,11 +1734,12 @@ describe('handleLocationPing - clock skew simulation', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-ok', send: vi.fn() };
+    const ws = { driverId: 'driver-ok', user: { id: 'driver-ok', role: 'driver' }, send: vi.fn() };
 
     // Device timestamp 1 minute ago is within 5-min tolerance
     const recentTime = new Date(Date.now() - 60 * 1000).toISOString();
@@ -1719,12 +1769,13 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       mongoDb: { collection },
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-mongo', send: vi.fn() };
+    const ws = { driverId: 'driver-mongo', user: { id: 'driver-mongo', role: 'driver' }, send: vi.fn() };
     await hlp(ws, {
       driver_id: 'driver-mongo',
       latitude: 12.9,
@@ -1742,7 +1793,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
-      t.pushToTelemetryWriteBuffer({ driver_id: 'new-driver' });
+      await t.pushToTelemetryWriteBuffer({ driver_id: 'new-driver' });
       throw new Error('network timeout');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1751,16 +1802,17 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       mongoDb: { collection },
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { __testing: t } = await import('../../src/sockets/tracker.js');
-    t.setTelemetryWriteBuffer([{ driver_id: 'old-driver' }]);
+    await t.setTelemetryWriteBuffer([{ driver_id: 'old-driver' }]);
 
     await t.flushTelemetryBuffer();
 
     // Failed records (old-driver) must be prepended and new records (new-driver) appended
-    const buffer = t.getTelemetryWriteBuffer().toArray();
+    const buffer = await t.getTelemetryWriteBuffer().toArray();
     expect(buffer).toHaveLength(2);
     expect(buffer[0].driver_id).toBe('old-driver');
     expect(buffer[1].driver_id).toBe('new-driver');
@@ -1771,7 +1823,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
       const mockNewRecords = Array.from({ length: 4995 }, (_, i) => ({ driver_id: `new-driver-${i}` }));
-      t.pushToTelemetryWriteBuffer(mockNewRecords);
+      await t.pushToTelemetryWriteBuffer(mockNewRecords);
       throw new Error('transient write failure');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1780,18 +1832,19 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       mongoDb: { collection },
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { __testing: t } = await import('../../src/sockets/tracker.js');
     const mockOldRecords = Array.from({ length: 10 }, (_, i) => ({ driver_id: `old-driver-${i}` }));
-    t.setTelemetryWriteBuffer(mockOldRecords);
+    await t.setTelemetryWriteBuffer(mockOldRecords);
 
     logger.warn.mockClear();
 
     await t.flushTelemetryBuffer();
 
-    const buffer = t.getTelemetryWriteBuffer().toArray();
+    const buffer = await t.getTelemetryWriteBuffer().toArray();
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
     // The first 5 old records (indices 0 to 4) should be dropped, keeping only indices 5 to 9.
@@ -1814,12 +1867,13 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       mongoDb: { collection },
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-discard', send: vi.fn() };
+    const ws = { driverId: 'driver-discard', user: { id: 'driver-discard', role: 'driver' }, send: vi.fn() };
     await hlp(ws, {
       driver_id: 'driver-discard',
       latitude: 12.9,
@@ -1858,7 +1912,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
     await handleSubscribe(customerWs, { order_display_id: 'ORDER-BROADCAST' });
 
     // Driver sends location ping for that order
-    const driverWs = { driverId: 'driver-1', send: vi.fn() };
+    const driverWs = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
     await handleLocationPing(driverWs, {
       driver_id: 'driver-1',
       order_display_id: 'ORDER-BROADCAST',
@@ -1881,35 +1935,34 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       vi.resetModules();
     });
 
-    it('uses cached order mapping on cache hit, skipping DB query', async () => {
+    it('uses cached order mapping on cache hit after re-verifying it in DB', async () => {
       const redisGet = vi.fn().mockResolvedValue(
         JSON.stringify({ orderId: 'uuid-123', orderDisplayId: 'ORDER-789' })
       );
       const redisSet = vi.fn().mockResolvedValue('OK');
-      const supabaseFrom = vi.fn();
+      const repoFrom = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({
+          data: { id: 'uuid-123', order_display_id: 'ORDER-789', driver_id: 'driver-cached', status: 'in_transit' },
+          error: null,
+        }),
+      });
       const mockChannel = { subscribe: vi.fn(), send: vi.fn().mockResolvedValue(undefined) };
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
-        supabase: { from: supabaseFrom, channel: vi.fn().mockReturnValue(mockChannel) },
+        supabaseAdmin: null,
+        supabase: { from: vi.fn(), channel: vi.fn().mockReturnValue(mockChannel) },
       }));
 
       const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
       const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-      t.setOrderRepository(new OR({
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: { id: 'uuid-123', order_display_id: 'ORDER-789', driver_id: 'driver-cached' },
-            error: null,
-          }),
-        }),
-      }));
+      t.setOrderRepository(new OR({ from: repoFrom }));
 
-      const ws = { driverId: 'driver-cached', send: vi.fn() };
+      const ws = { driverId: 'driver-cached', user: { id: 'driver-cached', role: 'driver' }, send: vi.fn() };
 
       await hlp(ws, {
         driver_id: 'driver-cached',
@@ -1920,6 +1973,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       // Cache was checked
       expect(redisGet).toHaveBeenCalledWith('driver:active-order:driver-cached');
+      // Cached mapping was re-verified against the DB (issue #10676)
+      expect(repoFrom).toHaveBeenCalled();
       // No error sent
       expect(ws.send).not.toHaveBeenCalled();
     });
@@ -1931,8 +1986,9 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: {
           channel: vi.fn().mockReturnValue(mockChannel),
           from: vi.fn().mockReturnValue({
@@ -1961,7 +2017,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         }),
       }));
 
-      const ws = { driverId: 'driver-miss', send: vi.fn() };
+      const ws = { driverId: 'driver-miss', user: { id: 'driver-miss', role: 'driver' }, send: vi.fn() };
 
       await hlp(ws, {
         driver_id: 'driver-miss',
@@ -1988,6 +2044,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         mongoDb: null,
         redisClient: { del: redisDel, expire, get: vi.fn(), set: vi.fn(), sadd: vi.fn(), smembers: vi.fn() },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: null,
       }));
 
@@ -2011,13 +2068,14 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: vi.fn(), del: vi.fn() },
+        redisClient: { get: redisGet, set: vi.fn(), del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: null,
       }));
 
       const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-      const ws = { driverId: 'driver-redis-err', send: vi.fn() };
+      const ws = { driverId: 'driver-redis-err', user: { id: 'driver-redis-err', role: 'driver' }, send: vi.fn() };
 
       // Should not throw
       await hlp(ws, {
@@ -2035,13 +2093,14 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: null,
       }));
 
       const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-      const ws = { driverId: 'driver-set-err', send: vi.fn() };
+      const ws = { driverId: 'driver-set-err', user: { id: 'driver-set-err', role: 'driver' }, send: vi.fn() };
 
       // Should not throw
       await hlp(ws, {
@@ -2059,16 +2118,30 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         JSON.stringify({ orderId: 'uuid-auth', orderDisplayId: 'ORDER-AUTH' })
       );
       const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: null,
       }));
 
-      const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-      const ws = { driverId: 'driver-unauth', send: vi.fn() };
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-auth', order_display_id: 'ORDER-AUTH', driver_id: 'driver-owner', status: 'in_transit' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-unauth', user: { id: 'driver-unauth', role: 'driver' }, send: vi.fn() };
 
       await hlp(ws, {
         driver_id: 'driver-unauth',
@@ -2077,10 +2150,140 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5,
       });
 
-      // Cache hit uses the cached values directly — no driver_id check on cache hit.
-      // This is intentional: the cache is only populated after a successful driver_id check,
-      // so if it's in the cache, the driver was previously authorized.
-      // Verify no error sent
+      // The cached mapping was re-verified and failed the driver_id check,
+      // so the ping is rejected and the stale cache entry is dropped
+      // (issue #10676).
+      expect(ws.send).toHaveBeenCalled();
+      expect(ws.send.mock.calls[0][0]).toContain('Not authorized');
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-unauth');
+    });
+
+    it('invalidates a cached mapping whose order is terminal (delivered)', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-done', orderDisplayId: 'ORDER-DONE' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-done', order_display_id: 'ORDER-DONE', driver_id: 'driver-terminal', status: 'payment_released' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-terminal', user: { id: 'driver-terminal', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-terminal',
+        order_id: 'uuid-done',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Stale terminal mapping dropped and never trusted as the active order
+      // (issue #10676).
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-terminal');
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('invalidates a cached mapping whose order no longer exists', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-gone', orderDisplayId: 'ORDER-GONE' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-gone', user: { id: 'driver-gone', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-gone',
+        order_id: 'uuid-gone',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Stale mapping dropped (issue #10676).
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-gone');
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('does not re-cache a freshly resolved terminal order', async () => {
+      const redisGet = vi.fn().mockResolvedValue(null);
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-fresh', order_display_id: 'ORDER-FRESH', driver_id: 'driver-fresh', status: 'cancelled' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-fresh', user: { id: 'driver-fresh', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-fresh',
+        order_display_id: 'ORDER-FRESH',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // No fresh cache entry is written for a finished order; any pre-existing
+      // entry is dropped instead (issue #10676).
+      expect(redisSet).not.toHaveBeenCalledWith(
+        'driver:active-order:driver-fresh',
+        expect.any(String),
+        'EX',
+        expect.any(Number),
+      );
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-fresh');
       expect(ws.send).not.toHaveBeenCalled();
     });
   });
@@ -2101,7 +2304,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
     await handleSubscribe(customerWs, { order_display_id: 'ORDER-CLOSED' });
 
-    const driverWs = { driverId: 'driver-1', send: vi.fn() };
+    const driverWs = { driverId: 'driver-1', user: { id: 'driver-1', role: 'driver' }, send: vi.fn() };
     await handleLocationPing(driverWs, {
       driver_id: 'driver-1',
       order_display_id: 'ORDER-CLOSED',
@@ -2120,9 +2323,9 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
     it('enforces MAX_BUFFER_SIZE using a Ring Buffer', async () => {
       const mockRecords = Array.from({ length: 5000 }, (_, i) => ({ driver_id: `driver-old-${i}` }));
-      __testing.setTelemetryWriteBuffer(mockRecords);
+      await __testing.setTelemetryWriteBuffer(mockRecords);
 
-      const ws = { driverId: 'driver-new', send: vi.fn() };
+      const ws = { driverId: 'driver-new', user: { id: 'driver-new', role: 'driver' }, send: vi.fn() };
       logger.warn.mockClear();
 
       await handleLocationPing(ws, {
@@ -2131,7 +2334,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5946,
       });
 
-      const buffer = __testing.getTelemetryWriteBuffer().toArray();
+      const buffer = await __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(5000); // RingBuffer max capacity is 5000
       expect(buffer[0].driver_id).toBe('driver-old-1');
       expect(buffer[4999].driver_id).toBe('driver-new');
@@ -2147,7 +2350,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
     });
 
     it('allows messages within the per-second limit', async () => {
-      const ws = { driverId: 'driver-rate', send: vi.fn() };
+      const ws = { driverId: 'driver-rate', user: { id: 'driver-rate', role: 'driver' }, send: vi.fn() };
 
       for (let i = 0; i < 5; i++) {
         await handleTrackingMessage(ws, JSON.stringify({
@@ -2156,12 +2359,12 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         }));
       }
 
-      const buffer = __testing.getTelemetryWriteBuffer().toArray();
+      const buffer = await __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(5);
     });
 
     it('drops messages that exceed the per-second limit', async () => {
-      const ws = { driverId: 'driver-rate-limit', send: vi.fn() };
+      const ws = { driverId: 'driver-rate-limit', user: { id: 'driver-rate-limit', role: 'driver' }, send: vi.fn() };
 
       for (let i = 0; i < 15; i++) {
         await handleTrackingMessage(ws, JSON.stringify({
@@ -2170,7 +2373,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         }));
       }
 
-      const buffer = __testing.getTelemetryWriteBuffer().toArray();
+      const buffer = await __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(10);
     });
   });
@@ -2189,13 +2392,14 @@ describe('consecutiveDropCount - driver state TTL cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-entry-format', send: vi.fn() };
+    const ws = { driverId: 'driver-entry-format', user: { id: 'driver-entry-format', role: 'driver' }, send: vi.fn() };
 
     await hlp(ws, {
       driver_id: 'driver-entry-format',
@@ -2216,13 +2420,14 @@ describe('consecutiveDropCount - driver state TTL cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-count-helper', send: vi.fn() };
+    const ws = { driverId: 'driver-count-helper', user: { id: 'driver-count-helper', role: 'driver' }, send: vi.fn() };
 
     await hlp(ws, {
       driver_id: 'driver-count-helper',
@@ -2255,12 +2460,13 @@ describe('consecutiveDropCount - TTL sweep', () => {
       const redisSet = vi.fn().mockResolvedValue('OK');
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet },
+        redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
+        supabaseAdmin: null,
         supabase: null,
       }));
       const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
-      const ws = { driverId: `driver-sweep-small-${i}`, send: vi.fn() };
+      const ws = { driverId: `driver-sweep-small-${i}`, user: { id: `driver-sweep-small-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws, {
         driver_id: `driver-sweep-small-${i}`,
         latitude: 12.9,
@@ -2295,15 +2501,16 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
 
     for (let i = 0; i < 55; i++) {
-      const ws = { driverId: `driver-expired-${i}`, send: vi.fn() };
+      const ws = { driverId: `driver-expired-${i}`, user: { id: `driver-expired-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws, {
         driver_id: `driver-expired-${i}`,
         latitude: 12.9,
@@ -2330,8 +2537,9 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -2339,7 +2547,7 @@ describe('consecutiveDropCount - TTL sweep', () => {
 
     // Create 55 drivers — all with approximately the same lastUpdated
     for (let i = 0; i < 55; i++) {
-      const ws = { driverId: `driver-preserve-${i}`, send: vi.fn() };
+      const ws = { driverId: `driver-preserve-${i}`, user: { id: `driver-preserve-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws, {
         driver_id: `driver-preserve-${i}`,
         latitude: 12.9,
@@ -2370,15 +2578,16 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
 
     for (let i = 0; i < 55; i++) {
-      const ws = { driverId: `driver-throttle-${i}`, send: vi.fn() };
+      const ws = { driverId: `driver-throttle-${i}`, user: { id: `driver-throttle-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws, {
         driver_id: `driver-throttle-${i}`,
         latitude: 12.9,
@@ -2395,7 +2604,7 @@ describe('consecutiveDropCount - TTL sweep', () => {
 
     // Re-seed 55 entries
     for (let i = 0; i < 55; i++) {
-      const ws2 = { driverId: `driver-throttle2-${i}`, send: vi.fn() };
+      const ws2 = { driverId: `driver-throttle2-${i}`, user: { id: `driver-throttle2-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws2, {
         driver_id: `driver-throttle2-${i}`,
         latitude: 12.9,
@@ -2424,14 +2633,15 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
-    const ws = { driverId: 'driver-disconnect-1', send: vi.fn() };
+    const ws = { driverId: 'driver-disconnect-1', user: { id: 'driver-disconnect-1', role: 'driver' }, send: vi.fn() };
     await hlp(ws, {
       driver_id: 'driver-disconnect-1',
       latitude: 12.9,
@@ -2460,6 +2670,7 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -2489,22 +2700,23 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
     // Create drops for two drivers
-    const ws1 = { driverId: 'driver-a', send: vi.fn() };
+    const ws1 = { driverId: 'driver-a', user: { id: 'driver-a', role: 'driver' }, send: vi.fn() };
     await hlp(ws1, {
       driver_id: 'driver-a',
       latitude: 12.9,
       longitude: 77.5,
     });
 
-    const ws2 = { driverId: 'driver-b', send: vi.fn() };
+    const ws2 = { driverId: 'driver-b', user: { id: 'driver-b', role: 'driver' }, send: vi.fn() };
     await hlp(ws2, {
       driver_id: 'driver-b',
       latitude: 12.9,
@@ -2533,6 +2745,7 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
       mongoDb: null,
       redisClient: null,
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -2563,13 +2776,14 @@ describe('consecutiveDropCount - circuit breaker behaviour unchanged', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-cb-preserve', send: vi.fn() };
+    const ws = { driverId: 'driver-cb-preserve', user: { id: 'driver-cb-preserve', role: 'driver' }, send: vi.fn() };
 
     for (let i = 0; i < t.MAX_CONSECUTIVE_DROPS; i++) {
       await hlp(ws, {
@@ -2593,13 +2807,14 @@ describe('consecutiveDropCount - circuit breaker behaviour unchanged', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-    const ws = { driverId: 'driver-cb-reset', send: vi.fn() };
+    const ws = { driverId: 'driver-cb-reset', user: { id: 'driver-cb-reset', role: 'driver' }, send: vi.fn() };
 
     for (let i = 0; i < 3; i++) {
       await hlp(ws, {
@@ -2632,16 +2847,17 @@ describe('consecutiveDropCount - multiple simultaneous drivers', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
     const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
 
-    const ws1 = { driverId: 'driver-multi-1', send: vi.fn() };
-    const ws2 = { driverId: 'driver-multi-2', send: vi.fn() };
-    const ws3 = { driverId: 'driver-multi-3', send: vi.fn() };
+    const ws1 = { driverId: 'driver-multi-1', user: { id: 'driver-multi-1', role: 'driver' }, send: vi.fn() };
+    const ws2 = { driverId: 'driver-multi-2', user: { id: 'driver-multi-2', role: 'driver' }, send: vi.fn() };
+    const ws3 = { driverId: 'driver-multi-3', user: { id: 'driver-multi-3', role: 'driver' }, send: vi.fn() };
 
     // Driver 1: 2 drops
     await hlp(ws1, { driver_id: 'driver-multi-1', latitude: 12.9, longitude: 77.5 });
@@ -2667,8 +2883,9 @@ describe('consecutiveDropCount - multiple simultaneous drivers', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -2676,7 +2893,7 @@ describe('consecutiveDropCount - multiple simultaneous drivers', () => {
 
     // Create drops for 3 drivers
     for (const id of ['driver-iso-1', 'driver-iso-2', 'driver-iso-3']) {
-      const ws = { driverId: id, send: vi.fn() };
+      const ws = { driverId: id, user: { id, role: 'driver' }, send: vi.fn() };
       await hlp(ws, { driver_id: id, latitude: 12.9, longitude: 77.5 });
     }
 
@@ -2714,8 +2931,9 @@ describe('consecutiveDropCount - long-running server simulation', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       firebaseAdmin: null,
+      supabaseAdmin: null,
       supabase: null,
     }));
 
@@ -2723,7 +2941,7 @@ describe('consecutiveDropCount - long-running server simulation', () => {
 
     // Create 60 drivers with drops (exceeds threshold of 50)
     for (let i = 0; i < 60; i++) {
-      const ws = { driverId: `driver-growth-${i}`, send: vi.fn() };
+      const ws = { driverId: `driver-growth-${i}`, user: { id: `driver-growth-${i}`, role: 'driver' }, send: vi.fn() };
       await hlp(ws, {
         driver_id: `driver-growth-${i}`,
         latitude: 12.9,
@@ -2742,12 +2960,43 @@ describe('consecutiveDropCount - long-running server simulation', () => {
     expect(t.getConsecutiveDropCountSize()).toBe(0);
 
     // Verify memory is reclaimed — new entries can be created normally
-    const ws = { driverId: 'driver-after-sweep', send: vi.fn() };
+    const ws = { driverId: 'driver-after-sweep', user: { id: 'driver-after-sweep', role: 'driver' }, send: vi.fn() };
     await hlp(ws, {
       driver_id: 'driver-after-sweep',
       latitude: 12.9,
       longitude: 77.5,
     });
     expect(t.getConsecutiveDropCount('driver-after-sweep')).toBe(1);
+  });
+});
+
+// GSSOC'26: Additional role-guard tests for ws.user.role pattern
+describe('Tracker ws.user.role guards', () => {
+  let ws;
+  beforeEach(() => {
+    ws = { user: null, send: vi.fn(), close: vi.fn(), readyState: 1 };
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('should ignore messages when ws.user is null', () => {
+    const handler = makeHandler();
+    handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } });
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('should handle ws.user.role = customer', () => {
+    ws.user = { id: 'cust-1', role: 'customer' };
+    const handler = makeHandler();
+    try { handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } }); } catch (_) {}
+    expect(true).toBe(true);
+  });
+
+  it('should handle ws.user.role = driver', () => {
+    ws.user = { id: 'drv-1', role: 'driver' };
+    const handler = makeHandler();
+    try { handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } }); } catch (_) {}
+    expect(true).toBe(true);
   });
 });

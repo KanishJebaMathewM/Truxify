@@ -45,4 +45,32 @@ describe('errorHandler Middleware', () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Unauthorized access' });
   });
+
+  it('sanitizes control characters from MulterError messages', () => {
+    const err = { name: 'MulterError', code: 'LIMIT_UNEXPECTED_FILE', message: 'Unexpected field "file\x1b]0;evil\x07"' };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    errorHandler(err, mockReq, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(body.code).toBe('LIMIT_UNEXPECTED_FILE');
+  });
+
+  it('provides a default code for MulterError without a code', () => {
+    const err = { name: 'MulterError', message: 'File upload error' };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    errorHandler(err, mockReq, res, next);
+    const body = res.json.mock.calls[0][0];
+    expect(body.code).toBe('UPLOAD_ERROR');
+  });
 });

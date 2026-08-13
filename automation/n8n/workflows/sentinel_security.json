@@ -3,13 +3,41 @@
   "nodes": [
     {
       "parameters": {
-        "url": "wss://polygon-mempool.g.alchemy.com/v2/your-api-key",
+        "url": "={{ $credentials.polygonAlchemyWs.url }}",
         "options": {}
       },
       "name": "Polygon Mempool WebSocket",
-      "type": "n8n-nodes-base.webhook",
+      "type": "@n8n/n8n-nodes-langchain.websocket",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [250, 300],
+      "credentials": {
+        "polygonAlchemyWs": {
+          "id": "polygonAlchemyWs",
+          "name": "Polygon Alchemy WebSocket"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.method }}",
+              "operation": "exists"
+            }
+          ],
+          "boolean": [
+            {
+              "value1": "={{ $json.params !== undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Validate Stream Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
     },
     {
       "parameters": {
@@ -25,7 +53,7 @@
       "name": "Is Flash Loan Pattern?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [650, 300]
     },
     {
       "parameters": {
@@ -36,11 +64,22 @@
       "name": "Trigger Frontrun Defensive Pause",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [650, 200]
+      "position": [850, 200]
     }
   ],
   "connections": {
     "Polygon Mempool WebSocket": {
+      "main": [
+        [
+          {
+            "node": "Validate Stream Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Stream Payload": {
       "main": [
         [
           {

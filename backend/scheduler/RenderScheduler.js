@@ -114,11 +114,29 @@ class RenderScheduler extends EventEmitter {
             const index = queue.indexOf(task);
             if (index !== -1) {
                 queue.splice(index, 1);
+<<<<<<< HEAD
+=======
+                // Unlink this task from any dependents so they are not
+                // permanently deadlocked by a dependency that will never
+                // complete. Removing the edge lets a dependent with no other
+                // dependencies become schedulable again.
+                for (const depId of [...task.dependents]) {
+                    this.removeDependency(depId, taskId);
+                    const dependent = this.taskMap.get(depId);
+                    if (dependent) {
+                        this.emit('dependentUnblocked', { taskId: depId, dependencyId: taskId });
+                    }
+                }
+>>>>>>> upstream/main
                 task.status = 'cancelled';
                 this.stats.cancelledTasks++;
                 this.emit('taskCancelled', { taskId });
                 this.taskMap.delete(taskId);
                 logger.debug(`Task ${taskId} cancelled`);
+<<<<<<< HEAD
+=======
+                this.pruneTaskMap();
+>>>>>>> upstream/main
                 return true;
             }
         }
@@ -315,7 +333,10 @@ class RenderScheduler extends EventEmitter {
             
             // Process dependents
             this.processDependents(task);
+<<<<<<< HEAD
+=======
             this.pruneTaskMap();
+>>>>>>> upstream/main
             
         } catch (error) {
             // Handle error
@@ -337,7 +358,10 @@ class RenderScheduler extends EventEmitter {
                 this.stats.failedTasks++;
                 this.emit('taskFailed', { taskId: task.id, error: error.message });
                 logger.error(`Task ${task.id} failed: ${error.message}`);
+<<<<<<< HEAD
+=======
                 this.pruneTaskMap();
+>>>>>>> upstream/main
             }
         }
     }
@@ -361,6 +385,8 @@ class RenderScheduler extends EventEmitter {
             }
         }
     }
+<<<<<<< HEAD
+=======
 
     // Completed/failed tasks are kept in this.taskMap forever, so a long-lived
     // scheduler accumulates one entry per scheduled task (unbounded memory).
@@ -370,17 +396,40 @@ class RenderScheduler extends EventEmitter {
     // depended on; getTask()/getTasks() for long-gone tasks are not used by
     // the processing loop.
     pruneTaskMap() {
+        const toDelete = [];
         for (const [taskId, task] of this.taskMap) {
-            if (task.status !== 'completed' && task.status !== 'failed') continue;
-            const hasLiveDependents = task.dependents.some(depId => {
-                const dep = this.taskMap.get(depId);
-                return dep && (dep.status === 'pending' || dep.status === 'running');
-            });
-            if (!hasLiveDependents) {
+            if (task.status === 'completed' || task.status === 'failed') {
+                const hasLiveDependents = task.dependents.some(depId => {
+                    const dep = this.taskMap.get(depId);
+                    return dep && (dep.status === 'pending' || dep.status === 'running');
+                });
+                if (!hasLiveDependents) {
+                    toDelete.push(taskId);
+                }
+            } else if (task.status === 'pending') {
+                // A pending task whose dependencies can never be satisfied
+                // (a cancelled or permanently failed dependency) is dead: it
+                // would deadlock forever and leak its taskMap entry. Remove it.
+                const blockedForever = task.dependencies.some(depId => {
+                    const dep = this.taskMap.get(depId);
+                    return dep && (dep.status === 'cancelled' || dep.status === 'failed');
+                });
+                if (blockedForever) {
+                    toDelete.push(taskId);
+                }
+            }
+        }
+        for (const taskId of toDelete) {
+            const task = this.taskMap.get(taskId);
+            if (task) {
+                const queue = this.queues[task.priority];
+                const index = queue.indexOf(task);
+                if (index !== -1) queue.splice(index, 1);
                 this.taskMap.delete(taskId);
             }
         }
     }
+>>>>>>> upstream/main
     
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));

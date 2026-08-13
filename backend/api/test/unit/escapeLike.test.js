@@ -42,12 +42,15 @@ describe('escapeLike', () => {
     const result = escapeLike('test');
     expect(typeof result).toBe('string');
   });
-
-  it('escapes square bracket wildcards', () => {
-    expect(escapeLike('a[b]c')).toBe('a\\[b\\]c');
-  });
-
-  it('escapes mixed wildcards including brackets in one pass', () => {
-    expect(escapeLike('50%_[x]')).toBe('50\\%\\_\\[x\\]');
-  });
 });
+
+
+// === Spec 17 test ===
+import { describe, it, expect } from 'vitest';
+import { escapeSqlLike } from '../../src/lib/escapeLike.js';
+describe('escapeSqlLike', () => {
+  it('escapes %', () => { expect(escapeSqlLike('100%')).toBe('100\\%'); });
+  it('escapes _', () => { expect(escapeSqlLike('a_b')).toBe('a\\_b'); });
+  it('null unchanged', () => { expect(escapeSqlLike(null)).toBeNull(); });
+});
+

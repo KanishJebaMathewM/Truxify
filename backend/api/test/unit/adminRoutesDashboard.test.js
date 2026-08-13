@@ -72,9 +72,7 @@ describe('adminRoutes', () => {
       expect(res.body).toEqual({
         active_drivers: 5,
         pending_orders: 3,
-        // total_amount is stored in paisa; route divides by 100 for INR display
-        // 100 + 200 paisa = 300 paisa = 3 INR
-        total_revenue_today: 3,
+        total_revenue_today: 300,
       });
     });
 

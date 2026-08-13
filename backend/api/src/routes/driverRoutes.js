@@ -630,8 +630,10 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
         });
       }
 
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+      const now = new Date();
+      const cutoff = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (limitDays - 1))
+      );
       windowFilter = { start: cutoff.toISOString().split('T')[0] };
     }
 

@@ -253,15 +253,13 @@ describe('Driver Routes', () => {
   });
 
   it('GET /earnings/summary with days=7 returns at most 7 calendar dates', async () => {
-    const today = new Date();
+    const now = new Date();
     const dates = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
       dates.push(d.toISOString().split('T')[0]);
     }
-    const oldDate = new Date(today);
-    oldDate.setDate(oldDate.getDate() - 10);
+    const oldDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 10));
     const oldDateStr = oldDate.toISOString().split('T')[0];
 
     m.store.earnings_daily.push(

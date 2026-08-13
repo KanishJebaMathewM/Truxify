@@ -68,12 +68,6 @@ class TraceabilityService {
         }
     }
 
-<<<<<<< HEAD
-    _parseProductCreated(receipt) {
-        for (const log of receipt.logs) {
-            try {
-                const parsed = this.contract.interface.parseLog(log);
-=======
     _parseShipmentCreated(receipt) {
         for (const log of receipt.logs) {
             try {
@@ -91,7 +85,6 @@ class TraceabilityService {
     _parseProductCreated(receipt) {        for (const log of receipt.logs) {
             try {
                 const parsed = this.contract.interface.parseLog(log);
->>>>>>> upstream/main
                 if (parsed && parsed.name === 'ProductCreated') {
                     return parsed.args[0].toString();
                 }
@@ -114,25 +107,7 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
-<<<<<<< HEAD
-            let shipmentId;
-            for (const log of receipt.logs) {
-                try {
-                    const parsed = this.contract.interface.parseLog(log);
-                    if (parsed && parsed.name === 'ShipmentCreated') {
-                        shipmentId = parsed.args.shipmentId;
-                        break;
-                    }
-                } catch (e) {
-                    // Not a matching event, continue
-                }
-            }
-            if (!shipmentId) {
-                shipmentId = await this.contract.getTotalShipments();
-            }
-=======
             const shipmentId = this._parseShipmentCreated(receipt);
->>>>>>> upstream/main
 
             await this.storeShipment({
                 productId,

@@ -2132,7 +2132,8 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text(AppLocalizations.of(context)!.unableToOpenGoogleMaps)),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[_openGoogleMapsRoute] route generation/launch failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppLocalizations.of(context)!.failedToGenerateRoute)),

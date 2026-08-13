@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +19,7 @@ class PositionalEncoding(nn.Module):
         # x: (..., 3) for positions or (..., 2) for directions
         encoding = [x]
         for i in range(self.num_frequencies):
-            freq = 2 ** i
+            freq = (2 ** i) * math.pi
             encoding.append(torch.sin(freq * x))
             encoding.append(torch.cos(freq * x))
         return torch.cat(encoding, dim=-1)

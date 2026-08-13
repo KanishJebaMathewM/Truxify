@@ -228,12 +228,12 @@ class _GeofencedEbolScreenState extends State<GeofencedEbolScreen> {
             const SizedBox(height: 8),
             const Text('LEGALLY BINDING HASH', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
             const Divider(height: 24),
-            Text('Signed at: ${_document!.signedAt.toString().split('.')[0]}', style: const TextStyle(color: Colors.grey)),
+            Text('Signed at: ${_document?.signedAt != null ? _document!.signedAt.toString().split('.')[0] : '—'}', style: const TextStyle(color: Colors.grey)),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(8),
               color: Colors.white,
-              child: Text(_document!.signatureHash!, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+              child: Text(_document!.signatureHash ?? '', style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
             )
           ],
         ),

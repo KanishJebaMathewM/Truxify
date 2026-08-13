@@ -11,7 +11,9 @@ describe('RequestCache', () => {
   it('starts empty', () => {
     expect(cache.size).toBe(0);
     expect(cache.has('key')).toBe(false);
-    expect(cache.get('key')).toBeUndefined();
+    // get() returns null for cache misses (not undefined), distinguishing
+    // missing keys from stored null/undefined values.
+    expect(cache.get('key')).toBeNull();
   });
 
   it('set and get return the value', () => {

@@ -21,7 +21,7 @@ spec:
       serviceAccountName: api-service-account
       containers:
       - name: api
-        image: ghcr.io/kanishjebamathewm/truxify-api:latest
+        image: truxify/api:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 5000

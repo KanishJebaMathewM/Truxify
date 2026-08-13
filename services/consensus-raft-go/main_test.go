@@ -4,11 +4,22 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+<<<<<<< HEAD
+=======
+	"os"
+>>>>>>> upstream/main
 	"strings"
 	"testing"
 	"time"
 )
 
+<<<<<<< HEAD
+=======
+func init() {
+	os.Setenv("RAFT_STATE_FILE", "none")
+}
+
+>>>>>>> upstream/main
 func TestNewRaftNodeInit(t *testing.T) {
 	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{"http://localhost:8081", "http://localhost:8082"})
 	if node.NodeID != "node1" {
@@ -438,6 +449,149 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	if !updatedSeen.After(oldTime) {
 		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
 	}
+<<<<<<< HEAD
+}
+
+=======
+}func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.CommitIndex = 1
+
+	// Setup log with an existing entry
+	node.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: time.Now()},
+	}
+
+	// Try to commit the exact same (order_id, command)
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no new entry was appended
+	if len(node.Log) != 1 {
+		t.Errorf("expected log length 1 (no duplicate appended), got %d", len(node.Log))
+	}
+}
+
+func TestHandleCommitOrderInvalidTransition(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+
+	// Case 1: Start with non-CREATED command (should fail)
+	reqPayload1 := `{"order_id": "ord-1", "command": "DISPATCHED"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload1))
+	w1 := httptest.NewRecorder()
+	node.HandleCommitOrder(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 when starting with DISPATCHED, got %d", w1.Code)
+	}
+
+	// Case 2: Valid CREATED
+	reqPayload2 := `{"order_id": "ord-1", "command": "CREATED"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload2))
+	w2 := httptest.NewRecorder()
+	node.HandleCommitOrder(w2, req2)
+
+	// Case 3: Out of order transition CREATED -> DELIVERED (should fail)
+	reqPayload3 := `{"order_id": "ord-1", "command": "DELIVERED"}`
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload3))
+	w3 := httptest.NewRecorder()
+	node.HandleCommitOrder(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for out-of-order transition CREATED -> DELIVERED, got %d", w3.Code)
+	}
+}
+
+func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	// Node 1 is leader but Node 2 is unreachable (port 9999 is blocked/dead)
+	node := NewRaftNode("node1", []string{"node2"}, []string{"http://localhost:9999"})
+	
+	// Transition manually to leader (simulating startElection election win)
+	node.mu.Lock()
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.nextIndex = map[string]uint64{"http://localhost:9999": 1}
+	node.matchIndex = map[string]uint64{"http://localhost:9999": 0}
+	node.peerLive = map[string]bool{"http://localhost:9999": false}
+	node.mu.Unlock()
+
+	// Try to commit order command
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	// Since there is no quorum validation, it should return 503 Service Unavailable (no quorum)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 (no quorum), got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no entry was appended to the log
+	node.mu.Lock()
+	logLen := len(node.Log)
+	node.mu.Unlock()
+	if logLen != 0 {
+		t.Errorf("expected log to remain empty, but got length %d", logLen)
+	}
+}
+
+func TestRaftStatePersistAndLoad(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "raft_state_test_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+	tmpFile.Close()
+
+	os.Setenv("RAFT_STATE_FILE", tmpPath)
+	defer os.Setenv("RAFT_STATE_FILE", "none")
+
+	node := NewRaftNode("test-node-1", nil, nil)
+	node.CurrentTerm = 5
+	node.VotedFor = "candidate-1"
+	node.Log = []LogEntry{
+		{Index: 1, Term: 2, Command: "CREATED", OrderID: "ord-1", Timestamp: time.Now()},
+		{Index: 2, Term: 3, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: time.Now()},
+	}
+
+	// Persist
+	node.persistState()
+
+	// Create new node and load
+	node2 := NewRaftNode("test-node-1", nil, nil)
+	if node2.CurrentTerm != 5 {
+		t.Errorf("expected term 5, got %d", node2.CurrentTerm)
+	}
+	if node2.VotedFor != "candidate-1" {
+		t.Errorf("expected VotedFor 'candidate-1', got %s", node2.VotedFor)
+	}
+	if len(node2.Log) != 2 {
+		t.Errorf("expected 2 log entries, got %d", len(node2.Log))
+	} else {
+		if node2.Log[0].Command != "CREATED" || node2.Log[1].Command != "DISPATCHED" {
+			t.Errorf("restored log entries commands mismatch")
+		}
+	}
 }
 
 // TestHandleCommitOrderRejectsOversizedBody verifies the service returns 413
@@ -476,4 +630,4 @@ func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
 		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
 	}
 }
-
+>>>>>>> upstream/main

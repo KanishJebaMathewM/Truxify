@@ -37,6 +37,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Checkout previous commit for canary
+        if: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.before }}
+          path: previous
+
+      - name: Build and push API canary (previous ref)
+        if: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ./previous/backend/api
+          target: production
+          push: true
+          tags: |
+            ghcr.io/kanishjebamathewm/truxify-api:canary
+
       - name: Build and push API
         uses: docker/build-push-action@v5
         with:
@@ -45,7 +62,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/kanishjebamathewm/truxify-api:latest
-            ghcr.io/kanishjebamathewm/truxify-api:canary
             ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
 
   ml:

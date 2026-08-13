@@ -26,14 +26,11 @@ alter table trips
 
 -- Recreate complete_trip_tx (latest authoritative body: service_role may skip
 -- the OTP, escrow fail-closed gate, order-linked trip finalization) with the
--- net_earnings write added to the trip finalization step. The p_hours_driven
--- parameter (restored, default 0.00) is accumulated into earnings_daily so the
--- driver app's hours-driven metrics stop reading permanent zeros (#9675).
+-- net_earnings write added to the trip finalization step.
 create or replace function complete_trip_tx(
   p_order_id uuid,
   p_otp_id uuid,
-  p_release_tx_hash text default null,
-  p_hours_driven numeric(4,2) default 0.00
+  p_release_tx_hash text default null
 )
 returns table(driver_id uuid)
 language plpgsql
@@ -215,15 +212,13 @@ begin
     'Payout for Order ' || v_order.order_display_id
   );
 
-  -- Update daily earnings summary, accumulating hours_driven alongside the
-  -- payout amount (canonical form from docs/supabase_setup.sql)
-  insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
-  values (v_order.driver_id, current_date, coalesce(v_order.bid_amount, v_order.total_amount), 1, p_hours_driven)
+  -- Update daily earnings summary
+  insert into earnings_daily (driver_id, day_date, amount, trip_count)
+  values (v_order.driver_id, current_date, coalesce(v_order.bid_amount, v_order.total_amount), 1)
   on conflict (driver_id, day_date)
   do update set
     amount = earnings_daily.amount + excluded.amount,
-    trip_count = earnings_daily.trip_count + 1,
-    hours_driven = earnings_daily.hours_driven + excluded.hours_driven;
+    trip_count = earnings_daily.trip_count + 1;
 
   driver_id := v_order.driver_id;
   return next;
@@ -234,5 +229,5 @@ $$;
 -- PUBLIC grant (anon/authenticated are members of PUBLIC) as well as the
 -- explicit anon/authenticated grants so direct PostgREST invocation is
 -- impossible; then grant execution to service_role explicitly.
-REVOKE EXECUTE ON FUNCTION complete_trip_tx(uuid, uuid, text, numeric) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION complete_trip_tx(uuid, uuid, text, numeric) TO service_role;
+REVOKE EXECUTE ON FUNCTION complete_trip_tx(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION complete_trip_tx(uuid, uuid, text) TO service_role;

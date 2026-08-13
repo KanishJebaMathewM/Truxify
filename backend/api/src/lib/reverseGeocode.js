@@ -98,3 +98,16 @@ export async function reverseGeocode(lat, lon) {
     return null;
   }
 }
+
+
+// === Spec 21: ===
+// === Spec 21: geohash precision bounds ===
+const MIN = 1, MAX = 12, DEF = 6;
+export function clampGeohashPrecision(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEF;
+  if (n < MIN) return MIN;
+  if (n > MAX) return MAX;
+  return Math.floor(n);
+}
+

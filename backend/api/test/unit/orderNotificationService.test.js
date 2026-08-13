@@ -1,28 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockGetActiveDeliveryOtp = vi.fn();
-const mockStoreDeliveryOtp = vi.fn();
-const mockSendDeliveryOtpNotification = vi.fn();
+const mockNotificationDispatcher = vi.fn();
 
-vi.mock('../../src/config/db.js', () => ({
-  redisClient: {
-    get: vi.fn().mockResolvedValue(null),
-    del: vi.fn(),
-    incr: vi.fn(),
-    expire: vi.fn(),
-    set: vi.fn(),
-  },
+vi.mock('../../src/core/container.js', () => ({
+  notificationDispatcher: mockNotificationDispatcher,
 }));
-
-vi.mock('../../src/services/notificationService.js', () => ({
-  sendDeliveryOtpNotification: mockSendDeliveryOtpNotification,
-  storeDeliveryOtp: mockStoreDeliveryOtp,
-  getActiveDeliveryOtp: mockGetActiveDeliveryOtp,
-}));
-
-const mockOrderRepository = {
-  updateOrder: vi.fn(),
-};
 
 describe('orderNotificationService', () => {
   let orderNotificationService;
@@ -30,58 +12,43 @@ describe('orderNotificationService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    const { OrderNotificationService } = await import('../../src/services/order/orderNotificationService.js');
-    orderNotificationService = new OrderNotificationService(mockOrderRepository);
+    orderNotificationService = (await import('../../src/services/order/orderNotificationService.js')).default;
   });
 
-  describe('sendOrderNotification', () => {
-    it('issues a fresh OTP and dispatches it', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue(null);
-      mockStoreDeliveryOtp.mockResolvedValue(true);
-      mockSendDeliveryOtpNotification.mockResolvedValue({ success: true });
-
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
-
-      expect(result.notified).toBe(true);
-      expect(result.otp).toMatch(/^\d{6}$/);
-      expect(mockStoreDeliveryOtp).toHaveBeenCalledWith('order-1', result.otp, expect.any(Number));
-      expect(mockSendDeliveryOtpNotification).toHaveBeenCalledWith('cust-1', 'TRX-1', result.otp);
-      expect(mockOrderRepository.updateOrder).not.toHaveBeenCalled();
+  describe('sendOrderUpdate', () => {
+    it('dispatches notification with order update', async () => {
+      mockNotificationDispatcher.mockResolvedValue({ success: true });
+      await orderNotificationService.sendOrderUpdate('driver-1', 'order-1', 'Order started');
+      expect(mockNotificationDispatcher).toHaveBeenCalledWith(
+        'driver-1',
+        expect.stringContaining('order-1'),
+        expect.any(String),
+        expect.any(Object),
+      );
     });
 
-    it('does not regenerate while an active OTP exists', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue({ otp: '111111' });
-
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
-
-      expect(result).toEqual({ otp: null, notified: false });
-      expect(mockStoreDeliveryOtp).not.toHaveBeenCalled();
+    it('gracefully handles dispatcher failure', async () => {
+      mockNotificationDispatcher.mockRejectedValue(new Error('Dispatcher unavailable'));
+      // Should not throw
+      await expect(
+        orderNotificationService.sendOrderUpdate('driver-1', 'order-1', 'Update'),
+      ).resolves.not.toThrow();
     });
+  });
 
-    it('handles a failed FCM dispatch without throwing', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue(null);
-      mockStoreDeliveryOtp.mockResolvedValue(true);
-      mockSendDeliveryOtpNotification.mockResolvedValue({ success: false, fcm: { error: 'device offline' } });
+  describe('sendBidReceived', () => {
+    it('dispatches bid received notification', async () => {
+      mockNotificationDispatcher.mockResolvedValue({ success: true });
+      await orderNotificationService.sendBidReceived('customer-1', 'bid-1', 15000);
+      expect(mockNotificationDispatcher).toHaveBeenCalled();
+    });
+  });
 
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
-
-      expect(result.notified).toBe(false);
-      expect(mockOrderRepository.updateOrder).toHaveBeenCalledWith('order-1', expect.objectContaining({ updated_at: expect.any(String) }));
+  describe('sendDeliveryConfirmed', () => {
+    it('dispatches delivery confirmed notification', async () => {
+      mockNotificationDispatcher.mockResolvedValue({ success: true });
+      await orderNotificationService.sendDeliveryConfirmed('customer-1', 'order-1');
+      expect(mockNotificationDispatcher).toHaveBeenCalled();
     });
   });
 });

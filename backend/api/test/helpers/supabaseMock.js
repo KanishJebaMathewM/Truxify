@@ -407,20 +407,6 @@ export function createSupabaseMock(initialStore = {}) {
           store.orders[idx] = { ...store.orders[idx], driver_id: args.p_driver_id, status: 'active' };
         }
       }
-      // Simulate the append_maintenance_photos PL/pgSQL RPC (see
-      // migrations/20260811000000_create_append_maintenance_photos.sql)
-      if (fnName === 'append_maintenance_photos' && args?.p_ticket_id) {
-        const idx = store.truck_maintenance_tickets?.findIndex(t => t.id === args.p_ticket_id);
-        if (idx !== -1) {
-          store.truck_maintenance_tickets[idx] = {
-            ...store.truck_maintenance_tickets[idx],
-            photo_urls: [
-              ...(store.truck_maintenance_tickets[idx].photo_urls || []),
-              ...(args.p_new_paths || []),
-            ],
-          };
-        }
-      }
       return Promise.resolve({ data: null, error: null });
     },
     storage: {

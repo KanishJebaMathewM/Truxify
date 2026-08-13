@@ -1,0 +1,119 @@
+{
+  "name": "Truxify Gas Relayer Refiller & Alert System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "name": "Interval 5 Min Check",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/relayer-balance",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Fetch Relayer Balance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [450, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetween": 2000,
+      "retryMode": "exponential",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.balanceEth }}",
+              "operation": "less",
+              "value2": 0.05
+            }
+          ]
+        }
+      },
+      "name": "Is Balance Low?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/refill-gas-tank",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {}
+      },
+      "name": "Trigger Admin Vault Gas Refill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [850, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetween": 2000,
+      "retryMode": "exponential",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Interval 5 Min Check": {
+      "main": [
+        [
+          {
+            "node": "Fetch Relayer Balance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Relayer Balance": {
+      "main": [
+        [
+          {
+            "node": "Is Balance Low?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Balance Low?": {
+      "main": [
+        [
+          {
+            "node": "Trigger Admin Vault Gas Refill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

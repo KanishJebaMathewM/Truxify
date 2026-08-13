@@ -12,3 +12,19 @@ describe('redisRateLimiter Middleware', () => {
     expect(next).toHaveBeenCalled();
   });
 });
+
+
+// === Spec 2 test ===
+import { describe, it, expect, vi } from 'vitest';
+import { checkSlidingWindow } from '../../src/middleware/redisRateLimiter.js';
+describe('checkSlidingWindow', () => {
+  it('allows under limit', async () => {
+    const r = { eval: vi.fn().mockResolvedValue([1, 1]) };
+    expect((await checkSlidingWindow(r, 'k', 1000, 60000, 5, 'm1')).allowed).toBe(true);
+  });
+  it('denies over limit', async () => {
+    const r = { eval: vi.fn().mockResolvedValue([0, 5]) };
+    expect((await checkSlidingWindow(r, 'k', 1000, 60000, 5, 'm1')).allowed).toBe(false);
+  });
+});
+

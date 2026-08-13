@@ -288,6 +288,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       );
                     } catch (e) {
                       debugPrint('Failed to update truck: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Failed to update truck details. Please try again.'),
+                            backgroundColor: TruxifyColors.error,
+                          ),
+                        );
+                      }
                     } finally {
                       apiClient.close();
                     }

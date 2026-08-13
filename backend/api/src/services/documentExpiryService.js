@@ -132,8 +132,8 @@ export async function processDocumentExpiryBatch() {
         let page = [];
         do {
           const { data, error } = await supabaseAdmin
-            .from('driver_documents')
-            .select('id, driver_id, document_type, valid_until')
+            .from('documents')
+            .select('id, user_id, doc_type, valid_until')
             .not('valid_until', 'is', null)
             .gte('valid_until', windowStart.toISOString())
             .lte('valid_until', windowEnd.toISOString())
@@ -162,18 +162,18 @@ export async function processDocumentExpiryBatch() {
       logger.info(`[document-expiry] Found ${documents.length} document(s) expiring in ${window.label} window.`);
 
       for (const doc of documents) {
-        if (!doc.driver_id || !doc.id) {
-          logger.warn('[document-expiry] Skipping document with missing driver_id or id:', doc.id);
+        if (!doc.user_id || !doc.id) {
+          logger.warn('[document-expiry] Skipping document with missing user_id or id:', doc.id);
           continue;
         }
 
-        const alreadyNotified = await hasExistingNotification(doc.driver_id, doc.id, window.days);
+        const alreadyNotified = await hasExistingNotification(doc.user_id, doc.id, window.days);
         if (alreadyNotified) {
           logger.info(`[document-expiry] Document ${doc.id} already notified for ${window.label} window, skipping.`);
           continue;
         }
 
-        const docLabel = getDocTypeLabel(doc.document_type);
+        const docLabel = getDocTypeLabel(doc.doc_type);
         const expiryDate = new Date(doc.valid_until).toLocaleDateString('en-IN', {
           day: '2-digit',
           month: 'short',
@@ -186,15 +186,15 @@ export async function processDocumentExpiryBatch() {
         const metadata = {
           type: 'document_expiry',
           documentId: doc.id,
-          documentType: doc.document_type,
+          documentType: doc.doc_type,
           daysRemaining: window.days,
           expiryDate: doc.valid_until,
         };
 
         try {
-          await sendPushNotification(doc.driver_id, title, body, 'document', metadata);
+          await sendPushNotification(doc.user_id, title, body, 'document', metadata);
           totalNotificationsSent++;
-          logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.driver_id}`);
+          logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.user_id}`);
         } catch (err) {
           logger.error(`[document-expiry] Failed to send notification for document ${doc.id}:`, err.message);
         }

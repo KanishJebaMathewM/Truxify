@@ -68,10 +68,30 @@ class TraceabilityService {
         }
     }
 
+<<<<<<< HEAD
     _parseProductCreated(receipt) {
         for (const log of receipt.logs) {
             try {
                 const parsed = this.contract.interface.parseLog(log);
+=======
+    _parseShipmentCreated(receipt) {
+        for (const log of receipt.logs) {
+            try {
+                const parsed = this.contract.interface.parseLog(log);
+                if (parsed && parsed.name === 'ShipmentCreated') {
+                    return parsed.args[0].toString();
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        throw new Error('ShipmentCreated event not found in receipt');
+    }
+
+    _parseProductCreated(receipt) {        for (const log of receipt.logs) {
+            try {
+                const parsed = this.contract.interface.parseLog(log);
+>>>>>>> upstream/main
                 if (parsed && parsed.name === 'ProductCreated') {
                     return parsed.args[0].toString();
                 }
@@ -94,6 +114,7 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
+<<<<<<< HEAD
             let shipmentId;
             for (const log of receipt.logs) {
                 try {
@@ -109,6 +130,9 @@ class TraceabilityService {
             if (!shipmentId) {
                 shipmentId = await this.contract.getTotalShipments();
             }
+=======
+            const shipmentId = this._parseShipmentCreated(receipt);
+>>>>>>> upstream/main
 
             await this.storeShipment({
                 productId,

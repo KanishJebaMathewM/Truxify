@@ -21,6 +21,10 @@ class StoreTransaction {
         
         this.snapshot = this.store.createSnapshot();
         this.isActive = true;
+<<<<<<< HEAD
+=======
+        this.txStartIndex = this.store.historyIndex;
+>>>>>>> upstream/main
         this.startTime = Date.now();
         this.store.emit('transactionStarted', { id: this.id });
         logger.debug(`Transaction ${this.id} started`);
@@ -60,7 +64,17 @@ class StoreTransaction {
         
         this.endTime = Date.now();
         this.isActive = false;
+<<<<<<< HEAD
         
+=======
+
+        // Record the transaction's net effect as a single undo entry so that
+        // one undo reverts the whole transaction, not an intermediate step.
+        if (JSON.stringify(this.snapshot.state) !== JSON.stringify(this.store.state)) {
+            this.store.saveHistory();
+        }
+
+>>>>>>> upstream/main
         this.store.emit('transactionCommitted', {
             id: this.id,
             duration: this.endTime - this.startTime,
@@ -85,6 +99,15 @@ class StoreTransaction {
             this.store.restoreSnapshot(this.snapshot);
         }
         
+<<<<<<< HEAD
+=======
+        // Restore the undo history cursor to the pre-transaction point so the
+        // pointer does not diverge from the restored state.
+        if (this.txStartIndex !== undefined && this.txStartIndex !== null) {
+            this.store.historyIndex = this.txStartIndex;
+        }
+        
+>>>>>>> upstream/main
         this.endTime = Date.now();
         this.isActive = false;
         
@@ -135,8 +158,16 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
+<<<<<<< HEAD
         // Save history for undo
         this.saveHistory();
+=======
+        // Save history for undo (skip while a transaction is active so that
+        // intermediate mutations do not pollute the undo history).
+        if (!this.activeTransaction) {
+            this.saveHistory();
+        }
+>>>>>>> upstream/main
         
         const oldValue = this.state[key];
         this.state[key] = value;
@@ -153,7 +184,15 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
+<<<<<<< HEAD
         this.saveHistory();
+=======
+        // Skip while a transaction is active so intermediate mutations do not
+        // pollute the undo history.
+        if (!this.activeTransaction) {
+            this.saveHistory();
+        }
+>>>>>>> upstream/main
         const oldState = { ...this.state };
         Object.assign(this.state, updates);
         
@@ -256,7 +295,11 @@ class GlobalStore extends EventEmitter {
     
     createSnapshot() {
         return {
+<<<<<<< HEAD
             state: { ...this.state },
+=======
+            state: structuredClone(this.state),
+>>>>>>> upstream/main
             timestamp: Date.now(),
             id: `snapshot_${Date.now()}`
         };
@@ -268,9 +311,14 @@ class GlobalStore extends EventEmitter {
         }
         
         const oldState = { ...this.state };
+<<<<<<< HEAD
         this.state = { ...snapshot.state };
         
+=======
+        this.state = structuredClone(snapshot.state);
+        
         this.notifyStateDiff(oldState, this.state);
+>>>>>>> upstream/main
         this.emit('snapshotRestored', { oldState, newState: this.state });
         logger.debug(`Snapshot restored: ${snapshot.id}`);
     }
@@ -287,7 +335,10 @@ class GlobalStore extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...this.history[this.historyIndex] };
         
+<<<<<<< HEAD
+=======
         this.notifyStateDiff(oldState, this.state);
+>>>>>>> upstream/main
         this.emit('undo', { oldState, newState: this.state });
         logger.debug('Undo performed');
         
@@ -304,7 +355,10 @@ class GlobalStore extends EventEmitter {
         const oldState = { ...this.state };
         this.state = { ...this.history[this.historyIndex] };
         
+<<<<<<< HEAD
+=======
         this.notifyStateDiff(oldState, this.state);
+>>>>>>> upstream/main
         this.emit('redo', { oldState, newState: this.state });
         logger.debug('Redo performed');
         
@@ -351,6 +405,8 @@ class GlobalStore extends EventEmitter {
             }
         }
     }
+<<<<<<< HEAD
+=======
 
     // Notify subscribers of every key whose value changed between two states.
     // Used by undo/redo/restoreSnapshot/atomic, which mutate the whole state
@@ -363,6 +419,7 @@ class GlobalStore extends EventEmitter {
             }
         }
     }
+>>>>>>> upstream/main
     
     // ============ Atomic Updates ============
     
@@ -372,7 +429,10 @@ class GlobalStore extends EventEmitter {
         
         try {
             Object.assign(this.state, updates);
+<<<<<<< HEAD
+=======
             this.notifyStateDiff(oldState, this.state);
+>>>>>>> upstream/main
             this.emit('atomicUpdate', { oldState, newState: this.state });
             logger.debug(`Atomic update: ${Object.keys(updates).join(', ')}`);
         } catch (error) {

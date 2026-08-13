@@ -169,11 +169,10 @@ import {
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
-import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 import { DomainError } from '../services/order/domainError.js';
 import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
-import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import {
@@ -201,8 +200,7 @@ const getOrderResource = async (req) => {
 };
 
 
-router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
-  const { id } = req.params;
+router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
@@ -212,7 +210,7 @@ router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), asyn
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
-  if (!req.params.id || !req.params.id.trim()) {
+  if (!id || !id.trim()) {
     return res.status(400).json({ error: 'Invalid order id' });
   }
   let geofenceRadiusM;
@@ -636,19 +634,13 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  // lockValue holds the owner UUID returned by acquireLock. It is passed to
-  // releaseLock in `finally` so only the holder can delete the lock.
-  let lockValue = null;
+  const lockValue = await acquireLock(lockKey, 120000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
+  }
 
   try {
-    // acquireLock throws LockAcquisitionError when Redis is unavailable and
-    // returns null when the lock is already held by another request.
-    lockValue = await acquireLock(lockKey, 120000);
-    if (!lockValue) {
-      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-    }
-
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
@@ -735,10 +727,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           details: acceptErr.message,
         });
       }
-      // Driver assignment confirmed — drop any stale cached mapping so the
-      // tracker resolves the newly assigned driver on the next ping
-      // (issue #10676).
-      await invalidateDriverOrderCache(pending.driver_id);
       sendPushNotification(
         pending.driver_id,
         'Bid Accepted!',
@@ -799,20 +787,13 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     await finalizeAcceptance();
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
-    if (err instanceof LockAcquisitionError) {
-      // Redis is down — do NOT proceed with the deposit mutation.
-      logger.error('[confirm-deposit] Redis unavailable — refusing deposit confirmation:', err.message);
-      return res.status(503).json({ error: 'Payment service temporarily unavailable. Please retry in a moment.' });
-    }
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
     logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
-    if (lockValue) {
-      await releaseLock(lockKey, lockValue);
-    }
+    await releaseLock(lockKey, lockValue);
   }
 });
 
@@ -1095,7 +1076,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
+      const { error: upErr } = await supabase.storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -1116,7 +1097,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
+      const { error: upErr } = await supabase.storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -1173,13 +1154,6 @@ router.get('/history', authenticate, userLimiter, requirePolicy('order:view-hist
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
 
-  if (page < 1) {
-    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
-  }
-  if (limit < 1 || limit > 100) {
-    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
-  }
-
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
     return res.json(result);
@@ -1213,13 +1187,6 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
-
-  if (page < 1) {
-    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
-  }
-  if (limit < 1 || limit > 100) {
-    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
-  }
 
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);

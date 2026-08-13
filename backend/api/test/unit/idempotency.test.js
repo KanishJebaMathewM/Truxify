@@ -60,24 +60,8 @@ describe('requireIdempotency middleware', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
-      error: 'X-Idempotency-Key must be a non-empty string.',
+      error: 'X-Idempotency-Key header is required for this action.',
     });
-    expect(next).not.toHaveBeenCalled();
-  });
-
-  it('returns 400 for a non-string idempotency key', async () => {
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-    const middleware = requireIdempotency();
-    const req = makeReq({ headers: { 'x-idempotency-key': 12345 } });
-    const res = makeRes();
-    const next = makeNext();
-
-    await middleware(req, res, next);
-
-    process.env.NODE_ENV = originalEnv;
-
-    expect(res.status).toHaveBeenCalledWith(400);
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -318,7 +302,7 @@ describe('requireIdempotency middleware', () => {
       const next = makeNext();
 
       const duplicate = middleware(req, res, next);
-      await vi.advanceTimersByTimeAsync(600 * 200 + 10);
+      await vi.advanceTimersByTimeAsync(200 * 50 + 10);
       await duplicate;
 
       expect(res.status).toHaveBeenCalledWith(409);

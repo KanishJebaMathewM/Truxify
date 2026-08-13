@@ -42,25 +42,16 @@ contract DAO is Ownable {
 
     /**
      * @dev Quadratic Voting: Token Cost = votes^2
-     *
-     *      The cost is charged on the caller's cumulative votes for the
-     *      proposal: (existing + new)^2 - existing^2. Charging votes^2 per
-     *      call would let a voter split their votes across many small calls
-     *      (or many addresses) and pay a linear total cost instead of the
-     *      quadratic price.
      */
     function voteQuadratic(uint256 _proposalId, uint256 _votes) external {
         Proposal storage proposal = proposals[_proposalId];
         require(block.timestamp < proposal.votingDeadline, "Voting period ended");
         require(_votes > 0, "Votes must be > 0");
 
-        uint256 existingVotes = votesCast[_proposalId][msg.sender];
-        uint256 totalVotes = existingVotes + _votes;
-
-        uint256 tokenCost = totalVotes * totalVotes - existingVotes * existingVotes;
+        uint256 tokenCost = _votes * _votes;
         require(governanceToken.transferFrom(msg.sender, address(this), tokenCost), "Token transfer failed");
 
-        votesCast[_proposalId][msg.sender] = totalVotes;
+        votesCast[_proposalId][msg.sender] += _votes;
         proposal.voteCount += _votes;
 
         emit VotedQuadratic(_proposalId, msg.sender, _votes, tokenCost);

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -139,15 +139,15 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Check if driver already has an existing document record for this documentType
-    const { data: existingDoc, error: checkError } = await client
+    const { data: existingDoc2, error: checkError2 } = await client
       .from('driver_documents')
       .select('id, storage_path')
       .eq('driver_id', driverId)
       .eq('document_type', documentType)
       .maybeSingle();
 
-    if (checkError) {
-      logger.error('[DocumentController] Failed to check for existing document:', checkError.message);
+    if (checkError2) {
+      logger.error('[DocumentController] Failed to check for existing document:', checkError2.message);
       return res.status(500).json({ error: 'Failed to process document' });
     }
 
@@ -175,7 +175,7 @@ export async function uploadDriverDocument(req, res) {
     let record;
     let dbError;
 
-    if (existingDoc) {
+    if (existingDoc2) {
       // Update existing record (Supersede)
       const { data: updatedRecord, error: updateErr } = await client
         .from('driver_documents')
@@ -185,7 +185,7 @@ export async function uploadDriverDocument(req, res) {
           status: 'pending_review',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existingDoc.id)
+        .eq('id', existingDoc2.id)
         .select('id, document_type, status, created_at')
         .single();
 
@@ -226,16 +226,16 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Clean up old file from storage to prevent orphaned files
-    if (existingDoc?.storage_path) {
+    if (existingDoc2?.storage_path) {
       await client.storage
         .from('driver-documents')
-        .remove([existingDoc.storage_path])
+        .remove([existingDoc2.storage_path])
         .catch((cleanupErr) => {
           logger.warn('[DocumentController] Failed to delete superseded storage file:', cleanupErr.message);
         });
     }
 
-    return res.status(existingDoc ? 200 : 201).json({
+    return res.status(existingDoc2 ? 200 : 201).json({
       success: true,
       document: record,
     });

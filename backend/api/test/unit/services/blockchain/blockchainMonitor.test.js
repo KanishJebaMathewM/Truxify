@@ -150,7 +150,7 @@ describe('BlockchainMonitor', () => {
     vi.unstubAllGlobals();
   });
 
-  it('clears isScanning in a finally block even when the scan throws', async () => {
+  it('clears isScanning in a finally block when getBlockNumber fails', async () => {
     const { monitor } = buildMonitor();
     let capturedCallback;
     vi.stubGlobal('setInterval', (cb) => {
@@ -167,6 +167,30 @@ describe('BlockchainMonitor', () => {
     await capturedCallback();
 
     expect(monitor.isScanning).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('clears isScanning in a finally block when scanBlockRange rejects', async () => {
+    const { monitor } = buildMonitor();
+    let capturedCallback;
+    vi.stubGlobal('setInterval', (cb) => {
+      capturedCallback = cb;
+      return 1;
+    });
+
+    monitor.isListening = true;
+    monitor.lastBlockScanned = 0;
+    monitor.provider = {
+      getBlockNumber: vi.fn().mockResolvedValue(5),
+    };
+    monitor.scanBlockRange = vi.fn().mockRejectedValue(new Error('range scan failed'));
+    monitor.startPollingBlocks();
+
+    await capturedCallback();
+
+    expect(monitor.isScanning).toBe(false);
+    expect(monitor.scanBlockRange).toHaveBeenCalledWith(1, 5);
 
     vi.unstubAllGlobals();
   });

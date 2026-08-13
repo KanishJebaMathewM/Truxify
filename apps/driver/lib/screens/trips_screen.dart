@@ -110,22 +110,22 @@ class _TripsScreenState extends State<TripsScreen> {
       final result = await _tripService.fetchTripHistory(limit: 20);
       final trips = result['trips'] as List<Map<String, dynamic>>;
 
-    final stopsByTrip = <String, List<Map<String, dynamic>>>{};
-    final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
-    final itemsByTrip = <String, List<Map<String, dynamic>>>{};   // ← add this
+      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+      final itemsByTrip = <String, List<Map<String, dynamic>>>{};
 
-    await Future.wait(trips.map((trip) async {
-      final tripId = trip['trip_display_id']?.toString();
-      if (tripId == null || tripId.isEmpty) return;
+      await Future.wait(trips.map((trip) async {
+        final tripId = trip['trip_display_id']?.toString();
+        if (tripId == null || tripId.isEmpty) return;
 
-      final results = await Future.wait([
-        _tripService.fetchTripStops(tripId),
-        _tripService.fetchRouteMapPoints(tripId),
-        _tripService.fetchTripItems(tripId),   
-      ]);
-      stopsByTrip[tripId] = results[0];
-      routePointsByTrip[tripId]= results[1];
-      itemsByTrip[tripId] = results[2];   
+        final results = await Future.wait([
+          _tripService.fetchTripStops(tripId),
+          _tripService.fetchRouteMapPoints(tripId),
+          _tripService.fetchTripItems(tripId),
+        ]);
+        stopsByTrip[tripId] = results[0];
+        routePointsByTrip[tripId] = results[1];
+        itemsByTrip[tripId] = results[2];
       }));
 
       if (!mounted) return;

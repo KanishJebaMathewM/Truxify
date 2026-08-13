@@ -61,6 +61,9 @@ function resolveResourceId(req) {
     || req.params?.reviewId
     || req.params?.ticketId
     || req.body?.id
+    || req.body?.order_id
+    || req.body?.withdrawal_id
+    || req.body?.payment_id
     || null;
 }
 

@@ -27,7 +27,6 @@ import {
 } from "../escrow.js";
 import logger from "../../middleware/logger.js";
 import { OrderTimelineService } from "./orderTimelineService.js";
-import { invalidateDriverOrderCache } from "../../sockets/tracker.js";
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
@@ -500,7 +499,7 @@ export class DeliveryVerificationService {
           // then enforced by escrowReleaseFn against the same expected figure,
           // so a booking funded with Y ≠ X can never be released while the app
           // pays the driver X from its own funds.
-          let expectedAmountWei;
+          let expectedAmountWei = null;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;
@@ -776,29 +775,12 @@ export class DeliveryVerificationService {
           });
         }
 
-        // The trip is complete (payment_released) — drop the cached
-        // driver→order mapping so telemetry/geofence provenance and the
-        // tracker's cache-first lookup no longer report the driver on the
-        // finished order (issue #10676).
-        const tripDriverId = tripData?.driver_id || order.driver_id;
-        if (tripDriverId) {
-          await invalidateDriverOrderCache(tripDriverId);
-        }
-
         // The trip is complete (payment_released) — kill any active public
         // tracking tokens so a shared link can no longer broadcast the driver's
-        // live location. Best-effort: token revocation failure must not break
-        // the delivery-complete flow, so swallow the throw here.
-        try {
-          await this.trackingTokenService?.revokeAllForOrder(
-            order.order_display_id,
-          );
-        } catch (error) {
-          logger.error(
-            `[verify-delivery] Failed to revoke tracking tokens for order ${order.order_display_id}:`,
-            error,
-          );
-        }
+        // live location. Best-effort: revokeAllForOrder never throws.
+        await this.trackingTokenService?.revokeAllForOrder(
+          order.order_display_id,
+        );
 
         // --- Fire FCM push to driver: "Payment Released ✓" ---
         const resolvedDriverIdForPush = tripData?.driver_id || order.driver_id;

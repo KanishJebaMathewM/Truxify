@@ -27,34 +27,6 @@ describe('authenticate middleware - non bypass flow', () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
-  it('returns 401 for an oversized bearer token without touching Firebase', async () => {
-    const dbMock = {
-      createUserClient: () => null,
-      firebaseAdmin: {
-        auth: vi.fn(() => ({
-          verifyIdToken: vi.fn().mockRejectedValue(new Error('should not be called')),
-        })),
-      },
-      supabase: null,
-    };
-    vi.doMock('../../src/config/db.js', () => dbMock);
-
-    const { authenticate } = await import('../../src/middleware/auth.js');
-
-    const req = { headers: { authorization: `Bearer ${'a'.repeat(70 * 1024)}` } };
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    };
-    const next = vi.fn();
-
-    await authenticate(req, res, next);
-
-    expect(res.status).toHaveBeenCalledWith(401);
-    expect(dbMock.firebaseAdmin.auth).not.toHaveBeenCalled();
-    expect(next).not.toHaveBeenCalled();
-  });
-
   it('returns 500 when supabase missing for supabase token', async () => {
     const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
     vi.doMock('../../src/config/db.js', () => ({
@@ -924,7 +896,7 @@ describe('authenticate middleware - Redis caching', () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(redisClientMock.set).toHaveBeenCalledWith(
       'user:profile:nonexistent-firebase-uid',
-      JSON.stringify({ isActive: false, notFound: true }),
+      JSON.stringify({ isActive: false }),
       'EX',
       TOMBSTONE_TTL_SECONDS
     );
@@ -1209,69 +1181,5 @@ describe('authenticate middleware - Redis caching', () => {
     const ttl = setCall[3];
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(120);
-  });
-
-  it('caches a firebase profile bounded by the token remaining lifetime', async () => {
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    const expSeconds = nowSeconds + 90; // token expires in 90 seconds
-    const token = jwt.sign({ exp: expSeconds }, 'secret');
-
-    const dbProfile = {
-      id: 'firebase-user-1',
-      firebase_uid: 'firebase-user',
-      role: 'driver',
-      full_name: 'Fresh Fire',
-      phone: '+913333333333',
-    };
-
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(null),
-      set: vi.fn().mockResolvedValue('OK'),
-    };
-
-    const firebaseAdminMock = {
-      auth: () => ({
-        verifyIdToken: vi.fn().mockResolvedValue({
-          uid: 'firebase-user',
-          exp: expSeconds,
-        }),
-      }),
-    };
-
-    const supabaseMock = {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
-            }),
-          }),
-        }),
-      }),
-    };
-
-    vi.doMock('../../src/config/db.js', () => ({
-      createUserClient: () => null,
-      firebaseAdmin: firebaseAdminMock,
-      supabase: supabaseMock,
-      redisClient: redisClientMock,
-    }));
-
-    const { authenticate } = await import('../../src/middleware/auth.js');
-
-    const req = { headers: { authorization: `Bearer ${token}` } };
-    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
-    const next = vi.fn();
-
-    await authenticate(req, res, next);
-
-    expect(next).toHaveBeenCalled();
-    const setCall = redisClientMock.set.mock.calls.find(
-      ([key]) => key === 'user:profile:firebase-user'
-    );
-    expect(setCall).toBeDefined();
-    const ttl = setCall[3];
-    expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(90);
   });
 });

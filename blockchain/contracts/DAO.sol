@@ -20,9 +20,12 @@ contract DAO is Ownable {
     IERC20 public governanceToken;
     Proposal[] public proposals;
     mapping(uint256 => mapping(address => uint256)) public votesCast;
+    mapping(address => bytes32) public voterIdentity;
+    mapping(bytes32 => address) public identityOwner;
 
     event ProposalCreated(uint256 indexed proposalId, string description, uint256 deadline);
     event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost);
+    event VoterRegistered(address indexed voter, bytes32 indexed identity);
 
     constructor(address _tokenAddress) Ownable(msg.sender) {
         governanceToken = IERC20(_tokenAddress);
@@ -41,9 +44,27 @@ contract DAO is Ownable {
     }
 
     /**
+     * @dev Binds msg.sender to a verified identity. One identity may only be
+     * registered to a single address, preventing a voter from splitting votes
+     * across many wallets to bypass the quadratic cost.
+     */
+    function registerVoter(bytes32 _identity) external {
+        require(voterIdentity[msg.sender] == bytes32(0), "Address already registered");
+        require(identityOwner[_identity] == address(0), "Identity already registered");
+
+        voterIdentity[msg.sender] = _identity;
+        identityOwner[_identity] = msg.sender;
+
+        emit VoterRegistered(msg.sender, _identity);
+    }
+
+    /**
      * @dev Quadratic Voting: Token Cost = votes^2
+     * Only addresses bound to a registered identity may vote.
      */
     function voteQuadratic(uint256 _proposalId, uint256 _votes) external {
+        require(voterIdentity[msg.sender] != bytes32(0), "Voter not registered");
+
         Proposal storage proposal = proposals[_proposalId];
         require(block.timestamp < proposal.votingDeadline, "Voting period ended");
         require(_votes > 0, "Votes must be > 0");

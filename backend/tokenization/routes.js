@@ -1,11 +1,12 @@
 import express from 'express';
 import tokenService from './token.service.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Create asset
-router.post('/token/asset/create', async (req, res) => {
+router.post('/token/asset/create', authenticate, async (req, res) => {
     try {
         const result = await tokenService.createAsset(req.body);
         res.json({ success: true, data: result });
@@ -16,7 +17,7 @@ router.post('/token/asset/create', async (req, res) => {
 });
 
 // Purchase fraction
-router.post('/token/fraction/purchase', async (req, res) => {
+router.post('/token/fraction/purchase', authenticate, async (req, res) => {
     try {
         const { assetId, amount, userAddress } = req.body;
         if (!assetId || !amount || !userAddress) {
@@ -34,7 +35,7 @@ router.post('/token/fraction/purchase', async (req, res) => {
 });
 
 // Sell fraction
-router.post('/token/fraction/sell', async (req, res) => {
+router.post('/token/fraction/sell', authenticate, async (req, res) => {
     try {
         const { assetId, amount, userAddress } = req.body;
         if (!assetId || !amount || !userAddress) {
@@ -52,7 +53,7 @@ router.post('/token/fraction/sell', async (req, res) => {
 });
 
 // Create trade order
-router.post('/token/trade/create', async (req, res) => {
+router.post('/token/trade/create', authenticate, async (req, res) => {
     try {
         const { assetId, amount, price, orderType, userAddress } = req.body;
         if (!assetId || !amount || !price || !orderType || !userAddress) {
@@ -72,7 +73,7 @@ router.post('/token/trade/create', async (req, res) => {
 });
 
 // Execute trade order
-router.post('/token/trade/execute', async (req, res) => {
+router.post('/token/trade/execute', authenticate, async (req, res) => {
     try {
         const { assetId, orderIndex, buyerAddress } = req.body;
         if (!assetId || orderIndex === undefined || !buyerAddress) {
@@ -90,7 +91,7 @@ router.post('/token/trade/execute', async (req, res) => {
 });
 
 // Get asset
-router.get('/token/asset/:assetId', async (req, res) => {
+router.get('/token/asset/:assetId', authenticate, async (req, res) => {
     try {
         const { assetId } = req.params;
         const asset = await tokenService.getAsset(assetId);
@@ -102,7 +103,7 @@ router.get('/token/asset/:assetId', async (req, res) => {
 });
 
 // Get fractional ownership
-router.get('/token/ownership/:assetId/:userAddress', async (req, res) => {
+router.get('/token/ownership/:assetId/:userAddress', authenticate, async (req, res) => {
     try {
         const { assetId, userAddress } = req.params;
         const ownership = await tokenService.getFractionalOwnership(assetId, userAddress);
@@ -114,7 +115,7 @@ router.get('/token/ownership/:assetId/:userAddress', async (req, res) => {
 });
 
 // Get stats
-router.get('/token/stats', async (req, res) => {
+router.get('/token/stats', authenticate, async (req, res) => {
     try {
         const stats = await tokenService.getStats();
         res.json({ success: true, data: stats });

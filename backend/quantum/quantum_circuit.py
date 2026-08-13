@@ -119,8 +119,20 @@ class QUBOFormatter:
         
         qubo.minimize(quadratic=objective)
         
-        # Constraints (simplified)
-        # In production: add degree constraints
+                # Add degree constraints: every node must have exactly 2 selected edges
+        for node in graph.nodes():
+            incident_vars = []
+
+            for (u, v), var in edge_vars.items():
+                if u == node or v == node:
+                    incident_vars.append(var)
+
+            qubo.linear_constraint(
+                linear={var: 1 for var in incident_vars},
+                sense='==',
+                rhs=2,
+                name=f'degree_{node}'
+            )
         
         self.qubo = qubo
         self.variables = list(edge_vars.values())

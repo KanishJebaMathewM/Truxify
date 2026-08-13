@@ -148,8 +148,12 @@ class AnomalyDetectionService {
       }
 
       const amounts = data.map(t => parseFloat(t.amount) || 0);
-      const avg = amounts.reduce((a, b) => a + b) / amounts.length;
-      const variance = amounts.reduce((sum, a) => sum + Math.pow(a - avg, 2), 0) / amounts.length;
+      let sum = 0;
+      for (const amount of amounts) { sum = Number((sum + amount).toPrecision(15)); }
+      const avg = sum / amounts.length;
+      let varianceSum = 0;
+      for (const amount of amounts) { varianceSum += Math.pow(amount - avg, 2); }
+      const variance = varianceSum / amounts.length;
       return Math.sqrt(variance);
     } catch (err) {
       logger.warn('[AnomalyDetectionService] Failed to calculate std dev:', err.message);

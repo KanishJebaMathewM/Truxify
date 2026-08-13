@@ -103,6 +103,29 @@ export const driverIdParamSchema = z.object({
   driverId: uuidSchema
 });
 
+// Cross-docking synchronization engine (#6181)
+export const crossDockParamSchema = z.object({
+  id: uuidSchema,
+});
+
+export const crossDockCandidateSchema = z.object({
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  radius_km: coerceNumber(z.number().min(1).max(500)).optional(),
+  limit: coerceNumber(z.number().int().min(1).max(50)).optional(),
+});
+
+export const createCrossDockSchema = z.object({
+  to_driver_id: uuidSchema,
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  cross_dock_note: z.string().max(500).optional(),
+});
+
+export const verifyHandoffSchema = z.object({
+  handoff_code: z.string().regex(/^\d{6}$/, "Handoff code must be 6 digits"),
+});
+
 export const submitBidSchema = z.object({
   bid_amount: z
     .number()

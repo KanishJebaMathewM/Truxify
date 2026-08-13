@@ -76,3 +76,18 @@ export function sanitizeUploadFilename(originalName, fallback = 'upload') {
 
   return name;
 }
+
+
+// === Spec 18: ===
+// === Spec 18: max body size ===
+const DEFAULT_MAX = 25 * 1024 * 1024;
+export function checkContentLength(req, maxBytes = DEFAULT_MAX) {
+  const len = Number(req.headers?.['content-length'] || 0);
+  if (len > maxBytes) {
+    const err = new Error(`body ${len} > max ${maxBytes}`);
+    err.status = 413; err.code = 'PAYLOAD_TOO_LARGE';
+    return { ok: false, error: err };
+  }
+  return { ok: true, length: len };
+}
+

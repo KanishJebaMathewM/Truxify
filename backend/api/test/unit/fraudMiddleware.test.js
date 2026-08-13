@@ -93,3 +93,18 @@ describe('fraudMiddleware', () => {
     });
   });
 });
+
+
+// === Spec 13 test ===
+import { describe, it, expect } from 'vitest';
+import { clampRiskScore, accumulateRisk } from '../../src/middleware/fraudMiddleware.js';
+describe('clampRiskScore', () => {
+  it('50 passes', () => { expect(clampRiskScore(50)).toBe(50); });
+  it('150 → 100', () => { expect(clampRiskScore(150)).toBe(100); });
+  it('NaN → 0', () => { expect(clampRiskScore(NaN)).toBe(0); });
+});
+describe('accumulateRisk', () => {
+  it('sums', () => { expect(accumulateRisk([10, 20, 30])).toBe(60); });
+  it('clamps', () => { expect(accumulateRisk([60, 50, 40])).toBe(100); });
+});
+

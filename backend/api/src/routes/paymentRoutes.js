@@ -39,6 +39,7 @@ import {
   submitEscrowRefund,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
+import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 import upiPaymentService from '../services/payment/UpiPaymentService.js';
 
 const router = express.Router();
@@ -399,6 +400,11 @@ router.post(
           });
         }
 
+        // Driver assignment confirmed — drop any stale cached mapping so the
+        // tracker resolves the newly assigned driver on the next ping
+        // (issue #10676).
+        await invalidateDriverOrderCache(pending.driver_id);
+
         sendPushNotification(
           pending.driver_id,
           'Bid Accepted!',
@@ -415,6 +421,7 @@ router.post(
           { order_display_id: order.order_display_id, tx_hash }
         ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       } else if (order.driver_id) {
+        await invalidateDriverOrderCache(order.driver_id);
         sendPushNotification(
           order.driver_id,
           '💰 Payment Locked',

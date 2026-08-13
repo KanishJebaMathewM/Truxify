@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 /// Parses the support tickets response body safely.
 ///
 /// Handles `{ "tickets": [...], "pagination": {...} }` maps, legacy direct `[...]` lists,
@@ -13,7 +15,14 @@ List<dynamic> parseSupportTicketsResponse(String responseBody) {
       List<dynamic> list => list,
       _ => <dynamic>[],
     };
-  } catch (_) {
+  } catch (e) {
+    final truncated = responseBody.length > 500
+        ? '${responseBody.substring(0, 500)}…'
+        : responseBody;
+    debugPrint(
+      'SupportTicketParser: failed to parse support tickets response: $e\n'
+      'truncated body: $truncated',
+    );
     return <dynamic>[];
   }
 }

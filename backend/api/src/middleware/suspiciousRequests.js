@@ -80,3 +80,23 @@ export default function suspiciousRequests(req, res, next) {
 
   next();
 }
+
+// === Spec 6: ===
+// === Spec 6: prevent prototype pollution ===
+const FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor']);
+export function sanitizeKey(k) {
+  if (typeof k !== 'string') return null;
+  if (FORBIDDEN.has(k)) return null;
+  if (k.startsWith('__') || k.includes('..')) return null;
+  return k;
+}
+export function sanitizeQueryParams(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const safe = sanitizeKey(k);
+    if (safe !== null) out[safe] = v;
+  }
+  return out;
+}
+

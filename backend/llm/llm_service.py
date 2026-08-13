@@ -168,7 +168,11 @@ class LLMService:
         """Retrieve relevant context from vector DB"""
         try:
             # Generate query embedding
-            query_embedding = self.embedder.encode(query).tolist()
+            loop = asyncio.get_running_loop()
+            query_embedding = await loop.run_in_executor(
+                self.executor,
+                lambda: self.embedder.encode(query).tolist()
+            )
             
             # Search in vector DB
             results = self.collection.query(
@@ -208,11 +212,15 @@ class LLMService:
             Answer: [/INST]"""
             
             # Generate response
-            response = self.qa_pipeline(
-                prompt,
-                max_new_tokens=512,
-                temperature=0.7,
-                do_sample=True
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                self.executor,
+                lambda: self.qa_pipeline(
+                    prompt,
+                    max_new_tokens=512,
+                    temperature=0.7,
+                    do_sample=True
+                )
             )
             
             # Extract response text
@@ -229,7 +237,11 @@ class LLMService:
         """Add documents to vector DB for RAG"""
         try:
             # Generate embeddings
-            embeddings = self.embedder.encode(documents).tolist()
+            loop = asyncio.get_running_loop()
+            embeddings = await loop.run_in_executor(
+                self.executor,
+                lambda: self.embedder.encode(documents).tolist()
+            )
             
             # Add to collection
             ids = [f"doc_{i}_{datetime.now().timestamp()}" for i in range(len(documents))]

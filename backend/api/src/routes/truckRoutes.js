@@ -618,7 +618,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabaseAdmin.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('trucks').select('id, driver_id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
       supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
@@ -639,15 +639,20 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       ? Math.round(routeEstimate.durationSeconds / 60)
       : null;
 
-    const results = drivers.map(d => {
+    const results = await Promise.all(drivers.map(async (d) => {
       const profile = profileMap[d.user_id] || {};
       const truck = truckMap[d.truck_id] || {};
+      let truckNumber = '';
+      if (truck.id) {
+        const access = await canViewTruckNumber(req.user, truck);
+        truckNumber = access.allowed ? (truck.number_plate || '') : '';
+      }
       return {
         driver: profile.full_name || 'Unknown Driver',
         driverId: d.user_id,
         rating: d.rating || 0,
         truck: truck.name || 'Unknown Truck',
-        truckNumber: truck.number_plate || '',
+        truckNumber,
         capacity: truck.max_capacity_tons ? `${truck.max_capacity_tons} tonnes` : '',
         capacityTons: truck.max_capacity_tons || 0,
         truckType: truck.truck_type || '',
@@ -659,7 +664,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         etaMinutes,
         isDigilockerVerified: profile.is_digilocker_verified || false,
       };
-    });
+    }));
 
     const filteredResults = results.filter(truck => {
       if (minCapFilter.value !== undefined && truck.capacityTons < minCapFilter.value) {

@@ -758,6 +758,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  String _initials(String name) {
+    final parts = name.trim().split(' ').where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return 'JD';
+    return parts[0].substring(0, 1) +
+        (parts.length > 1 ? parts[1].substring(0, 1) : '');
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -794,12 +801,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     radius: 30,
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     child: Text(
-                      _driverName.isNotEmpty
-                          ? _driverName.substring(0, 1) +
-                              (_driverName.contains(' ')
-                                  ? _driverName.split(' ')[1].substring(0, 1)
-                                  : '')
-                          : 'JD',
+                      _initials(_driverName),
                       style: GoogleFonts.dmSans(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

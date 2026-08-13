@@ -11,6 +11,7 @@ from chromadb.config import Settings
 import json
 import os
 import redis
+import uuid
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -231,8 +232,12 @@ class LLMService:
             # Generate embeddings
             embeddings = self.embedder.encode(documents).tolist()
             
-            # Add to collection
-            ids = [f"doc_{i}_{datetime.now().timestamp()}" for i in range(len(documents))]
+            # Validate metadata matches documents
+            if metadata is not None and len(metadata) != len(documents):
+                raise ValueError("Metadata length must match documents length")
+            
+            # Generate unique IDs for documents
+            ids = [str(uuid.uuid4()) for _ in documents]
             
             self.collection.add(
                 embeddings=embeddings,

@@ -98,6 +98,12 @@ var operatorRoles = map[string]bool{
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 
+	// Coincident points are exactly zero apart; return early so the trig
+	// below is never fed a degenerate zero-angle central argument.
+	if lat1 == lat2 && lon1 == lon2 {
+		return 0
+	}
+
 	dLat := (lat2 - lat1) * (math.Pi / 180.0)
 	dLon := (lon2 - lon1) * (math.Pi / 180.0)
 

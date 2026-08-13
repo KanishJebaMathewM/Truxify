@@ -1,5 +1,22 @@
+<<<<<<< HEAD
 import os
 import hashlib
+=======
+"""
+Real ML-KEM-1024 (CRYSTALS-Kyber) key-encapsulation relayer service.
+
+Implemented on top of the standards-compliant ``mlkem`` package. Unlike the
+previous hash-based construction — where the public key was a pure function of
+the secret seed and the ciphertext XORed a keystream derived from the *public*
+key, so anyone holding the public key could decrypt the message and derive the
+shared secret — this module performs genuine ML-KEM-1024 key encapsulation:
+only the holder of the secret key can decapsulate the shared secret.
+"""
+
+from mlkem.ml_kem import ML_KEM
+from mlkem.parameter_set import ML_KEM_1024
+
+>>>>>>> upstream/main
 
 class Kyber1024Relayer:
     """
@@ -12,6 +29,7 @@ class Kyber1024Relayer:
         self.secret_key_len = 3168
         self.ciphertext_len = 1568
         self.shared_secret_len = 32
+<<<<<<< HEAD
 
     @staticmethod
     def _expand(material: bytes, length: int) -> bytes:
@@ -47,6 +65,25 @@ class Kyber1024Relayer:
         enc_key = hashlib.sha3_512(public_key).digest()
         ct_blob = bytes(a ^ b for a, b in zip(message, enc_key[:self.shared_secret_len]))
         ciphertext = (ct_blob * ((self.ciphertext_len + self.shared_secret_len - 1) // self.shared_secret_len))[:self.ciphertext_len]
+=======
+        self._kem = ML_KEM(ML_KEM_1024)
+
+    def generate_keypair(self):
+        """Generates an ML-KEM-1024 public/private keypair from a CSPRNG seed."""
+        return self._kem.key_gen()
+
+    def encapsulate(self, public_key: bytes):
+        """Encapsulates a random 256-bit shared secret using the recipient's Kyber public key.
+
+        Returns ``(ciphertext, shared_secret)``. The shared secret is only
+        recoverable by the holder of the corresponding secret key; a party
+        that knows only the public key and the ciphertext cannot derive it.
+        """
+        if len(public_key) != self.public_key_len:
+            raise ValueError(f"Invalid Kyber1024 public key length: {len(public_key)} bytes required.")
+
+        shared_secret, ciphertext = self._kem.encaps(public_key)
+>>>>>>> upstream/main
         return ciphertext, shared_secret
 
     def decapsulate(self, ciphertext: bytes, secret_key: bytes):
@@ -56,6 +93,7 @@ class Kyber1024Relayer:
         if len(secret_key) != self.secret_key_len:
             raise ValueError(f"Invalid secret key length: {len(secret_key)} bytes required.")
 
+<<<<<<< HEAD
         # Reconstruct the public key from the seed embedded in the secret key
         seed = secret_key[:64]
         public_key = self._expand(seed + b"KYBER_PK_TAG", self.public_key_len)
@@ -65,5 +103,9 @@ class Kyber1024Relayer:
         ct_blob = ciphertext[:self.shared_secret_len]
         message = bytes(a ^ b for a, b in zip(ct_blob, enc_key[:self.shared_secret_len]))
         return hashlib.sha3_512(public_key + message).digest()[:self.shared_secret_len]
+=======
+        return self._kem.decaps(secret_key, ciphertext)
+
+>>>>>>> upstream/main
 
 relayer_service = Kyber1024Relayer()

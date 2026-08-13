@@ -1,4 +1,5 @@
 ﻿#!/bin/bash
+<<<<<<< HEAD
 echo "🚀 Installing Istio Service Mesh..."
 curl -L https://istio.io/downloadIstio | sh -
 cd istio-*
@@ -8,6 +9,8 @@ kubectl label namespace default istio-injection=enabled
 kubectl get pods -n istio-system
 echo "✅ Istio installed successfully!"
 #!/bin/bash
+=======
+>>>>>>> upstream/main
 
 echo "🚀 Installing Istio Service Mesh..."
 

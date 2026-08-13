@@ -38,6 +38,7 @@ class FraudDetectionService {
 
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
+    if (!userId) return null;
     try {
       if (!supabaseAdmin) return null;
       const profile = await this.getOrCreateProfile(userId);

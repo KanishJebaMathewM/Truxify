@@ -200,7 +200,12 @@ class LocationService {
     _positionSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Geolocator filters to 10m minimum movement
+        // No platform-level distance gate: distanceFilter 10 matched
+        // _minDistanceMeters (10.0), so the in-app distance condition was
+        // always satisfied and the 5s time throttle was never the controlling
+        // factor. Letting the platform emit every fix lets the throttle below
+        // own the cadence (issue #11715).
+        distanceFilter: 0,
       ),
     ).listen(
       (position) {
@@ -211,7 +216,8 @@ class LocationService {
       },
     );
 
-    // Fallback timer: ensure a ping is sent at least every 30 seconds
+    // Fallback timer: ensure a ping is sent at least every 5 seconds
+    // (the throttle's _maxInterval), even when the device barely moves.
     _maxIntervalTimer?.cancel();
     _maxIntervalTimer = Timer.periodic(_maxInterval, (_) {
       if (_lastSentPosition != null && _isTracking) {
@@ -245,7 +251,7 @@ class LocationService {
       position.longitude,
     );
 
-    // Send if: moved 15m+ OR max interval (30s) has elapsed
+    // Send if: moved >= 10m OR the 5s max interval has elapsed.
     if (distanceMoved >= _minDistanceMeters ||
         timeSinceLastSend.compareTo(_maxInterval) >= 0) {
       final result = await _sendLocationPing(position);

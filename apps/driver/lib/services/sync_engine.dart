@@ -95,7 +95,11 @@ class SyncEngine {
       if (user == null) return;
       final token = await user.getIdToken();
 
-      final eventIds = events.map((e) => e['id'] as String).toList()..sort();
+      final eventIds = events
+          .map((e) => (e['id'] as String?) ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList()
+        ..sort();
       final idempotencyKey = eventIds.join(',');
 
       final requestBody = {

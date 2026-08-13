@@ -96,12 +96,21 @@ class ABTestModel:
             
             # Calculate average metrics per model
             results = {}
+            # Shadow metrics are logged under the real shadow model version
+            # (e.g. 'eta_v1'), not the literal bucket name 'shadow'. Derive
+            # the shadow bucket from the versions actually logged for this
+            # test so the A/B comparison measures the real models.
+            logged_versions = df['model_version'].unique()
+            shadow_version = next(
+                (v for v in logged_versions if v != 'production'),
+                'shadow'
+            )
             for metric in df['metric_name'].unique():
                 metric_df = df[df['metric_name'] == metric]
                 avg_metrics = metric_df.groupby('model_version')['metric_value'].mean()
                 
                 prod_val = avg_metrics.get('production', None)
-                shadow_val = avg_metrics.get('shadow', None)
+                shadow_val = avg_metrics.get(shadow_version, None)
                 lower_is_better_keywords = {'rmse', 'mae', 'mse', 'loss', 'error_rate', 'latency', 'error'}
                 higher_is_better = not any(k in metric.lower() for k in lower_is_better_keywords)
 

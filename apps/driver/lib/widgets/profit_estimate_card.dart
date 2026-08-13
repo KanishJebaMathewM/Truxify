@@ -54,7 +54,8 @@ class _ProfitEstimateCardState extends State<ProfitEstimateCard> {
       } finally {
         repo.dispose();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[ProfitEstimateCard] Profit prediction failed: $e');
       if (mounted) setState(() { _isLoading = false; _error = 'Prediction unavailable'; });
     }
   }

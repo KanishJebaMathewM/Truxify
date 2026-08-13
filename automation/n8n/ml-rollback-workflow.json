@@ -121,8 +121,59 @@
         1000,
         -100
       ],
+      "onError": "continueRegularOutput",
       "id": "execute-rollback",
       "name": "Execute Rollback"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{$json.statusCode}}",
+              "operator": {
+                "type": "number",
+                "operation": "gte",
+                "value": 200
+              }
+            },
+            {
+              "leftValue": "={{$json.statusCode}}",
+              "operator": {
+                "type": "number",
+                "operation": "lt",
+                "value": 300
+              }
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -100
+      ],
+      "id": "rollback-http-ok",
+      "name": "Rollback Succeeded?"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "❌ ML Model Rollback FAILED: {{$node[\"Decision\"].json.test_id}}",
+        "htmlFormat": true,
+        "message": "<h3>ML Model Auto-Rollback FAILED</h3><p>Auto-rollback could not be completed for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong> (degradation {{$node[\"Decision\"].json.degradation}}).</p><p>The rollback endpoint returned a non-success response (status: {{$node[\"Execute Rollback\"].json.statusCode}}).</p><p>Previous stable model baseline may NOT have been restored. Manual intervention required.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        0
+      ],
+      "id": "send-failure-alert",
+      "name": "Send Failure Alert"
     },
     {
       "parameters": {
@@ -202,7 +253,25 @@
       "main": [
         [
           {
+            "node": "rollback-http-ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rollback-http-ok": {
+      "main": [
+        [
+          {
             "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-failure-alert",
             "type": "main",
             "index": 0
           }

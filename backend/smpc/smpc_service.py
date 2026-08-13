@@ -328,10 +328,16 @@ class SMPCProtocol:
     def _aggregate_average(self, shares_list: List[Dict[str, bytes]]) -> List[Tuple[int, int]]:
         sum_shares = self._aggregate_sum(shares_list)
         count = len(shares_list)
+        # Use fixed-point arithmetic: scale by FIXED_POINT_SCALE to preserve fractional part.
+        # mean = (sum * inv(count) * SCALE) / SCALE in the prime field.
+        FIXED_POINT_SCALE = 1000
+        inv_count = pow(count, -1, self.secret_sharing.prime)
         result = []
         for x, y in sum_shares:
-            avg = (y * pow(count, -1, self.secret_sharing.prime)) % self.secret_sharing.prime
-            result.append((x, avg))
+            # Scale the sum, apply modular inverse of count, then descale.
+            # (y * SCALE * inv_count) % prime gives the fixed-point mean in the field.
+            scaled_avg = (y * FIXED_POINT_SCALE * inv_count) % self.secret_sharing.prime
+            result.append((x, scaled_avg))
         return result
 
     def _aggregate_max(self, shares_list: List[Dict[str, bytes]]) -> List[Tuple[int, int]]:

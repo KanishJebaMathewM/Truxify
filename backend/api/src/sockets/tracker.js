@@ -1134,6 +1134,12 @@ export async function handleLocationPing(ws, data, req) {
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     telemetryTotalDropped++;
     telemetryOverflowDropped++;
+    ws.send(JSON.stringify({
+      error: 'Telemetry buffer full, please retry in a few seconds',
+      code: 503,
+      retryAfter: 5,
+    }));
+    return;
   }
   await telemetryWriteBuffer.push({
   driver_id,

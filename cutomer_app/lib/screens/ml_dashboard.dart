@@ -98,6 +98,7 @@ class _MLDashboardState extends State<MLDashboard> {
     results.forEach((metric, values) {
       final prod = values['production']?.toStringAsFixed(2);
       final shadow = values['shadow']?.toStringAsFixed(2);
+      if (prod == null || shadow == null) return;
       rows.add(_buildMetricRow(metric, prod, shadow, metric == 'rmse'));
     });
 

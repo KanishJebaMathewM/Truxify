@@ -30,5 +30,45 @@ void main() {
       expect(resolved, hasLength(1));
       expect(resolved.single.payload['stopId'], 'stop-1');
     });
+
+    test('deep-merges all PoD payload fields and keeps corrected values', () {
+      final resolver = ConflictResolver();
+      final events = <TripEvent>[
+        TripEvent.podMetadata(
+          'trip-1',
+          {
+            'podNumber': 'POD-001',
+            'remarks': 'original',
+            'signee': 'Alice',
+            'attachments': [
+              {'name': 'sig.png', 'hash': 'a1'},
+            ],
+          },
+          occurredAt: '2024-01-01T00:00:00.000Z',
+        ),
+        TripEvent.podMetadata(
+          'trip-1',
+          {
+            'podNumber': 'POD-002',
+            'remarks': 'corrected',
+            'attachments': [
+              {'name': 'sig.png', 'hash': 'a1'},
+              {'name': 'photo.png', 'hash': 'b2'},
+            ],
+          },
+          occurredAt: '2024-01-01T00:00:05.000Z',
+        ),
+      ];
+
+      final resolved = resolver.resolve(events);
+
+      expect(resolved, hasLength(1));
+      final payload = resolved.single.payload;
+      expect(payload['podNumber'], 'POD-002');
+      expect(payload['remarks'], 'corrected');
+      expect(payload['signee'], 'Alice');
+      final attachments = payload['attachments'] as List;
+      expect(attachments, hasLength(2));
+    });
   });
 }

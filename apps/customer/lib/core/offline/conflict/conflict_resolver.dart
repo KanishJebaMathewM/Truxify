@@ -124,6 +124,12 @@ class ConflictResolver {
       mergedPayload['attachments'] = merged;
     }
 
+    for (final entry in incomingPayload.entries) {
+      if (entry.key != 'attachments') {
+        mergedPayload[entry.key] = entry.value;
+      }
+    }
+
     return existing.copyWith(payload: mergedPayload, occurredAt: incoming.occurredAt);
   }
 }

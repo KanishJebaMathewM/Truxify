@@ -1,3 +1,22 @@
+/**
+ * Correlation ID middleware for distributed request tracing.
+ *
+ * Assigns a unique correlation ID (UUID) to each incoming HTTP request and
+ * propagates it through AsyncLocalStorage so all downstream async operations
+ * (database calls, external API requests, etc.) share the same trace ID.
+ *
+ * If the client sends an X-Correlation-ID header, that value is used instead
+ * of generating a new one, enabling trace propagation across service boundaries.
+ *
+ * The correlation ID is set on:
+ * - req.correlationId (string)
+ * - res.setHeader('X-Correlation-ID', ...) (response header)
+ * - AsyncLocalStorage store (accessible via correlationContext.getStore())
+ *
+ * @module correlationId
+ * @see {@link https://www.w3.org/TR/trace-context/}
+ */
+
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import logger from './logger.js';

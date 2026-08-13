@@ -806,7 +806,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
       .select('id')
       .eq('id', truckId)
       .eq('driver_id', req.user.id)
-      .single();
+      .maybeSingle();
 
     if (truckErr || !truck) {
       return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });

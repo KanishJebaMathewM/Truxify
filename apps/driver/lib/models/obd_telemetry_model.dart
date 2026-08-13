@@ -26,12 +26,17 @@ class ObdTelemetry {
     final ph = json['predictiveHealthScore']?.toDouble();
     final def = json['defUreaConcentration']?.toDouble();
     final nox = json['noxLevel']?.toDouble();
-    if (et == null) debugPrint('ObdTelemetry: engineTemperature missing or null');
-    if (ol == null) debugPrint('ObdTelemetry: oilLevel missing or null');
-    if (tp == null) debugPrint('ObdTelemetry: tirePressureAvg missing or null');
-    if (ph == null) debugPrint('ObdTelemetry: predictiveHealthScore missing or null');
-    if (def == null) debugPrint('ObdTelemetry: defUreaConcentration missing or null');
-    if (nox == null) debugPrint('ObdTelemetry: noxLevel missing or null');
+    final missingFields = <String>[
+      if (et == null) 'engineTemperature',
+      if (ol == null) 'oilLevel',
+      if (tp == null) 'tirePressureAvg',
+      if (ph == null) 'predictiveHealthScore',
+      if (def == null) 'defUreaConcentration',
+      if (nox == null) 'noxLevel',
+    ];
+    if (missingFields.isNotEmpty) {
+      debugPrint('ObdTelemetry: missing fields: ${missingFields.join(', ')}');
+    }
     return ObdTelemetry(
       engineTemperature: et,
       oilLevel: ol,

@@ -54,12 +54,19 @@ def main():
 
     total_error = 0
     count = 0
+    missing_actual = 0
 
     for log in logs:
-        pred = log.get('predicted_price', 0)
-        accepted = log.get('accepted_price', 0)
+        pred = log.get('predicted_price')
+        accepted = log.get('accepted_price')
+        if accepted is None or pred is None:
+            missing_actual += 1
+            continue
         total_error += abs(pred - accepted)
         count += 1
+
+    if missing_actual:
+        print(f"Skipped {missing_actual} price logs with missing actual/accepted price.")
 
     if count == 0:
         print("No price logs found for the last 7 days. Nothing to analyze.")

@@ -221,7 +221,7 @@ class VoiceAIService:
             
             # Store in Redis
             self.redis.setex(
-                f"voice:transcribe:{hashlib.md5(audio_data).hexdigest()}",
+                f"voice:transcribe:{language_code}:{hashlib.md5(audio_data).hexdigest()}",
                 3600,
                 json.dumps({
                     'text': adapted_text,

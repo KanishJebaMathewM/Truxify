@@ -24,6 +24,14 @@ class SyncService {
       : _tripService = tripService ?? TripService(),
         _apiClient = apiClient ?? ApiClient();
 
+  @visibleForTesting
+  Future<void> syncPendingDataForTesting() => _syncPendingData();
+
+  // Stable idempotency key derived from the local pod id. Reusing the same key
+  // lets the server dedupe repeated upload attempts (across retries and app
+  // restarts) so the signature/photo is never stored more than once.
+  String _podIdempotencyKey(int podId) => 'pod-$podId';
+
   void startListening() {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
       if (!results.contains(ConnectivityResult.none)) {
@@ -50,16 +58,38 @@ class SyncService {
         final podId = pod['id'] as int;
 
         try {
-          if (orderId != null && (photoPath != null || signaturePath != null)) {
-            await _uploadPodFiles(orderId!, photoPath: photoPath, signaturePath: signaturePath);
+          // Upload the PoD files at most once. A completed-but-unacked pod
+          // (e.g. when markStopCompleted fails transiently) must NOT re-upload
+          // its files, or the server ends up with duplicate artifacts.
+          if (!_uploadedPodIds.contains(podId) &&
+              orderId != null &&
+              (photoPath != null || signaturePath != null)) {
+            await _uploadPodFiles(
+              orderId!,
+              photoPath: photoPath,
+              signaturePath: signaturePath,
+              idempotencyKey: _podIdempotencyKey(podId),
+            );
+            _uploadedPodIds.add(podId);
           }
           await _tripService.markStopCompleted(stopId, tripId);
           await LocalDbService.instance.markPoDSynced(podId);
         } catch (e) {
           debugPrint('Failed to sync PoD $podId: $e');
           try {
-            if (orderId != null && (photoPath != null || signaturePath != null)) {
-              await _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
+            // Only re-upload if the first upload itself failed. Otherwise the
+            // file is already on the server (the idempotency key dedupes across
+            // retries/restarts) and we just retry completing the stop.
+            if (!_uploadedPodIds.contains(podId) &&
+                orderId != null &&
+                (photoPath != null || signaturePath != null)) {
+              await _uploadPodFiles(
+                orderId!,
+                photoPath: photoPath,
+                signaturePath: signaturePath,
+                idempotencyKey: _podIdempotencyKey(podId),
+              );
+              _uploadedPodIds.add(podId);
             }
             await _tripService.markStopCompleted(stopId, tripId);
             await LocalDbService.instance.markPoDSynced(podId);
@@ -80,14 +110,16 @@ class SyncService {
     required String orderId,
     String? photoPath,
     String? signaturePath,
+    String? idempotencyKey,
   }) async {
-    return _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
+    return _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath, idempotencyKey: idempotencyKey);
   }
 
   Future<Map<String, dynamic>?> _uploadPodFiles(
     String orderId, {
     String? photoPath,
     String? signaturePath,
+    String? idempotencyKey,
   }) async {
     final hasPhoto = photoPath != null && await File(photoPath).exists();
     final hasSignature = signaturePath != null && await File(signaturePath).exists();
@@ -123,6 +155,7 @@ class SyncService {
       '/api/orders/$orderId/pod',
       fields: {},
       files: files,
+      idempotencyKey: idempotencyKey,
     );
 
     return response as Map<String, dynamic>?;

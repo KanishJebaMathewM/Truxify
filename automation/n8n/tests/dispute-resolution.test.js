@@ -1,8 +1,21 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
 const path = require("path");
 const workflow = require(path.join(__dirname, "..", "dispute-resolution.json"));
+
+const REPO_ROOT = path.join(__dirname, "..", "..", "..");
+const ALERT_EMAIL_EXPRESSION = "={{$env.ADMIN_ALERT_EMAIL}}";
+const LITERAL_EMAIL = /^[^={}\s]+@[^={}\s]+$/;
+
+function emailNodes() {
+  return workflow.nodes.filter((n) => n.type === "n8n-nodes-base.emailSend");
+}
+
+function readRepoFile(relativePath) {
+  return fs.readFileSync(path.join(REPO_ROOT, relativePath), "utf8");
+}
 
 function nodeByName(name) {
   return workflow.nodes.find((n) => n.name === name);
@@ -77,6 +90,66 @@ test("every connection source and target references an existing node", () => {
       }
     }
   }
+});
+
+test("no emailSend node hardcodes a literal recipient address", () => {
+  const nodes = emailNodes();
+  assert.ok(nodes.length > 0, "workflow must contain emailSend nodes");
+  for (const node of nodes) {
+    const toEmail = node.parameters && node.parameters.toEmail;
+    assert.ok(toEmail, `${node.name} must define a recipient`);
+    assert.ok(
+      !LITERAL_EMAIL.test(toEmail),
+      `${node.name} must not hardcode a recipient address (found '${toEmail}')`,
+    );
+  }
+});
+
+test("every alert/escalation email routes to $env.ADMIN_ALERT_EMAIL", () => {
+  const expected = [
+    "Alert Admin — Escrow Freeze Failed",
+    "Email Admin",
+    "Alert Admin — Escrow Release Failed",
+  ];
+  for (const name of expected) {
+    const node = nodeByName(name);
+    assert.ok(node, `${name} node must exist`);
+    assert.strictEqual(
+      node.parameters.toEmail,
+      ALERT_EMAIL_EXPRESSION,
+      `${name} must resolve its recipient from ADMIN_ALERT_EMAIL`,
+    );
+  }
+  assert.strictEqual(
+    emailNodes().length,
+    expected.length,
+    "a new emailSend node was added without being covered by this test",
+  );
+});
+
+test("ADMIN_ALERT_EMAIL is plumbed into the n8n container and documented", () => {
+  assert.match(
+    readRepoFile("docker-compose.yml"),
+    /ADMIN_ALERT_EMAIL=\$\{ADMIN_ALERT_EMAIL:-/,
+    "dev compose must pass ADMIN_ALERT_EMAIL to n8n with a fallback",
+  );
+  assert.match(
+    readRepoFile("docker-compose.prod.yml"),
+    /ADMIN_ALERT_EMAIL:\s*\$\{ADMIN_ALERT_EMAIL:\?/,
+    "prod compose must require ADMIN_ALERT_EMAIL (:? form) so alerts cannot be misrouted",
+  );
+  // Must ship EMPTY: docker compose interpolates from .env, so any default here
+  // would satisfy the prod `:?` guard and re-route alerts to a placeholder.
+  assert.match(
+    readRepoFile(".env.example"),
+    /^ADMIN_ALERT_EMAIL=\s*$/m,
+    ".env.example must declare ADMIN_ALERT_EMAIL with no default value",
+  );
+  assert.match(
+    readRepoFile(path.join("automation", "n8n", "README.md")),
+    /ADMIN_ALERT_EMAIL/,
+    "n8n README env table must document ADMIN_ALERT_EMAIL",
+  );
 });
 
 if (failures > 0) {

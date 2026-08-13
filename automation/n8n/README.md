@@ -25,6 +25,7 @@ When importing workflows into your n8n instance, ensure the following environmen
 | `ML_API_KEY` | API Key for authenticating against the FastAPI ML Engine | `local_ml_secret` |
 | `ML_ENGINE_URL` | Base URL of the ML service container | `http://ml-engine:8000` |
 | `BACKEND_API_URL` | Base URL of the backend Express API, reachable from the n8n container on the internal Docker network | `http://api:5000` |
+| `ADMIN_ALERT_EMAIL` | Operator mailbox for the `dispute-resolution.json` alert nodes: escrow **freeze failed**, escrow **release failed**, and the 24h **arbitration escalation**. Must be a monitored address — these fire when disputed funds are stuck on-chain and need manual intervention. **Required in production**: `docker-compose.prod.yml` refuses to start n8n if it is unset | `admin@localhost` |
 | `ALCHEMY_WS_URL` | Full Polygon mempool WebSocket URL including the Alchemy API key (e.g. `wss://polygon-mainnet.g.alchemy.com/v2/<API_KEY>`), consumed by the sentinel workflow | Not set |
 | `N8N_ENCRYPTION_KEY` | Master encryption key for n8n credentials | Configured in `docker-compose.prod.yml` |
 

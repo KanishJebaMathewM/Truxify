@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
         "options": {}
@@ -230,7 +230,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escalation Alert: Arbitration Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=The dispute for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}} has remained unresolved for 24 hours. Please review the packaged GPS trail and OTP logs.",
         "options": {}
@@ -293,7 +293,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Release Escrow Payment Failed for Booking {{$json.body.bookingId}}",
         "textBody": "=CRITICAL: The Release Escrow Payment step failed after 3 retries for Booking {{$json.body.bookingId}}. Escrow payment was not released on-chain. Immediate manual intervention required.",
         "options": {}

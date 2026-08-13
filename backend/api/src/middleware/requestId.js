@@ -41,9 +41,7 @@ export function requestLogger(req, res, next) {
   req.log = reqLogger;
 
   res.on('finish', () => {
-    // Clamp so a premature finish event (or a clock that moved backwards)
-    // cannot produce a negative duration in logs and dashboards.
-    const durationMs = Math.max(0, Date.now() - start);
+    const durationMs = Date.now() - start;
     const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
     reqLogger[level]({
       requestId: req.requestId,

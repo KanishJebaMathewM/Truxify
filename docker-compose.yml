@@ -15,7 +15,10 @@ services:
     build:
       context: ./backend/api
       target: development
+<<<<<<< HEAD
+=======
     image: ghcr.io/kanishjebamathewm/truxify-api
+>>>>>>> upstream/main
     container_name: truxify-api
     env_file:
       - .env
@@ -85,7 +88,10 @@ services:
   ml-engine:
     build:
       context: ./backend/ml
+<<<<<<< HEAD
+=======
     image: ghcr.io/kanishjebamathewm/truxify-ml
+>>>>>>> upstream/main
     container_name: truxify-ml-engine
     env_file:
       - .env
@@ -255,7 +261,11 @@ services:
     ports:
       - "5678:5678"
     environment:
+<<<<<<< HEAD
+      - N8N_HOST=localhost
+=======
       - N8N_HOST=${N8N_HOST:-localhost}
+>>>>>>> upstream/main
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=development

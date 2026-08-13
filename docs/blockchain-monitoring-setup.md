@@ -177,7 +177,11 @@ const metrics = await supabase
 
 ### Manual Testing
 
+<<<<<<< HEAD
+1. Trigger a PaymentReceived event from contract
+=======
 1. Trigger a PaymentReleased event from contract
+>>>>>>> upstream/main
 2. Verify Slack notification appears
 3. Monitor escalation if alert not acknowledged
 
@@ -185,17 +189,29 @@ const metrics = await supabase
 
 ```javascript
 describe('BlockchainMonitor', () => {
+<<<<<<< HEAD
+  test('should detect PaymentReceived events', async () => {
+=======
   test('should detect PaymentReleased events', async () => {
+>>>>>>> upstream/main
     const monitor = new BlockchainMonitor({ /* deps */ });
     await monitor.initialize();
     await monitor.startListening();
     
     // Simulate event
     const alert = {
+<<<<<<< HEAD
+      type: 'PAYMENT_RECEIVED',
+      severity: 'MEDIUM',
+      driver: '0x...',
+      amount: '1000',
+      timestamp: Date.now(),
+=======
       type: 'PAYMENT_RELEASED',
       severity: 'MEDIUM',
       driver: '0x...',
       amount: '1000',
+>>>>>>> upstream/main
     };
     
     // Verify routing

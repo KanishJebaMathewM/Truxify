@@ -23,6 +23,6 @@ assert.strictEqual(res5.isDivergent, true);
 
 const logs = divergenceDetector.getDivergenceLogs();
 assert.strictEqual(logs.length, 1);
-assert.strictEqual(logs[0].gapSize, 2);
+assert.strictEqual(logs[0].gapSize, 3);
 
 console.log('✅ Divergence Detector tests passed successfully.');

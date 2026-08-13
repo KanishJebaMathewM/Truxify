@@ -4,7 +4,6 @@
  * to check carrier credentials and safety scores against the specific weigh station.
  */
 
-import logger from '../middleware/logger.js';
 const SIMULATED_NETWORK_DELAY_MS = 800;
 const STATION_ID_RANGE = 1000;
 

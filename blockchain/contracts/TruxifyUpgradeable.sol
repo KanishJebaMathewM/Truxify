@@ -121,7 +121,10 @@ contract TruxifyUpgradeable is
     event EscrowCreated(uint256 indexed escrowId, address customer, address driver, uint256 amount);
     event EscrowReleased(uint256 indexed escrowId, address driver, uint256 amount);
     event EscrowDisputed(uint256 indexed escrowId, address customer);
+<<<<<<< HEAD
+=======
     event EscrowResolved(uint256 indexed escrowId, address recipient, uint256 amount);
+>>>>>>> upstream/main
     event ProposalCreated(uint256 indexed proposalId, address proposer, address implementation);
     event VoteCast(uint256 indexed proposalId, address voter, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed proposalId, bool passed);
@@ -227,10 +230,13 @@ contract TruxifyUpgradeable is
         uint256 requestTimestamp = emergencyUpgradeRequests[newImplementation];
         if (requestTimestamp != 0) {
             require(
+<<<<<<< HEAD
+=======
                 approvedImplementations[newImplementation],
                 "Implementation not approved"
             );
             require(
+>>>>>>> upstream/main
                 block.timestamp >= requestTimestamp + EMERGENCY_UPGRADE_TIMELOCK,
                 "Emergency timelock not yet elapsed"
             );
@@ -308,6 +314,8 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
     emit EscrowDisputed(escrowId, msg.sender);
 }
 
+<<<<<<< HEAD
+=======
 /**
  * @dev Resolves a disputed escrow by releasing the funds to either the
  *      customer (refund) or the driver, as determined by the dispute
@@ -332,6 +340,7 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
     emit EscrowResolved(escrowId, recipient, escrow.amount);
 }
 
+>>>>>>> upstream/main
     // ============ DAO Governance ============
     function createProposal(
         address newImplementation,
@@ -490,10 +499,13 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
         require(
+<<<<<<< HEAD
+=======
             approvedImplementations[newImplementation],
             "Implementation not approved"
         );
         require(
+>>>>>>> upstream/main
             emergencyUpgradeRequests[newImplementation] == 0,
             "Emergency upgrade already requested for this implementation"
         );

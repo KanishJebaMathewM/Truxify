@@ -22,7 +22,17 @@ function setL1(key, data, expiresAt) {
 
 async function getCachedOrFetch(key, fetchFn) {
   const existing = inflight.get(key);
-  if (existing) return existing;
+  if (existing) {
+    existing.waiters += 1;
+    try {
+      return await existing.promise;
+    } finally {
+      existing.waiters -= 1;
+      if (existing.waiters === 0) {
+        inflight.delete(key);
+      }
+    }
+  }
 
   const fetchPromise = (async () => {
     const now = Date.now();
@@ -76,13 +86,18 @@ async function getCachedOrFetch(key, fetchFn) {
     return data;
   })();
 
-  // Atomic check-and-set: only first caller wins
-  const actual = inflight.get(key) || inflight.set(key, fetchPromise).get(key);
+  // Only the first caller creates the shared promise; keep the entry in the
+  // map until every waiter (including this one) is done awaiting it.
+  const entry = { promise: fetchPromise, waiters: 1 };
+  inflight.set(key, entry);
   setTimeout(() => inflight.delete(key), 30000);
   try {
-    return await actual;
+    return await entry.promise;
   } finally {
-    inflight.delete(key);
+    entry.waiters -= 1;
+    if (entry.waiters === 0) {
+      inflight.delete(key);
+    }
   }
 }
 

@@ -199,9 +199,18 @@ int trace_setuid(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_rename")
 int trace_file_rename(struct trace_event_raw_sys_enter *args)
 {
-    const char *oldpath = (const char *)args->args[0];
-    const char *newpath = (const char *)args->args[1];
-    
+    char oldpath[256];
+    char newpath[256];
+    // args->args[0] and args->args[1] are userspace pointers to the path
+    // names; they cannot be dereferenced from kernel context. Probe them into
+    // bounded stack buffers before any use.
+    if (bpf_probe_read_user_str(oldpath, sizeof(oldpath), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
+    if (bpf_probe_read_user_str(newpath, sizeof(newpath), (void *)(long)args->args[1]) < 0) {
+        return 0;
+    }
+
     bpf_printk("File renamed: %s -> %s\n", oldpath, newpath);
     
     return 0;

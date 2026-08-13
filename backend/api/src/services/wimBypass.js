@@ -23,7 +23,10 @@ export function evaluateBypassEligibility(truckData) {
         return false;
     }
 
-    if (typeof axleWeight !== 'number' || axleWeight > maxWeightLimit) {
+    if (typeof axleWeight !== 'number' || typeof maxWeightLimit !== 'number') {
+        return false;
+    }
+    if (axleWeight > maxWeightLimit) {
         return false;
     }
 

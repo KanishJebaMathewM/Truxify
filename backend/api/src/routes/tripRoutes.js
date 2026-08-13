@@ -534,7 +534,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
   try {
     const { data: order, error: orderErr } = await supabaseAdmin
       .from('orders')
-      .select('id, driver_id, customer_id')
+      .select('id, order_display_id, driver_id, customer_id')
       .eq('id', tripId)
       .maybeSingle();
 
@@ -555,10 +555,11 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       }
     }
 
+    const tripDisplayId = order.order_display_id;
     let eventsQuery = supabase
       .from('trip_events')
       .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at', { count: 'exact' })
-      .eq('trip_id', tripId);
+      .eq('trip_id', tripDisplayId);
 
     if (type && typeof type === 'string') {
       eventsQuery = eventsQuery.eq('event_type', type);

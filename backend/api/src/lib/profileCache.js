@@ -102,31 +102,19 @@ function getRedisClient() {
  * @param {string} firebaseUid - The expected Firebase UID.
  * @param {object|null} cachedProfile - The cached profile to validate.
  *   Must have: isActive (boolean), uid (string matching firebaseUid), id (string),
- *   role (string). Optional: fullName (string|null), phone (string|null), updatedAt (string|null).
+ *   role (string). Optional: fullName (string|null), phone (string|null).
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedProfile(firebaseUid, cachedProfile) {
-  if (typeof firebaseUid !== 'string' || !firebaseUid.trim()) {
+  if (typeof firebaseUid !== "string" || !firebaseUid.trim()) {
     return false;
   }
   if (
     !cachedProfile ||
-    typeof cachedProfile !== 'object' ||
+    typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
     return false;
-  }
-
-  // Reject objects with unexpected fields to enforce strict schema
-  const ALLOWED_FIELDS = new Set([
-    'isActive', 'uid', 'id', 'role',
-    'fullName', 'phone', 'updatedAt',
-  ]);
-  const profileKeys = Object.keys(cachedProfile);
-  for (const key of profileKeys) {
-    if (!ALLOWED_FIELDS.has(key)) {
-      return false;
-    }
   }
   if (typeof cachedProfile.isActive !== "boolean") {
     return false;
@@ -218,16 +206,8 @@ export async function getCachedProfile(firebaseUid) {
   try {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
-      const parsed = JSON.parse(raw);
-      // A corrupted payload that parses to a non-object (e.g. "42", "null",
-      // "some string") must not be treated as a valid cached profile.
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        cacheMisses++;
-        await redisClient.del(firebaseProfileKey(firebaseUid)).catch(() => {});
-        return null;
-      }
       cacheHits++;
-      return parsed;
+      return JSON.parse(raw);
     }
     cacheMisses++;
     return null;
@@ -258,11 +238,6 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
-  // Clamp the TTL the same way the Supabase setters do: a non-positive TTL
-  // would immediately expire the key, and an unbounded TTL could pin a
-  // stale (e.g. deactivated) profile in cache for a very long time.
-  if (!Number.isFinite(Number(ttlSeconds)) || ttlSeconds < 1) ttlSeconds = 1;
-  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       firebaseProfileKey(firebaseUid),
@@ -503,3 +478,16 @@ export async function invalidateCachedSupabaseProfileAll(userId) {
     logCacheError("invalidateCachedSupabaseProfileAll", err);
   }
 }
+
+
+// === Spec 8: ===
+// === Spec 8: profile cache schema validation ===
+export function isValidProfile(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return false;
+  if (typeof value.id !== 'string' || value.id.length === 0) return false;
+  if (typeof value.createdAt !== 'string') return false;
+  if (Number.isNaN(Date.parse(value.createdAt))) return false;
+  return true;
+}
+

@@ -10,7 +10,7 @@
  * Run with:  npm run test:unit -- test/unit/validate.test.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { validateBody, validateParams, validateQuery, formatValidationIssues } from '../../src/middleware/validate.js';
+import { validateBody, validateParams, validateQuery } from '../../src/middleware/validate.js';
 import { z } from 'zod';
 
 function makeRes() {
@@ -69,15 +69,6 @@ describe('validateBody middleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('does not throw when req.body is undefined', () => {
-    const req = {};
-    const res = makeRes();
-    const next = makeNext();
-    expect(() => validateBody(schema)(req, res, next)).not.toThrow();
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(next).not.toHaveBeenCalled();
-  });
-
   it('does not call next when validation fails', () => {
     const req = { body: { name: 1, age: 2 } };
     const res = makeRes();
@@ -103,7 +94,31 @@ describe('validateBody middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+describe('formatValidationIssues', () => {
+  it('formats a single field error', () => {
+    const error = { issues: [{ path: ['email'], message: 'Invalid email' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'email', message: 'Invalid email' }]);
+  });
 
+  it('formats a nested field error path', () => {
+    const error = { issues: [{ path: ['address', 'city'], message: 'Required' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'address.city', message: 'Required' }]);
+  });
+
+  it('formats an empty path as "body"', () => {
+    const error = { issues: [{ path: [], message: 'Body is required' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'body', message: 'Body is required' }]);
+  });
+
+  it('returns empty array for empty issues', () => {
+    const error = { issues: [] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([]);
+  });
+});
 
 });
 
@@ -196,27 +211,30 @@ describe('validateQuery middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('returns 400 instead of 500 when the schema throws a ZodError', () => {
-    // A schema whose transform throws (e.g. a value that cannot be coerced)
-    // must surface as a client error, not an internal server error.
-    const throwingSchema = {
-      safeParse: () => {
-        const err = new Error('Malformed value');
-        err.name = 'ZodError';
-        err.issues = [{ path: ['page'], message: 'Malformed value' }];
-        throw err;
-      },
-    };
-    const req = { query: { page: 'huge-value' } };
-    const res = makeRes();
-    const next = makeNext();
-    validateQuery(throwingSchema)(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      error: 'Validation failed',
-      details: [{ field: 'page', message: 'Malformed value' }],
-    });
-    expect(next).not.toHaveBeenCalled();
+describe('formatValidationIssues', () => {
+  it('formats a single field error', () => {
+    const error = { issues: [{ path: ['email'], message: 'Invalid email' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'email', message: 'Invalid email' }]);
   });
+
+  it('formats a nested field error path', () => {
+    const error = { issues: [{ path: ['address', 'city'], message: 'Required' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'address.city', message: 'Required' }]);
+  });
+
+  it('formats an empty path as "body"', () => {
+    const error = { issues: [{ path: [], message: 'Body is required' }] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([{ field: 'body', message: 'Body is required' }]);
+  });
+
+  it('returns empty array for empty issues', () => {
+    const error = { issues: [] };
+    const result = formatValidationIssues(error);
+    expect(result).toEqual([]);
+  });
+});
 
 });

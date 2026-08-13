@@ -33,7 +33,6 @@ export class CircuitBreaker {
       }
       this._halfOpenTimer = null;
     }, this.resetTimeoutMs);
-    this._halfOpenTimer.unref?.();
   }
 
   getState() {

@@ -4,16 +4,15 @@ import { uploadMaintenancePhotos } from '../controllers/maintenancePhotoControll
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { ALLOWED_DOCUMENT_MIME_TYPES } from '../lib/documentValidation.js';
 
 const router = express.Router();
 
-// Photos only — must match the controller's ALLOWED_PHOTO_MIME_TYPES exactly.
-// Rejecting on the declared type here avoids buffering 8MB of a file that is
-// guaranteed to be rejected (422) after upload.
-const ALLOWED_PHOTO_MIME_TYPES = Object.freeze([
-  'image/jpeg',
-  'image/png',
-]);
+// Photos only — the controller re-checks the actual bytes, but rejecting on
+// the declared type here avoids buffering 8MB of non-image content first.
+const ALLOWED_PHOTO_MIME_TYPES = ALLOWED_DOCUMENT_MIME_TYPES.filter(
+  (mime) => mime.startsWith('image/')
+);
 
 const upload = multer({
   storage: multer.memoryStorage(),

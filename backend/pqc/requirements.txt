@@ -1,4 +1,9 @@
+<<<<<<< HEAD
+cryptography>=42.0.0
+pycryptodome>=3.20.0
+=======
 numpy>=1.24.0
 scipy>=1.10.0
 fastapi>=0.110.0
 sympy>=1.12
+>>>>>>> upstream/main

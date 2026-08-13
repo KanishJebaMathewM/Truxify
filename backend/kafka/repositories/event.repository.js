@@ -1,18 +1,6 @@
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 
-/**
- * DEPRECATED — superseded by the unified outbox pipeline (Issue #1).
- *
- * This adapter reads/writes the legacy `events` table, which is no longer the
- * durable event log. The authoritative event log is `event_outbox`
- * (transactional outbox written by the `trg_orders_event_outbox` trigger),
- * relayed to Kafka by relay/outbox.relay.js and applied to
- * `orders_read_model` by cqrs/order.read.model.js.
- *
- * Kept in place for reference/back-compat; the active pipeline never writes
- * the `events` table.
- */
 class EventRepository {
   async saveEvent(event) {
     try {

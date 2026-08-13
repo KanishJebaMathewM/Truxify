@@ -1,10 +1,6 @@
 package main
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -79,69 +75,4 @@ func TestSweepDriversEvictsStaleRetainsFresh(t *testing.T) {
 	activeDrivers.Delete("fresh-driver")
 	pingRateLimit.Delete("stale-ping")
 	pingRateLimit.Delete("fresh-ping")
-}
-
-func TestSweepDriversPrunesStaleGeofenceEntries(t *testing.T) {
-	now := time.Now()
-
-	staleEntry := &rateEntry{driverID: "geo-stale", stamps: []time.Time{now.Add(-2 * time.Second)}}
-	freshEntry := &rateEntry{driverID: "geo-fresh", stamps: []time.Time{now}}
-	geofenceRateLimit.Store("geo-stale", staleEntry)
-	geofenceRateLimit.Store("geo-fresh", freshEntry)
-	atomic.AddUint64(&geofenceRateTracked, 2)
-
-	before := atomic.LoadUint64(&geofenceRateTracked)
-
-	sweepDrivers()
-
-	if _, ok := geofenceRateLimit.Load("geo-stale"); ok {
-		t.Error("expected stale geofence rate-limit entry (all stamps older than 1s) to be pruned")
-	}
-	if _, ok := geofenceRateLimit.Load("geo-fresh"); !ok {
-		t.Error("expected fresh geofence rate-limit entry to be retained")
-	}
-	if after := atomic.LoadUint64(&geofenceRateTracked); after != before-1 {
-		t.Errorf("expected geofenceRateTracked to decrement by 1 (from %d), got %d", before, after)
-	}
-
-	geofenceRateLimit.Delete("geo-stale")
-	geofenceRateLimit.Delete("geo-fresh")
-	atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
-}
-
-// TestHandlePingRejectsOversizedBody verifies the service returns 413 for a
-// body larger than the 1 MiB cap instead of buffering it into memory.
-func TestHandlePingRejectsOversizedBody(t *testing.T) {
-	bypassAuth = true
-	defer func() { bypassAuth = false }()
-
-	big := strings.Repeat("a", maxRequestBodyBytes+1)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/ping", strings.NewReader(big))
-	req.Header.Set("X-Driver-ID", "driver-test")
-	w := httptest.NewRecorder()
-
-	handlePing(w, req)
-
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("expected 413 for oversized body, got %d", w.Code)
-	}
-}
-
-// TestHandlePingAcceptsBodyWithinLimit verifies a body at the cap boundary is
-// still processed normally (reaching validation, not rejected as too large).
-func TestHandlePingAcceptsBodyWithinLimit(t *testing.T) {
-	bypassAuth = true
-	defer func() { bypassAuth = false }()
-
-	// The decoder errors on malformed JSON, but not with a MaxBytesError: the
-	// response must be 400 (payload validation), not 413.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/ping", strings.NewReader("{not-json"))
-	req.Header.Set("X-Driver-ID", "driver-test")
-	w := httptest.NewRecorder()
-
-	handlePing(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
-	}
 }

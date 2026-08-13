@@ -1,11 +1,12 @@
 import express from 'express';
 import chaosService from './chaos-service.js';
 import logger from '../../backend/api/src/middleware/logger.js';
+import { authenticate, requireRole } from '../../backend/api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Run chaos experiment
-router.post('/chaos/experiment', async (req, res) => {
+router.post('/chaos/experiment', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const { type, config } = req.body;
         if (!type) {
@@ -89,7 +90,7 @@ router.get('/chaos/stats', async (req, res) => {
 });
 
 // Schedule experiments
-router.post('/chaos/schedule', async (req, res) => {
+router.post('/chaos/schedule', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         await chaosService.scheduleExperiments();
         res.json({

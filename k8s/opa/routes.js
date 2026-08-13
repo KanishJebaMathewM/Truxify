@@ -1,6 +1,7 @@
 import express from 'express';
 import opaService from './policy.service.js';
 import logger from '../../backend/api/src/middleware/logger.js';
+import { authenticate, requireRole } from '../../backend/api/src/middleware/auth.js';
 
 const router = express.Router();
 
@@ -119,7 +120,7 @@ router.post('/opa/kubernetes', async (req, res) => {
 });
 
 // Deploy policy
-router.post('/opa/policy', async (req, res) => {
+router.post('/opa/policy', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const { policyName, policyContent } = req.body;
         if (!policyName || !policyContent) {
@@ -138,7 +139,7 @@ router.post('/opa/policy', async (req, res) => {
 });
 
 // Get policies
-router.get('/opa/policies', async (req, res) => {
+router.get('/opa/policies', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const policies = await opaService.getPolicies();
         res.json({ success: true, data: policies });

@@ -1,11 +1,12 @@
 import express from 'express';
 import vitessService from './vitess.service.js';
 import logger from '../../backend/api/src/middleware/logger.js';
+import { authenticate, requireRole } from '../../backend/api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Insert order
-router.post('/vitess/order', async (req, res) => {
+router.post('/vitess/order', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const result = await vitessService.insertOrder(req.body);
         res.json({ success: true, data: result });
@@ -56,7 +57,7 @@ router.put('/vitess/order/:orderId/status', async (req, res) => {
 });
 
 // Insert driver
-router.post('/vitess/driver', async (req, res) => {
+router.post('/vitess/driver', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const result = await vitessService.insertDriver(req.body);
         res.json({ success: true, data: result });
@@ -79,7 +80,7 @@ router.get('/vitess/driver/:driverId', async (req, res) => {
 });
 
 // Insert payment
-router.post('/vitess/payment', async (req, res) => {
+router.post('/vitess/payment', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const result = await vitessService.insertPayment(req.body);
         res.json({ success: true, data: result });

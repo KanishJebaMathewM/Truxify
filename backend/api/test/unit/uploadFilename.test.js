@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
+import { sanitizeUploadFilename, isValidUploadFilename } from '../../src/lib/uploadFilename.js';
 
-describe('sanitizeUploadFilename', () => {
-  it('returns original name when safe', () => {
-    expect(sanitizeUploadFilename('document.pdf', 'default')).toBe('document.pdf');
-  });
+describe('uploadFilename', () => {
+  describe('sanitizeUploadFilename', () => {
+    it('returns original name when safe', () => {
+      expect(sanitizeUploadFilename('document.pdf', 'default')).toBe('document.pdf');
+    });
+
 
   it('strips directory traversal sequences', () => {
     // Only the basename survives directory stripping; traversal segments are
@@ -61,3 +63,18 @@ describe('sanitizeUploadFilename', () => {
     expect(sanitizeUploadFilename('file...name.pdf', 'default')).toBe('file.name.pdf');
   });
 });
+
+  describe('isValidUploadFilename', () => {
+    it('returns true for safe filenames', () => {
+      expect(isValidUploadFilename('document.pdf')).toBe(true);
+      expect(isValidUploadFilename('driver_license_2026.png')).toBe(true);
+    });
+
+    it('returns false for unsafe or traversal filenames', () => {
+      expect(isValidUploadFilename('../../../etc/passwd')).toBe(false);
+      expect(isValidUploadFilename('CON.pdf')).toBe(false);
+      expect(isValidUploadFilename(null)).toBe(false);
+    });
+  });
+});
+

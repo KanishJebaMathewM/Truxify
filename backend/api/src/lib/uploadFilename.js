@@ -80,3 +80,12 @@ export function sanitizeUploadFilename(originalName, fallback = 'upload') {
 
   return name;
 }
+
+export function isValidUploadFilename(filename) {
+  if (typeof filename !== 'string' || filename.length === 0 || filename.length > MAX_FILENAME_LENGTH) {
+    return false;
+  }
+  const sanitized = sanitizeUploadFilename(filename, '__INVALID__');
+  return sanitized === filename && sanitized !== '__INVALID__';
+}
+

@@ -8,14 +8,11 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
 
-    // These must match the actual mount paths in index.js. Trips are mounted
-    // at /api/v1/trips (with authenticate + this middleware); the bare
-    // /api/trips mount has no auth/middleware, so matching it would be moot.
-    // See issue #10501.
     const criticalEndpoints = [
       '/api/orders',
       '/api/payments',
-      '/api/v1/trips'
+      '/api/escrow',
+      '/api/trips'
     ];
 
     const isCritical = criticalEndpoints.some(endpoint => req.originalUrl.startsWith(endpoint));
@@ -46,11 +43,10 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
       });
 
       if (risk && risk.riskScore > RISK_REVIEW_THRESHOLD) {
-        // Flag for review. The reason carries the request id so review
-        // entries can be traced back to a specific request in the logs.
+        // Flag for review
         await fraudDetection.addToReviewQueue(
           userId,
-          `Suspicious activity on ${req.path} (requestId: ${req.requestId || req.id || 'unknown'})`,
+          `Suspicious activity on ${req.path}`,
           risk.riskScore
         );
 
@@ -71,7 +67,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
 
     next();
   } catch (error) {
-    logger.error({ requestId: req.requestId, err: error }, 'Fraud middleware error — failing closed');
+    logger.error('Fraud middleware error — failing closed:', error);
     return res.status(503).json({
       error: 'Fraud detection service is temporarily unavailable. Please retry.',
     });

@@ -13,27 +13,14 @@ export default function securityHeaderDuplicates(req, res, next) {
     return next();
   }
 
-  const seen = new Map();
+  const seen = new Set();
   const originalSetHeader = res.setHeader.bind(res);
 
   res.setHeader = (name, value) => {
-    // A proxy layer (e.g. nginx) can pass an undefined header name; guard so
-    // the monitor never throws on a malformed assignment.
-    if (name === undefined || name === null) {
-      return originalSetHeader(name, value);
-    }
     const header = String(name).toLowerCase();
 
     if (MONITORED_HEADERS.has(header)) {
-      // A single assignment may carry an array of values (e.g. multiple
-      // Set-Cookie headers). Collapse the value to a signature so one
-      // array-valued assignment is treated as a single logical set, and
-      // idempotent re-sets of the same value are not flagged. Only a
-      // genuinely different value on the same header warns.
-      const signature = JSON.stringify(value);
-      const previous = seen.get(header);
-
-      if (previous !== undefined && previous !== signature) {
+      if (seen.has(header)) {
         logger.warn(
           {
             method: req.method,
@@ -44,7 +31,7 @@ export default function securityHeaderDuplicates(req, res, next) {
         );
       }
 
-      seen.set(header, signature);
+      seen.add(header);
     }
 
     return originalSetHeader(name, value);

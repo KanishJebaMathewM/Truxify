@@ -125,7 +125,7 @@ BEGIN
     reconciled_at = NOW()
   WHERE id = p_order_id
     AND escrow_status = 'refund_pending'
-    AND reconciled_by IS NULL
+    AND (reconciled_by IS NULL OR reconciled_at < NOW() - INTERVAL '10 minutes')
   RETURNING *;
 END;
 $$;
@@ -152,7 +152,62 @@ BEGIN
     reconciled_at = NOW()
   WHERE id = p_order_id
     AND escrow_status = 'release_failed'
-    AND reconciled_by IS NULL
+    AND (reconciled_by IS NULL OR reconciled_at < NOW() - INTERVAL '10 minutes')
   RETURNING *;
+END;
+$$;
+
+
+-- ─── RPC 4: release_reconciliation_lease — clear a stuck claim ───
+-- Called by the reaper (or a worker on failure) to free a row whose claiming
+-- instance died before completing the on-chain release/refund. Without this the
+-- next sweep would skip the row forever because its predicate requires
+-- reconciled_by IS NULL, stranding the payout/refund.
+CREATE OR REPLACE FUNCTION release_reconciliation_lease(p_order_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'Only the backend service can release leases';
+  END IF;
+
+  UPDATE orders SET reconciled_by = NULL, reconciled_at = NULL
+   WHERE id = p_order_id AND reconciled_by IS NOT NULL;
+END;
+$$;
+
+
+-- ─── RPC 5: reap_stale_reconciliation_leases — reaper for stranded claims ───
+-- Frees reconciliation leases whose claiming instance has held the row longer
+-- than the 10-minute lease window without completing the on-chain op. A held
+-- (reconciled_by non-NULL) row with escrow_status still pending/failed is a
+-- crashed worker: reset it so another instance can re-claim via the claim RPCs.
+CREATE OR REPLACE FUNCTION reap_stale_reconciliation_leases(p_lease_interval INTERVAL DEFAULT INTERVAL '10 minutes')
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_reaped integer;
+BEGIN
+  IF auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'Only the backend service can reap reconciliation leases';
+  END IF;
+
+  WITH stale AS (
+    SELECT id FROM orders
+     WHERE reconciled_by IS NOT NULL
+       AND reconciled_at < NOW() - p_lease_interval
+       AND escrow_status IN ('release_failed', 'refund_pending')
+  )
+  SELECT count(*) INTO v_reaped FROM stale;
+
+  PERFORM release_reconciliation_lease(id) FROM stale;
+
+  RETURN v_reaped;
 END;
 $$;

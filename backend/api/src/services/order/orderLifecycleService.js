@@ -464,12 +464,17 @@ export class OrderLifecycleService {
       }
 
       if (generatedOtp) {
-        await this.deliveryVerification.sendOtpNotification({
+        const notifResult = await this.deliveryVerification.sendOtpNotification({
           orderId,
           customerId: order.customer_id,
           orderDisplayId: order.order_display_id,
           otp: generatedOtp,
         });
+        if (notifResult && !notifResult.success) {
+          await this.orderTimelineService.rollbackMilestone(order.order_display_id, milestone);
+          await expireDeliveryOtps(order.id);
+          throw new DomainError(500, { error: 'Failed to send delivery OTP to customer. Milestone rolled back.' });
+        }
       }
 
       sendPushNotification(

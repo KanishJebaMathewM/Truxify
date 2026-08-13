@@ -281,6 +281,7 @@ export class DeliveryVerificationService {
             updated_at: new Date().toISOString(),
           });
         }
+        return notifResult;
       },
     );
   }

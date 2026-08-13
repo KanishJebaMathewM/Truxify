@@ -10,6 +10,12 @@ from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 
+# Fixed-point scale for SMPC averaging. Inputs are real numbers (fraud
+# scores, sensor values, ...); they are scaled by this factor, summed in the
+# field, and divided back out off-field so the "average" is the true
+# arithmetic mean rather than a field-inverse integer (issue #11668).
+FIXED_POINT_SCALE = 1_000_000
+
 class SecretSharing:
     """Shamir's Secret Sharing Scheme"""
     
@@ -238,29 +244,50 @@ class SMPCProtocol:
 <<<<<<< HEAD
     def secure_aggregate(self, data_list: List[Any], operation: str = 'sum') -> Any:
         try:
+            if operation not in ('sum', 'average', 'max'):
+                raise ValueError(f"Unknown operation: {operation}")
+
             data_ints = []
             for data in data_list:
-                data_bytes = json.dumps(data).encode()
-                data_int = int.from_bytes(data_bytes, 'big') % self.secret_sharing.prime
-                data_ints.append(data_int)
+                if operation == 'average':
+                    # Numeric fixed-point encoding: multiply by the scale so
+                    # the field sum can be divided back to a real-valued mean
+                    # (issue #11668).
+                    scaled = int(round(float(data) * FIXED_POINT_SCALE))
+                    data_ints.append(scaled % self.secret_sharing.prime)
+                else:
+                    data_bytes = json.dumps(data).encode()
+                    data_int = int.from_bytes(data_bytes, 'big') % self.secret_sharing.prime
+                    data_ints.append(data_int)
 
             parties = list(self.parties.keys())
 
             shares_list = []
             for data_int in data_ints:
-                shares = self.share_data(data_int, parties)
+                if operation == 'average':
+                    # Share the scaled integer directly (no JSON byte
+                    # re-encoding) so reconstruction returns the exact sum of
+                    # scaled values.
+                    shares = self._share_int(data_int, parties)
+                else:
+                    shares = self.share_data(data_int, parties)
                 shares_list.append(shares)
 
             if operation == 'sum':
                 result_shares = self._aggregate_sum(shares_list)
             elif operation == 'average':
                 result_shares = self._aggregate_average(shares_list)
-            elif operation == 'max':
-                result_shares = self._aggregate_max(shares_list)
             else:
-                raise ValueError(f"Unknown operation: {operation}")
+                result_shares = self._aggregate_max(shares_list)
 
             result = self.secret_sharing.reconstruct_secret(result_shares)
+
+            if operation == 'average':
+                # Decode the fixed-point mean off-field with real division so
+                # non-divisible sums yield the true average, not a modular
+                # inverse residue (issue #11668).
+                count = len(data_list)
+                return (result / FIXED_POINT_SCALE) / count
 
             result_bytes = result.to_bytes((result.bit_length() + 7) // 8, 'big')
             result_data = self._deserialize_result(result_bytes)
@@ -309,6 +336,30 @@ class SMPCProtocol:
             logger.error(f"Secure aggregation failed: {e}")
             raise
 
+    def _share_int(self, value_int: int, parties: List[str]) -> Dict[str, bytes]:
+        """Share a raw integer (already in the field) without re-encoding it.
+
+        Used by the fixed-point average path so reconstruction recovers the
+        exact scaled sum (issue #11668). Mirrors share_data's per-party
+        encryption/Redis layout so _aggregate_sum can consume the result.
+        """
+        shares = self.secret_sharing.generate_shares(
+            value_int % self.secret_sharing.prime,
+            len(parties),
+            self.threshold
+        )
+        shares_dict = {}
+        for i, party in enumerate(parties):
+            share_bytes = json.dumps(shares[i]).encode()
+            encrypted = self.cipher.encrypt(share_bytes)
+            shares_dict[party] = encrypted
+            self.redis.setex(
+                f"mpc:share:{self.session_id}:{party}",
+                3600,
+                encrypted
+            )
+        return shares_dict
+
     def _aggregate_sum(self, shares_list: List[Dict[str, bytes]]) -> List[Tuple[int, int]]:
         aggregated = {}
         for shares in shares_list:
@@ -326,13 +377,11 @@ class SMPCProtocol:
         return list(aggregated.values())
 
     def _aggregate_average(self, shares_list: List[Dict[str, bytes]]) -> List[Tuple[int, int]]:
-        sum_shares = self._aggregate_sum(shares_list)
-        count = len(shares_list)
-        result = []
-        for x, y in sum_shares:
-            avg = (y * pow(count, -1, self.secret_sharing.prime)) % self.secret_sharing.prime
-            result.append((x, avg))
-        return result
+        # The scaled fixed-point shares are summed in the field; the mean is
+        # decoded off-field in secure_aggregate. A modular-inverse division
+        # here would produce a meaningless large residue for non-divisible
+        # sums (issue #11668).
+        return self._aggregate_sum(shares_list)
 
     def _aggregate_max(self, shares_list: List[Dict[str, bytes]]) -> List[Tuple[int, int]]:
         max_share = shares_list[0]

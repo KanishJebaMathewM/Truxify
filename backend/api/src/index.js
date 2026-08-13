@@ -124,6 +124,7 @@ import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 // 🆕 ZK-PROOFS FOR DRIVER KYC
 // ============================================================================
 import zkpRoutes from './routes/zkp.routes.js'
+import crossDockRoutes from './routes/crossDockRoutes.js'
 
 
 // ============================================================================
@@ -484,6 +485,9 @@ app.use('/api', requestCacheMiddleware)
 // REST API ROUTING
 // ============================================================================
 app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
+// Cross-docking synchronization engine (#6181): handoff relay lifecycle for
+// long-haul loads. Sits behind authenticate + per-route policy checks.
+app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)

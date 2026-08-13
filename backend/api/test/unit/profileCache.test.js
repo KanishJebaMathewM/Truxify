@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getCacheStats,
   resetCacheStats,
-} from '../../lib/profileCache.js';
+} from '../../src/lib/profileCache.js';
 
 describe('profileCache stats', () => {
   beforeEach(() => {
@@ -40,11 +40,59 @@ describe('profileCache stats', () => {
 import { describe, it, expect } from 'vitest';
 import { isValidProfile } from '../../src/lib/profileCache.js';
 describe('isValidProfile', () => {
-  it('accepts valid', () => {
+  it('accepts valid profile with required fields', () => {
     expect(isValidProfile({ id: 'a', createdAt: '2026-01-01T00:00:00Z' })).toBe(true);
   });
-  it('rejects null', () => { expect(isValidProfile(null)).toBe(false); });
-  it('rejects missing id', () => { expect(isValidProfile({ createdAt: '2026-01-01T00:00:00Z' })).toBe(false); });
-  it('rejects bad date', () => { expect(isValidProfile({ id: 'a', createdAt: 'bad' })).toBe(false); });
+
+  it('accepts profile with additional optional fields', () => {
+    expect(isValidProfile({ id: 'user-123', createdAt: '2026-08-13T12:00:00Z', email: 'test@example.com' })).toBe(true);
+  });
+
+  it('rejects null', () => {
+    expect(isValidProfile(null)).toBe(false);
+  });
+
+  it('rejects undefined', () => {
+    expect(isValidProfile(undefined)).toBe(false);
+  });
+
+  it('rejects non-object types', () => {
+    expect(isValidProfile('string')).toBe(false);
+    expect(isValidProfile(123)).toBe(false);
+    expect(isValidProfile(true)).toBe(false);
+    expect(isValidProfile(() => {})).toBe(false);
+  });
+
+  it('rejects arrays', () => {
+    expect(isValidProfile([])).toBe(false);
+    expect(isValidProfile(['id', 'createdAt'])).toBe(false);
+  });
+
+  it('rejects when id is missing', () => {
+    expect(isValidProfile({ createdAt: '2026-01-01T00:00:00Z' })).toBe(false);
+  });
+
+  it('rejects when id is not a non-empty string', () => {
+    expect(isValidProfile({ id: '', createdAt: '2026-01-01T00:00:00Z' })).toBe(false);
+    expect(isValidProfile({ id: 123, createdAt: '2026-01-01T00:00:00Z' })).toBe(false);
+    expect(isValidProfile({ id: null, createdAt: '2026-01-01T00:00:00Z' })).toBe(false);
+  });
+
+  it('rejects when createdAt is missing', () => {
+    expect(isValidProfile({ id: 'user-123' })).toBe(false);
+  });
+
+  it('rejects when createdAt is not a valid ISO date string', () => {
+    expect(isValidProfile({ id: 'user-123', createdAt: 'bad' })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: '' })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: '2026-13-01T00:00:00Z' })).toBe(false);  // invalid month
+    expect(isValidProfile({ id: 'user-123', createdAt: null })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: undefined })).toBe(false);
+  });
+
+  it('accepts various valid ISO date strings', () => {
+    expect(isValidProfile({ id: 'u1', createdAt: '2026-01-01T00:00:00Z' })).toBe(true);
+    expect(isValidProfile({ id: 'u1', createdAt: '2026-08-13T23:59:59.999Z' })).toBe(true);
+  });
 });
 

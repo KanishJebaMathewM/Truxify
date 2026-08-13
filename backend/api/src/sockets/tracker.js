@@ -155,12 +155,12 @@ const consecutiveDropCount = new Map();
 // DRIVER STATE TTL & LAZY CLEANUP
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_THRESHOLD = 50;
-const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000;
+const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 300000; // default 5 min
 let lastDriverStateSweep = 0;
 
 function sweepStaleDriverState(now) {
-  if (consecutiveDropCount.size < DRIVER_STATE_SWEEP_THRESHOLD) return;
+  // Clean up stale driver state periodically regardless of Map size to
+  // prevent unbounded memory growth from drivers who stop sending telemetry.
   if (now - lastDriverStateSweep < DRIVER_STATE_SWEEP_INTERVAL_MS) return;
   lastDriverStateSweep = now;
   for (const [driverId, entry] of consecutiveDropCount) {
@@ -382,6 +382,17 @@ function enforceWsUpgradeMemoryLimit(ipAddress) {
     }
   }
   return entry.count <= WS_UPGRADE_RATE_LIMIT;
+}
+
+const WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS = 30000;
+
+// Periodically purge expired per-IP upgrade-limit entries so the in-memory
+// fallback map does not grow unbounded during a Redis outage.
+function sweepWsUpgradeMemoryLimits() {
+  const now = Date.now();
+  for (const [key, e] of wsUpgradeMemoryLimits) {
+    if (now >= e.resetAt) wsUpgradeMemoryLimits.delete(key);
+  }
 }
 
 export async function isWebSocketUpgradeAllowed(request) {
@@ -799,6 +810,12 @@ export function initWebSocketServer(server, orderRepository) {
     }
   });
 
+  // Periodically purge expired per-IP WebSocket upgrade-limit entries, so the
+  // in-memory fallback map does not leak during Redis outages.
+  wsUpgradeLimitsCleanupInterval = setInterval(() => {
+    sweepWsUpgradeMemoryLimits();
+  }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
+
   if (!isSchedulerActive) {
     initTelemetryScheduler();
   }
@@ -1004,7 +1021,8 @@ export async function handleLocationPing(ws, data, req) {
     return;
   }
 
-  // Fix 1: Always use server time for sequence comparison
+  // Fix 1: Server receive time, used as the monotonic order key fallback
+  // when the device does not supply a device_timestamp (issue #11671).
   const serverNow = Date.now();
 
   // Fix 4: IDEMPOTENCY GATE & OUT-OF-ORDER SEQUENCER + Circuit breaker
@@ -1012,33 +1030,45 @@ export async function handleLocationPing(ws, data, req) {
     try {
       const seqKey = `driver:sequence:${driver_id}`;
       const lastRecordedEpochStr = await redisClient.get(seqKey);
+      const lastRecordedEpoch = Number.parseInt(lastRecordedEpochStr, 10);
 
-      if (lastRecordedEpochStr) {
-        const lastRecordedEpoch = parseInt(lastRecordedEpochStr, 10);
+      // Strictly-increasing gate: compare with `<` (not `<=`) and use the
+      // device-supplied timestamp when available so two legitimate updates
+      // that share a server-side millisecond are never dropped as "out of
+      // order" (issue #11671). Genuinely stale updates whose order key has
+      // already advanced past the current receive time are still discarded.
+      const orderKey = deviceTime ? deviceTime.getTime() : serverNow;
+      if (!Number.isNaN(lastRecordedEpoch) && orderKey < lastRecordedEpoch) {
+        logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
 
-        if (serverNow <= lastRecordedEpoch) {
-          logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
-
-          // Circuit breaker: if too many consecutive drops, reset the sequence
-          const prevEntry = consecutiveDropCount.get(driver_id);
-          const currentCount = (prevEntry ? prevEntry.count : 0) + 1;
-          consecutiveDropCount.set(driver_id, { count: currentCount, lastUpdated: serverNow });
-          sweepStaleDriverState(serverNow);
-          if (currentCount >= MAX_CONSECUTIVE_DROPS) {
-            logger.warn(
-              `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
-              `(${MAX_CONSECUTIVE_DROPS}). Resetting sequence.`
-            );
-            await redisClient.del(seqKey);
-            consecutiveDropCount.delete(driver_id);
-          }
-          return;
+        // Circuit breaker: if too many consecutive drops, reset the sequence
+        const prevEntry = consecutiveDropCount.get(driver_id);
+        const currentCount = (prevEntry ? prevEntry.count : 0) + 1;
+        consecutiveDropCount.set(driver_id, { count: currentCount, lastUpdated: serverNow });
+        sweepStaleDriverState(serverNow);
+        if (currentCount >= MAX_CONSECUTIVE_DROPS) {
+          logger.warn(
+            `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
+            `(${MAX_CONSECUTIVE_DROPS}). Resetting sequence.`
+          );
+          await redisClient.del(seqKey);
+          consecutiveDropCount.delete(driver_id);
         }
+        return;
       }
 
       // Reset circuit breaker on successful sequence advancement
       consecutiveDropCount.delete(driver_id);
-      await redisClient.set(seqKey, serverNow.toString(), 'EX', 86400);
+
+      // Advance a strictly-increasing monotonic counter: when the update
+      // shares a timestamp with the previous accepted one, bump the stored
+      // sequence by 1 instead of rewriting the same value so the gate keeps
+      // moving forward.
+      const nextSequence =
+        Number.isNaN(lastRecordedEpoch) || orderKey > lastRecordedEpoch
+          ? orderKey
+          : lastRecordedEpoch + 1;
+      await redisClient.set(seqKey, nextSequence.toString(), 'EX', 86400);
     } catch (err) {
       logger.error('Redis sequence verification cache error:', err.message);
     }
@@ -1443,6 +1473,11 @@ export async function closeWebSocketServer() {
   if (wsHeartbeatInterval) {
     clearInterval(wsHeartbeatInterval);
     wsHeartbeatInterval = null;
+  }
+
+  if (wsUpgradeLimitsCleanupInterval) {
+    clearInterval(wsUpgradeLimitsCleanupInterval);
+    wsUpgradeLimitsCleanupInterval = null;
   }
 
   // Wait for MongoDB to be available before final flush

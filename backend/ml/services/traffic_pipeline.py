@@ -23,9 +23,25 @@ import redis
 import os
 import logging
 from functools import partial
+from collections import deque, defaultdict
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
+
+
+def eta_seconds_from_speed(route_distance_m: float, predicted_speed_mps: float) -> Optional[float]:
+    """Convert a predicted traffic speed (m/s) into a travel time (seconds).
+
+    The LSTM is trained on traffic_speed (m/s) (see train_model), so its raw
+    output is a speed, not a duration. eta_seconds = distance_m / speed_mps.
+    Returns None when either input is missing or non-positive so callers can
+    fall back to the routing engine's own duration estimate.
+    """
+    if not route_distance_m or route_distance_m <= 0:
+        return None
+    if not predicted_speed_mps or predicted_speed_mps <= 0:
+        return None
+    return route_distance_m / predicted_speed_mps
 
 class TrafficData(Base):
     __tablename__ = 'traffic_data'
@@ -53,6 +69,10 @@ class TrafficPipeline:
         self.gmaps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
         self.osrm_url = os.getenv('OSRM_URL', 'http://localhost:5000')
         self._closed = False
+        # Rolling per-route history of recent feature rows, fed to predict_eta
+        # as a genuine 60-step sequence instead of a tiled constant row
+        # (issue #11666).
+        self._route_windows = defaultdict(lambda: deque(maxlen=60))
 
     def close(self):
         """Dispose DB connection pool and close Redis connection.
@@ -221,17 +241,33 @@ class TrafficPipeline:
             return json.loads(cached)
         return None
     
-    def predict_eta(self, route_data: np.ndarray) -> float:
-        """Predict ETA using LSTM model"""
+    def predict_eta(self, route_data: np.ndarray, route_id: Optional[str] = None) -> float:
+        """Predict ETA using LSTM model.
+
+        Feeds a genuine rolling window of the last 60 observations for the
+        route (padded at the front by repeating the earliest observation during
+        warm-up) instead of tiling a single row into a constant sequence, which
+        was out of distribution for the model trained on diverse consecutive
+        speeds (issue #11666).
+        """
         try:
-            # Model expects (batch, 60, 5) — trained on 60-step sequences.
-            # Repeat a single feature row to fill the 60-timestep window.
             if route_data.ndim == 1:
                 route_data = route_data.reshape(1, -1)
-            if route_data.shape[1] == 5:
-                route_data = np.tile(route_data, (1, 60, 1))
+            if route_data.shape[1] != 5:
+                logger.error(f"Prediction failed: expected 5 features, got {route_data.shape[1]}")
+                return None
 
-            prediction = self.model.predict(route_data, verbose=0)
+            window = self._route_windows[route_id or ""]
+            window.append(route_data[0])
+
+            seq = list(window)
+            if len(seq) < 60:
+                # Cold start: pad the front with the earliest observation so
+                # the model still receives a 60-step input.
+                seq = [seq[0]] * (60 - len(seq)) + seq
+
+            model_input = np.array(seq).reshape(1, 60, 5)
+            prediction = self.model.predict(model_input, verbose=0)
             return float(prediction[0][0])
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -251,6 +287,7 @@ class TrafficPipeline:
         
         # Prepare features
         df = pd.DataFrame([{
+            'route_id': d.route_id,
             'traffic_speed': d.traffic_speed,
             'free_flow_speed': d.free_flow_speed,
             'congestion_level': d.congestion_level,
@@ -259,9 +296,26 @@ class TrafficPipeline:
             'timestamp': d.timestamp
         } for d in data])
         
-        # Create sequences
+        # Build sequences per route in timestamp order so sliding 60-step
+        # windows never span a route boundary or an arbitrary row order; a
+        # window concatenated across corridors taught the LSTM spurious
+        # transitions and meaningless targets (issue #11666).
         features = ['traffic_speed', 'free_flow_speed', 'congestion_level', 'hour', 'day_of_week']
-        X, y = self._create_sequences(df[features], 'traffic_speed')
+        df = df.sort_values(['route_id', 'timestamp'])
+        X_parts, y_parts = [], []
+        for _, group in df.groupby('route_id', sort=False):
+            if len(group) < 61:
+                continue
+            X_route, y_route = self._create_sequences(group[features], 'traffic_speed')
+            X_parts.append(X_route)
+            y_parts.append(y_route)
+
+        if not X_parts:
+            logger.warning("Not enough per-route data for training")
+            return
+
+        X = np.concatenate(X_parts, axis=0)
+        y = np.concatenate(y_parts, axis=0)
         
         # Train
         self.model.fit(
@@ -305,19 +359,25 @@ class TrafficPipeline:
                     datetime.now().weekday()
                 ]])
                 
-                # Predict traffic speed (km/h) with the LSTM.
-                predicted_speed_kmh = self.predict_eta(features)
+                # The LSTM predicts traffic speed in m/s (it is trained on
+                # traffic_speed, see _fetch_osrm_data and train_model), so its
+                # output is a speed, not a duration. Convert the predicted
+                # speed into an ETA in seconds using the route distance so the
+                # value is meaningful as a travel time. The rolling window is
+                # keyed by the order's route id (issue #11666).
+                predicted_speed_mps = self.predict_eta(
+                    features,
+                    f"order_{order_id}"
+                )
 
-                if predicted_speed_kmh is not None:
-                    # The model predicts speed, not duration. Convert the
-                    # predicted speed into an ETA in seconds using the route
-                    # distance so the value is meaningful as a travel time.
+                if predicted_speed_mps is not None:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)
                     route_distance_m = float(osrm_data.get('distance') or 0)
-                    if route_distance_m > 0 and predicted_speed_kmh > 0:
-                        # Convert speed from km/h to m/s, then divide distance_m by speed_mps to get seconds.
-                        # Incorrect: (route_distance_m / 1000.0) / (speed_kmh / 3.6) mixes km with m/s, off by 1000x.
-                        eta_seconds = route_distance_m / (predicted_speed_kmh / 3.6)
+                    if route_distance_m > 0 and predicted_speed_mps > 0:
+                        # Distance (m) / speed (m/s) yields seconds. The speed
+                        # is already m/s — do NOT divide by 3.6 as if it were
+                        # km/h, that inflated the ETA by 3.6x.
+                        eta_seconds = route_distance_m / predicted_speed_mps
                     else:
                         # Fall back to the routing engine's duration estimate.
                         eta_seconds = float(osrm_data.get('duration') or 0)

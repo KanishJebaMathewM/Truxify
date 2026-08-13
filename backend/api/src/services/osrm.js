@@ -291,6 +291,9 @@ export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
 export async function routeWithFailover(primary, _fb, coords) {
   try { return await primary(coords); }
   catch (err) {
+    if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
+      return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
+    }
     const [a, b] = coords[0];
     return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
   }

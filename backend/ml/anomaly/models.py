@@ -108,18 +108,36 @@ class LSTMAutoencoder:
         }
     
     def get_anomaly_score(self, sequence):
-        """Get anomaly score for a single sequence"""
+        """Get anomaly score for a sequence.
+
+        Expects a genuine (sequence_length, input_dim) window. Tiling a single
+        feature vector into a constant 60-step sequence fed the model
+        out-of-distribution inputs for a model trained on diverse multi-step
+        sequences (issue #11669); callers must supply the real rolling window
+        instead, so single-step inputs are rejected rather than silently
+        tiled.
+        """
         if self.model is None:
             raise ValueError("Model not trained yet")
-        
-        sequence = np.array(sequence)
-        if sequence.size == self.input_dim:
-            sequence = np.tile(sequence.reshape(1, self.input_dim), (self.sequence_length, 1))
-        sequence = sequence.reshape(1, self.sequence_length, self.input_dim)
+
+        sequence = np.array(sequence, dtype=np.float32)
+        if sequence.ndim == 1:
+            sequence = sequence.reshape(1, -1)
+        if sequence.shape[1] != self.input_dim:
+            raise ValueError(
+                f"Expected {self.input_dim} features per timestep, got {sequence.shape[1]}"
+            )
+        if sequence.shape[0] < self.sequence_length:
+            raise ValueError(
+                f"Expected at least {self.sequence_length} timesteps, got {sequence.shape[0]}. "
+                "Feed a genuine rolling window (issue #11669)."
+            )
+
+        sequence = sequence[:self.sequence_length].reshape(1, self.sequence_length, self.input_dim)
         reconstruction = self.model.predict(sequence, verbose=0)
         error = np.mean(np.square(reconstruction - sequence))
         score = error / self.threshold if self.threshold else error
-        
+
         return {
             'reconstruction_error': float(error),
             'anomaly_score': float(score),

@@ -9,6 +9,7 @@
 #include <bpf/bpf_helpers.h>
 
 struct bucket_state {
+    struct bpf_spin_lock lock;
     __u64 consumed;
     __u64 last_time;
 };
@@ -33,27 +34,31 @@ int tc_bandwidth_shaper(struct __sk_buff *skb) {
     
     struct bucket_state *state = bpf_map_lookup_elem(&bandwidth_bucket_map, &client_ip);
     if (state) {
+        bpf_spin_lock(&state->lock);
         __u64 elapsed = now - state->last_time;
         // Refill tokens based on elapsed time: 1 MB/sec means 1 byte per 1000 ns
         __u64 decay = elapsed / 1000;
         
         __u64 consumed = state->consumed;
+        __u64 new_last_time = state->last_time;
         if (decay > consumed) {
             consumed = 0; // per-window reset
+            new_last_time = now;
         } else {
             consumed -= decay;
+            new_last_time += decay * 1000;
         }
 
         if (consumed + skb->len > limit) {
+            bpf_spin_unlock(&state->lock);
             return TC_ACT_SHOT; // Drop packet exceeding bandwidth limit
         }
         
-        struct bucket_state next_state;
-        next_state.consumed = consumed + skb->len;
-        next_state.last_time = now;
-        bpf_map_update_elem(&bandwidth_bucket_map, &client_ip, &next_state, BPF_EXIST);
+        state->consumed = consumed + skb->len;
+        state->last_time = new_last_time;
+        bpf_spin_unlock(&state->lock);
     } else {
-        struct bucket_state start_state;
+        struct bucket_state start_state = {};
         start_state.consumed = skb->len;
         start_state.last_time = now;
         if (start_state.consumed > limit) {

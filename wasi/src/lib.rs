@@ -252,6 +252,15 @@ mod tests {
         assert!(is_url_allowed("https://attacker.io@api.truxify.com/x").is_err());
         assert!(is_url_allowed("https://user:pass@127.0.0.1/x").is_err());
     }
+
+    #[test]
+    fn env_allowlist_blocks_secrets() {
+        assert!(is_env_allowed("TRUXIFY_SANDBOX_MODE"));
+        assert!(is_env_allowed("TRUXIFY_REGION"));
+        assert!(!is_env_allowed("JWT_SECRET"));
+        assert!(!is_env_allowed("DATABASE_URL"));
+        assert!(!is_env_allowed("PRIVATE_KEY"));
+    }
 }
 
 // ============ Network System Calls ============
@@ -336,13 +345,26 @@ fn is_url_allowed(url: &str) -> Result<(), String> {
 
 // ============ Process System Calls ============
 
+// Capability-based security for host environment access. Untrusted WASM guests
+// must only ever read from a curated allowlist, never the host `std::env`, so
+// secret-bearing variables (JWT_SECRET, DATABASE_URL, PRIVATE_KEY, ...) are
+// never reachable from a guest module.
+fn is_env_allowed(name: &str) -> bool {
+    matches!(name, "TRUXIFY_SANDBOX_MODE" | "TRUXIFY_REGION")
+}
+
 #[wasm_bindgen]
 pub fn wasi_get_process_id() -> u32 {
-    std::process::id()
+    // Do not leak the host process id to the guest sandbox. Return a synthetic,
+    // constant sandboxed id instead.
+    0
 }
 
 #[wasm_bindgen]
 pub fn wasi_get_env_var(name: &str) -> Result<String, String> {
+    if !is_env_allowed(name) {
+        return Err("Access denied: environment variable not permitted".to_string());
+    }
     match std::env::var(name) {
         Ok(value) => Ok(value),
         Err(_) => Err("Environment variable not found".to_string()),
@@ -351,10 +373,9 @@ pub fn wasi_get_env_var(name: &str) -> Result<String, String> {
 
 #[wasm_bindgen]
 pub fn wasi_get_current_dir() -> Result<String, String> {
-    match std::env::current_dir() {
-        Ok(path) => Ok(path.to_string_lossy().to_string()),
-        Err(e) => Err(format!("Failed to get current directory: {}", e)),
-    }
+    // Do not expose the host's real working directory (which may reveal
+    // filesystem layout / secrets paths) to the guest sandbox.
+    Ok("/sandbox".to_string())
 }
 
 // ============ Memory System Calls ============

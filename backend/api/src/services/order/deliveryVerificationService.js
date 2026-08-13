@@ -701,7 +701,7 @@ export class DeliveryVerificationService {
 
         // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
         let verifiedOrder;
-        let tripData = null;
+        let tripData;
 
         if (!isRetryForStuckEscrow) {
           const guardResult = await this._writeRepository.updateOrderGuardStatus(

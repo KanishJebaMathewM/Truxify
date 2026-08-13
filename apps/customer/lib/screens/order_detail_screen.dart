@@ -47,8 +47,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   String _formatEta(double etaMinutes) {
     if (etaMinutes <= 0) return '0 mins';
-    final hrs = etaMinutes ~/ 60;
-    final mins = (etaMinutes % 60).round();
+    // Round the total first, then split, so the minutes component can never
+    // reach 60 (e.g. 119.9 -> 2 hrs, not "1 hrs 60 mins").
+    final totalMinutes = etaMinutes.round();
+    final hrs = totalMinutes ~/ 60;
+    final mins = totalMinutes % 60;
     if (hrs > 0) {
       if (mins > 0) {
         return '$hrs hrs $mins mins';

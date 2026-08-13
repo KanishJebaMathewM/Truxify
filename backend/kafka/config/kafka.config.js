@@ -131,6 +131,15 @@ class KafkaConfig {
     return this.consumers.get(groupId);
   }
 
+  /**
+   * Publishes a single event envelope to Kafka.
+   *
+   * The message key MUST be the aggregate/order id, never the event id:
+   * consumers use the key to correlate messages with an order, and the event
+   * id is the idempotency key. Using event.eventId as the key here is the
+   * exact bug this pipeline fixes (an event uuid was being mistaken for the
+   * order id).
+   */
   async publishEvent(topic, event, key = null) {
     try {
       const producer = await this.getProducer();
@@ -138,15 +147,17 @@ class KafkaConfig {
       const traceHeaders = {};
       propagation.inject(context.active(), traceHeaders);
 
+      const messageKey = key || event.aggregateId || event.orderId || event.order_id || null;
+
       const message = {
         topic,
         messages: [
           {
-            key: key || event.eventId || event.orderId,
+            key: messageKey,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version ?? '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -155,7 +166,7 @@ class KafkaConfig {
       };
       
       await producer.send(message);
-      logger.info(`📤 Event published: ${topic}`, { eventId: event.eventId });
+      logger.info(`📤 Event published: ${topic}`, { eventId: event.eventId, key: messageKey });
       return message;
     } catch (error) {
       logger.error(`❌ Failed to publish event to ${topic}:`, error);
@@ -174,11 +185,12 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId,
+            key: key || event.aggregateId || event.orderId || event.order_id || null,
+            key: key || event.eventId || event.orderId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),
-              version: '1.0',
+              version: event.version ?? '1.0',
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -209,7 +221,7 @@ class KafkaConfig {
           }
           const parentContext = propagation.extract(context.active(), normalizedHeaders);
 
-          logger.debug(`📥 Message received: ${topic}`, { key: message.key.toString() });
+          logger.debug(`📥 Message received: ${topic}`, { key: message.key ? message.key.toString() : null });
 
           await context.with(parentContext, async () => {
             await messageHandler(topic, value, message);

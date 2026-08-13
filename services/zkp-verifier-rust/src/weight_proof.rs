@@ -7,6 +7,7 @@ pub struct WeightProofInput {
     pub axle_weight_kg: u64,
     pub max_legal_limit_kg: u64,
     pub nonce: String,
+    pub vehicle_id: String,
 }
 
 /// A weight claim signed by the weighing device. There is intentionally NO
@@ -20,17 +21,20 @@ pub struct WeightProofOutput {
     pub nonce: String,
     pub timestamp: u64,
     pub signature_hex: String,
+    pub vehicle_id: String,
 }
 
-/// Canonically encodes the claim (weight, device limit, nonce, timestamp) so
-/// the signed commitment is unambiguous and the verifier can re-derive exactly
-/// the bytes that were signed. Length-prefixing the nonce prevents collisions
-/// between different field combinations.
+/// Canonically encodes the claim (weight, device limit, nonce, timestamp,
+/// vehicle/order binding) so the signed commitment is unambiguous and the
+/// verifier can re-derive exactly the bytes that were signed.
+/// Length-prefixing the nonce and vehicle_id prevents collisions between
+/// different field combinations.
 pub fn canonical_payload(
     axle_weight_kg: u64,
     max_legal_limit_kg: u64,
     nonce: &str,
     timestamp: u64,
+    vehicle_id: &str,
 ) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(b"truxify.zkp.weight.v1");
@@ -39,6 +43,8 @@ pub fn canonical_payload(
     out.extend_from_slice(&timestamp.to_be_bytes());
     out.extend_from_slice(&(nonce.len() as u64).to_be_bytes());
     out.extend_from_slice(nonce.as_bytes());
+    out.extend_from_slice(&(vehicle_id.len() as u64).to_be_bytes());
+    out.extend_from_slice(vehicle_id.as_bytes());
     out
 }
 
@@ -68,6 +74,7 @@ impl WeightProofGenerator {
             input.max_legal_limit_kg,
             &input.nonce,
             timestamp,
+            &input.vehicle_id,
         );
         let signature = signing_key.sign(&payload);
 
@@ -77,6 +84,7 @@ impl WeightProofGenerator {
             nonce: input.nonce.clone(),
             timestamp,
             signature_hex: hex::encode(signature.to_bytes()),
+            vehicle_id: input.vehicle_id.clone(),
         }
     }
 }

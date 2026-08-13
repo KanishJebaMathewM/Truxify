@@ -1,13 +1,27 @@
 import kafka, { TOPICS, CONSUMER_GROUPS } from '../config/kafka.config.js';
 import processedEventRepository from '../repositories/processedEvent.repository.js';
 import deadLetterRepository from '../repositories/deadLetter.repository.js';
+import orderReadModel from '../cqrs/order.read.model.js';
 import logger from '../../api/src/middleware/logger.js';
+
+// Topics whose only side effect is the order read-model projection. These are
+// applied ATOMICALLY with their idempotency record (apply_order_event), so a
+// duplicate/replayed message is a no-op and an event is never marked processed
+// before its read-model update succeeds.
+const ORDER_READ_MODEL_TOPICS = new Set([
+  TOPICS.ORDER_CREATED,
+  TOPICS.ORDER_UPDATED,
+  TOPICS.ORDER_CANCELLED,
+  TOPICS.DRIVER_ASSIGNED,
+]);
+const MAX_REPLAY_ATTEMPTS = 3;
 
 class OrderConsumer {
   constructor({ eventBus: externalEventBus } = {}) {
     this.handlers = new Map();
     this.initialized = false;
     this._eventBus = externalEventBus || null;
+    this.createdConsumerGroups = [];
   }
 
   setEventBus(eventBus) {
@@ -55,6 +69,13 @@ class OrderConsumer {
       TOPICS.FRAUD_DETECTED,
     ]);
 
+    this.createdConsumerGroups = [
+      CONSUMER_GROUPS.ORDER_SERVICE,
+      CONSUMER_GROUPS.NOTIFICATION_SERVICE,
+      CONSUMER_GROUPS.ANALYTICS_SERVICE,
+      CONSUMER_GROUPS.FRAUD_SERVICE,
+    ];
+
     this.initialized = true;
     logger.info('✅ Kafka consumers initialized');
   }
@@ -81,20 +102,42 @@ class OrderConsumer {
     const handlers = this.handlers;
 
     const messageHandler = async (topic, message, rawMessage) => {
-      // Idempotency claim: only the first delivery of an event may apply side
-      // effects. Kafka redelivers messages on restarts/rebalances, so without
-      // this guard PAYMENT_CONFIRMED / TRIP_COMPLETED / ESCROW_RELEASED would
-      // be processed (and credit wallets) more than once.
-      const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
-      if (eventId) {
-        const isNew = await processedEventRepository.claimProcessed(
+      // Order read-model topics: apply the event atomically with its
+      // idempotency record. If the event was already applied (duplicate,
+      // redelivery after a restart, replay, or a publish retried after a
+      // crash), applyEvent returns false and we skip all side effects.
+      if (ORDER_READ_MODEL_TOPICS.has(topic)) {
+        const eventId = message?.eventId || message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        const orderId = message?.aggregateId || message?.orderId || message?.payload?.orderId || rawMessage?.key?.toString() || null;
+
+        const applied = await orderReadModel.applyEvent({
           topic,
           eventId,
-          message?.orderId || message?.payload?.orderId || null
-        );
-        if (!isNew) {
-          logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`);
+          orderId,
+          eventType: message?.eventType,
+          payload: message?.payload,
+          version: message?.version,
+        });
+
+        if (!applied) {
+          logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`, { orderId });
           return;
+        }
+      } else {
+        // Side-effect topics (wallet credits, notifications, ...): claim the
+        // event as processed BEFORE running handlers so a redelivery can never
+        // apply the same side effect twice.
+        const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        if (eventId) {
+          const isNew = await processedEventRepository.claimProcessed(
+            topic,
+            eventId,
+            message?.orderId || message?.payload?.orderId || null
+          );
+          if (!isNew) {
+            logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`);
+            return;
+          }
         }
       }
 
@@ -188,7 +231,12 @@ class OrderConsumer {
         parsedMessage = JSON.parse(serialized);
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
         continue;
       }
@@ -201,7 +249,16 @@ class OrderConsumer {
         results.succeeded += 1;
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}):`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        // Cap replay attempts so a poison message is not retried forever.
+        // After the cap the dead letter is marked failed and no longer
+        // picked up by listPending(), otherwise each replay cycles the same
+        // failing entry back into the pending queue indefinitely.
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
       }
     }
@@ -213,7 +270,10 @@ class OrderConsumer {
   async startAllConsumers() {
     await this.initialize();
 
-    const consumerGroups = Object.values(CONSUMER_GROUPS);
+    // Only start consumer groups that were actually created in initialize().
+    // CONSUMER_GROUPS also declares DRIVER/PAYMENT/ESCROW groups that are not
+    // wired up yet, and startConsuming() would fail on getConsumer() for them.
+    const consumerGroups = this.createdConsumerGroups;
     for (const groupId of consumerGroups) {
       try {
         await this.startConsuming(groupId);

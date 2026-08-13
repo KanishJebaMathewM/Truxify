@@ -32,12 +32,28 @@
     },
     {
       "parameters": {
-        "jsCode": "const gasHex = items[0].json.result;\nconst gasGwei = parseInt(gasHex, 16) / 1e9;\nconst timestamp = Date.now();\nconst idempotencyKey = `gas_sync_${Math.floor(timestamp / 300000)}`;\n\nreturn [{ json: { gasGwei, idempotencyKey, timestamp } }];"
+        "jsCode": "const raw = items[0]?.json?.result;\nconst timestamp = Date.now();\nconst idempotencyKey = `gas_sync_${Math.floor(timestamp / 300000)}`;\n\nif (typeof raw !== 'string' || !/^0x[0-9a-fA-F]+$/.test(raw)) {\n  return [{ json: { error: 'invalid_gas_result', raw, idempotencyKey, timestamp, valid: false } }];\n}\n\nconst gasGwei = parseInt(raw, 16) / 1e9;\nif (!isFinite(gasGwei)) {\n  return [{ json: { error: 'non_finite_gas_result', raw, idempotencyKey, timestamp, valid: false } }];\n}\n\nreturn [{ json: { gasGwei, idempotencyKey, timestamp, valid: true } }];"
       },
       "name": "Compute Idempotency & Format",
       "type": "n8n-nodes-base.code",
       "typeVersion": 1,
       "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Gas Result Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
     },
     {
       "parameters": {
@@ -52,13 +68,20 @@
       "name": "Sync Gas Price",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [850, 300],
+      "position": [1150, 300],
       "credentials": {
         "httpHeaderAuth": {
           "name": "Truxify Internal API Key",
           "id": ""
         }
       }
+    },
+    {
+      "parameters": {},
+      "name": "Alert: Invalid Gas Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1150, 120]
     }
   ],
   "connections": {
@@ -88,7 +111,25 @@
       "main": [
         [
           {
+            "node": "Gas Result Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gas Result Valid?": {
+      "main": [
+        [
+          {
             "node": "Sync Gas Price",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Invalid Gas Result",
             "type": "main",
             "index": 0
           }

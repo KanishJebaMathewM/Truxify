@@ -263,10 +263,6 @@ class OrderReadModel {
   async getAllOrdersReadModel(filters = {}) {
     try {
       let query = supabase
-        .from('orders_read_model')
-        .select('*');
-
-      // Payload is the full order row snapshot, so filters target payload keys.
         .from(ORDER_READ_MODEL_TABLE)
         .select('*');
 
@@ -279,10 +275,6 @@ class OrderReadModel {
       }
       if (filters.driverId) {
         query = query.eq('payload->>driver_id', filters.driverId);
-        query = query.eq('payload->customer_id', filters.customerId);
-      }
-      if (filters.driverId) {
-        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);

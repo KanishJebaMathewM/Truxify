@@ -27,7 +27,7 @@ class DeadheadRecommendation {
   final String deadline;
 
   factory DeadheadRecommendation.fromJson(Map<String, dynamic> json) {
-    num _n(String key, [num fallback = 0]) => (json[key] as num?) ?? fallback;
+    num _n(String key, [num fallback = 0]) => num.tryParse(json[key]?.toString() ?? '') ?? fallback;
     return DeadheadRecommendation(
       loadId: (json['load_id'] ?? '').toString(),
       distanceToPickupKm: _n('distance_to_pickup_km').toDouble(),

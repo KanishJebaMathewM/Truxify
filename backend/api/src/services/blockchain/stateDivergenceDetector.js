@@ -299,7 +299,7 @@ class StateDivergenceDetector {
     const metrics = {
       totalDivergences: this.divergences.size,
       activeDivergences: Array.from(this.divergences.values()).filter(d => !d.resolved).length,
-      bytelastChecked: new Date().toISOString(),
+      lastChecked: new Date().toISOString(),
       rpcNodeCount: this.rpcNodes.length,
     };
 

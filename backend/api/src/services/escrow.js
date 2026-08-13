@@ -393,9 +393,12 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     // (issue #7734).
     const network = await escrowContract.runner.provider.getNetwork()
     const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
+    // The commitment must pin the exact driver and amount the backend
+    // authorised, otherwise a customer could reuse a valid signature to create
+    // a booking for a different driver or an underfunded amount (issue #11393).
     const commitment = ethers.solidityPackedKeccak256(
-      ['uint256', 'address', 'address', 'uint256', 'uint256'],
-      [network.chainId, contractAddress, customerWalletAddress, bookingId, nonce]
+      ['uint256', 'address', 'address', 'uint256', 'address', 'uint256', 'uint256'],
+      [network.chainId, contractAddress, customerWalletAddress, bookingId, driverWalletAddress, amountWei, nonce]
     )
     const signature = await relayerWallet.signMessage(ethers.getBytes(commitment))
 

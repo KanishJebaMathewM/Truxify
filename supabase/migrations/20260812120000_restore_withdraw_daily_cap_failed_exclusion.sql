@@ -68,7 +68,7 @@ BEGIN
    WHERE driver_id  = p_driver_id
      AND txn_type   = 'withdrawal'
      AND status    <> 'failed'
-     AND created_at >= date_trunc('day', now());
+     AND created_at >= date_trunc('day', now() AT TIME ZONE 'utc') AT TIME ZONE 'utc';
 
   IF v_day_total + p_amount > v_daily_cap THEN
     RAISE EXCEPTION 'Daily withdrawal cap exceeded: % of % used',

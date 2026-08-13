@@ -238,6 +238,8 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       firebaseProfileKey(firebaseUid),

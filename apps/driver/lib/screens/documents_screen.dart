@@ -651,7 +651,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         if (row is! Map) continue;
         try {
           documents.add(DriverDocument.fromMap(Map<String, dynamic>.from(row)));
-        } catch (_) {
+        } catch (e) {
+          debugPrint(
+            'DocumentsScreen: skipped malformed driver document row: $e\nrow: $row',
+          );
           continue;
         }
       }

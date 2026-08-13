@@ -20,7 +20,6 @@ const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
-const MAX_RETRY_DELAY_MS = 10_000; // upper bound on a single backoff sleep
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
@@ -42,15 +41,6 @@ function parsePositiveNumber(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/**
- * Exponential backoff delay for a retry attempt, clamped to MAX_RETRY_DELAY_MS
- * so a misconfigured (very large) retry count or base delay cannot produce a
- * multi-hour sleep in the request path.
- */
-function retryDelayMs(baseDelayMs, attempt) {
-  return Math.min(baseDelayMs * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
-}
-
 function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
   const baseUrl = process.env.OSRM_BASE_URL || DEFAULT_OSRM_BASE_URL;
   const url = new URL('/route/v1/driving/', baseUrl);
@@ -66,17 +56,12 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate(input = {}) {
+export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
   return measureExecution('OSRMService.getRouteEstimate', async () => {
-  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
     !Number.isFinite(dropLat) || !Number.isFinite(dropLng)
   ) {
-    return null;
-  }
-
-  if (pickupLat === dropLat && pickupLng === dropLng) {
     return null;
   }
 
@@ -115,7 +100,7 @@ export async function getRouteEstimate(input = {}) {
         await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries }, 'Server error. Retrying...');
-          await new Promise(r => setTimeout(r, retryDelayMs(baseDelayMs, attempt)));
+          await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
           continue;
         }
         return null;
@@ -123,10 +108,7 @@ export async function getRouteEstimate(input = {}) {
 
       const payload = await response.json();
       const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
-      // A zero distance means the API returned no real path (identical
-      // coordinates or an empty route); treat it as invalid so callers fall
-      // back to straight-line geometry instead of caching a useless estimate.
-      if (!route || !Number.isFinite(route.distance) || route.distance <= 0) {
+      if (!route || !Number.isFinite(route.distance) || route.distance < 0) {
         clearTimeout(timeout);
         return null;
       }
@@ -150,7 +132,7 @@ export async function getRouteEstimate(input = {}) {
     } catch (err) {
       clearTimeout(timeout);
       if (attempt < maxRetries - 1) {
-        const delayMs = retryDelayMs(baseDelayMs, attempt);
+        const delayMs = baseDelayMs * Math.pow(2, attempt);
         if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
           logger.warn('[OSRM] Circuit is open. Falling back instantly.');
           return null; // Return null so caller knows to use straight-line fallback
@@ -184,8 +166,7 @@ function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
 
-export async function getRouteGeometry(opts = {}) {
-  const { originLat, originLng, destLat, destLng } = opts || {};
+export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
@@ -266,8 +247,7 @@ export async function getRouteGeometry(opts = {}) {
   });
 }
 
-export function buildStraightLineGeometry(opts = {}) {
-  const { originLat, originLng, destLat, destLng } = opts || {};
+export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
     !Number.isFinite(destLat) || !Number.isFinite(destLng)
@@ -293,8 +273,29 @@ export const __testing = {
   buildCacheKey,
   buildGeometryUrl,
   buildGeometryCacheKey,
-  retryDelayMs,
-  MAX_RETRY_DELAY_MS,
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
+
+
+// === Spec 22: ===
+// === Spec 22: OSRM failover ===
+export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const t = (d) => (d * Math.PI) / 180;
+  const dLat = t(lat2 - lat1);
+  const dLon = t(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(t(lat1))*Math.cos(t(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+export async function routeWithFailover(primary, _fb, coords) {
+  try { return await primary(coords); }
+  catch (err) {
+    if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
+      return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
+    }
+    const [a, b] = coords[0];
+    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+  }
+}
+

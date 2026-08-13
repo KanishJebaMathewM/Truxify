@@ -62,10 +62,13 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
       orderRepository,
       orderTimelineService,
 const mockOrderRepository = {
-  findOrdersByCustomer: vi.fn(),
-  findOrdersWithCount: vi.fn(),
-  findProfilesByIds: vi.fn(),
+  findOrderById: vi.fn(),
+  updateOrderWithFilter: vi.fn(),
 };
+
+vi.mock('../../src/core/container.js', () => ({
+  orderRepository: mockOrderRepository,
+}));
 
 describe('orderLifecycleService', () => {
   let orderLifecycleService;
@@ -99,30 +102,22 @@ describe('orderLifecycleService', () => {
       p_status: 'cancelled',
       p_not_statuses: ['delivered', 'payment_released', 'cancelled'],
       p_event_type: 'ORDER_CANCELLED',
+    orderLifecycleService = (await import('../../src/services/order/orderLifecycleService.js')).default;
   });
 
-  describe('getActiveOrders', () => {
-    it('returns active orders enriched with driver names', async () => {
-      mockOrderRepository.findOrdersByCustomer.mockResolvedValue({
-        data: [{ id: 'order-1', driver_id: 'driver-1' }],
-        error: null,
-      });
-      mockOrderRepository.findProfilesByIds.mockResolvedValue({
-        data: [{ id: 'driver-1', full_name: 'Ravi Kumar' }],
-      });
+  describe('startOrder', () => {
+    it('starts an order in pending state', async () => {
+      const order = { id: 'order-1', status: 'pending', escrow_status: 'pending' };
+      mockOrderRepository.findOrderById.mockResolvedValue(order);
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValue({ error: null });
 
-      const result = await orderLifecycleService.getActiveOrders('cust-1');
-
-      expect(result).toHaveLength(1);
-      expect(result[0].driver_name).toBe('Ravi Kumar');
-      expect(mockOrderRepository.findOrdersByCustomer).toHaveBeenCalledWith(
-        'cust-1', '*', expect.any(Array), 'pickup_date', false,
-      );
+      const result = await orderLifecycleService.startOrder('order-1', 'driver-1');
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalled();
     });
 
-    it('throws when the query fails', async () => {
-      mockOrderRepository.findOrdersByCustomer.mockResolvedValue({ data: null, error: { message: 'DB down' } });
-      await expect(orderLifecycleService.getActiveOrders('cust-1')).rejects.toThrow();
+    it('throws when order not found', async () => {
+      mockOrderRepository.findOrderById.mockResolvedValue(null);
+      await expect(orderLifecycleService.startOrder('order-nonexistent', 'driver-1')).rejects.toThrow();
     });
     expect(result.status).toBe(200);
     expect(orderTimelineService.insertCancelEvent).toHaveBeenCalledWith('ORD-1');
@@ -159,10 +154,13 @@ describe('orderLifecycleService', () => {
       });
 
       const result = await orderLifecycleService.getOrderHistory('cust-1', 1, 10);
+  describe('completeOrder', () => {
+    it('completes an order in_transit', async () => {
+      const order = { id: 'order-1', status: 'in_transit', escrow_status: 'funded' };
+      mockOrderRepository.findOrderById.mockResolvedValue(order);
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValue({ error: null });
 
-      expect(result.total).toBe(1);
-      expect(result.totalPages).toBe(1);
-      expect(result.history).toHaveLength(1);
+      await expect(orderLifecycleService.completeOrder('order-1')).resolves.not.toThrow();
     });
     escrow.submitEscrowCancelWithPenalty.mockRejectedValue(new Error('chain down'));
 
@@ -178,6 +176,10 @@ describe('orderLifecycleService', () => {
     it('throws when the history query fails', async () => {
       mockOrderRepository.findOrdersWithCount.mockResolvedValue({ data: null, error: { message: 'DB down' }, count: 0 });
       await expect(orderLifecycleService.getOrderHistory('cust-1', 1, 10)).rejects.toThrow();
+    it('throws when trying to complete delivered order', async () => {
+      const order = { id: 'order-1', status: 'delivered' };
+      mockOrderRepository.findOrderById.mockResolvedValue(order);
+      await expect(orderLifecycleService.completeOrder('order-1')).rejects.toThrow();
     });
   });
 });

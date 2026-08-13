@@ -1,14 +1,16 @@
 import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
-import { invalidateDriverOrderCache } from '../../sockets/tracker.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { supabaseAdmin } from '../../config/db.js';
 import {
   submitEscrowRefund,
+  recordDepositTx,
   submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
+  getEscrowBookingId,
+  resolveExpectedDepositAmount,
   paisaToMaticWei,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
@@ -194,9 +196,7 @@ export class OrderLifecycleService {
       const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
 
       const { data: orders, error } = await this.orderRepository.findOrdersByCustomer(
-        customerId,
-        'id, order_display_id, status, pickup_address, drop_address, pickup_date, pickup_lat, pickup_lng, drop_lat, drop_lng, eta, driver_id, truck_id, truck_number, total_amount, goods_type, weight_tonnes, length_ft, width_ft, height_ft, is_stackable, is_fragile, special_requirements, created_at, updated_at',
-        activeStatuses, 'pickup_date', false, { limit: 100 }
+        customerId, '*', activeStatuses, 'pickup_date', false
       );
 
       if (error) throw new DomainError(500, { error: 'Failed to fetch active orders.', details: error.message });
@@ -592,7 +592,6 @@ export class OrderLifecycleService {
         // against at deposit time and on release), so it must track
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
-        const newAmountWei = paisaToMaticWei(pricing.totalAmount);
         const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
@@ -706,7 +705,6 @@ export class OrderLifecycleService {
 
         if (currentOrder.status === 'cancelled' && (!requiresRefund || currentOrder.escrow_status === 'refunded')) {
           await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
-          await invalidateDriverOrderCache(currentOrder.driver_id);
           return {
             status: 200,
             body: {
@@ -827,7 +825,6 @@ export class OrderLifecycleService {
             await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
             await expireDeliveryOtps(currentOrder.id);
             await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
-            await invalidateDriverOrderCache(currentOrder.driver_id);
 
             return {
               status: 200,
@@ -869,7 +866,6 @@ export class OrderLifecycleService {
               escrow_refund_last_attempt_at: failedAt,
               updated_at: failedAt,
             });
-            await invalidateDriverOrderCache(currentOrder.driver_id);
 
             return {
               status: 202,
@@ -915,7 +911,6 @@ export class OrderLifecycleService {
         await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
         await expireDeliveryOtps(currentOrder.id);
         await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
-        await invalidateDriverOrderCache(currentOrder.driver_id);
 
         return {
           status: 200,
@@ -938,6 +933,7 @@ export class OrderLifecycleService {
       try {
         const { data: order, error: fetchErr } = await this.orderRepository.findOrderById(
           orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
+          orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
         );
 
         if (fetchErr || !order) throw new DomainError(404, { error: 'Order not found' });
@@ -993,6 +989,12 @@ export class OrderLifecycleService {
             '[confirm-deposit] DB update failed:',
             updateErr?.message ?? 'escrow-status guard rejected the update'
           );
+        const { error: updateErr } = await this.orderRepository.updateOrder(orderId, {
+          escrow_status: 'funded',
+        });
+
+        if (updateErr) {
+          logger.error('[confirm-deposit] DB update failed:', updateErr.message);
           throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
         }
 

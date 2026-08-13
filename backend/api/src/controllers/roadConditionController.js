@@ -59,15 +59,15 @@ export const getNearbyGripData = async (req, res) => {
 
     // Approximate bounding box (1 degree is roughly 69 miles)
     const radiusDeg = radiusMiles / 69.0;
-    const minLat = Math.max(-90, latitude - radiusDeg);
-    const maxLat = Math.min(90, latitude + radiusDeg);
+    const minLat = latitude - radiusDeg;
+    const maxLat = latitude + radiusDeg;
     // Longitude degree distance varies by latitude; clamp the cos term so that
     // latitudes near ±90 cannot produce an infinite lng span.
     const latRad = latitude * (Math.PI / 180);
     const cosLat = Math.max(Math.abs(Math.cos(latRad)), 0.01);
     const lngDeg = radiusDeg / cosLat;
-    const minLng = Math.max(-180, longitude - lngDeg);
-    const maxLng = Math.min(180, longitude + lngDeg);
+    const minLng = longitude - lngDeg;
+    const maxLng = longitude + lngDeg;
 
     // Fetch reports from the last 12 hours
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();

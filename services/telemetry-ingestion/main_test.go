@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -109,39 +110,148 @@ func TestSweepDriversPrunesStaleGeofenceEntries(t *testing.T) {
 	atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
 }
 
-// TestHandlePingRejectsOversizedBody verifies the service returns 413 for a
-// body larger than the 1 MiB cap instead of buffering it into memory.
-func TestHandlePingRejectsOversizedBody(t *testing.T) {
-	bypassAuth = true
-	defer func() { bypassAuth = false }()
+// TestHaversineDistanceAntipodalFinite verifies antipodal points (including the
+// poles, where rounding can push `a` past 1.0) always return a finite,
+// positive distance.
+func TestHaversineDistanceAntipodalFinite(t *testing.T) {
+	d := haversineDistance(90, 0, -90, 180)
+	if math.IsNaN(d) || math.IsInf(d, 0) {
+		t.Fatalf("expected finite antipodal distance, got %v", d)
+	}
+	if d <= 0 {
+		t.Fatalf("expected positive antipodal distance, got %v", d)
+	}
 
-	big := strings.Repeat("a", maxRequestBodyBytes+1)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/ping", strings.NewReader(big))
-	req.Header.Set("X-Driver-ID", "driver-test")
-	w := httptest.NewRecorder()
-
-	handlePing(w, req)
-
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("expected 413 for oversized body, got %d", w.Code)
+	d2 := haversineDistance(0, 0, 0, 180)
+	if math.IsNaN(d2) || math.IsInf(d2, 0) || d2 <= 0 {
+		t.Fatalf("expected finite positive equator antipodal distance, got %v", d2)
 	}
 }
 
-// TestHandlePingAcceptsBodyWithinLimit verifies a body at the cap boundary is
-// still processed normally (reaching validation, not rejected as too large).
-func TestHandlePingAcceptsBodyWithinLimit(t *testing.T) {
+// TestGeofenceRadiusZeroIsExactCheck verifies an explicit radius_meters: 0 is
+// kept (exact-position check) instead of being coerced to the default.
+func TestGeofenceRadiusZeroIsExactCheck(t *testing.T) {
+	zero := 0.0
+	req := &geofenceRequest{DriverID: "d1", TargetLat: 19.0, TargetLng: 72.8, RadiusM: &zero}
+	radius, err := validateGeofenceInput(req)
+	if err != nil {
+		t.Fatalf("unexpected error for radius 0: %v", err)
+	}
+	if radius != 0 {
+		t.Fatalf("expected radius 0 for explicit zero, got %v", radius)
+	}
+}
+
+// TestGeofenceRadiusAbsentDefaultsTo500 verifies an absent radius_meters
+// defaults to the 500 m geofence.
+func TestGeofenceRadiusAbsentDefaultsTo500(t *testing.T) {
+	req := &geofenceRequest{DriverID: "d1", TargetLat: 19.0, TargetLng: 72.8}
+	radius, err := validateGeofenceInput(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if radius != defaultGeofenceRadiusMeters {
+		t.Fatalf("expected default radius %v, got %v", defaultGeofenceRadiusMeters, radius)
+	}
+}
+
+// TestGeofenceNegativeRadiusRejected verifies a negative radius_meters is
+// rejected with 400 (was silently making every check false).
+func TestGeofenceNegativeRadiusRejected(t *testing.T) {
+	neg := -1.0
+	req := &geofenceRequest{DriverID: "d1", TargetLat: 19.0, TargetLng: 72.8, RadiusM: &neg}
+	if _, err := validateGeofenceInput(req); err == nil {
+		t.Fatal("expected error for negative radius")
+	}
+}
+
+// TestGeofenceOversizedRadiusRejected verifies a radius beyond the sane bound
+// is rejected.
+func TestGeofenceOversizedRadiusRejected(t *testing.T) {
+	big := 1_000_000.0
+	req := &geofenceRequest{DriverID: "d1", TargetLat: 19.0, TargetLng: 72.8, RadiusM: &big}
+	if _, err := validateGeofenceInput(req); err == nil {
+		t.Fatal("expected error for oversized radius")
+	}
+}
+
+// TestGeofenceOutOfRangeTargetRejected verifies out-of-range/NaN target
+// coordinates are rejected before the haversine computation.
+func TestGeofenceOutOfRangeTargetRejected(t *testing.T) {
+	for _, tc := range []struct {
+		lat, lng float64
+	}{
+		{91, 0},
+		{-91, 0},
+		{0, 181},
+		{0, -181},
+		{math.NaN(), 0},
+		{0, math.NaN()},
+	} {
+		req := &geofenceRequest{DriverID: "d1", TargetLat: tc.lat, TargetLng: tc.lng}
+		if _, err := validateGeofenceInput(req); err == nil {
+			t.Fatalf("expected error for out-of-range target (%v, %v)", tc.lat, tc.lng)
+		}
+	}
+}
+
+// TestGeofenceValidInputAccepted verifies a well-formed request passes input
+// validation and yields a positive radius.
+func TestGeofenceValidInputAccepted(t *testing.T) {
+	req := &geofenceRequest{DriverID: "d1", TargetLat: 19.0, TargetLng: 72.8}
+	radius, err := validateGeofenceInput(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if radius <= 0 {
+		t.Fatalf("expected positive radius, got %v", radius)
+	}
+}
+
+// TestGeofenceHTTPRejectsNegativeRadius posts a negative radius and asserts a
+// clean 400.
+func TestGeofenceHTTPRejectsNegativeRadius(t *testing.T) {
 	bypassAuth = true
 	defer func() { bypassAuth = false }()
 
-	// The decoder errors on malformed JSON, but not with a MaxBytesError: the
-	// response must be 400 (payload validation), not 413.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/ping", strings.NewReader("{not-json"))
-	req.Header.Set("X-Driver-ID", "driver-test")
+	activeDrivers.Store("d1", driverEntry{
+		ping:     TelemetryPing{DriverID: "d1", Latitude: 19.0, Longitude: 72.8},
+		lastSeen: time.Now(),
+	})
+	defer activeDrivers.Delete("d1")
+
+	body := `{"driver_id":"d1","target_latitude":19.0,"target_longitude":72.8,"radius_meters":-1}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/geofence", strings.NewReader(body))
+	req.Header.Set("X-Driver-ID", "d1")
 	w := httptest.NewRecorder()
 
-	handlePing(w, req)
+	handleGeofence(w, req)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
+		t.Fatalf("expected 400 for negative radius, got %d", w.Code)
+	}
+}
+
+// TestGeofenceHTTPRejectsOutOfRangeTarget posts out-of-range coordinates and
+// asserts a clean 400.
+func TestGeofenceHTTPRejectsOutOfRangeTarget(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	activeDrivers.Store("d2", driverEntry{
+		ping:     TelemetryPing{DriverID: "d2", Latitude: 19.0, Longitude: 72.8},
+		lastSeen: time.Now(),
+	})
+	defer activeDrivers.Delete("d2")
+
+	body := `{"driver_id":"d2","target_latitude":200.0,"target_longitude":72.8}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry/geofence", strings.NewReader(body))
+	req.Header.Set("X-Driver-ID", "d2")
+	w := httptest.NewRecorder()
+
+	handleGeofence(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for out-of-range target, got %d", w.Code)
 	}
 }

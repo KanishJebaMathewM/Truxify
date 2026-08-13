@@ -136,9 +136,7 @@ class _OrdersScreenState extends State<OrdersScreen>
     try {
       if (hasNetwork) {
         final activeOrders = await _orderService.fetchActiveOrders();
-        debugPrint("Supabase active orders: $activeOrders");
         final historyOrders = await _orderService.fetchHistoryOrders();
-        debugPrint("Supabase history orders: $historyOrders");
 
         String? updatedAt;
 

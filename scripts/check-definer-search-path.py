@@ -21,18 +21,45 @@ ALTER_RE = re.compile(
     r"alter\s+function\s+(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s*\([^)]*\)\s*set\s+search_path", re.I
 )
 BODY_RE = re.compile(r"\bas\s*\$", re.I)
+# Opening/closing dollar-quote tags look like `$$` or `$tag$`.
+DOLLAR_TAG_RE = re.compile(r"\$[a-zA-Z0-9_]*\$")
 
 
-def main() -> int:
+def _function_body_end(sql: str, start: int) -> int:
+    """Return the index just past the dollar-quoted body terminator of the
+    function definition that starts at `start`.
+
+    We find the first `AS $$` (or `AS $tag$`) body marker, then capture up to the
+    *matching* closing dollar-quote. This bounds the scanned header region to the
+    function's own definition instead of either truncating to a fixed 4000-char
+    window (which drops SET search_path on long headers) or scanning the whole
+    rest of the file (which can pick up search_path from an unrelated statement
+    later on).
+    """
+    body_m = BODY_RE.search(sql, start)
+    if not body_m:
+        return len(sql)
+
+    dollar_start = body_m.end() - 1
+    tag = DOLLAR_TAG_RE.match(sql, dollar_start)
+    if not tag:
+        return len(sql)
+
+    closing_idx = sql.find(tag.group(0), tag.end())
+    if closing_idx == -1:
+        return len(sql)
+
+    return closing_idx + len(tag.group(0))
+
+
+def audit_sql(files: list[tuple[str, str]]) -> tuple[dict[str, tuple[str, bool, bool]], set[str]]:
     latest: dict[str, tuple[str, bool, bool]] = {}
     altered: set[str] = set()
 
-    for path in sorted(glob.glob("supabase/migrations/*.sql")):
-        sql = open(path, encoding="utf-8", errors="replace").read()
-
+    for path, sql in files:
         for match in FUNC_RE.finditer(sql):
-            # The header is everything before the `AS $$` body marker.
-            header = BODY_RE.split(sql[match.start() : match.start() + 4000])[0]
+            end = _function_body_end(sql, match.start())
+            header = sql[match.start() : end]
             latest[match.group(1)] = (
                 os.path.basename(path),
                 bool(re.search(r"security\s+definer", header, re.I)),
@@ -40,6 +67,16 @@ def main() -> int:
             )
 
         altered.update(m.group(1) for m in ALTER_RE.finditer(sql))
+
+    return latest, altered
+
+
+def main() -> int:
+    files = [
+        (path, open(path, encoding="utf-8", errors="replace").read())
+        for path in sorted(glob.glob("supabase/migrations/*.sql"))
+    ]
+    latest, altered = audit_sql(files)
 
     unpinned = sorted(
         (name, src)

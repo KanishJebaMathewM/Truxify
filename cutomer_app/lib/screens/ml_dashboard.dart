@@ -3,6 +3,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class MLDashboard extends StatefulWidget {
+  final Map<String, dynamic>? initialMetrics;
+
+  const MLDashboard({super.key, this.initialMetrics});
+
   @override
   _MLDashboardState createState() => _MLDashboardState();
 }
@@ -25,7 +29,12 @@ class _MLDashboardState extends State<MLDashboard> {
   @override
   void initState() {
     super.initState();
-    fetchMetrics();
+    if (widget.initialMetrics != null) {
+      metrics = widget.initialMetrics;
+      isLoading = false;
+    } else {
+      fetchMetrics();
+    }
   }
 
   Future<void> fetchMetrics() async {
@@ -93,12 +102,34 @@ class _MLDashboardState extends State<MLDashboard> {
   }
 
   Widget _buildMetricsCard() {
-    final results = metrics?['results'] as Map<String, dynamic>? ?? {};
+    final rawResults = metrics?['results'];
+    if (rawResults is! Map) {
+      return Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('📈 Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Text('No metrics available'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final results = Map<String, dynamic>.from(rawResults);
     final rows = <Widget>[];
     results.forEach((metric, values) {
-      final prod = values['production']?.toStringAsFixed(2);
-      final shadow = values['shadow']?.toStringAsFixed(2);
-      rows.add(_buildMetricRow(metric, prod, shadow, metric == 'rmse'));
+      if (values is! Map) return;
+      final rawValues = Map<String, dynamic>.from(values);
+      final prod = rawValues['production'];
+      final shadow = rawValues['shadow'];
+      final prodStr = prod is num ? prod.toStringAsFixed(2) : null;
+      final shadowStr = shadow is num ? shadow.toStringAsFixed(2) : null;
+      if (prodStr == null || shadowStr == null) return;
+      rows.add(_buildMetricRow(metric, prodStr, shadowStr, metric == 'rmse'));
     });
 
     if (rows.isEmpty) {

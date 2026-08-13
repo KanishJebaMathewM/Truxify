@@ -328,3 +328,10 @@ class MEVService {
 }
 
 export default new MEVService();
+
+// === Spec 41: ===
+// === Spec 41: commit-reveal ===
+import crypto from 'crypto';
+export function commitHash(s, p) { return crypto.createHash('sha256').update(s + ':' + JSON.stringify(p)).digest('hex'); }
+export function verifyReveal(c, s, p) { return commitHash(s, p) === c; }
+

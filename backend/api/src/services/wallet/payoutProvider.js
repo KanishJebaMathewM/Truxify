@@ -72,11 +72,16 @@ export async function dispatchPayout({ driverId, withdrawal }) {
       throw new Error(`Payout webhook returned HTTP ${response.status}.`);
     }
 
-    const body = await response.json().catch(() => ({}));
+    const body = await response.json().catch(() => null);
+    const settlementRef = body && typeof body === 'object'
+      ? (body.settlement_ref || body.reference)
+      : null;
+    if (!settlementRef) {
+      throw new Error('Payout webhook returned HTTP 200 but body contains no settlement_ref or reference.');
+    }
     return {
       success: true,
-      settlementRef:
-        body.settlement_ref || body.reference || `w${withdrawal.id}`,
+      settlementRef,
     };
   }
 

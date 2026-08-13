@@ -1,6 +1,7 @@
 import logger from '../middleware/logger.js';
 
 const TRIP_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const DEFAULT_DRIFT_TOLERANCE_KM = 0; // 0 = strict monotonicity; set > 0 for GPS drift tolerance
 
 /**
  * Validates trip-related requests.
@@ -42,7 +43,7 @@ export const tripValidator = {
 
       if (lastOdometerRaw !== undefined && lastOdometerRaw !== null) {
         const lastOdometer = Number(lastOdometerRaw);
-        if (Number.isFinite(lastOdometer) && odometer < lastOdometer) {
+        if (Number.isFinite(lastOdometer) && odometer < lastOdometer - DEFAULT_DRIFT_TOLERANCE_KM) {
           logger.warn(
             {
               event: 'TRIP_ODOMETER_MONOTONICITY_VIOLATION',

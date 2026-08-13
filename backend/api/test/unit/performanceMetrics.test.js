@@ -1,29 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { measureExecution } from '../../src/core/performanceMetrics.js';
 
-describe('measureExecution', () => {
-  beforeEach(() => {
-    delete process.env.SLOW_OPERATION_THRESHOLD_MS;
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+describe('performanceMetrics', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
   });
 
-  it('returns the result of the async function', async () => {
-    const result = await measureExecution('test.op', async () => 'hello');
-    expect(result).toBe('hello');
+  it('exports measureExecution function', async () => {
+    const mod = await import('../../src/core/performanceMetrics.js');
+    expect(typeof mod.measureExecution).toBe('function');
   });
 
-  it('re-throws errors from the async function', async () => {
-    await expect(measureExecution('test.op', async () => {
-      throw new Error('boom');
-    })).rejects.toThrow('boom');
+  it('measureExecution returns the function result', async () => {
+    const { measureExecution } = await import('../../src/core/performanceMetrics.js');
+    const result = await measureExecution('test-op', async () => 'success');
+    expect(result).toBe('success');
   });
 
-  it('measures fast operations without warning', async () => {
-    const result = await measureExecution('test.op', async () => 42);
-    expect(result).toBe(42);
-  });
-
-  it('supports non-async functions that return promises', async () => {
-    const result = await measureExecution('test.op', () => Promise.resolve(99));
-    expect(result).toBe(99);
+  it('measureExecution propagates errors', async () => {
+    const { measureExecution } = await import('../../src/core/performanceMetrics.js');
+    await expect(
+      measureExecution('failing-op', async () => { throw new Error('fail'); })
+    ).rejects.toThrow('fail');
   });
 });

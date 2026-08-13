@@ -33,6 +33,18 @@ class MarketplaceRepository {
   final ApiClient _apiClient;
   final String _apiBaseUrl;
 
+  /// Supabase keys `client.channel(topic)` by topic, so every call returns the
+  /// *same* underlying [RealtimeChannel]. To keep logical subscriptions
+  /// independent we share one channel per topic but ref-count its usage and
+  /// only ever register a single `onPostgresChanges` filter on it. Each
+  /// subscriber gets its own [StreamController] in [_channelControllers], and
+  /// [removeChannel] is only invoked once the last subscriber cancels.
+  static const String _newLoadOffersTopic = 'new_load_offers';
+  static final Map<RealtimeChannel, List<StreamController<LoadOffer>>>
+      _channelControllers = {};
+  static final Set<RealtimeChannel> _subscribedChannels = {};
+  static final Map<RealtimeChannel, int> _channelRefCounts = {};
+
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
   void dispose() {
@@ -442,36 +454,56 @@ class MarketplaceRepository {
   /// Subscribes to new available load offers via Supabase Realtime postgres_changes.
   /// Returns a stream of [LoadOffer] objects as they are inserted.
   /// Callers should cancel the [StreamSubscription] when done.
+  ///
+  /// Supabase keys `client.channel(topic)` by topic, so every call returns the
+  /// *same* underlying [RealtimeChannel]. We therefore share one channel per
+  /// topic but keep each logical subscriber independent: every subscriber gets
+  /// its own [StreamController], the `onPostgresChanges` filter is registered
+  /// only once (ref-counted), and `removeChannel` is invoked only after the
+  /// last subscriber cancels — so cancelling one listener never tears the
+  /// channel down for the others.
   Stream<LoadOffer> subscribeToNewLoads() {
     final controller = StreamController<LoadOffer>.broadcast();
-    RealtimeChannel? channel;
 
+    RealtimeChannel channel;
     try {
       final client = _client;
-      channel = client.channel('new_load_offers');
-      channel.onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'load_offers',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'status',
-          value: 'available',
-        ),
-        callback: (payload) {
-          try {
-            final newRecord = payload.newRecord;
-            if (newRecord.isNotEmpty) {
-              final offer = _mapLoadOffer(newRecord);
-              if (!controller.isClosed) {
-                controller.add(offer);
+      channel = client.channel(_newLoadOffersTopic);
+
+      // Register the postgres_changes filter exactly once on the shared
+      // channel, regardless of how many logical subscribers are active.
+      if (!_subscribedChannels.contains(channel)) {
+        channel.onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'load_offers',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'status',
+            value: 'available',
+          ),
+          callback: (payload) {
+            try {
+              final newRecord = payload.newRecord;
+              if (newRecord.isNotEmpty) {
+                final offer = _mapLoadOffer(newRecord);
+                final controllers = _channelControllers[channel];
+                if (controllers != null) {
+                  for (final c in controllers) {
+                    if (!c.isClosed) c.add(offer);
+                  }
+                }
               }
+            } catch (e, st) {
+              developer.log('Error mapping load offer', error: e, stackTrace: st);
             }
-          } catch (e, st) {
-            developer.log('Error mapping load offer', error: e, stackTrace: st);
-          }
-        },
-      ).subscribe();
+          },
+        ).subscribe();
+        _subscribedChannels.add(channel);
+      }
+
+      _channelControllers.putIfAbsent(channel, () => []).add(controller);
+      _channelRefCounts[channel] = (_channelRefCounts[channel] ?? 0) + 1;
     } catch (e, st) {
       developer.log('Supabase/Realtime not available', error: e, stackTrace: st);
       controller.close();
@@ -479,14 +511,25 @@ class MarketplaceRepository {
     }
 
     controller.onCancel = () {
-      if (channel != null) {
+      final controllers = _channelControllers[channel];
+      if (controllers != null) {
+        controllers.remove(controller);
+      }
+      _channelRefCounts[channel] = (_channelRefCounts[channel] ?? 1) - 1;
+
+      // Tear the shared channel down only once the last subscriber cancels, so
+      // cancelling one listener keeps the others alive.
+      if ((_channelRefCounts[channel] ?? 0) <= 0) {
+        _channelControllers.remove(channel);
+        _channelRefCounts.remove(channel);
+        _subscribedChannels.remove(channel);
         try {
           _client.removeChannel(channel);
         } catch (e, st) {
           developer.log('Error removing channel', error: e, stackTrace: st);
         }
       }
-      controller.close();
+      if (!controller.isClosed) controller.close();
     };
 
     return controller.stream;

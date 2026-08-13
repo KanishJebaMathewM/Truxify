@@ -1,9 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the db module before importing redisLock
+// Mock the db module before importing redisLock. redisClient is a live
+// getter so tests can swap the backing redis instance via redisHolder.client.
+const redisHolder = vi.hoisted(() => ({ client: null }));
+
 vi.mock('../../src/config/db.js', () => ({
-  redisClient: null,
+  get redisClient() {
+    return redisHolder.client;
+  },
 }));
+
+import { acquireLock, renewLock, releaseLock, LockAcquisitionError } from '../../src/lib/redisLock.js';
+
+function makeRedis({ setResult = 'OK', evalResult = 1, throwOn } = {}) {
+  const redis = {
+    set: vi.fn(async () => {
+      if (throwOn === 'set') throw new Error('Redis connection lost');
+      return setResult;
+    }),
+    eval: vi.fn(async () => {
+      if (throwOn === 'eval') throw new Error('Redis eval failed');
+      return evalResult;
+    }),
+  };
+  return redis;
+}
 
 describe('redisLock', () => {
   beforeEach(() => {
@@ -11,12 +32,10 @@ describe('redisLock', () => {
   });
 
   it('acquireLock throws (fails closed) when redisClient is null', async () => {
-    const { acquireLock, LockAcquisitionError } = await import('../../src/lib/redisLock.js');
     await expect(acquireLock('test-resource', 5000)).rejects.toBeInstanceOf(LockAcquisitionError);
   });
 
   it('releaseLock does not throw when redisClient is null', async () => {
-    const { releaseLock } = await import('../../src/lib/redisLock.js');
     await expect(releaseLock('non-existent-lock')).resolves.not.toThrow();
   });
 });

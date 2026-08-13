@@ -29,16 +29,34 @@ class OfflineRouteMatrixService {
             sin(dLng / 2);
 
     double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    double greatCircleKm = earthRadiusKm * c;
+
     // Great-circle distance is always <= real road distance. Trucks cannot
-    // follow straight lines (highways, detours, restricted turns), so we apply a
-    // detour/winding factor. 1.5 better approximates truck road distance than the
-    // old 1.25. This is still an approximation; expect a residual error band of
+    // follow straight lines, so we estimate a drivable road distance using a
+    // corridor-aware detour factor instead of a flat multiplier: short trips are
+    // intra-urban (more winding), long trips use highways (less winding).
+    // This is still an approximation; expect a residual error band of
     // roughly -10%..+30% versus real road distance depending on terrain/corridor.
-    const double detourFactor = 1.5;
-    double distanceKm = (earthRadiusKm * c * detourFactor);
-    // Representative average truck speed (km/h) blending urban/highway corridors,
-    // lower than the old flat 55 km/h to reflect real truck operating speeds.
-    const double avgTruckSpeedKmh = 50.0;
+    double detourFactor;
+    if (greatCircleKm < 10) {
+      detourFactor = 1.6;
+    } else if (greatCircleKm < 50) {
+      detourFactor = 1.4;
+    } else {
+      detourFactor = 1.2;
+    }
+    double distanceKm = (greatCircleKm * detourFactor);
+    // Use a corridor-aware truck speed (km/h) instead of a flat constant: urban
+    // corridors are slower and highway corridors are faster, reflecting posted
+    // truck speed limits rather than a single assumed value.
+    double avgTruckSpeedKmh;
+    if (greatCircleKm < 10) {
+      avgTruckSpeedKmh = 35.0;
+    } else if (greatCircleKm < 50) {
+      avgTruckSpeedKmh = 45.0;
+    } else {
+      avgTruckSpeedKmh = 65.0;
+    }
     double durationMins = (distanceKm / avgTruckSpeedKmh) * 60.0;
     double fuelLiters = distanceKm * 0.32;
 

@@ -619,6 +619,51 @@ describe('ml service — predictDriverProfit', () => {
       routeDistanceKm: 100, fuelPricePerLitre: 100, tollEstimateInr: 0, truckMileageKmL: 5, cargoWeightKg: 1000, tripDurationHours: 2,
     })).rejects.toThrow('[ML] ML_API_KEY is not configured');
   });
+
+  it('produces a valid interval when the upper bound is missing (#11547)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ predicted_profit: 12500.5, confidence_interval: { lower: 10000 } })),
+    });
+
+    const result = await predictDriverProfit({
+      routeDistanceKm: 500, fuelPricePerLitre: 105, tollEstimateInr: 1200, truckMileageKmL: 4, cargoWeightKg: 8000, tripDurationHours: 10,
+    });
+
+    const { lower, upper } = result.confidence_interval;
+    expect(lower).toBeGreaterThanOrEqual(0);
+    expect(upper).toBeGreaterThanOrEqual(0);
+    expect(lower).toBeLessThanOrEqual(upper);
+    expect(lower).toBeLessThanOrEqual(result.predicted_profit);
+    expect(upper).toBeGreaterThanOrEqual(result.predicted_profit);
+  });
+
+  it('keeps the interval valid (lower <= upper) for tight ranges after rounding (#11547)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ predicted_profit: 10.004, confidence_interval: { lower: 9.999, upper: 10.001 } })),
+    });
+
+    const result = await predictDriverProfit({
+      routeDistanceKm: 500, fuelPricePerLitre: 105, tollEstimateInr: 1200, truckMileageKmL: 4, cargoWeightKg: 8000, tripDurationHours: 10,
+    });
+
+    expect(result.confidence_interval.lower).toBeLessThanOrEqual(result.confidence_interval.upper);
+  });
+
+  it('does not produce a negative upper fallback for loss predictions (#11547)', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ predicted_profit: -500.25, confidence_interval: { lower: -600 } })),
+    });
+
+    const result = await predictDriverProfit({
+      routeDistanceKm: 100, fuelPricePerLitre: 100, tollEstimateInr: 0, truckMileageKmL: 5, cargoWeightKg: 1000, tripDurationHours: 2,
+    });
+
+    expect(result.confidence_interval.upper).toBeGreaterThanOrEqual(0);
+    expect(result.confidence_interval.lower).toBeLessThanOrEqual(result.confidence_interval.upper);
+  });
 });
 
 describe('ml service — optimisePacking', () => {

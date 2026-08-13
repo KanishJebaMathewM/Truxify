@@ -1016,7 +1016,7 @@ export async function handleLocationPing(ws, data, req) {
       if (lastRecordedEpochStr) {
         const lastRecordedEpoch = parseInt(lastRecordedEpochStr, 10);
 
-        if (serverNow <= lastRecordedEpoch) {
+        if (serverNow < lastRecordedEpoch) {
           logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
 
           // Circuit breaker: if too many consecutive drops, reset the sequence

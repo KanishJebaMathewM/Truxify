@@ -3,6 +3,7 @@
  * In a real-world scenario, this service would communicate with Drivewyze or PrePass API
  * to check carrier credentials and safety scores against the specific weigh station.
  */
+import logger from '../middleware/logger.js';
 
 import logger from '../middleware/logger.js';
 

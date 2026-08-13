@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-import securityHeaders from '../../src/middleware/securityHeaders.js';
+import securityHeaders, { setHstsHeader } from '../../src/middleware/securityHeaders.js';
 
 function createApp(preset = {}) {
   const app = express();
@@ -144,8 +144,6 @@ describe('securityHeaders', () => {
 
 
 // === Spec 11 test ===
-import { describe, it, expect } from 'vitest';
-import { setHstsHeader } from '../../src/middleware/securityHeaders.js';
 describe('setHstsHeader', () => {
   it('sets when missing', () => {
     const r = { _h: {}, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };

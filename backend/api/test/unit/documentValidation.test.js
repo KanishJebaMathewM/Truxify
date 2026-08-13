@@ -4,6 +4,7 @@ import {
   validateDocumentBuffer,
   DocumentValidationError,
   ALLOWED_DOCUMENT_MIME_TYPES,
+  matchesMimeSignature,
 } from '../../src/lib/documentValidation.js';
 
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
@@ -73,8 +74,6 @@ describe('validateDocumentBuffer', () => {
 
 
 // === Spec 7 test ===
-import { describe, it, expect } from 'vitest';
-import { matchesMimeSignature } from '../../src/lib/documentValidation.js';
 describe('matchesMimeSignature', () => {
   it('matches PNG', () => {
     expect(matchesMimeSignature(Buffer.from([0x89, 0x50, 0x4E, 0x47]), 'image/png')).toBe(true);

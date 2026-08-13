@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -136,19 +136,6 @@ export async function uploadDriverDocument(req, res) {
       throw scanError;
     } finally {
       clearTimeout(timeoutId);
-    }
-
-    // Check if driver already has an existing document record for this documentType
-    const { data: existingDoc, error: checkError } = await client
-      .from('driver_documents')
-      .select('id, storage_path')
-      .eq('driver_id', driverId)
-      .eq('document_type', documentType)
-      .maybeSingle();
-
-    if (checkError) {
-      logger.error('[DocumentController] Failed to check for existing document:', checkError.message);
-      return res.status(500).json({ error: 'Failed to process document' });
     }
 
     const extension = MIME_EXTENSION_MAP[verifiedMimeType];

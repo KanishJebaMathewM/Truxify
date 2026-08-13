@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { correlationIdMiddleware, correlationContext } from '../../src/middleware/correlationId.js';
+import { correlationIdMiddleware, correlationContext, runWithCorrelationId, getCorrelationStore } from '../../src/middleware/correlationId.js';
 
 function makeReq(headers = {}) {
   return {
@@ -129,8 +129,6 @@ describe('correlationIdMiddleware', () => {
 
 
 // === Spec 14 test ===
-import { describe, it, expect } from 'vitest';
-import { runWithCorrelationId, getCorrelationStore } from '../../src/middleware/correlationId.js';
 describe('correlationId', () => {
   it('stores in run()', () => {
     runWithCorrelationId('cid-1', () => { expect(getCorrelationStore().correlationId).toBe('cid-1'); });

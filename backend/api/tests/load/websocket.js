@@ -1,3 +1,4 @@
+/* global __ENV */
 import ws from 'k6/ws';
 import { check } from 'k6';
 

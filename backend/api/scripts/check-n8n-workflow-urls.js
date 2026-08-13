@@ -227,7 +227,7 @@ function pathFromUrl(raw) {
   } catch {
     return null;
   }
-  let target = null;
+  let target;
   if (isApiHost(parsed)) target = 'api';
   else if (isMlHost(parsed)) target = 'ml';
   else return null;

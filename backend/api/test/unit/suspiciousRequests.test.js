@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import suspiciousRequests from '../../src/middleware/suspiciousRequests.js';
+import suspiciousRequests, { sanitizeKey, sanitizeQueryParams } from '../../src/middleware/suspiciousRequests.js';
 
 describe('suspiciousRequests Middleware', () => {
   it('calls next() for normal requests', () => {
@@ -14,8 +14,6 @@ describe('suspiciousRequests Middleware', () => {
 
 
 // === Spec 6 test ===
-import { describe, it, expect } from 'vitest';
-import { sanitizeKey, sanitizeQueryParams } from '../../src/middleware/suspiciousRequests.js';
 describe('sanitizeKey', () => {
   it('rejects __proto__', () => { expect(sanitizeKey('__proto__')).toBeNull(); });
   it('rejects constructor', () => { expect(sanitizeKey('constructor')).toBeNull(); });

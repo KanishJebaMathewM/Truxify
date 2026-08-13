@@ -410,7 +410,6 @@ describe('auditWithState convenience', () => {
 
 
 // === Spec 20 test ===
-import { describe, it, expect } from 'vitest';
 import { maskPii } from '../../src/middleware/auditLog.js';
 describe('maskPii', () => {
   it('masks password', () => { expect(maskPii({ password: 'x' })).toEqual({ password: '***' }); });

@@ -37,7 +37,6 @@ describe('profileCache stats', () => {
 
 
 // === Spec 8 test ===
-import { describe, it, expect } from 'vitest';
 import { isValidProfile } from '../../src/lib/profileCache.js';
 describe('isValidProfile', () => {
   it('accepts valid profile with required fields', () => {

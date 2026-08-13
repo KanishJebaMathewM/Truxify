@@ -1,7 +1,7 @@
 import { supabase, supabaseAdmin } from '../config/db.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import {
-  getCachedSupabaseProfile, setCachedSupabaseProfile,
+  getCachedSupabaseProfile, setCachedSupabaseProfile, isValidCachedProfile,
   getCachedCustomerStats, setCachedCustomerStats,
   getCachedDriverDetails, setCachedDriverDetails,
 } from '../lib/profileCache.js';

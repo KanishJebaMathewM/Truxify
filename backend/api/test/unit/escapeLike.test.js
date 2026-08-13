@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { escapeLike } from '../../src/lib/escapeLike.js';
+import { escapeLike, escapeSqlLike } from '../../src/lib/escapeLike.js';
 
 describe('escapeLike', () => {
   it('returns non-string inputs unchanged', () => {
@@ -46,8 +46,6 @@ describe('escapeLike', () => {
 
 
 // === Spec 17 test ===
-import { describe, it, expect } from 'vitest';
-import { escapeSqlLike } from '../../src/lib/escapeLike.js';
 describe('escapeSqlLike', () => {
   it('escapes %', () => { expect(escapeSqlLike('100%')).toBe('100\\%'); });
   it('escapes _', () => { expect(escapeSqlLike('a_b')).toBe('a\\_b'); });

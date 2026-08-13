@@ -52,7 +52,6 @@ describe('shouldIgnoreError', () => {
 
 
 // === Spec 4 test ===
-import { describe, it, expect, vi } from 'vitest';
 import { checkBoundOrFailClosed } from '../../src/middleware/authFailureMonitor.js';
 describe('checkBoundOrFailClosed', () => {
   it('allows under limit', async () => {

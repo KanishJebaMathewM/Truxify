@@ -77,17 +77,3 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     return 1.0;
   }
 }
-
-function getRushHourMultiplier(date) {
-  const hour = date.getUTCHours();
-  const isMorningRush = hour >= RUSH_HOUR_START_AM && hour < RUSH_HOUR_END_AM;
-  const isEveningRush = hour >= RUSH_HOUR_START_PM && hour < RUSH_HOUR_END_PM;
-  if (!isMorningRush && !isEveningRush) {
-    return 1.0;
-  }
-  const peakHour = isMorningRush
-    ? (hour - RUSH_HOUR_START_AM) / (RUSH_HOUR_END_AM - RUSH_HOUR_START_AM)
-    : (hour - RUSH_HOUR_START_PM) / (RUSH_HOUR_END_PM - RUSH_HOUR_START_PM);
-  const surge = MIN_SURGE_MULTIPLIER + SURGE_PEAK_AMPLITUDE * Math.sin(peakHour * Math.PI);
-  return Number(Math.min(MAX_SURGE_MULTIPLIER, Math.max(MIN_SURGE_MULTIPLIER, surge)).toFixed(2));
-}

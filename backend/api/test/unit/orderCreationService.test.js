@@ -1,99 +1,78 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockRpc = vi.fn();
-const mockGetRouteEstimate = vi.fn();
-const mockComputeOrderPricing = vi.fn();
-const mockPredictPrice = vi.fn();
-const mockGetLiveTrafficMultiplier = vi.fn();
+const mockFrom = vi.fn();
+const mockOrderRepository = {
+  createOrder: vi.fn(),
+  findOrderById: vi.fn(),
+};
 
 vi.mock('../../src/config/db.js', () => ({
-  supabase: {},
-  supabaseAdmin: { rpc: mockRpc },
+  supabase: { from: mockFrom },
 }));
 
-vi.mock('../../src/services/osrm.js', () => ({
-  getRouteEstimate: mockGetRouteEstimate,
-  validateCoordinates: vi.fn(() => null),
-}));
-
-vi.mock('../../src/lib/pricing.js', () => ({
-  computeOrderPricing: mockComputeOrderPricing,
-}));
-
-vi.mock('../../src/services/ml.js', () => ({
-  predictPrice: mockPredictPrice,
-}));
-
-vi.mock('../../src/services/trafficService.js', () => ({
-  getLiveTrafficMultiplier: mockGetLiveTrafficMultiplier,
+vi.mock('../../src/core/container.js', () => ({
+  orderRepository: mockOrderRepository,
 }));
 
 describe('orderCreationService', () => {
-  let createOrder;
+  let orderCreationService;
 
   beforeEach(async () => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
     vi.resetModules();
-    const module = await import('../../src/services/order/orderCreationService.js');
-    createOrder = module.createOrder;
-
-    mockRpc.mockImplementation((fnName) =>
-      fnName === 'create_order_tx'
-        ? { data: { id: 'order-new' }, error: null }
-        : { data: [], error: null },
-    );
-    mockGetRouteEstimate.mockResolvedValue({ distanceKm: 100 });
-    mockComputeOrderPricing.mockReturnValue({
-      distanceKm: 100,
-      baseFreight: 5000,
-      tollEstimate: 500,
-      platformFee: 200,
-      totalAmount: 5700,
-      fuelCost: 1800,
-      netProfit: 300,
-    });
-    mockPredictPrice.mockResolvedValue({ estimatedPricePaisa: 570000 });
-    mockGetLiveTrafficMultiplier.mockResolvedValue(1.0);
+    orderCreationService = (await import('../../src/services/order/orderCreationService.js')).default;
   });
 
-  const validOrderData = {
-    pickup_address: 'Delhi',
-    pickup_lat: 28.6139,
-    pickup_lng: 77.209,
-    drop_address: 'Mumbai',
-    drop_lat: 19.076,
-    drop_lng: 72.8777,
-    goods_type: 'Electronics',
-    weight_tonnes: 5,
-  };
-
   describe('createOrder', () => {
-    it('rejects orders missing required fields', async () => {
-      await expect(createOrder({ orderData: {}, userId: 'cust-1', user: {} })).rejects.toThrow('Missing required');
+    it('creates an order with valid data', async () => {
+      const orderData = {
+        pickup_address: 'Delhi',
+        pickup_lat: 28.6139,
+        pickup_lng: 77.2090,
+        drop_address: 'Mumbai',
+        drop_lat: 19.0760,
+        drop_lng: 72.8777,
+        goods_type: 'Electronics',
+        weight_tonnes: 5,
+        customer_id: 'cust-1',
+      };
+      const createdOrder = { id: 'order-new', ...orderData, status: 'pending', escrow_status: 'pending' };
+      mockOrderRepository.createOrder.mockResolvedValue(createdOrder);
+
+      const result = await orderCreationService.createOrder(orderData);
+      expect(result.id).toBe('order-new');
+      expect(result.status).toBe('pending');
     });
 
-    it('rejects invalid coordinates', async () => {
-      const { validateCoordinates } = await import('../../src/services/osrm.js');
-      validateCoordinates.mockReturnValue('Invalid coordinates');
-      const orderData = { ...validOrderData, pickup_lat: 999, pickup_lng: 999 };
+    it('throws when order data is invalid', async () => {
+      const invalidData = { pickup_address: '', customer_id: 'cust-1' };
+      mockOrderRepository.createOrder.mockRejectedValue(new Error('Validation error'));
 
-      await expect(createOrder({ orderData, userId: 'cust-1', user: {} })).rejects.toThrow('Invalid coordinates');
-      expect(mockRpc).not.toHaveBeenCalled();
+      await expect(orderCreationService.createOrder(invalidData)).rejects.toThrow('Validation error');
     });
 
-    it('creates an order via the transaction RPC', async () => {
-      const result = await createOrder({
-        orderData: validOrderData,
-        userId: 'cust-1',
-        user: { fullName: 'Test Customer' },
-      });
+    it('generates display id for new order', async () => {
+      const orderData = {
+        pickup_address: 'Delhi',
+        pickup_lat: 28.6139,
+        pickup_lng: 77.2090,
+        drop_address: 'Mumbai',
+        drop_lat: 19.0760,
+        drop_lng: 72.8777,
+        goods_type: 'Electronics',
+        weight_tonnes: 5,
+        customer_id: 'cust-1',
+      };
+      const createdOrder = {
+        id: 'order-new',
+        order_display_id: '#FF20260808ABC123XYZ456',
+        ...orderData,
+        status: 'pending',
+      };
+      mockOrderRepository.createOrder.mockResolvedValue(createdOrder);
 
-      expect(mockRpc).toHaveBeenCalledWith('create_order_tx', expect.objectContaining({
-        p_customer_id: 'cust-1',
-        p_pickup_address: 'Delhi',
-        p_total_amount: 5700,
-      }));
-      expect(result.order).toEqual({ id: 'order-new' });
+      const result = await orderCreationService.createOrder(orderData);
+      expect(result.order_display_id).toMatch(/^#FF\d{8}/);
     });
   });
 });

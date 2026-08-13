@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import { EventStore, EventStoreVersionConflictError, EventStorePersistenceError } from '../event-store.js';
 import { InMemoryDb, dbRow } from './in-memory-db.js';
-import { ORDER_READ_MODEL_TABLE } from '../../api/src/core/orders/read-model-schema.js';
 
 const silentLogger = {
   info() {},
@@ -19,7 +18,7 @@ function createMockClient() {
     orders,
     drivers,
     from(name) {
-      if (name === ORDER_READ_MODEL_TABLE) {
+      if (name === 'orders_read_model') {
         return {
           upsert: async (items) => {
             for (const item of items) orders.set(item.order_id, item);

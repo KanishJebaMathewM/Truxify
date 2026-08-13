@@ -1,194 +1,238 @@
+#!/usr/bin/env node
 /**
- * Benchmark the composite indexes on `trips`.
+ * benchmark-trips-index.js
  *
- * Runs EXPLAIN ANALYZE against the query shapes the driver earnings and
- * trip-history endpoints actually issue, and reports the plan nodes and
- * timings so the effect of idx_trips_driver_status_date can be measured
- * rather than asserted.
- *
- * Requires a direct PostgreSQL connection — PostgREST cannot return query
- * plans, so DATABASE_URL is used rather than the Supabase client.
+ * Before/after EXPLAIN ANALYZE harness for the trips table composite index.
+ * Modelled on scripts/benchmark-postgis.js.
  *
  * Usage:
- *   node scripts/benchmark-trips-index.js
- *   node scripts/benchmark-trips-index.js --driver-id <uuid>
+ *   node scripts/benchmark-trips-index.js [--trips <n>]
  *
- * To measure the improvement, run it, then:
- *   DROP INDEX idx_trips_driver_status_date;
- * run it again, and re-create the index. Compare the plan nodes: with the
- * index the plan should show an Index Scan and no Sort node; without it,
- * a BitmapAnd plus an explicit Sort.
+ * Options:
+ *   --trips <n>   Number of synthetic completed trips to seed (default 5000)
+ *
+ * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment.
+ * The script seeds a synthetic driver, runs EXPLAIN ANALYZE on each hot
+ * query shape, reports the plan differences, and cleans up after itself.
  */
-import pg from 'pg';
+
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-const connectionString = process.env.DATABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!connectionString) {
-  console.error('Missing DATABASE_URL. A direct PostgreSQL connection is required —');
-  console.error('PostgREST cannot return query plans.');
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
   process.exit(1);
 }
 
-/** Query shapes taken from src/routes/driverRoutes.js. */
-const QUERIES = [
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Parse CLI args
+const args = process.argv.slice(2);
+const tripCount = parseInt(args[args.indexOf('--trips') + 1] ?? '5000', 10) || 5000;
+
+// Synthetic driver ID used for all seeded rows — cleaned up at the end.
+const SYNTHETIC_DRIVER_ID = '00000000-0000-0000-0000-000000000001';
+
+// ---------------------------------------------------------------------------
+// Hot query shapes from driverRoutes.js
+// ---------------------------------------------------------------------------
+
+const QUERY_SHAPES = [
   {
-    name: 'period trips (driverRoutes.js:1477)',
-    sql: `SELECT trip_display_id, route_label, trip_date, distance,
-                 total_earnings, fuel_deducted, net_earnings, blockchain_hash
-            FROM trips
-           WHERE driver_id = $1 AND status = 'completed'
-             AND trip_date >= $2
-           ORDER BY trip_date DESC`,
-    params: (driverId, cutoff) => [driverId, cutoff],
+    label: 'Q1 — driver + status=completed + trip_date >= cutoff, ORDER BY trip_date DESC (line 1477)',
+    sql: `
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+      SELECT *
+      FROM trips
+      WHERE driver_id   = '${SYNTHETIC_DRIVER_ID}'
+        AND status      = 'completed'
+        AND trip_date  >= NOW() - INTERVAL '90 days'
+      ORDER BY trip_date DESC;
+    `,
   },
   {
-    name: 'lifetime count (driverRoutes.js:1489)',
-    sql: `SELECT count(*) FROM trips
-           WHERE driver_id = $1 AND status = 'completed'`,
-    params: (driverId) => [driverId],
+    label: 'Q2 — driver + status=completed, count only (line 1489)',
+    sql: `
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+      SELECT COUNT(*)
+      FROM trips
+      WHERE driver_id = '${SYNTHETIC_DRIVER_ID}'
+        AND status    = 'completed';
+    `,
   },
   {
-    name: 'deadhead adjacency (driverRoutes.js:1531)',
-    sql: `SELECT route_label, trip_date
-            FROM trips
-           WHERE driver_id = $1 AND status = 'completed'
-             AND trip_date >= $2
-           ORDER BY trip_date ASC
-           LIMIT 1000`,
-    params: (driverId, cutoff) => [driverId, cutoff],
+    label: 'Q3 — driver + status=completed, ORDER BY trip_date ASC (line 1531)',
+    sql: `
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+      SELECT *
+      FROM trips
+      WHERE driver_id = '${SYNTHETIC_DRIVER_ID}'
+        AND status    = 'completed'
+      ORDER BY trip_date ASC;
+    `,
   },
   {
-    name: 'ownership check (driverRoutes.js:629)',
-    sql: `SELECT id FROM trips
-           WHERE trip_display_id = $1 AND driver_id = $2`,
-    params: (driverId) => ['TRP-000001', driverId],
+    label: 'Q4 — driver_id filter only (lines 558, 813)',
+    sql: `
+      EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+      SELECT *
+      FROM trips
+      WHERE driver_id = '${SYNTHETIC_DRIVER_ID}';
+    `,
   },
 ];
 
-/** Plan node names that indicate the index is not being used effectively. */
-const WARNING_NODES = ['Seq Scan', 'BitmapAnd', 'Sort ', 'external merge'];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function summarisePlan(planText) {
-  const findings = [];
-  for (const node of WARNING_NODES) {
-    if (planText.includes(node)) {
-      findings.push(node.trim());
+async function sql(query) {
+  const { data, error } = await supabase.rpc('exec_sql', { query });
+  if (error) throw new Error(`SQL error: ${error.message}\nQuery: ${query}`);
+  return data;
+}
+
+function extractPlanNodes(explainText) {
+  const lines = (explainText ?? '').split('\n');
+  const nodes = lines
+    .filter((l) => /->|Seq Scan|Index Scan|Bitmap|Sort/.test(l))
+    .map((l) => l.trim());
+  return nodes;
+}
+
+function extractExecutionTime(explainText) {
+  const match = explainText.match(/Execution Time:\s*([\d.]+)\s*ms/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Seed / cleanup
+// ---------------------------------------------------------------------------
+
+async function seedTrips() {
+  console.log(`\nSeeding ${tripCount} synthetic completed trips for driver ${SYNTHETIC_DRIVER_ID}…`);
+
+  // Build bulk insert using VALUES rows
+  const rows = Array.from({ length: tripCount }, (_, i) => {
+    const daysAgo = Math.floor(Math.random() * 365);
+    const date = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    return `('${SYNTHETIC_DRIVER_ID}', 'completed', '${date}', 'BM-BENCH-${i.toString().padStart(6, '0')}')`;
+  });
+
+  // Insert in batches of 500 to avoid request-size limits
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500).join(',\n');
+    await sql(`
+      INSERT INTO trips (driver_id, status, trip_date, trip_display_id)
+      VALUES ${batch}
+      ON CONFLICT DO NOTHING;
+    `);
+  }
+  console.log(`Seeded ${tripCount} rows.`);
+}
+
+async function cleanup() {
+  await sql(`DELETE FROM trips WHERE driver_id = '${SYNTHETIC_DRIVER_ID}';`);
+  console.log('\nSynthetic rows removed.');
+}
+
+// ---------------------------------------------------------------------------
+// Benchmark runner
+// ---------------------------------------------------------------------------
+
+async function runQueryBenchmark(shape) {
+  const result = await sql(shape.sql);
+  const planText = Array.isArray(result)
+    ? result.map((r) => Object.values(r)[0]).join('\n')
+    : String(result);
+
+  const execMs = extractExecutionTime(planText);
+  const nodes  = extractPlanNodes(planText);
+
+  return { label: shape.label, execMs, nodes, planText };
+}
+
+function printResult(result) {
+  console.log(`\n  ${result.label}`);
+  console.log(`  Execution time : ${result.execMs != null ? `${result.execMs} ms` : 'n/a'}`);
+  console.log(`  Key plan nodes :`);
+  if (result.nodes.length === 0) {
+    console.log('    (none extracted)');
+  } else {
+    for (const node of result.nodes) {
+      console.log(`    ${node}`);
     }
   }
-  return findings;
 }
 
-function extractTiming(planText) {
-  const match = planText.match(/Execution Time:\s*([\d.]+)\s*ms/);
-  return match ? Number(match[1]) : null;
-}
-
-async function resolveDriverId(client, explicit) {
-  if (explicit) return explicit;
-
-  const { rows } = await client.query(
-    `SELECT driver_id, count(*) AS trip_count
-       FROM trips
-      WHERE status = 'completed' AND driver_id IS NOT NULL
-      GROUP BY driver_id
-      ORDER BY trip_count DESC
-      LIMIT 1`
-  );
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  console.log(
-    `Using the driver with the most completed trips: ${rows[0].driver_id} ` +
-      `(${rows[0].trip_count} trips)\n`
-  );
-  return rows[0].driver_id;
-}
-
-async function listIndexes(client) {
-  const { rows } = await client.query(
-    `SELECT indexname, indexdef FROM pg_indexes
-      WHERE schemaname = 'public' AND tablename = 'trips'
-      ORDER BY indexname`
-  );
-  return rows;
-}
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 async function main() {
-  const argIndex = process.argv.indexOf('--driver-id');
-  const explicitDriverId = argIndex !== -1 ? process.argv[argIndex + 1] : null;
+  console.log('--- Trips Composite Index Benchmark ---');
+  console.log(`Trip rows to seed: ${tripCount}`);
 
-  const client = new pg.Client({ connectionString });
-  await client.connect();
-
+  // Check that the exec_sql RPC exists (requires a helper function in Supabase).
+  // If it does not, print guidance and exit gracefully.
   try {
-    console.log('--- trips index benchmark ---\n');
-
-    const indexes = await listIndexes(client);
-    console.log(`Indexes currently on trips (${indexes.length}):`);
-    for (const idx of indexes) {
-      console.log(`  ${idx.indexname}`);
-    }
-
-    const hasComposite = indexes.some(
-      (idx) => idx.indexname === 'idx_trips_driver_status_date'
-    );
-    console.log(
-      `\nComposite index present: ${hasComposite ? 'yes' : 'NO — run the migration first'}\n`
-    );
-
-    const driverId = await resolveDriverId(client, explicitDriverId);
-    if (!driverId) {
-      console.error('No completed trips found. Seed the trips table before benchmarking.');
-      process.exitCode = 1;
-      return;
-    }
-
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 30);
-    const cutoffKey = cutoff.toISOString().split('T')[0];
-
-    for (const query of QUERIES) {
-      const params = query.params(driverId, cutoffKey);
-      const { rows } = await client.query(
-        `EXPLAIN (ANALYZE, BUFFERS) ${query.sql}`,
-        params
-      );
-      const planText = rows.map((r) => r['QUERY PLAN']).join('\n');
-
-      const timing = extractTiming(planText);
-      const warnings = summarisePlan(planText);
-
-      console.log(`── ${query.name}`);
-      console.log(`   execution time: ${timing === null ? 'unknown' : `${timing} ms`}`);
-      if (warnings.length > 0) {
-        console.log(`   ⚠ plan contains: ${warnings.join(', ')}`);
-      } else {
-        console.log('   ✓ index scan, no sort node');
-      }
-      console.log(
-        planText
-          .split('\n')
-          .map((line) => `      ${line}`)
-          .join('\n')
-      );
-      console.log('');
-    }
-  } finally {
-    await client.end();
+    await sql('SELECT 1');
+  } catch (err) {
+    console.error('\nCould not run raw SQL via exec_sql RPC.');
+    console.error('Create a service-role helper first:\n');
+    console.error(`
+CREATE OR REPLACE FUNCTION exec_sql(query text)
+RETURNS json
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE result json;
+BEGIN
+  EXECUTE query INTO result;
+  RETURN result;
+END;
+$$;
+`);
+    process.exit(1);
   }
+
+  await seedTrips();
+
+  // Run benchmarks
+  console.log('\n=== EXPLAIN ANALYZE results ===');
+  for (const shape of QUERY_SHAPES) {
+    try {
+      const result = await runQueryBenchmark(shape);
+      printResult(result);
+
+      // Flag if a sequential scan or sort appears — indicates the index is missing.
+      const hasBadNode = result.nodes.some((n) => /Seq Scan|Sort/.test(n));
+      if (hasBadNode) {
+        console.log('  ⚠ WARNING: Seq Scan or Sort node detected — composite index may be missing.');
+      } else {
+        console.log('  ✓ Index scan confirmed — no sort node.');
+      }
+    } catch (err) {
+      console.error(`  ✖ ${shape.label}: ${err.message}`);
+    }
+  }
+
+  console.log('\nExpectations (with composite index on (driver_id, status, trip_date DESC)):');
+  console.log('  Q1/Q3 : Index Scan using idx_trips_driver_status_date — no Sort node');
+  console.log('  Q2    : Index Only Scan or Index Scan — no Bitmap AND, no Sort');
+  console.log('  Q4    : Index Scan using idx_trips_driver_status_date (leading column)');
+
+  await cleanup();
 }
 
 main().catch((err) => {
-  console.error('Benchmark failed:', err.message);
-  process.exit(1);
+  console.error(`Benchmark failed: ${err.message}`);
+  process.exitCode = 1;
 });

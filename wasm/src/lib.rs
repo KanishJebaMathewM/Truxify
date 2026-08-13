@@ -1,8 +1,6 @@
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
-mod zkp_edge_verifier;
-
 #[derive(Serialize, Deserialize)]
 pub struct Coordinate {
     pub lat: f64,

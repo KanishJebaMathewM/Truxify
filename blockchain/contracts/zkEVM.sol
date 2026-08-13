@@ -131,9 +131,10 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             require(_verifySignature(txHashForSig, signature, from), "Invalid signature");
 
             processedTxHashes[txHash] = true;
-            usedNonces[from][nonce] = true;
 
             // Same per-tx signature/nonce/balance checks as the single-tx path.
+            // _applyTx marks the nonce used; do not mark it before the call or
+            // _applyTx's own "Nonce already used" check reverts every batch.
             _applyTx(from, to, value, data, nonce, gasPrice, gasLimit, signature);
             txHashes[i] = txHash;
         }

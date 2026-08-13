@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
-import { supabase, redisClient, createUserClient } from '../../config/db.js';
+import { supabase, supabaseAdmin, redisClient, createUserClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
@@ -230,14 +230,23 @@ class WebRTCSignalingServer {
     const userClient = peer.token ? createUserClient(peer.token) : null;
     const gpsClient = userClient || supabase;
 
+    // gps_offline_data is RLS-scoped by `peerId = get_profile_id()::text`, so
+    // rows must be keyed by the authenticated user's profile id (peer.userId),
+    // never the ephemeral WebRTC session id. Fail closed when the owner cannot
+    // be established so an un-owned frame is never written.
+    if (!peer.userId) {
+      logger.warn(`[WebRTC] GPS data dropped for peer ${peerId}: no authenticated user id`);
+      return;
+    }
+
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
     };
 
-    // Store GPS data in MongoDB with offline sync flag
+    // Store GPS data with offline sync flag, keyed by the owner's profile id
     const gpsEntry = {
-      peerId,
+      peerId: peer.userId,
       data: normalizedData,
       timestamp: Date.now(),
       synced: false
@@ -406,34 +415,46 @@ class WebRTCSignalingServer {
     if (user?.role === 'admin') return true;
 
     const peer = this.peers.get(peerId);
-    return Boolean(peer && peer.userId === user?.id);
+    // Both ids must actually be present: `peer.userId === user?.id` is true
+    // when both sides are undefined, which would admit a caller with no id to
+    // any peer registered from a token carrying no `id` claim.
+    return Boolean(
+      peer && peer.userId != null && user?.id != null && peer.userId === user.id,
+    );
   }
 
-  async getOfflineGPSData(peerId, since, requestingUser) {
+  async getOfflineGPSData(peerId, since, requestingUser, token) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized offline GPS data access attempt for peer ${peerId}`);
       return [];
     }
-    const { data } = await supabase
+    // Rows are keyed by the owning profile id (matches the `peerId =
+    // get_profile_id()` RLS policy); resolve it from the active peer session
+    // and fall back to the caller's own id.
+    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
+    const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
+    const { data } = await client
       .from('gps_offline_data')
       .select('*')
-      .eq('peerId', peerId)
+      .eq('peerId', ownerId)
       .gt('timestamp', since || 0)
       .order('timestamp', { ascending: true });
-    
+
     return data || [];
   }
 
-  async syncOfflineData(peerId, requestingUser) {
+  async syncOfflineData(peerId, requestingUser, token) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
+    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
+    const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
     // Mark data as synced for this peer
-    await supabase
+    await client
       .from('gps_offline_data')
       .update({ synced: true })
-      .eq('peerId', peerId)
+      .eq('peerId', ownerId)
       .eq('synced', false);
   }
 }

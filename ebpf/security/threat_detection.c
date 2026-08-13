@@ -6,6 +6,45 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+#ifndef AF_INET
+#define AF_INET 2
+#endif
+#ifndef AF_INET6
+#define AF_INET6 10
+#endif
+
+// Prefix match helper. str is a bounded stack buffer filled by
+// bpf_probe_read_user_str; prefix_len is a small compile-time constant, so the
+// loop is fully unrolled and verifier-safe.
+static __always_inline int str_has_prefix(const char *str, const char *prefix, int prefix_len)
+{
+    for (int i = 0; i < prefix_len; i++) {
+        if (str[i] != prefix[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Substring match helper over a bounded stack buffer (replaces libc strstr,
+// which is unavailable to the BPF verifier).
+static __always_inline int str_contains(const char *str, int str_len, const char *sub, int sub_len)
+{
+    for (int i = 0; i <= str_len - sub_len; i++) {
+        int match = 1;
+        for (int j = 0; j < sub_len; j++) {
+            if (str[i + j] != sub[j]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Map for threat events
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -29,23 +68,31 @@ struct {
     __type(value, __u64);    // file hash
 } file_hashes SEC(".maps");
 
-// Tracepoint for failed login attempts
+// Tracepoint for sensitive file access
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_file_access(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[1];
+    char filename[256];
+    // args->args[1] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[1]) < 0) {
+        return 0;
+    }
     
     // Check for sensitive files
-    const char *sensitive_files[] = {
-        "/etc/passwd",
-        "/etc/shadow",
-        "/etc/sudoers",
-        "/root/.ssh/id_rsa",
-        "/etc/ssl/private/"
+    struct {
+        const char *path;
+        int len;
+    } sensitive_files[] = {
+        { "/etc/passwd", 11 },
+        { "/etc/shadow", 11 },
+        { "/etc/sudoers", 12 },
+        { "/root/.ssh/id_rsa", 17 },
+        { "/etc/ssl/private/", 17 }
     };
     
     for (int i = 0; i < 5; i++) {
-        if (strncmp(filename, sensitive_files[i], strlen(sensitive_files[i])) == 0) {
+        if (str_has_prefix(filename, sensitive_files[i].path, sensitive_files[i].len)) {
             bpf_printk("Sensitive file access: %s\n", filename);
         }
     }
@@ -53,23 +100,31 @@ int trace_file_access(struct trace_event_raw_sys_enter *args)
     return 0;
 }
 
-// Tracepoint for failed login attempts
+// Tracepoint for process execution
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_process_exec(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the executable path; probe it
+    // into a bounded stack buffer before any string matching.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     
     // Check for suspicious processes
-    const char *suspicious_processes[] = {
-        "nc", "netcat", "ncat",
-        "telnet", "ftp", "sshpass",
-        "curl", "wget",
-        "python -c", "perl -e",
-        "bash -i", "sh -i"
+    struct {
+        const char *name;
+        int len;
+    } suspicious_processes[] = {
+        { "nc", 2 }, { "netcat", 6 }, { "ncat", 4 },
+        { "telnet", 6 }, { "ftp", 3 }, { "sshpass", 7 },
+        { "curl", 4 }, { "wget", 4 },
+        { "python -c", 9 }, { "perl -e", 7 },
+        { "bash -i", 7 }, { "sh -i", 5 }
     };
     
-    for (int i = 0; i < 11; i++) {
-        if (strstr(filename, suspicious_processes[i]) != NULL) {
+    for (int i = 0; i < 12; i++) {
+        if (str_contains(filename, sizeof(filename), suspicious_processes[i].name, suspicious_processes[i].len)) {
             bpf_printk("Suspicious process: %s\n", filename);
         }
     }
@@ -81,7 +136,28 @@ int trace_process_exec(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_connect")
 int trace_network_connect(struct trace_event_raw_sys_enter *args)
 {
-    __u32 port = (__u32)args->args[1];
+    __u32 port = 0;
+    __u16 family = 0;
+    __u16 sin_port = 0;
+    char *sockaddr = (char *)(long)args->args[1];
+
+    // args->args[1] is a pointer to a userspace struct sockaddr, not the
+    // port. Reading the pointer value as the port never matches real ports;
+    // probe the sockaddr first and inspect sa_family.
+    if (bpf_probe_read_user(&family, sizeof(family), sockaddr) != 0) {
+        return 0;
+    }
+
+    // sin_port / sin6_port is a __u16 at offset 2 of both sockaddr_in and
+    // sockaddr_in6, in network byte order.
+    if (family == AF_INET || family == AF_INET6) {
+        if (bpf_probe_read_user(&sin_port, sizeof(sin_port), sockaddr + 2) != 0) {
+            return 0;
+        }
+        port = bpf_ntohs(sin_port);
+    } else {
+        return 0;
+    }
     
     // Check for suspicious ports
     const __u32 suspicious_ports[] = {

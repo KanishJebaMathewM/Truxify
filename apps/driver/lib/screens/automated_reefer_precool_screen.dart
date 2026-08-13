@@ -65,7 +65,7 @@ class _AutomatedReeferPrecoolScreenState extends State<AutomatedReeferPrecoolScr
 
   Widget _buildWeatherEtaCard(ReeferTelemetry t) {
     return Card(
-      color: Colors.grey[850],
+      color: Colors.grey[800],
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -171,7 +171,7 @@ class _AutomatedReeferPrecoolScreenState extends State<AutomatedReeferPrecoolScr
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
       child: const Text('REEFER OFF', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 18)),
     );
   }
@@ -189,7 +189,7 @@ class _AutomatedReeferPrecoolScreenState extends State<AutomatedReeferPrecoolScr
   Widget _buildMetricCard(String title, String value, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: Colors.grey[800], borderRadius: BorderRadius.circular(12)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

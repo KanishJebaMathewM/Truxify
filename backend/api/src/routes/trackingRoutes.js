@@ -19,7 +19,6 @@ const publicTrackingLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
   store: createStore('rl:public-tracking:'),
 });
 

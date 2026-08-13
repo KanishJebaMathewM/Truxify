@@ -140,19 +140,27 @@ export function parseDistanceKm(value) {
  */
 export function buildWeeklyChart(trips, { period = 'week', now = new Date() } = {}) {
   const frameDays = period === 'day' ? 1 : period === 'month' ? 30 : 7;
+  // Anchor the frame at UTC midnight so the bucket keys and the trip_date
+  // (YYYY-MM-DD) keys share one zone. The previous code built buckets from
+  // local-time midnight but formatted them via toISOString() (UTC), so on any
+  // non-UTC server the keys shifted by the UTC offset and trips landed in the
+  // wrong day or were dropped entirely (#11723).
+  const anchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const buckets = {};
   for (let i = frameDays - 1; i >= 0; i -= 1) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
+    const d = new Date(anchor);
+    d.setUTCDate(d.getUTCDate() - i);
     buckets[toDateKey(d)] = 0;
   }
 
   for (const trip of Array.isArray(trips) ? trips : []) {
-    const tripDate = new Date(trip.trip_date);
-    if (Number.isNaN(tripDate.getTime())) {
+    // trip_date is already the YYYY-MM-DD calendar-day key the column stores;
+    // use it directly (stripping any timestamp) so no time-zone shifting can
+    // mis-bucket a trip.
+    const key = String(trip.trip_date || '').split('T')[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
       continue;
     }
-    const key = toDateKey(tripDate);
     if (buckets[key] !== undefined) {
       buckets[key] += toAmount(trip.total_earnings);
     }

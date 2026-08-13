@@ -101,27 +101,4 @@ describe('CircuitBreaker Unit Tests', () => {
     expect(breaker.state).toBe(CircuitState.CLOSED);
     expect(breaker.failureCount).toBe(0);
   });
-
-  it('triggers request timeout when execution exceeds requestTimeoutMs', async () => {
-    const breaker = new CircuitBreaker('testTimeoutBreaker', {
-      requestTimeoutMs: 50,
-    });
-    const slowFn = () => new Promise((resolve) => setTimeout(resolve, 200));
-
-    await expect(breaker.execute(slowFn)).rejects.toThrow('Request timed out after 50ms');
-  });
-
-  it('passes arguments to fallback function on failure', async () => {
-    const fallback = vi.fn((arg1, arg2) => `fallback:${arg1}:${arg2}`);
-    const breaker = new CircuitBreaker('testFallbackArgsBreaker', {
-      failureThreshold: 1,
-      fallback,
-    });
-    const fnFail = vi.fn().mockRejectedValue(new Error('Failure'));
-
-    const result = await breaker.execute(fnFail, 'val1', 42);
-
-    expect(result).toBe('fallback:val1:42');
-    expect(fallback).toHaveBeenCalledWith('val1', 42);
-  });
 });

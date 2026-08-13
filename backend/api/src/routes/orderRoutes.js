@@ -155,7 +155,14 @@ import {
   createOrderSchema, submitBidSchema, submitRatingSchema, paramIdSchema, acceptBidParamsSchema,
   updateMilestoneSchema, verifyDeliverySchema, predictDemandSchema, changeDropSchema, cancelOrderSchema,
 } from '../validation/requestSchemas.js';
-
+import { awardReputationPoints } from '../services/reputation.js';
+import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
+import { DomainError } from '../services/order/domainError.js';
+import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
+import { requireIdempotency } from '../middleware/idempotency.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import logger from '../middleware/logger.js';
+import { auditLog } from '../middleware/auditLog.js';
 import {
   createOrder,
   getActiveOrders,
@@ -213,8 +220,8 @@ const getOrderResource = async (req) => {
 };
 
 
-// 1. CREATE AN ORDER (CUSTOMER)
-router.post('/', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateBody(createOrderSchema), createOrder);
+router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+  const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
@@ -222,8 +229,16 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), g
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
 
-// 4. FETCH EN-ROUTE LOADS (MARKETPLACE)
-router.get('/load-offers/en-route', authenticate, userLimiter, getEnRouteLoads);
+  if (!id || !id.trim()) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
+  let geofenceRadiusM;
+  if (geofence_radius_m !== undefined) {
+    geofenceRadiusM = parseFloat(geofence_radius_m);
+    if (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0) {
+      return res.status(400).json({ error: 'Invalid geofence_radius_m' });
+    }
+  }
 
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), getOrderHistory);
@@ -277,7 +292,195 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), cancelOrder);
 
 // 17. CONFIRM ESCROW DEPOSIT (CUSTOMER)
-router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') })), confirmDeposit);
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}/confirm-deposit:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Confirm escrow deposit
+ *     description: Confirms that an escrow deposit transaction has been completed for an order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Deposit confirmed
+ */
+router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('order:confirm-deposit'), auditLog({ action: 'order:confirm-deposit', resourceType: 'order' }), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(
+  z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
+), async (req, res) => {
+  const orderId = req.params.id;
+  const { txHash } = req.body;
+
+  const lockKey = `escrow_lock:${orderId}`;
+  const lockValue = await acquireLock(lockKey, 120000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
+  }
+
+  try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance');
+    orderValidationService.assertOrderFound(order);
+    orderValidationService.assertCustomerOwnership(order, req.user.id);
+    orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
+    if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
+
+    const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+    const customerWallet = customerProfile?.polygon_wallet_address ?? null;
+    const bookingId = order.escrow_booking_id || (order.order_display_id ? getEscrowBookingId(order.order_display_id) : orderId);
+
+    // Two-phase acceptance (#5724): once the deposit is verified on-chain we
+    // finalize the driver assignment via accept_bid_tx. If that cannot be
+    // completed the deposit is refunded and the order stays pending.
+    const finalizeAcceptance = async () => {
+      const pending = order.pending_bid_acceptance;
+      if (!pending) return;
+      const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
+        p_bid_id: pending.bid_id,
+        p_order_id: orderId,
+        p_load_id: pending.load_id,
+        p_driver_id: pending.driver_id,
+        p_truck_id: pending.truck_id,
+        p_driver_name: pending.driver_name,
+        p_driver_rating: pending.driver_rating,
+        p_truck_number: pending.truck_number,
+        p_bid_amount: pending.bid_amount,
+        p_order_display_id: pending.order_display_id,
+        p_expected_version: pending.version,
+        p_escrow_booking_id: bookingId,
+      }, req.token ? createUserClient(req.token) : undefined);
+      if (acceptErr) {
+        logger.error('[confirm-deposit] accept_bid_tx failed:', acceptErr.message);
+        // The refund is authoritative: only claim the deposit was refunded once
+        // the on-chain refund was actually submitted. escrowRefund resolves to
+        // { txHash, bookingId, waitForConfirmation } on success or
+        // { txHash: null, bookingId, error } when the submit fails.
+        let refundResult;
+        try {
+          refundResult = await submitEscrowRefund(order.order_display_id);
+        } catch (refundErr) {
+          logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
+          refundResult = { error: refundErr.message };
+        }
+        let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+        if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
+          try {
+            await refundResult.waitForConfirmation();
+          } catch (confirmErr) {
+            logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
+            refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
+            refundConfirmed = false;
+          }
+        } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
+          refundConfirmed = false;
+          refundResult = {
+            error: refundResult.error || 'escrow refund confirmation is unavailable',
+            txHash: refundResult.txHash,
+          };
+        }
+
+        if (!refundConfirmed) {
+          // The deposit is still locked on-chain. Keep escrow_booking_id and
+          // pending_bid_acceptance intact and return the order to the 'funding'
+          // state so escrowFundingReconciliation reclaims the deposit; report a
+          // retryable error instead of a false "refunded" success.
+          const refundError = refundResult?.error || 'escrow refund was not submitted';
+          await orderRepository.updateOrder(orderId, {
+            escrow_status: 'funding',
+            escrow_funding_error: `escrow refund pending: ${refundError}`,
+          }).catch((stateErr) => {
+            logger.error('[confirm-deposit] Failed to mark escrow refund pending:', stateErr.message);
+          });
+          throw new DomainError(503, {
+            error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
+            details: `${acceptErr.message}; escrow refund: ${refundError}`,
+          });
+        }
+
+        // Refund confirmed on-chain — safe to release the escrow booking reference.
+        await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
+          logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
+        });
+        throw new DomainError(409, {
+          error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
+          details: acceptErr.message,
+        });
+      }
+      sendPushNotification(
+        pending.driver_id,
+        'Bid Accepted!',
+        `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
+        'order_update',
+        { orderId, orderDisplayId: pending.order_display_id }
+      ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
+    };
+
+    // Resolve the authoritative expected deposit amount for this order and
+    // cross-check it against the server-written bid context. This must happen
+    // BEFORE any client-supplied value is trusted: the on-chain deposit is
+    // only accepted if it matches the amount the app actually recorded.
+    const resolvedAmount = resolveExpectedDepositAmount(order);
+    if (resolvedAmount.error) {
+      return res.status(422).json({ error: resolvedAmount.error, code: resolvedAmount.code });
+    }
+    const expectedAmountWei = resolvedAmount.expectedAmountWei;
+
+    const result = await recordDepositTx(
+      bookingId,
+      txHash,
+      customerWallet,
+      order.escrow_driver_wallet ?? null,
+      expectedAmountWei
+    );
+
+    if (result.alreadyFunded) {
+      const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+        escrow_status: 'funded',
+      }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+
+      if (!updateErr && updatedData) {
+        await finalizeAcceptance();
+        return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
+      }
+      return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
+    }
+
+    if (result.error) {
+      return res.status(422).json({ error: result.error, code: result.code });
+    }
+
+    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+      escrow_status: 'funded',
+    }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+
+    if (updateErr) {
+      logger.error('[confirm-deposit] DB update failed:', updateErr.message);
+      return res.status(500).json({ error: 'Database update failed after deposit confirmation. Please contact support.' });
+    }
+
+    if (!updatedData) {
+      logger.error('[confirm-deposit] No row updated — escrow_status may not have been "funding"');
+      return res.status(409).json({ error: 'Order was not in funding state. Please refresh and try again.' });
+    }
+
+    await finalizeAcceptance();
+    res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('[confirm-deposit] Exception:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    await releaseLock(lockKey, lockValue);
+  }
+});
 
 // 18. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), predictRideDemand);
@@ -347,7 +550,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
+      const { error: upErr } = await supabase.storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -368,7 +571,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
+      const { error: upErr } = await supabase.storage
         .from('driver-documents')
         .upload(storagePath, file.buffer, { contentType: file.mimetype });
       if (upErr) {
@@ -425,13 +628,6 @@ router.get('/history', authenticate, userLimiter, requirePolicy('order:view-hist
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
 
-  if (page < 1) {
-    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
-  }
-  if (limit < 1 || limit > 100) {
-    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
-  }
-
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
     return res.json(result);
@@ -465,13 +661,6 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 
   const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
   const limit = parseInt(req.query.limit, 10) || 20;
-
-  if (page < 1) {
-    return res.status(400).json({ error: 'Invalid page parameter. Must be a positive integer.' });
-  }
-  if (limit < 1 || limit > 100) {
-    return res.status(400).json({ error: 'Invalid limit parameter. Must be between 1 and 100.' });
-  }
 
   try {
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);

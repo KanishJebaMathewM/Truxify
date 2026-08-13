@@ -121,12 +121,11 @@ class WASIRuntime {
                 throw new Error('Instance timeout');
             }
             
-            // Start WASI runtime before invoking any exports — WASI must be
-            // initialized before the WASM module can safely use stdin/stdout/stderr
-            wasi.start(instance);
-            
             // Execute function
             const result = instance.exports[functionName](...args);
+            
+            // Handle WASI
+            wasi.start(instance);
             
             return result;
             

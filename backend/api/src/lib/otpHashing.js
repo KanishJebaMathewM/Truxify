@@ -15,17 +15,9 @@ export function hashOtp(otp, saltHex) {
   if (otp === null || otp === undefined || (typeof otp === 'string' && otp.trim() === '')) {
     throw new TypeError('OTP must be a non-empty value');
   }
-  let salt = saltHex;
-  if (salt === undefined || salt === null) {
-    salt = crypto.randomBytes(16).toString('hex');
-  } else if (typeof salt !== 'string' || !/^[a-f0-9]{32}$/i.test(salt)) {
-    // A supplied salt must be the hex encoding of exactly 16 bytes. Anything
-    // else would either make scrypt throw a cryptic error or (worse) silently
-    // weaken the KDF with a tiny salt.
-    throw new TypeError('saltHex must be a 32-character hex string (16 bytes)');
-  }
+  const salt = saltHex || crypto.randomBytes(16).toString('hex');
   const key = crypto.scryptSync(String(otp), salt, 64);
-  return { hash: key.toString('hex'), salt: salt.toLowerCase() };
+  return { hash: key.toString('hex'), salt };
 }
 
 /**
@@ -42,11 +34,6 @@ export function hashOtp(otp, saltHex) {
 export function verifyOtpHash(otp, otpRecord) {
   if (!otpRecord) return false;
   if (otpRecord.otp_salt) {
-    // A malformed stored salt must fail verification cleanly (false), not
-    // throw from scrypt.
-    if (typeof otpRecord.otp_salt !== 'string' || !/^[a-f0-9]{32}$/i.test(otpRecord.otp_salt)) {
-      return false;
-    }
     const { hash: submittedHash } = hashOtp(otp, otpRecord.otp_salt);
     const expected = String(otpRecord.otp_hash || '');
     if (!/^[a-f0-9]{128}$/.test(expected)) return false;

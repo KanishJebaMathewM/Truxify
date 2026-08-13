@@ -1621,7 +1621,9 @@ class _TripsScreenState extends State<TripsScreen> {
       );
     }
 
-    final points = routePoints.map((point) {
+    final points = routePoints.where((point) {
+      return point['latitude'] is num && point['longitude'] is num;
+    }).map((point) {
       return ll.LatLng(
         (point['latitude'] as num).toDouble(),
         (point['longitude'] as num).toDouble(),
@@ -1658,7 +1660,8 @@ class _TripsScreenState extends State<TripsScreen> {
               p == routePoints.first ||
               p == routePoints.last ||
               p['is_claimed'] == true
-            ).map<Marker>((point) {
+            ).where((p) => p['latitude'] is num && p['longitude'] is num)
+            .map<Marker>((point) {
               return Marker(
                 point: ll.LatLng(
                   (point['latitude'] as num).toDouble(),

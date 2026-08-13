@@ -29,8 +29,17 @@ class OfflineRouteMatrixService {
             sin(dLng / 2);
 
     double c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    double distanceKm = (earthRadiusKm * c * 1.25); // Apply road winding factor
-    double durationMins = (distanceKm / 55.0) * 60.0;
+    // Great-circle distance is always <= real road distance. Trucks cannot
+    // follow straight lines (highways, detours, restricted turns), so we apply a
+    // detour/winding factor. 1.5 better approximates truck road distance than the
+    // old 1.25. This is still an approximation; expect a residual error band of
+    // roughly -10%..+30% versus real road distance depending on terrain/corridor.
+    const double detourFactor = 1.5;
+    double distanceKm = (earthRadiusKm * c * detourFactor);
+    // Representative average truck speed (km/h) blending urban/highway corridors,
+    // lower than the old flat 55 km/h to reflect real truck operating speeds.
+    const double avgTruckSpeedKmh = 50.0;
+    double durationMins = (distanceKm / avgTruckSpeedKmh) * 60.0;
     double fuelLiters = distanceKm * 0.32;
 
     return {

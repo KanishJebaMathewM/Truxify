@@ -114,7 +114,7 @@ describe('roadConditionController', () => {
       expect(res.status).toHaveBeenCalledWith(400);
     });
 
-    it('returns nearby grip data', async () => {
+     it('returns nearby grip data', async () => {
       supabaseAdmin.from = vi.fn(() => supabaseAdmin);
       supabaseAdmin.limit.mockResolvedValue({ data: [{ id: 'r1' }], error: null });
 
@@ -124,6 +124,25 @@ describe('roadConditionController', () => {
       await getNearbyGripData(req, res);
 
       expect(res.json).toHaveBeenCalledWith({ success: true, data: [{ id: 'r1' }] });
+    });
+
+    it('clamps the latitude bounding box to the valid range near the poles', async () => {
+      supabaseAdmin.from = vi.fn(() => supabaseAdmin);
+      supabaseAdmin.limit.mockResolvedValue({ data: [], error: null });
+
+      const req = { query: { lat: '89.9', lng: '0', radius_miles: '1000' } };
+      const res = mockRes();
+
+      await getNearbyGripData(req, res);
+
+      // The two latitude filters must be within [-90, 90].
+      const gteCalls = supabaseAdmin.gte.mock.calls;
+      const lteCalls = supabaseAdmin.lte.mock.calls;
+      const latGte = gteCalls.find(c => c[0] === 'latitude');
+      const latLte = lteCalls.find(c => c[0] === 'latitude');
+      expect(latGte[1]).toBeGreaterThanOrEqual(-90);
+      expect(latLte[1]).toBeLessThanOrEqual(90);
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: [] });
     });
   });
 });

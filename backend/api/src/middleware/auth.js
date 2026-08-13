@@ -110,9 +110,7 @@ export async function verifyAuthToken(token) {
       userProfile = profile;
 
       if (userProfile) {
-        // Clamp the cached profile TTL to the token's remaining lifetime so a
-        // cached profile can never outlive the access token that authorised it.
-        const cacheTtl = Math.max(1, Math.min(TTL_SECONDS, tokenRemaining));
+        const cacheTtl = Math.min(TTL_SECONDS, Math.max(1, tokenRemaining));
         await setCachedProfile(firebaseUid, {
           id: userProfile.id,
           uid: userProfile.firebase_uid,
@@ -131,7 +129,7 @@ export async function verifyAuthToken(token) {
 
   return {
     id: userProfile.id,
-    uid: userProfile.firebase_uid || userProfile.id,
+    uid: userProfile.uid ?? userProfile.firebase_uid,
     role: userProfile.role,
     fullName: userProfile.fullName ?? userProfile.full_name,
     phone: userProfile.phone,
@@ -269,7 +267,6 @@ export async function authenticate(req, res, next) {
     let firebaseUid = null;
     let supabaseUserId = null;
     let userClient = null;
-    let decodedToken = null;
 
     let decoded;
     try {
@@ -348,10 +345,9 @@ export async function authenticate(req, res, next) {
           error: "Firebase Auth verification is not configured on this server.",
         });
       }
-      const verifiedFirebaseToken = await firebaseAdmin
+      const decodedToken = await firebaseAdmin
         .auth()
         .verifyIdToken(token, true);
-      decodedToken = verifiedFirebaseToken;
       firebaseUid = decodedToken.uid;
 
       // Check Redis cache first.
@@ -427,32 +423,31 @@ export async function authenticate(req, res, next) {
         profileIsDeactivated = !!inactive;
       }
 
-      if (profileIsDeactivated) {
-        if (firebaseUid) {
-          try {
-            await setCachedProfile(
-              firebaseUid,
-              { isActive: false },
-              TOMBSTONE_TTL_SECONDS,
-            );
-          } catch (err) {
-            logger.error({ err }, "Cache set failed");
-          }
-        }
-        if (supabaseUserId) {
-          void setCachedSupabaseProfile(
-            supabaseUserId,
+      if (firebaseUid) {
+        try {
+          await setCachedProfile(
+            firebaseUid,
             { isActive: false },
             TOMBSTONE_TTL_SECONDS,
           );
+        } catch (err) {
+          logger.error({ err }, "Cache set failed");
         }
+      }
+      if (supabaseUserId) {
+        void setCachedSupabaseProfile(
+          supabaseUserId,
+          { isActive: false },
+          TOMBSTONE_TTL_SECONDS,
+        );
+      }
 
+      if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
           hint: "Contact support to reactivate your account.",
         });
       }
-
       return res.status(403).json({
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",
@@ -462,7 +457,7 @@ export async function authenticate(req, res, next) {
     // Attach user data to request context
     req.user = {
       id: userProfile.id,
-      uid: userProfile.firebase_uid || userProfile.id,
+      uid: userProfile.firebase_uid,
       role: userProfile.role,
       fullName: userProfile.full_name,
       phone: userProfile.phone,
@@ -472,14 +467,7 @@ export async function authenticate(req, res, next) {
     // Populate cache on successful DB fetch
     if (userProfile.firebase_uid) {
       try {
-        // Clamp the cached profile TTL to the token's remaining lifetime so a
-        // cached profile can never outlive the access token that authorised it.
-        const nowSeconds = Math.floor(Date.now() / 1000);
-        const firebaseTokenRemaining = decodedToken.exp
-          ? decodedToken.exp - nowSeconds
-          : TTL_SECONDS;
-        const firebaseTtl = Math.max(1, Math.min(TTL_SECONDS, firebaseTokenRemaining));
-        await setCachedProfile(userProfile.firebase_uid, req.user, firebaseTtl);
+        await setCachedProfile(userProfile.firebase_uid, req.user);
       } catch (err) {
         logger.error({ err }, "Cache set failed");
       }

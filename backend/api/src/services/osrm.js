@@ -56,8 +56,7 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate(opts = {}) {
-  const { pickupLat, pickupLng, dropLat, dropLng } = opts || {};
+export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -167,8 +166,7 @@ function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
 
-export async function getRouteGeometry(opts = {}) {
-  const { originLat, originLng, destLat, destLng } = opts || {};
+export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
@@ -249,8 +247,7 @@ export async function getRouteGeometry(opts = {}) {
   });
 }
 
-export function buildStraightLineGeometry(opts = {}) {
-  const { originLat, originLng, destLat, destLng } = opts || {};
+export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
     !Number.isFinite(destLat) || !Number.isFinite(destLng)
@@ -279,3 +276,23 @@ export const __testing = {
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
+
+
+// === Spec 22: ===
+// === Spec 22: OSRM failover ===
+export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const t = (d) => (d * Math.PI) / 180;
+  const dLat = t(lat2 - lat1);
+  const dLon = t(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(t(lat1))*Math.cos(t(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+export async function routeWithFailover(primary, _fb, coords) {
+  try { return await primary(coords); }
+  catch (err) {
+    const [a, b] = coords[0];
+    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+  }
+}
+

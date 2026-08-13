@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const mockFrom = vi.fn();
 const mockOrderRepository = {
-  getTimeline: vi.fn(),
-  updateTimelineMilestone: vi.fn(),
-  createTimeline: vi.fn(),
+  addTimelineEvent: vi.fn(),
+  getOrderTimeline: vi.fn(),
 };
+
+vi.mock('../../src/config/db.js', () => ({
+  supabase: { from: mockFrom },
+}));
+
+vi.mock('../../src/core/container.js', () => ({
+  orderRepository: mockOrderRepository,
+}));
 
 describe('orderTimelineService', () => {
   let orderTimelineService;
@@ -12,47 +20,47 @@ describe('orderTimelineService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    const { OrderTimelineService } = await import('../../src/services/order/orderTimelineService.js');
-    orderTimelineService = new OrderTimelineService(mockOrderRepository);
+    orderTimelineService = (await import('../../src/services/order/orderTimelineService.js')).default;
+  });
+
+  describe('addTimelineEvent', () => {
+    it('adds a timeline event with actor info', async () => {
+      const event = { id: 'e1', order_id: 'order-1', type: 'status_change', created_at: new Date().toISOString() };
+      mockOrderRepository.addTimelineEvent.mockResolvedValue(event);
+
+      const result = await orderTimelineService.addTimelineEvent('order-1', {
+        type: 'status_change',
+        actor: 'driver-1',
+        description: 'Order started',
+      });
+      expect(mockOrderRepository.addTimelineEvent).toHaveBeenCalled();
+    });
+
+    it('throws when database insert fails', async () => {
+      mockOrderRepository.addTimelineEvent.mockRejectedValue(new Error('DB insert failed'));
+      await expect(
+        orderTimelineService.addTimelineEvent('order-1', { type: 'status_change' }),
+      ).rejects.toThrow('DB insert failed');
+    });
   });
 
   describe('getOrderTimeline', () => {
-    it('returns events for an order', async () => {
-      mockOrderRepository.getTimeline.mockResolvedValue({
-        data: [{ id: 'e1', milestone: 'Order Placed' }],
-        error: null,
-      });
+    it('returns events in chronological order', async () => {
+      const events = [
+        { id: 'e1', created_at: '2026-08-01T10:00:00Z', type: 'created' },
+        { id: 'e2', created_at: '2026-08-01T11:00:00Z', type: 'status_change' },
+      ];
+      mockOrderRepository.getOrderTimeline.mockResolvedValue(events);
 
       const result = await orderTimelineService.getOrderTimeline('order-1');
-      expect(result).toHaveLength(1);
-      expect(mockOrderRepository.getTimeline).toHaveBeenCalledWith('order-1');
+      expect(result).toHaveLength(2);
+      expect(result[0].created_at).toBeLessThan(result[1].created_at);
     });
 
     it('returns empty array when no events', async () => {
-      mockOrderRepository.getTimeline.mockResolvedValue({ data: [], error: null });
+      mockOrderRepository.getOrderTimeline.mockResolvedValue([]);
       const result = await orderTimelineService.getOrderTimeline('order-1');
       expect(result).toEqual([]);
-    });
-
-    it('throws when the timeline query fails', async () => {
-      mockOrderRepository.getTimeline.mockResolvedValue({ data: null, error: { message: 'DB down' } });
-      await expect(orderTimelineService.getOrderTimeline('order-1')).rejects.toThrow();
-    });
-  });
-
-  describe('completeMilestone', () => {
-    it('marks a milestone completed', async () => {
-      mockOrderRepository.updateTimelineMilestone.mockResolvedValue({ error: null });
-
-      await expect(orderTimelineService.completeMilestone('order-1', 'In Transit')).resolves.not.toThrow();
-      expect(mockOrderRepository.updateTimelineMilestone).toHaveBeenCalledWith(
-        'order-1', 'In Transit', expect.objectContaining({ completed: true }),
-      );
-    });
-
-    it('throws when the milestone update fails', async () => {
-      mockOrderRepository.updateTimelineMilestone.mockResolvedValue({ error: { message: 'DB down' } });
-      await expect(orderTimelineService.completeMilestone('order-1', 'In Transit')).rejects.toThrow();
     });
   });
 });

@@ -8,10 +8,8 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-MODEL_STORAGE_DIR = os.environ.get(
-    "MODEL_STORAGE_DIR",
-    os.path.join(os.path.dirname(__file__), "..", "..", "models_storage"),
-)
+MODEL_STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models_storage")
+
 _model_locks: dict[str, asyncio.Lock] = {}
 
 def _get_lock(model_name: str) -> asyncio.Lock:

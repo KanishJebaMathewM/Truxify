@@ -1,5 +1,5 @@
 import { EventPublisher } from '../EventPublisher.js';
-import { EventSubscriber } from '../EventSubscriber.js';
+import { EventSubscriber as EventSubscriberBase } from '../EventSubscriber.js';
 import logger from '../../../middleware/logger.js';
 
 export class WorkerEventAdapter extends EventPublisher {

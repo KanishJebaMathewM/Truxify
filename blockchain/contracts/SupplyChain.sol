@@ -9,14 +9,11 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     
     // ============ Structs ============
 
-<<<<<<< HEAD
-=======
     /// @dev Strict, forward-only lifecycle for shipments. Transitions must
     ///      advance one step at a time: Created -> InTransit -> Arrived ->
     ///      Delivered. The only terminal branch is Created -> Cancelled.
     enum ShipmentStatus { Created, InTransit, Arrived, Delivered, Cancelled }
 
->>>>>>> upstream/main
     struct Product {
         uint256 id;
         string name;
@@ -37,12 +34,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         address receiver;
         uint256 sentAt;
         uint256 receivedAt;
-<<<<<<< HEAD
-        string status; // CREATED, IN_TRANSIT, DELIVERED
-        string location;
-        bytes32 shipmentHash;
-        bool isActive;
-=======
         string status; // CREATED, IN_TRANSIT, ARRIVED, DELIVERED, CANCELLED
         string location;
         bytes32 shipmentHash;
@@ -50,7 +41,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         uint256 updatedAt;
         address verifiedBy;
         uint256 verifiedAt;
->>>>>>> upstream/main
     }
 
     struct TraceEvent {
@@ -79,21 +69,15 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
 
     mapping(uint256 => Product) public products;
     mapping(uint256 => Shipment) public shipments;
-<<<<<<< HEAD
-=======
     mapping(uint256 => ShipmentStatus[]) public shipmentStatusHistory;
->>>>>>> upstream/main
     mapping(uint256 => TraceEvent[]) public productEvents;
     mapping(uint256 => Verification[]) public productVerifications;
     mapping(uint256 => uint256[]) public productShipments;
 
-<<<<<<< HEAD
-=======
     /// @dev Independent parties allowed to verify shipments. A verifier must
     ///      not be the sender or receiver of the shipment it attests.
     mapping(address => bool) public verifiers;
 
->>>>>>> upstream/main
     uint256 private _productCounter;
     uint256 private _shipmentCounter;
     uint256 private _eventCounter;
@@ -105,14 +89,10 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer);
     event ProductUpdated(uint256 indexed productId, string name);
     event ShipmentCreated(uint256 indexed shipmentId, uint256 productId, address indexed sender);
-<<<<<<< HEAD
-    event ShipmentDelivered(uint256 indexed shipmentId, uint256 productId, address indexed receiver);
-=======
     event ShipmentStatusUpdated(uint256 indexed shipmentId, ShipmentStatus status, address indexed actor);
     event ShipmentDelivered(uint256 indexed shipmentId, uint256 productId, address indexed receiver);
     event ShipmentVerified(uint256 indexed shipmentId, address indexed verifier, uint256 timestamp);
     event VerifierUpdated(address indexed verifier, bool allowed);
->>>>>>> upstream/main
     event TraceEventAdded(uint256 indexed eventId, uint256 productId, string eventType);
     event ProductVerified(uint256 indexed verificationId, uint256 productId, bool isValid);
 
@@ -197,11 +177,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
             status: "CREATED",
             location: location,
             shipmentHash: keccak256(abi.encodePacked(productId, msg.sender, receiver, block.timestamp)),
-<<<<<<< HEAD
-            isActive: true
-        });
-
-=======
             isActive: true,
             updatedAt: block.timestamp,
             verifiedBy: address(0),
@@ -210,7 +185,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
 
         shipmentStatusHistory[shipmentId].push(ShipmentStatus.Created);
 
->>>>>>> upstream/main
         productShipments[productId].push(shipmentId);
 
         _addTraceEvent(productId, shipmentId, "SHIPPED", location, "Shipment created", msg.sender);
@@ -224,20 +198,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         string memory status,
         string memory location
     ) external whenNotPaused {
-<<<<<<< HEAD
-        require(shipments[shipmentId].isActive, "Shipment not active");
-        require(msg.sender == shipments[shipmentId].sender || msg.sender == shipments[shipmentId].receiver || msg.sender == owner(), "Not authorized");
-
-        shipments[shipmentId].status = status;
-        shipments[shipmentId].location = location;
-
-        if (keccak256(bytes(status)) == keccak256(bytes("DELIVERED"))) {
-            shipments[shipmentId].receivedAt = block.timestamp;
-        }
-
-        _addTraceEvent(
-            shipments[shipmentId].productId,
-=======
         Shipment storage s = shipments[shipmentId];
         require(s.isActive, "Shipment not active");
         require(msg.sender == s.sender || msg.sender == s.receiver || msg.sender == owner(), "Not authorized");
@@ -259,15 +219,12 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
 
         _addTraceEvent(
             s.productId,
->>>>>>> upstream/main
             shipmentId,
             status,
             location,
             string(abi.encodePacked("Shipment status updated to ", status)),
             msg.sender
         );
-<<<<<<< HEAD
-=======
 
         emit ShipmentStatusUpdated(shipmentId, newStatus, msg.sender);
         if (newStatus == ShipmentStatus.Delivered) {
@@ -307,7 +264,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         if (h == keccak256(bytes("DELIVERED"))) return ShipmentStatus.Delivered;
         if (h == keccak256(bytes("CANCELLED"))) return ShipmentStatus.Cancelled;
         revert("Invalid status");
->>>>>>> upstream/main
     }
 
     // ============ Trace Events ============
@@ -354,8 +310,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
 
     // ============ Verification ============
 
-<<<<<<< HEAD
-=======
     /**
      * @dev Owner registers or removes an independent verifier (e.g. an oracle
      *      or third-party verifier role) allowed to attest shipments.
@@ -383,7 +337,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         emit ShipmentVerified(shipmentId, msg.sender, block.timestamp);
     }
 
->>>>>>> upstream/main
     function verifyProduct(
         uint256 productId,
         bool isValid,
@@ -420,13 +373,10 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         return shipments[shipmentId];
     }
 
-<<<<<<< HEAD
-=======
     function getShipmentStatusHistory(uint256 shipmentId) external view returns (ShipmentStatus[] memory) {
         return shipmentStatusHistory[shipmentId];
     }
 
->>>>>>> upstream/main
     function getProductEvents(uint256 productId) external view returns (TraceEvent[] memory) {
         return productEvents[productId];
     }

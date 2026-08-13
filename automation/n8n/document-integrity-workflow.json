@@ -45,7 +45,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const driver = $input.item.json;\nconst docs = driver.documents || [];\nconst requiredDocs = ['rc_book', 'driving_licence', 'insurance'];\nconst missingOrTampered = [];\n\nfor (const docType of requiredDocs) {\n  const doc = docs.find(d => d.type === docType);\n  if (!doc) {\n    missingOrTampered.push({ type: docType, reason: 'missing' });\n  } else if (doc.status !== 'approved' || (doc.expiry_date && new Date(doc.expiry_date) < new Date())) {\n    missingOrTampered.push({ type: docType, reason: doc.status !== 'approved' ? 'unverified' : 'expired' });\n  }\n}\n\nreturn {\n  driver_id: driver.id || driver.driver_id,\n  driver_name: driver.name || 'Unknown',\n  has_issues: missingOrTampered.length > 0,\n  issues: missingOrTampered,\n  checked_at: new Date().toISOString()\n};"
+        "jsCode": "const driver = $input.item.json;\nconst docs = driver.documents || [];\nconst requiredDocs = ['rc_book', 'driving_licence'];\nconst missingOrTampered = [];\n\nfor (const docType of requiredDocs) {\n  const doc = docs.find(d => (d.document_type || d.type) === docType);\n  if (!doc) {\n    missingOrTampered.push({ type: docType, reason: 'missing' });\n  } else if (doc.status !== 'approved') {\n    missingOrTampered.push({ type: docType, reason: 'unverified' });\n  }\n}\n\nreturn {\n  driver_id: driver.id || driver.driver_id,\n  driver_name: driver.name || 'Unknown',\n  has_issues: missingOrTampered.length > 0,\n  issues: missingOrTampered,\n  checked_at: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -74,12 +74,12 @@
         0
       ],
       "id": "filter-issues",
-      "name": "Has Mismatch or Expiry?"
+      "name": "Has Mismatch?"
     },
     {
       "parameters": {
         "toEmail": "admin@truxify.com",
-        "subject": "⚠️ Document Tampering/Expiry Alert: Driver {{$json.driver_id}}",
+        "subject": "⚠️ Document Integrity Alert: Driver {{$json.driver_id}}",
         "htmlFormat": true,
         "message": "<h3>Document Verification Alert</h3><p>Driver ID: <strong>{{$json.driver_id}}</strong></p><p>Name: <strong>{{$json.driver_name}}</strong></p><p><strong>Issues Detected:</strong></p><pre>{{JSON.stringify($json.issues, null, 2)}}</pre><p>Checked at: {{$json.checked_at}}</p>",
         "options": {}

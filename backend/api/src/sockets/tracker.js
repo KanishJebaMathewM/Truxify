@@ -155,7 +155,7 @@ const consecutiveDropCount = new Map();
 // DRIVER STATE TTL & LAZY CLEANUP
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 300000; // default 5 min
+const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 60000; // default 1 min
 let lastDriverStateSweep = 0;
 
 function sweepStaleDriverState(now) {
@@ -281,6 +281,7 @@ let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
+let driverStateSweepInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
 
 // Observability counters
@@ -815,6 +816,12 @@ export function initWebSocketServer(server, orderRepository) {
   wsUpgradeLimitsCleanupInterval = setInterval(() => {
     sweepWsUpgradeMemoryLimits();
   }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
+
+  // Periodically purge stale circuit-breaker state for drivers, regardless of
+  // the total number of active drivers (fixes unbounded growth under < 50 drivers).
+  driverStateSweepInterval = setInterval(() => {
+    sweepStaleDriverState(Date.now());
+  }, DRIVER_STATE_SWEEP_INTERVAL_MS);
 
   if (!isSchedulerActive) {
     initTelemetryScheduler();
@@ -1478,6 +1485,11 @@ export async function closeWebSocketServer() {
   if (wsUpgradeLimitsCleanupInterval) {
     clearInterval(wsUpgradeLimitsCleanupInterval);
     wsUpgradeLimitsCleanupInterval = null;
+  }
+
+  if (driverStateSweepInterval) {
+    clearInterval(driverStateSweepInterval);
+    driverStateSweepInterval = null;
   }
 
   // Wait for MongoDB to be available before final flush

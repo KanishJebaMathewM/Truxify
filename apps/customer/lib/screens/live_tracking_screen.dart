@@ -16,6 +16,13 @@ import '../theme/app_theme.dart';
 import '../constants/supabase_config.dart';
 import '../services/supabase_service.dart';
 import '../widgets/common_widgets.dart';
+
+/// Shared cancellation-fee parser so the preview and confirm flows treat a
+/// missing fee identically (both must render "no fee", never "₹0.00 charged").
+double? parseFeeRupees(dynamic raw) {
+  return raw is num ? raw / 100 : null;
+}
+
 class LiveTrackingScreen extends StatefulWidget {
   final String orderId;
   final OrderService? orderService;
@@ -725,9 +732,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   Future<void> _showCancel() async {
     bool isLoading = false;
-    final rawFee = _order?['cancellation_fee'];
-    final feeInRupees = rawFee is num ? rawFee / 100 : null;
-    String? feeText = feeInRupees != null ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}' : null;
+    final feeInRupees = parseFeeRupees(_order?['cancellation_fee']);
+    String? feeText = feeInRupees != null
+        ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}'
+        : 'No cancellation fee';
 
     await showModalBottomSheet<void>(
       context: context,
@@ -759,12 +767,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           setModalState(() => isLoading = true);
                           try {
                             final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
-                            final rawFee = resp['cancellation_fee'];
-                            final feeInRupees = rawFee is num ? rawFee / 100 : 0;
+                            final feeInRupees = parseFeeRupees(resp['cancellation_fee']);
                             await _loadOrder();
                             if (!context.mounted) return;
                             Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}')));
+                            final feeMsg = feeInRupees != null
+                                ? 'Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}'
+                                : 'Order cancelled. No cancellation fee.';
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(feeMsg)));
                           } catch (e) {
                             setModalState(() => isLoading = false);
                             if (!context.mounted) return;

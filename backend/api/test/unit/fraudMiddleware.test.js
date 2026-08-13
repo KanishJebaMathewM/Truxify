@@ -14,9 +14,10 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { fraudDetectionMiddleware, networkAnalysisMiddleware } from '../../src/middleware/fraudMiddleware.js';
+import { fraudDetectionMiddleware, networkAnalysisMiddleware, classifyRiskLevel } from '../../src/middleware/fraudMiddleware.js';
 
 function makeReqRes(overrides = {}) {
+
   const req = {
     user: { id: 'u1' },
     method: 'GET',
@@ -136,4 +137,14 @@ describe('fraudMiddleware', () => {
       expect(res.status).toHaveBeenCalledWith(503);
     });
   });
+
+  describe('classifyRiskLevel', () => {
+    it('classifies scores correctly', () => {
+      expect(classifyRiskLevel(0.95)).toBe('HIGH');
+      expect(classifyRiskLevel(0.8)).toBe('MEDIUM');
+      expect(classifyRiskLevel(0.3)).toBe('LOW');
+      expect(classifyRiskLevel(null)).toBe('LOW');
+    });
+  });
 });
+

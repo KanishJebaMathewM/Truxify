@@ -4,6 +4,14 @@ import logger from './logger.js';
 const RISK_REVIEW_THRESHOLD = 0.7;
 const RISK_BLOCK_THRESHOLD = 0.9;
 
+export function classifyRiskLevel(riskScore) {
+  const score = Number(riskScore) || 0;
+  if (score > RISK_BLOCK_THRESHOLD) return 'HIGH';
+  if (score > RISK_REVIEW_THRESHOLD) return 'MEDIUM';
+  return 'LOW';
+}
+
+
 export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;

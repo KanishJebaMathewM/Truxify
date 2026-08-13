@@ -24,18 +24,21 @@ export const MAX_TRIPS_PER_SUMMARY = 500;
 /**
  * Start of the requested reporting period.
  *
+ * The `trip_date` column is written in UTC (`toISOString().slice(0, 10)`, see
+ * tripRoutes), so the lower bound is computed in UTC too. Mixing local calendar
+ * components here would shift the window by the server's UTC offset and by an
+ * extra hour across a DST boundary.
+ *
  * @param {'weekly'|'monthly'} period
  * @returns {Date} Inclusive lower bound for `trip_date`.
  */
 export function getPeriodStart(period) {
   const now = new Date();
   if (period === 'weekly') {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 7);
-    return d;
+    return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   }
-  // monthly (default) — from the first of the current month
-  return new Date(now.getFullYear(), now.getMonth(), 1);
+  // monthly (default) — from the first of the current month, in UTC
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
 /**

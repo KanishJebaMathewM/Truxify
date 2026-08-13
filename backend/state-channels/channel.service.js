@@ -2,6 +2,28 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { channelManager } from './channel_manager.js';
 
+/**
+ * Normalize a channel deposit value into wei (BigInt) using an explicit 18
+ * decimal scale. The JSON body `amount` may arrive as a string, number, or
+ * float; we force a string and validate it is a non-negative decimal before
+ * scaling so a value already expressed in wei, a float, or junk input cannot be
+ * silently mis-scaled by `parseEther`.
+ *
+ * @param {string|number} amount human-readable decimal value (in ether units)
+ * @returns {bigint} value in wei
+ */
+export function normalizeChannelValue(amount) {
+    const value = String(amount).trim();
+    if (!/^\d+(\.\d+)?$/.test(value)) {
+        throw new Error(`Invalid channel value: ${amount} (expected a positive decimal)`);
+    }
+    const valueWei = ethers.parseUnits(value, 18);
+    if (valueWei <= 0n) {
+        throw new Error(`Invalid channel value: ${amount} (must be greater than zero)`);
+    }
+    return valueWei;
+}
+
 class StateChannelService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -36,8 +58,10 @@ class StateChannelService {
 
     async openChannel(participantA, participantB, amount) {
         try {
+            const valueWei = normalizeChannelValue(amount);
+
             const tx = await this.channel.openChannel(participantB, {
-                value: ethers.parseEther(amount.toString()),
+                value: valueWei,
                 gasLimit: 200000
             });
             const receipt = await tx.wait();
@@ -50,9 +74,13 @@ class StateChannelService {
                 channelId,
                 this.wallet.address,
                 participantB,
-                ethers.parseEther(amount.toString()),
-                0
+                valueWei,
+                0n
             );
+
+            // Back the in-memory channel cache so subsequent reads/settlements
+            // have a cheap, consistent fast-path instead of always hitting chain.
+            this._recordOpenedChannel(channelId, this.wallet.address, participantB, valueWei);
 
             logger.info(`✅ Channel opened: ${channelId}`);
             return {
@@ -63,6 +91,28 @@ class StateChannelService {
         } catch (error) {
             logger.error('Channel open failed:', error);
             throw error;
+        }
+    }
+
+    _recordOpenedChannel(channelId, userA, userB, valueWei) {
+        this.channelCache.set(channelId, {
+            channelId,
+            userA,
+            userB,
+            balanceA: valueWei.toString(),
+            balanceB: '0',
+            isClosed: false
+        });
+    }
+
+    _readCachedChannel(channelId) {
+        return this.channelCache.get(channelId) || null;
+    }
+
+    _markChannelClosed(channelId) {
+        const cached = this.channelCache.get(channelId);
+        if (cached) {
+            cached.isClosed = true;
         }
     }
 
@@ -120,6 +170,8 @@ class StateChannelService {
             );
             const receipt = await tx.wait();
 
+            this._markChannelClosed(channelId);
+
             logger.info(`✅ Channel closed: ${channelId}`);
             return {
                 success: true,
@@ -136,8 +188,15 @@ class StateChannelService {
 
     async getChannel(channelId) {
         try {
+            // Fast-path: serve consistent off-chain state from the cache when
+            // available, falling back to the on-chain view below.
+            const cached = this._readCachedChannel(channelId);
+            if (cached) {
+                return cached;
+            }
+
             const channel = await this.channel.channels(channelId);
-            return {
+            const result = {
                 channelId,
                 userA: channel[0],
                 userB: channel[1],
@@ -148,6 +207,8 @@ class StateChannelService {
                 isDisputed: channel[6],
                 isClosed: channel[7]
             };
+            this.channelCache.set(channelId, result);
+            return result;
         } catch (error) {
             logger.error('Get channel failed:', error);
             return null;

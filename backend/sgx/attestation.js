@@ -2,22 +2,6 @@ import crypto from 'crypto';
 
 /**
  * Intel SGX Remote Attestation Node.js Bridge
-<<<<<<< HEAD
- */
-export class SgxAttestationService {
-  async verifyDriverDocumentInEnclave(documentBase64) {
-    console.log('[SGX Enclave] Loading isolated execution enclave memory...');
-    
-    const docHash = crypto.createHash('sha256').update(documentBase64).digest('hex');
-    const mockQuote = `SGX_QUOTE_V3_VALIDATED_HASH_${documentBase64.length}_${docHash.slice(0, 16)}`;
-
-    // Verify attestation quote signature
-    const isAttestationValid = mockQuote.startsWith('SGX_QUOTE_V3');
-
-    return {
-      success: isAttestationValid,
-      attestationQuote: mockQuote,
-=======
  *
  * Attestation is gated behind ENCLAVE_ATTESTATION so that a fabricated quote is
  * never presented as a hardware-verified result:
@@ -104,7 +88,6 @@ export class SgxAttestationService {
       attestationQuote: null,
       attestationProvider: this.mode,
       hardwareBacked: false,
->>>>>>> upstream/main
       docHash,
       timestamp: Date.now(),
     };

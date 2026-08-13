@@ -305,7 +305,6 @@ class _TripsScreenState extends State<TripsScreen> {
         specialRequirements:
           item['special_requirements']?.toString(),
       );
-      debugPrint(item.toString());
     }).toList();
 
     return Trip(

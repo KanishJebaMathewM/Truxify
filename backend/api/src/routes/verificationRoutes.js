@@ -266,11 +266,14 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const ocrData = await mlResponse.json();
 
     if (ocrData.verified) {
+      const docNumber = ocrData.extracted_number && ocrData.extracted_number.trim()
+        ? ocrData.extracted_number.trim()
+        : null;
       const { error: verifyError } = await supabaseAdmin
         .from('driver_details')
-        .update({ 
+        .update({
           kyc_status: 'Verified',
-          kyc_doc_number: ocrData.extracted_number
+          kyc_doc_number: docNumber,
         })
         .eq('user_id', userId);
 

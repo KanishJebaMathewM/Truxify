@@ -510,7 +510,9 @@ class OfflineLocationQueue {
     if (id is! int) return;
     try {
       await _store.deleteWhereId(id);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[OfflineLocationQueue] Failed to quarantine corrupt '
+          'queue row $id: $e');
       // Never let a corrupt row block the queue.
     }
   }

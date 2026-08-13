@@ -46,7 +46,7 @@ class DigilockerService {
 
   async exchangeCode(code) {
     if (!this.isMock) {
-      if (!this.clientId || !this.clientSecret || !code) {
+      if (!this.clientId || !this.clientSecret || !code || !code.trim()) {
         logger.warn('[DigilockerService] DigiLocker integration missing credentials or code; refusing mock fallback');
         return { success: false, error: 'DigiLocker verification is not configured' };
       }

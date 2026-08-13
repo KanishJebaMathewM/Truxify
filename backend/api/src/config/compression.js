@@ -18,16 +18,20 @@ import compression from 'compression';
  * CPU cost is not repaid, and very small payloads can grow once the gzip
  * header and trailer are added.
  */
-export const COMPRESSION_THRESHOLD_BYTES = Number(
-  process.env.COMPRESSION_THRESHOLD_BYTES || 1024
-);
+const _parsedThreshold = Number(process.env.COMPRESSION_THRESHOLD_BYTES || 1024);
+export const COMPRESSION_THRESHOLD_BYTES = Number.isFinite(_parsedThreshold) && _parsedThreshold > 0
+  ? Math.floor(_parsedThreshold)
+  : 1024;
 
 /**
  * zlib level, 1 (fastest) to 9 (smallest). 6 is zlib's default and sits at
  * the knee of the curve: levels above it cost noticeably more CPU for very
  * little additional saving on JSON.
  */
-export const COMPRESSION_LEVEL = Number(process.env.COMPRESSION_LEVEL || 6);
+const _parsedLevel = Number(process.env.COMPRESSION_LEVEL || 6);
+export const COMPRESSION_LEVEL = Number.isFinite(_parsedLevel) && _parsedLevel >= 1 && _parsedLevel <= 9
+  ? Math.round(_parsedLevel)
+  : 6;
 
 /**
  * Content types that are already compressed. Re-compressing them burns CPU

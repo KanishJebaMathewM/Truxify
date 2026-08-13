@@ -119,7 +119,10 @@ class _RetentionDashboardScreenState extends State<RetentionDashboardScreen> {
                   children: [
                     CircleAvatar(
                       backgroundColor: riskColor,
-                      child: Text(driver.driverName[0], style: const TextStyle(color: Colors.white)),
+                      child: Text(
+                        driver.driverName.isNotEmpty ? driver.driverName[0] : '?',
+                        style: const TextStyle(color: Colors.white),
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Column(

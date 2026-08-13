@@ -78,6 +78,15 @@ BEGIN
     RAISE EXCEPTION 'Order not found or not eligible for rating: the order must be delivered or payment released, owned by you, and completed by this driver';
   END IF;
 
+  -- Lock the driver row BEFORE inserting/aggregating so concurrent rating
+  -- submissions for the same driver are serialized: without this, each
+  -- transaction computed avg(stars) at its own statement time and the last
+  -- UPDATE clobbered the first, losing a just-inserted row (#11718).
+  PERFORM 1
+    FROM driver_details
+   WHERE user_id = p_driver_id
+     FOR UPDATE;
+
   -- Upsert: first call inserts, subsequent calls replace the rating values.
   INSERT INTO ratings (order_display_id, customer_id, driver_id, stars, comment)
   VALUES (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment)

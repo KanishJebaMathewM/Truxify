@@ -380,3 +380,14 @@ describe('osrm - getRouteEstimate edge cases', () => {
     expect(fetch).toHaveBeenCalled();
   });
 });
+
+// === Spec 22 test ===
+import { describe, it, expect, vi } from 'vitest';
+import { routeWithFailover } from '../../src/services/osrm.js';
+describe('routeWithFailover', () => {
+  it('uses primary', async () => {
+    const p = vi.fn().mockResolvedValue({ distance: 100, source: 'osrm' });
+    expect((await routeWithFailover(p, null, [[[0,0],[0,1]]])).source).toBe('osrm');
+  });
+});
+

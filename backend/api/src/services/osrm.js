@@ -276,3 +276,23 @@ export const __testing = {
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
+
+
+// === Spec 22: ===
+// === Spec 22: OSRM failover ===
+export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const t = (d) => (d * Math.PI) / 180;
+  const dLat = t(lat2 - lat1);
+  const dLon = t(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(t(lat1))*Math.cos(t(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+export async function routeWithFailover(primary, _fb, coords) {
+  try { return await primary(coords); }
+  catch (err) {
+    const [a, b] = coords[0];
+    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+  }
+}
+

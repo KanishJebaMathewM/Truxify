@@ -74,7 +74,11 @@ create table if not exists event_outbox (
   next_attempt_at timestamptz not null default now(),
   created_at      timestamptz not null default now(),
   published_at    timestamptz,
-  constraint event_outbox_status_check check (status in ('pending', 'publishing', 'published'))
+  constraint event_outbox_status_check check (status in ('pending', 'publishing', 'published')),
+  -- Versions must be strictly sequential per aggregate: this constraint is the
+  -- backstop that makes duplicate (aggregate_id, version) rows impossible even
+  -- if two enqueues race on a brand-new aggregate that has no rows to lock.
+  constraint event_outbox_aggregate_version_unique unique (aggregate_id, version)
 );
 
 create index if not exists idx_event_outbox_dispatch
@@ -137,6 +141,16 @@ begin
       return NEW;
     end if;
   end if;
+
+  -- Serialize concurrent enqueues for the same aggregate: lock the
+  -- aggregate's existing outbox rows so the max(version) + 1 compute below
+  -- is race-free. When no rows exist yet (very first event), the UNIQUE
+  -- (aggregate_id, version) constraint is the backstop and surfaces a
+  -- retryable error on collision (#11716).
+  perform 1
+    from event_outbox
+   where aggregate_id = NEW.id::text
+     for update;
 
   select coalesce(max(version), 0) + 1
     into v_next_version

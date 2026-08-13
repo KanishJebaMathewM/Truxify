@@ -299,13 +299,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _logout(BuildContext context) async {
-    try {
-      await _profileService.logout();
-    } catch (e) {
-      debugPrint('Logout error: $e');
-    }
+    final ok = await _profileService.logout();
 
     if (!context.mounted) return;
+
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Logout failed. Check your connection and try again.'),
+          backgroundColor: TruxifyColors.errorRed,
+        ),
+      );
+      return;
+    }
 
     await _cacheManager.open();
     await _cacheManager.cacheProfile({});

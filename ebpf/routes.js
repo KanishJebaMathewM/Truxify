@@ -1,13 +1,15 @@
 import express from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'node:path';
+import fs from 'node:fs';
 import rateLimit from 'express-rate-limit';
 import logger from '../backend/api/src/middleware/logger.js';
 import { authenticate } from '../backend/api/src/middleware/auth.js';
 import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const router = express.Router();
 
 // ============ Rate Limiters ============
@@ -206,8 +208,11 @@ router.post('/ebpf/load', authenticate, requirePolicy('ebpf:manage'), ebpfAction
             });
         }
 
-        // Execute with sanitized input
-        const result = await execAsync(`sudo bpftool prog load "${path.join(process.env.EBPF_PROGRAMS_PATH || process.cwd(), 'ebpf', 'programs', program + '.o')}" /sys/fs/bpf/truxify_${program}`);
+        // Execute with validated, resolved path (no shell, bounded time)
+        const base = path.resolve(process.env.EBPF_PROGRAMS_PATH || path.join(process.cwd(), 'ebpf', 'programs'));
+        if (!base.startsWith(process.cwd())) throw new Error('invalid programs path');
+        await execFileAsync('sudo', ['bpftool', 'prog', 'load',
+            path.join(base, `${program}.o`), `/sys/fs/bpf/truxify_${program}`], { timeout: 10000 });
         
         res.json({
             success: true,
@@ -241,8 +246,8 @@ router.post('/ebpf/unload', authenticate, requirePolicy('ebpf:manage'), ebpfActi
             });
         }
 
-        // Execute with sanitized input
-        await execAsync(`sudo rm -f /sys/fs/bpf/truxify_${program}`);
+        // Execute with validated, allowlisted program name (no shell, bounded time)
+        await execFileAsync('sudo', ['rm', '-f', `/sys/fs/bpf/truxify_${program}`], { timeout: 10000 });
         
         res.json({
             success: true,
@@ -258,7 +263,13 @@ router.post('/ebpf/unload', authenticate, requirePolicy('ebpf:manage'), ebpfActi
 // Unload all eBPF programs (admin only, with rate limiting)
 router.post('/ebpf/unload-all', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
-        await execAsync('sudo rm -f /sys/fs/bpf/truxify_*');
+        // Expand the glob in-process (no shell) and remove each pinned program bounded by a timeout
+        const bpfDir = '/sys/fs/bpf';
+        const entries = await fs.promises.readdir(bpfDir);
+        const targets = entries.filter((e) => e.startsWith('truxify_'));
+        for (const target of targets) {
+            await execFileAsync('sudo', ['rm', '-f', path.join(bpfDir, target)], { timeout: 10000 });
+        }
         
         res.json({
             success: true,

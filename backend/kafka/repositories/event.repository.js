@@ -194,3 +194,20 @@ class EventRepository {
 }
 
 export default new EventRepository();
+
+
+// === Spec 33: ===
+// === Spec 33: transaction rollback ===
+export async function insertEventsWithTransaction(client, events) {
+  if (!Array.isArray(events) || events.length === 0) return 0;
+  try {
+    await client.query('BEGIN');
+    for (const e of events) await client.query('INSERT INTO events (data) VALUES ($1)', [JSON.stringify(e)]);
+    await client.query('COMMIT');
+    return events.length;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  }
+}
+

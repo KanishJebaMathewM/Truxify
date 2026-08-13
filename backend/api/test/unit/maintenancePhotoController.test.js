@@ -104,26 +104,26 @@ describe('maintenancePhotoController', () => {
   });
 
   it('returns 400 and cleans up storage when the RPC reports MAX_PHOTOS_EXCEEDED', async () => {
-    dbMock.supabase.from.mockReturnValue({
+    dbMock.userClient.from.mockReturnValue({
       select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: 't1', driver_id: 'driver-1', photo_urls: [] }, error: null }) })) })),
     });
-    dbMock.supabase.rpc.mockResolvedValue({ data: null, error: { message: 'MAX_PHOTOS_EXCEEDED' } });
+    dbMock.userClient.rpc.mockResolvedValue({ data: null, error: { message: 'MAX_PHOTOS_EXCEEDED' } });
     const { req, res } = makeReqRes({ files: [{ buffer: Buffer.from('a'), mimetype: 'image/jpeg' }] });
     await uploadMaintenancePhotos(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining('Maximum 3') }));
-    expect(dbMock.supabase.storage.from).toHaveBeenCalledWith('maintenance-photos');
+    expect(dbMock.userClient.storage.from).toHaveBeenCalledWith('maintenance-photos');
   });
 
   it('returns 500 and cleans up storage when the RPC fails unexpectedly', async () => {
-    dbMock.supabase.from.mockReturnValue({
+    dbMock.userClient.from.mockReturnValue({
       select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: 't1', driver_id: 'driver-1', photo_urls: [] }, error: null }) })) })),
     });
-    dbMock.supabase.rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+    dbMock.userClient.rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
     const { req, res } = makeReqRes({ files: [{ buffer: Buffer.from('a'), mimetype: 'image/jpeg' }] });
     await uploadMaintenancePhotos(req, res);
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'Failed to save photo references' }));
-    expect(dbMock.supabase.storage.from).toHaveBeenCalledWith('maintenance-photos');
+    expect(dbMock.userClient.storage.from).toHaveBeenCalledWith('maintenance-photos');
   });
 });

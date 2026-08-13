@@ -19,11 +19,11 @@ vi.mock('ethers', () => ({
 
 
 const mockQuery = {
-  select: vi.fn(function () { return this; }),
+  select: vi.fn(function () { return Promise.resolve({ data: [{ id: 'tx-wallet-1' }], error: null }); }),
   eq: vi.fn(function () { return this; }),
   in: vi.fn(function () { return this; }),
   update: vi.fn(function () { return this; }),
-  limit: vi.fn(function () { return this; }),
+  limit: vi.fn(function () { return Promise.resolve({ data: [{ id: 'tx-limit-1' }], error: null }); }),
   maybeSingle: vi.fn(),
 };
 

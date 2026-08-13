@@ -328,3 +328,26 @@ describe('toDateKey', () => {
     expect(toDateKey(new Date('2026-08-05T15:30:00.000Z'))).toBe('2026-08-05');
   });
 });
+
+describe('earnings aggregation edge cases', () => {
+  it('builds a single-bar chart for the day period', () => {
+    const trips = [{ trip_date: '2026-08-12T09:00:00Z', total_earnings: 120 }];
+    const chart = buildWeeklyChart(trips, { period: 'day', now: new Date('2026-08-12T12:00:00Z') });
+    expect(chart).toHaveLength(1);
+    expect(chart[0].day).toBe('2026-08-12');
+    expect(chart[0].earnings).toBe(120);
+  });
+
+  it('coerces a mix of null and numeric earnings to a finite sum', () => {
+    const trips = [
+      { total_earnings: null, net_earnings: null },
+      { total_earnings: 100, net_earnings: 80 },
+      { total_earnings: undefined, net_earnings: 20 },
+    ];
+    const totals = sumEarnings(trips);
+    expect(totals.gross).toBe(100);
+    expect(totals.net).toBe(100);
+    expect(Number.isFinite(totals.gross)).toBe(true);
+    expect(Number.isFinite(totals.net)).toBe(true);
+  });
+});

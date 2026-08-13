@@ -73,7 +73,6 @@ describe('validateDocumentBuffer', () => {
 
 
 // === Spec 7 test ===
-import { describe, it, expect } from 'vitest';
 import { matchesMimeSignature } from '../../src/lib/documentValidation.js';
 describe('matchesMimeSignature', () => {
   it('matches PNG', () => {

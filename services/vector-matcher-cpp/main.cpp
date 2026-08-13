@@ -10,6 +10,8 @@
 #include <cstring>
 #include <thread>
 
+#include "../include/http_parse.hpp"
+
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -27,9 +29,8 @@ typedef int socklen_t;
 #define closesocket close
 #endif
 
-// Total request byte budget per connection. Oversized requests are answered
-// with 413 instead of being buffered, bounding memory per connection.
-const size_t MAX_REQUEST_BYTES = 64 * 1024;
+// Total request byte budget per connection is defined in http_parse.hpp
+// (MAX_REQUEST_BYTES) and used here for the buffered-size cap below.
 
 // Applies read/write idle timeouts so a slow or idle client cannot stall a
 // handler thread forever: recv returns after the timeout instead of blocking
@@ -171,44 +172,6 @@ int parse_top_k(const std::string& body) {
 
 // ---- Minimal HTTP/1.1 server ----
 
-// Returns the body Content-Length from the request head, or 0.
-size_t parse_content_length(const std::string& request) {
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end == std::string::npos) return 0;
-
-    std::istringstream ss(request.substr(0, header_end));
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string name = line.substr(0, colon);
-        std::string value = line.substr(colon + 1);
-        for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (name == "content-length") {
-            return static_cast<size_t>(std::strtoul(value.c_str(), nullptr, 10));
-        }
-    }
-    return 0;
-}
-
-// Splits a request into method, path, and (read) body.
-void parse_request(const std::string& request, std::string& method, std::string& path, std::string& body) {
-    size_t line_end = request.find("\r\n");
-    std::string head = request.substr(0, line_end);
-    std::istringstream iss(head);
-    iss >> method >> path;
-
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end != std::string::npos) {
-        size_t content_length = parse_content_length(request);
-        size_t body_start = header_end + 4;
-        if (request.size() >= body_start + content_length) {
-            body = request.substr(body_start, content_length);
-        }
-    }
-}
-
 // Wraps a JSON payload in an HTTP/1.1 response.
 std::string build_response(const std::string& body, const std::string& status) {
     std::stringstream ss;
@@ -239,8 +202,8 @@ void handle_client(SOCKET client, const std::vector<DriverEmbedding>& driver_poo
 
         size_t header_end = request.find("\r\n\r\n");
         if (header_end != std::string::npos) {
-            size_t content_length = parse_content_length(request);
-            if (request.size() >= header_end + 4 + content_length) break;
+            size_t content_length = 0, body_start = 0, body_len = 0;
+            if (compute_body_range(request, content_length, body_start, body_len)) break;
         }
     }
 

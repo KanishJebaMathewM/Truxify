@@ -9,3 +9,8 @@ find_package(Threads REQUIRED)
 add_executable(route-matrix-cpp main.cpp)
 
 target_link_libraries(route-matrix-cpp PRIVATE Threads::Threads)
+
+add_executable(test_content_length tests/test_content_length.cpp)
+
+enable_testing()
+add_test(NAME content_length COMMAND test_content_length)

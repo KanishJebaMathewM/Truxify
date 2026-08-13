@@ -18,3 +18,8 @@ add_executable(vector-matcher-cpp
 
 target_compile_options(vector-matcher-cpp PRIVATE -O3)
 target_link_libraries(vector-matcher-cpp PRIVATE Threads::Threads)
+
+add_executable(test_content_length tests/test_content_length.cpp)
+
+enable_testing()
+add_test(NAME content_length COMMAND test_content_length)

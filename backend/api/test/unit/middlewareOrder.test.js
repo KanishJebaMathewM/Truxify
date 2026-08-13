@@ -32,7 +32,7 @@ const REQUIRED_BEFORE_ROUTES = [
   // Fraud detection is deliberately registered per-route (after authenticate)
   // for the high-value orders/payments/trips routers — see #6321 — so the
   // marker locks in that mount rather than a global registration.
-  { name: 'fraud detection', marker: "app.use('/api/orders', fraudDetectionMiddleware" },
+  { name: 'fraud detection', marker: "app.use('/api/orders', authenticate, fraudDetectionMiddleware" },
   { name: 'global rate limiter', marker: "app.use('/api/', globalLimiter)" },
 ];
 

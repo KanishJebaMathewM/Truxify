@@ -31,9 +31,11 @@ contract FlashbotsRelay is Ownable {
 
         bytes32 result = relay.submitBundle(signedTxs, blockNumber);
         submittedBundles[bundleId] = true;
-        
+        bundleResults[bundleId] = uint256(result);
+
         emit BundleSubmitted(bundleId, blockNumber);
-        return result;
+        emit BundleExecuted(bundleId, result != bytes32(0));
+        return bundleId;
     }
 
     function setRelay(address newRelay) external onlyOwner {

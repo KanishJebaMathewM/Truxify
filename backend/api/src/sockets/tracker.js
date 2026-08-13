@@ -854,6 +854,11 @@ export async function isMessageRateLimited(ws) {
 
 export async function handleTrackingMessage(ws, message, req) {
   if (await isMessageRateLimited(ws)) {
+    ws.send(JSON.stringify({
+      error: 'Rate limit exceeded: too many messages per second',
+      code: 429,
+      retryAfter: 1,
+    }));
     return;
   }
 

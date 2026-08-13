@@ -1,5 +1,7 @@
 // Created by spec 5
 // === Spec 5: validate pagination bounds ===
+// NaN is caught by !Number.isFinite(p) — callers passing parseInt(nonNumericString)
+// receive an error rather than propagating NaN into offset calculations.
 const MAX_OFFSET = 1_000_000;
 export function validatePagination({ page = 1, pageSize = 20 } = {}) {
   const p = Number(page);

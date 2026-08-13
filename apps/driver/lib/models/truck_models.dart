@@ -29,20 +29,20 @@ class Truck {
 
   factory Truck.fromJson(Map<String, dynamic> json) {
     return Truck(
-      id: json['id'] as String,
-      driverId: json['driver_id'] as String,
-      name: json['name'] as String,
-      numberPlate: json['number_plate'] as String,
+      id: json['id']?.toString() ?? '',
+      driverId: json['driver_id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      numberPlate: json['number_plate']?.toString() ?? '',
       maxCapacityTons: (json['max_capacity_tons'] as num?)?.toDouble() ?? 0.0,
       averageMpg: (json['average_mpg'] as num?)?.toDouble() ?? 6.0,
       insuranceExpiry: json['insurance_expiry'] != null
-          ? DateTime.tryParse(json['insurance_expiry'] as String)
+          ? DateTime.tryParse(json['insurance_expiry'].toString())
           : null,
       pucExpiry: json['puc_expiry'] != null
-          ? DateTime.tryParse(json['puc_expiry'] as String)
+          ? DateTime.tryParse(json['puc_expiry'].toString())
           : null,
       permitExpiry: json['permit_expiry'] != null
-          ? DateTime.tryParse(json['permit_expiry'] as String)
+          ? DateTime.tryParse(json['permit_expiry'].toString())
           : null,
       cargoLengthFt: (json['cargo_length_ft'] as num?)?.toDouble() ?? 0.0,
       cargoWidthFt: (json['cargo_width_ft'] as num?)?.toDouble() ?? 0.0,
@@ -91,17 +91,17 @@ class TruckMaintenanceTicket {
 
   factory TruckMaintenanceTicket.fromJson(Map<String, dynamic> json) {
     return TruckMaintenanceTicket(
-      id: json['id'].toString(),
-      truckId: json['truck_id'].toString(),
-      driverId: json['driver_id'].toString(),
-      category: json['category'] as String,
-      description: json['description'] as String,
-      status: json['status'] as String,
+      id: json['id']?.toString() ?? '',
+      truckId: json['truck_id']?.toString() ?? '',
+      driverId: json['driver_id']?.toString() ?? '',
+      category: json['category']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      status: json['status']?.toString() ?? '',
       createdAt: json['created_at'] != null
-          ? DateTime.tryParse(json['created_at'] as String)
+          ? DateTime.tryParse(json['created_at'].toString())
           : null,
       photoUrls: json['photo_urls'] != null
-          ? List<String>.from(json['photo_urls'] as List)
+          ? List<String>.from((json['photo_urls'] as List?) ?? [])
           : const [],
     );
   }

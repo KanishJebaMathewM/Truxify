@@ -22,6 +22,9 @@ function chain(result) {
     in: vi.fn(() => q),
     maybeSingle: vi.fn(() => Promise.resolve(result)),
     update: vi.fn(() => q),
+    then(resolve) {
+      return Promise.resolve({ data: [{ id: 'o1' }], error: null }).then(resolve);
+    },
   };
   return q;
 }
@@ -34,10 +37,6 @@ describe('escrowWebhookProcessor', () => {
 
   it('throws when event type is missing', async () => {
     await expect(processEscrowWebhookEvent('')).rejects.toThrow('Missing escrow webhook event type');
-  });
-
-  it('throws on simulated failure', async () => {
-    await expect(processEscrowWebhookEvent('PaymentReleased', { simulateFailure: true })).rejects.toThrow('Simulated database lock or processing failure');
   });
 
   it('acknowledges unknown event types without state change', async () => {

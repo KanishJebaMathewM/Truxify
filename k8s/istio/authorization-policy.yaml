@@ -44,8 +44,12 @@ spec:
   action: DENY
   rules:
   - from:
-    - source:
-        notPrincipals: ["cluster.local/ns/truxify/sa/api-service-account", "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    - notSource:
+        principals:
+          - "cluster.local/ns/truxify/sa/api-service-account"
+          - "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"
+    to:
+    - operation:
         paths: ["/health", "/metrics"]
 
   - to:

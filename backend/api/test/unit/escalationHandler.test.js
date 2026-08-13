@@ -11,11 +11,11 @@ const mockLogger = {
   error: vi.fn(),
 };
 
-vi.mock('../../middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
-const { default: EscalationHandler, ESCALATION_LEVELS, ESCALATION_THRESHOLDS } = require('../../src/services/blockchain/escalationHandler.js');
+const { default: EscalationHandler, ESCALATION_LEVELS, ESCALATION_THRESHOLDS } = await import('../../src/services/blockchain/escalationHandler.js');
 
 describe('EscalationHandler', () => {
   let handler;

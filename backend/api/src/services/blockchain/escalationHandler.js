@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
@@ -179,8 +180,10 @@ class EscalationHandler {
   }
 
   generateAlertId(alert) {
-    const key = [alert.type, alert.driver || alert.wallet || alert.shipmentId || 'unknown'].join('_');
-    return Buffer.from(key).toString('hex').slice(0, 16);
+    const actor = alert.driver || alert.wallet || 'unknown';
+    const scopedId = alert.shipmentId || alert.orderId || alert.bookingId || '';
+    const key = [alert.type, actor, scopedId].join('_');
+    return createHash('sha256').update(key).digest('hex').slice(0, 16);
   }
 
   async storeEscalation(record) {

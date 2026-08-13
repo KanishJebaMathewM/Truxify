@@ -25,6 +25,7 @@ function mapOrder(row) {
 
     return {
         ...row,
+        status: ORDER_STATUS_FROM_DB[row.status] ?? row.status,
         customerId: row.customerId ?? row.customer_id,
         driverId: row.driverId ?? row.driver_id,
         cargoType: row.cargoType ?? row.goods_type,
@@ -53,6 +54,20 @@ const ORDER_STATUS_TO_DB = {
     COMPLETED: 'delivered',
     CANCELLED: 'cancelled',
     DISPUTED: 'disputed',
+};
+
+const ORDER_STATUS_FROM_DB = {
+    pending: 'PENDING',
+    truck_assigned: 'CONFIRMED',
+    en_route_pickup: 'ASSIGNED',
+    arrived_pickup: 'ASSIGNED',
+    picked_up: 'IN_TRANSIT',
+    in_transit: 'IN_TRANSIT',
+    arriving: 'IN_TRANSIT',
+    delivered: 'COMPLETED',
+    cancelled: 'CANCELLED',
+    payment_released: 'COMPLETED',
+    disputed: 'DISPUTED',
 };
 
 function toDbStatus(status) {

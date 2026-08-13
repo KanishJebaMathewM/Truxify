@@ -102,14 +102,6 @@ export async function verifyAuthToken(token) {
       .eq("firebase_uid", firebaseUid)
       .maybeSingle();
 
-      const userClient = createUserClient?.(token) || supabase;
-      const { data: profile, error } = await userClient
-        .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone")
-        .eq("firebase_uid", firebaseUid)
-        .eq("is_active", true)
-        .maybeSingle();
-
       if (error) {
         throw new Error("Database query failed verification: " + error.message);
       }
@@ -129,7 +121,6 @@ export async function verifyAuthToken(token) {
         }, cacheTtl);
       }
     }
-  }
 
   if (!userProfile) {
     throw new Error("User profile not found in database.");
@@ -406,6 +397,8 @@ export async function authenticate(req, res, next) {
             tombstonePayload,
             TOMBSTONE_TTL_SECONDS,
           );
+        } catch (err) {
+          logger.error({ err }, "Cache set failed");
         }
       }
       if (supabaseUserId) {
@@ -430,7 +423,6 @@ export async function authenticate(req, res, next) {
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",
       });
-    }
 
     req.user = formatUserProfile(userProfile);
 

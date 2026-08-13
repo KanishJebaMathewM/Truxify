@@ -123,6 +123,10 @@ abstract class LocationQueueStore {
   /// Deletes the [count] oldest rows of any kind (last-resort trim).
   Future<int> deleteOldestRows(int count);
 
+  /// Deletes the [count] oldest milestone rows. Used as a last-resort trim
+  /// when dropping locations cannot bring the queue back under capacity.
+  Future<int> deleteOldestMilestones(int count);
+
   /// Looks up a row by its unique idempotency key (or null).
   Future<Map<String, dynamic>?> findByIdempotencyKey(String key);
 }
@@ -203,6 +207,24 @@ class SqfliteLocationQueueStore implements LocationQueueStore {
     final db = await _db;
     final rows = await db.rawQuery(
       'SELECT id FROM $table ORDER BY created_at ASC, id ASC LIMIT ?',
+      [count],
+    );
+    if (rows.isEmpty) return 0;
+    final ids = rows.map((r) => r['id']).toList();
+    return db.delete(
+      table,
+      where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: ids,
+    );
+  }
+
+  @override
+  Future<int> deleteOldestMilestones(int count) async {
+    final db = await _db;
+    final rows = await db.rawQuery(
+      'SELECT id FROM $table '
+      'WHERE kind = "milestone" '
+      'ORDER BY created_at ASC, id ASC LIMIT ?',
       [count],
     );
     if (rows.isEmpty) return 0;
@@ -483,25 +505,35 @@ class OfflineLocationQueue {
 
   double _rad(double deg) => deg * math.pi / 180.0;
 
-  /// Drops the oldest location rows until the queue is within capacity.
-  /// The newest location fix and all milestone rows survive.
+  /// Drops the oldest rows until the queue is within capacity.
+  ///
+  /// Locations are evicted first (the newest location fix is always retained),
+  /// matching the documented priority that milestones outrank ordinary
+  /// telemetry. When dropping locations cannot free enough space — either
+  /// because there are no locations, or only the newest location fix remains —
+  /// the oldest milestones are dropped instead so capacity is still honored
+  /// rather than overflowing by one row.
   Future<void> _trimToCapacity() async {
     var guard = 0;
-    while (guard++ < 10) {
+    while (guard++ < 20) {
       final total = await _store.count();
       if (total <= maxEntries) return;
+      final toDelete = total - maxEntries;
       final newest = await _newestLocation();
-      final before = total;
+      var deleted = 0;
       if (newest != null) {
-        await _store.deleteOldestLocations(
-          count: total - maxEntries,
+        deleted = await _store.deleteOldestLocations(
+          count: toDelete,
           keepNewestId: newest.id,
         );
-      } else {
-        await _store.deleteOldestRows(total - maxEntries);
       }
-      final after = await _store.count();
-      if (after >= before) return; // nothing deleted — stop to avoid a loop
+      // Locations couldn't be freed (none, or only the newest fix exists).
+      // Fall back to dropping the oldest milestones so we still get under
+      // capacity.
+      if (deleted == 0) {
+        deleted = await _store.deleteOldestMilestones(toDelete);
+      }
+      if (deleted == 0) return; // nothing deletable — avoid an infinite loop
     }
   }
 

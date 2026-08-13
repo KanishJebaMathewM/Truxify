@@ -542,10 +542,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           'wallet_address': address,
                         },
                       );
+                      if (!context.mounted) return;
                       setState(() {
                         _walletAddress = address;
                       });
-                      if (!context.mounted) return;
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(

@@ -57,11 +57,22 @@ describe('payoutProvider', () => {
     vi.unstubAllGlobals()
   })
 
-  it('falls back to the generated reference when the webhook omits settlement_ref', async () => {
+  it('fails when the webhook returns 200 without a settlement reference', async () => {
     process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
-    const result = await dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } })
-    expect(result.settlementRef).toBe('w9')
+    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } }))
+      .rejects.toThrow(/without a settlement_ref/)
+    vi.unstubAllGlobals()
+  })
+
+  it('fails when the webhook returns 200 with an error body', async () => {
+    process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'failed', error: 'insufficient funds' }),
+    }))
+    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } }))
+      .rejects.toThrow(/without a settlement_ref/)
     vi.unstubAllGlobals()
   })
 
@@ -75,7 +86,7 @@ describe('payoutProvider', () => {
 
   it('passes an abort signal so a hung webhook cannot stall the worker', async () => {
     process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ settlement_ref: 'ref-1' }) })
     vi.stubGlobal('fetch', mockFetch)
 
     await dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 1 } })
@@ -99,7 +110,7 @@ describe('payoutProvider', () => {
   it('ignores a non-positive configured timeout and falls back to the default', async () => {
     process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
     process.env.WITHDRAWAL_PAYOUT_TIMEOUT_MS = 'not-a-number'
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ settlement_ref: 'ref-1' }) })
     vi.stubGlobal('fetch', mockFetch)
 
     await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 1 } }))

@@ -73,10 +73,19 @@ export async function dispatchPayout({ driverId, withdrawal }) {
     }
 
     const body = await response.json().catch(() => ({}));
+    // A 2xx transport response is not proof the payout succeeded: gateways
+    // routinely return HTTP 200 with an error/empty JSON body. Require an
+    // explicit provider-confirmed settlement reference before reporting
+    // success; otherwise fail so the caller retries and keeps funds reserved.
+    const settlementRef = body.settlement_ref || body.reference;
+    if (typeof settlementRef !== 'string' || settlementRef.trim() === '') {
+      throw new Error(
+        'Payout webhook returned HTTP 200 without a settlement_ref — payout not confirmed.'
+      );
+    }
     return {
       success: true,
-      settlementRef:
-        body.settlement_ref || body.reference || `w${withdrawal.id}`,
+      settlementRef,
     };
   }
 

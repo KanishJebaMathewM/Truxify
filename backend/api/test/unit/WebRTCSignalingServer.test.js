@@ -444,6 +444,40 @@ describe('WebRTCSignalingServer', () => {
     });
   });
 
+  describe('getOfflineGPSData()/syncOfflineData() missing-peer isolation (#11548)', () => {
+    it('never falls back to the requester id for an admin with a disconnected peer', async () => {
+      // The peer is absent from the in-memory registry (driver socket dropped),
+      // so a cross-user fallback to the requester id must be prevented.
+      const result = await server.getOfflineGPSData('peer-gone', 0, {
+        id: 'admin-1',
+        role: 'admin',
+      });
+
+      expect(result).toEqual([]);
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+      expect(supabaseQuery.eq).not.toHaveBeenCalledWith('peerId', 'admin-1');
+    });
+
+    it('does not mutate rows for an admin when the peer is missing', async () => {
+      await server.syncOfflineData('peer-gone', { id: 'admin-1', role: 'admin' });
+
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+    });
+
+    it('still scopes to the owner id when the peer is present', async () => {
+      addPeer(server, 'peer-1', { userId: 'user-1' });
+      supabaseQuery.order.mockResolvedValue({ data: [{ peerId: 'user-1' }] });
+
+      const result = await server.getOfflineGPSData('peer-1', 0, {
+        id: 'admin-1',
+        role: 'admin',
+      });
+
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'user-1');
+      expect(result).toEqual([{ peerId: 'user-1' }]);
+    });
+  });
+
   describe('handleGPSData() persistence', () => {
     it('keys the offline GPS row by the owning profile id, not the session peerId', async () => {
       addPeer(server, 'peer-1', { userId: 'user-1' });

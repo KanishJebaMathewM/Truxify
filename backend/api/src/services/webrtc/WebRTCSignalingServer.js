@@ -429,9 +429,14 @@ class WebRTCSignalingServer {
       return [];
     }
     // Rows are keyed by the owning profile id (matches the `peerId =
-    // get_profile_id()` RLS policy); resolve it from the active peer session
-    // and fall back to the caller's own id.
-    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
+    // get_profile_id()` RLS policy). Resolve it strictly from the live peer
+    // session: a missing peer must be treated as not-found rather than
+    // silently scoped to the requester's own id.
+    const ownerId = this.peers.get(peerId)?.userId;
+    if (!ownerId) {
+      logger.warn(`[WebRTC] Offline GPS data requested for unknown peer ${peerId}`);
+      return [];
+    }
     const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
     const { data } = await client
       .from('gps_offline_data')
@@ -448,7 +453,11 @@ class WebRTCSignalingServer {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
-    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
+    const ownerId = this.peers.get(peerId)?.userId;
+    if (!ownerId) {
+      logger.warn(`[WebRTC] Sync requested for unknown peer ${peerId}`);
+      return;
+    }
     const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
     // Mark data as synced for this peer
     await client

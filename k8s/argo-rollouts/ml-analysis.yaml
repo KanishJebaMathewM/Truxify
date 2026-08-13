@@ -48,7 +48,7 @@ spec:
     spec:
       containers:
       - name: ml-engine
-        image: truxify/ml:latest
+        image: ghcr.io/kanishjebamathewm/truxify-ml:latest
         ports:
         - containerPort: 8000
   strategy:

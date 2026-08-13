@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -165,6 +167,35 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 50));
       expect(connectCount, 0);
       await ws.close();
+    });
+
+    test('handshake timeout reconnects instead of hanging forever', () async {
+      // A raw TCP server accepts the connection but never completes the
+      // WebSocket upgrade — simulating a stalled handshake (proxy holding the
+      // connection open, flaky mobile network). The handshake await must time
+      // out and drive the wrapper into the reconnecting state rather than
+      // staying stuck in `connecting` permanently.
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((_) {/* keep connection open, never upgrade */});
+      final port = server.port;
+
+      final ws = ResilientWebSocket(
+        'ws://127.0.0.1:$port/ws',
+        initialDelay: const Duration(milliseconds: 20),
+        maxAttempts: 1,
+      );
+
+      await ws.connect();
+
+      // The 10s handshake timeout must fire and push the wrapper to reconnecting
+      // (which then gives up after maxAttempts=1). It must NOT hang.
+      final reachedReconnecting = await ws.connectionState
+          .firstWhere((s) => s == WsConnectionState.reconnecting)
+          .timeout(const Duration(seconds: 15));
+      expect(reachedReconnecting, WsConnectionState.reconnecting);
+
+      await ws.close();
+      await server.close();
     });
   });
 }

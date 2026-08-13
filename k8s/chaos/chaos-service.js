@@ -221,9 +221,27 @@ class ChaosService {
     async updateResilienceScore(experiment) {
         // Calculate impact
         const impact = this.calculateImpact(experiment);
-        
-        // Update score
+
+        // Apply the impact of the experiment
         this.resilienceScore = Math.max(0, this.resilienceScore - impact);
+
+        // Recovery: a completed experiment that the system survived should
+        // restore confidence. Reward the score proportionally to how healthy
+        // the system currently is, so it can climb back toward 100 rather
+        // than monotonically decreasing.
+        try {
+            const health = await this.checkSystemHealth();
+            const services = ['api', 'ml', 'redis', 'db'];
+            const healthyServices = services.filter(
+                s => health[s] && health[s].status === 'healthy'
+            );
+            const healthRatio = healthyServices.length / services.length;
+            const recovery = Math.ceil(impact * healthRatio);
+            this.resilienceScore = Math.min(100, this.resilienceScore + recovery);
+        } catch (error) {
+            logger.error('Resilience recovery check failed:', error);
+        }
+
         this.resilienceScore = Math.min(100, this.resilienceScore);
 
         // Store score

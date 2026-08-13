@@ -72,9 +72,13 @@ class RegionService {
         // Update active regions
         const previousActive = this.activeRegions.map(r => r.name);
         this.activeRegions = this.regions.filter(r => results[r.name].healthy);
-        
-        // Check if failover needed
-        if (previousActive.length !== this.activeRegions.length) {
+
+        // Check if failover needed by comparing set membership
+        const currentActive = this.activeRegions.map(r => r.name);
+        const failed = previousActive.filter(p => !currentActive.includes(p));
+        const recovered = currentActive.filter(c => !previousActive.includes(c));
+
+        if (failed.length > 0 || recovered.length > 0) {
             await this.handleFailover(previousActive, this.activeRegions);
         }
         

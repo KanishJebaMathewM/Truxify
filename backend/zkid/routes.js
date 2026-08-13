@@ -1,12 +1,11 @@
 import express from 'express';
 import zkidService from './zkid.service.js';
 import logger from '../api/src/middleware/logger.js';
-import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Create identity
-router.post('/zkid/identity/create', authenticate, async (req, res) => {
+router.post('/zkid/identity/create', async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -25,7 +24,7 @@ router.post('/zkid/identity/create', authenticate, async (req, res) => {
 });
 
 // Issue credential
-router.post('/zkid/credential/issue', authenticate, async (req, res) => {
+router.post('/zkid/credential/issue', async (req, res) => {
     try {
         const { identityHash, credentialType, schemaHash } = req.body;
         if (!identityHash || !credentialType) {
@@ -44,7 +43,7 @@ router.post('/zkid/credential/issue', authenticate, async (req, res) => {
 });
 
 // Verify credential
-router.get('/zkid/credential/verify/:credentialHash', authenticate, async (req, res) => {
+router.get('/zkid/credential/verify/:credentialHash', async (req, res) => {
     try {
         const { credentialHash } = req.params;
         const result = await zkidService.verifyCredential(credentialHash);
@@ -56,7 +55,7 @@ router.get('/zkid/credential/verify/:credentialHash', authenticate, async (req, 
 });
 
 // Revoke credential
-router.post('/zkid/credential/revoke', authenticate, async (req, res) => {
+router.post('/zkid/credential/revoke', async (req, res) => {
     try {
         const { credentialHash } = req.body;
         if (!credentialHash) {
@@ -75,7 +74,7 @@ router.post('/zkid/credential/revoke', authenticate, async (req, res) => {
 });
 
 // Request verification
-router.post('/zkid/verification/request', authenticate, async (req, res) => {
+router.post('/zkid/verification/request', async (req, res) => {
     try {
         const { identityHash, credentialHash, proofData } = req.body;
         if (!identityHash || !credentialHash) {
@@ -94,7 +93,7 @@ router.post('/zkid/verification/request', authenticate, async (req, res) => {
 });
 
 // Create selective disclosure
-router.post('/zkid/disclosure/create', authenticate, async (req, res) => {
+router.post('/zkid/disclosure/create', async (req, res) => {
     try {
         const { identityHash, disclosedAttributes, recipient } = req.body;
         if (!identityHash || !disclosedAttributes || !recipient) {
@@ -117,7 +116,7 @@ router.post('/zkid/disclosure/create', authenticate, async (req, res) => {
 });
 
 // Revoke selective disclosure
-router.post('/zkid/disclosure/revoke', authenticate, async (req, res) => {
+router.post('/zkid/disclosure/revoke', async (req, res) => {
     try {
         const { disclosureId } = req.body;
         if (!disclosureId) {
@@ -136,7 +135,7 @@ router.post('/zkid/disclosure/revoke', authenticate, async (req, res) => {
 });
 
 // Get identity
-router.get('/zkid/identity/:identityHash', authenticate, async (req, res) => {
+router.get('/zkid/identity/:identityHash', async (req, res) => {
     try {
         const { identityHash } = req.params;
         const identity = await zkidService.getIdentity(identityHash);
@@ -148,7 +147,7 @@ router.get('/zkid/identity/:identityHash', authenticate, async (req, res) => {
 });
 
 // Get stats
-router.get('/zkid/stats', authenticate, async (req, res) => {
+router.get('/zkid/stats', async (req, res) => {
     try {
         const stats = await zkidService.getZKIDStats();
         res.json({ success: true, data: stats });

@@ -118,3 +118,20 @@ describe('RequestCache', () => {
     });
   });
 });
+
+
+// === Spec 25 test ===
+import { describe, it, expect } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { attachResponseCleanup } from '../../src/lib/requestCache.js';
+describe('attachResponseCleanup', () => {
+  it('removes on finish', () => {
+    const em = new EventEmitter();
+    const res = new EventEmitter();
+    attachResponseCleanup(em, res, 'data');
+    expect(em.listenerCount('data')).toBe(1);
+    res.emit('finish');
+    expect(em.listenerCount('data')).toBe(0);
+  });
+});
+

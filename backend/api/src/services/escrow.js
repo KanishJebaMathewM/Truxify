@@ -481,6 +481,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction destination is not the Escrow contract' }
   }
 
+  // Critical Security Check: Verify tx.value (deposit amount)
+  if (expectedAmountWei && BigInt(tx.value) < BigInt(expectedAmountWei)) {
+    return { error: `Transaction value ${tx.value} wei is less than expected ${expectedAmountWei} wei` }
+  }
+
   let decoded
   try {
     decoded = escrowContract.interface.parseTransaction({ data: tx.data, value: tx.value })

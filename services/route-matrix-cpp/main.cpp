@@ -8,7 +8,6 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
-#include <thread>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -20,33 +19,11 @@ typedef int socklen_t;
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <cerrno>
 #define SOCKET int
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket close
 #endif
-
-// Total request byte budget per connection. Oversized requests are answered
-// with 413 instead of being buffered, bounding memory per connection.
-const size_t MAX_REQUEST_BYTES = 64 * 1024;
-
-// Applies read/write idle timeouts so a slow or idle client cannot stall a
-// handler thread forever: recv returns after the timeout instead of blocking
-// indefinitely.
-void set_socket_timeouts(SOCKET client) {
-#if defined(_WIN32)
-    unsigned long timeout_ms = 30000;
-    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
-    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
-#else
-    timeval tv;
-    tv.tv_sec = 30;
-    tv.tv_usec = 0;
-    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#endif
-}
 
 // Point structure
 struct Location {
@@ -233,33 +210,24 @@ std::string build_response(const std::string& body, const std::string& status) {
 void handle_client(SOCKET client) {
     char buf[8192];
     std::string request;
-    bool too_large = false;
     for (;;) {
-        // SO_RCVTIMEO bounds how long recv blocks on an idle/slow client, so a
-        // single connection cannot stall this handler thread indefinitely.
         int n = recv(client, buf, sizeof(buf), 0);
-        if (n <= 0) break; // closed, errored, or idle timeout elapsed
+        if (n <= 0) break;
         request.append(buf, static_cast<size_t>(n));
-
-        if (request.size() > MAX_REQUEST_BYTES) {
-            too_large = true;
-            break;
-        }
 
         size_t header_end = request.find("\r\n\r\n");
         if (header_end != std::string::npos) {
             size_t content_length = parse_content_length(request);
             if (request.size() >= header_end + 4 + content_length) break;
         }
+        if (request.size() > 65536) break;
     }
 
     std::string method, path, body;
     parse_request(request, method, path, body);
 
     std::string response;
-    if (too_large) {
-        response = build_response("{\"error\":\"request too large\"}", "413 Content Too Large");
-    } else if (method == "GET" && path == "/health") {
+    if (method == "GET" && path == "/health") {
         response = build_response("{\"status\":\"ok\",\"service\":\"route-matrix-cpp\"}", "200 OK");
     } else if (method == "POST" && path == "/matrix") {
         std::vector<Location> locs = parse_locations(body);
@@ -321,14 +289,7 @@ int main() {
     for (;;) {
         SOCKET client = accept(listen_sock, nullptr, nullptr);
         if (client == INVALID_SOCKET) continue;
-
-        set_socket_timeouts(client);
-
-        // Handle each connection on its own thread so an idle or slow client
-        // can never block the accept loop (and thus the whole service).
-        std::thread([client]() {
-            handle_client(client);
-            closesocket(client);
-        }).detach();
+        handle_client(client);
+        closesocket(client);
     }
 }

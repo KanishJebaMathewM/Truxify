@@ -1,6 +1,9 @@
 import unittest
+<<<<<<< HEAD
+=======
 import hashlib
 
+>>>>>>> upstream/main
 from kyber_relayer import Kyber1024Relayer
 
 class TestKyber1024Relayer(unittest.TestCase):
@@ -22,6 +25,8 @@ class TestKyber1024Relayer(unittest.TestCase):
         self.assertEqual(len(ss2), 32)
         self.assertEqual(ss1, ss2)
 
+<<<<<<< HEAD
+=======
     def test_shared_secret_not_derivable_from_public_key_alone(self):
         pk, sk = self.relayer.generate_keypair()
         ct, ss = self.relayer.encapsulate(pk)
@@ -60,5 +65,6 @@ class TestKyber1024Relayer(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.relayer.decapsulate(b"bad", b"bad")
 
+>>>>>>> upstream/main
 if __name__ == '__main__':
     unittest.main()

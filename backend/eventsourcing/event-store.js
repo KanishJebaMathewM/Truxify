@@ -13,11 +13,6 @@ import {
   EventStorePersistenceError,
   toEventStoreError,
 } from './errors.js';
-import {
-  ORDER_READ_MODEL_TABLE,
-  assertOrderReadModelRow,
-  deriveOrderStatus,
-} from '../api/src/core/orders/read-model-schema.js';
 
 // Topic names mirror the values in backend/kafka/config/kafka.config.js.
 // They are duplicated here (instead of importing TOPICS) so this package does
@@ -418,25 +413,17 @@ class EventStore {
      * same payload shape (the aggregate state), so `payload->>status` and
      * `payload->>customerId` filters behave identically after warm writes and
      * after a rebuild.
-     *
-     * The row is validated against the canonical read-model schema before the
-     * upsert so a projection/schema mismatch fails loudly instead of being
-     * silently logged.
      */
     async _upsertOrderReadModel(orderId, state, eventType, version) {
-        const row = assertOrderReadModelRow({
-            order_id: orderId,
-            payload: state,
-            event_type: eventType,
-            version: version ?? state?.version,
-            status: deriveOrderStatus(state),
-            timeline: null,
-            updated_at: new Date().toISOString()
-        });
-
         const { error } = await this._client
-            .from(ORDER_READ_MODEL_TABLE)
-            .upsert([row], {
+            .from('orders_read_model')
+            .upsert([{
+                order_id: orderId,
+                payload: state,
+                event_type: eventType,
+                version: version ?? state?.version,
+                updated_at: new Date().toISOString()
+            }], {
                 onConflict: 'order_id'
             });
 
@@ -556,7 +543,7 @@ class EventStore {
 
     async getOrderReadModel(orderId) {
         const { data, error } = await this._client
-            .from(ORDER_READ_MODEL_TABLE)
+            .from('orders_read_model')
             .select('*')
             .eq('order_id', orderId)
             .single();
@@ -579,7 +566,7 @@ class EventStore {
 
     async getOrderList(filters = {}) {
         let query = this._client
-            .from(ORDER_READ_MODEL_TABLE)
+            .from('orders_read_model')
             .select('*');
 
         if (filters.status) {

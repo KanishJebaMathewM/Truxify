@@ -169,7 +169,7 @@ export const dlqService = {
     const { data: requeued, error: updateErr } = await dlqDb()
       .from('webhook_failures')
       .update({
-        status: 'pending', // Reset status back to 'pending' for retryable failure
+        status: 'pending',
         retry_count: retryCount,
         next_retry_at: nextRetryAt,
         error_message: sanitizeError(error),

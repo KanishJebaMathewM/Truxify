@@ -18,7 +18,7 @@ jobs:
     steps:
     # Step 1: Execute GitHub Script to post the automated response
       - name: Post Closing Comment
-        uses: actions/github-script@v9
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

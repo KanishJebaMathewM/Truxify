@@ -7,7 +7,6 @@ import http from 'http'
 import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -25,16 +24,13 @@ import cookieSecurityValidator from './middleware/cookieSecurityValidator.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
-import { validateWimConfig } from './config/wim.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
 import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import digilockerService from './services/digilockerService.js'
 
 
 import {
@@ -163,19 +159,13 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import {
-  startOutboxRelayWorker,
-  stopOutboxRelayWorker,
-} from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -244,20 +234,6 @@ if (!process.env.WEBHOOK_SECRET) {
   } else {
     logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
-}
-
-// ============================================================================
-// 🆕 WIM BYPASS VALIDATION
-// ============================================================================
-// WIM bypass credentials are HMAC-signed with a server secret. Without a
-// properly configured secret the process must fail fast rather than ever
-// issue an unsigned or weakly-signed bypass credential.
-try {
-  validateWimConfig();
-  logger.info('✅ WIM bypass signing configuration is valid.')
-} catch (err) {
-  logger.fatal(err.message)
-  process.exit(1)
 }
 
 // ============================================================================
@@ -345,15 +321,6 @@ validateEscrowSetup().then((valid) => {
     logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
-
-// Validate DocumentRegistry/KYCVerifier contract wiring — a mismatched
-// DOCUMENT_REGISTRY_CONTRACT / KYC_VERIFIER_CONTRACT_ADDRESS must fail loudly
-// instead of silently skipping the DigiLocker on-chain write.
-digilockerService.validateSetup().then((valid) => {
-  if (!valid) {
-    logger.warn('⚠️ DigiLocker contract setup validation failed. On-chain document verification may not work correctly.')
-  }
-}).catch(err => logger.error({ err }, 'DigiLocker contract setup validation failed'))
 
 const app = express()
 const server = http.createServer(app)
@@ -487,9 +454,6 @@ app.use(requestLogger)
 
 app.use(hppProtection)
 app.use(suspiciousRequests)
-
-// Sanitize all responses to prevent response-header injection before routes run.
-app.use(responseSanitizer)
 
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
@@ -718,6 +682,8 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
+app.use(responseSanitizer)
+
 // Handling 404 Route Not Found
 app.use(notFound)
 // Sentry error handler must come before the generic error handler;
@@ -775,6 +741,7 @@ server.listen(PORT, () => {
   startStaleOrderWorker(escrowReconciliationOrderRepository)
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
+  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   startOutboxRelayWorker()
 
   // Register worker states for health aggregation
@@ -817,6 +784,7 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
+  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

@@ -18,11 +18,7 @@ export function initSentry() {
   Sentry.init({
     dsn,
     environment: process.env.NODE_ENV || "development",
-    beforeSend(event, hint) {
-      const originalException = hint?.originalException;
-      if (originalException && shouldIgnoreError(originalException)) {
-        return null;
-      }
+    beforeSend(event) {
       if (event.exception?.values?.[0]?.value) {
         const err = new Error(event.exception.values[0].value);
         err.code = event.exception.values[0].type || undefined;

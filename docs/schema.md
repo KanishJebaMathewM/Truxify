@@ -1,6 +1,10 @@
 # 📊 Truxify — Database Schema
 
+<<<<<<< HEAD
+> **28 tables · 4 RPC functions · 28 foreign keys**
+=======
 > **26 tables · 4 RPC functions · 26 foreign keys**
+>>>>>>> upstream/main
 > Critical business entities now use physical referential integrity for core joins and audit trails.
 
 ---
@@ -287,6 +291,27 @@ erDiagram
         numeric hours_driven
     }
 
+<<<<<<< HEAD
+    milestones {
+        uuid id PK
+        text title
+        text subtitle
+        int threshold
+        text metric
+        boolean is_active
+    }
+
+    driver_milestones {
+        uuid id PK
+        uuid driver_id
+        uuid milestone_id
+        boolean achieved
+        numeric progress
+        timestamptz achieved_at
+    }
+
+=======
+>>>>>>> upstream/main
     profiles ||--o| driver_details : "user_id"
     profiles ||--o| customer_stats : "user_id"
     profiles ||--o{ trucks : "driver_id"
@@ -321,8 +346,15 @@ erDiagram
     orders ||--o{ wallet_transactions : "order_display_id"
     trips ||--o{ wallet_transactions : "trip_display_id"
     profiles ||--o{ processed_batches : "user_id"
+<<<<<<< HEAD
+    profiles ||--o{ earnings_daily : "driver_id"
+    profiles ||--o{ driver_milestones : "driver_id"
+    milestones ||--o{ driver_milestones : "milestone_id"
+```
+=======
 profiles ||--o{ earnings_daily : "driver_id"
 
+>>>>>>> upstream/main
 
 ---
 
@@ -375,6 +407,11 @@ graph LR
 
     subgraph ENGAGEMENT["⭐ Engagement Layer"]
         R[ratings]
+<<<<<<< HEAD
+        M[milestones]
+        DM[driver_milestones]
+=======
+>>>>>>> upstream/main
         N[notifications]
         FAQ[faqs]
         ST[support_tickets]
@@ -469,11 +506,20 @@ graph LR
 |-------|---------|-------------|----------|
 | `processed_batches` | Offline sync / event idempotency tracking | `idempotency_key`, `user_id`, `event_count`, `processed_at` | `profiles.id` |
 
+<<<<<<< HEAD
+### ⭐ Engagement Layer (6 tables)
+=======
 ### ⭐ Engagement Layer (4 tables)
+>>>>>>> upstream/main
 
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
 | `ratings` | Customer → driver reviews | `order_display_id`, `stars`, `comment` | `profiles.id`, `orders.order_display_id` |
+<<<<<<< HEAD
+| `milestones` | Gamification achievement definitions | `title`, `threshold`, `metric` | — |
+| `driver_milestones` | Driver progress on milestones | `driver_id`, `milestone_id`, `achieved` | `profiles.id`, `milestones.id` |
+=======
+>>>>>>> upstream/main
 | `notifications` | In-app notification inbox | `user_id`, `title`, `notif_type`, `is_read` | `profiles.id` |
 | `faqs` | Help & support content | `app_type`, `question`, `answer` | — |
 | `support_tickets` | User support requests | `user_id`, `subject`, `category`, `status` | `profiles.id` |

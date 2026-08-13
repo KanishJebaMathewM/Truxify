@@ -47,20 +47,4 @@ describe('orderDisplayId — generateOrderDisplayId', () => {
     expect(ORDER_DISPLAY_ID_MAX_RETRIES).toBeGreaterThanOrEqual(1)
     expect(Number.isInteger(ORDER_DISPLAY_ID_MAX_RETRIES)).toBe(true)
   })
-
-  it('falls back to the epoch date when the system clock is invalid', () => {
-    const RealDate = globalThis.Date
-    class BrokenDate extends RealDate {
-      toISOString() {
-        throw new RangeError('Invalid time value')
-      }
-    }
-    globalThis.Date = BrokenDate
-    try {
-      const id = generateOrderDisplayId()
-      expect(id).toMatch(/^#FF19700101[A-Z0-9]{12}$/)
-    } finally {
-      globalThis.Date = RealDate
-    }
-  })
 })

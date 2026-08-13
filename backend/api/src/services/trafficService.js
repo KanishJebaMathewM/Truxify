@@ -8,6 +8,16 @@ const MIN_SURGE_MULTIPLIER = 1.2;
 const MAX_SURGE_MULTIPLIER = 2.5;
 const SURGE_PEAK_AMPLITUDE = 1.3;
 
+/**
+ * Calculates a live traffic multiplier for a given pickup location.
+ * Combines TOMTOM/Google Maps real-time traffic data with a sinusoidal rush-hour
+ * surge overlay (7-10 AM and 4-7 PM UTC). Falls back to rush-hour only if no API key
+ * is configured or the request fails.
+ *
+ * @param {number} pickupLat - Pickup latitude
+ * @param {number} pickupLng - Pickup longitude
+ * @returns {Promise<number>} Traffic multiplier (1.0 to 2.5), or 1.0 on error
+ */
 export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   try {
     if (!pickupLat || !pickupLng) {
@@ -56,6 +66,14 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   }
 }
 
+/**
+ * Returns a rush-hour surge multiplier based on the hour of day (UTC).
+ * Peaks at MIN_SURGE_MULTIPLIER + SURGE_PEAK_AMPLITUDE during the center of
+ * the rush-hour windows (morning 7-10 UTC, evening 16-19 UTC).
+ *
+ * @param {Date} date - Date/time to evaluate
+ * @returns {number} Surge multiplier between MIN_SURGE_MULTIPLIER and MAX_SURGE_MULTIPLIER
+ */
 function getRushHourMultiplier(date) {
   const hour = date.getUTCHours();
   const isMorningRush = hour >= RUSH_HOUR_START_AM && hour < RUSH_HOUR_END_AM;

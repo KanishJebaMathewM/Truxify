@@ -16,6 +16,10 @@ export class RequestCache {
     return this._cache.has(key);
   }
 
+  delete(key) {
+    return this._cache.delete(key);
+  }
+
   clear() {
     this._cache.clear();
   }

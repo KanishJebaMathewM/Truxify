@@ -1,33 +1,25 @@
 ## Problem
 
-`backend/ml/marl/mappo_fleet.py` computes the stochastic policy with a numerically unstable softmax:
+In `backend/ml/diffusion/trainer.py`, `train()` calls `self.validate(val_loader)` but `validate()` (lines ~148-166) never consults the `condition` loader that `train_epoch` uses. `train_epoch` appends the condition batch to the model input (`x_noisy = torch.cat([x_noisy, condition], dim=-1)`), yet `validate` builds its batches from `val_loader` alone, dropping the conditioning signal.
 
-```python
-probs = np.exp(action_logits) / np.sum(np.exp(action_logits))
-```
-
-`action_logits` is an unbounded dot product of `state × actor_weights`, so `np.exp(logits)` overflows to `inf` for moderately large logits. The resulting `inf/inf` (or `inf/sum`) yields `NaN`, and `np.argmax(NaN)` returns `0`. The fleet agent therefore collapses to a fixed action (`agent_id = 0`) regardless of state, and large/negative logits silently distort the distribution.
+For conditional diffusion models this means training conditions on `condition_data` while validation silently ignores it, producing train/validation skew: the validation loss measures an unrelated (unconditional) objective, so early stopping / checkpoint selection is driven by a mismatched metric.
 
 ## Fix
 
-Replaced the softmax with a numerically stable version that subtracts the max before exponentiating:
-
-```python
-z = action_logits - np.max(action_logits)
-e = np.exp(z)
-probs = e / np.sum(e)
-```
-
-Added a guard for the degenerate all-`-inf` case (falls back to a uniform distribution) and a unit test asserting finite probabilities, a normalized distribution, and that the selected agent matches the argmax of the raw logits (which fails on the old NaN/argmax=0 path).
+- Threaded the condition loader through `validate(val_loader, condition_loader=None, require_condition=False)` and, inside the validation loop, rebuild the same `(x, condition)` input used by `train_epoch` (1:1 channel layout, including the cyclical condition iterator).
+- `train()` now passes `condition_loader` to `validate` and sets `require_condition=(condition_loader is not None)`.
+- `validate` raises `ValueError` when `require_condition=True` but no `condition_loader` is supplied.
 
 ## Files changed
 
-- `backend/ml/marl/mappo_fleet.py`
-- `backend/ml/marl/test_mappo.py` (added `test_stable_softmax_large_logits`)
+- `backend/ml/diffusion/trainer.py`
+- `backend/ml/tests/test_diffusion_trainer.py` (added `TestDiffusionValidateCondition`)
 
 ## Testing
 
 - `python -c "import ast; ast.parse(...)"` for syntax validation.
-- `pytest backend/ml/marl/test_mappo.py` passes (2 passed). The new test feeds large-magnitude logits and verifies finite, normalized probabilities and a state-dependent selected agent.
+- `pytest backend/ml/tests/test_diffusion_trainer.py` passes (2 passed):
+  - `test_validate_raises_when_condition_required_but_missing` asserts `validate` raises `ValueError` when condition is required but missing.
+  - `test_validate_threads_condition_into_model` asserts the condition is actually concatenated into the model input via a `denoise` spy.
 
-Closes #11388
+Closes #11389

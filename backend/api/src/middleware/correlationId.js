@@ -4,12 +4,25 @@ import logger from './logger.js';
 
 export const correlationContext = new AsyncLocalStorage();
 
+const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export function correlationIdMiddleware(req, res, next) {
-  const header = req.headers['x-correlation-id'];
-  const correlationId = (typeof header === 'string' && header.trim()) ? header.trim() : randomUUID();
+  const rawHeader =
+    req.headers['x-correlation-id'] ??
+    req.headers['X-Correlation-ID'] ??
+    req.headers['x-correlation-ID'];
+  // Node lowercases header names but other runtimes may not; some clients
+  // send duplicate headers which arrive as an array — take the first value.
+  const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  const correlationId =
+    typeof header === 'string' && SAFE_CORRELATION_ID.test(header.trim())
+      ? header.trim()
+      : randomUUID();
 
   req.correlationId = correlationId;
-  res.setHeader('X-Correlation-ID', correlationId);
+  if (typeof res?.setHeader === 'function') {
+    res.setHeader('X-Correlation-ID', correlationId);
+  }
 
   logger.debug(
     { event: 'CORRELATION_ID_SET', correlationId, requestId: req.requestId || req.id },
@@ -19,12 +32,3 @@ export function correlationIdMiddleware(req, res, next) {
   const store = { correlationId };
   correlationContext.run(store, next);
 }
-
-
-// === Spec 14: ===
-// === Spec 14: AsyncLocalStorage for correlation IDs ===
-import { AsyncLocalStorage } from 'node:async_hooks';
-const storage = new AsyncLocalStorage();
-export function getCorrelationStore() { return storage.getStore() || {}; }
-export function runWithCorrelationId(cid, fn) { return storage.run({ correlationId: cid, startedAt: Date.now() }, fn); }
-

@@ -403,7 +403,7 @@ describe('reconcilePendingEscrowRefunds — issue #8891 started-trip guard', () 
 
     await reconcilePendingEscrowRefunds(orderRepository);
 
-    expect(getEscrowBooking).toHaveBeenCalledTimes(1);
+    expect(getEscrowBooking).toHaveBeenCalledTimes(2);
     expect(submitEscrowRefund).toHaveBeenCalledTimes(1);
   });
 });

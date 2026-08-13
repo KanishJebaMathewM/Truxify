@@ -14,7 +14,7 @@ class KeyManagementService {
     this.encryptionKeyCache = new Map();
   }
 
-  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt) {
+  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt = null) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
       const saltHex = salt || '';
       const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
@@ -24,12 +24,15 @@ class KeyManagementService {
         return this.encryptionKeyCache.get(cacheKey);
       }
 
+      const saltBuffer = salt
+        ? Buffer.from(salt, 'hex')
+        : Buffer.from('truxify-wallet-key-derivation');
       const derivedKey = crypto.pbkdf2Sync(
         Buffer.concat([
           Buffer.from(deviceId),
           Buffer.from(masterSecret),
         ]),
-        Buffer.from(saltHex || 'truxify-wallet-key-derivation'),
+        saltBuffer,
         100000,
         32,
         'sha256'

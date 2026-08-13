@@ -162,6 +162,22 @@ describe('CacheNamespace', () => {
       expect(entry.prefix).toBe('my_namespace');
     });
 
+    it('uses an explicit prefix when provided', () => {
+      CacheNamespace.clear();
+      const entry = CacheNamespace.register('custom_ns', { prefix: 'cache:custom' });
+      expect(entry.prefix).toBe('cache:custom');
+      expect(CacheNamespace.get('custom_ns').prefix).toBe('cache:custom');
+    });
+
+    it('returns the same entry object on duplicate registration', () => {
+      CacheNamespace.clear();
+      const first = CacheNamespace.register('dup_ns', { prefix: 'p1' });
+      const second = CacheNamespace.register('dup_ns', { prefix: 'p2' });
+      expect(second).toBe(first);
+      // The original prefix is kept; the later options are ignored.
+      expect(second.prefix).toBe('p1');
+    });
+
     it('defaultTtl defaults to 900 when not provided', () => {
       CacheNamespace.clear();
       const entry = CacheNamespace.register('ttl_test');

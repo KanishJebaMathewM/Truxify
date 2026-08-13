@@ -22,6 +22,7 @@ class SyncEngine {
     ConflictResolver? resolver,
     this.maxRetries = 5,
     this.batchSize = 20,
+    this.maxDrainPerCycle = 200,
   }) : resolver = resolver ?? ConflictResolver();
 
   final OfflineEventDb db;
@@ -29,6 +30,7 @@ class SyncEngine {
   final ConflictResolver resolver;
   final int maxRetries;
   final int batchSize;
+  final int maxDrainPerCycle;
 
   bool _isSyncing = false;
 
@@ -60,6 +62,17 @@ class SyncEngine {
   }
 
   Future<int> _syncPendingInternal() async {
+    int total = 0;
+    while (true) {
+      final n = await _syncBatchOnce();
+      if (n == 0) break;
+      total += n;
+      if (total >= maxDrainPerCycle) break; // backpressure guard
+    }
+    return total;
+  }
+
+  Future<int> _syncBatchOnce() async {
     final pending = await db.pendingEvents(limit: batchSize);
     if (pending.isEmpty) {
       return 0;

@@ -244,9 +244,12 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
+      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+        logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
+      }
       let txHash = null;
 
-      if (this.contract && walletAddress) {
+      if (this.contract && walletAddress && walletAddress !== '0x0000000000000000000000000000000000000000') {
         try {
           const tx = await this.contract.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();

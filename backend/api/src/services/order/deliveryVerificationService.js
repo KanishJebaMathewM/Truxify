@@ -481,9 +481,9 @@ export class DeliveryVerificationService {
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
-        if (!isRetryForStuckEscrow) {
-          await this.assertDriverAtDropoff(order);
-        }
+        // Always assert driver is at dropoff — physical presence must be verified
+        // regardless of retry path to prevent bypassing geofence on escrow recovery.
+        await this.assertDriverAtDropoff(order);
 
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;

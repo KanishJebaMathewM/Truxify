@@ -678,6 +678,14 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(trustedRelayer != address(0), "Relayer not configured");
         require(signature.length == 65, "Invalid signature length");
         bytes32 combinedHash = keccak256(abi.encodePacked(messageHash, kyberSharedSecretHash));
+
+        // EIP-191 prefix: relayer signatures are produced with a standard
+        // wallet sign (personal_sign / signMessage) which prepends
+        // "\x19Ethereum Signed Message:\n32". Recovering over the raw hash
+        // would never match a standard-signed relayer signature (issue #13965).
+        bytes32 signedHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", combinedHash)
+        );
         
         bytes32 r;
         bytes32 s;
@@ -688,7 +696,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             v := byte(0, mload(add(signature, 96)))
         }
         
-        address signer = ecrecover(combinedHash, v, r, s);
+        address signer = ecrecover(signedHash, v, r, s);
         return (signer == trustedRelayer);
     }
 }

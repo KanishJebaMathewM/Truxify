@@ -1,6 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockFrom = vi.fn();
+const { mockFrom, mockRedisGet, mockRedisSetex } = vi.hoisted(() => ({
+  mockFrom: vi.fn(),
+  mockRedisGet: vi.fn(),
+  mockRedisSetex: vi.fn(),
+}));
+
+vi.mock('../../config/db.js', () => ({
+  supabase: { from: mockFrom },
+  supabaseAdmin: { from: mockFrom },
+  redisClient: {
+    get: mockRedisGet,
+    setex: mockRedisSetex,
+  },
+}));
+ = vi.fn();
 const mockRedisGet = vi.fn();
 const mockRedisSetex = vi.fn();
 

@@ -59,7 +59,12 @@ export default function securityHeaders(req, res, next) {
 // === Spec 11: prevent HSTS header duplication ===
 export function setHstsHeader(res) {
   if (!res.getHeader || res.getHeader('Strict-Transport-Security')) return false;
-  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  const preload = process.env.SECURE_HSTS_PRELOAD;
+  const includePreload = !preload || preload === 'true' || preload === '1';
+  const header = includePreload
+    ? 'max-age=63072000; includeSubDomains; preload'
+    : 'max-age=63072000; includeSubDomains';
+  res.setHeader('Strict-Transport-Security', header);
   return true;
 }
 

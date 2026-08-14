@@ -4,9 +4,15 @@ import logger from '../middleware/logger.js';
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const NOMINATIM_TIMEOUT_MS = 5000;
 
+/**
+ * Returns the Nominatim HTTP timeout in milliseconds.
+ * Reads NOMINATIM_TIMEOUT_MS from environment or falls back to NOMINATIM_TIMEOUT_MS constant.
+ *
+ * @returns {number} Timeout in milliseconds (minimum 1)
+ */
 function getTimeoutMs() {
   const configured = Number(process.env.NOMINATIM_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : NOMINATIM_TIMEOUT_MS;
+  return Number.isFinite(configured) && configured > 0 && !Number.isNaN(configured) ? configured : NOMINATIM_TIMEOUT_MS;
 }
 
 /**
@@ -98,3 +104,16 @@ export async function reverseGeocode(lat, lon) {
     return null;
   }
 }
+
+
+// === Spec 21: ===
+// === Spec 21: geohash precision bounds ===
+const MIN = 1, MAX = 12, DEF = 6;
+export function clampGeohashPrecision(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEF;
+  if (n < MIN) return MIN;
+  if (n > MAX) return MAX;
+  return Math.floor(n);
+}
+

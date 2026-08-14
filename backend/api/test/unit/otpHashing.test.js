@@ -122,3 +122,15 @@ describe('otpHashing', () => {
   });
 
 });
+
+
+// === Spec 12 test ===
+import { describe, it, expect } from 'vitest';
+import { constantTimeEqualHex } from '../../src/lib/otpHashing.js';
+describe('constantTimeEqualHex', () => {
+  it('equal returns true', () => { expect(constantTimeEqualHex('abcdef', 'abcdef')).toBe(true); });
+  it('different returns false', () => { expect(constantTimeEqualHex('abcdef', '123456')).toBe(false); });
+  it('length mismatch', () => { expect(constantTimeEqualHex('abc', 'abcd')).toBe(false); });
+  it('invalid hex', () => { expect(constantTimeEqualHex('xyz', 'xyz')).toBe(false); });
+});
+

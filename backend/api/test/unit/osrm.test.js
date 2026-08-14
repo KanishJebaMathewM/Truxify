@@ -63,14 +63,14 @@ describe('osrm - buildRouteUrl', () => {
 });
 
 describe('osrm - buildCacheKey', ()=> {
-  it('rounds coordinates to 8 decimal places with v2 prefix', () => {
+  it('rounds coordinates to 6 decimal places with v2 prefix', () => {
     const key = buildCacheKey({
       pickupLat: 12.9715987,
       pickupLng: 77.5945627,
       dropLat: 13.0827,
       dropLng: 80.2707,
     });
-    expect(key).toBe('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
+    expect(key).toBe('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
   });
 
   it('produces same key for coordinates that round to same values', () => {
@@ -234,7 +234,7 @@ describe('osrm - getRouteEstimate', () => {
       pickupLat: 12.9715987, pickupLng: 77.5945627, dropLat: 13.0827, dropLng: 80.2707,
     });
 
-    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
+    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
   });
 
   it('calls OSRM and stores result in Redis on cache miss', async () => {
@@ -270,10 +270,7 @@ describe('osrm - getRouteEstimate', () => {
 
     expect(result).toEqual({ distanceKm: 20, durationSeconds: 900 });
     expect(fetch).toHaveBeenCalledOnce();
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      { event: 'OSRM_REDIS_GET_ERROR', error: 'Redis connection refused' },
-      '[osrm] Redis get error'
-    );
+    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis get error:', 'Redis connection refused');
   });
 
   it('returns result even when Redis set throws after successful OSRM response', async () => {
@@ -288,10 +285,7 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toEqual({ distanceKm: 10, durationSeconds: 600 });
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      { event: 'OSRM_REDIS_SET_ERROR', error: 'Redis write failed' },
-      '[osrm] Redis set error'
-    );
+    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis set error:', 'Redis write failed');
   });
 
   it('does not cache null when OSRM returns a non-ok response', async () => {
@@ -320,19 +314,7 @@ describe('osrm - getRouteEstimate', () => {
 
 describe('osrm - getRouteEstimate edge cases', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
-    mockRedis.get.mockResolvedValue(null);
-    mockRedis.set.mockResolvedValue('OK');
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
     vi.clearAllMocks();
-    vi.stubGlobal('fetch', vi.fn());
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
   });
 
   it('returns null for null input', async () => {
@@ -396,5 +378,62 @@ describe('osrm - getRouteEstimate edge cases', () => {
 
     // Redis get failed (invalid JSON), fetch was called as fallback
     expect(fetch).toHaveBeenCalled();
+  });
+});
+
+// === Spec 22 test ===
+import { routeWithFailover } from '../../src/services/osrm.js';
+describe('routeWithFailover', () => {
+  it('uses primary', async () => {
+    const p = vi.fn().mockResolvedValue({ distance: 100, source: 'osrm' });
+    expect((await routeWithFailover(p, null, [[[0,0],[0,1]]])).source).toBe('osrm');
+  });
+});
+
+
+describe('routeWithFailover edge cases', () => {
+  let osrm;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    osrm = await import('../../src/services/osrm.js');
+  });
+
+  it('returns distance 0 when coords are null', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      null,
+      null
+    );
+    expect(result).toEqual({ distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' });
+  });
+
+  it('returns distance 0 when coords array is empty', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [],
+      null
+    );
+    expect(result.distance).toBe(0);
+    expect(result.source).toBe('haversine-fallback');
+  });
+
+  it('returns distance 0 when only one coord pair is provided', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [[0, 0]],
+      null
+    );
+    expect(result.distance).toBe(0);
+  });
+
+  it('returns primary result when primary succeeds', async () => {
+    const primaryResult = { distance: 50, source: 'osrm' };
+    const result = await osrm.routeWithFailover(
+      async () => primaryResult,
+      null,
+      [[0, 0], [1, 1]]
+    );
+    expect(result).toEqual(primaryResult);
   });
 });

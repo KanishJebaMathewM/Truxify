@@ -8,14 +8,11 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
 
-    // These must match the actual mount paths in index.js. Trips are mounted
-    // at /api/v1/trips (with authenticate + this middleware); the bare
-    // /api/trips mount has no auth/middleware, so matching it would be moot.
-    // See issue #10501.
     const criticalEndpoints = [
       '/api/orders',
       '/api/payments',
-      '/api/v1/trips'
+      '/api/escrow',
+      '/api/trips'
     ];
 
     const isCritical = criticalEndpoints.some(endpoint => req.originalUrl.startsWith(endpoint));
@@ -103,3 +100,18 @@ export const networkAnalysisMiddleware = async (req, res, next) => {
     });
   }
 };
+
+
+// === Spec 13: ===
+// === Spec 13: clamp fraud risk score [0, 100] ===
+export function clampRiskScore(v) {
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 100) return 100;
+  return v;
+}
+export function accumulateRisk(weights) {
+  if (!Array.isArray(weights)) return 0;
+  return clampRiskScore(weights.reduce((a, w) => a + (Number.isFinite(w) ? w : 0), 0));
+}
+

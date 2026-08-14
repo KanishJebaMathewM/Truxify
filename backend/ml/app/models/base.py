@@ -8,10 +8,8 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-MODEL_STORAGE_DIR = os.environ.get(
-    "MODEL_STORAGE_DIR",
-    os.path.join(os.path.dirname(__file__), "..", "..", "models_storage"),
-)
+MODEL_STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models_storage")
+
 _model_locks: dict[str, asyncio.Lock] = {}
 
 def _get_lock(model_name: str) -> asyncio.Lock:
@@ -35,13 +33,19 @@ def get_previous_meta_path(model_name: str) -> str:
     os.makedirs(MODEL_STORAGE_DIR, exist_ok=True)
     return os.path.join(MODEL_STORAGE_DIR, f"{model_name}_previous_meta.json")
 
-def save_model(model: Any, model_name: str, metrics: Optional[dict] = None) -> None:
+def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, training_meta: Optional[dict] = None) -> None:
     """Persist *model* as the production version for *model_name*.
 
     Before overwriting, the current production model (if any) is preserved
     as the "previous" version so restore_previous_model() has something
     real to roll back to, instead of the old behaviour of unconditionally
     clobbering the only copy on disk via os.replace().
+
+    Args:
+        model: The model object to persist.
+        model_name: Name of the model.
+        metrics: Optional metrics dict.
+        training_meta: Optional training metadata (source, timestamp, feature_hash, etc.).
     """
     path = get_model_path(model_name)
     meta_path = get_meta_path(model_name)
@@ -61,6 +65,8 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None) -> N
         "saved_at": datetime.now().isoformat(),
         "metrics": metrics or {},
     }
+    if training_meta:
+        meta["training_meta"] = training_meta
     meta_tmp = meta_path + ".tmp"
     with open(meta_tmp, "w") as f:
         json.dump(meta, f, indent=2)

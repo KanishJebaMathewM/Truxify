@@ -18,7 +18,7 @@ function makeBuilder(result) {
 }
 
 const resultsByTable = {
-  driver_documents: { data: [{ id: 'doc-1', driver_id: 'user-1', document_type: 'rc_book', valid_until: '2099-01-01T00:00:00.000Z' }], error: null },
+  documents: { data: [{ id: 'doc-1', user_id: 'user-1', doc_type: 'rc_book', valid_until: '2099-01-01T00:00:00.000Z' }], error: null },
   notifications: { data: [], error: null },
 };
 
@@ -56,7 +56,7 @@ describe('documentExpiryService', () => {
 
     await processDocumentExpiryBatch();
 
-    expect(supabaseAdminBuilder.from).toHaveBeenCalledWith('driver_documents');
+    expect(supabaseAdminBuilder.from).toHaveBeenCalledWith('documents');
     expect(supabaseAdminBuilder.from).toHaveBeenCalledWith('notifications');
     expect(supabaseAnonBuilder.from).not.toHaveBeenCalled();
     expect(sendPushNotificationMock).toHaveBeenCalledWith(
@@ -71,17 +71,17 @@ describe('documentExpiryService', () => {
   it('pages the window sweep past the PostgREST 1000-row cap until fewer than a full page remains', async () => {
     const pageOf1000 = Array.from({ length: 1000 }, (_, i) => ({
       id: `doc-${i + 1}`,
-      driver_id: 'user-1',
-      document_type: 'rc_book',
+      user_id: 'user-1',
+      doc_type: 'rc_book',
       valid_until: '2099-01-01T00:00:00.000Z',
     }));
 
     const notificationsResult = { data: [], error: null };
-    const responses = [pageOf1000, [{ id: 'doc-tail', driver_id: 'user-2', document_type: 'insurance', valid_until: '2099-02-01T00:00:00.000Z' }]];
+    const responses = [pageOf1000, [{ id: 'doc-tail', user_id: 'user-2', doc_type: 'insurance', valid_until: '2099-02-01T00:00:00.000Z' }]];
 
     const paginatedBuilder = {
       from: vi.fn((table) => {
-        if (table === 'driver_documents') {
+        if (table === 'documents') {
           return makeBuilder({ data: responses.shift() ?? [], error: null });
         }
         return makeBuilder(notificationsResult);
@@ -101,7 +101,7 @@ describe('documentExpiryService', () => {
     const { processDocumentExpiryBatch } = await import('../../src/services/documentExpiryService.js');
     await processDocumentExpiryBatch();
 
-    const docCalls = paginatedBuilder.from.mock.calls.filter(([table]) => table === 'driver_documents');
+    const docCalls = paginatedBuilder.from.mock.calls.filter(([table]) => table === 'documents');
     expect(docCalls.length).toBeGreaterThan(1);
     expect(sendPushNotificationMock).toHaveBeenCalledWith(
       'user-2',

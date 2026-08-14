@@ -1,5 +1,12 @@
 #!/bin/bash
 
+<<<<<<< HEAD
+echo "🔄 Rolling back Liquibase Migrations..."
+
+# Rollback last change
+liquibase --changeLogFile=changelog-master.xml \
+    --url="jdbc:postgresql://localhost:5432/truxify" \
+=======
 # The Liquibase changelogs describe a legacy standalone demo schema and must
 # never run against the application database. They target the dedicated
 # "truxify_liquibase" database — see run-migrations.sh.
@@ -16,8 +23,13 @@ echo "🔄 Rolling back Liquibase Migrations against database '${LIQUIBASE_DB}'.
 # Rollback last change
 liquibase --changeLogFile=changelog-master.xml \
     --url="jdbc:postgresql://localhost:5432/${LIQUIBASE_DB}" \
+>>>>>>> upstream/main
     --username=postgres \
     --password=password \
     rollbackCount 1
 
+<<<<<<< HEAD
 echo "✅ Rollback completed!"
+=======
+echo "✅ Rollback completed!"
+>>>>>>> upstream/main

@@ -23,6 +23,7 @@ import redis
 import os
 import logging
 from functools import partial
+from collections import deque, defaultdict
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -68,6 +69,10 @@ class TrafficPipeline:
         self.gmaps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
         self.osrm_url = os.getenv('OSRM_URL', 'http://localhost:5000')
         self._closed = False
+        # Rolling per-route history of recent feature rows, fed to predict_eta
+        # as a genuine 60-step sequence instead of a tiled constant row
+        # (issue #11666).
+        self._route_windows = defaultdict(lambda: deque(maxlen=60))
 
     def close(self):
         """Dispose DB connection pool and close Redis connection.
@@ -236,17 +241,33 @@ class TrafficPipeline:
             return json.loads(cached)
         return None
     
-    def predict_eta(self, route_data: np.ndarray) -> float:
-        """Predict ETA using LSTM model"""
+    def predict_eta(self, route_data: np.ndarray, route_id: Optional[str] = None) -> float:
+        """Predict ETA using LSTM model.
+
+        Feeds a genuine rolling window of the last 60 observations for the
+        route (padded at the front by repeating the earliest observation during
+        warm-up) instead of tiling a single row into a constant sequence, which
+        was out of distribution for the model trained on diverse consecutive
+        speeds (issue #11666).
+        """
         try:
-            # Model expects (batch, 60, 5) — trained on 60-step sequences.
-            # Repeat a single feature row to fill the 60-timestep window.
             if route_data.ndim == 1:
                 route_data = route_data.reshape(1, -1)
-            if route_data.shape[1] == 5:
-                route_data = np.tile(route_data, (1, 60, 1))
+            if route_data.shape[1] != 5:
+                logger.error(f"Prediction failed: expected 5 features, got {route_data.shape[1]}")
+                return None
 
-            prediction = self.model.predict(route_data, verbose=0)
+            window = self._route_windows[route_id or ""]
+            window.append(route_data[0])
+
+            seq = list(window)
+            if len(seq) < 60:
+                # Cold start: pad the front with the earliest observation so
+                # the model still receives a 60-step input.
+                seq = [seq[0]] * (60 - len(seq)) + seq
+
+            model_input = np.array(seq).reshape(1, 60, 5)
+            prediction = self.model.predict(model_input, verbose=0)
             return float(prediction[0][0])
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -266,6 +287,7 @@ class TrafficPipeline:
         
         # Prepare features
         df = pd.DataFrame([{
+            'route_id': d.route_id,
             'traffic_speed': d.traffic_speed,
             'free_flow_speed': d.free_flow_speed,
             'congestion_level': d.congestion_level,
@@ -274,9 +296,26 @@ class TrafficPipeline:
             'timestamp': d.timestamp
         } for d in data])
         
-        # Create sequences
+        # Build sequences per route in timestamp order so sliding 60-step
+        # windows never span a route boundary or an arbitrary row order; a
+        # window concatenated across corridors taught the LSTM spurious
+        # transitions and meaningless targets (issue #11666).
         features = ['traffic_speed', 'free_flow_speed', 'congestion_level', 'hour', 'day_of_week']
-        X, y = self._create_sequences(df[features], 'traffic_speed')
+        df = df.sort_values(['route_id', 'timestamp'])
+        X_parts, y_parts = [], []
+        for _, group in df.groupby('route_id', sort=False):
+            if len(group) < 61:
+                continue
+            X_route, y_route = self._create_sequences(group[features], 'traffic_speed')
+            X_parts.append(X_route)
+            y_parts.append(y_route)
+
+        if not X_parts:
+            logger.warning("Not enough per-route data for training")
+            return
+
+        X = np.concatenate(X_parts, axis=0)
+        y = np.concatenate(y_parts, axis=0)
         
         # Train
         self.model.fit(
@@ -324,8 +363,12 @@ class TrafficPipeline:
                 # traffic_speed, see _fetch_osrm_data and train_model), so its
                 # output is a speed, not a duration. Convert the predicted
                 # speed into an ETA in seconds using the route distance so the
-                # value is meaningful as a travel time.
-                predicted_speed_mps = self.predict_eta(features)
+                # value is meaningful as a travel time. The rolling window is
+                # keyed by the order's route id (issue #11666).
+                predicted_speed_mps = self.predict_eta(
+                    features,
+                    f"order_{order_id}"
+                )
 
                 if predicted_speed_mps is not None:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)

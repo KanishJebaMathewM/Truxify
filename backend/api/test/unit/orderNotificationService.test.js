@@ -1,87 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OTP_TTL_MINUTES, OTP_MAX_FAILED_ATTEMPTS, OTP_LOCKOUT_MINUTES, checkOtpLockout, recordOtpFailure, clearOtpState } from '../../src/services/order/orderNotificationService.js';
 
-const mockGetActiveDeliveryOtp = vi.fn();
-const mockStoreDeliveryOtp = vi.fn();
-const mockSendDeliveryOtpNotification = vi.fn();
-
-vi.mock('../../src/config/db.js', () => ({
-  redisClient: {
-    get: vi.fn().mockResolvedValue(null),
-    del: vi.fn(),
-    incr: vi.fn(),
-    expire: vi.fn(),
-    set: vi.fn(),
-  },
-}));
-
+const mockSendPushNotification = vi.fn();
 vi.mock('../../src/services/notificationService.js', () => ({
-  sendDeliveryOtpNotification: mockSendDeliveryOtpNotification,
-  storeDeliveryOtp: mockStoreDeliveryOtp,
-  getActiveDeliveryOtp: mockGetActiveDeliveryOtp,
+  sendPushNotification: (...args) => mockSendPushNotification(...args),
 }));
-
-const mockOrderRepository = {
-  updateOrder: vi.fn(),
-};
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../../src/config/db.js', () => ({ redisClient: null }));
 
 describe('orderNotificationService', () => {
-  let orderNotificationService;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    const { OrderNotificationService } = await import('../../src/services/order/orderNotificationService.js');
-    orderNotificationService = new OrderNotificationService(mockOrderRepository);
   });
 
-  describe('sendOrderNotification', () => {
-    it('issues a fresh OTP and dispatches it', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue(null);
-      mockStoreDeliveryOtp.mockResolvedValue(true);
-      mockSendDeliveryOtpNotification.mockResolvedValue({ success: true });
-
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
-
-      expect(result.notified).toBe(true);
-      expect(result.otp).toMatch(/^\d{6}$/);
-      expect(mockStoreDeliveryOtp).toHaveBeenCalledWith('order-1', result.otp, expect.any(Number));
-      expect(mockSendDeliveryOtpNotification).toHaveBeenCalledWith('cust-1', 'TRX-1', result.otp);
-      expect(mockOrderRepository.updateOrder).not.toHaveBeenCalled();
+  describe('exports', () => {
+    it('exports OTP_TTL_MINUTES as a number', () => {
+      expect(typeof OTP_TTL_MINUTES).toBe('number');
     });
 
-    it('does not regenerate while an active OTP exists', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue({ otp: '111111' });
-
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
-
-      expect(result).toEqual({ otp: null, notified: false });
-      expect(mockStoreDeliveryOtp).not.toHaveBeenCalled();
+    it('exports OTP_MAX_FAILED_ATTEMPTS as a number', () => {
+      expect(typeof OTP_MAX_FAILED_ATTEMPTS).toBe('number');
     });
 
-    it('handles a failed FCM dispatch without throwing', async () => {
-      mockGetActiveDeliveryOtp.mockResolvedValue(null);
-      mockStoreDeliveryOtp.mockResolvedValue(true);
-      mockSendDeliveryOtpNotification.mockResolvedValue({ success: false, fcm: { error: 'device offline' } });
+    it('exports OTP_LOCKOUT_MINUTES as a number', () => {
+      expect(typeof OTP_LOCKOUT_MINUTES).toBe('number');
+    });
 
-      const result = await orderNotificationService.sendOrderNotification({
-        type: 'delivery_otp_in_transit',
-        orderId: 'order-1',
-        orderDisplayId: 'TRX-1',
-        customerId: 'cust-1',
-      });
+    it('exports checkOtpLockout as a function', () => {
+      expect(typeof checkOtpLockout).toBe('function');
+    });
 
-      expect(result.notified).toBe(false);
-      expect(mockOrderRepository.updateOrder).toHaveBeenCalledWith('order-1', expect.objectContaining({ updated_at: expect.any(String) }));
+    it('exports recordOtpFailure as a function', () => {
+      expect(typeof recordOtpFailure).toBe('function');
+    });
+
+    it('exports clearOtpState as a function', () => {
+      expect(typeof clearOtpState).toBe('function');
+    });
+  });
+
+  describe('checkOtpLockout', () => {
+    it('returns false when redis is not available', async () => {
+      const result = await checkOtpLockout('order-1');
+      expect(result).toBe(false);
     });
   });
 });

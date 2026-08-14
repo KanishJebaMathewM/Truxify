@@ -6,6 +6,8 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+<<<<<<< HEAD
+=======
 #ifndef AF_INET
 #define AF_INET 2
 #endif
@@ -45,6 +47,7 @@ static __always_inline int str_contains(const char *str, int str_len, const char
     return 0;
 }
 
+>>>>>>> upstream/main
 // Map for threat events
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -68,6 +71,25 @@ struct {
     __type(value, __u64);    // file hash
 } file_hashes SEC(".maps");
 
+<<<<<<< HEAD
+// Tracepoint for failed login attempts
+SEC("tracepoint/syscalls/sys_enter_openat")
+int trace_file_access(struct trace_event_raw_sys_enter *args)
+{
+    const char *filename = (const char *)args->args[1];
+    
+    // Check for sensitive files
+    const char *sensitive_files[] = {
+        "/etc/passwd",
+        "/etc/shadow",
+        "/etc/sudoers",
+        "/root/.ssh/id_rsa",
+        "/etc/ssl/private/"
+    };
+    
+    for (int i = 0; i < 5; i++) {
+        if (strncmp(filename, sensitive_files[i], strlen(sensitive_files[i])) == 0) {
+=======
 // Tracepoint for sensitive file access
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_file_access(struct trace_event_raw_sys_enter *args)
@@ -93,6 +115,7 @@ int trace_file_access(struct trace_event_raw_sys_enter *args)
     
     for (int i = 0; i < 5; i++) {
         if (str_has_prefix(filename, sensitive_files[i].path, sensitive_files[i].len)) {
+>>>>>>> upstream/main
             bpf_printk("Sensitive file access: %s\n", filename);
         }
     }
@@ -100,6 +123,25 @@ int trace_file_access(struct trace_event_raw_sys_enter *args)
     return 0;
 }
 
+<<<<<<< HEAD
+// Tracepoint for failed login attempts
+SEC("tracepoint/syscalls/sys_enter_execve")
+int trace_process_exec(struct trace_event_raw_sys_enter *args)
+{
+    const char *filename = (const char *)args->args[0];
+    
+    // Check for suspicious processes
+    const char *suspicious_processes[] = {
+        "nc", "netcat", "ncat",
+        "telnet", "ftp", "sshpass",
+        "curl", "wget",
+        "python -c", "perl -e",
+        "bash -i", "sh -i"
+    };
+    
+    for (int i = 0; i < 11; i++) {
+        if (strstr(filename, suspicious_processes[i]) != NULL) {
+=======
 // Tracepoint for process execution
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_process_exec(struct trace_event_raw_sys_enter *args)
@@ -125,6 +167,7 @@ int trace_process_exec(struct trace_event_raw_sys_enter *args)
     
     for (int i = 0; i < 12; i++) {
         if (str_contains(filename, sizeof(filename), suspicious_processes[i].name, suspicious_processes[i].len)) {
+>>>>>>> upstream/main
             bpf_printk("Suspicious process: %s\n", filename);
         }
     }
@@ -136,6 +179,9 @@ int trace_process_exec(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_connect")
 int trace_network_connect(struct trace_event_raw_sys_enter *args)
 {
+<<<<<<< HEAD
+    __u32 port = (__u32)args->args[1];
+=======
     __u32 port = 0;
     __u16 family = 0;
     __u16 sin_port = 0;
@@ -158,6 +204,7 @@ int trace_network_connect(struct trace_event_raw_sys_enter *args)
     } else {
         return 0;
     }
+>>>>>>> upstream/main
     
     // Check for suspicious ports
     const __u32 suspicious_ports[] = {
@@ -199,9 +246,24 @@ int trace_setuid(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_rename")
 int trace_file_rename(struct trace_event_raw_sys_enter *args)
 {
+<<<<<<< HEAD
     const char *oldpath = (const char *)args->args[0];
     const char *newpath = (const char *)args->args[1];
     
+=======
+    char oldpath[256];
+    char newpath[256];
+    // args->args[0] and args->args[1] are userspace pointers to the path
+    // names; they cannot be dereferenced from kernel context. Probe them into
+    // bounded stack buffers before any use.
+    if (bpf_probe_read_user_str(oldpath, sizeof(oldpath), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
+    if (bpf_probe_read_user_str(newpath, sizeof(newpath), (void *)(long)args->args[1]) < 0) {
+        return 0;
+    }
+
+>>>>>>> upstream/main
     bpf_printk("File renamed: %s -> %s\n", oldpath, newpath);
     
     return 0;

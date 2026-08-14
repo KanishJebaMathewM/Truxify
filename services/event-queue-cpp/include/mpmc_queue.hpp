@@ -19,11 +19,11 @@ public:
     }
 
     bool enqueue(const T& data) {
-        size_t pos = enqueue_pos_.load(std::memory_order_relaxed);
+        int64_t pos = enqueue_pos_.load(std::memory_order_relaxed);
         while (true) {
             Cell* cell = &cells_[pos % Capacity];
-            size_t seq = cell->sequence.load(std::memory_order_acquire);
-            intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+            int64_t seq = cell->sequence.load(std::memory_order_acquire);
+            int64_t diff = static_cast<int64_t>(seq) - static_cast<int64_t>(pos);
 
             if (diff == 0) {
                 if (enqueue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
@@ -40,11 +40,11 @@ public:
     }
 
     bool dequeue(T& data) {
-        size_t pos = dequeue_pos_.load(std::memory_order_relaxed);
+        int64_t pos = dequeue_pos_.load(std::memory_order_relaxed);
         while (true) {
             Cell* cell = &cells_[pos % Capacity];
-            size_t seq = cell->sequence.load(std::memory_order_acquire);
-            intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+            int64_t seq = cell->sequence.load(std::memory_order_acquire);
+            int64_t diff = static_cast<int64_t>(seq) - static_cast<int64_t>(pos + 1);
 
             if (diff == 0) {
                 if (dequeue_pos_.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
@@ -62,13 +62,13 @@ public:
 
 private:
     struct Cell {
-        std::atomic<size_t> sequence;
+        std::atomic<int64_t> sequence;
         T data;
     };
 
     alignas(64) Cell cells_[Capacity];
-    alignas(64) std::atomic<size_t> enqueue_pos_;
-    alignas(64) std::atomic<size_t> dequeue_pos_;
+    alignas(64) std::atomic<int64_t> enqueue_pos_{0};
+    alignas(64) std::atomic<int64_t> dequeue_pos_{0};
 };
 
 } // namespace TruxifyQueue

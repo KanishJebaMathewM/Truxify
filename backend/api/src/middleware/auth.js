@@ -247,6 +247,7 @@ export async function authenticate(req, res, next) {
           role: testUserRole,
           fullName: testFullName,
           phone: "+919999999999",
+          isActive: true,
         };
         req.token = "test-auth-token";
         return next();
@@ -263,9 +264,14 @@ export async function authenticate(req, res, next) {
       process.env.DEV_ACCESS_TOKEN &&
       devToken === process.env.DEV_ACCESS_TOKEN
     ) {
+      const devIdentity = {
+        id: req.headers["x-user-id"],
+        role: req.headers["x-user-role"] || "customer",
+        name: req.headers["x-user-name"] || "Test User",
+      };
       const testUserId = devIdentity.id;
-      const testUserRole = devIdentity.role || "customer";
-      const testFullName = devIdentity.name || "Test User";
+      const testUserRole = devIdentity.role;
+      const testFullName = devIdentity.name;
 
       if (testUserId) {
         req.user = {
@@ -274,6 +280,7 @@ export async function authenticate(req, res, next) {
           role: testUserRole,
           fullName: testFullName,
           phone: "+919999999999",
+          isActive: true,
         };
         logger.warn(
           {
@@ -355,6 +362,8 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      } catch (err) {
+        logger.error({ err }, "Supabase cache check failed");
       }
 
       // Single DB query retrieves profile state including `is_active`
@@ -447,6 +456,8 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      } catch (err) {
+        logger.error({ err }, "Firebase cache check failed");
       }
 
       if (!supabase) {
@@ -490,6 +501,7 @@ export async function authenticate(req, res, next) {
           TOMBSTONE_TTL_SECONDS,
         ).catch((err) => logger.error({ err }, "Cache set failed"));
 
+      if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
           hint: "Contact support to reactivate your account.",
@@ -531,7 +543,19 @@ export function requireRole(allowedRoles) {
     );
   }
 
-  const sanitizedAllowedRoles = allowedRoles.map(r => typeof r === "string" ? r.trim() : r);
+  // Trim each entry and drop anything that is not a non-empty string, so a
+  // misconfigured array like ['admin', 42, '   '] cannot silently produce a
+  // role check that never matches (denying every user) or worse, matches on
+  // a garbage value.
+  const sanitizedAllowedRoles = allowedRoles
+    .map(r => typeof r === "string" ? r.trim() : "")
+    .filter(r => r.length > 0);
+
+  if (sanitizedAllowedRoles.length === 0) {
+    throw new Error(
+      "requireRole middleware requires at least one non-empty role string.",
+    );
+  }
 
   return (req, res, next) => {
     if (!req.user) {

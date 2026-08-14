@@ -38,9 +38,9 @@ app.use((req, res, next) => {
   req.user = { id: 'driver-1' };
   next();
 });
-app.use('/api/orders', orderRoutes);
+app.use(orderRoutes);
 
-describe('POST /api/orders/:id/geofence-confirm validation', () => {
+describe('POST /api/deliveries/:id/geofence-confirm validation', () => {
   beforeEach(() => {
     orderValidationService.findOrderByIdOrDisplayId.mockReset();
     orderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockReset();
@@ -51,7 +51,7 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
     orderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockResolvedValue({ success: true });
 
     const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
+      .post('/api/deliveries/123/geofence-confirm')
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 100 });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -66,7 +66,7 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
 
   it('should reject NaN geofence_radius_m with 400', async () => {
     const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
+      .post('/api/deliveries/123/geofence-confirm')
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 'invalid' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
@@ -74,7 +74,7 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
 
   it('should reject non-positive geofence_radius_m with 400', async () => {
     const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
+      .post('/api/deliveries/123/geofence-confirm')
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: -50 });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();

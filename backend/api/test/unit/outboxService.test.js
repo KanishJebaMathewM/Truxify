@@ -62,7 +62,7 @@ function buildSupabaseMock() {
 
 const mocks = buildSupabaseMock();
 vi.mock('../../src/config/db.js', () => ({
-  supabase: mocks.supabase,
+  supabaseAdmin: mocks.supabase,
 }));
 
 const { outboxService } = await import('../../src/services/outbox/outboxService.js');
@@ -75,7 +75,7 @@ describe('OutboxService', () => {
   });
 
   describe('writeEvent', () => {
-    it('writes a pending outbox event and returns its id', async () => {
+    it('writes a pending outbox event via supabaseAdmin and returns its id', async () => {
       mocks.chain.data = { id: 'evt-1' };
       const id = await outboxService.writeEvent({
         aggregateId: 'order-1',
@@ -101,14 +101,11 @@ describe('OutboxService', () => {
       expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
 
-    it('returns null and logs when the insert errors', async () => {
+    it('throws when the insert errors so failures are observable', async () => {
       mocks.chain.error = { message: 'insert failed' };
-      const id = await outboxService.writeEvent({
-        aggregateId: 'order-1',
-        eventType: 'order.created',
-      });
-      expect(id).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
+      await expect(
+        outboxService.writeEvent({ aggregateId: 'order-1', eventType: 'order.created' })
+      ).rejects.toThrow(/insert failed/);
     });
   });
 
@@ -174,6 +171,26 @@ describe('OutboxService', () => {
 
       expect(mocks.chain.lastUpdate).toEqual({ status: 'pending' });
       expect(mocks.chain.lastEq).toEqual(['status', 'failed']);
+    });
+
+    it('does not throw when the Supabase update returns an error', async () => {
+      mocks.chain.error = { message: 'connection timeout' };
+      // Should not throw — error is swallowed and logged.
+      await expect(outboxService.requeueFailedEvents(3)).resolves.toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    it('uses maxRetries as the lt threshold for retry_count', async () => {
+      mocks.chain.error = null;
+      // Track the .lt call to verify maxRetries is passed correctly.
+      const ltValues = [];
+      mocks.chain.lt = vi.fn(function (col) {
+        ltValues.push(col);
+        return this;
+      });
+      await outboxService.requeueFailedEvents(7);
+      expect(mocks.chain.lastEq).toEqual(['status', 'failed']);
+      expect(ltValues.length).toBeGreaterThan(0);
     });
   });
 });

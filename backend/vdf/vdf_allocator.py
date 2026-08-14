@@ -59,11 +59,25 @@ class VdfLoadAllocator:
     def __init__(self):
         self.vdf = WesolowskiVDF(iterations=2000)
 
-    def evaluate_bid_fairness(self, load_id: str, driver_id: str, bid_timestamp: float):
+    def evaluate_bid_fairness(self, load_id: str, driver_id: str, bid_timestamp: float,
+                              output_y: int = None, proof: str = None):
         seed = f"{load_id}:{driver_id}:{bid_timestamp}"
-        output_y, proof = self.vdf.eval(seed)
+
+        # Fairness gate must verify the bidder-supplied (output, proof) against
+        # the public seed and parameters, never its own freshly generated
+        # output — self-verification could never fail and the anti-MEV gate was
+        # a no-op (issue #11675). Missing claims fail closed.
+        if output_y is None or proof is None:
+            return {
+                "load_id": load_id,
+                "driver_id": driver_id,
+                "vdf_output": output_y,
+                "proof": proof,
+                "is_fairly_allocated": False
+            }
+
         is_valid = self.vdf.verify(seed, output_y, proof)
-        
+
         return {
             "load_id": load_id,
             "driver_id": driver_id,

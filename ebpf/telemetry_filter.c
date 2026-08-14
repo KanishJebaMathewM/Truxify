@@ -15,18 +15,19 @@
 #define MAX_PACKETS_PER_SEC 10             // Max 10 telemetry pings per sec per IP
 
 struct rate_limit_entry {
-    __u32 lock;
+    // bpf_spin_lock requires the lock field to be exactly this type; it is
+    // only permitted inside BPF_MAP_TYPE_HASH / BPF_MAP_TYPE_ARRAY (not LRU).
+    struct bpf_spin_lock lock;
     __u64 last_time_ns;
     __u32 packet_count;
 };
 
 // BPF Map: Per-IP Telemetry Rate Limiting.
-// BPF_MAP_TYPE_LRU_HASH bounds memory and evicts idle entries automatically,
-// so a flood of spoofed source IPs can no longer permanently fill the map.
-// A periodic userspace sweep (loader.py) additionally deletes entries that
-// are idle past the window so the map stays healthy in normal operation.
+// BPF_MAP_TYPE_HASH supports bpf_spin_lock (LRU_HASH does not), so the verifier
+// accepts the program. A periodic userspace sweep (loader.py) deletes entries
+// that are idle past the window so the map stays healthy in normal operation.
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_TRACKERS);
     __type(key, __u32); // IPv4 Address
     __type(value, struct rate_limit_entry);
@@ -74,7 +75,7 @@ int xdp_telemetry_filter(struct xdp_md *ctx) {
             bpf_spin_unlock(&entry->lock);
         } else {
             struct rate_limit_entry new_entry = {
-                .lock = 0,
+                .lock = {},
                 .last_time_ns = now,
                 .packet_count = 1
             };

@@ -1,0 +1,47 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: api-kafka-scaledobject
+  namespace: truxify
+  labels:
+    app: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-deployment
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  cooldownPeriod: 300
+  pollingInterval: 30
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      topic: order.created
+      consumerGroup: order-service
+      lagThreshold: "10"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ml-kafka-scaledobject
+  namespace: truxify
+  labels:
+    app: ml
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 30
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      topic: ml.predictions
+      consumerGroup: ml-service
+      lagThreshold: "5"

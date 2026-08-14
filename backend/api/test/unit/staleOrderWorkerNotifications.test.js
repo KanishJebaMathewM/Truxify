@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const sendPushNotificationMock = vi.hoisted(() => vi.fn());
-const loggerWarnMock = vi.hoisted(() => vi.fn());
-const acquireLockMock = vi.hoisted(() => vi.fn());
-const renewLockMock = vi.hoisted(() => vi.fn());
-const releaseLockMock = vi.hoisted(() => vi.fn());
+const sendPushNotificationMock = vi.fn();
+const loggerWarnMock = vi.fn();
+const redisSetMock = vi.fn();
+const redisDelMock = vi.fn();
+const redisExpireMock = vi.fn();
 
 vi.mock('node-cron', () => ({
   default: {
@@ -49,13 +49,11 @@ vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
 vi.mock('../../src/config/db.js', () => ({
   supabase: {},
   supabaseAdmin: {},
-}));
-
-vi.mock('../../src/lib/redisLock.js', () => ({
-  acquireLock: acquireLockMock,
-  renewLock: renewLockMock,
-  releaseLock: releaseLockMock,
-  LockAcquisitionError: class LockAcquisitionError extends Error {},
+  redisClient: {
+    set: redisSetMock,
+    del: redisDelMock,
+    expire: redisExpireMock,
+  },
 }));
 
 describe('staleOrderWorker notifications', () => {
@@ -65,9 +63,9 @@ describe('staleOrderWorker notifications', () => {
   beforeEach(async () => {
     sendPushNotificationMock.mockReset();
     loggerWarnMock.mockClear();
-    acquireLockMock.mockReset().mockResolvedValue('lock-token');
-    renewLockMock.mockReset().mockResolvedValue(true);
-    releaseLockMock.mockReset().mockResolvedValue(true);
+    redisSetMock.mockReset().mockResolvedValue(true);
+    redisDelMock.mockReset().mockResolvedValue(true);
+    redisExpireMock.mockReset().mockResolvedValue(true);
     vi.resetModules();
     orderRepository = {
       findStalePendingOrders: vi.fn(),

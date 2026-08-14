@@ -92,7 +92,6 @@ const mockSupabase = {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: mockSupabase,
-  supabaseAdmin: null,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,

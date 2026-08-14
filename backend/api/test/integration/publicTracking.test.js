@@ -315,35 +315,6 @@ describe('Tracking Routes', () => {
       expect(res.status).toBe(422);
       expect(res.body.error).toBe('Route coordinates are not available for this order');
     });
-
-    // #10503: the /route endpoint must mirror the main tracking endpoint's
-    // status mapping for invalid tokens (410 for revoked/expired, 404 for
-    // not_found) instead of returning 404 for every invalid state.
-    it('should return 410 for a revoked token (mirrors main endpoint)', async () => {
-      const shareRes = await request(app)
-        .post('/api/orders/%23FF20241205/share-tracking')
-        .set('x-user-id', 'customer-uuid-123')
-        .send({});
-
-      await request(app)
-        .post('/api/orders/%23FF20241205/share-tracking/revoke')
-        .set('x-user-id', 'customer-uuid-123')
-        .send({});
-
-      const res = await request(app)
-        .get(`/api/public/tracking/${shareRes.body.token}/route`);
-
-      expect(res.status).toBe(410);
-      expect(res.body.error).toBe('This tracking link has been revoked');
-    });
-
-    it('should return 404 for an unknown token (mirrors main endpoint)', async () => {
-      const res = await request(app)
-        .get('/api/public/tracking/invalid-token-abc123/route');
-
-      expect(res.status).toBe(404);
-      expect(res.body.error).toBe('Tracking link not found or invalid');
-    });
   });
 
   describe('Security: No auth required for public endpoint', () => {

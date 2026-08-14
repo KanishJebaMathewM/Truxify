@@ -93,4 +93,27 @@ describe('redisLock acquire/renew/release semantics', () => {
 
     expect(await renewLock('res', 'other', 30000)).toBe(false);
   });
+
+  it('releaseLock returns false on a Lua script error', async () => {
+    const redis = { eval: vi.fn().mockRejectedValue(new Error('redis down')) };
+    const { releaseLock } = await loadRedisLock(redis);
+
+    expect(await releaseLock('res', 'token-1')).toBe(false);
+  });
+
+  it('acquireLock passes a custom TTL to SET NX PX', async () => {
+    const redis = { set: vi.fn().mockResolvedValue('OK') };
+    const { acquireLock } = await loadRedisLock(redis);
+
+    await acquireLock('res', 45000);
+    expect(redis.set).toHaveBeenCalledWith('res', expect.any(String), 'PX', 45000, 'NX');
+  });
+
+  it('releaseLock treats a falsy token as a no-op without calling eval', async () => {
+    const redis = { eval: vi.fn() };
+    const { releaseLock } = await loadRedisLock(redis);
+
+    expect(await releaseLock('res', undefined)).toBe(false);
+    expect(redis.eval).not.toHaveBeenCalled();
+  });
 });

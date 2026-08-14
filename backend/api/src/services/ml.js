@@ -44,10 +44,14 @@ function parseWeightKg(weight) {
 }
 
 function parseWeightKgSafe(weight) {
+  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
+    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
+    return null;
+  }
   const result = parseWeightKg(weight);
   if (Number.isNaN(result)) {
     logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return 0;
+    return null;
   }
   return result;
 }
@@ -85,20 +89,20 @@ function getHeaders() {
 /**
  * Utility: handle ML engine responses consistently
  */
-async function handleResponse(response) {
+async function handleResponse(response, url = '', method = 'GET') {
     const text = await response.text();
 
     if (response.status === 401 || response.status === 403) {
-        throw new Error(`[ML] Authentication failed (${response.status}): ${text}`);
+        throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed (${response.status}): ${text}`);
+        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
     }
 
     try {
         return JSON.parse(text);
     } catch (err) {
-        logger.error({ status: response ? response.status : undefined, bodyPreview: text.slice(0, 200) }, 'ML service request failed');
+        logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }
@@ -134,7 +138,7 @@ export async function predictDemand(features = {}) {
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
   demandCache.set(cacheKey, result);
   return result;
 }
@@ -186,7 +190,7 @@ export async function predictPrice({
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const raw = await handleResponse(response);
+  const raw = await handleResponse(response, url, 'POST');
 
   const initialValidation = validatePricePrediction(raw);
   if (!initialValidation.ok) {
@@ -199,11 +203,13 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
+  // Only forward min_price/max_price keys when the raw response actually
+  // carried them — injecting undefined values trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
-      min_price: typeof raw?.min_price === 'number' ? raw.min_price * safeMultiplier : undefined,
-      max_price: typeof raw?.max_price === 'number' ? raw.max_price * safeMultiplier : undefined,
+      ...(typeof raw?.min_price === 'number' ? { min_price: raw.min_price * safeMultiplier } : {}),
+      ...(typeof raw?.max_price === 'number' ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
@@ -266,7 +272,7 @@ export async function predictEta({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
 
   if (
     result == null ||
@@ -304,7 +310,7 @@ export async function matchBilateral({ loads, drivers }) {
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
-  return handleResponse(response);
+  return handleResponse(response, url, 'POST');
 }
 
 /**
@@ -347,7 +353,7 @@ export async function predictDriverProfit({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
 
   if (
     result == null ||
@@ -740,20 +746,20 @@ class MLService {
     let data;
     try {
       data = await response.json();
-    } catch (e) {
+    } catch (_) {
       throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
     }
 
     if (response.status === 401) {
-      throw new Error(`[MLService] Unauthorized (401) for ${method} ${url}`);
+      throw new Error(`[MLService] Authentication failed: ${method} ${url} (${response.status})`);
     }
 
     if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden (403) for ${method} ${url}`);
+      throw new Error(`[MLService] Forbidden: ${method} ${url} (${response.status})`);
     }
 
     if (!response.ok) {
-      throw new Error(`[MLService] Request failed with status ${response.status} for ${method} ${url}`);
+      throw new Error(`[MLService] Request failed: ${method} ${url} ${response.status}`);
     }
 
     return data;

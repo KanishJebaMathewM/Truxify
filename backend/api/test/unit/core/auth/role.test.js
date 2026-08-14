@@ -1,29 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { ROLES, isValidRole, allRoles } from '../../../../src/core/auth/Role.js';
+import { Role } from '../../../../src/core/auth/Role.js';
+import { Permission } from '../../../../src/core/auth/Permission.js';
 
 describe('Role', () => {
-  it('should define the application roles', () => {
-    expect(ROLES).toEqual({ CUSTOMER: 'customer', DRIVER: 'driver', ADMIN: 'admin' });
+  it('should create a role with a name', () => {
+    const role = new Role('admin');
+    expect(role.name).toBe('admin');
   });
 
-  it('should recognise valid roles', () => {
-    expect(isValidRole('customer')).toBe(true);
-    expect(isValidRole('driver')).toBe(true);
-    expect(isValidRole('admin')).toBe(true);
+  it('should add permissions to the role', () => {
+    const role = new Role('editor');
+    const perm = new Permission('articles', 'write');
+    role.addPermission(perm);
+    expect(role.hasPermission(perm)).toBe(true);
   });
 
-  it('should reject unknown roles', () => {
-    expect(isValidRole('editor')).toBe(false);
-    expect(isValidRole('')).toBe(false);
+  it('should check if role has a permission', () => {
+    const role = new Role('viewer');
+    role.addPermission(new Permission('orders', 'read'));
+    expect(role.hasPermission(new Permission('orders', 'read'))).toBe(true);
+    expect(role.hasPermission(new Permission('orders', 'write'))).toBe(false);
   });
 
-  it('should reject non-string input', () => {
-    expect(isValidRole(null)).toBe(false);
-    expect(isValidRole(undefined)).toBe(false);
-    expect(isValidRole(123)).toBe(false);
-  });
-
-  it('should return all valid roles', () => {
-    expect(allRoles()).toEqual(['customer', 'driver', 'admin']);
+  it('should support wildcard permissions', () => {
+    const role = new Role('superuser');
+    role.addPermission(new Permission('*', '*'));
+    expect(role.hasPermission(new Permission('anything', 'any_action'))).toBe(true);
   });
 });

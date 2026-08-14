@@ -400,8 +400,13 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
     // ============ Compliance ============
 
+    // Persisted KYC/AML verification status. Only verified users can take
+    // part in compliant P2P transfers of tokenized assets.
+    mapping(address => bool) public isCompliant;
+
     function verifyCompliance(address user) external onlyOwner {
         // KYC/AML check
+        isCompliant[user] = true;
         emit ComplianceCheck(user, true);
     }
 
@@ -416,6 +421,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(assetExists[assetId], "Asset not found");
         require(to != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
+        require(isCompliant[msg.sender], "Sender not compliant");
+        require(isCompliant[to], "Recipient not compliant");
 
         FractionalOwnership storage senderOwnership = fractionalOwnership[assetId][msg.sender];
         require(senderOwnership.amount >= amount, "Insufficient fractional ownership");

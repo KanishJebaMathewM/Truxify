@@ -275,7 +275,7 @@ describe('accept_bid_tx — two-phase acceptance guard preserved (issue #8971)',
   let ownershipFixContent;
 
   beforeAll(async () => {
-    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260805120000_fix_rpc_ownership_checks.sql');
+    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260805120001_fix_rpc_ownership_checks.sql');
     ownershipFixContent = await fs.readFile(p, 'utf8');
   });
 

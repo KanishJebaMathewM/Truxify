@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import driverEarningsService from '../../src/services/driverEarningsService.js';
 
-describe('driverEarningsService.calculateEarningsAggregation', () => {
+describe('driverEarningsService.aggregateTripEarnings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -12,7 +12,7 @@ describe('driverEarningsService.calculateEarningsAggregation', () => {
       { total_earnings: 2000, net_earnings: 1800 },
     ];
 
-    const result = driverEarningsService.calculateEarningsAggregation(trips);
+    const result = driverEarningsService.aggregateTripEarnings(trips);
 
     expect(result).toEqual({
       totalEarnings: 3000,
@@ -27,7 +27,7 @@ describe('driverEarningsService.calculateEarningsAggregation', () => {
       { total_earnings: 1500, net_earnings: null },
     ];
 
-    const result = driverEarningsService.calculateEarningsAggregation(trips);
+    const result = driverEarningsService.aggregateTripEarnings(trips);
 
     expect(result).toEqual({
       totalEarnings: 1500,
@@ -42,7 +42,7 @@ describe('driverEarningsService.calculateEarningsAggregation', () => {
       { total_earnings: 1000, net_earnings: Number('invalid') },
     ];
 
-    const result = driverEarningsService.calculateEarningsAggregation(trips);
+    const result = driverEarningsService.aggregateTripEarnings(trips);
 
     expect(result).toEqual({
       totalEarnings: 1000,
@@ -57,7 +57,7 @@ describe('driverEarningsService.calculateEarningsAggregation', () => {
       { total_earnings: 500, net_earnings: 400 },
     ];
 
-    const result = driverEarningsService.calculateEarningsAggregation(trips);
+    const result = driverEarningsService.aggregateTripEarnings(trips);
 
     expect(result.totalEarnings).not.toBeNaN();
     expect(result.netEarnings).not.toBeNaN();
@@ -65,7 +65,7 @@ describe('driverEarningsService.calculateEarningsAggregation', () => {
   });
 
   it('should return zeros for empty trip lists', () => {
-    const result = driverEarningsService.calculateEarningsAggregation([]);
+    const result = driverEarningsService.aggregateTripEarnings([]);
 
     expect(result).toEqual({
       totalEarnings: 0,

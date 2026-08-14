@@ -114,11 +114,23 @@ class RenderScheduler extends EventEmitter {
             const index = queue.indexOf(task);
             if (index !== -1) {
                 queue.splice(index, 1);
+                // Unlink this task from any dependents so they are not
+                // permanently deadlocked by a dependency that will never
+                // complete. Removing the edge lets a dependent with no other
+                // dependencies become schedulable again.
+                for (const depId of [...task.dependents]) {
+                    this.removeDependency(depId, taskId);
+                    const dependent = this.taskMap.get(depId);
+                    if (dependent) {
+                        this.emit('dependentUnblocked', { taskId: depId, dependencyId: taskId });
+                    }
+                }
                 task.status = 'cancelled';
                 this.stats.cancelledTasks++;
                 this.emit('taskCancelled', { taskId });
                 this.taskMap.delete(taskId);
                 logger.debug(`Task ${taskId} cancelled`);
+                this.pruneTaskMap();
                 return true;
             }
         }
@@ -370,13 +382,35 @@ class RenderScheduler extends EventEmitter {
     // depended on; getTask()/getTasks() for long-gone tasks are not used by
     // the processing loop.
     pruneTaskMap() {
+        const toDelete = [];
         for (const [taskId, task] of this.taskMap) {
-            if (task.status !== 'completed' && task.status !== 'failed') continue;
-            const hasLiveDependents = task.dependents.some(depId => {
-                const dep = this.taskMap.get(depId);
-                return dep && (dep.status === 'pending' || dep.status === 'running');
-            });
-            if (!hasLiveDependents) {
+            if (task.status === 'completed' || task.status === 'failed') {
+                const hasLiveDependents = task.dependents.some(depId => {
+                    const dep = this.taskMap.get(depId);
+                    return dep && (dep.status === 'pending' || dep.status === 'running');
+                });
+                if (!hasLiveDependents) {
+                    toDelete.push(taskId);
+                }
+            } else if (task.status === 'pending') {
+                // A pending task whose dependencies can never be satisfied
+                // (a cancelled or permanently failed dependency) is dead: it
+                // would deadlock forever and leak its taskMap entry. Remove it.
+                const blockedForever = task.dependencies.some(depId => {
+                    const dep = this.taskMap.get(depId);
+                    return dep && (dep.status === 'cancelled' || dep.status === 'failed');
+                });
+                if (blockedForever) {
+                    toDelete.push(taskId);
+                }
+            }
+        }
+        for (const taskId of toDelete) {
+            const task = this.taskMap.get(taskId);
+            if (task) {
+                const queue = this.queues[task.priority];
+                const index = queue.indexOf(task);
+                if (index !== -1) queue.splice(index, 1);
                 this.taskMap.delete(taskId);
             }
         }

@@ -14,7 +14,7 @@ class KeyManagementService {
     this.encryptionKeyCache = new Map();
   }
 
-  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt = null) {
+  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
       const saltHex = salt || '';
       const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
@@ -24,15 +24,12 @@ class KeyManagementService {
         return this.encryptionKeyCache.get(cacheKey);
       }
 
-      const saltBuffer = salt
-        ? Buffer.from(salt, 'hex')
-        : Buffer.from('truxify-wallet-key-derivation');
       const derivedKey = crypto.pbkdf2Sync(
         Buffer.concat([
           Buffer.from(deviceId),
           Buffer.from(masterSecret),
         ]),
-        saltBuffer,
+        Buffer.from(saltHex || 'truxify-wallet-key-derivation'),
         100000,
         32,
         'sha256'
@@ -109,12 +106,20 @@ class KeyManagementService {
   async storeEncryptedKey(userId, walletAddress, encryptedKeyData, deviceId, version = 1) {
     return measureExecution('KeyManagementService.storeEncryptedKey', async () => {
       try {
+        const keyId = crypto.randomUUID();
+        const now = new Date().toISOString();
+
         // Deactivate any previously active row for this user/wallet scope so
         // exactly one active row exists and retrieveEncryptedKey's
         // .eq('active', true).single() never 406s on multiple rows.
+        // Collapse the two prior updates into one that also sets archive metadata.
         const { error: deactivateError } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
-          .update({ active: false })
+          .update({
+            active: false,
+            archived_at: now,
+            archive_reason: 'rotated',
+          })
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
           .eq('active', true);
@@ -123,20 +128,6 @@ class KeyManagementService {
           logger.error('[KeyManagementService] Failed to deactivate prior active keys:', deactivateError);
           throw deactivateError;
         }
-
-        const keyId = crypto.randomUUID();
-
-        // Deactivate any previously active key for this user+wallet
-        await (supabaseAdmin || supabase)
-          .from('encrypted_wallet_keys')
-          .update({
-            active: false,
-            archived_at: new Date().toISOString(),
-            archive_reason: 'rotated',
-          })
-          .eq('user_id', userId)
-          .eq('wallet_address', walletAddress)
-          .eq('active', true);
 
         const { data, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
@@ -148,8 +139,8 @@ class KeyManagementService {
             device_id: deviceId,
             version,
             active: true,
-            created_at: new Date().toISOString(),
-            last_used_at: new Date().toISOString(),
+            created_at: now,
+            last_used_at: now,
           }]);
 
         if (error) {

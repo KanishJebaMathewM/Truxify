@@ -1,5 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { sendPushNotification, sendFcmNotification } from '../../src/services/notificationService.js';
+import crypto from 'crypto';
+import notificationService from '../../src/services/notificationService.js';
+import { sendPushNotification, sendFcmNotification, hashDeliveryOtp, verifyDeliveryOtpHash } from '../../src/services/notificationService.js';
+import { DomainError } from '../../src/services/order/domainError.js';
+
+describe('notificationService allowlist validation', () => {
+  it('should throw DomainError for invalid notif_type in insertNotification', async () => {
+    const invalidData = { notif_type: 'invalid_type', user_id: '123' };
+    await expect(notificationService.insertNotification(invalidData)).rejects.toThrow(DomainError);
+  });
+
+  it('should throw DomainError for invalid notif_type in sendPushNotification', async () => {
+    const invalidPayload = { notif_type: 'unsupported_type', title: 'Test' };
+    await expect(notificationService.sendPushNotification(invalidPayload)).rejects.toThrow(DomainError);
+  });
+
+  it('should allow valid notif_types', async () => {
+    for (const type of ['order_update', 'payment', 'load_offer', 'trip_update', 'document', 'system']) {
+      const payload = { notif_type: type, title: 'Test' };
+      // Will attempt supabase call, which might fail or resolve depending on mock, but won't throw DomainError
+      await expect(notificationService.sendPushNotification(payload)).resolves.toBeDefined();
+    }
+  });
+
+  describe('FCM edge cases', () => {
+    it('returns null when userId is null in getFcmTokenForUser', async () => {
+      const result = await notificationService.getFcmTokenForUser(null);
+      expect(result).toBeNull();
+    });
+
+    it('returns error result when fcmToken is empty in sendFcmNotification', async () => {
+      const result = await notificationService.sendFcmNotification(null, '', { title: 'Test', body: 'Test body' });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('No FCM token');
+    });
+  });
+});
 
 // notificationService reads supabaseAdmin and firebaseAdmin (not supabase),
 // and getUserFcmToken chains .select().eq().maybeSingle() — a mock lacking
@@ -44,6 +80,16 @@ describe('notificationService', () => {
       // Result may have success:false (no token) or success:true, but should not throw
       expect(result).toBeDefined();
       expect(typeof result.success).toBe('boolean');
+    });
+
+    it('returns success:false when FCM delivery fails even though the notification is persisted', async () => {
+      // Simulate an FCM delivery failure. The DB insert still succeeds
+      // (mockInsert resolves), but `success` must reflect the push outcome.
+      mockSend.mockRejectedValueOnce(new Error('FCM unavailable'));
+      const result = await sendPushNotification('user-123', 'Title', 'Body', 'order_update', {});
+      expect(result.persisted).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.fcm?.success).toBe(false);
     });
 
     it('accepts valid notif_types without throwing', async () => {
@@ -102,6 +148,21 @@ describe('notificationService', () => {
       await expect(
         sendPushNotification('user-1', 'Title', 'Body', 'invalid_type')
       ).resolves.toBeDefined();
+    });
+  });
+
+  describe('delivery OTP hashing', () => {
+    it('round-trips a salted hash and rejects a wrong OTP', () => {
+      const { hash, salt } = hashDeliveryOtp('123456');
+      expect(hash).toMatch(/^[a-f0-9]{128}$/);
+      expect(verifyDeliveryOtpHash('123456', { otp_hash: hash, otp_salt: salt })).toBe(true);
+      expect(verifyDeliveryOtpHash('654321', { otp_hash: hash, otp_salt: salt })).toBe(false);
+    });
+
+    it('still verifies legacy unsalted SHA-256 hashes', () => {
+      const legacyHash = crypto.createHash('sha256').update('123456').digest('hex');
+      expect(verifyDeliveryOtpHash('123456', { otp_hash: legacyHash })).toBe(true);
+      expect(verifyDeliveryOtpHash('999999', { otp_hash: legacyHash })).toBe(false);
     });
   });
 });

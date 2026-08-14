@@ -404,7 +404,7 @@ export class DeliveryVerificationService {
    *                       409 no/invalid/stale/out-of-range telemetry.
    */
   async assertDriverAtDropoff(order, radiusM) {
-    if (!order.drop_lat || !order.drop_lng) {
+    if (order.drop_lat == null || order.drop_lng == null) {
       throw new DomainError(400, {
         error: "Order is missing drop-off coordinates.",
       });

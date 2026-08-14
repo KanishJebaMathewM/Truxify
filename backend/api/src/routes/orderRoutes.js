@@ -149,7 +149,6 @@ import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateDocumentBuffer } from '../lib/documentValidation.js';
 import { scanDocument } from '../lib/malwareScanner.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { z } from 'zod';
 import {
   createOrderSchema, submitBidSchema, submitRatingSchema, paramIdSchema, acceptBidParamsSchema,
   updateMilestoneSchema, verifyDeliverySchema, predictDemandSchema, changeDropSchema, cancelOrderSchema,
@@ -210,7 +209,6 @@ const milestoneLimiter = rateLimit({
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
-const router = express.Router();
 
 const getOrderResource = async (req) => {
   const { id } = req.params;

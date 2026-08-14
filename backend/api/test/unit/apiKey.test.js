@@ -2,7 +2,7 @@
  * Unit tests for backend/api/src/middleware/apiKey.js
  *
  * Coverage:
- *   - Skips verification when VALID_API_KEYS is not set (calls next immediately)
+ *   - Fails closed with 503 when VALID_API_KEYS is unset, empty or only separators
  *   - Returns 401 when x-api-key header is missing
  *   - Returns 401 when x-api-key header is invalid
  *   - Returns 401 when api_key query param is invalid
@@ -68,14 +68,26 @@ describe('requireApiKey', () => {
     vi.clearAllMocks();
   });
 
-  it('skips verification when VALID_API_KEYS is not set', () => {
+  // Fails closed: an unconfigured VALID_API_KEYS must not turn into an open
+  // door on the backend-to-backend routes this middleware guards.
+  it('returns 503 and does not call next() when VALID_API_KEYS is not set', () => {
     vi.stubEnv('VALID_API_KEYS', '');
     const { req, res, next } = createMocks();
 
     requireApiKey(req, res, next);
 
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when VALID_API_KEYS is only separators or whitespace', () => {
+    vi.stubEnv('VALID_API_KEYS', ' , ,  ');
+    const { req, res, next } = createMocks();
+
+    requireApiKey(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('returns 401 when x-api-key header is missing', () => {
@@ -123,15 +135,15 @@ describe('requireApiKey', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('calls next() when valid key provided via query.api_key', () => {
+  it('returns 401 when a valid key is only provided via query.api_key (query keys are ignored)', () => {
     const { req, res, next } = createMocks({
       req: { headers: {}, query: { api_key: 'test-key-2' } },
     });
 
     requireApiKey(req, res, next);
 
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('accepts second key in comma-separated VALID_API_KEYS list', () => {

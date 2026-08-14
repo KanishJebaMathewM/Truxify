@@ -1,6 +1,3 @@
-
-﻿apiVersion: networking.istio.io/v1beta1
-
 apiVersion: networking.istio.io/v1beta1
 
 kind: Gateway
@@ -51,15 +48,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
-  - match:
-    - uri:
-        prefix: /graphql
-    route:
-    - destination:
-        host: graphql-service
-        port:
-          number: 4000
+          number: 80
   - match:
     - uri:
         prefix: /docs
@@ -67,5 +56,4 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
-
+          number: 80

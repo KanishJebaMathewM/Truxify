@@ -309,8 +309,8 @@ async function run({ github, context, core, dryRun = false, prState = 'closed', 
         const pageData = Array.isArray(response) ? response : (response && response.data ? response.data : []);
         if (pageData.length === 0) break;
         for (const pr of pageData) {
-          const prTime = new Date(pr.closed_at || pr.updated_at || pr.created_at);
-          if (prTime < cutoffTime) {
+          const updatedAt = new Date(pr.updated_at || pr.created_at);
+          if (updatedAt < cutoffTime) {
             stop = true;
             break;
           }

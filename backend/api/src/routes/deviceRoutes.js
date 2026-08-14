@@ -14,6 +14,9 @@
  *         platform:
  *           type: string
  *           enum: [ios, android, web]
+ *         deviceId:
+ *           type: string
+ *           description: Stable installation/device identifier used for FCM token rotation (optional)
  *     DeviceRegisterResponse:
  *       type: object
  *       properties:
@@ -103,6 +106,7 @@ router.post('/register', authenticate, deviceLimiter, validateBody(registerDevic
  *         description: Validation error
  */
 router.delete('/unregister', authenticate, deviceLimiter, validateBody(unregisterDeviceSchema), unregisterDeviceToken);
+router.post('/unregister', authenticate, deviceLimiter, validateBody(unregisterDeviceSchema), unregisterDeviceToken);
 
 // GET /api/devices/platforms
 router.get('/platforms', authenticate, getDevicePlatforms);

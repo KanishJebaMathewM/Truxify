@@ -1,8 +1,8 @@
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
 import logger from "../middleware/logger.js";
-import { GpsLog } from "../models/GpsLog.js";
+import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase } from "../config/db.js";
+import telemetryBuffer from "./telemetryBuffer.js";
 
 let io = null;
 
@@ -96,6 +96,19 @@ export function getActiveDriverCount() {
   return activeDrivers.size;
 }
 
+/**
+ * Parses a client-supplied GPS timestamp defensively.
+ *
+ * Falls back to the current time when the value is missing or unparseable so
+ * that a single malformed telemetry frame (e.g. `"abc"` or a bad epoch)
+ * cannot turn into an Invalid Date whose `toISOString()` throws and kills the
+ * driver's live location broadcast.
+ */
+export function parseGpsTimestamp(timestamp) {
+  const parsed = timestamp ? new Date(timestamp) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 // ─── Server init ─────────────────────────────────────────────────────────────
 
 /**
@@ -108,7 +121,7 @@ export function getActiveDriverCount() {
  *  /customer namespace — Customer app subscribes to booking rooms here
  *
  * Auth:
- *  Both namespaces require a valid JWT in socket.handshake.auth.token
+ *  Both namespaces require a valid Firebase/Supabase token in socket.handshake.auth.token
  *
  * Dead-connection handling (issue #5728):
  *  In addition to Socket.IO's transport-level ping/pong (pingInterval /
@@ -187,47 +200,69 @@ export function initLocationServer(httpServer) {
      *
      * Expected payload:
      * {
-     *   bookingId: string,
      *   lat: number,        // -90 to 90
      *   lng: number,        // -180 to 180
      *   speed: number,      // km/h
      *   heading: number,    // 0–360 degrees
      *   timestamp: string   // ISO 8601
      * }
+     *
+     * Note: bookingId is taken from the authenticated socket session,
+     * NOT from the payload, to prevent unauthorized location updates.
+     *
+     * Persistence is decoupled from broadcasting: the GPS point is pushed into
+     * the shared buffered telemetry pipeline (synchronous, fail-open) and the
+     * live `driver_location` broadcast proceeds immediately without waiting on
+     * any MongoDB round-trip.
      */
-    socket.on("location_update", async (payload) => {
+    socket.on("location_update", (payload) => {
       // Treat any incoming data as proof-of-life (avoids evicting an active
       // driver who sends location updates but whose pong was dropped).
       const entry = activeDrivers.get(socket.id);
       if (entry) entry.lastPong = Date.now();
 
+      const { lat, lng, speed = 0, heading = 0, timestamp } = payload || {};
+
+      if (
+        typeof lat !== "number" ||
+        typeof lng !== "number" ||
+        lat < -90 || lat > 90 ||
+        lng < -180 || lng > 180
+      ) {
+        socket.emit("error", { message: "Invalid GPS coordinates" });
+        return;
+      }
+
+      const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
+        const gpsTimestamp = parseGpsTimestamp(timestamp);
+
+      // 1. Buffer GPS point into the shared telemetry pipeline. Synchronous and
+      //    fail-open — a slow or unavailable MongoDB must never delay the
+      //    broadcast below.
       try {
-        const { lat, lng, speed = 0, heading = 0, timestamp } = payload;
-
-        if (
-          typeof lat !== "number" ||
-          typeof lng !== "number" ||
-          lat < -90 || lat > 90 ||
-          lng < -180 || lng > 180
-        ) {
-          socket.emit("error", { message: "Invalid GPS coordinates" });
-          return;
-        }
-
-        const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
-
-        // 1. Persist GPS point to MongoDB time-series collection
-        await GpsLog.create({
-          bookingId,
-          driverId,
+        telemetryBuffer.enqueue({
+          driver_id: driverId,
+          order_id: socket.data.orderId || null,
+          order_display_id: bookingId,
           lat,
           lng,
-          speed,
-          heading,
+          location: {
+            type: "Point",
+            coordinates: [lng, lat],
+          },
+          speed_kmh: speed,
+          bearing_deg: heading,
           timestamp: gpsTimestamp,
+          pinged_at: gpsTimestamp,
+          buffered_at: new Date(),
+          server_received_at: new Date(),
         });
+      } catch (error) {
+        logger.error({ driverId, error: error.message }, '[WS] GPS buffer error (broadcast continues)');
+      }
 
-        // 2. Broadcast to customer's booking room
+      // 2. Broadcast to customer's booking room — independent of persistence.
+      try {
         io.of("/customer")
           .to(`booking:${bookingId}`)
           .emit("driver_location", {
@@ -238,9 +273,8 @@ export function initLocationServer(httpServer) {
             timestamp: gpsTimestamp.toISOString(),
             bookingId,
           });
-
       } catch (error) {
-        logger.error({ driverId, error: error.message }, '[WS] GPS persist error for driver');
+        logger.error({ driverId, error: error.message }, '[WS] GPS broadcast error for driver');
         socket.emit("error", { message: "Failed to process location update" });
       }
     });
@@ -294,12 +328,10 @@ export function initLocationServer(httpServer) {
         // Join the booking room to receive location updates
         socket.join(`booking:${bookingId}`);
 
-        // Send the last known GPS position immediately on subscribe
-        const lastPoint = await GpsLog.findOne(
-          { bookingId },
-          {},
-          { sort: { timestamp: -1 } }
-        );
+        // Send the last known GPS position immediately on subscribe. Read from
+        // the shared `telemetry` collection (the buffered pipeline) rather than
+        // the legacy GpsLog collection.
+        const lastPoint = await telemetryBuffer.readLatestPoint(bookingId);
 
         if (lastPoint) {
           socket.emit("driver_location", {
@@ -361,9 +393,9 @@ async function verifyDriverToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "driver") {
+    if (profile.role !== "driver") {
       return next(new Error("Forbidden: driver role required"));
     }
 
@@ -372,13 +404,16 @@ async function verifyDriverToken(socket, next) {
       return next(new Error("bookingId required in handshake auth"));
     }
 
-    const isAssignedDriver = await verifyDriverAssignment(decoded.sub, bookingId);
-    if (!isAssignedDriver) {
+    const orderId = await verifyDriverAssignment(profile.id, bookingId);
+    if (!orderId) {
       return next(new Error("Forbidden: driver is not assigned to this booking"));
     }
 
-    socket.data.driverId = decoded.sub;
+    socket.data.driverId = profile.id;
     socket.data.bookingId = bookingId;
+    // Orders UUID, resolved once per connection (not per location update) so
+    // telemetry records carry a stable `order_id`.
+    socket.data.orderId = orderId;
 
     next();
   } catch (error) {
@@ -402,13 +437,13 @@ async function verifyCustomerToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "customer") {
+    if (profile.role !== "customer") {
       return next(new Error("Forbidden: customer role required"));
     }
 
-    socket.data.customerId = decoded.sub;
+    socket.data.customerId = profile.id;
     next();
   } catch (error) {
     next(new Error(`Authentication failed: ${error.message}`));
@@ -417,6 +452,7 @@ async function verifyCustomerToken(socket, next) {
 
 /**
  * Verifies that a driver is assigned to a specific booking.
+ * Resolves to the orders UUID (or null when not assigned / on error).
  */
 async function verifyDriverAssignment(driverId, bookingId) {
   try {
@@ -431,11 +467,11 @@ async function verifyDriverAssignment(driverId, bookingId) {
 
     const { data, error } = await query.maybeSingle();
 
-    if (error || !data) return false;
-    return true;
+    if (error || !data) return null;
+    return data.id;
   } catch (err) {
     logger.error({ err }, '[WS] verifyDriverAssignment error');
-    return false;
+    return null;
   }
 }
 

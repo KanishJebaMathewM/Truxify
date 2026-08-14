@@ -153,3 +153,5 @@ BEGIN
     trip_count = earnings_daily.trip_count + 1;
 END;
 $$;
+
+REVOKE UPDATE (escrow_disabled) ON orders FROM anon, authenticated;

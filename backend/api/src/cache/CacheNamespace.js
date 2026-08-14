@@ -81,6 +81,7 @@ export const CacheNamespace = {
 
 // ── Built-in namespaces ─────────────────────────────────────────────
 CacheNamespace.register('profile', {
+  prefix: 'user:profile',
   defaultTtl: parseInt(process.env.REDIS_CACHE_TTL || '900', 10),
 });
 CacheNamespace.register('order', { defaultTtl: 300 });

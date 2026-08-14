@@ -808,5 +808,17 @@
   "downloadFailed": "डाउनलोड असफल",
   "@downloadFailed": {
     "description": "Error message when invoice download or generation fails"
+  },
+  "english": "अंग्रेज़ी",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "हिंदी",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "तमिल",
+  "@tamil": {
+    "description": "Tamil language name"
   }
 }

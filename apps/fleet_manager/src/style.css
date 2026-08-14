@@ -294,3 +294,23 @@ code {
     border-right-color: var(--border);
   }
 }
+
+@media (max-width: 768px) {
+  #next-steps ul {
+    gap: 12px;
+    margin-top: 16px;
+    li {
+      flex: 1 1 100%;
+    }
+    a {
+      padding: 10px 16px;
+      margin: 0 12px;
+      width: calc(100% - 24px);
+      box-sizing: border-box;
+    }
+  }
+  button, .counter {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+}

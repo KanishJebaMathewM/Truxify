@@ -533,4 +533,16 @@ class AppLocalizationsTa extends AppLocalizations {
 
   @override
   String get resendOtp => 'Resend OTP';
+
+  @override
+  String get language => 'மொழி';
+
+  @override
+  String get english => 'ஆங்கிலம்';
+
+  @override
+  String get hindi => 'இந்தி';
+
+  @override
+  String get tamil => 'தமிழ்';
 }

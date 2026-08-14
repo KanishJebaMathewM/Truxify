@@ -45,6 +45,11 @@ contract KYCVerifier is Verifier {
         require(a[0] != 0 || a[1] != 0, "Zero proof rejected");
         require(input[0] != 0 || input[1] != 0, "Empty public input");
 
+        // Bind the proof to the user: the circuit's first public input must
+        // commit to the address being verified so one proof cannot be replayed
+        // to mark arbitrary accounts as KYC-verified.
+        require(uint256(input[0]) == uint256(uint160(user)), "Proof not bound to user");
+
         // Verify the proof
         bool isValid = verifyProof(a, b, c, input);
         

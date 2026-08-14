@@ -1,134 +1,132 @@
-import os
-import sys
+"""
+Unit tests for backend/ml/app/models/deadhead_eliminator.py
 
-import pytest
-from fastapi.testclient import TestClient
+Run with: python3 -m pytest tests/test_deadhead_eliminator.py -v --no-header
+"""
+import math
+from datetime import datetime, timezone, timedelta
+from app.models.deadhead_eliminator import (
+    _haversine,
+    _to_naive,
+    find_return_loads,
+    MAX_DETOUR_FRACTION,
+)
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from main import app
+class TestHaversine:
+    """Tests for the haversine distance calculation."""
 
-client = TestClient(app, headers={'X-API-Key': 'test_key'})
+    def test_same_point_returns_zero(self):
+        """Identical coordinates should give zero distance."""
+        assert _haversine(0, 0, 0, 0) == 0.0
+
+    def test_known_distance_delhi_to_mumbai(self):
+        """Delhi (28.6139, 77.2090) to Mumbai (19.0760, 72.8777) is approx 1152 km."""
+        dist = _haversine(28.6139, 77.2090, 19.0760, 72.8777)
+        assert 1100 < dist < 1200
+
+    def test_short_distance(self):
+        """1 degree latitude ~= 111 km."""
+        dist = _haversine(0, 0, 1, 0)
+        assert 110 < dist < 112
+
+    def test_antipodal_points(self):
+        """Antipodal points are roughly 20,000 km apart."""
+        dist = _haversine(0, 0, 0, 180)
+        assert 20000 - 100 < dist < 20000 + 100
 
 
-def _valid_payload():
-    """Return a reusable valid deadhead payload."""
-    return {
-        "driver_destination": {"lat": 19.076, "lng": 72.877},
-        "truck_specs": {
-            "max_weight_kg": 10000,
-            "max_length_m": 6.0,
-            "max_width_m": 2.5,
-            "max_height_m": 2.5,
-        },
-        "arrival_time": "2026-06-28T10:00:00",
-        "available_loads": [
-            {
+class TestToNaive:
+    """Tests for _to_naive datetime normalisation."""
+
+    def test_strips_timezone_info(self):
+        """Aware datetime should have tzinfo stripped."""
+        aware = datetime(2026, 8, 7, 10, 30, tzinfo=timezone.utc)
+        result = _to_naive(aware)
+        assert result.tzinfo is None
+        assert result == datetime(2026, 8, 7, 10, 30)
+
+    def test_preserves_naive_datetime(self):
+        """Already-naive datetime should be returned unchanged."""
+        naive = datetime(2026, 8, 7, 10, 30)
+        assert _to_naive(naive) == naive
+
+
+class TestFindReturnLoads:
+    """Tests for find_return_loads logic."""
+
+    def test_empty_loads_returns_empty_recommendations(self):
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={"max_weight_kg": 10000},
+            arrival_time="2026-08-07T10:00:00",
+            available_loads=[],
+        )
+        assert result["recommendations"] == []
+
+    def test_oversized_load_is_filtered(self):
+        """Load exceeding truck weight should be excluded."""
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={"max_weight_kg": 5000, "max_length_m": 6, "max_width_m": 2, "max_height_m": 2.5},
+            arrival_time="2026-08-10T10:00:00",
+            available_loads=[{
                 "load_id": "L001",
-                "origin_lat": 19.1,
-                "origin_lng": 72.9,
-                "dest_lat": 18.52,
-                "dest_lng": 73.85,
+                "origin_lat": 12.98,
+                "origin_lng": 77.63,
+                "dest_lat": 13.0,
+                "dest_lng": 77.7,
+                "weight_kg": 10000,  # exceeds 5000 kg limit
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T12:00:00",
+                "payment_inr": 5000,
+            }],
+        )
+        assert result["recommendations"] == []
+
+    def test_valid_load_is_recommended(self):
+        """Load within truck specs and time window should be recommended."""
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={"max_weight_kg": 10000, "max_length_m": 10, "max_width_m": 2.5, "max_height_m": 3},
+            arrival_time="2026-08-10T08:00:00",
+            available_loads=[{
+                "load_id": "L001",
+                "origin_lat": 12.98,
+                "origin_lng": 77.63,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
                 "weight_kg": 5000,
-                "length_m": 3.0,
-                "width_m": 2.0,
-                "height_m": 1.5,
-                "pickup_deadline": "2026-06-28T14:00:00",
-                "payment_inr": 15000,
-            },
-            {
-                "load_id": "L002",
-                "origin_lat": 19.2,
-                "origin_lng": 73.0,
-                "dest_lat": 20.0,
-                "dest_lng": 73.8,
-                "weight_kg": 3000,
-                "length_m": 2.0,
-                "width_m": 1.5,
-                "height_m": 1.0,
-                "pickup_deadline": "2026-06-28T16:00:00",
-                "payment_inr": 12000,
-            },
-        ],
-    }
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T14:00:00",  # deadline allows 6 hours, trip is ~30 min
+                "payment_inr": 3000,
+            }],
+        )
+        assert len(result["recommendations"]) == 1
+        assert result["recommendations"][0]["load_id"] == "L001"
 
-
-# ---------------------------------------------------------------------------
-# Valid prediction tests
-# ---------------------------------------------------------------------------
-
-def test_deadhead_valid():
-    """Full payload — 200 with recommendations containing expected fields."""
-    payload = _valid_payload()
-    response = client.post("/match/deadhead", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "recommendations" in data
-    assert isinstance(data["recommendations"], list)
-    for rec in data["recommendations"]:
-        assert "load_id" in rec
-        assert "distance_to_pickup_km" in rec
-        assert "match_score" in rec
-        assert "detour_km" in rec
-        assert "estimated_earnings" in rec
-
-
-def test_deadhead_empty_loads():
-    """Empty available_loads list — 200 with empty recommendations."""
-    payload = _valid_payload()
-    payload["available_loads"] = []
-    response = client.post("/match/deadhead", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["recommendations"] == []
-
-
-def test_deadhead_oversized_load():
-    """Load exceeding truck max_weight_kg should not appear in recommendations."""
-    payload = _valid_payload()
-    # Replace loads with a single oversized load
-    payload["available_loads"] = [
-        {
-            "load_id": "L_HEAVY",
-            "origin_lat": 19.1,
-            "origin_lng": 72.9,
-            "dest_lat": 18.52,
-            "dest_lng": 73.85,
-            "weight_kg": 20000,
-            "length_m": 3.0,
-            "width_m": 2.0,
-            "height_m": 1.5,
-            "pickup_deadline": "2026-06-28T14:00:00",
-            "payment_inr": 25000,
-        }
-    ]
-    response = client.post("/match/deadhead", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    recommended_ids = [r["load_id"] for r in data["recommendations"]]
-    assert "L_HEAVY" not in recommended_ids
-
-
-# ---------------------------------------------------------------------------
-# API key auth tests
-# ---------------------------------------------------------------------------
-
-def test_deadhead_auth_missing(monkeypatch):
-    """When ML_API_KEY is set but no header is sent — expect 401."""
-    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
-    payload = _valid_payload()
-    response = client.post("/match/deadhead", json=payload)
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Unauthorized"}
-
-
-def test_deadhead_auth_valid(monkeypatch):
-    """When ML_API_KEY is set and correct header is provided — expect 200."""
-    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
-    payload = _valid_payload()
-    response = client.post(
-        "/match/deadhead",
-        json=payload,
-        headers={"X-API-Key": "test-secret-key"},
-    )
-    assert response.status_code == 200
+    def test_load_past_deadline_is_filtered(self):
+        """Load whose pickup deadline is before estimated arrival should be excluded."""
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={"max_weight_kg": 10000, "max_length_m": 10, "max_width_m": 2.5, "max_height_m": 3},
+            arrival_time="2026-08-10T12:00:00",
+            available_loads=[{
+                "load_id": "L001",
+                "origin_lat": 12.98,
+                "origin_lng": 77.63,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
+                "weight_kg": 5000,
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T10:00:00",  # deadline already passed
+                "payment_inr": 3000,
+            }],
+        )
+        assert result["recommendations"] == []

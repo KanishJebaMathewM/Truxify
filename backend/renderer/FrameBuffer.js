@@ -160,13 +160,19 @@ class FrameBuffer {
         let changed = false;
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
-                if (this.buffer[y][x].char !== character) {
-                    this.buffer[y][x].char = character;
+                const pixel = this.buffer[y][x];
+                // Clear the styling too. Any change to the char OR the styling
+                // must mark the frame dirty and bump the version; otherwise a
+                // clear() that only resets colors/styles is never redrawn and
+                // the old styling stays visible on the terminal.
+                if (pixel.char !== character ||
+                    pixel.fg !== null || pixel.bg !== null || pixel.style !== null) {
+                    pixel.char = character;
+                    pixel.fg = null;
+                    pixel.bg = null;
+                    pixel.style = null;
                     changed = true;
                 }
-                this.buffer[y][x].fg = null;
-                this.buffer[y][x].bg = null;
-                this.buffer[y][x].style = null;
             }
         }
         

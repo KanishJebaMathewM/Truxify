@@ -43,6 +43,14 @@ export class PolicyEvaluator {
       };
     }
 
+    if (resource === undefined && permission.ownership) {
+      return {
+        allowed: false,
+        permission: permission.toJSON(),
+        reason: 'missing_resource',
+      };
+    }
+
     if (resource !== undefined && !permission.checkOwnership(user, resource)) {
       return {
         allowed: false,

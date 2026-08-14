@@ -22,13 +22,13 @@ export const reportGripData = async (req, res) => {
       });
 
     if (insertErr) {
-      logger.error('Failed to insert road grip report:', insertErr);
+      logger.error({ err: insertErr }, 'Failed to insert road grip report');
       return res.status(500).json({ error: 'Database error' });
     }
 
     return res.status(201).json({ success: true, message: 'Grip data reported successfully' });
   } catch (err) {
-    logger.error('Internal server error in reportGripData:', err);
+    logger.error({ err }, 'Internal server error in reportGripData');
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -86,13 +86,13 @@ export const getNearbyGripData = async (req, res) => {
       .limit(100);
 
     if (error) {
-      logger.error('Failed to fetch nearby grip data:', error);
+      logger.error({ err: error }, 'Failed to fetch nearby grip data');
       return res.status(500).json({ error: 'Database error' });
     }
 
     return res.json({ success: true, data });
   } catch (err) {
-    logger.error('Internal server error in getNearbyGripData:', err);
+    logger.error({ err }, 'Internal server error in getNearbyGripData');
     return res.status(500).json({ error: 'Internal server error' });
   }
 };

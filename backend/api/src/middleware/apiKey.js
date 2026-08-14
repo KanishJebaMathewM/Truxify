@@ -691,7 +691,7 @@ export const createAdminApiRouter = () => {
     });
 
     res.status(201).json({
-      message: 'API Key created successfully. Store raw key safely - it won't be shown again.',
+      message: "API Key created successfully. Store raw key safely - it won't be shown again.",
       apiKey: rawKey,
       metadata: record,
     });

@@ -75,8 +75,8 @@ class MarketplaceRepository {
     final path = '/api/orders/load-offers';
     try {
       final decoded = await _apiClient.get(path);
-      if (decoded is! List) throw StateError('Unexpected response type');
-      return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+      final body = _unwrapLoads(decoded);
+      return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
       rethrow;
@@ -100,12 +100,25 @@ class MarketplaceRepository {
     final path = '/api/orders/load-offers/en-route$query';
     try {
       final decoded = await _apiClient.get(path);
-      if (decoded is! List) throw StateError('Unexpected response type');
-      return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+      final body = _unwrapLoads(decoded);
+      return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
       rethrow;
     }
+  }
+
+  /// Extracts the list of load offers from a marketplace response, accepting
+  /// both the bare-list shape and the paginated `{ loads: [...] }` envelope
+  /// returned by `GET /api/orders/load-offers` and
+  /// `GET /api/orders/load-offers/en-route`. An envelope without a `loads`
+  /// key resolves to an empty list.
+  static List<dynamic> _unwrapLoads(dynamic decoded) {
+    if (decoded is Map<String, dynamic>) {
+      return decoded['loads'] as List? ?? const [];
+    }
+    if (decoded is List) return decoded;
+    throw StateError('Unexpected response type');
   }
 
   Future<Map<String, dynamic>> fetchDemandHeatmap() async {

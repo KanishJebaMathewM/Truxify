@@ -46,11 +46,13 @@ async function authorizeOrderAccess(req, orderId) {
 
 router.get('/status', authenticate, async (req, res) => {
   try {
+    const { providers, threshold } = oracleService.getStatus();
     res.status(200).json({
       success: true,
       data: {
-        providers: 3,
-        threshold: 2,
+        providers: providers.length,
+        providerList: providers,
+        threshold,
         timestamp: new Date().toISOString()
       }
     });

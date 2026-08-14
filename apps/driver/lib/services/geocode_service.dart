@@ -156,8 +156,9 @@ class GeocodeService {
           .where((s) => s.isNotEmpty)
           .toList();
     } catch (e) {
-      debugPrint('[GeocodeService] Error: $e');
-      return [];
+      debugPrint('[GeocodeService] reverseGeocode failed for '
+          '${point.latitude},${point.longitude}: $e');
+      return null;
     }
   }
 
@@ -217,7 +218,7 @@ class GeocodeService {
           .whereType<SearchResult>()
           .toList();
     } catch (e) {
-      debugPrint('[GeocodeService] searchPlaces failed: $e');
+      debugPrint('[GeocodeService] autocomplete failed for query "$query": $e');
       return [];
     }
   }

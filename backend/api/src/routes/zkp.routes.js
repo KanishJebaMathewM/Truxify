@@ -47,7 +47,13 @@ const zkpVerifyLimiter = redisRateLimiter({
  */
 router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
   try {
-    const userId = req.user.id;
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      return res.status(400).json({ success: false, error: 'userId is required' });
+    }
+    if (userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
     const {
       name,
       licenseNumber,

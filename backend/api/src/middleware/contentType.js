@@ -28,6 +28,14 @@ export function requireJsonContent(req, res, next) {
       'multipart/form-data',
     ];
     if (allowed.includes(mimeType)) {
+      // Validate that parsed body is a plain object (not array, null, or primitive)
+      if (mimeType === 'application/json' && req.body != null) {
+        if (typeof req.body !== 'object' || Array.isArray(req.body)) {
+          return res.status(400).json({
+            error: 'Request body must be a JSON object.',
+          });
+        }
+      }
       return next();
     }
 

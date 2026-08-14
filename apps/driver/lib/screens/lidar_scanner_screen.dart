@@ -22,10 +22,14 @@ class _LidarScannerScreenState extends State<LidarScannerScreen> {
     });
     
     await Future.delayed(const Duration(seconds: 1));
-    setState(() => _scanProgressText = 'Mapping Point Cloud...');
-    
+    if (mounted) {
+      setState(() => _scanProgressText = 'Mapping Point Cloud...');
+    }
+
     await Future.delayed(const Duration(seconds: 1));
-    setState(() => _scanProgressText = 'Calculating Bounding Box...');
+    if (mounted) {
+      setState(() => _scanProgressText = 'Calculating Bounding Box...');
+    }
 
     final result = await _lidarService.perform3DScan();
     

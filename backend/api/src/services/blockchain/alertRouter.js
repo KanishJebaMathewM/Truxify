@@ -177,7 +177,7 @@ class AlertRouter {
       PAYMENT_RECEIVED: '💰',
       INSURANCE_CLAIM_APPROVED: '✅',
       INSURANCE_CLAIM_REJECTED: '❌',
-      GEOFENCE_BREACH: '⚠️',
+      GEOFENCE_BREACH: '[WARNING]',
       BALANCE_UPDATE_FAILED: '🚨',
       SMART_CONTRACT_REVERT: '💥',
     };

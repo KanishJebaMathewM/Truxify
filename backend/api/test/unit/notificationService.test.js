@@ -151,6 +151,33 @@ describe('notificationService', () => {
     });
   });
 
+  describe('sendDeliveryOtpNotification (#12329)', () => {
+    it('delivers the plaintext OTP to the customer via the FCM data payload', async () => {
+      const otp = '654321';
+      // Provide an FCM token so the push actually reaches firebaseAdmin.send.
+      mockMaybeSingle.mockResolvedValue({ data: { fcm_token: 'fcm-token-xyz' }, error: null });
+
+      const result = await notificationService.sendDeliveryOtpNotification('user-1', 'TX1001', otp);
+
+      expect(result.success).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const sentMessage = mockSend.mock.calls[0][0];
+      expect(sentMessage.data).toBeDefined();
+      expect(sentMessage.data.otp).toBe(otp);
+      expect(sentMessage.data.notifType).toBe('delivery_otp');
+    });
+
+    it('does not persist the raw OTP in the notification metadata', async () => {
+      const otp = '654321';
+      mockMaybeSingle.mockResolvedValue({ data: { fcm_token: 'fcm-token-xyz' }, error: null });
+
+      await notificationService.sendDeliveryOtpNotification('user-1', 'TX1001', otp);
+
+      const inserted = mockInsert.mock.calls[0][0];
+      expect(JSON.stringify(inserted.metadata ?? {})).not.toContain(otp);
+    });
+  });
+
   describe('delivery OTP hashing', () => {
     it('round-trips a salted hash and rejects a wrong OTP', () => {
       const { hash, salt } = hashDeliveryOtp('123456');

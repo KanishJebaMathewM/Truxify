@@ -241,14 +241,28 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         uint[2][2] memory b,
         uint[2] memory c,
         uint[] memory publicInputs,
+        bytes32 nullifier,
+        bytes32 commitment,
         address recipient,
         uint256 amount
     ) external nonReentrant whenNotPaused {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
-        require(publicInputs.length >= 2, "Invalid proof public inputs length");
-        require(publicInputs[0] == uint256(uint160(recipient)), "Recipient mismatch in proof input");
-        require(publicInputs[1] == amount, "Amount mismatch in proof input");
+
+        // Bind the withdrawal to a real on-chain deposit ledger and consume a
+        // one-time nullifier so the same proof cannot be replayed to drain the
+        // contract. Without these checks the caller-chosen `amount` is paid
+        // straight out of the contract balance regardless of any deposit.
+        require(!nullifiers[nullifier], "Nullifier already used");
+        require(commitments[commitment], "Commitment does not exist");
+        require(!spentCommitments[commitment], "Commitment already spent");
+        require(commitmentAmounts[commitment] >= amount, "Insufficient deposit amount");
+
+        require(publicInputs.length >= 4, "Invalid proof public inputs length");
+        require(publicInputs[0] == uint256(nullifier), "Nullifier mismatch in proof input");
+        require(publicInputs[1] == uint256(commitment), "Commitment mismatch in proof input");
+        require(publicInputs[2] == uint256(uint160(recipient)), "Recipient mismatch in proof input");
+        require(publicInputs[3] == amount, "Amount mismatch in proof input");
 
         // Verify zk-STARK proof
         bool isValid = verifySTARK(a, b, c, publicInputs);
@@ -258,7 +272,23 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Transfer failed");
 
-        emit TransactionProcessed(bytes32(0), recipient, amount);
+        // Record the withdrawal against the deposit ledger.
+        transactionCounter++;
+        bytes32 txId = keccak256(abi.encodePacked(block.timestamp, transactionCounter));
+
+        transactions[txId] = PrivateTransaction({
+            commitment: commitment,
+            nullifier: nullifier,
+            recipient: recipient,
+            amount: amount,
+            timestamp: block.timestamp,
+            spent: false
+        });
+
+        nullifiers[nullifier] = true;
+        spentCommitments[commitment] = true;
+
+        emit TransactionProcessed(nullifier, recipient, amount);
     }
 
     // ============ Privacy-Preserving ============

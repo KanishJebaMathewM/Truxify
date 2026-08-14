@@ -61,7 +61,7 @@ export function initReputationContract() {
         REPUTATION_ABI,
         relayer,
       );
-      logger.info("✅ Polygon Reputation contract client initialised.");
+      logger.info("Polygon Reputation contract client initialised.");
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: err && (err.message || String(err)) },

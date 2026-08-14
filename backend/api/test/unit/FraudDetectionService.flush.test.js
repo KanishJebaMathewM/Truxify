@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Create mocks with vi.hoisted so they're available for mocking
 const { mockFrom, mockRedisGet, mockRedisSetex } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockRedisGet: vi.fn(),
@@ -15,6 +16,17 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
+// Mock logger to suppress logs during tests
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+// Helper to create a chainable mock query builder
 function chain(overrides = {}) {
   return {
     select: vi.fn().mockReturnThis(),
@@ -37,16 +49,34 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     vi.resetModules();
-    FraudDetectionService = (await import('../../src/services/fraud/FraudDetectionService.js')).default;
-    clearInterval(FraudDetectionService._flushInterval);
-    clearInterval(FraudDetectionService._cleanupInterval);
-  });
-
-  async function trackOneUser(userId) {
+    
+    // Setup default mock - profile not found in DB
     mockFrom.mockReturnValue(chain({
       single: vi.fn().mockResolvedValue({ data: null, error: null }),
     }));
     mockRedisGet.mockResolvedValue(null);
+    
+    FraudDetectionService = (await import('../../src/services/fraud/FraudDetectionService.js')).default;
+    
+    // Clear any pending data and intervals
+    FraudDetectionService.pendingUpserts.clear();
+    if (FraudDetectionService._flushInterval) {
+      clearInterval(FraudDetectionService._flushInterval);
+      FraudDetectionService._flushInterval = null;
+    }
+    if (FraudDetectionService._cleanupInterval) {
+      clearInterval(FraudDetectionService._cleanupInterval);
+      FraudDetectionService._cleanupInterval = null;
+    }
+  });
+
+  async function trackOneUser(userId) {
+    // Setup mocks for trackBehavior
+    mockFrom.mockReturnValue(chain({
+      single: vi.fn().mockResolvedValue({ data: null, error: null }),
+    }));
+    mockRedisGet.mockResolvedValue(null);
+    
     return FraudDetectionService.trackBehavior(userId, {
       type: 'transaction',
       amount: 100,
@@ -57,9 +87,11 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('retains pending risk-score updates when the DB upsert fails', async () => {
     await trackOneUser('user-flush');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
+    
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockResolvedValue({ error: { message: 'db unavailable' } }),
     }));
+    
     await FraudDetectionService._flushPendingUpserts();
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
     expect(FraudDetectionService.pendingUpserts.has('user-flush')).toBe(true);
@@ -68,9 +100,11 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('retains pending risk-score updates when the DB upsert throws', async () => {
     await trackOneUser('user-throw');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
+    
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockRejectedValue(new Error('network down')),
     }));
+    
     await FraudDetectionService._flushPendingUpserts();
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
     expect(FraudDetectionService.pendingUpserts.has('user-throw')).toBe(true);
@@ -79,9 +113,11 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('clears pending updates only after a successful DB upsert', async () => {
     await trackOneUser('user-ok');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
+    
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockResolvedValue({ error: null }),
     }));
+    
     await FraudDetectionService._flushPendingUpserts();
     expect(FraudDetectionService.pendingUpserts.size).toBe(0);
   });

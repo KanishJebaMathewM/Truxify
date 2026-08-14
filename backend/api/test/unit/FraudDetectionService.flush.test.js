@@ -4,7 +4,7 @@ const mockFrom = vi.fn();
 const mockRedisGet = vi.fn();
 const mockRedisSetex = vi.fn();
 
-vi.mock('../../src/config/db.js', () => ({
+vi.mock('../../config/db.js', () => ({
   supabase: { from: mockFrom },
   supabaseAdmin: { from: mockFrom },
   redisClient: {

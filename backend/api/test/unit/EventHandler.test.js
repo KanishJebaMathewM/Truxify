@@ -9,7 +9,7 @@ vi.mock("../../../src/core/telemetry/ContextPropagator.js", () => ({
   ContextPropagator: { extractFromEventPayload: vi.fn() },
 }));
 
-const { EventHandler } = await import("../../../src/core/events/EventHandler.js");
+const { EventHandler } = await import("../../src/core/events/EventHandler.js");
 
 describe("EventHandler", () => {
   it("rejects non-function handler", () => {

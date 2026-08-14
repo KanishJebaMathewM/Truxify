@@ -143,19 +143,28 @@ class EventBus extends EventEmitter {
 
   emitSafe(event, ...args) {
     const listeners = this.rawListeners(event);
+    const promises = [];
     for (const listener of listeners) {
       try {
         const result = listener.apply(this, args);
-        if (result && typeof result.catch === 'function') {
-          result.catch(err => {
+        if (result && typeof result.then === 'function') {
+          // Capture the async listener's rejection but do not block other listeners.
+          const p = result.catch(err => {
             logger.error(`[EventBus] Unhandled async listener error for "${event}":`, err);
             this._metrics.errors++;
           });
+          promises.push(p);
         }
       } catch (err) {
         logger.error(`[EventBus] Sync listener error for "${event}":`, err);
         this._metrics.errors++;
       }
+    }
+    // Return a promise that resolves when all async listeners have settled.
+    // Await this in the caller to confirm all listeners completed before
+    // marking an event as successfully published.
+    if (promises.length > 0) {
+      return Promise.allSettled(promises).then(() => listeners.length > 0);
     }
     return listeners.length > 0;
   }
@@ -242,31 +251,24 @@ class EventBus extends EventEmitter {
   }
 
   /**
-   * Publish an event and report the delivery outcome so callers (e.g. the
-   * outbox relay worker) can decide whether to acknowledge a message.
-   * Accepts the same (event | eventType) shapes as publish() plus a plain
-   * event object carrying an eventType field.
+   * Like `publish`, but awaits adapter delivery and returns a structured
+   * outcome so callers can tell whether an event was actually consumed.
    *
-   * @returns {Promise<{
-   *   published: boolean,
-   *   deduplicated: boolean,
-   *   consumed: boolean,
-   *   adapterAttempted: number,
-   *   adapterFailures: number,
-   *   adapterErrors: string[],
-   * }>}
+   * `publish` (and therefore `publishAsync`) swallows adapter/lisener errors
+   * internally, which means a caller cannot distinguish "delivered" from
+   * "no consumer handled it / a consumer failed". The transactional outbox
+   * relay relies on this signal to decide whether to mark an outbox row as
+   * published or failed (see issue #11209).
    */
-  async publishAndReport(eventOrType, payloadOrOptions, optionsOrUndefined) {
+  async publishAndReport(eventOrType, payloadOrOptions, options = {}) {
     let event;
-    let options;
+    let eventType;
 
     if (eventOrType && typeof eventOrType === 'object' && eventOrType.metadata) {
       event = eventOrType;
-      options = payloadOrOptions || {};
+      eventType = event.metadata?.eventType || event.eventType;
     } else if (typeof eventOrType === 'string') {
-      const eventType = eventOrType;
-      const payload = payloadOrOptions;
-      options = optionsOrUndefined || {};
+      eventType = eventOrType;
       const metadata = new EventMetadata({
         eventType,
         source: options.source,
@@ -274,32 +276,13 @@ class EventBus extends EventEmitter {
         version: options.version,
         correlationId: options.correlationId,
       });
-      event = { metadata, payload: payload !== undefined ? payload : {} };
-    } else if (eventOrType && typeof eventOrType === 'object' && eventOrType.eventType) {
-      const { payload, ...rest } = eventOrType;
-      const metadata = new EventMetadata({
-        eventType: eventOrType.eventType,
-        source: payloadOrOptions?.source,
-        category: payloadOrOptions?.category || EVENT_CATEGORIES.DOMAIN,
-        version: payloadOrOptions?.version,
-        correlationId: payloadOrOptions?.correlationId,
-      });
-      options = payloadOrOptions || {};
-      event = { metadata, payload: payload !== undefined ? payload : {}, ...rest };
+      event = {
+        metadata,
+        payload: payloadOrOptions !== undefined ? payloadOrOptions : {},
+      };
     } else {
-      throw new Error('EventBus.publishAndReport() requires a BaseEvent instance, (eventType, payload, options), or an event object with an eventType field');
+      throw new Error('EventBus.publishAndReport() requires either a BaseEvent instance or (eventType, payload, options)');
     }
-
-    const eventType = event.metadata?.eventType || event.eventType;
-
-    const report = {
-      published: true,
-      deduplicated: false,
-      consumed: false,
-      adapterAttempted: 0,
-      adapterFailures: 0,
-      adapterErrors: [],
-    };
 
     if (this._registry.isValid(eventType)) {
       const validation = this._registry.validate(eventType, event.payload);
@@ -310,33 +293,62 @@ class EventBus extends EventEmitter {
 
     if (options.deduplicate !== false && this._isDuplicate(event)) {
       this._metrics.deduplicated++;
-      report.deduplicated = true;
-      report.published = false;
       logger.debug(`[EventBus] Duplicate event suppressed: ${event.metadata?.eventId}`);
-      return report;
+      return {
+        published: false,
+        deduplicated: true,
+        consumed: false,
+        adapterAttempted: 0,
+        adapterFailures: 0,
+        adapterErrors: [],
+      };
     }
 
+    const traceSnapshot = ContextPropagator.snapshot();
     const enrichedEvent = ContextPropagator.injectIntoEventPayload(event);
-    this._metrics.published++;
-    report.consumed = this.emitSafe(eventType, enrichedEvent);
+    const source = event.metadata?.source || 'unknown';
+    const eventId = event.metadata?.eventId;
 
-    if (options.adapters !== false) {
-      const targetAdapters = options.adapters || null;
-      for (const [name, adapter] of this._adapters) {
-        if (targetAdapters && !targetAdapters.includes(name)) continue;
-        if (typeof adapter.publish !== 'function') continue;
-        report.adapterAttempted++;
-        try {
+    const span = spanFactory.startEventPublishSpan(eventType, { source, eventId });
+
+    const consumed = this.emitSafe(eventType, enrichedEvent);
+
+    const targetAdapters = options.adapters || null;
+    let adapterAttempted = 0;
+    let adapterFailures = 0;
+    const adapterErrors = [];
+
+    for (const [name, adapter] of this._adapters) {
+      if (targetAdapters && !targetAdapters.includes(name)) continue;
+      adapterAttempted++;
+      try {
+        if (typeof adapter.publish === 'function') {
           await adapter.publish(enrichedEvent);
-        } catch (err) {
-          report.adapterFailures++;
-          report.adapterErrors.push(`${name}: ${err.message}`);
-          this._metrics.errors++;
         }
+      } catch (err) {
+        adapterFailures++;
+        adapterErrors.push(`${name}: ${err.message}`);
+        logger.error(`[EventBus] Adapter "${name}" publish failed for "${eventType}":`, err.message);
+        this._metrics.errors++;
       }
     }
 
-    return report;
+    try {
+      span.setStatus({ code: SpanStatusCode.OK });
+      span.end();
+    } catch (err) {
+      spanFactory.recordError(span, err);
+      span.end();
+    }
+
+    return {
+      published: true,
+      deduplicated: false,
+      consumed,
+      adapterAttempted,
+      adapterFailures,
+      adapterErrors,
+    };
   }
 
   _isDuplicate(event) {

@@ -55,9 +55,40 @@ void main() {
       expect(offers, isEmpty);
     });
 
-    test('throws StateError on non-list response', () async {
+    test('unwraps { loads } envelope returned by the marketplace endpoint', () async {
       final client = MockClient((request) async {
-        return http.Response('{"not": "a list"}', 200);
+        expect(request.url.path, '/api/orders/load-offers');
+        return http.Response(
+          jsonEncode({
+            'page': 1,
+            'limit': 20,
+            'total': 1,
+            'loads': [_loadOfferRow],
+          }),
+          200,
+        );
+      });
+
+      final offers = await _repository(client).fetchLoadOffers();
+
+      expect(offers, hasLength(1));
+      expect(offers.first.id, 'load-1');
+      expect(offers.first.customer, 'Acme Corp');
+    });
+
+    test('returns empty list when envelope has no loads key', () async {
+      final client = MockClient((request) async {
+        return http.Response('{"total": 0}', 200);
+      });
+
+      final offers = await _repository(client).fetchLoadOffers();
+
+      expect(offers, isEmpty);
+    });
+
+    test('throws StateError on non-list non-map response', () async {
+      final client = MockClient((request) async {
+        return http.Response('"unexpected"', 200);
       });
 
       expect(
@@ -119,6 +150,27 @@ void main() {
         currentLng: 72.0,
         maxDetourKm: 120,
       );
+    });
+
+    test('unwraps { loads } envelope returned by the en-route endpoint', () async {
+      final client = MockClient((request) async {
+        expect(request.url.path, '/api/orders/load-offers/en-route');
+        return http.Response(
+          jsonEncode({
+            'loads': [_loadOfferRow],
+          }),
+          200,
+        );
+      });
+
+      final loads = await _repository(client).fetchEnRouteLoads(
+        currentLat: 19.0,
+        currentLng: 72.0,
+      );
+
+      expect(loads, hasLength(1));
+      expect(loads.first.id, 'load-1');
+      expect(loads.first.customer, 'Acme Corp');
     });
   });
 

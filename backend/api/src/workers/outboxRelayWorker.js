@@ -1,5 +1,7 @@
 import { outboxService } from '../services/outbox/outboxService.js';
 import { eventBus } from '../core/events/index.js';
+import { BaseEvent } from '../core/events/BaseEvent.js';
+import { EVENT_SOURCES, EVENT_CATEGORIES } from '../core/events/EventMetadata.js';
 import logger from '../middleware/logger.js';
 
 const RELAY_INTERVAL_MS = parseInt(process.env.OUTBOX_RELAY_INTERVAL_MS, 10) || 5000;
@@ -17,38 +19,45 @@ async function relayOnce() {
     const events = await outboxService.fetchPendingEvents(50);
 
     for (const event of events) {
-      const payload = {
-        eventId: event.id,
-        aggregateId: event.aggregate_id,
-        aggregateType: event.aggregate_type,
-        payload: event.payload,
-        createdAt: event.created_at,
-      };
-
-      let report;
       try {
-        // Publish via existing eventBus and inspect the delivery report. Only
-        // acknowledge the message when an adapter actually attempted it — a
-        // no-op publish (no registered consumer/adapter) must be retried, not
-        // marked published (regression #11209).
-        report = await eventBus.publishAndReport(
-          { eventId: event.id, eventType: event.event_type, ...payload },
-          { adapters: ['kafka'] },
-        );
+        // Publish via eventBus.publishAndReport() with Kafka adapter. Unlike
+        // publishAsync(), publishAndReport awaits adapter delivery and reports
+        // whether an adapter actually consumed the event, so we only mark the
+        // outbox row published when it truly was delivered (issue #11209).
+        const baseEvent = new BaseEvent({
+          eventType: event.event_type,
+          payload: {
+            aggregateId: event.aggregate_id,
+            aggregateType: event.aggregate_type,
+            ...event.payload,
+          },
+          source: EVENT_SOURCES.INTERNAL,
+          category: EVENT_CATEGORIES.DOMAIN,
+        });
+        const outcome = await eventBus.publishAndReport(baseEvent, { adapters: ['kafka'] });
+
+        const delivered =
+          outcome.published &&
+          !outcome.deduplicated &&
+          outcome.adapterAttempted > 0 &&
+          outcome.adapterFailures === 0;
+
+        if (delivered) {
+          await outboxService.markPublished(event.id);
+          logger.info('[OutboxRelay] Published event:', { eventId: event.id, type: event.event_type });
+        } else {
+          const reason = outcome.deduplicated
+            ? 'Event deduplicated by EventBus'
+            : outcome.adapterAttempted === 0
+              ? 'No event consumer/adapters handled the event'
+              : `Adapter failures: ${outcome.adapterErrors.join('; ')}`;
+          await outboxService.markFailed(event.id, reason);
+          logger.error('[OutboxRelay] Event not delivered, marked failed:', { eventId: event.id, reason });
+        }
       } catch (err) {
         logger.error('[OutboxRelay] Failed to publish event:', { eventId: event.id, err: err.message });
         await outboxService.markFailed(event.id, err.message);
-        continue;
       }
-
-      if (report.adapterAttempted === 0) {
-        logger.warn('[OutboxRelay] No event consumer handled event:', { eventId: event.id, type: event.event_type });
-        await outboxService.markFailed(event.id, 'No event consumer handled the event');
-        continue;
-      }
-
-      await outboxService.markPublished(event.id);
-      logger.info('[OutboxRelay] Published event:', { eventId: event.id, type: event.event_type });
     }
   } catch (err) {
     logger.error('[OutboxRelay] Relay cycle error:', err.message);

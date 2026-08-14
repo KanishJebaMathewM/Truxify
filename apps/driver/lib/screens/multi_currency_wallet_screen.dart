@@ -67,9 +67,12 @@ class _MultiCurrencyWalletScreenState extends State<MultiCurrencyWalletScreen> {
 
   Widget _buildTotalBalance() {
     // Mock calculation of total balance in USD for display
-    double totalUsd = _wallets.firstWhere((w) => w.currencyCode == 'USD').balance +
-                      (_wallets.firstWhere((w) => w.currencyCode == 'CAD').balance / 1.35) +
-                      (_wallets.firstWhere((w) => w.currencyCode == 'MXN').balance / 16.90);
+    // Null-safe lookup: a missing currency wallet contributes 0.0 instead of
+    // throwing StateError from firstWhere (issue #12522).
+    double totalUsd =
+        (_wallets.where((w) => w.currencyCode == 'USD').firstOrNull?.balance ?? 0) +
+            ((_wallets.where((w) => w.currencyCode == 'CAD').firstOrNull?.balance ?? 0) / 1.35) +
+            ((_wallets.where((w) => w.currencyCode == 'MXN').firstOrNull?.balance ?? 0) / 16.90);
 
     return Container(
       width: double.infinity,

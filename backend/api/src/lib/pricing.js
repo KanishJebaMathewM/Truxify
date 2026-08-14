@@ -61,7 +61,7 @@ function parsePositiveFloat(raw, fallback, label) {
     return fallback;
   }
   const n = Number(raw);
-  if (Number.isFinite(n) && n > 0) return n;
+  if (Number.isFinite(n) && n >= 0) return n;
   if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
   return fallback;
 }

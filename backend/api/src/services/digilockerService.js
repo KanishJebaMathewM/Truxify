@@ -21,12 +21,16 @@ class DigilockerService {
       try {
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        this.contractABI = [
+        this.documentRegistryABI = [
           'function registerDocument(address driver, string memory documentType, bytes32 docHash, bool isVerified) external',
           'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)',
-          'function hashDocument(bytes32 documentHash, address user) public'
         ];
-        this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+        this.documentRegistry = new ethers.Contract(contractAddress, this.documentRegistryABI, this.wallet);
+        const kycVerifierAddress = process.env.KYC_VERIFIER_CONTRACT || contractAddress;
+        this.kycVerifierABI = [
+          'function hashDocument(bytes32 documentHash, address user) public',
+        ];
+        this.kycVerifier = new ethers.Contract(kycVerifierAddress, this.kycVerifierABI, this.wallet);
       } catch (err) {
         logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
       }
@@ -46,7 +50,7 @@ class DigilockerService {
 
   async exchangeCode(code) {
     if (!this.isMock) {
-      if (!this.clientId || !this.clientSecret || !code) {
+      if (!this.clientId || !this.clientSecret || !code || !code.trim()) {
         logger.warn('[DigilockerService] DigiLocker integration missing credentials or code; refusing mock fallback');
         return { success: false, error: 'DigiLocker verification is not configured' };
       }
@@ -81,6 +85,10 @@ class DigilockerService {
   }
 
   async verifyDocuments(userId, accessToken) {
+    if (!accessToken) {
+      logger.warn('[DigilockerService] verifyDocuments called with null/undefined accessToken');
+      return { success: false, error: 'Access token is required', is_digilocker_verified: false };
+    }
     if (!this.isMock) {
       logger.warn('[DigilockerService] DigiLocker integration not configured; refusing auto-approval');
       return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };
@@ -244,9 +252,12 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
+      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+        logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
+      }
       let txHash = null;
 
-      if (this.contract && walletAddress) {
+      if (this.contract && walletAddress && walletAddress !== '0x0000000000000000000000000000000000000000') {
         try {
           const tx = await this.contract.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();

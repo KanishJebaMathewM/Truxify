@@ -159,9 +159,13 @@ export async function sendPushNotification(userId, title, body, notifType = 'ord
     fcmResult = await sendFcmNotification(userId, { title, body }, data);
   } catch (err) {
     logger.error({ err }, '[NotificationService] Unexpected sendFcmNotification error');
+    fcmResult = { success: false, error: err?.message ?? 'Unexpected sendFcmNotification error' };
   }
 
-  return { success: dbSuccess || Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
+  // `success` reflects the actual push (FCM) delivery, not the DB
+  // persistence side-effect. Reporting DB persistence as push success masked
+  // FCM delivery failures (see issue #11212).
+  return { success: Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
 }
 
 export const hashDeliveryOtp = hashOtp;
@@ -173,6 +177,21 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
       logger.error({}, '[NotificationService] Service-role client not configured — cannot store OTP.');
       return null;
     }
+
+    // Invalidate all existing unverified OTPs for this order so that only one
+    // active OTP can ever exist per order within the TTL window. This prevents
+    // an attacker who obtained an older OTP from using it after a new one is
+    // issued (see issue #11205).
+    const { error: invalidateError } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({ expires_at: new Date().toISOString(), verified: true })
+      .eq('order_id', orderId)
+      .eq('verified', false);
+
+    if (invalidateError) {
+      logger.error({ err: invalidateError }, '[NotificationService] Failed to invalidate existing OTPs');
+    }
+
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 
@@ -295,7 +314,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
-        notif_type: 'order_update',
+        notif_type: 'delivery_otp',
         // No OTP or OTP-derived value is persisted here: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }
@@ -317,7 +336,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp',  }
+      { orderDisplayId, notifType: 'delivery_otp', otp }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

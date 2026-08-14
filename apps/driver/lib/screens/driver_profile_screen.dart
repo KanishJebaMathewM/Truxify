@@ -271,11 +271,24 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 onPressed: () async {
                   if (formKey.currentState?.validate() ?? false) {
                     final apiClient = ApiClient();
+                    final weight = double.tryParse(weightController.text);
+                    final volume = double.tryParse(volumeController.text);
+                    if (weight == null || volume == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Capacity weight and volume must be valid numbers.',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
                     try {
                       await apiClient.put('/api/driver/truck', body: {
                         'type': typeController.text.trim(),
-                        'capacityWeight': double.parse(weightController.text),
-                        'capacityVolume': double.parse(volumeController.text),
+                        'capacityWeight': weight,
+                        'capacityVolume': volume,
                         'registrationNumber': regController.text.trim().toUpperCase(),
                       });
                       Navigator.of(context).pop();
@@ -288,6 +301,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       );
                     } catch (e) {
                       debugPrint('Failed to update truck: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Failed to update truck details. Please try again.'),
+                            backgroundColor: TruxifyColors.error,
+                          ),
+                        );
+                      }
                     } finally {
                       apiClient.close();
                     }

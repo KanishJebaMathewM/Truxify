@@ -28,18 +28,15 @@ import { auditLog } from '../middleware/auditLog.js';
 import logger from '../middleware/logger.js';
 import { createStore } from '../middleware/rateLimiter.js';
 import { orderRepository, orderValidationService } from '../core/container.js';
-import { supabase, createUserClient } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import {
   recordDepositTx,
   getEscrowBookingId,
-  paisaToMaticWei,
   isEscrowEnabled,
-  escrowLockPayment,
   resolveExpectedDepositAmount,
   submitEscrowRefund,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
-import upiPaymentService from '../services/payment/UpiPaymentService.js';
 
 const router = express.Router();
 
@@ -409,7 +406,7 @@ router.post(
 
         sendPushNotification(
           pending.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
@@ -417,7 +414,7 @@ router.post(
       } else if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }

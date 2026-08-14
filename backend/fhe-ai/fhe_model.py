@@ -58,15 +58,20 @@ class FHEModel:
         return self
     
     def encrypt(self):
-        """Encrypt model weights"""
+        """Encrypt model weights for secure storage.
+
+        Plaintext weights are retained for homomorphic inference so the
+        linear layer can apply the learned matrix (y = x · W + b); a separate
+        encrypted copy is kept only for serialization.
+        """
         self.is_encrypted = True
         encrypted_weights = []
         encrypted_biases = []
         
         for weights, biases in zip(self.weights, self.biases):
             # Convert to numpy
-            w_np = weights.numpy().flatten()
-            b_np = biases.numpy().flatten()
+            w_np = weights.detach().numpy().flatten()
+            b_np = biases.detach().numpy().flatten()
             
             # Encrypt
             enc_w = ts.ckks_vector(self.context, w_np.tolist())
@@ -75,8 +80,8 @@ class FHEModel:
             encrypted_weights.append(enc_w)
             encrypted_biases.append(enc_b)
         
-        self.weights = encrypted_weights
-        self.biases = encrypted_biases
+        self.encrypted_weights = encrypted_weights
+        self.encrypted_biases = encrypted_biases
         
         logger.info("✅ Model weights encrypted")
         return self
@@ -107,11 +112,17 @@ class FHEModel:
         
         return x
     
-    def _encrypted_linear(self, x: ts.ckks_vector, weights: ts.ckks_vector, bias: ts.ckks_vector) -> ts.ckks_vector:
-        """Encrypted linear layer"""
-        # In production: use FHE matrix multiplication
-        # For now, multiply by a scalar (simplified)
-        result = x * 0.5  # Simulated linear transformation
+    def _encrypted_linear(self, x: ts.ckks_vector, weights, bias) -> ts.ckks_vector:
+        """Encrypted linear layer: y = x · W^T + b.
+
+        `weights`/`bias` are the plaintext tensors from add_linear; only the
+        input `x` is homomorphically encrypted, so the learned weights now
+        actually affect the output.
+        """
+        w = weights.detach().numpy() if hasattr(weights, 'detach') else np.asarray(weights)
+        b = bias.detach().numpy() if hasattr(bias, 'detach') else np.asarray(bias)
+        result = x.matmul(w.T)  # encrypted (out_features,)
+        result = result + b
         return result
     
     def _encrypted_relu(self, x: ts.ckks_vector) -> ts.ckks_vector:
@@ -148,16 +159,24 @@ class FHEModel:
         return result
     
     def _encrypted_softmax(self, x: ts.ckks_vector) -> ts.ckks_vector:
-        """Encrypted Softmax (approximated)"""
-        # Use Newton-Raphson reciprocal approximation: r_{n+1} = r * (2 - denom * r)
-        # Avoids CKKS vector/vector division which TenSEAL does not support
+        """Encrypted Softmax (approximated).
+
+        Computes exp(x_i) / sum_j(exp(x_j)) using TenSEAL's native exp() and a
+        Newton-Raphson reciprocal for the scalar normalizer. Produces a
+        normalized distribution summing to ~1 that preserves input ordering and
+        is safe at x = 0 (exp(0) = 1, no division by the input vector).
+        """
+        ex = x.exp()
+        total = ex[0]
+        for i in range(1, len(ex)):
+            total = total + ex[i]
         epsilon = 1e-7
-        denom = x + epsilon
-        y = 0.5  # initial guess for reciprocal of denom
-        y = y * (2 - denom * y)  # iteration 1
-        y = y * (2 - denom * y)  # iteration 2
-        y = y * (2 - denom * y)  # iteration 3
-        return x * y
+        denom = total + epsilon
+        r = 0.5  # initial reciprocal guess for the scalar normalizer
+        r = r * (2 - denom * r)  # iteration 1
+        r = r * (2 - denom * r)  # iteration 2
+        r = r * (2 - denom * r)  # iteration 3
+        return ex * r
 
 class FHETrainer:
     """Trainer for FHE-encrypted models"""
@@ -315,7 +334,11 @@ class FHEService:
             
             # Serialize encrypted weights
             encrypted_weights = []
-            for w in self.model.weights:
+            enc_weights = getattr(self.model, 'encrypted_weights', None)
+            if enc_weights is None:
+                self.model.encrypt()
+                enc_weights = self.model.encrypted_weights
+            for w in enc_weights:
                 encrypted_weights.append({
                     'data': w.serialize(),
                     'shape': w.size()

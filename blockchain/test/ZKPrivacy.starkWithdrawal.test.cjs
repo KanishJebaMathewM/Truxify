@@ -26,9 +26,14 @@ async function expectRevert(promise, expectedMessage) {
 describe("ZKPrivacy STARK withdrawal", function () {
   let zkPrivacy, verifier;
   let owner, recipient;
+  let commitment, nullifier;
 
-  const PROGRAM_INPUTS = (recipient, amount) => [
-    BigInt(recipient),
+  // The STARK public inputs must bind the withdrawal to a one-time nullifier,
+  // the deposit commitment, the recipient and the amount, in that order.
+  const PROGRAM_INPUTS = (n, c, r, amount) => [
+    BigInt(n),
+    BigInt(c),
+    BigInt(r),
     amount,
   ];
   const PROOF_A = [1, 2];
@@ -38,6 +43,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
   beforeEach(async function () {
     [owner, recipient] = await ethers.getSigners();
 
+    commitment = ethers.keccak256(ethers.toUtf8Bytes("stark-commitment"));
+    nullifier = ethers.keccak256(ethers.toUtf8Bytes("stark-nullifier"));
+
     const MockVerifier = await ethers.getContractFactory("MockZKPrivacyVerifier");
     verifier = await MockVerifier.deploy();
     await verifier.waitForDeployment();
@@ -46,12 +54,10 @@ describe("ZKPrivacy STARK withdrawal", function () {
     zkPrivacy = await ZKPrivacy.deploy(await verifier.getAddress());
     await zkPrivacy.waitForDeployment();
 
-    // Fund the contract so withdrawals can be paid out.
+    // Fund the contract with a real deposit that the withdrawal is bound to.
     await zkPrivacy
       .connect(owner)
-      .deposit(ethers.keccak256(ethers.toUtf8Bytes("escrow-funds")), {
-        value: ethers.parseEther("3"),
-      });
+      .deposit(commitment, { value: ethers.parseEther("3") });
   });
 
   it("reverts when no verifier is wired in (issue #10795)", async function () {
@@ -67,7 +73,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
           PROOF_A,
           PROOF_B,
           PROOF_C,
-          PROGRAM_INPUTS(recipient.address, amount),
+          PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+          nullifier,
+          commitment,
           recipient.address,
           amount
         ),
@@ -78,7 +86,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
   it("transfers the value to the recipient after verification (issue #10795)", async function () {
     await verifier.setShouldVerify(true);
     const amount = ethers.parseEther("1");
-    await verifier.setExpectedInput(PROGRAM_INPUTS(recipient.address, amount));
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
 
     const before = await ethers.provider.getBalance(recipient.address);
 
@@ -89,7 +99,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
           PROOF_A,
           PROOF_B,
           PROOF_C,
-          PROGRAM_INPUTS(recipient.address, amount),
+          PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+          nullifier,
+          commitment,
           recipient.address,
           amount
         )
@@ -103,7 +115,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
     await verifier.setShouldVerify(true);
     const [other] = await ethers.getSigners();
     const amount = ethers.parseEther("1");
-    await verifier.setExpectedInput(PROGRAM_INPUTS(recipient.address, amount));
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
 
     await expectRevert(
       zkPrivacy
@@ -112,7 +126,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
           PROOF_A,
           PROOF_B,
           PROOF_C,
-          PROGRAM_INPUTS(other.address, amount),
+          PROGRAM_INPUTS(nullifier, commitment, other.address, amount),
+          nullifier,
+          commitment,
           recipient.address,
           amount
         ),
@@ -123,7 +139,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
   it("rejects a proof whose public inputs do not bind the amount", async function () {
     await verifier.setShouldVerify(true);
     const amount = ethers.parseEther("1");
-    await verifier.setExpectedInput(PROGRAM_INPUTS(recipient.address, amount));
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
 
     await expectRevert(
       zkPrivacy
@@ -132,7 +150,14 @@ describe("ZKPrivacy STARK withdrawal", function () {
           PROOF_A,
           PROOF_B,
           PROOF_C,
-          PROGRAM_INPUTS(recipient.address, ethers.parseEther("2")),
+          PROGRAM_INPUTS(
+            nullifier,
+            commitment,
+            recipient.address,
+            ethers.parseEther("2")
+          ),
+          nullifier,
+          commitment,
           recipient.address,
           amount
         ),
@@ -143,7 +168,9 @@ describe("ZKPrivacy STARK withdrawal", function () {
   it("rejects a proof the verifier does not accept", async function () {
     await verifier.setShouldVerify(false);
     const amount = ethers.parseEther("1");
-    await verifier.setExpectedInput(PROGRAM_INPUTS(recipient.address, amount));
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
 
     await expectRevert(
       zkPrivacy
@@ -152,11 +179,105 @@ describe("ZKPrivacy STARK withdrawal", function () {
           PROOF_A,
           PROOF_B,
           PROOF_C,
-          PROGRAM_INPUTS(recipient.address, amount),
+          PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+          nullifier,
+          commitment,
           recipient.address,
           amount
         ),
       "Invalid STARK proof"
+    );
+  });
+
+  it("rejects a withdrawal against a commitment that was never deposited", async function () {
+    await verifier.setShouldVerify(true);
+    const amount = ethers.parseEther("1");
+    const missingCommitment = ethers.keccak256(
+      ethers.toUtf8Bytes("missing-commitment")
+    );
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, missingCommitment, recipient.address, amount)
+    );
+
+    await expectRevert(
+      zkPrivacy
+        .connect(owner)
+        .processSTARKTransaction(
+          PROOF_A,
+          PROOF_B,
+          PROOF_C,
+          PROGRAM_INPUTS(nullifier, missingCommitment, recipient.address, amount),
+          nullifier,
+          missingCommitment,
+          recipient.address,
+          amount
+        ),
+      "Commitment does not exist"
+    );
+  });
+
+  it("rejects an amount greater than the deposited balance", async function () {
+    await verifier.setShouldVerify(true);
+    const amount = ethers.parseEther("5");
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
+
+    await expectRevert(
+      zkPrivacy
+        .connect(owner)
+        .processSTARKTransaction(
+          PROOF_A,
+          PROOF_B,
+          PROOF_C,
+          PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+          nullifier,
+          commitment,
+          recipient.address,
+          amount
+        ),
+      "Insufficient deposit amount"
+    );
+  });
+
+  it("rejects replay of a consumed nullifier (issue #13110)", async function () {
+    await verifier.setShouldVerify(true);
+    const amount = ethers.parseEther("1");
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
+
+    await zkPrivacy
+      .connect(owner)
+      .processSTARKTransaction(
+        PROOF_A,
+        PROOF_B,
+        PROOF_C,
+        PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+        nullifier,
+        commitment,
+        recipient.address,
+        amount
+      );
+
+    await verifier.setExpectedInput(
+      PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount)
+    );
+
+    await expectRevert(
+      zkPrivacy
+        .connect(owner)
+        .processSTARKTransaction(
+          PROOF_A,
+          PROOF_B,
+          PROOF_C,
+          PROGRAM_INPUTS(nullifier, commitment, recipient.address, amount),
+          nullifier,
+          commitment,
+          recipient.address,
+          amount
+        ),
+      "Nullifier already used"
     );
   });
 
@@ -167,6 +288,8 @@ describe("ZKPrivacy STARK withdrawal", function () {
 
     await expectRevert(
       noVerifier.verifySTARK(PROOF_A, PROOF_B, PROOF_C, [
+        BigInt(nullifier),
+        BigInt(commitment),
         BigInt(recipient.address),
         1,
       ]),

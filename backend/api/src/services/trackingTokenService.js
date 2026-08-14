@@ -26,6 +26,11 @@ export class TrackingTokenService {
   }
 
   async createToken({ orderDisplayId, createdBy }) {
+    if (!orderDisplayId) {
+      this._logger.error({ orderDisplayId }, 'orderDisplayId is required to create a tracking token');
+      throw new Error('orderDisplayId is required');
+    }
+
     const rawToken = this.generateRawToken();
     const tokenHash = this.hashToken(rawToken);
     const expiresAt = this.getExpiryDate();

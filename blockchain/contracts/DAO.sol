@@ -23,6 +23,7 @@ contract DAO is Ownable {
     mapping(address => bytes32) public voterIdentity;
     mapping(bytes32 => address) public identityOwner;
     mapping(uint256 => mapping(address => bool)) public votesReleased;
+    mapping(uint256 => mapping(address => uint256)) public tokensHeld;
 
     event ProposalCreated(uint256 indexed proposalId, string description, uint256 deadline);
     event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost);
@@ -75,8 +76,25 @@ contract DAO is Ownable {
         require(governanceToken.transferFrom(msg.sender, address(this), tokenCost), "Token transfer failed");
 
         votesCast[_proposalId][msg.sender] += _votes;
+        tokensHeld[_proposalId][msg.sender] += tokenCost;
         proposal.voteCount += _votes;
 
         emit VotedQuadratic(_proposalId, msg.sender, _votes, tokenCost);
+    }
+
+    /**
+     * @dev Releases the escrowed governance tokens for a voter on a proposal.
+     * Refunds the exact sum of per-call quadratic costs (tokensHeld), never the
+     * square of the accumulated vote total, so the shared pool cannot be drained.
+     */
+    function releaseVotes(uint256 _proposalId) external {
+        uint256 held = tokensHeld[_proposalId][msg.sender];
+        require(held > 0, "No votes to release");
+        require(!votesReleased[_proposalId][msg.sender], "Already released");
+
+        votesReleased[_proposalId][msg.sender] = true;
+        require(governanceToken.transfer(msg.sender, held), "Token transfer failed");
+
+        emit VotesReleased(_proposalId, msg.sender, held);
     }
 }

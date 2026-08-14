@@ -9,14 +9,15 @@ const STATUS = { Active: 0, Delivered: 1, Cancelled: 2, Disputed: 3, Resolved: 4
 
 /**
  * Mint the same EIP-191 commitment the contract verifies:
- *   keccak256(chainId, this, customer, bookingId, commitmentNonces[customer])
+ *   keccak256(chainId, this, customer, bookingId, driver, amount,
+ *   commitmentNonces[customer][bookingId])
  */
-async function signCommitment(signer, escrow, customer, bookingId) {
+async function signCommitment(signer, escrow, customer, bookingId, driver, amount) {
   const { chainId } = await ethers.provider.getNetwork();
-  const nonce = await escrow.commitmentNonces(customer);
+  const nonce = await escrow.commitmentNonces(customer, bookingId);
   const commitment = ethers.solidityPackedKeccak256(
-    ["uint256", "address", "address", "uint256", "uint256"],
-    [chainId, escrow.target, customer, bookingId, nonce]
+    ["uint256", "address", "address", "uint256", "address", "uint256", "uint256"],
+    [chainId, escrow.target, customer, bookingId, driver, amount, nonce]
   );
   return signer.signMessage(ethers.getBytes(commitment));
 }
@@ -34,7 +35,7 @@ describe("TruxifyEscrow", function () {
   describe("createBooking — owner-signed commitment (issue #7734)", function () {
     it("creates a booking with a valid owner-signed commitment", async function () {
       const bookingId = 1;
-      const sig = await signCommitment(owner, escrow, customer.address, bookingId);
+      const sig = await signCommitment(owner, escrow, customer.address, bookingId, driver.address, AMOUNT);
 
       await expect(
         escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: AMOUNT })
@@ -52,7 +53,7 @@ describe("TruxifyEscrow", function () {
 
     it("reverts when the commitment is forged by a non-owner (front-running blocked)", async function () {
       const bookingId = 1;
-      const forged = await signCommitment(attacker, escrow, customer.address, bookingId);
+      const forged = await signCommitment(attacker, escrow, customer.address, bookingId, driver.address, AMOUNT);
 
       await expect(
         escrow.connect(customer).createBooking(bookingId, driver.address, forged, { value: AMOUNT })
@@ -69,7 +70,7 @@ describe("TruxifyEscrow", function () {
 
     it("reverts when the commitment covers a different bookingId", async function () {
       const bookingId = 1;
-      const sig = await signCommitment(owner, escrow, customer.address, 99);
+      const sig = await signCommitment(owner, escrow, customer.address, 99, driver.address, AMOUNT);
 
       await expect(
         escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: AMOUNT })
@@ -78,7 +79,7 @@ describe("TruxifyEscrow", function () {
 
     it("reverts when the commitment covers a different customer wallet", async function () {
       const bookingId = 1;
-      const sig = await signCommitment(owner, escrow, otherCustomer.address, bookingId);
+      const sig = await signCommitment(owner, escrow, otherCustomer.address, bookingId, driver.address, AMOUNT);
 
       await expect(
         escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: AMOUNT })
@@ -87,7 +88,7 @@ describe("TruxifyEscrow", function () {
 
     it("burns the nonce — a replayed commitment reverts", async function () {
       const bookingId = 1;
-      const sig = await signCommitment(owner, escrow, customer.address, bookingId);
+      const sig = await signCommitment(owner, escrow, customer.address, bookingId, driver.address, AMOUNT);
       await escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: AMOUNT });
 
       await expect(
@@ -97,7 +98,7 @@ describe("TruxifyEscrow", function () {
 
     it("records msg.sender as the customer so the wallet funds the escrow", async function () {
       const bookingId = 1;
-      const sig = await signCommitment(owner, escrow, customer.address, bookingId);
+      const sig = await signCommitment(owner, escrow, customer.address, bookingId, driver.address, AMOUNT);
       await escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: AMOUNT });
 
       const booking = await escrow.bookings(bookingId);
@@ -108,13 +109,13 @@ describe("TruxifyEscrow", function () {
 
   describe("slot reuse after settlement (issue #7734)", function () {
     async function createBooking(bookingId, who = customer) {
-      const sig = await signCommitment(owner, escrow, who.address, bookingId);
+      const sig = await signCommitment(owner, escrow, who.address, bookingId, driver.address, AMOUNT);
       await escrow.connect(who).createBooking(bookingId, driver.address, sig, { value: AMOUNT });
     }
 
     it("cannot re-create the slot while the original booking is active", async function () {
       await createBooking(1);
-      const sig = await signCommitment(owner, escrow, customer.address, 1);
+      const sig = await signCommitment(owner, escrow, customer.address, 1, driver.address, AMOUNT);
 
       await expect(
         escrow.connect(customer).createBooking(1, driver.address, sig, { value: AMOUNT })
@@ -164,10 +165,34 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).releasePayment(1);
       expect((await escrow.bookings(1)).status).to.equal(STATUS.Delivered);
 
-      const sig = await signCommitment(owner, escrow, customer.address, 1);
+      const sig = await signCommitment(owner, escrow, customer.address, 1, driver.address, AMOUNT);
       await expect(
         escrow.connect(customer).createBooking(1, driver.address, sig, { value: AMOUNT })
       ).to.be.revertedWith("TruxifyEscrow: Booking already exists");
+    });
+  });
+
+  describe("concurrent deposits do not collide on a shared nonce (issue #13119)", function () {
+    it("funds two distinct bookings built back-to-back with distinct valid nonces", async function () {
+      // Simulate two orders accepted in quick succession: the backend reads the
+      // per-(customer, bookingId) nonce for each booking independently, so both
+      // deposits embed a currently-valid nonce even though neither has mined yet.
+      const bookingIdA = 1;
+      const bookingIdB = 2;
+      const sigA = await signCommitment(owner, escrow, customer.address, bookingIdA, driver.address, AMOUNT);
+      const sigB = await signCommitment(owner, escrow, customer.address, bookingIdB, driver.address, AMOUNT);
+
+      await expect(
+        escrow.connect(customer).createBooking(bookingIdA, driver.address, sigA, { value: AMOUNT })
+      ).to.emit(escrow, "BookingCreated").withArgs(bookingIdA, customer.address, driver.address, AMOUNT);
+
+      await expect(
+        escrow.connect(customer).createBooking(bookingIdB, driver.address, sigB, { value: AMOUNT })
+      ).to.emit(escrow, "BookingCreated").withArgs(bookingIdB, customer.address, driver.address, AMOUNT);
+
+      // Each booking burned its own per-bookingId nonce.
+      expect(await escrow.commitmentNonces(customer.address, bookingIdA)).to.equal(1n);
+      expect(await escrow.commitmentNonces(customer.address, bookingIdB)).to.equal(1n);
     });
   });
 });

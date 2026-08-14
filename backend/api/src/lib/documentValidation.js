@@ -56,6 +56,9 @@ export function validateDocumentBuffer(buffer, declaredMimeType) {
   if (buffer == null) {
     throw new DocumentValidationError('Document buffer is null or undefined.');
   }
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new DocumentValidationError('Document buffer is empty.');
+  }
   const detected = detectDocumentMimeType(buffer);
 
   if (!detected || !ALLOWED_DOCUMENT_MIME_TYPES.includes(detected)) {

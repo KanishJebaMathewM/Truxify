@@ -61,8 +61,7 @@ const kycUploadLimiter = rateLimit({
 router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const userClient = createUserClient(req.token);
-    const { data: order, error: orderError } = await userClient
+    const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('id, customer_id, driver_id')
       .eq('id', orderId)
@@ -167,7 +166,7 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
     const { accessToken } = req.body;
-    const userId = req.user.id;
+    const userId = req.user?.id;
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
@@ -219,6 +218,7 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
         return res.status(422).json({ success: false, error: 'Uploaded image failed malware scanning.' });
       }
     } catch (error) {
+      logger.error({ error: error.message, stack: error.stack }, '[verificationRoutes] KYC upload validation/malware scan error');
       if (error instanceof DocumentValidationError) {
         return res.status(422).json({ success: false, error: error.message });
       }
@@ -296,6 +296,7 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
     if (error?.name === 'AbortError') {
       return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
     }
+    logger.error({ event: 'KYC_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'KYC upload error');
     res.status(500).json({
       success: false,
       error: error.message

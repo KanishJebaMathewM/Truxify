@@ -89,10 +89,11 @@ BEGIN
         AND column_name  = v_col
     ) THEN
       EXECUTE format('REVOKE UPDATE (%I) ON public.orders FROM anon, authenticated', v_col);
+      EXECUTE format('REVOKE INSERT (%I) ON public.orders FROM anon, authenticated', v_col);
     END IF;
-  END LOOP;
-END;
-$$;
+   END LOOP;
+  END;
+ $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Revoke UPDATE on protected driver_details columns from client roles
@@ -121,10 +122,11 @@ BEGIN
         AND column_name  = v_col
     ) THEN
       EXECUTE format('REVOKE UPDATE (%I) ON public.driver_details FROM anon, authenticated', v_col);
+      EXECUTE format('REVOKE INSERT (%I) ON public.driver_details FROM anon, authenticated', v_col);
     END IF;
-  END LOOP;
-END;
-$$;
+   END LOOP;
+  END;
+ $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Narrow the client policies on orders: keep ownership-scoped

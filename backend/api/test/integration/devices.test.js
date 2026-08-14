@@ -14,11 +14,13 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 const { default: deviceRouter } = await import('../../src/routes/deviceRoutes.js');
+const { errorHandler } = await import('../../src/middleware/errorHandler.js');
 
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/devices', deviceRouter);
+  app.use(errorHandler);
   return app;
 }
 
@@ -152,8 +154,8 @@ describe('Device Routes Integration Tests', () => {
       expect(res.body.error).toBe('Failed to register device');
     });
 
-    it('returns 500 when device token profile sync fails', async () => {
-      m.programErrorFor('profiles', 'update', 'Profile write failed');
+    it('returns 500 when the transactional device registration fails', async () => {
+      m.programRpcError('Profile write failed');
 
       const res = await request(buildApp())
         .post('/api/devices/register')
@@ -161,8 +163,39 @@ describe('Device Routes Integration Tests', () => {
         .send({ fcmToken: 'token_profile_sync_fail', platform: 'android' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to sync device token to profile');
-      expect(m.store.user_devices.find(d => d.fcm_token === 'token_profile_sync_fail')).toBeTruthy();
+      expect(res.body.error).toBe('Failed to register device');
+      // The whole registration (device row + profile sync) is one transaction,
+      // so a failure must not leave a partially-inserted device row behind.
+      expect(m.store.user_devices.find(d => d.fcm_token === 'token_profile_sync_fail')).toBeUndefined();
+    });
+
+    it('rotates the device row in place when the same deviceId re-registers with a new token', async () => {
+      const ROTATE_HEADERS = {
+        'x-user-id': 'rotate-user-uuid-999',
+        'x-user-role': 'customer',
+        'x-user-name': 'Rotation Customer',
+      };
+
+      await request(buildApp())
+        .post('/api/devices/register')
+        .set(ROTATE_HEADERS)
+        .send({ fcmToken: 'old-token-123456', platform: 'android', deviceId: 'device-abc-1' });
+
+      const res = await request(buildApp())
+        .post('/api/devices/register')
+        .set(ROTATE_HEADERS)
+        .send({ fcmToken: 'new-token-123456', platform: 'android', deviceId: 'device-abc-1' });
+
+      expect(res.status).toBe(200);
+      const rows = m.store.user_devices.filter(d => d.user_id === 'rotate-user-uuid-999');
+      // Old token retired, new token active, no duplicate rows.
+      const oldRow = rows.find(d => d.fcm_token === 'old-token-123456');
+      const newRow = rows.find(d => d.fcm_token === 'new-token-123456');
+      expect(oldRow.is_active).toBe(false);
+      expect(newRow).toBeTruthy();
+      expect(newRow.is_active).toBe(true);
+      expect(newRow.device_id).toBe('device-abc-1');
+      expect(rows.filter(d => d.is_active !== false)).toHaveLength(1);
     });
 
     it('successfully registers multiple devices for the same user', async () => {
@@ -243,11 +276,12 @@ describe('Device Routes Integration Tests', () => {
       );
     });
 
-    it('removes the device record and clears the matching profile token', async () => {
+    it('soft-deactivates the device row and clears the matching profile token', async () => {
       m.store.user_devices.push({
         user_id: 'unregister-test-user-uuid',
         fcm_token: 'logout-token-123456',
         platform: 'android',
+        is_active: true,
       });
       m.store.profiles.push({
         id: 'unregister-test-user-uuid',
@@ -266,13 +300,42 @@ describe('Device Routes Integration Tests', () => {
         message: 'Device token unregistered',
       });
 
-      const remainingDevice = m.store.user_devices.find(
+      // The row is preserved for audit but deactivated; it must no longer be
+      // a fan-out target.
+      const deactivated = m.store.user_devices.find(
         (d) => d.user_id === 'unregister-test-user-uuid' && d.fcm_token === 'logout-token-123456'
       );
-      expect(remainingDevice).toBeUndefined();
+      expect(deactivated).toBeTruthy();
+      expect(deactivated.is_active).toBe(false);
+      expect(deactivated.deactivated_at).toBeTruthy();
 
       const profile = m.store.profiles.find((p) => p.id === 'unregister-test-user-uuid');
       expect(profile.fcm_token).toBeNull();
+    });
+
+    it('keeps the user\'s other devices active when one token is unregistered', async () => {
+      m.store.user_devices.push(
+        { user_id: 'unregister-test-user-uuid', fcm_token: 'logout-token-123456', platform: 'android', is_active: true },
+        { user_id: 'unregister-test-user-uuid', fcm_token: 'other-active-token-1', platform: 'ios', is_active: true },
+      );
+      m.store.profiles.push({
+        id: 'unregister-test-user-uuid',
+        fcm_token: 'logout-token-123456',
+        fcm_token_updated_at: '2026-01-01T00:00:00.000Z',
+      });
+
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({ fcmToken: 'logout-token-123456' });
+
+      expect(res.status).toBe(200);
+      const rows = m.store.user_devices.filter(d => d.user_id === 'unregister-test-user-uuid');
+      expect(rows.find(d => d.fcm_token === 'logout-token-123456').is_active).toBe(false);
+      expect(rows.find(d => d.fcm_token === 'other-active-token-1').is_active).toBe(true);
+      // Profile fallback moves to the remaining active device.
+      const profile = m.store.profiles.find((p) => p.id === 'unregister-test-user-uuid');
+      expect(profile.fcm_token).toBe('other-active-token-1');
     });
 
     it('does not remove another user\'s device record for the same token', async () => {

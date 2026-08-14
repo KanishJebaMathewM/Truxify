@@ -92,11 +92,11 @@ BEGIN
         CASE WHEN jsonb_typeof(p_order_data->'special_requirements') = 'array'
              THEN (p_order_data->'special_requirements')::TEXT[]
              ELSE NULL END,
-        (p_order_data->>'base_freight')::INTEGER,
-        (p_order_data->>'toll_estimate')::INTEGER,
-        (p_order_data->>'platform_fee')::INTEGER,
-        (p_order_data->>'total_amount')::INTEGER,
-        (p_order_data->>'estimated_price')::INTEGER,
+        round((p_order_data->>'base_freight')::NUMERIC)::INTEGER,
+        round((p_order_data->>'toll_estimate')::NUMERIC)::INTEGER,
+        round((p_order_data->>'platform_fee')::NUMERIC)::INTEGER,
+        round((p_order_data->>'total_amount')::NUMERIC)::INTEGER,
+        round((p_order_data->>'estimated_price')::NUMERIC)::INTEGER,
         (p_order_data->>'payment_method_id')::UUID,
         p_order_data->>'upi_id'
     )

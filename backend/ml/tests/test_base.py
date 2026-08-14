@@ -380,3 +380,34 @@ class TestRestorePreviousModel:
         assert restore_previous_model("test_reversible") is True
         assert load_model("test_reversible") == model_b
 
+
+class TestModelIntegrity:
+    def test_save_writes_sha256_sidecar(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        save_model({"data": 1}, "hash_test")
+        assert (tmp_path / "hash_test.sha256").exists()
+
+    def test_load_rejects_tampered_pkl(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        save_model({"data": 42}, "integrity_test")
+        # Tamper with the persisted artifact without updating its hash.
+        pkl = tmp_path / "integrity_test.pkl"
+        with open(pkl, "ab") as f:
+            f.write(b"malicious")
+        # Integrity check must refuse to unpickle the tampered artifact (#13095).
+        assert load_model("integrity_test") is None
+
+    def test_restore_rejects_tampered_previous(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        save_model({"version": "A"}, "restore_integrity")
+        save_model({"version": "B"}, "restore_integrity")
+
+        # Tamper with the previous artifact that would be restored.
+        prev = get_previous_model_path("restore_integrity")
+        with open(prev, "ab") as f:
+            f.write(b"tampered")
+
+        assert restore_previous_model("restore_integrity") is False
+        # Production artifact stays intact and loadable.
+        assert load_model("restore_integrity") == {"version": "B"}
+

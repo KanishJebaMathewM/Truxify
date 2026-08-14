@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import suspiciousRequests from '../../src/middleware/suspiciousRequests.js';
+import suspiciousRequests, { sanitizeKey, sanitizeQueryParams } from '../../src/middleware/suspiciousRequests.js';
 
 describe('suspiciousRequests Middleware', () => {
   it('calls next() for normal requests', () => {

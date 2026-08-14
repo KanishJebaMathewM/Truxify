@@ -71,13 +71,28 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
         // Look up the device-to-load assignment via the iot_device_loads table.
         // The previous check (device_id === load_id) was semantically wrong since
         // a device UUID and a load UUID are never meaningfully comparable.
-        const { data: assignment } = await supabaseAdmin
+        const { data: assignment, error: assignmentErr } = await supabaseAdmin
           .from('iot_device_loads')
           .select('id')
           .eq('device_id', req.user.id)
           .eq('load_id', loadId)
           .maybeSingle();
+        if (assignmentErr) {
+          logger.error({ event: 'IOT_DEVICE_LOAD_FETCH_ERROR', loadId, error: assignmentErr && (assignmentErr.message || String(assignmentErr)) }, 'Failed to resolve device-to-load assignment');
+          return res.status(500).json({ error: 'Authorization error' });
+        }
         isAuthorized = !!assignment;
+        // A device may only report telemetry for a load whose order is still in
+        // an active (in-transit) state, mirroring the driver authorization below.
+        if (isAuthorized && load.order_display_id) {
+          const { data: order } = await supabaseAdmin
+            .from('orders')
+            .select('driver_id')
+            .eq('order_display_id', load.order_display_id)
+            .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered'])
+            .maybeSingle();
+          isAuthorized = !!order;
+        }
       } else {
         isAuthorized = load.customer_id === req.user.id;
         if (!isAuthorized && load.order_display_id) {

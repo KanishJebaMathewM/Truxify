@@ -51,3 +51,31 @@ http://localhost:5678
 2. Click **Workflows** → **Import from File**.
 3. Select any `.json` file from `automation/n8n/`.
 4. Configure required credentials (PostgreSQL, Email/SMTP, HTTP Header Auth) and click **Activate**.
+
+---
+
+## 🔐 Escrow Webhook Authentication
+
+`dispute-resolution.json` fronts on-chain escrow operations, so both of its webhooks
+(`POST /webhook/dispute-trigger` and `POST /webhook/admin-resolution`) use **Header Auth**
+and will reject any request that does not carry the shared secret. Before activating it,
+create an **HTTP Header Auth** credential in n8n named exactly:
+
+```text
+Truxify Internal API Key
+```
+
+Set its header to `x-api-key` and its value to one of the keys listed in the backend's
+`VALID_API_KEYS` environment variable. The same credential authenticates this workflow's
+outbound calls to the backend, which gates internal endpoints with the `requireApiKey`
+middleware (`backend/api/src/middleware/apiKey.js`).
+
+> **Escrow payee:** the release step deliberately sends only `bookingId`. `TruxifyEscrow.releasePayment(uint256 bookingId)`
+> pays `booking.driver`, which is bound when the deposit is built — a payout address must
+> never be accepted from a webhook caller.
+
+Audit the above with:
+
+```bash
+node automation/n8n/tests/dispute-resolution.security.test.js
+```

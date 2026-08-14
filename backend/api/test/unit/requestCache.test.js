@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { RequestCache } from '../../src/lib/requestCache.js';
+import { EventEmitter } from 'node:events';
+import { RequestCache, attachResponseCleanup } from '../../src/lib/requestCache.js';
 
 describe('RequestCache', () => {
   let cache;

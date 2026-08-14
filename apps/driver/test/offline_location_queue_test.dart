@@ -94,6 +94,22 @@ class FakeLocationQueueStore implements LocationQueueStore {
   }
 
   @override
+  Future<int> deleteOldestNonMilestones(int count) async {
+    final candidates = rows
+        .where((r) => r['kind'] != 'milestone')
+        .toList()
+      ..sort((a, b) {
+        final byTime = (a['created_at'] as int).compareTo(b['created_at'] as int);
+        if (byTime != 0) return byTime;
+        return (a['id'] as int).compareTo(b['id'] as int);
+      });
+    final doomed = candidates.take(count).map((r) => r['id']).toSet();
+    final before = rows.length;
+    rows.removeWhere((r) => doomed.contains(r['id']));
+    return before - rows.length;
+  }
+
+  @override
   Future<Map<String, dynamic>?> findByIdempotencyKey(String key) async {
     for (final row in rows) {
       if (row['idempotency_key'] == key) return row;
@@ -253,6 +269,32 @@ void main() {
       expect(locations.last.payload['data']['lat'], 21.0 + 14 * 0.01);
       // Oldest location was dropped first.
       expect(locations.first.payload['data']['lat'], isNot(21.0));
+    });
+
+    test('milestone rows survive trimming when no location rows remain', () async {
+      // A long offline stretch of geofence milestones with location pings
+      // disabled leaves only milestone rows in the queue.
+      for (var i = 0; i < 15; i++) {
+        await queue.enqueueMilestone(
+          orderId: 'order-1',
+          milestone: 'Milestone $i',
+          driverId: 'driver-1',
+        );
+      }
+      expect(await queue.count(), 15);
+
+      // Trim is only reachable through enqueueLocation; the newly inserted
+      // location must not cause any milestone row to be evicted.
+      await queue.enqueueLocation(loc(lat: 21.5, lng: 72.5));
+
+      final pending = await queue.pending();
+      final milestones =
+          pending.where((i) => i.kind == QueueItemKind.milestone).toList();
+      expect(milestones, hasLength(15));
+      expect(
+        pending.where((i) => i.kind == QueueItemKind.location),
+        hasLength(1),
+      );
     });
   });
 

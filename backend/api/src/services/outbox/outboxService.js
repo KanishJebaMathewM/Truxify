@@ -35,9 +35,10 @@ export class OutboxService {
       .single();
 
     if (error) {
-      // Best-effort: log but never throw — the order mutation already committed.
+      // Surface the failure so the caller can decide how to handle a
+      // non-atomic write (the order mutation may already have committed).
       logger.error('[OutboxService] Failed to write outbox event:', error.message, { aggregateId, eventType });
-      return null;
+      throw error;
     }
 
     logger.info('[OutboxService] Outbox event written:', { eventId, aggregateId, eventType });
@@ -78,27 +79,35 @@ export class OutboxService {
 
   /**
    * Mark an event as failed and increment retry_count.
+   *
+   * The new retry_count is computed in JS: the previous implementation
+   * assigned an unawaited `supabase.rpc('increment', ...)` Promise to the
+   * column, so the counter never advanced and dead-lettering never triggered.
    */
   async markFailed(eventId, errorMessage) {
-    if (!eventId) return;
+    if (!eventId) {
+      logger.warn('[OutboxService] Skipping markFailed — missing eventId');
+      return;
+    }
 
-    // Fetch the current retry_count and increment it so the update carries a
-    // plain number. The previous code embedded a supabase query builder
-    // (supabase.rpc) as the column value, which is never a valid retry_count.
-    const { data: current } = await supabaseAdmin
+    const { data: current, error: fetchError } = await supabaseAdmin
       .from('outbox_events')
       .select('retry_count')
       .eq('id', eventId)
-      .maybeSingle();
+      .single();
 
-    const baseCount = current && Number.isInteger(current.retry_count) ? current.retry_count : 0;
+    if (fetchError) {
+      logger.warn('[OutboxService] Failed to read retry_count:', fetchError.message, { eventId });
+    }
+
+    const currentRetryCount = Number.isFinite(current?.retry_count) ? current.retry_count : 0;
 
     const { error } = await supabaseAdmin
       .from('outbox_events')
       .update({
         status: 'failed',
         last_error: String(errorMessage).slice(0, 1000),
-        retry_count: baseCount + 1,
+        retry_count: currentRetryCount + 1,
         last_attempted_at: new Date().toISOString(),
       })
       .eq('id', eventId);

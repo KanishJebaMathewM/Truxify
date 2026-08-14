@@ -48,6 +48,8 @@ Commit requests are validated before they touch the log:
 
 - `order_id` must be non-empty, at most 64 chars, and contain only `[A-Za-z0-9_-]`.
 - `command` must be in the allow-list (`CREATED`, `DISPATCHED`, `IN_TRANSIT`, `DELIVERED`, `COMPLETED`, `CANCELLED`), overridable via `RAFT_ALLOWED_COMMANDS` (comma-separated).
+- The command must follow the order's lifecycle state machine (replayed from the log): `CREATED` must be first, then `DISPATCHED` → `IN_TRANSIT` → `DELIVERED` → `COMPLETED`, with `CANCELLED` allowed from `CREATED`/`DISPATCHED`/`IN_TRANSIT`; `CANCELLED` and `COMPLETED` are terminal. Violations return `400`.
+- Re-submitting an identical `(order_id, command)` is idempotent: it returns the existing entry's `raft_index` instead of appending a duplicate.
 
 ---
 

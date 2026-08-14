@@ -518,13 +518,8 @@ Future<http.Response> _execute(
     if (response.statusCode == 429) {
         final retryAfterHeader = response.headers['retry-after'];
 
-<<<<<<< HEAD
-        final retryAfterSeconds =
-            int.tryParse(retryAfterHeader ?? '') ?? 0;
-=======
         final rawRetryAfterSeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
         final retryAfterSeconds = rawRetryAfterSeconds.clamp(1, 30);
->>>>>>> upstream/main
 
         throw RateLimitException(
             response.statusCode,

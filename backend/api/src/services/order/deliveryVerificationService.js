@@ -512,7 +512,7 @@ export class DeliveryVerificationService {
           // then enforced by escrowReleaseFn against the same expected figure,
           // so a booking funded with Y ≠ X can never be released while the app
           // pays the driver X from its own funds.
-          let expectedAmountWei = null;
+          let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;
@@ -701,7 +701,7 @@ export class DeliveryVerificationService {
 
         // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
         let verifiedOrder;
-        let tripData = null;
+        let tripData;
 
         if (!isRetryForStuckEscrow) {
           const guardResult = await this._writeRepository.updateOrderGuardStatus(

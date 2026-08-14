@@ -32,7 +32,6 @@ export class RequestCache {
 
 // === Spec 25: ===
 // === Spec 25: event listener leak guard ===
-import { EventEmitter } from 'node:events';
 export function attachResponseCleanup(emitter, res, eventName = 'data') {
   const onData = () => {};
   emitter.on(eventName, onData);

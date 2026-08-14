@@ -113,6 +113,7 @@ export async function reverseGeocode(lat, lon) {
 
     return formattedAddress;
   } catch (err) {
+    // err may be a TypeError (JSON parse), Error (fetch/AbortSignal), or any thrown value
     logger.error({ err, lat, lon }, '[ReverseGeocode] Error reverse geocoding coordinates');
     return null;
   }

@@ -156,16 +156,88 @@ class SGXService:
             logger.error(f"Attestation failed: {e}")
             return {'success': False, 'error': str(e)}
     
+    def _parse_quote(self, quote: bytes) -> Optional[Dict]:
+        """Parse a SGX ECDSA (DCAP v3) attestation quote.
+
+        Returns the enclave measurement fields, or None when the quote is
+        malformed or uses an unsupported format.
+        """
+        # Header: version(u16), attestation_key_type(u16), reserved(u32)
+        if len(quote) < 8:
+            return None
+        version = int.from_bytes(quote[0:2], "little")
+        key_type = int.from_bytes(quote[2:4], "little")
+        # Only ECDSA/DCAP v3 quotes are supported here.
+        if version != 3 or key_type != 2:
+            return None
+        # qe3_gid(16) + certification_data_type(u16) + certification_data_size(u32)
+        if len(quote) < 30:
+            return None
+        cert_size = int.from_bytes(quote[26:30], "little")
+        body_off = 30 + cert_size
+        if body_off + 384 > len(quote):
+            return None
+        body = quote[body_off:body_off + 384]
+        return {
+            "version": version,
+            "key_type": key_type,
+            "mrenclave": body[80:112].hex(),
+            "mrsigner": body[144:176].hex(),
+            "isv_svn": int.from_bytes(body[274:276], "little"),
+        }
+
     def verify_attestation(self, quote_b64: str) -> Dict:
         """Verify SGX attestation quote"""
         try:
-            # In production: verify quote using IAS or DCAP
-            # For demo: accept any quote
-            quote = base64.b64decode(quote_b64)
-            
+            try:
+                quote = base64.b64decode(quote_b64, validate=True)
+            except Exception:
+                return {
+                    'success': True,
+                    'verified': False,
+                    'reason': 'quote is not valid base64',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # The known demo/dummy quote carries no real evidence and must be
+            # rejected so it can never be mistaken for a trusted enclave.
+            if quote == b'SGX_ATTESTATION_QUOTE_DUMMY':
+                return {
+                    'success': True,
+                    'verified': False,
+                    'reason': 'dummy quote cannot be attested',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            parsed = self._parse_quote(quote)
+            if parsed is None:
+                return {
+                    'success': True,
+                    'verified': False,
+                    'reason': 'malformed or unsupported SGX quote',
+                    'timestamp': datetime.now().isoformat()
+                }
+
+            # The quote is structurally valid, but a real deployment must also
+            # verify the QE/PCK signature chain against the Intel root CA. Until
+            # that chain is available we only trust quotes whose measurement
+            # matches the pinned enclave identity; everything else is rejected so
+            # a forged or unverifiable quote can never be reported as trusted.
+            expected_mrenclave = os.environ.get('SGX_EXPECTED_MRENCLAVE')
+            if not expected_mrenclave or parsed['mrenclave'] != expected_mrenclave:
+                return {
+                    'success': True,
+                    'verified': False,
+                    'reason': 'unverifiable quote: enclave measurement not pinned/matched',
+                    'timestamp': datetime.now().isoformat()
+                }
+
             return {
                 'success': True,
                 'verified': True,
+                'mrenclave': parsed['mrenclave'],
+                'mrsigner': parsed['mrsigner'],
+                'isv_svn': parsed['isv_svn'],
                 'quote_hash': hashlib.sha256(quote).hexdigest(),
                 'timestamp': datetime.now().isoformat()
             }

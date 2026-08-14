@@ -9,7 +9,7 @@ import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisL
  * Must be long enough to cover proof generation + blockchain tx confirmation.
  * Configurable via ZKP_LOCK_TTL_MS env var.
  */
-const ZKP_LOCK_TTL_MS = Number(process.env.ZKP_LOCK_TTL_MS) || 120_000;
+const ZKP_LOCK_TTL_MS = Number(process.env.ZKP_LOCK_TTL_MS) || 600_000;
 
 class ZKPService {
   constructor() {

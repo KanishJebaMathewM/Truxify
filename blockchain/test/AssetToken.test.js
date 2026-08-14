@@ -11,6 +11,13 @@ describe("AssetToken", function () {
     return { assetToken, owner, buyer1, buyer2, outsider };
   }
 
+  async function markCompliant(assetToken, owner, addresses) {
+    for (const address of addresses) {
+      await assetToken.connect(owner).verifyCompliance(address);
+      assert.equal(await assetToken.isCompliant(address), true);
+    }
+  }
+
   it("should create an asset and update assetCounter", async function () {
     const { assetToken, owner } = await deployAssetToken();
     const name = "Truck 1";
@@ -223,6 +230,7 @@ describe("AssetToken", function () {
     });
 
     // P2P transfer of 4 tokens: the backed flag rides along
+    await markCompliant(assetToken, owner, [buyer1.address, buyer2.address]);
     await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4"));
 
     let buyer1Ownership = await assetToken.getFractionalOwnership(1, buyer1.address);
@@ -250,6 +258,40 @@ describe("AssetToken", function () {
     await assetToken.connect(buyer2).claimPayout();
     await assetToken.connect(buyer1).claimPayout();
     assert.equal(await ethers.provider.getBalance(assetToken.target), 0n);
+  });
+
+  it("should reject transferWithCompliance for non-compliant parties", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // Neither party has passed KYC/AML yet: the transfer must be blocked.
+    await assert.rejects(
+      assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4")),
+      /Sender not compliant/
+    );
+
+    // Only the sender verified: still blocked because the recipient is not compliant.
+    await assetToken.connect(owner).verifyCompliance(buyer1.address);
+    await assert.rejects(
+      assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4")),
+      /Recipient not compliant/
+    );
+
+    // Once both parties are verified the transfer succeeds.
+    await assetToken.connect(owner).verifyCompliance(buyer2.address);
+    await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4"));
+    assert.equal((await assetToken.getFractionalOwnership(1, buyer2.address)).amount, ethers.parseEther("4"));
   });
 
   it("should block plain ERC20 transfer/transferFrom so the fractional-ownership ledger cannot desync", async function () {
@@ -289,6 +331,7 @@ describe("AssetToken", function () {
     assert.equal(await assetToken.balanceOf(buyer2.address), 0n);
 
     // The asset-aware path still works and keeps the ledger in sync.
+    await markCompliant(assetToken, owner, [buyer1.address, buyer2.address]);
     await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4"));
     assert.equal((await assetToken.getFractionalOwnership(1, buyer1.address)).amount, ethers.parseEther("6"));
     assert.equal((await assetToken.getFractionalOwnership(1, buyer2.address)).amount, ethers.parseEther("4"));
@@ -354,6 +397,7 @@ describe("AssetToken", function () {
 
     // transferWithCompliance carries backing for exactly the tokens it moved,
     // so a seller can never sell back more than the backed portion
+    await markCompliant(assetToken, owner, [buyer1.address, buyer2.address]);
     await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("10"));
 
     // buyer1 no longer holds any tokens and has no backing left

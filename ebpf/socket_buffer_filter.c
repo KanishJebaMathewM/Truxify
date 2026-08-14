@@ -77,6 +77,12 @@ int socket_telemetry_filter(struct __sk_buff *skb) {
         bpf_map_update_elem(&rate_limit_map, &rate_key, &one, BPF_ANY);
     }
 
+    // Guard against short/truncated packets: subtracting the L2/L3/L4 header
+    // sizes from an undersized skb->len wraps the __u32 and would emit a bogus
+    // near-UINT_MAX payload_len in the ring buffer event.
+    if (skb->len < ETH_HLEN + sizeof(ip) + (tcp.doff * 4))
+        return 0;
+
     // Calculate payload length
 >>>>>>> upstream/main
     __u32 payload_len = skb->len - (ETH_HLEN + sizeof(ip) + (tcp.doff * 4));

@@ -16,6 +16,7 @@ function makeRes() {
   return {
     getHeader: vi.fn(n => h[n]),
     setHeader: vi.fn((n, v) => { h[n] = v; }),
+    status: vi.fn(function(s) { this.statusCode = s; return this; }),
     json: vi.fn(function(b) { return this; }),
     on: vi.fn(),
   };

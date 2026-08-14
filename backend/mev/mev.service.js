@@ -2,12 +2,14 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { getMevRelayer } from './flashbots_relayer.js';
 
 class MEVService {
     constructor() {
-        this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
-        this.escrowAddress = process.env.MEV_ESCROW_ADDRESS;
+        this._provider = null;
+        this._wallet = null;
+        this._escrow = null;
+        this.escrowAddress = process.env.ESCROW_CONTRACT_ADDRESS || process.env.MEV_ESCROW_ADDRESS;
         
         this.escrowABI = [
             'function createProtectedDeposit(address payable driver, bytes32 secretHash) external payable returns (uint256)',
@@ -20,16 +22,42 @@ class MEVService {
             'event DepositRefunded(uint256 indexed depositId, address indexed shipper, uint256 amount)'
         ];
 
-        this.escrow = new ethers.Contract(
-            this.escrowAddress,
-            this.escrowABI,
-            this.wallet
-        );
-
         // Flashbots endpoint
         this.flashbotsEndpoint = process.env.FLASHBOTS_ENDPOINT || 'https://relay.flashbots.net';
         
         logger.info('✅ MEV Protection Service initialized');
+    }
+
+    get provider() {
+        if (!this._provider) {
+            this._provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
+        }
+        return this._provider;
+    }
+
+    get wallet() {
+        if (!this._wallet) {
+            const privateKey = process.env.RELAYER_WALLET_PRIVATE_KEY || process.env.PRIVATE_KEY;
+            if (!privateKey) {
+                throw new Error('RELAYER_WALLET_PRIVATE_KEY / PRIVATE_KEY environment variable is required for MEV operations');
+            }
+            this._wallet = new ethers.Wallet(privateKey, this.provider);
+        }
+        return this._wallet;
+    }
+
+    get escrow() {
+        if (!this._escrow) {
+            if (!this.escrowAddress) {
+                throw new Error('ESCROW_CONTRACT_ADDRESS / MEV_ESCROW_ADDRESS environment variable is required for MEV operations');
+            }
+            this._escrow = new ethers.Contract(
+                this.escrowAddress,
+                this.escrowABI,
+                this.wallet
+            );
+        }
+        return this._escrow;
     }
 
     // ============ Commitment Creation ============
@@ -204,6 +232,26 @@ class MEVService {
             signedTxs.push(signedTx);
         }
         return signedTxs;
+    }
+
+    async submitFlashbotsBundle(escrowId, transactions) {
+        try {
+            const relayer = getMevRelayer();
+            const targetBlock = (await this.provider.getBlockNumber()) + 1;
+            const result = await relayer.sendPrivateBundle({
+                signedBundle: transactions,
+                targetBlock
+            });
+            await this.storeBundle({
+                escrowId,
+                bundleId: result.bundleHash,
+                blockNumber: result.targetBlock
+            });
+            return result;
+        } catch (error) {
+            logger.error('Flashbots bundle submission failed:', error);
+            throw error;
+        }
     }
 
     // ============ MEV Protection Level ============

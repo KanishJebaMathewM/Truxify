@@ -52,8 +52,8 @@ describe('deliveryVerificationService.js syntax (issue #8892)', () => {
     }
   });
 
-  it('expectedAmountWei is declared via a single `let expectedAmountWei = null;`', () => {
+  it('expectedAmountWei is declared via a single `let expectedAmountWei;`', () => {
     const source = readFileSync(serviceFile, 'utf8');
-    expect(occurrences(source, /let expectedAmountWei = null;/g)).toBe(1);
+    expect(occurrences(source, /let expectedAmountWei;/g)).toBe(1);
   });
 });

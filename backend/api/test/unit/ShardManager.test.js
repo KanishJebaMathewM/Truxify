@@ -27,14 +27,39 @@ describe('ShardManager', () => {
       expect(shard1).toBe(shard2);
     });
 
-    it('returns north shard for lat < 20', () => {
-      const shard = ShardManager.getShardForLocation(15.0, 77.2090);
+    it('routes Delhi to the north shard', () => {
+      const shard = ShardManager.getShardForLocation(28.6139, 77.2090);
       expect(shard).toBe('north');
     });
 
-    it('returns south shard for lat < 10', () => {
-      const shard = ShardManager.getShardForLocation(5.0, 77.2090);
+    it('routes Patna (Bihar) to the east shard (issue #11394)', () => {
+      const shard = ShardManager.getShardForLocation(25.6, 85.1);
+      expect(shard).toBe('east');
+    });
+
+    it('routes Kerala to the south shard', () => {
+      const shard = ShardManager.getShardForLocation(10.5, 76.5);
       expect(shard).toBe('south');
+    });
+
+    it('routes Andhra to the south shard', () => {
+      const shard = ShardManager.getShardForLocation(16.0, 80.0);
+      expect(shard).toBe('south');
+    });
+
+    it('routes Goa to the west shard', () => {
+      const shard = ShardManager.getShardForLocation(15.3, 74.1);
+      expect(shard).toBe('west');
+    });
+
+    it('routes Odisha to the east shard', () => {
+      const shard = ShardManager.getShardForLocation(20.5, 85.5);
+      expect(shard).toBe('east');
+    });
+
+    it('returns a configured shard for every resolved state (no default misuse)', () => {
+      const state = ShardManager.getStateFromCoordinates(25.6, 85.1);
+      expect(['north', 'south', 'east', 'west']).toContain(ShardManager.getShardForState(state));
     });
   });
 

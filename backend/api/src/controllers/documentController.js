@@ -65,16 +65,16 @@ export async function uploadDriverDocument(req, res) {
       });
     }
 
-    // Retrieve existing document of the same type for this driver
-    const { data: existingDoc, error: checkError } = await supabaseAdmin
+    // Retrieve existing document of the same type for this driver (pre-flight check)
+    const { data: existingDocPreflight, error: checkErrorPreflight } = await supabaseAdmin
       .from('driver_documents')
       .select('id, storage_path')
       .eq('driver_id', driverId)
       .eq('document_type', documentType)
       .maybeSingle();
 
-    if (checkError) {
-      logger.error('[DocumentController] Failed to query existing document:', checkError.message);
+    if (checkErrorPreflight) {
+      logger.error('[DocumentController] Failed to query existing document:', checkErrorPreflight.message);
       return res.status(500).json({ error: 'Failed to verify existing documents' });
     }
 

@@ -20,10 +20,11 @@ describe("EventRegistry", () => {
     expect(reg.isValid("order.created")).toBe(false);
   });
 
-  it("validate returns valid:true for unregistered types with no validator", () => {
+  it("validate returns valid:false for unregistered types", () => {
     const reg = new EventRegistry();
     const result = reg.validate("order.created", {});
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("Unknown event type");
   });
 
   it("validate uses custom validator", () => {

@@ -2,7 +2,7 @@
  * Unit tests for backend/api/src/lib/requestContext.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { requestContext, getRequestCache } from '../../src/lib/requestContext.js';
+import { requestContext, getRequestCache, safeJsonParseWithFallback } from '../../src/lib/requestContext.js';
 import { RequestCache } from '../../src/lib/requestCache.js';
 
 describe('requestContext', () => {

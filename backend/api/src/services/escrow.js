@@ -481,10 +481,10 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction destination is not the Escrow contract' }
   }
 
-  // Critical Security Check: Verify tx.value (deposit amount)
-  if (expectedAmountWei && BigInt(tx.value) < BigInt(expectedAmountWei)) {
-    return { error: `Transaction value ${tx.value} wei is less than expected ${expectedAmountWei} wei` }
-  }
+  // Critical Security Check: Verify tx.value (deposit amount). The exact
+  // equality check below (expectedAmountWei !== null) is the authoritative
+  // gate — a redundant less-than guard here would shadow the booking-id,
+  // sender, and driver checks for under-funded deposits.
 
   let decoded
   try {

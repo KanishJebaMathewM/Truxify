@@ -42,7 +42,7 @@ export const i18nMiddleware = middleware.handle(i18next);
 export const errorTranslationInterceptor = (req, res, next) => {
   const originalJson = res.json;
   res.json = function(body) {
-    if (body && typeof body === 'object' && typeof body.error === 'string') {
+    if (body !== null && body && typeof body === 'object' && typeof body.error === 'string') {
       // Use original English error string as key
       const translated = req.t(body.error, { defaultValue: body.error });
       body.error = translated;

@@ -61,5 +61,40 @@ void main() {
 
       expect(events, isEmpty);
     });
+
+    test('start→stop→start cycle releases ports and delivers fresh events',
+        () async {
+      final service = BackgroundTrackerService();
+      final events = <Map<String, dynamic>>[];
+      final sub = service.locationStream.listen(events.add);
+      addTearDown(sub.cancel);
+
+      final ping = <String, dynamic>{
+        'driverId': 'd1',
+        'orderId': 'o1',
+        'lat': 12.97,
+        'lng': 77.59,
+      };
+
+      // First cycle.
+      await service.startBackgroundTracking();
+      for (var i = 0; i < 10 && events.length < 1; i++) {
+        service.processLocationPing(ping);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      service.stopBackgroundTracking();
+
+      // Stop must fully release the prior listener/port so a subsequent
+      // start creates a clean cycle without leaking or double-delivering.
+      await service.startBackgroundTracking();
+      for (var i = 0; i < 10 && events.length < 2; i++) {
+        service.processLocationPing(ping);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      service.stopBackgroundTracking();
+
+      // Exactly one event per cycle — no duplicate handlers from the leak.
+      expect(events, hasLength(2));
+    });
   });
 }

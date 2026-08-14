@@ -212,6 +212,11 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+  deviceId: z.string()
+    .min(3, { message: 'deviceId must be at least 3 characters' })
+    .max(128, { message: 'deviceId is too long' })
+    .regex(/^[a-zA-Z0-9\-_.:]+$/, { message: 'deviceId contains invalid characters' })
+    .optional(),
   metadata: z.record(z.any()).optional(),
 }).strict();
 

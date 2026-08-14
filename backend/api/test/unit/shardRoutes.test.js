@@ -145,3 +145,20 @@ describe('shardRoutes', () => {
     });
   });
 });
+
+// Additional coverage: error handling edge cases
+describe('shardRoutes extended coverage', () => {
+  describe('GET /shards/health', () => {
+    it('returns 200 with ok status', async () => {
+      const { default: express } = await import('express');
+      const { default: request } = await import('supertest');
+      const shardRoutes = (await import('../../src/routes/shardRoutes.js')).default;
+      const app = express();
+      app.use(express.json());
+      app.use('/shards', shardRoutes);
+      const res = await request(app).get('/shards/health');
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+    });
+  });
+});

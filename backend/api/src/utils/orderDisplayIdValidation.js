@@ -4,8 +4,6 @@
  * @module orderDisplayIdValidation
  */
 
-import { DISPLAY_ID_PREFIX, DISPLAY_ID_RANDOM_LENGTH } from '../lib/orderDisplayId.js';
-
 const DISPLAY_ID_PATTERN = /^#FF\d{8}[A-Z0-9]{12}$/;
 
 /**

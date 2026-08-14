@@ -88,9 +88,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           _kycStatus = details['kyc_status']?.toString() ?? details['kycStatus']?.toString() ?? 'Unverified';
 
           _truckType = truck['truck_type']?.toString() ?? truck['type']?.toString();
-          _capacityWeight = (truck['capacity_weight_tonnes'] as num?)?.toDouble() ?? (truck['capacityWeight'] as num?)?.toDouble() ?? 0.0;
+          _capacityWeight = (truck['max_capacity_tons'] as num?)?.toDouble()
+              ?? (truck['capacity_weight_tonnes'] as num?)?.toDouble()
+              ?? (truck['capacityWeight'] as num?)?.toDouble()
+              ?? 0.0;
           _capacityVolume = (truck['capacity_volume_m3'] as num?)?.toDouble() ?? (truck['capacityVolume'] as num?)?.toDouble() ?? 0.0;
-          _registrationNumber = truck['registration_number']?.toString() ?? truck['registrationNumber']?.toString();
+          _registrationNumber = truck['number_plate']?.toString()
+              ?? truck['registration_number']?.toString()
+              ?? truck['registrationNumber']?.toString();
 
           final parsedBadges = details['badges'] as List<dynamic>? ?? [];
           _badges = parsedBadges.map((e) => Map<String, dynamic>.from(e as Map)).toList();

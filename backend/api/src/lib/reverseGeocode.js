@@ -57,7 +57,10 @@ export async function reverseGeocode(lat, lon) {
     // Handle rate-limiting with Retry-After support
     if (response.status === 429) {
       const retryAfter = response.headers.get('Retry-After');
-      const waitMs = retryAfter ? Math.min(parseInt(retryAfter, 10) * 1000, 60000) : 60000;
+      const retryAfterSecs = Number.parseInt(retryAfter, 10);
+      const waitMs = retryAfter && Number.isFinite(retryAfterSecs)
+        ? Math.min(retryAfterSecs * 1000, 60000)
+        : 60000;
       logger.warn({ waitMs, lat: roundedLat, lon: roundedLon }, '[ReverseGeocode] Rate-limited, retrying after Retry-After delay');
       await new Promise((resolve) => setTimeout(resolve, waitMs));
       response = await fetch(url, {

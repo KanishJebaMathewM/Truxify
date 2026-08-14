@@ -36,6 +36,11 @@ async function relayOnce() {
         });
         const outcome = await eventBus.publishAndReport(baseEvent, { adapters: ['kafka'] });
 
+        // Guard explanation:
+        // outcome.published       — EventBus successfully received the event
+        // !outcome.deduplicated   — Event was not a duplicate (avoid re-marking)
+        // outcome.adapterAttempted > 0 — At least one adapter (e.g. Kafka) received the event
+        // outcome.adapterFailures === 0 — No adapter reported a failure
         const delivered =
           outcome.published &&
           !outcome.deduplicated &&

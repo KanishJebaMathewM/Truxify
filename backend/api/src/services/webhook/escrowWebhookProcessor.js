@@ -21,7 +21,7 @@ async function findOrderByIdOrDisplayId(orderId) {
   if (!orderId) {
     throw new Error('Missing orderId in escrow webhook payload');
   }
-  const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash';
+  const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash, escrow_amount_wei, escrow_booking_id';
 
   if (UUID_REGEX.test(orderId)) {
     const { data, error } = await db
@@ -110,15 +110,60 @@ async function verifyPolygonTransactionReceipt(txHash) {
     }
   }
 
-  return true;
+  return receipt;
+}
+
+// Asserts the on-chain release transferred exactly the escrowed amount to the
+// driver's wallet. `receipt.value` is denominated in wei (a bigint from ethers),
+// while `order.escrow_amount_wei` is persisted as a string/number — both are
+// normalized to BigInt before comparison. Binding the receipt value to the
+// order prevents a misrouted/partial event from triggering a full payout.
+function assertReceiptAmount(receipt, order) {
+  if (order.escrow_amount_wei == null) {
+    return;
+  }
+  if (receipt.value == null) {
+    throw new Error(
+      `Polygon receipt for ${order.order_display_id} is missing a transferred value — cannot bind release to escrow amount`
+    );
+  }
+  const expected = BigInt(order.escrow_amount_wei);
+  const actual = BigInt(receipt.value);
+  if (actual !== expected) {
+    throw new Error(
+      `Polygon release value ${actual} wei does not match escrow amount ${expected} wei for order ${order.order_display_id}`
+    );
+  }
+}
+
+// Confirms the release event is bound to this order's escrow booking. When the
+// webhook carries an `escrow_booking_id`, it must match the order's on-chain
+// booking id — otherwise a misrouted event from a different escrow could flip
+// an unrelated order to `released`.
+function assertBookingBinding(payload, order) {
+  const eventBookingId = payload.escrow_booking_id || payload.bookingId;
+  if (!eventBookingId) {
+    return;
+  }
+  const orderBookingId = order.escrow_booking_id;
+  if (!orderBookingId) {
+    return;
+  }
+  if (String(eventBookingId).toLowerCase() !== String(orderBookingId).toLowerCase()) {
+    throw new Error(
+      `Escrow release event booking id ${eventBookingId} does not match order ${order.order_display_id} booking id ${orderBookingId}`
+    );
+  }
 }
 
 async function handlePaymentReleased(payload) {
   if (!payload.txHash) {
     throw new Error('Missing txHash in escrow release webhook payload — release requires on-chain proof');
   }
-  await verifyPolygonTransactionReceipt(payload.txHash);
+  const receipt = await verifyPolygonTransactionReceipt(payload.txHash);
   const order = await findOrderByIdOrDisplayId(payload.orderId);
+  assertBookingBinding(payload, order);
+  assertReceiptAmount(receipt, order);
   const now = new Date().toISOString();
 
   // Idempotency: a release event is only ever emitted once per booking

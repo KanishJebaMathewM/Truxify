@@ -43,7 +43,13 @@ describe('cursorPagination', () => {
 
     it('returns null for non-string input', () => {
       expect(decodeCursor(123)).toBe(null);
-      expect(decodeCursor({})).toBe(null);
+    });
+
+    it('returns null for non-object decoded value (null, array, primitive)', () => {
+      // null decodes to null which is not an object
+      expect(decodeCursor(Buffer.from('null').toString('base64url'))).toBe(null);
+      // empty object is a valid object and should be returned
+      expect(decodeCursor(Buffer.from('{}').toString('base64url'))).toEqual({});
     });
 
     it('returns null for invalid base64', () => {

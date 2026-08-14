@@ -42,7 +42,7 @@ class MEVService {
         // Flashbots endpoint
         this.flashbotsEndpoint = process.env.FLASHBOTS_ENDPOINT || 'https://relay.flashbots.net';
         
-        logger.info('✅ MEV Protection Service initialized');
+        logger.info('Γ£à MEV Protection Service initialized');
     }
 
     get provider() {
@@ -96,7 +96,7 @@ class MEVService {
                 txHash: null
             });
             
-            logger.info(`✅ Commitment created for user ${userId}`);
+            logger.info(`Γ£à Commitment created for user ${userId}`);
             return {
                 success: true,
                 secretHash,
@@ -146,7 +146,7 @@ class MEVService {
                 txHash: receipt.hash
             });
             
-            logger.info(`✅ MEV Protected Escrow created: ${escrowId}`);
+            logger.info(`Γ£à MEV Protected Escrow created: ${escrowId}`);
             return {
                 success: true,
                 escrowId,
@@ -187,7 +187,7 @@ class MEVService {
             
             await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
             
-            logger.info(`✅ Escrow ${escrowId} released with MEV protection`);
+            logger.info(`Γ£à Escrow ${escrowId} released with MEV protection`);
             return {
                 success: true,
                 txHash: receipt.hash
@@ -199,6 +199,7 @@ class MEVService {
     }
 
     // ============ Flashbots Integration ============
+
 
     async signTransactions(transactions) {
         const signedTxs = [];

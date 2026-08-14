@@ -135,15 +135,15 @@ describe('requireApiKey', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  it('calls next() when valid key provided via query.api_key', () => {
+  it('returns 401 when a valid key is only provided via query.api_key (query keys are ignored)', () => {
     const { req, res, next } = createMocks({
       req: { headers: {}, query: { api_key: 'test-key-2' } },
     });
 
     requireApiKey(req, res, next);
 
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('accepts second key in comma-separated VALID_API_KEYS list', () => {

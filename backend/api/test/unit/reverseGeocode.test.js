@@ -4,6 +4,7 @@
  * Run with:  npm run test:unit -- test/unit/reverseGeocode.test.js
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 
 // Use vi.hoisted so mock functions are accessible inside vi.mock factory (hoisted)
 const { mockFetch, mockRedisGet, mockRedisSet } = vi.hoisted(() => ({
@@ -127,8 +128,6 @@ describe('reverseGeocode', () => {
 });
 
 
-// === Spec 21 test ===
-import { describe, it, expect } from 'vitest';
 import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 describe('clampGeohashPrecision', () => {
   it('null -> clamped to MIN 1', () => { expect(clampGeohashPrecision(null)).toBe(1); });

@@ -105,18 +105,22 @@ class SpatialTemporalGAT(nn.Module):
     ) -> torch.Tensor:
         # x shape: (batch_size, num_nodes, time_steps, features)
         batch_size, num_nodes, time_steps, features = x.shape
-        
-        # Reshape for spatial processing
-        x = x.permute(0, 2, 1, 3).contiguous()  # (batch, time, nodes, features)
-        x = x.view(batch_size * time_steps, num_nodes, features)
-        
-        # Spatial GAT
-        for spatial_layer in self.spatial_layers:
-            x = spatial_layer(x, edge_index)
-            x = F.relu(x)
-        
-        # Reshape back
-        x = x.view(batch_size, time_steps, num_nodes, -1)
+
+        if features != self.in_features:
+            raise ValueError(
+                f"Expected feature dimension {self.in_features}, got {features}"
+            )
+
+        x = x.permute(0, 2, 1, 3).contiguous()
+
+        outs = []
+        for t in range(time_steps):
+            out = x[:, t]
+            for spatial_layer in self.spatial_layers:
+                out = spatial_layer(out, edge_index)
+                out = F.relu(out)
+            outs.append(out)
+        x = torch.stack(outs, dim=1)
         
         # Temporal attention
         x = x.permute(0, 2, 1, 3).contiguous()  # (batch, nodes, time, features)

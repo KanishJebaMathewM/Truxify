@@ -22,7 +22,7 @@ spec:
       containers:
       - name: api
         image: truxify/api:1.0.0
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5000
         envFrom:

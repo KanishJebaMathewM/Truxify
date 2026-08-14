@@ -160,12 +160,15 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startDevicePruningWorker } from './workers/devicePruningWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -563,6 +566,7 @@ app.use('/api/blockchain', (req, _res, next) => {
 // Auth-gated internal endpoints consumed by automation/n8n workflows:
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
+//   POST /api/internal/defensive-pause
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
@@ -654,6 +658,9 @@ app.get('/api/fraud/health', (req, res) => {
 // ============================================================================
 app.use('/api/zkp', zkpRoutes)
 
+// 🆕 BLOCKCHAIN MONITORING ROUTES
+app.use('/api/blockchain', blockchainMonitoringRoutes)
+
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
   res.json({
@@ -744,9 +751,9 @@ server.listen(PORT, () => {
   startReputationReconciliation(orderRepository)
   startDlqWorker()
   startStaleOrderWorker(escrowReconciliationOrderRepository)
+  startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
-  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   startOutboxRelayWorker()
 
   // Register worker states for health aggregation
@@ -757,6 +764,7 @@ server.listen(PORT, () => {
     reputationReconciliation: true,
     dlqWorker: true,
     staleOrderWorker: true,
+    devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
   }
@@ -789,7 +797,6 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
-  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

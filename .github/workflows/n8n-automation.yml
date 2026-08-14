@@ -1,0 +1,50 @@
+name: n8n Automation
+
+# The dispute-resolution workflow fronts on-chain escrow operations, so its
+# webhook authentication and payee handling are security-critical (#13111).
+# These audits are plain-node scripts with no dependencies — they parse the
+# workflow JSON and assert invariants, so they need no n8n instance to run.
+
+on:
+  pull_request:
+    paths:
+      - "automation/n8n/**"
+      - ".github/workflows/n8n-automation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "automation/n8n/**"
+      - ".github/workflows/n8n-automation.yml"
+
+concurrency:
+  group: truxify-n8n-automation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  escrow-webhook-audit:
+    name: n8n Escrow Webhook Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate n8n workflow JSON is parseable
+        run: |
+          for f in $(find automation/n8n -name '*.json' -not -path '*/node_modules/*'); do
+            node -e "require('./$f')" || { echo "::error file=$f::invalid JSON"; exit 1; }
+          done
+
+      - name: Audit dispute-resolution escrow webhooks
+        run: node automation/n8n/tests/dispute-resolution.security.test.js
+
+      - name: Audit internal control-plane call authentication
+        run: node automation/n8n/tests/internal-api-auth.security.test.js

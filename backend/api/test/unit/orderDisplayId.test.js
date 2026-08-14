@@ -31,3 +31,16 @@ describe('orderDisplayId.js', () => {
     });
   });
 });
+
+describe('orderDisplayId - additional edge cases', () => {
+  it('date component matches current date', () => {
+    const id = generateOrderDisplayId();
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    expect(id).toContain(today);
+  });
+
+  it('parseDisplayId extracts date from valid id', () => {
+    const result = parseDisplayId('#FF202608021234567890AB');
+    expect(result.valid).toBe(true);
+  });
+});

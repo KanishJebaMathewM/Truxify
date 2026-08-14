@@ -85,6 +85,7 @@ class VoiceAiService {
             'Content-Type': 'application/json',
           },
           responseType: 'stream',
+          timeout: 30000,
         }
       );
 

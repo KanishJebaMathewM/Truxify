@@ -5,6 +5,7 @@
  * unsanitised from the voice upload endpoint into the speech pipeline.
  */
 import { describe, expect, it } from 'vitest';
+import { checkContentLength, sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {

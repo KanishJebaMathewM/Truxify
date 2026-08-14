@@ -259,3 +259,43 @@ describe('processEscrowWebhookEvent — idempotency (crash-after-side-effect / d
     expect(updatePayloads().filter(p => p.escrow_status === 'released')).toHaveLength(0);
   });
 });
+
+describe('regression: wallet ledger must not multiply the net credit across drivers (#12155)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.maybeSingle.mockReset();
+    process.env.POLYGON_RPC_URL = 'https://polygon-rpc.example';
+    process.env.ESCROW_CONTRACT_ADDRESS = '0xEscrowContract000000000000000000000001';
+    mockGetTransactionReceipt.mockResolvedValue({
+      status: 1,
+      to: '0xEscrowContract000000000000000000000001',
+    });
+  });
+
+  it('reconciles the wallet ledger exactly once per release (no per-driver multiplication)', async () => {
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD8',
+      driver_id: 'driver-1',
+      escrow_status: 'funded',
+      release_tx_hash: null,
+      refund_tx_hash: null,
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: '0xabc' })
+    ).resolves.toEqual({ received: true });
+
+    // The on-chain release transfers a single net amount. The wallet ledger must
+    // be reconciled exactly once for the order's driver — never once per grouped
+    // driver, which would over-credit by (n-1) × net_amount.
+    const walletUpdateIndexes = mockSupabaseAdmin.from.mock.calls
+      .map(([table], i) => (table === 'wallet_transactions' ? i : -1))
+      .filter((i) => i !== -1);
+    expect(walletUpdateIndexes).toHaveLength(1);
+    expect(mockQuery.update.mock.calls[walletUpdateIndexes[0]][0]).toEqual(
+      expect.objectContaining({ status: 'confirmed' })
+    );
+  });
+});

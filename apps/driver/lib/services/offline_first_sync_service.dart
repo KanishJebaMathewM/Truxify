@@ -136,13 +136,13 @@ class OfflineFirstSyncService {
 
     final rows = await db.query('sync_events', orderBy: 'queued_at ASC');
     return rows.map((row) => OfflineSyncEvent(
-      eventId: row['event_id'] as String,
-      eventType: row['event_type'] as String,
-      payload: jsonDecode(row['payload'] as String) as Map<String, dynamic>,
-      queuedAt: DateTime.fromMillisecondsSinceEpoch(row['queued_at'] as int),
-      isSynced: (row['is_synced'] as int) == 1,
-      syncedAt: row['synced_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(row['synced_at'] as int)
+      eventId: (row['event_id'] as String?) ?? '',
+      eventType: (row['event_type'] as String?) ?? '',
+      payload: jsonDecode((row['payload'] as String?) ?? '{}') as Map<String, dynamic>,
+      queuedAt: DateTime.fromMillisecondsSinceEpoch((row['queued_at'] as int?) ?? 0),
+      isSynced: (row['is_synced'] as int?) == 1,
+      syncedAt: (row['synced_at'] as int?) != null
+          ? DateTime.fromMillisecondsSinceEpoch((row['synced_at'] as int?) ?? 0)
           : null,
     )).toList();
   }
@@ -186,7 +186,9 @@ class OfflineFirstSyncService {
       );
 
       return response.statusCode == 200 || response.statusCode == 202;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[OfflineFirstSyncService] Sync failed for event '
+          '${event.eventId} (${event.eventType}): $e');
       return false;
     }
   }

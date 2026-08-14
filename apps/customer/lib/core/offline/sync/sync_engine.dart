@@ -127,7 +127,8 @@ class SyncEngine {
     final SyncUploadOutcome uploadOutcome;
     try {
       uploadOutcome = await _uploadBatch(resolved);
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Unexpected error during batch upload: $e');
       // An unexpected error during upload must never leave events stuck in the
       // transient `syncing` state; fall through to failure handling below so
       // they are re-queued on a later sync pass.
@@ -209,7 +210,8 @@ class SyncEngine {
       }
 
       return SyncUploadOutcome.retryableFailure;
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Batch upload threw: $e');
       await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
       return SyncUploadOutcome.retryableFailure;
     }

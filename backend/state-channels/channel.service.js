@@ -2,8 +2,6 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { channelManager } from './channel_manager.js';
 
-<<<<<<< HEAD
-=======
 /**
  * Normalize a channel deposit value into wei (BigInt) using an explicit 18
  * decimal scale. The JSON body `amount` may arrive as a string, number, or
@@ -26,7 +24,6 @@ export function normalizeChannelValue(amount) {
     return valueWei;
 }
 
->>>>>>> upstream/main
 class StateChannelService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -61,15 +58,10 @@ class StateChannelService {
 
     async openChannel(participantA, participantB, amount) {
         try {
-<<<<<<< HEAD
-            const tx = await this.channel.openChannel(participantB, {
-                value: ethers.parseEther(amount.toString()),
-=======
             const valueWei = normalizeChannelValue(amount);
 
             const tx = await this.channel.openChannel(participantB, {
                 value: valueWei,
->>>>>>> upstream/main
                 gasLimit: 200000
             });
             const receipt = await tx.wait();
@@ -82,12 +74,6 @@ class StateChannelService {
                 channelId,
                 this.wallet.address,
                 participantB,
-<<<<<<< HEAD
-                ethers.parseEther(amount.toString()),
-                0
-            );
-
-=======
                 valueWei,
                 0n
             );
@@ -96,7 +82,6 @@ class StateChannelService {
             // have a cheap, consistent fast-path instead of always hitting chain.
             this._recordOpenedChannel(channelId, this.wallet.address, participantB, valueWei);
 
->>>>>>> upstream/main
             logger.info(`✅ Channel opened: ${channelId}`);
             return {
                 success: true,
@@ -109,8 +94,6 @@ class StateChannelService {
         }
     }
 
-<<<<<<< HEAD
-=======
     _recordOpenedChannel(channelId, userA, userB, valueWei) {
         this.channelCache.set(channelId, {
             channelId,
@@ -133,7 +116,6 @@ class StateChannelService {
         }
     }
 
->>>>>>> upstream/main
     _parseChannelOpened(receipt) {
         for (const log of receipt.logs) {
             try {
@@ -188,11 +170,8 @@ class StateChannelService {
             );
             const receipt = await tx.wait();
 
-<<<<<<< HEAD
-=======
             this._markChannelClosed(channelId);
 
->>>>>>> upstream/main
             logger.info(`✅ Channel closed: ${channelId}`);
             return {
                 success: true,
@@ -209,10 +188,6 @@ class StateChannelService {
 
     async getChannel(channelId) {
         try {
-<<<<<<< HEAD
-            const channel = await this.channel.channels(channelId);
-            return {
-=======
             // Fast-path: serve consistent off-chain state from the cache when
             // available, falling back to the on-chain view below.
             const cached = this._readCachedChannel(channelId);
@@ -222,7 +197,6 @@ class StateChannelService {
 
             const channel = await this.channel.channels(channelId);
             const result = {
->>>>>>> upstream/main
                 channelId,
                 userA: channel[0],
                 userB: channel[1],
@@ -233,11 +207,8 @@ class StateChannelService {
                 isDisputed: channel[6],
                 isClosed: channel[7]
             };
-<<<<<<< HEAD
-=======
             this.channelCache.set(channelId, result);
             return result;
->>>>>>> upstream/main
         } catch (error) {
             logger.error('Get channel failed:', error);
             return null;

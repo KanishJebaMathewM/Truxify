@@ -31,14 +31,41 @@ export class FlashbotsRelayerService {
   }
 
   async sendPrivateBundle(bundle) {
+    const blockHex = '0x' + BigInt(bundle.targetBlock).toString(16);
     console.log(`[MEV Relayer] Submitting private transaction bundle to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`);
-    // Simulated private submission response
+
+    const response = await fetch(this.flashbotsRelayUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_sendBundle',
+        params: [{
+          txs: bundle.signedBundle,
+          blockNumber: blockHex,
+        }],
+      }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (payload.error) {
+      throw new Error(`Flashbots relay rejected bundle: ${payload.error.message || JSON.stringify(payload.error)}`);
+    }
+    if (!payload.result) {
+      throw new Error('Flashbots relay returned no bundle hash');
+    }
+
     return {
       success: true,
-      bundleHash: ethers.keccak256(bundle.signedBundle[0]),
+      bundleHash: payload.result,
       targetBlock: bundle.targetBlock,
     };
   }
+}
+
+export function getMevRelayer() {
+  return mevRelayer;
 }
 
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;

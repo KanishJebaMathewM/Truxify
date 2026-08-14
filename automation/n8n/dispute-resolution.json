@@ -354,17 +354,6 @@
         ]
       ]
     },
-    "Query Supabase OTP Logs": {
-      "main": [
-        [
-          {
-            "node": "Package Dispute PDF",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Package Dispute PDF": {
       "main": [
         [

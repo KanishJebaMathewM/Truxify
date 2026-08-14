@@ -11,15 +11,15 @@ class AcousticTirePredictorScreen extends StatefulWidget {
 
 class _AcousticTirePredictorScreenState extends State<AcousticTirePredictorScreen> {
   final AcousticTirePredictorService _service = AcousticTirePredictorService();
-  AcousticAnalysisStatus? _status;
+  TireAcousticAnalysis? _analysis;
 
   @override
   void initState() {
     super.initState();
     _service.analysisStream.listen((data) {
-      if (mounted) setState(() => _status = data);
+      if (mounted) setState(() => _analysis = data);
     });
-    _service.simulateDriving();
+    _service.simulateAcousticAnalysis();
   }
 
   @override
@@ -32,125 +32,152 @@ class _AcousticTirePredictorScreenState extends State<AcousticTirePredictorScree
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Acoustic Tire Analysis'),
-        backgroundColor: Colors.blueGrey[900],
+        title: const Text('Acoustic Tire AI Forensics'),
+        backgroundColor: Colors.teal[900],
       ),
-      backgroundColor: Colors.grey[900],
-      body: _status == null
+      backgroundColor: Colors.grey[200],
+      body: _analysis == null
           ? const Center(child: CircularProgressIndicator())
           : _buildDashboard(),
     );
   }
 
   Widget _buildDashboard() {
+    final a = _analysis!;
+    
     return Column(
       children: [
-        _buildListeningBanner(),
+        _buildStatusHeader(a),
         Expanded(
-          child: ListView.builder(
+          child: ListView(
             padding: const EdgeInsets.all(16),
-            itemCount: _status!.tireData.length,
-            itemBuilder: (context, index) {
-              return _buildTireCard(_status!.tireData[index]);
-            },
+            children: [
+              if (a.status.contains('Warning') || a.status.contains('Critical'))
+                _buildAlertCard(a),
+              const SizedBox(height: 24),
+              const Text('LIVE HARMONIC FREQUENCIES', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const SizedBox(height: 12),
+              ...a.signatures.map((sig) => _buildSignatureCard(sig)),
+            ],
           ),
-        ),
+        )
       ],
     );
   }
 
-  Widget _buildListeningBanner() {
-    if (_status!.hasCriticalWarning) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        color: Colors.redAccent,
-        child: const Column(
-          children: [
-            Icon(Icons.warning, color: Colors.white, size: 48),
-            SizedBox(height: 16),
-            Text('CRITICAL HARMONIC SHIFT DETECTED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1.2)),
-            SizedBox(height: 8),
-            Text('PULL OVER IMMEDIATELY. Tread separation imminent.', style: TextStyle(color: Colors.white, fontSize: 16)),
-          ],
-        ),
-      );
+  Widget _buildStatusHeader(TireAcousticAnalysis a) {
+    Color headerColor = Colors.teal[800]!;
+    IconData icon = Icons.hearing;
+    
+    if (a.status.contains('Warning')) {
+      headerColor = Colors.orange[800]!;
+      icon = Icons.warning_amber_rounded;
+    } else if (a.status.contains('Critical')) {
+      headerColor = Colors.red[900]!;
+      icon = Icons.error_outline;
     }
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 500),
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      color: Colors.black,
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      color: headerColor,
+      child: Column(
         children: [
-          SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.greenAccent, strokeWidth: 2)),
-          SizedBox(width: 16),
-          Text('LISTENING TO TIRE HARMONICS...', style: TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, letterSpacing: 2)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 36),
+              const SizedBox(width: 12),
+              const Text('ACOUSTIC SENSOR', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(a.status.toUpperCase(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
         ],
       ),
     );
   }
 
-  Widget _buildTireCard(TireHarmonicData tire) {
-    final isCritical = tire.status == 'CRITICAL';
+  Widget _buildAlertCard(TireAcousticAnalysis a) {
+    bool isCritical = a.status.contains('Critical');
     
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: Colors.black,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: isCritical ? Colors.redAccent : Colors.grey[800]!, width: 2),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: isCritical ? Colors.redAccent : Colors.orangeAccent, width: 2)),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(color: isCritical ? Colors.red[50] : Colors.orange[50], borderRadius: BorderRadius.circular(16)),
         child: Column(
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.tire_repair, color: isCritical ? Colors.redAccent : Colors.grey),
-                    const SizedBox(width: 12),
-                    Text(tire.tirePosition, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(color: isCritical ? Colors.redAccent.withOpacity(0.2) : Colors.greenAccent.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                  child: Text(tire.status, style: TextStyle(color: isCritical ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold)),
-                )
-              ],
-            ),
-            const Divider(color: Colors.white24, height: 32),
+            Text('AFFECTED TIRE', style: TextStyle(color: isCritical ? Colors.red[800] : Colors.orange[900], fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+            const SizedBox(height: 8),
+            Text(a.activeTireLocation, textAlign: TextAlign.center, style: const TextStyle(color: Colors.black87, fontSize: 20, fontWeight: FontWeight.bold)),
+            const Divider(height: 32),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildFrequencyMetric('Frequency', '${tire.currentFrequencyHz.toInt()} Hz', isCritical ? Colors.redAccent : Colors.white),
-                _buildFrequencyMetric('Baseline', '${tire.baselineFrequencyHz.toInt()} Hz', Colors.grey),
-                _buildFrequencyMetric('Anomaly Score', '${(tire.anomalyScore * 100).toInt()}%', isCritical ? Colors.redAccent : Colors.greenAccent),
+                _buildSmallMetric('Est. Failure In', '${a.estimatedMinutesToFailure} mins', isCritical ? Colors.red : Colors.orange[800]!),
+                _buildSmallMetric('AI Confidence', '${a.confidencePct}%', Colors.black87),
               ],
             ),
-            if (isCritical) ...[
-              const SizedBox(height: 16),
-              LinearProgressIndicator(value: tire.anomalyScore, color: Colors.redAccent, backgroundColor: Colors.red[900]),
-              const SizedBox(height: 8),
-              const Text('Internal steel belt failure indicated by pitch shift.', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-            ]
+            const SizedBox(height: 24),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              decoration: BoxDecoration(color: isCritical ? Colors.red[900] : Colors.orange[900], borderRadius: BorderRadius.circular(8)),
+              child: const Text('PULL OVER IMMEDIATELY', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1.2)),
+            )
           ],
         ),
       ),
     );
   }
-
-  Widget _buildFrequencyMetric(String label, String value, Color color) {
+  
+  Widget _buildSmallMetric(String label, String value, Color valueColor) {
     return Column(
       children: [
-        Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold)),
+        Text(value, style: TextStyle(color: valueColor, fontSize: 24, fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
       ],
+    );
+  }
+
+  Widget _buildSignatureCard(AcousticHarmonicSignature sig) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: sig.isAnomalous ? Colors.redAccent : Colors.grey[300]!)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: sig.isAnomalous ? Colors.red[50] : Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+              child: Icon(sig.isAnomalous ? Icons.graphic_eq : Icons.multitrack_audio, color: sig.isAnomalous ? Colors.red : Colors.grey),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${sig.frequencyHz.toInt()} Hz', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  const SizedBox(height: 4),
+                  Text(sig.isAnomalous ? 'Anomalous High-Pitch Whine' : 'Normal Road Noise', style: TextStyle(color: sig.isAnomalous ? Colors.red : Colors.grey, fontSize: 12, fontWeight: sig.isAnomalous ? FontWeight.bold : FontWeight.normal)),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('${sig.amplitudeDb.toInt()} dB', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: sig.isAnomalous ? Colors.red : Colors.black87)),
+                const Text('Amplitude', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              ],
+            )
+          ],
+        ),
+      ),
     );
   }
 }

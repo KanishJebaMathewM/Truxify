@@ -290,6 +290,25 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     }
   });
 
+  it('verifies that complete_trip_tx persists net_earnings on the finalized trip row', async () => {
+    const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
+    const migrationSqlPath = path.resolve(__dirname, '../../../../supabase/migrations/20260810120000_complete_trip_tx_write_net_earnings.sql');
+
+    const setupSql = await fs.readFile(setupSqlPath, 'utf8');
+    const migrationSql = await fs.readFile(migrationSqlPath, 'utf8');
+
+    for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['net_earnings migration', migrationSql]]) {
+      expect(
+        /update\s+trips[\s\S]*?set\s+status\s*=\s*'completed'[\s\S]*?net_earnings\s*=/i.test(sqlContent),
+        `net_earnings write on trip completion not found in ${name}`
+      ).toBe(true);
+      expect(
+        /net_earnings\s*=\s*(coalesce\(v_order\.bid_amount,\s*v_order\.total_amount\)|v_order\.total_amount)/i.test(sqlContent),
+        `net_earnings must mirror the wallet credit payout basis in ${name}`
+      ).toBe(true);
+    }
+  });
+
   it('verifies that order completion consumes the delivery OTP in the same RPC transaction', async () => {
     const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
     const migrationSqlPath = path.resolve(__dirname, '../../../../supabase/migrations/20260624223000_make_delivery_otp_completion_atomic.sql');

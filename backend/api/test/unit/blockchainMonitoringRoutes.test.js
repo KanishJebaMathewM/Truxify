@@ -8,10 +8,16 @@
  *
  * Run with:  npm test -- test/unit/blockchainMonitoringRoutes.test.js
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import blockchainMonitoringRoutes from '../../src/routes/blockchainMonitoringRoutes.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INDEX_PATH = path.resolve(__dirname, '../../src/index.js');
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => next(),
@@ -136,5 +142,15 @@ describe('blockchainMonitoringRoutes', () => {
     expect(res.status).toBe(200);
     expect(supabase.from).toHaveBeenCalledWith('blockchain_escalations');
     expect(res.body.escalation.alert_id).toBe('abc123');
+  });
+
+  it('regression: index.js mounts /api/blockchain exactly once with req.supabase = supabaseAdmin', () => {
+    const src = fs.readFileSync(INDEX_PATH, 'utf8');
+
+    const mountMatches = src.match(/app\.use\('\/api\/blockchain'/g) || [];
+    expect(mountMatches.length).toBe(1);
+
+    const mountSegment = src.slice(src.indexOf("app.use('/api/blockchain'"));
+    expect(mountSegment).toMatch(/req\.supabase\s*=\s*supabaseAdmin/);
   });
 });

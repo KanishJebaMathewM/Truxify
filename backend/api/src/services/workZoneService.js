@@ -58,7 +58,7 @@ export async function predictWorkZoneDelays(start, end, waypoints = [], departur
     };
 
   } catch (error) {
-    logger.error(`[WorkZoneService] Error predicting work-zone delays: ${error.message}`);
+    logger.error(`[WorkZoneService] Error predicting work-zone delays: ${error?.message ?? String(error)}`);
     // Fail open: assume no severe delay if predictive engine fails
     return { hasSevereDelay: false, predictedDelayMins: 0, problematicPoint: null };
   }

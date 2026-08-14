@@ -20,8 +20,14 @@ export class LoadOfferCacheService {
   static async getVersion(region) {
     if (!redisClient) return null;
     try {
-      const version = await redisClient.get(`version:load_offers:region:${region}`);
-      return version || null;
+      const [regionVersion, globalVersion] = await Promise.all([
+        redisClient.get(`version:load_offers:region:${region}`),
+        redisClient.get(`version:load_offers:region:global`),
+      ]);
+      const regionNum = regionVersion ? Number(regionVersion) : 0;
+      const globalNum = globalVersion ? Number(globalVersion) : 0;
+      const max = Math.max(regionNum, globalNum);
+      return max > 0 ? String(max) : null;
     } catch (err) {
       logger.warn('[LoadOfferCache] Redis error getting version:', err.message);
       return null;
@@ -36,9 +42,6 @@ export class LoadOfferCacheService {
     try {
       const region = this.getRegion(lat, lng);
       await redisClient.incr(`version:load_offers:region:${region}`);
-      if (region !== 'global') {
-        await redisClient.incr(`version:load_offers:region:global`);
-      }
     } catch (err) {
       logger.warn('[LoadOfferCache] Redis error invalidating cache:', err.message);
     }

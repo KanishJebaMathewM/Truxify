@@ -14,7 +14,8 @@ spec:
 
   accessLogging:
   - providers:
-    - name: envoy---
+    - name: envoy
+---
 apiVersion: telemetry.istio.io/v1alpha1
 kind: Telemetry
 metadata:

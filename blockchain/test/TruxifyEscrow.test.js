@@ -5,6 +5,42 @@ import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("TruxifyEscrow", function () {
 
+  // createBooking requires an owner-signed EIP-191 commitment binding the
+<<<<<<< HEAD
+  // chain, contract, customer wallet, bookingId and the customer's current
+  // nonce (issue #7734). This mirrors what buildDepositTx() produces in
+  // backend/api/src/services/escrow.js.
+  async function signCreateCommitment(escrow, customerAddress, bookingId) {
+    const [owner] = await ethers.getSigners();
+    const { chainId } = await ethers.provider.getNetwork();
+    const commitment = ethers.solidityPackedKeccak256(
+      ["uint256", "address", "address", "uint256", "uint256"],
+=======
+  // chain, contract, customer wallet, bookingId, the authorised driver, the
+  // authorised amount and the customer's current nonce (issue #7734 + #11393).
+  // This mirrors what buildDepositTx() produces in backend/api/src/services/escrow.js.
+  async function signCreateCommitment(escrow, customerAddress, bookingId, driverAddress, amount) {
+    const [owner] = await ethers.getSigners();
+    const { chainId } = await ethers.provider.getNetwork();
+    const commitment = ethers.solidityPackedKeccak256(
+      ["uint256", "address", "address", "uint256", "address", "uint256", "uint256"],
+>>>>>>> upstream/main
+      [
+        chainId,
+        await escrow.getAddress(),
+        customerAddress,
+        bookingId,
+<<<<<<< HEAD
+=======
+        driverAddress,
+        amount,
+>>>>>>> upstream/main
+        await escrow.commitmentNonces(customerAddress),
+      ],
+    );
+    return owner.signMessage(ethers.getBytes(commitment));
+  }
+
   // ─── Fixture ──────────────────────────────────────────────────────────────
   async function deployEscrowFixture() {
     const [owner, customer, driver, attacker] = await ethers.getSigners();
@@ -20,7 +56,11 @@ describe("TruxifyEscrow", function () {
     const bookingId = 1;
     const amount = ethers.parseEther("1.0");
 
-    await escrow.connect(customer).createBooking(bookingId, driver.address, { value: amount });
+<<<<<<< HEAD
+    await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId), { value: amount });
+=======
+    await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
     return { escrow, owner, customer, driver, attacker, bookingId, amount };
   }
@@ -35,9 +75,13 @@ describe("TruxifyEscrow", function () {
       const bookingId = 1;
       const amount = ethers.parseEther("1.0");
 
-      await escrow.connect(customer).createBooking(bookingId, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId), {
         value: amount,
       });
+=======
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       const booking = await escrow.getBooking(bookingId);
       expect(booking.amount).to.equal(amount);
@@ -52,17 +96,28 @@ describe("TruxifyEscrow", function () {
 
       expect(await escrow.bookingCount()).to.equal(0);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
       expect(await escrow.bookingCount()).to.equal(1);
 
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("1") });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+      expect(await escrow.bookingCount()).to.equal(1);
+
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       expect(await escrow.bookingCount()).to.equal(2);
     });
 
     it("records createdAt timestamp", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      const tx = await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      const tx = await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      const tx = await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       const receipt = await tx.wait();
       const block = await ethers.provider.getBlock(receipt.blockNumber);
 
@@ -77,7 +132,11 @@ describe("TruxifyEscrow", function () {
       const amount = ethers.parseEther("2.5");
 
       await expect(
-        escrow.connect(customer).createBooking(bookingId, driver.address, { value: amount })
+<<<<<<< HEAD
+        escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId), { value: amount })
+=======
+        escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId, driver.address, amount), { value: amount })
+>>>>>>> upstream/main
       )
         .to.emit(escrow, "BookingCreated")
         .withArgs(bookingId, customer.address, driver.address, amount);
@@ -87,7 +146,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
       await expect(
-        escrow.connect(customer).createBooking(1, driver.address, { value: 0 })
+<<<<<<< HEAD
+        escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: 0 })
+=======
+        escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, 0), { value: 0 })
+>>>>>>> upstream/main
       ).to.be.revertedWith("TruxifyEscrow: Payment required");
     });
 
@@ -95,28 +158,66 @@ describe("TruxifyEscrow", function () {
       const { escrow, customer } = await loadFixture(deployEscrowFixture);
 
       await expect(
-        escrow.connect(customer).createBooking(1, ethers.ZeroAddress, { value: ethers.parseEther("1") })
+<<<<<<< HEAD
+        escrow.connect(customer).createBooking(1, ethers.ZeroAddress, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") })
+=======
+        escrow.connect(customer).createBooking(1, ethers.ZeroAddress, await signCreateCommitment(escrow, customer.address, 1, ethers.ZeroAddress, ethers.parseEther("1")), { value: ethers.parseEther("1") })
+>>>>>>> upstream/main
       ).to.be.revertedWith("TruxifyEscrow: Invalid driver address");
     });
 
     it("reverts if booking already exists", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
 
       await expect(
-        escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") })
+        escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") })
       ).to.be.revertedWith("TruxifyEscrow: Booking already exists");
     });
 
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+
+      await expect(
+        escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") })
+      ).to.be.revertedWith("TruxifyEscrow: Booking already exists");
+    });
+
+    it("reverts if the commitment driver/amount diverges from the booking (issue #11393)", async function () {
+      const { escrow, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
+
+      const bookingId = 1;
+      const authorizedAmount = ethers.parseEther("1.0");
+      // Owner signs a commitment for the legitimate driver + authorised amount.
+      const signature = await signCreateCommitment(escrow, customer.address, bookingId, driver.address, authorizedAmount);
+
+      // A mismatched driver must be rejected even with the correct amount sent.
+      await expect(
+        escrow.connect(customer).createBooking(bookingId, attacker.address, signature, { value: authorizedAmount })
+      ).to.be.revertedWith("TruxifyEscrow: Invalid commitment signature");
+
+      // The correct driver with a mismatched (underfunded) amount must be rejected.
+      await expect(
+        escrow.connect(customer).createBooking(bookingId, driver.address, signature, { value: ethers.parseEther("0.5") })
+      ).to.be.revertedWith("TruxifyEscrow: Invalid commitment signature");
+    });
+
+>>>>>>> upstream/main
     it("stores correct booking for each ID", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const addr1 = "0x0000000000000000000000000000000000000001";
       const addr2 = "0x0000000000000000000000000000000000000002";
 
-      await escrow.connect(customer).createBooking(100, driver.address, { value: ethers.parseEther("1") });
-      await escrow.connect(customer).createBooking(200, addr2, { value: ethers.parseEther("2") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(100, driver.address, await signCreateCommitment(escrow, customer.address, 100), { value: ethers.parseEther("1") });
+      await escrow.connect(customer).createBooking(200, addr2, await signCreateCommitment(escrow, customer.address, 200), { value: ethers.parseEther("2") });
+=======
+      await escrow.connect(customer).createBooking(100, driver.address, await signCreateCommitment(escrow, customer.address, 100, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+      await escrow.connect(customer).createBooking(200, addr2, await signCreateCommitment(escrow, customer.address, 200, addr2, ethers.parseEther("2")), { value: ethers.parseEther("2") });
+>>>>>>> upstream/main
 
       const booking1 = await escrow.getBooking(100);
       const booking2 = await escrow.getBooking(200);
@@ -138,9 +239,13 @@ describe("TruxifyEscrow", function () {
       const bookingId = 1;
       const amount = ethers.parseEther("2.0");
 
-      await escrow.connect(customer).createBooking(bookingId, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId), {
         value: amount,
       });
+=======
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       const driverBalanceBefore = await ethers.provider.getBalance(driver.address);
 
@@ -163,7 +268,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("3.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       expect(await escrow.pendingWithdrawals(driver.address)).to.equal(amount);
@@ -172,7 +281,11 @@ describe("TruxifyEscrow", function () {
     it("sets releaseTimestamps for driver", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       const tx = await escrow.connect(owner).releasePayment(1);
       const receipt = await tx.wait();
@@ -187,7 +300,11 @@ describe("TruxifyEscrow", function () {
       const bookingId = 7;
       const amount = ethers.parseEther("1.5");
 
-      await escrow.connect(customer).createBooking(bookingId, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(bookingId, driver.address, await signCreateCommitment(escrow, customer.address, bookingId, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       const tx = escrow.connect(owner).releasePayment(bookingId);
 
@@ -202,9 +319,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if called by non-owner", async function () {
       const { escrow, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(attacker).releasePayment(1)
@@ -214,9 +335,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if called by customer", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(customer).releasePayment(1)
@@ -226,9 +351,13 @@ describe("TruxifyEscrow", function () {
     it("reverts on double payment attempt", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
 
       await escrow.connect(owner).releasePayment(1);
 
@@ -240,9 +369,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if booking is cancelled", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
 
       await expect(
@@ -253,9 +386,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if booking is disputed", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).raiseDispute(1);
 
       await expect(
@@ -276,9 +413,13 @@ describe("TruxifyEscrow", function () {
     it("reverts when contract is paused", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).pause();
 
       await expect(
@@ -289,8 +430,13 @@ describe("TruxifyEscrow", function () {
     it("handles multiple bookings independently", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("2") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("2")), { value: ethers.parseEther("2") });
+>>>>>>> upstream/main
 
       await escrow.connect(owner).releasePayment(1);
 
@@ -316,9 +462,13 @@ describe("TruxifyEscrow", function () {
       const bookingId = 99;
       const amount = ethers.parseEther("5.0");
 
-      await escrow.connect(customer).createBooking(bookingId, await malicious.getAddress(), {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(bookingId, await malicious.getAddress(), await signCreateCommitment(escrow, customer.address, bookingId), {
         value: amount,
       });
+=======
+      await escrow.connect(customer).createBooking(bookingId, await malicious.getAddress(), await signCreateCommitment(escrow, customer.address, bookingId, await malicious.getAddress(), amount), { value: amount });
+>>>>>>> upstream/main
 
       await owner.sendTransaction({
         to: await escrow.getAddress(),
@@ -347,7 +497,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       const balanceBefore = await ethers.provider.getBalance(customer.address);
       await escrow.connect(owner).cancelBooking(1);
@@ -367,7 +521,11 @@ describe("TruxifyEscrow", function () {
     it("allows owner to cancel booking", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
 
       const booking = await escrow.getBooking(1);
@@ -378,7 +536,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("2.5");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
 
       expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount);
@@ -387,7 +549,11 @@ describe("TruxifyEscrow", function () {
     it("sets releaseTimestamps for customer", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       const tx = await escrow.connect(owner).cancelBooking(1);
       const receipt = await tx.wait();
@@ -401,7 +567,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.5");
 
-      await escrow.connect(customer).createBooking(5, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(5, driver.address, await signCreateCommitment(escrow, customer.address, 5), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(5, driver.address, await signCreateCommitment(escrow, customer.address, 5, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       const tx = escrow.connect(owner).cancelBooking(5);
 
@@ -416,9 +586,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if not customer or owner", async function () {
       const { escrow, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(attacker).cancelBooking(1)
@@ -429,9 +603,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if driver tries to cancel", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(driver).cancelBooking(1)
@@ -442,9 +620,13 @@ describe("TruxifyEscrow", function () {
     it("reverts if booking is already paid", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await expect(
@@ -463,9 +645,13 @@ describe("TruxifyEscrow", function () {
     it("reverts when contract is paused", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).pause();
 
       await expect(
@@ -476,9 +662,13 @@ describe("TruxifyEscrow", function () {
     it("reverts once the trip has started", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, {
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), {
         value: ethers.parseEther("1.0"),
       });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).markBookingStarted(1);
 
       await expect(
@@ -586,7 +776,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if called by non-owner", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(customer).markBookingStarted(1)
@@ -612,7 +806,11 @@ describe("TruxifyEscrow", function () {
     it("allows owner to raise dispute", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).raiseDispute(1);
 
       const booking = await escrow.getBooking(1);
@@ -622,7 +820,11 @@ describe("TruxifyEscrow", function () {
     it("emits BookingDisputed event with correct args", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       // Owner raises dispute on booking 1
       await expect(escrow.connect(owner).raiseDispute(1))
@@ -633,7 +835,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if customer tries to raise dispute", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(customer).raiseDispute(1)
@@ -644,7 +850,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if driver tries to raise dispute", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
 
       await expect(
         escrow.connect(driver).raiseDispute(1)
@@ -655,7 +865,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if booking is not active", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await expect(
@@ -666,7 +880,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if booking is already cancelled", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
 
       await expect(
@@ -691,7 +909,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("2.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       // Withdraw after the withdrawal timelock elapses
@@ -710,7 +932,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await expect(
@@ -725,7 +951,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.5");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
 
       // Withdraw after the withdrawal timelock elapses
@@ -743,7 +973,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       // Withdraw after the withdrawal timelock elapses
@@ -756,7 +990,11 @@ describe("TruxifyEscrow", function () {
     it("clears releaseTimestamps after withdrawal", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       expect(await escrow.releaseTimestamps(driver.address)).to.be.gt(0);
@@ -779,7 +1017,11 @@ describe("TruxifyEscrow", function () {
     it("reverts when contract is paused", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
       await escrow.connect(owner).pause();
 
@@ -793,8 +1035,13 @@ describe("TruxifyEscrow", function () {
       const amount1 = ethers.parseEther("1");
       const amount2 = ethers.parseEther("2");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount1 });
-      await escrow.connect(customer).createBooking(2, driver.address, { value: amount2 });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount1 });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: amount2 });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount1), { value: amount1 });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, amount2), { value: amount2 });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
       await escrow.connect(owner).releasePayment(2);
 
@@ -821,7 +1068,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       // Fast-forward past withdrawal timeout (30 days)
@@ -839,7 +1090,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("0.5");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -852,7 +1107,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if called by non-owner", async function () {
       const { escrow, owner, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -865,7 +1124,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if recipient is zero address", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -878,7 +1141,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if withdrawal period is still active", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       // Don't fast-forward — timeout hasn't passed
@@ -890,7 +1157,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if amount exceeds pending withdrawals", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -912,7 +1183,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("2.0");
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -966,7 +1241,11 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).pause();
 
       // createBooking has no whenNotPaused modifier, so this succeeds
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       const booking = await escrow.getBooking(1);
       expect(booking.amount).to.equal(ethers.parseEther("1"));
     });
@@ -977,7 +1256,11 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).pause();
       await escrow.connect(owner).unpause();
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       const booking = await escrow.getBooking(1);
       expect(booking.amount).to.equal(ethers.parseEther("1"));
     });
@@ -985,7 +1268,11 @@ describe("TruxifyEscrow", function () {
     it("prevents withdrawal when paused", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
       await escrow.connect(owner).pause();
 
@@ -997,7 +1284,11 @@ describe("TruxifyEscrow", function () {
     it("prevents cancellation when paused", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).pause();
 
       await expect(
@@ -1080,7 +1371,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       // Withdraw after the withdrawal timelock elapses so the timestamp is cleared
@@ -1097,7 +1392,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       const WITHDRAWAL_TIMEOUT = await escrow.WITHDRAWAL_TIMEOUT();
@@ -1111,7 +1410,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
 
       await expect(
@@ -1126,7 +1429,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       // First booking for driver — sets deadline D1
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1.0") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
       const deadline1 = await escrow.releaseTimestamps(driver.address);
 
@@ -1134,7 +1441,11 @@ describe("TruxifyEscrow", function () {
       await time.increase(3600); // 1 hour
 
       // Second booking for same driver — must extend deadline
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("2.0") });
+=======
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("2.0")), { value: ethers.parseEther("2.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(2);
       const deadline2 = await escrow.releaseTimestamps(driver.address);
 
@@ -1145,7 +1456,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       // First booking for customer — sets deadline D1
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1.0") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(1);
       const deadline1 = await escrow.releaseTimestamps(customer.address);
 
@@ -1153,7 +1468,11 @@ describe("TruxifyEscrow", function () {
       await time.increase(3600);
 
       // Second booking for same customer — must extend deadline
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("2.0") });
+=======
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("2.0")), { value: ethers.parseEther("2.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).cancelBooking(2);
       const deadline2 = await escrow.releaseTimestamps(customer.address);
 
@@ -1164,7 +1483,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       // First booking — release, withdraw (clears timestamp)
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1.0") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(1);
       // Withdraw after the withdrawal timelock elapses
       await time.increase(30 * 24 * 60 * 60 + 1);
@@ -1174,7 +1497,11 @@ describe("TruxifyEscrow", function () {
       expect(await escrow.releaseTimestamps(driver.address)).to.equal(0n);
 
       // Second booking — must set a fresh timestamp
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("2.0") });
+=======
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("2.0")), { value: ethers.parseEther("2.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(2);
       const newDeadline = await escrow.releaseTimestamps(driver.address);
       expect(newDeadline).to.be.gt(0n);
@@ -1183,10 +1510,17 @@ describe("TruxifyEscrow", function () {
     it("allows withdraw after each booking independently", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1.0") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1), { value: ethers.parseEther("1.0") });
       await escrow.connect(owner).releasePayment(1);
 
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2.0") });
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: ethers.parseEther("2.0") });
+=======
+      await escrow.connect(customer).createBooking(1, driver.address, await signCreateCommitment(escrow, customer.address, 1, driver.address, ethers.parseEther("1.0")), { value: ethers.parseEther("1.0") });
+      await escrow.connect(owner).releasePayment(1);
+
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, ethers.parseEther("2.0")), { value: ethers.parseEther("2.0") });
+>>>>>>> upstream/main
       await escrow.connect(owner).releasePayment(2);
 
       // Both funds should be withdrawable
@@ -1208,7 +1542,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(2, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(2, driver.address, await signCreateCommitment(escrow, customer.address, 2, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       // Raise dispute (owner-only)
       await escrow.connect(owner).raiseDispute(2);
@@ -1233,7 +1571,11 @@ describe("TruxifyEscrow", function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
-      await escrow.connect(customer).createBooking(3, driver.address, { value: amount });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(3, driver.address, await signCreateCommitment(escrow, customer.address, 3), { value: amount });
+=======
+      await escrow.connect(customer).createBooking(3, driver.address, await signCreateCommitment(escrow, customer.address, 3, driver.address, amount), { value: amount });
+>>>>>>> upstream/main
 
       // Raise dispute (owner-only)
       await escrow.connect(owner).raiseDispute(3);
@@ -1247,7 +1589,11 @@ describe("TruxifyEscrow", function () {
     it("reverts if called by a non-owner before timeout expires", async function () {
       const { escrow, owner, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
 
-      await escrow.connect(customer).createBooking(4, driver.address, { value: ethers.parseEther("1") });
+<<<<<<< HEAD
+      await escrow.connect(customer).createBooking(4, driver.address, await signCreateCommitment(escrow, customer.address, 4), { value: ethers.parseEther("1") });
+=======
+      await escrow.connect(customer).createBooking(4, driver.address, await signCreateCommitment(escrow, customer.address, 4, driver.address, ethers.parseEther("1")), { value: ethers.parseEther("1") });
+>>>>>>> upstream/main
       await escrow.connect(owner).raiseDispute(4);
 
       await hre.network.provider.send("evm_increaseTime", [8 * 24 * 60 * 60]);

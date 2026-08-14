@@ -42,7 +42,7 @@ class AlertRouter {
 
       results.forEach((result, idx) => {
         if (result.status === 'rejected') {
-          logger.error(`[AlertRouter] Failed to send to ${channels[idx]}:`, result.reason);
+          logger.error({ channel: channels[idx], reason: result.reason }, '[AlertRouter] Failed to send alert');
           Sentry.captureException(result.reason);
         }
       });
@@ -63,10 +63,10 @@ class AlertRouter {
         case ALERT_CHANNELS.DASHBOARD:
           return await this.logToDashboard(alert);
         default:
-          logger.warn(`[AlertRouter] Unknown channel: ${channel}`);
+          logger.warn({ channel }, '[AlertRouter] Unknown alert channel');
       }
     } catch (err) {
-      logger.error(`[AlertRouter] Error sending to ${channel}:`, err.message);
+      logger.error({ err, channel, alertType: alert.type }, '[AlertRouter] Error sending alert to channel');
       throw err;
     }
   }
@@ -177,7 +177,7 @@ class AlertRouter {
       PAYMENT_RECEIVED: '💰',
       INSURANCE_CLAIM_APPROVED: '✅',
       INSURANCE_CLAIM_REJECTED: '❌',
-      GEOFENCE_BREACH: '⚠️',
+      GEOFENCE_BREACH: '[WARNING]',
       BALANCE_UPDATE_FAILED: '🚨',
       SMART_CONTRACT_REVERT: '💥',
     };

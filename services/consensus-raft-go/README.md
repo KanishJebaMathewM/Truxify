@@ -9,7 +9,7 @@ This directory contains the **Go Raft Distributed Consensus Engine** designed fo
 - **Distributed State Machine**: Guarantees linearizable order state transitions (`CREATED` $\rightarrow$ `DISPATCHED` $\rightarrow$ `COMPLETED`) across multi-cloud regions.
 - **Leader Election & Heartbeats**: Nodes start as `FOLLOWER`, campaign for leadership via `RequestVote` RPCs, and keep leadership with `AppendEntries` heartbeats and term bumps (Raft paper §5).
 - **Atomic Log Replication**: Appends transactional state transition entries into an append-only WAL log and replicates them to a quorum of followers (AppendEntries + `nextIndex`/`matchIndex` tracking) before advancing `CommitIndex`. `/commit` returns success only once the entry is replicated to a quorum and committed.
-- **Quorum-Aware Health**: `/api/v1/raft/status` reports `HEALTHY_CLUSTER` only when a leader has quorum; `NO_LEADER`, `ELECTION_IN_PROGRESS`, and `UNHEALTHY_CLUSTER` are reported otherwise.
+- **Quorum-Aware Health**: `/api/v1/raft/status` reports `HEALTHY_CLUSTER` only when a leader has a *live* quorum — a majority of peers that have acknowledged a recent AppendEntries round; `NO_LEADER`, `ELECTION_IN_PROGRESS`, and `UNHEALTHY_CLUSTER` are reported otherwise. `matchIndex` is never seeded optimistically after an election: it is learned only from real AppendEntries acknowledgements (Raft §5.3).
 
 ---
 
@@ -18,7 +18,7 @@ This directory contains the **Go Raft Distributed Consensus Engine** designed fo
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/v1/raft/status` | `GET` | Returns node role, current term, leader id, log length, quorum, and cluster health. |
-| `/api/v1/raft/commit` | `POST` | Commits an order entry. The leader appends the entry, replicates it to followers via `AppendEntries`, and advances `CommitIndex` only once a quorum acknowledges it — success is returned only after the entry is committed (and the updated commit index is propagated). Non-leaders return `409` with the current `leader_id`; without quorum it returns `503`. |
+| `/api/v1/raft/commit` | `POST` | Commits an order entry. The leader first admits the request only when it has evidence of a live quorum (a majority of followers that have acknowledged at least one AppendEntries round in the current term); otherwise it fails fast with `503` before touching its local log. The leader then appends the entry, replicates it to followers via `AppendEntries`, and advances `CommitIndex` only once a quorum acknowledges it — success is returned only after the entry is committed (and the updated commit index is propagated). Non-leaders return `409` with the current `leader_id`; without quorum it returns `503`. |
 | `/api/v1/raft/vote` | `POST` | Internal Raft `RequestVote` RPC used during elections. |
 | `/api/v1/raft/append` | `POST` | Internal Raft `AppendEntries` (heartbeat) RPC used by the leader. |
 
@@ -48,6 +48,8 @@ Commit requests are validated before they touch the log:
 
 - `order_id` must be non-empty, at most 64 chars, and contain only `[A-Za-z0-9_-]`.
 - `command` must be in the allow-list (`CREATED`, `DISPATCHED`, `IN_TRANSIT`, `DELIVERED`, `COMPLETED`, `CANCELLED`), overridable via `RAFT_ALLOWED_COMMANDS` (comma-separated).
+- The command must follow the order's lifecycle state machine (replayed from the log): `CREATED` must be first, then `DISPATCHED` → `IN_TRANSIT` → `DELIVERED` → `COMPLETED`, with `CANCELLED` allowed from `CREATED`/`DISPATCHED`/`IN_TRANSIT`; `CANCELLED` and `COMPLETED` are terminal. Violations return `400`.
+- Re-submitting an identical `(order_id, command)` is idempotent: it returns the existing entry's `raft_index` instead of appending a duplicate.
 
 ---
 

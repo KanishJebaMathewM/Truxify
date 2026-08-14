@@ -227,11 +227,27 @@ describe('Pricing Service Unit Tests', () => {
       expect(convertKmToMiles(100)).toBeCloseTo(62.1371, 4);
     });
 
-    it('throws TypeError for non-numeric or NaN', () => {
+    it('throws TypeError for non-numeric, NaN, or non-finite', () => {
       expect(() => convertKmToMiles('100')).toThrow(TypeError);
       expect(() => convertKmToMiles(null)).toThrow(TypeError);
       expect(() => convertKmToMiles(undefined)).toThrow(TypeError);
       expect(() => convertKmToMiles(NaN)).toThrow(TypeError);
+      expect(() => convertKmToMiles(Infinity)).toThrow(TypeError);
+    });
+
+    it('throws RangeError for negative km values', () => {
+      expect(() => convertKmToMiles(-5)).toThrow(RangeError);
+      expect(() => convertKmToMiles(-100)).toThrow(RangeError);
     });
   });
 });
+
+
+// === Spec 10 test ===
+import { guardNonNegative } from '../../src/lib/pricing.js';
+describe('guardNonNegative', () => {
+  it('passes positive', () => { expect(guardNonNegative(10, 'x')).toBe(10); });
+  it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });
+  it('rejects NaN', () => { expect(() => guardNonNegative(NaN, 'x')).toThrow(TypeError); });
+});
+

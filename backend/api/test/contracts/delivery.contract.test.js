@@ -309,9 +309,9 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
 
     expectContract(res, 200);
     expect(res.body.payment_released).toBe(true);
-    expect(typeof res.body.amount_inr).toBe("string");
-    expect(Number.isNaN(Number(res.body.amount_inr))).toBe(false);
-    expect(res.body.amount_inr).toBe("5000");
+    expect(typeof res.body.amount_inr).toBe("number");
+    expect(Number.isNaN(res.body.amount_inr)).toBe(false);
+    expect(res.body.amount_inr).toBe(5000);
     expect(res.body.order_display_id).toBe("ORD-COTP");
   });
 

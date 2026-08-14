@@ -4,6 +4,8 @@ project(vector_matcher_cpp CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+find_package(Threads REQUIRED)
+
 include_directories(include)
 
 add_library(vector_matcher
@@ -15,3 +17,9 @@ add_executable(vector-matcher-cpp
 )
 
 target_compile_options(vector-matcher-cpp PRIVATE -O3)
+target_link_libraries(vector-matcher-cpp PRIVATE Threads::Threads)
+
+add_executable(test_content_length tests/test_content_length.cpp)
+
+enable_testing()
+add_test(NAME content_length COMMAND test_content_length)

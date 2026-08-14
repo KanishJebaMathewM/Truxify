@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const PAYMENT_RECEIVED_EVENT = 'PaymentReceived(address indexed driver, uint256 amount, uint256 timestamp)';
@@ -30,6 +30,7 @@ class BlockchainMonitor {
     this.provider = null;
     this.contract = null;
     this.isListening = false;
+    this.isScanning = false;
     this.lastBlockScanned = 0;
     this.eventHandlers = {};
   }
@@ -98,9 +99,15 @@ class BlockchainMonitor {
     const pollInterval = parseInt(process.env.BLOCKCHAIN_POLL_INTERVAL_MS || '12000', 10);
 
     setInterval(async () => {
+      if (this.isScanning) {
+        logger.warn('[BlockchainMonitor] Previous block scan still in progress. Skipping interval tick to avoid duplicate event processing.');
+        return;
+      }
+
       try {
         if (!this.isListening || !this.provider) return;
 
+        this.isScanning = true;
         const currentBlock = await this.provider.getBlockNumber();
         if (currentBlock > this.lastBlockScanned) {
           await this.scanBlockRange(this.lastBlockScanned + 1, currentBlock);
@@ -109,6 +116,8 @@ class BlockchainMonitor {
       } catch (err) {
         logger.error('[BlockchainMonitor] Polling error:', err.message);
         Sentry.captureException(err);
+      } finally {
+        this.isScanning = false;
       }
     }, pollInterval);
   }
@@ -264,7 +273,7 @@ class BlockchainMonitor {
 
   async storeEvent(alert) {
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_monitoring_events')
         .insert([{
           type: alert.type,

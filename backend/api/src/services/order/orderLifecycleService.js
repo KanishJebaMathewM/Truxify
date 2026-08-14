@@ -216,7 +216,7 @@ export class OrderLifecycleService {
     return measureExecution('OrderLifecycleService.getOrderHistory', async () => {
       const { data: history, error, count } = await this.orderRepository.findOrdersWithCount(
         customerId,
-        'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at',
+        'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, truck_number, created_at',
         { page, limit }
       );
 
@@ -334,7 +334,7 @@ export class OrderLifecycleService {
         sendPushNotification(
           offer.customer_id,
           'New Bid Received',
-          `A driver has submitted a bid of ₹${bidAmount} for your order.`,
+          `A driver has submitted a bid of ₹${(bidAmount / 100).toFixed(2)} for your order.`,
           'order_update',
           { loadOfferId, bidId: bid.id }
         ).catch(err => logger.error(`[FCM] Failed to notify customer of new bid: ${err.message}`));
@@ -1034,7 +1034,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
   }
 
   try {
-    const { data, error } = await db.rpc('create_order_tx', {
+    const { data, error } = await supabaseAdmin.rpc('create_order_tx', {
       p_idempotency_key: idempotencyKey,
       p_order_data: orderData,
       p_timeline_data: timelineData || { status: 'created', details: { note: 'Order initialized' } },
@@ -1056,5 +1056,3 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
     throw err;
   }
 }
-
-module.exports.createOrderTransactional = createOrderTransactional;

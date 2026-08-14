@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../controllers/app_controller.dart';
+import '../providers/text_scale_provider.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
 import '../data/mock_data.dart';
@@ -145,10 +147,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (data is Map<String, dynamic>) {
           setState(() {
-            _platformRating = (data['supabaseRating'] as num?)?.toDouble() ?? 0.0;
-            _onChainScore = data['onChainScore'] != null
-                ? (data['onChainScore'] as num).toInt()
-                : null;
+            _platformRating = _parseDouble(data['supabaseRating']) ?? 0.0;
+            _onChainScore = _parseInt(data['onChainScore']);
             _walletAddress = data['walletAddress']?.toString() ?? '';
             _isLoadingReputation = false;
           });
@@ -169,6 +169,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       }
     }
+  }
+
+  int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? double.tryParse(value)?.toInt();
+    return null;
+  }
+
+  double? _parseDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
 
@@ -540,10 +554,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           'wallet_address': address,
                         },
                       );
+                      if (!context.mounted) return;
                       setState(() {
                         _walletAddress = address;
                       });
-                      if (!context.mounted) return;
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -756,6 +770,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  String _initials(String name) {
+    final parts = name.trim().split(' ').where((s) => s.isNotEmpty).toList();
+    if (parts.isEmpty) return 'JD';
+    return parts[0].substring(0, 1) +
+        (parts.length > 1 ? parts[1].substring(0, 1) : '');
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -792,12 +813,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     radius: 30,
                     backgroundColor: Theme.of(context).colorScheme.surface,
                     child: Text(
-                      _driverName.isNotEmpty
-                          ? _driverName.substring(0, 1) +
-                              (_driverName.contains(' ')
-                                  ? _driverName.split(' ')[1].substring(0, 1)
-                                  : '')
-                          : 'JD',
+                      _initials(_driverName),
                       style: GoogleFonts.dmSans(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -1050,6 +1066,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color: _borderColor(context),
                 ),
                 const _ThemeModeTile(),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                Consumer<TextScaleProvider>(
+                  builder: (context, scaleProvider, child) {
+                    return SwitchListTile.adaptive(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                      title: Text(
+                        'Enable Large Text',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Optimized for dashboard mounting',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                      value: scaleProvider.isLargeText,
+                      onChanged: (val) => scaleProvider.toggleScale(val),
+                      activeColor: TruxifyColors.accent,
+                    );
+                  },
+                ),
                 Divider(
                   height: 1,
                   color: _borderColor(context),

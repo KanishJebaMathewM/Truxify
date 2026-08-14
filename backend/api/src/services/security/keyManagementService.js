@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -14,10 +14,11 @@ class KeyManagementService {
     this.encryptionKeyCache = new Map();
   }
 
-  async deriveDeviceEncryptionKey(deviceId, masterSecret) {
+  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
+      const saltHex = salt || '';
       const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
-      const cacheKey = `${deviceId}:${secretHash}`;
+      const cacheKey = `${deviceId}:${secretHash}:${saltHex}`;
 
       if (this.encryptionKeyCache.has(cacheKey)) {
         return this.encryptionKeyCache.get(cacheKey);
@@ -28,7 +29,7 @@ class KeyManagementService {
           Buffer.from(deviceId),
           Buffer.from(masterSecret),
         ]),
-        Buffer.from('truxify-wallet-key-derivation'),
+        Buffer.from(saltHex || 'truxify-wallet-key-derivation'),
         100000,
         32,
         'sha256'
@@ -47,7 +48,8 @@ class KeyManagementService {
   async encryptPrivateKey(privateKey, deviceId, masterSecret) {
     return measureExecution('KeyManagementService.encryptPrivateKey', async () => {
       try {
-        const deviceKey = await this.deriveDeviceEncryptionKey(deviceId, masterSecret);
+        const salt = crypto.randomBytes(SALT_LENGTH);
+        const deviceKey = await this.deriveDeviceEncryptionKey(deviceId, masterSecret, salt.toString('hex'));
 
         const iv = crypto.randomBytes(IV_LENGTH);
         const cipher = crypto.createCipheriv(ALGORITHM, deviceKey, iv);
@@ -56,7 +58,6 @@ class KeyManagementService {
         encrypted += cipher.final('hex');
 
         const authTag = cipher.getAuthTag();
-        const salt = crypto.randomBytes(SALT_LENGTH);
 
         const encryptedData = {
           iv: iv.toString('hex'),
@@ -80,7 +81,7 @@ class KeyManagementService {
   async decryptPrivateKey(encryptedData, deviceId, masterSecret) {
     return measureExecution('KeyManagementService.decryptPrivateKey', async () => {
       try {
-        const deviceKey = await this.deriveDeviceEncryptionKey(deviceId, masterSecret);
+        const deviceKey = await this.deriveDeviceEncryptionKey(deviceId, masterSecret, encryptedData.salt);
 
         const iv = Buffer.from(encryptedData.iv, 'hex');
         const encryptedKey = Buffer.from(encryptedData.encryptedKey, 'hex');
@@ -105,12 +106,20 @@ class KeyManagementService {
   async storeEncryptedKey(userId, walletAddress, encryptedKeyData, deviceId, version = 1) {
     return measureExecution('KeyManagementService.storeEncryptedKey', async () => {
       try {
+        const keyId = crypto.randomUUID();
+        const now = new Date().toISOString();
+
         // Deactivate any previously active row for this user/wallet scope so
         // exactly one active row exists and retrieveEncryptedKey's
         // .eq('active', true).single() never 406s on multiple rows.
-        const { error: deactivateError } = await supabase
+        // Collapse the two prior updates into one that also sets archive metadata.
+        const { error: deactivateError } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
-          .update({ active: false })
+          .update({
+            active: false,
+            archived_at: now,
+            archive_reason: 'rotated',
+          })
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
           .eq('active', true);
@@ -120,9 +129,7 @@ class KeyManagementService {
           throw deactivateError;
         }
 
-        const keyId = crypto.randomUUID();
-
-        const { data, error } = await supabase
+        const { data, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .insert([{
             key_id: keyId,
@@ -132,8 +139,8 @@ class KeyManagementService {
             device_id: deviceId,
             version,
             active: true,
-            created_at: new Date().toISOString(),
-            last_used_at: new Date().toISOString(),
+            created_at: now,
+            last_used_at: now,
           }]);
 
         if (error) {
@@ -154,7 +161,7 @@ class KeyManagementService {
   async retrieveEncryptedKey(userId, walletAddress) {
     return measureExecution('KeyManagementService.retrieveEncryptedKey', async () => {
       try {
-        const { data: keys, error } = await supabase
+        const { data: keys, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .select('*')
           .eq('user_id', userId)
@@ -169,7 +176,7 @@ class KeyManagementService {
           return null;
         }
 
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({ last_used_at: new Date().toISOString() })
           .eq('key_id', keys.key_id);
@@ -186,7 +193,7 @@ class KeyManagementService {
   async archiveKey(keyId, reason = 'unknown') {
     return measureExecution('KeyManagementService.archiveKey', async () => {
       try {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({
             active: false,
@@ -210,15 +217,16 @@ class KeyManagementService {
     });
   }
 
-  async getKeyRotationHistory(userId, walletAddress) {
+  async getKeyRotationHistory(userId, walletAddress, limit = 10) {
     return measureExecution('KeyManagementService.getKeyRotationHistory', async () => {
       try {
-        const { data: history, error } = await supabase
+        const { data: history, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .select('*')
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
 
         if (error) {
           logger.error('[KeyManagementService] Failed to fetch rotation history:', error);

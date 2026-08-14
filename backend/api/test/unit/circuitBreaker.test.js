@@ -84,4 +84,40 @@ describe('CircuitBreaker Unit Tests', () => {
     expect(res).toBe('recovered');
     expect(breaker.getState()).toBe(CircuitState.CLOSED);
   });
+
+  it('admits only one probe in HALF_OPEN and short-circuits the rest', async () => {
+    const fallback = vi.fn(() => 'fallback');
+    const breaker = new CircuitBreaker('testHalfOpenProbe', { fallback });
+    // Force the recovery probe window.
+    breaker.state = CircuitState.HALF_OPEN;
+
+    const probeFn = vi.fn(
+      () => new Promise((resolve) => setTimeout(() => resolve('probe'), 50)),
+    );
+
+    const p1 = breaker.execute(probeFn); // admitted as the single trial probe
+    const p2 = breaker.execute(probeFn); // extra concurrent request -> short-circuited
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect(r1).toBe('probe');
+    expect(r2).toBe('fallback');
+    expect(probeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up resources and resets state when destroy is called', () => {
+    const breaker = new CircuitBreaker('testDestroyBreaker', {
+      failureThreshold: 1,
+      resetTimeoutMs: 10000,
+      fallback: () => 'fallback',
+    });
+    breaker.onFailure(new Error('Fail'), []);
+    expect(breaker._halfOpenTimer).not.toBeNull();
+    expect(breaker.state).toBe(CircuitState.OPEN);
+
+    breaker.destroy();
+
+    expect(breaker._halfOpenTimer).toBeNull();
+    expect(breaker.state).toBe(CircuitState.CLOSED);
+    expect(breaker.failureCount).toBe(0);
+  });
 });

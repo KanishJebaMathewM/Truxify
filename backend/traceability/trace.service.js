@@ -18,7 +18,8 @@ class TraceabilityService {
             'function getShipment(uint256 shipmentId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,string,string,bytes32,bool))',
             'function getProductEvents(uint256 productId) external view returns (tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[])',
             'function getProductTrace(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32), tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[], tuple(uint256,uint256,address,uint256,bool,string,bytes32)[])',
-            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)'
+            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)',
+            'event ShipmentCreated(uint256 indexed shipmentId, uint256 productId, address indexed sender)'
         ];
 
         this.contract = new ethers.Contract(this.contractAddress, this.contractABI, this.wallet);
@@ -67,8 +68,21 @@ class TraceabilityService {
         }
     }
 
-    _parseProductCreated(receipt) {
+    _parseShipmentCreated(receipt) {
         for (const log of receipt.logs) {
+            try {
+                const parsed = this.contract.interface.parseLog(log);
+                if (parsed && parsed.name === 'ShipmentCreated') {
+                    return parsed.args[0].toString();
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        throw new Error('ShipmentCreated event not found in receipt');
+    }
+
+    _parseProductCreated(receipt) {        for (const log of receipt.logs) {
             try {
                 const parsed = this.contract.interface.parseLog(log);
                 if (parsed && parsed.name === 'ProductCreated') {
@@ -93,21 +107,7 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
-            let shipmentId;
-            for (const log of receipt.logs) {
-                try {
-                    const parsed = this.contract.interface.parseLog(log);
-                    if (parsed && parsed.name === 'ShipmentCreated') {
-                        shipmentId = parsed.args.shipmentId;
-                        break;
-                    }
-                } catch (e) {
-                    // Not a matching event, continue
-                }
-            }
-            if (!shipmentId) {
-                shipmentId = await this.contract.getShipmentCount();
-            }
+            const shipmentId = this._parseShipmentCreated(receipt);
 
             await this.storeShipment({
                 productId,

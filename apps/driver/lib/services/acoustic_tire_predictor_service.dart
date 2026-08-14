@@ -2,45 +2,54 @@ import 'dart:async';
 import '../models/acoustic_tire_predictor_model.dart';
 
 class AcousticTirePredictorService {
-  final _telemetryController = StreamController<AcousticAnalysisStatus>.broadcast();
+  final _analysisController = StreamController<TireAcousticAnalysis>.broadcast();
 
-  Stream<AcousticAnalysisStatus> get analysisStream => _telemetryController.stream;
+  Stream<TireAcousticAnalysis> get analysisStream => _analysisController.stream;
 
-  void simulateDriving() async {
-    // 1. Driving normally, all tires healthy
-    _telemetryController.add(AcousticAnalysisStatus(
-      isListening: true,
-      hasCriticalWarning: false,
-      tireData: [
-        TireHarmonicData(tirePosition: 'Steer Left', currentFrequencyHz: 440.0, baselineFrequencyHz: 440.0, anomalyScore: 0.05, status: 'Normal'),
-        TireHarmonicData(tirePosition: 'Steer Right', currentFrequencyHz: 441.0, baselineFrequencyHz: 440.0, anomalyScore: 0.06, status: 'Normal'),
-        TireHarmonicData(tirePosition: 'Drive Left Outer', currentFrequencyHz: 438.0, baselineFrequencyHz: 440.0, anomalyScore: 0.04, status: 'Normal'),
-        TireHarmonicData(tirePosition: 'Drive Right Outer', currentFrequencyHz: 442.0, baselineFrequencyHz: 440.0, anomalyScore: 0.08, status: 'Normal'),
+  void simulateAcousticAnalysis() async {
+    // 1. Normal Highway Driving (Normal Road Noise)
+    _analysisController.add(TireAcousticAnalysis(
+      status: 'Monitoring Ambient Road Noise',
+      activeTireLocation: 'All Tires',
+      confidencePct: 99.9,
+      estimatedMinutesToFailure: 999,
+      signatures: [
+        AcousticHarmonicSignature(frequencyHz: 120.0, amplitudeDb: 65.0, isAnomalous: false), // Normal low hum
+        AcousticHarmonicSignature(frequencyHz: 400.0, amplitudeDb: 55.0, isAnomalous: false), // Wind noise
       ],
     ));
 
     await Future.delayed(const Duration(seconds: 4));
 
-    // 2. Drive Right Outer starts resonating abnormally (steel belt fatigue)
-    _telemetryController.add(AcousticAnalysisStatus(
-      isListening: true,
-      hasCriticalWarning: true,
-      tireData: [
-        TireHarmonicData(tirePosition: 'Steer Left', currentFrequencyHz: 440.0, baselineFrequencyHz: 440.0, anomalyScore: 0.05, status: 'Normal'),
-        TireHarmonicData(tirePosition: 'Steer Right', currentFrequencyHz: 441.0, baselineFrequencyHz: 440.0, anomalyScore: 0.06, status: 'Normal'),
-        TireHarmonicData(tirePosition: 'Drive Left Outer', currentFrequencyHz: 438.0, baselineFrequencyHz: 440.0, anomalyScore: 0.04, status: 'Normal'),
-        TireHarmonicData(
-          tirePosition: 'Drive Right Outer', 
-          currentFrequencyHz: 680.0, // Major pitch shift
-          baselineFrequencyHz: 440.0, 
-          anomalyScore: 0.92, 
-          status: 'CRITICAL',
-        ),
+    // 2. Early Warning (High pitch whine starts - Belt Separation)
+    _analysisController.add(TireAcousticAnalysis(
+      status: 'Warning - Internal Belt Separation',
+      activeTireLocation: 'Passenger Side - Trailer Axle 2 - Outer',
+      confidencePct: 75.5,
+      estimatedMinutesToFailure: 45,
+      signatures: [
+        AcousticHarmonicSignature(frequencyHz: 120.0, amplitudeDb: 65.0, isAnomalous: false),
+        AcousticHarmonicSignature(frequencyHz: 4500.0, amplitudeDb: 82.0, isAnomalous: true), // The whine!
+      ],
+    ));
+
+    await Future.delayed(const Duration(seconds: 4));
+
+    // 3. Critical (Whine gets extremely loud and oscillates)
+    _analysisController.add(TireAcousticAnalysis(
+      status: 'Critical - Imminent Blowout',
+      activeTireLocation: 'Passenger Side - Trailer Axle 2 - Outer',
+      confidencePct: 98.2,
+      estimatedMinutesToFailure: 3, // Pull over NOW
+      signatures: [
+        AcousticHarmonicSignature(frequencyHz: 120.0, amplitudeDb: 65.0, isAnomalous: false),
+        AcousticHarmonicSignature(frequencyHz: 4500.0, amplitudeDb: 105.0, isAnomalous: true), // Severe whine
+        AcousticHarmonicSignature(frequencyHz: 12.0, amplitudeDb: 95.0, isAnomalous: true), // Physical thumping
       ],
     ));
   }
 
   void dispose() {
-    _telemetryController.close();
+    _analysisController.close();
   }
 }

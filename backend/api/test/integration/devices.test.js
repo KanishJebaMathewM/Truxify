@@ -7,6 +7,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -304,6 +305,43 @@ describe('Device Routes Integration Tests', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to unregister device');
+    });
+  });
+
+  describe('POST /api/devices/unregister', () => {
+    const UNREGISTER_HEADERS = {
+      'x-user-id': 'unregister-test-user-uuid',
+      'x-user-role': 'customer',
+      'x-user-name': 'Test Customer',
+    };
+
+    it('unregisters the device token via POST (shared app contract)', async () => {
+      m.store.user_devices.push({
+        user_id: 'unregister-test-user-uuid',
+        fcm_token: 'logout-token-123456',
+        platform: 'android',
+      });
+      m.store.profiles.push({
+        id: 'unregister-test-user-uuid',
+        fcm_token: 'logout-token-123456',
+        fcm_token_updated_at: '2026-01-01T00:00:00.000Z',
+      });
+
+      const res = await request(buildApp())
+        .post('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({ fcmToken: 'logout-token-123456' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        message: 'Device token unregistered',
+      });
+
+      const remainingDevice = m.store.user_devices.find(
+        (d) => d.user_id === 'unregister-test-user-uuid' && d.fcm_token === 'logout-token-123456'
+      );
+      expect(remainingDevice).toBeUndefined();
     });
   });
 });

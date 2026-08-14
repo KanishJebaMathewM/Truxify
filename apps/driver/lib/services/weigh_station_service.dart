@@ -1,18 +1,21 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/src/services/api_client.dart';
 import 'location_service.dart';
 
 class WeighStationEvent {
-  final String action; // 'BYPASS' or 'PULL_IN'
+  final String action; // 'BYPASS', 'PULL_IN' or 'UNSUPPORTED'
   final String reason;
   final String stationId;
+  final bool simulated;
 
   WeighStationEvent({
     required this.action,
     required this.reason,
     required this.stationId,
+    this.simulated = false,
   });
 }
 
@@ -105,17 +108,50 @@ class WeighStationService {
         '/api/driver/weigh-stations/bypass-status?lat=${pos.latitude}&lng=${pos.longitude}'
       );
 
-      final event = WeighStationEvent(
+      if (response is Map<String, dynamic> && _isUnsupported(response)) {
+        _emitEvent(_unsupportedEvent(response));
+        return;
+      }
+
+      _emitEvent(WeighStationEvent(
         action: response['action'] ?? 'PULL_IN',
         reason: response['reason'] ?? 'Random check',
         stationId: response['stationId'] ?? stationKey,
+      ));
+    } catch (e) {
+      // The endpoint fails closed with 503 UNSUPPORTED until a real WIM
+      // provider is integrated. Surface that as a clearly-simulated preview;
+      // never show an authoritative BYPASS/PULL_IN verdict on a failure.
+      if (e is ApiException && e.body != null) {
+        try {
+          final decoded = jsonDecode(e.body!);
+          if (decoded is Map<String, dynamic> && _isUnsupported(decoded)) {
+            _emitEvent(_unsupportedEvent(decoded));
+            return;
+          }
+        } catch (_) {
+          // Not JSON — fall through to the generic debug log below.
+        }
+      }
+      debugPrint('[WeighStationService] Error checking bypass status: $e');
+    }
+  }
+
+  bool _isUnsupported(Map<String, dynamic> payload) =>
+      payload['supported'] == false || payload['action'] == 'UNSUPPORTED';
+
+  WeighStationEvent _unsupportedEvent(Map<String, dynamic> payload) =>
+      WeighStationEvent(
+        action: 'UNSUPPORTED',
+        reason: (payload['reason'] as String?) ??
+            'Weigh-in-motion bypass is not available.',
+        stationId: 'N/A',
+        simulated: true,
       );
 
-      if (!_eventController.isClosed) {
-        _eventController.add(event);
-      }
-    } catch (e) {
-      debugPrint('[WeighStationService] Error checking bypass status: $e');
+  void _emitEvent(WeighStationEvent event) {
+    if (!_eventController.isClosed) {
+      _eventController.add(event);
     }
   }
 

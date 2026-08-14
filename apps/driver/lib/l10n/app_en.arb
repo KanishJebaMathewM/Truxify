@@ -882,5 +882,21 @@
   "resendOtp": "Resend OTP",
   "@resendOtp": {
     "description": "Label for the button that resends the OTP to the driver's phone."
+  },
+  "language": "Language",
+  "@language": {
+    "description": "Language selection setting"
+  },
+  "english": "English",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "Hindi",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "Tamil",
+  "@tamil": {
+    "description": "Tamil language name"
   }
 }

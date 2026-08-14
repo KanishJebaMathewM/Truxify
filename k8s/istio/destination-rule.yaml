@@ -1,6 +1,3 @@
-
-﻿apiVersion: networking.istio.io/v1beta1
-
 apiVersion: networking.istio.io/v1beta1
 
 kind: DestinationRule
@@ -70,4 +67,3 @@ spec:
         connectTimeout: 10ms
     loadBalancer:
       simple: ROUND_ROBIN
-

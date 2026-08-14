@@ -2,6 +2,7 @@ import rateLimit, { MemoryStore } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
+import crypto from "crypto";
 import logger from "./logger.js";
 
 function isRedisReady() {
@@ -91,6 +92,28 @@ class DeferredRedisStore {
 }
 
 /**
+ * Expands an IPv6 address into its 8 text groups, resolving the "::"
+ * shorthand to the correct number of zero groups.
+ *
+ * The previous /64 masking split on ":" and took the first four tokens, which
+ * mis-split compressed forms like `2001:db8::a:b` and produced non-canonical,
+ * bypassable bucket keys. Returns null when the input cannot be a full IPv6
+ * address.
+ */
+function expandIpv6Groups(ip) {
+  if (ip.includes("::")) {
+    const [left, right] = ip.split("::");
+    const leftGroups = left ? left.split(":") : [];
+    const rightGroups = right ? right.split(":") : [];
+    const missing = 8 - leftGroups.length - rightGroups.length;
+    if (missing < 1) return null;
+    return [...leftGroups, ...Array(missing).fill("0"), ...rightGroups];
+  }
+  const groups = ip.split(":");
+  return groups.length === 8 ? groups : null;
+}
+
+/**
  * Normalizes an IP address, converting IPv6 mapped IPv4 and masking IPv6 to /64 subnets.
  */
 export function normalizeIp(rawIp) {
@@ -101,9 +124,9 @@ export function normalizeIp(rawIp) {
   if (ip === "::1") return "127.0.0.1";
 
   if (ip.includes(":")) {
-    const parts = ip.split(":");
-    if (parts.length >= 4) {
-      return `${parts.slice(0, 4).join(":")}::/64`;
+    const groups = expandIpv6Groups(ip);
+    if (groups) {
+      return `${groups.slice(0, 4).join(":").toLowerCase()}::/64`;
     }
   }
   return ip;
@@ -111,6 +134,11 @@ export function normalizeIp(rawIp) {
 
 /**
  * Generates a rate-limit key from the proxy-resolved IP address.
+ *
+ * When trust proxy is enabled, req.ip is derived from X-Forwarded-For which
+ * can be spoofed. We prefer req.ips[0] (the client IP before any proxy hops)
+ * as the most trustworthy source, falling back to the socket address only
+ * when the forwarded header is suspicious or unavailable.
  */
 export function safeIpKeyGenerator(req) {
   const forwarded = req.headers?.["x-forwarded-for"];
@@ -124,9 +152,15 @@ export function safeIpKeyGenerator(req) {
       },
       "Suspicious X-Forwarded-For header detected",
     );
+    // Use socket address instead of the spoofed header value.
+    const socketIp = req.socket?.remoteAddress || req.connection?.remoteAddress || "unknown";
+    return normalizeIp(socketIp);
   }
 
+  // req.ips[0] is the client IP before any proxy hops (set by trust proxy).
+  // This is preferred over req.ip because req.ip may use the full header.
   const rawIp =
+    (req.ips && req.ips.length > 0 ? req.ips[0] : null) ||
     req.ip ||
     req.headers?.["x-forwarded-for"] ||
     req.socket?.remoteAddress ||
@@ -304,7 +338,14 @@ export const otpVerificationLimiter = rateLimit({
   max: OTP_VERIFICATION_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
+  keyGenerator: (req) => {
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    if (phone) {
+      const phoneHash = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+      return `otp-verify:${phoneHash}:${safeIpKeyGenerator(req)}`;
+    }
+    return safeIpKeyGenerator(req);
+  },
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:otp-verification:"),
   handler: sentryAlertHandler("otpVerificationLimiter"),
@@ -368,6 +409,108 @@ export const adminRateLimiter = rateLimit({
   message: {
     error: "Rate limit exceeded",
     retryAfter: Math.ceil(adminWindowMs / 1000),
+  },
+});
+
+const VERIFY_DELIVERY_WINDOW_MS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const VERIFY_DELIVERY_MAX_REQUESTS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+// Delivery-OTP confirmation is a brute-force target, so it is throttled per
+// authenticated user with a strict cap.
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: VERIFY_DELIVERY_WINDOW_MS,
+  max: VERIFY_DELIVERY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:verify-delivery:"),
+  handler: sentryAlertHandler("verifyDeliveryLimiter"),
+  message: {
+    error:
+      "Too many delivery OTP verification attempts. Please try again later.",
+  },
+});
+
+const RESEND_OTP_WINDOW_MS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const RESEND_OTP_MAX_REQUESTS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5;
+
+// OTP resend is an abuse vector (SMS flooding / OTP brute-forcing), so it gets
+// the strictest per-user cap alongside the existing otpVerificationLimiter.
+export const resendOtpLimiter = rateLimit({
+  windowMs: RESEND_OTP_WINDOW_MS,
+  max: RESEND_OTP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:resend-otp:"),
+  handler: sentryAlertHandler("resendOtpLimiter"),
+  message: {
+    error: "Too many OTP resend requests. Please try again after 15 minutes.",
+  },
+});
+
+const CHANGE_DROP_WINDOW_MS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const CHANGE_DROP_MAX_REQUESTS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+export const changeDropLimiter = rateLimit({
+  windowMs: CHANGE_DROP_WINDOW_MS,
+  max: CHANGE_DROP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:change-drop:"),
+  handler: sentryAlertHandler("changeDropLimiter"),
+  message: { error: "Too many change-drop requests. Please try again later." },
+});
+
+const PREDICT_DEMAND_WINDOW_MS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+const PREDICT_DEMAND_MAX_REQUESTS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 60;
+
+// Demand prediction runs a ML model per request, so it is capped to a low
+// hourly budget per user to keep the inference service safe from abuse.
+export const predictDemandLimiter = rateLimit({
+  windowMs: PREDICT_DEMAND_WINDOW_MS,
+  max: PREDICT_DEMAND_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:predict-demand:"),
+  handler: sentryAlertHandler("predictDemandLimiter"),
+  message: {
+    error: "Too many demand prediction requests. Please try again later.",
+  },
+});
+
+const TELEMETRY_WINDOW_MS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const TELEMETRY_MAX_REQUESTS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 300;
+
+// Driver-location and route reads are polled frequently while tracking a
+// shipment, so the cap is generous but still bounded per authenticated user.
+export const telemetryLimiter = rateLimit({
+  windowMs: TELEMETRY_WINDOW_MS,
+  max: TELEMETRY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:telemetry:"),
+  handler: sentryAlertHandler("telemetryLimiter"),
+  message: {
+    error: "Too many telemetry requests. Please try again later.",
   },
 });
 

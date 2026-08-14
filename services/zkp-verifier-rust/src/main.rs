@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
 use std::time::Instant;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+
+/// Address the verification microservice listens on (matches `EXPOSE 8087`).
+const BIND_ADDR: &str = "0.0.0.0:8087";
 
 /// Dev-only Ed25519 verifying public key (hex-encoded).
 ///
@@ -105,12 +110,113 @@ pub fn verify_zkp_circuit(req: &ZKPProofRequest) -> ZKPVerificationResult {
     }
 }
 
-fn main() {
+/// Returns the HTTP method and request path from the raw request head.
+fn parse_request_line(head: &str) -> (String, String) {
+    let mut parts = head.split_whitespace();
+    let method = parts.next().unwrap_or("").to_string();
+    let path = parts.next().unwrap_or("").to_string();
+    (method, path)
+}
+
+/// Parses the `Content-Length` header value, defaulting to 0.
+fn parse_content_length(head: &str) -> usize {
+    for line in head.lines() {
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            return value.trim().parse().unwrap_or(0);
+        }
+    }
+    0
+}
+
+/// Builds a minimal HTTP/1.1 JSON response with `Connection: close`.
+fn http_response(status_line: &str, body: &str) -> Vec<u8> {
+    let body = body.as_bytes();
+    let mut resp = Vec::with_capacity(128 + body.len());
+    resp.extend_from_slice(format!("HTTP/1.1 {status_line}\r\n").as_bytes());
+    resp.extend_from_slice(b"Content-Type: application/json\r\n");
+    resp.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+    resp.extend_from_slice(b"Connection: close\r\n\r\n");
+    resp.extend_from_slice(body);
+    resp
+}
+
+/// Routes a request to the appropriate handler.
+fn route(method: &str, path: &str, body: &str) -> (&'static str, String) {
+    match (method, path) {
+        ("GET", "/health") => {
+            let payload = serde_json::json!({
+                "status": "ok",
+                "service": "truxify-zkp-verifier",
+            });
+            ("200 OK", serde_json::to_string(&payload).unwrap_or_else(|_| "{\"status\":\"ok\"}".into()))
+        }
+        ("POST", "/verify") => match serde_json::from_str::<ZKPProofRequest>(body) {
+            Ok(req) => match serde_json::to_string(&verify_zkp_circuit(&req)) {
+                Ok(payload) => ("200 OK", payload),
+                Err(e) => (
+                    "500 Internal Server Error",
+                    format!("{{\"error\":\"serialize result: {e}\"}}"),
+                ),
+            },
+            Err(e) => (
+                "400 Bad Request",
+                format!("{{\"error\":\"invalid request payload: {e}\"}}"),
+            ),
+        },
+        _ => ("404 Not Found", "{\"error\":\"not found\"}".to_string()),
+    }
+}
+
+/// Reads one HTTP request and writes the response for a single connection.
+async fn handle_connection(mut stream: TcpStream) {
+    let mut buf = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+
+    // Read headers until the end-of-header marker.
+    let header_end = loop {
+        let n = match stream.read(&mut chunk).await {
+            Ok(0) => return,
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        if buf.len() > 64 * 1024 {
+            return;
+        }
+    };
+
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let content_length = parse_content_length(&head);
+
+    // Read the remaining body bytes.
+    while buf.len() < header_end + content_length {
+        let n = match stream.read(&mut chunk).await {
+            Ok(0) => return,
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        buf.extend_from_slice(&chunk[..n]);
+    }
+
+    let (method, path) = parse_request_line(&head);
+    let body =
+        String::from_utf8_lossy(&buf[header_end..header_end + content_length]).to_string();
+    let (status, payload) = route(&method, &path, &body);
+
+    let _ = stream.write_all(&http_response(status, &payload)).await;
+    let _ = stream.flush().await;
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔐 Truxify Rust Zero-Knowledge Proof (ZKP) Verifier starting...");
 
-    // An attacker that only knows the public verification key cannot forge a
-    // proof. A client-supplied 64-byte "proof" (here all zero bytes) must be
-    // rejected by the verifier.
+    // Startup self-test: an attacker that only knows the public verification
+    // key cannot forge a proof. A client-supplied 64-byte "proof" (here all
+    // zero bytes) must be rejected by the verifier before it serves traffic.
     let forged_req = ZKPProofRequest {
         proof_id: "zkp_forged_sample".to_string(),
         proof_type: "identity_kyc".to_string(),
@@ -119,9 +225,16 @@ fn main() {
     };
 
     let res = verify_zkp_circuit(&forged_req);
-    println!("Forged proof result: {:?}", res);
+    println!("✅ Self-test (forged proof must be rejected): {:?}", res);
     assert!(!res.verified, "forged proof must never verify");
-    println!("ZKP Verifier ready for deployment.");
+
+    let listener = TcpListener::bind(BIND_ADDR).await?;
+    println!("✅ ZKP Verifier listening on {BIND_ADDR}");
+
+    loop {
+        let (stream, _peer) = listener.accept().await?;
+        tokio::spawn(handle_connection(stream));
+    }
 }
 
 #[cfg(test)]
@@ -227,6 +340,37 @@ mod tests {
         let res = verify_zkp_circuit(&req);
         assert!(!res.verified);
         assert_eq!(res.status, "INVALID_PROOF");
+    }
+
+    #[test]
+    fn health_route_responds_ok() {
+        let (status, payload) = route("GET", "/health", "");
+        assert_eq!(status, "200 OK");
+        assert!(payload.contains("\"status\":\"ok\""));
+    }
+
+    #[test]
+    fn verify_route_accepts_genuine_proof() {
+        let proof = genuine_proof("identity_kyc", &["driver_hash_99", "min_rating_4_5"]);
+        let body = format!(
+            "{{\"proof_id\":\"zkp_http\",\"proof_type\":\"identity_kyc\",\"public_inputs\":[\"driver_hash_99\",\"min_rating_4_5\"],\"proof_bytes_hex\":\"{proof}\"}}"
+        );
+        let (status, payload) = route("POST", "/verify", &body);
+        assert_eq!(status, "200 OK");
+        assert!(payload.contains("\"verified\":true"));
+        assert!(payload.contains("\"status\":\"VALID_PROOF\""));
+    }
+
+    #[test]
+    fn verify_route_rejects_bad_payload() {
+        let (status, _) = route("POST", "/verify", "{not-json");
+        assert_eq!(status, "400 Bad Request");
+    }
+
+    #[test]
+    fn unknown_route_returns_404() {
+        let (status, _) = route("GET", "/nope", "");
+        assert_eq!(status, "404 Not Found");
     }
 
     #[test]

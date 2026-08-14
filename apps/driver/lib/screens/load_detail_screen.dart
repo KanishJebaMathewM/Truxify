@@ -4,17 +4,52 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/route_hero_card.dart';
 import '../widgets/accept_bottom_sheet.dart';
+import '../services/marketplace_repository.dart';
 import '../widgets/profit_estimate_card.dart';
 
 // ---------------------------------------------------------------------------
 // LoadDetailScreen — full details of a load offer for the driver
 // ---------------------------------------------------------------------------
-class LoadDetailScreen extends StatelessWidget {
-  const LoadDetailScreen({super.key, required this.load});
+class LoadDetailScreen extends StatefulWidget {
+  const LoadDetailScreen({
+    super.key,
+    required this.load,
+    MarketplaceRepository? marketplaceRepository,
+  }) : marketplaceRepository = marketplaceRepository;
 
   final LoadOffer load;
+  final MarketplaceRepository? marketplaceRepository;
+
+  @override
+  State<LoadDetailScreen> createState() => _LoadDetailScreenState();
+}
+
+class _LoadDetailScreenState extends State<LoadDetailScreen> {
+  late final MarketplaceRepository _marketplaceRepository =
+      widget.marketplaceRepository ?? MarketplaceRepository();
+
+  LoadOffer get load => widget.load;
+
+  bool _isSubmittingBid = false;
+
+  num? _bidAmountForLoad() {
+    final paymentInr = load.paymentInr;
+    if (paymentInr != null && paymentInr > 0) {
+      return paymentInr;
+    }
+    for (final value in [load.freightValue, load.netProfit]) {
+      final cleaned = value.replaceAll(RegExp(r'[^0-9]'), '');
+      final parsed = num.tryParse(cleaned);
+      if (parsed != null && parsed > 0) {
+        return parsed;
+      }
+    }
+    return null;
+  }
 
   Future<void> _showAcceptSheet(BuildContext context) async {
+    if (_isSubmittingBid) return;
+
     final accepted = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -24,7 +59,29 @@ class LoadDetailScreen extends StatelessWidget {
       ),
       builder: (ctx) => AcceptBottomSheet(load: load),
     );
-    if (accepted == true && context.mounted) {
+    if (accepted != true || !context.mounted) return;
+
+    final loadId = load.id;
+    final amount = _bidAmountForLoad();
+    if (loadId.isEmpty || amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Unable to accept this load. Missing load ID or bid amount.'),
+          backgroundColor: TruxifyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmittingBid = true);
+    try {
+      await _marketplaceRepository.submitBid(
+        loadId: loadId,
+        amount: amount,
+      );
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Load accepted successfully'),
@@ -34,6 +91,20 @@ class LoadDetailScreen extends StatelessWidget {
         ),
       );
       Navigator.of(context).pop();
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to accept load: $e'),
+          backgroundColor: TruxifyColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingBid = false);
+      }
     }
   }
 
@@ -243,7 +314,7 @@ class LoadDetailScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
           child: PrimaryButton(
             label: 'Accept This Load',
-            onPressed: () => _showAcceptSheet(context),
+            onPressed: _isSubmittingBid ? null : () => _showAcceptSheet(context),
           ),
         ),
       ),

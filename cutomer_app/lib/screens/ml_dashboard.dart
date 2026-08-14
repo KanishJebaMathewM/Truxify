@@ -16,6 +16,12 @@ class _MLDashboardState extends State<MLDashboard> {
     defaultValue: 'http://localhost:8000',
   );
 
+  static const String _apiKey = String.fromEnvironment('ML_API_KEY');
+
+  Map<String, String> _headers() => {
+    if (_apiKey.isNotEmpty) 'X-API-Key': _apiKey,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -26,6 +32,7 @@ class _MLDashboardState extends State<MLDashboard> {
     try {
       final response = await http.get(
         Uri.parse('$_baseUrl/ab-testing/status'),
+        headers: _headers(),
       );
       if (response.statusCode == 200) {
         setState(() {
@@ -91,6 +98,7 @@ class _MLDashboardState extends State<MLDashboard> {
     results.forEach((metric, values) {
       final prod = values['production']?.toStringAsFixed(2);
       final shadow = values['shadow']?.toStringAsFixed(2);
+      if (prod == null || shadow == null) return;
       rows.add(_buildMetricRow(metric, prod, shadow, metric == 'rmse'));
     });
 
@@ -142,7 +150,8 @@ class _MLDashboardState extends State<MLDashboard> {
         if (testId != null) {
           try {
             final response = await http.post(
-              Uri.parse('http://ml-engine:8000/ab-testing/rollback/$testId'),
+              Uri.parse('$_baseUrl/ab-testing/rollback/$testId'),
+              headers: _headers(),
             );
             if (response.statusCode == 200) {
               ScaffoldMessenger.of(context).showSnackBar(

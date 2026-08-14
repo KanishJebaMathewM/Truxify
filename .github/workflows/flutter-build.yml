@@ -40,10 +40,26 @@ jobs:
         working-directory: ${{ matrix.app }}
         run: flutter test
 
+      - name: Restore google-services.json
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: ${{ matrix.app }}
+        shell: bash
+        run: |
+          echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 --decode > android/app/google-services.json
+
       - name: Build APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: ${{ matrix.app }}
-        run: flutter build apk --release
+        env:
+          TRUXIFY_API_BASE_URL: ${{ secrets.TRUXIFY_API_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build apk --release \
+            --dart-define=ENV=prod \
+            --dart-define=TRUXIFY_API_BASE_URL=$TRUXIFY_API_BASE_URL \
+            --dart-define=SUPABASE_URL=$SUPABASE_URL \
+            --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 
       - name: Upload APK Artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

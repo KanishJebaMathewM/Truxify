@@ -164,6 +164,10 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
       distanceCharge: formatPaise(orderMap['distance_charge']),
       tollCharge: formatPaise(orderMap['toll_charge']),
       platformFee: formatPaise(orderMap['platform_fee']),
+      pickupLat: (orderMap['pickup_lat'] as num?)?.toDouble(),
+      pickupLng: (orderMap['pickup_lng'] as num?)?.toDouble(),
+      dropLat: (orderMap['drop_lat'] as num?)?.toDouble(),
+      dropLng: (orderMap['drop_lng'] as num?)?.toDouble(),
     );
 
     // Switch to Orders tab and push detail screen.

@@ -45,5 +45,8 @@
       "dart format",
       "flutter analyze"
     ]
+  },
+  "dependencies": {
+    "dataloader": "^2.2.3"
   }
 }

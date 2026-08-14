@@ -15,22 +15,39 @@ import {
 import logger from "./logger.js";
 
 /**
- * Authentication middleware to verify requests using Firebase ID Tokens.
- * Supports BYPASS_AUTH=true and DEV_ACCESS_TOKEN environment variables
- * for easy local testing.
- *
- * In production, development auth headers (x-user-id, x-user-role, x-user-name)
- * are unconditionally stripped to prevent any possibility of bypass.
+ * Safely decodes a JWT without throwing on malformed input.
+ */
+function safeDecodeJwt(token) {
+  try {
+    return jwt.decode(token);
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Shared helper to format profile payload for req.user
+ */
+function formatUserProfile(profile) {
+  return {
+    id: profile.id,
+    uid: profile.firebase_uid,
+    role: profile.role,
+    fullName: profile.full_name,
+    phone: profile.phone,
+    isActive: true,
+  };
+}
+
+/**
+ * Authentication middleware helper to verify requests using Firebase ID Tokens or Supabase Tokens.
  */
 export async function verifyAuthToken(token) {
   let userProfile;
   let firebaseUid;
   let supabaseUserId = null;
 
-  let decoded;
-  try {
-    decoded = jwt.decode(token);
-  } catch (err) {}
+  const decoded = safeDecodeJwt(token);
 
   const isSupabaseToken =
     decoded &&
@@ -53,15 +70,11 @@ export async function verifyAuthToken(token) {
     }
     supabaseUserId = user.id;
 
-    // Profile lookups must run as the authenticated user (RLS is enforced on
-    // profiles: anon has no read privileges). The user-bound client carries the
-    // caller's JWT so PostgREST resolves the authenticated role for this query.
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone")
+      .select("id, firebase_uid, role, full_name, phone, is_active")
       .eq("id", user.id)
-      .eq("is_active", true)
       .maybeSingle();
 
     if (error) {
@@ -77,50 +90,63 @@ export async function verifyAuthToken(token) {
     const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
     firebaseUid = decodedToken.uid;
 
-    if (!supabase) {
-      throw new Error("Supabase client is not configured on this server.");
-    }
+    // Calculate token remaining lifetime to clamp cache TTL
+    const nowSec = Math.floor(Date.now() / 1000);
+    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
+    const tokenRemaining = tokenExp - nowSec;
 
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone")
+      .select("id, firebase_uid, role, full_name, phone, is_active")
       .eq("firebase_uid", firebaseUid)
       .eq("is_active", true)
       .maybeSingle();
 
-    if (error) {
-      throw new Error("Database query failed verification: " + error.message);
+      if (error) {
+        throw new Error("Database query failed verification: " + error.message);
+      }
+      userProfile = profile;
+
+      if (userProfile) {
+        // Clamp the cached profile TTL to the token's remaining lifetime so a
+        // cached profile can never outlive the access token that authorised it.
+        const cacheTtl = Math.max(1, Math.min(TTL_SECONDS, tokenRemaining));
+        await setCachedProfile(firebaseUid, {
+          id: userProfile.id,
+          uid: userProfile.firebase_uid,
+          role: userProfile.role,
+          fullName: userProfile.full_name,
+          phone: userProfile.phone,
+          isActive: true,
+        }, cacheTtl);
+      }
     }
-    userProfile = profile;
-  }
 
   if (!userProfile) {
-    throw new Error("User profile not found or inactive.");
+    throw new Error("User profile not found in database.");
   }
 
-  return {
-    id: userProfile.id,
-    uid: userProfile.firebase_uid,
-    role: userProfile.role,
-    fullName: userProfile.full_name,
-    phone: userProfile.phone,
-    isActive: true,
-  };
+  if (userProfile.is_active === false) {
+    throw new Error("User profile is inactive.");
+  }
+
+  return formatUserProfile(userProfile);
 }
 
 export async function authenticate(req, res, next) {
   const bypassAuth = process.env.BYPASS_AUTH === "true";
-  // Header-based test impersonation is an explicit opt-in (ENABLE_TEST_AUTH),
-  // independent of NODE_ENV, so a stray NODE_ENV=test deployment cannot
-  // silently turn plaintext x-user-id/x-user-role headers into a full
-  // impersonation primitive.
   const testAuthEnabled = process.env.ENABLE_TEST_AUTH === "true";
 
-  // ── Production header sanitization (defense in depth) ──────────────
-  // Strip dev-only authentication headers before any logic runs.
-  // This ensures they cannot be used even if BYPASS_AUTH is accidentally
-  // enabled or a proxy misconfiguration exposes them.
+  // Capture test-identity headers before sanitization so DEV_ACCESS_TOKEN
+  // bypass (gated on a shared secret, not bare headers) can still use them.
+  const devIdentity = {
+    id: req.headers["x-user-id"],
+    role: req.headers["x-user-role"],
+    name: req.headers["x-user-name"],
+  };
+
+  // ── Production header sanitization ──────────────────────────────────
   if (
     process.env.NODE_ENV === "production" ||
     !bypassAuth ||
@@ -131,7 +157,7 @@ export async function authenticate(req, res, next) {
     delete req.headers["x-user-name"];
   }
 
-  // Support local development bypass mode using DEV_ACCESS_TOKEN
+  // Support local development bypass mode
   if (bypassAuth) {
     if (process.env.NODE_ENV === "production") {
       return res.status(503).json({
@@ -140,8 +166,6 @@ export async function authenticate(req, res, next) {
       });
     }
 
-    // Header-based test bypass is only reachable with the explicit
-    // ENABLE_TEST_AUTH opt-in, which the dedicated test harness sets.
     if (testAuthEnabled) {
       const testUserId = req.headers["x-user-id"];
       const testUserRole = req.headers["x-user-role"] || "customer";
@@ -154,9 +178,8 @@ export async function authenticate(req, res, next) {
           role: testUserRole,
           fullName: testFullName,
           phone: "+919999999999",
+          isActive: true,
         };
-        // Mirror the real token flow so route handlers can build a
-        // per-request Supabase client for SECURITY DEFINER RPCs in tests.
         req.token = "test-auth-token";
         return next();
       }
@@ -172,9 +195,14 @@ export async function authenticate(req, res, next) {
       process.env.DEV_ACCESS_TOKEN &&
       devToken === process.env.DEV_ACCESS_TOKEN
     ) {
-      const testUserId = req.headers["x-user-id"];
-      const testUserRole = req.headers["x-user-role"] || "customer";
-      const testFullName = req.headers["x-user-name"] || "Test User";
+      const devIdentity = {
+        id: req.headers["x-user-id"],
+        role: req.headers["x-user-role"] || "customer",
+        name: req.headers["x-user-name"] || "Test User",
+      };
+      const testUserId = devIdentity.id;
+      const testUserRole = devIdentity.role;
+      const testFullName = devIdentity.name;
 
       if (testUserId) {
         req.user = {
@@ -183,6 +211,7 @@ export async function authenticate(req, res, next) {
           role: testUserRole,
           fullName: testFullName,
           phone: "+919999999999",
+          isActive: true,
         };
         logger.warn(
           {
@@ -214,9 +243,6 @@ export async function authenticate(req, res, next) {
   }
 
   const token = authHeader.split(" ")[1];
-
-  // Store the raw access token on the request so route handlers can create
-  // per-request Supabase clients that carry the user's identity for RPC calls.
   req.token = token;
 
   try {
@@ -224,13 +250,9 @@ export async function authenticate(req, res, next) {
     let firebaseUid = null;
     let supabaseUserId = null;
     let userClient = null;
+    let decodedToken = null;
 
-    let decoded;
-    try {
-      decoded = jwt.decode(token);
-    } catch (err) {
-      // ignore decoding errors and let verification handle it
-    }
+    const decoded = safeDecodeJwt(token);
 
     const isSupabaseToken =
       decoded &&
@@ -254,30 +276,34 @@ export async function authenticate(req, res, next) {
         });
       }
       supabaseUserId = user.id;
-      // Bind the profile lookup to the caller's JWT: profiles RLS grants reads
-      // only to the authenticated owner, so a sessionless anon client cannot
-      // resolve the profile.
       userClient = createUserClient?.(token) || supabase;
 
-      // Token is verified above; the cache only skips the profile lookup, keyed
-      // by the verified user id. Cache entries are bounded by the token's own
-      // expiry (see TTL calculation below) so a revoked session cannot be served.
-      const cachedProfile = await getCachedSupabaseProfile(supabaseUserId);
-      if (cachedProfile) {
-        if (!isValidCachedSupabaseProfile(supabaseUserId, cachedProfile)) {
-          void invalidateCachedSupabaseProfile(supabaseUserId);
-        } else if (cachedProfile.isActive === false) {
-          return res.status(403).json({
-            error: "User profile is inactive.",
-            hint: "Contact support to reactivate your account.",
-          });
-        } else {
-          req.user = cachedProfile;
-          return next();
+      // Check cache for Supabase Profile
+      try {
+        const cachedProfile = await getCachedSupabaseProfile(supabaseUserId);
+        if (cachedProfile) {
+          if (!isValidCachedSupabaseProfile(supabaseUserId, cachedProfile)) {
+            await invalidateCachedSupabaseProfile(supabaseUserId);
+          } else if (cachedProfile.notFound) {
+            return res.status(403).json({
+              error: "User profile not found in database.",
+              hint: "Register user in profiles table first.",
+            });
+          } else if (cachedProfile.isActive === false) {
+            return res.status(403).json({
+              error: "User profile is inactive.",
+              hint: "Contact support to reactivate your account.",
+            });
+          } else {
+            req.user = cachedProfile;
+            return next();
+          }
         }
+      } catch (err) {
+        logger.error({ err }, "Supabase cache check failed");
       }
 
-      // Fetch corresponding profile from Supabase by user.id
+      // Query database
       const { data: profile, error } = await userClient
         .from("profiles")
         .select("id, firebase_uid, role, full_name, phone")
@@ -299,35 +325,35 @@ export async function authenticate(req, res, next) {
           error: "Firebase Auth verification is not configured on this server.",
         });
       }
-      const decodedToken = await firebaseAdmin
+      const verifiedFirebaseToken = await firebaseAdmin
         .auth()
         .verifyIdToken(token, true);
+      decodedToken = verifiedFirebaseToken;
       firebaseUid = decodedToken.uid;
 
-      // Check Redis cache first.
-      // NOTE: On cache hit, we attach the cached profile directly and skip the DB query entirely
-      // to reduce database load (per the Acceptance Criteria).
-      // Since all profile mutations in this API (e.g., PUT /api/profile) invalidate the cache,
-      // the cache remains consistent. Any future administrative role or status mutations
-      // must explicitly call invalidateCachedProfile(firebaseUid).
-      const cachedProfile = await getCachedProfile(firebaseUid);
-      if (cachedProfile) {
-        if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
-          try {
+      // Check cache for Firebase Profile
+      try {
+        const cachedProfile = await getCachedProfile(firebaseUid);
+        if (cachedProfile) {
+          if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
             await invalidateCachedProfile(firebaseUid);
-          } catch (err) {
-            logger.error({ err }, "Cache invalidation failed");
-          }
-        } else {
-          if (cachedProfile.isActive === false) {
+          } else if (cachedProfile.notFound) {
+            return res.status(403).json({
+              error: "User profile not found in database.",
+              hint: "Register user in profiles table first.",
+            });
+          } else if (cachedProfile.isActive === false) {
             return res.status(403).json({
               error: "User profile is inactive.",
               hint: "Contact support to reactivate your account.",
             });
+          } else {
+            req.user = cachedProfile;
+            return next();
           }
-          req.user = cachedProfile;
-          return next();
         }
+      } catch (err) {
+        logger.error({ err }, "Firebase cache check failed");
       }
 
       if (!supabase) {
@@ -336,7 +362,6 @@ export async function authenticate(req, res, next) {
           .json({ error: "Supabase client is not configured on this server." });
       }
 
-      // Fetch corresponding profile from Supabase by firebase_uid
       userClient = createUserClient?.(token) || supabase;
       const { data: profile, error } = await userClient
         .from("profiles")
@@ -355,9 +380,6 @@ export async function authenticate(req, res, next) {
     }
 
     if (!userProfile) {
-      // Check whether the profile exists but is deactivated (is_active=false).
-      // The main queries above filter on is_active=true, so null could mean
-      // missing OR deactivated. We distinguish here to give accurate errors.
       let profileIsDeactivated = false;
       if (supabaseUserId && userClient) {
         const { data: inactive } = await userClient
@@ -377,11 +399,16 @@ export async function authenticate(req, res, next) {
         profileIsDeactivated = !!inactive;
       }
 
+      // Set tombstone correctly differentiating deactivated vs missing profiles
+      const tombstonePayload = profileIsDeactivated
+        ? { isActive: false, notFound: false }
+        : { isActive: false, notFound: true };
+
       if (firebaseUid) {
         try {
           await setCachedProfile(
             firebaseUid,
-            { isActive: false },
+            tombstonePayload,
             TOMBSTONE_TTL_SECONDS,
           );
         } catch (err) {
@@ -389,11 +416,15 @@ export async function authenticate(req, res, next) {
         }
       }
       if (supabaseUserId) {
-        void setCachedSupabaseProfile(
-          supabaseUserId,
-          { isActive: false },
-          TOMBSTONE_TTL_SECONDS,
-        );
+        try {
+          await setCachedSupabaseProfile(
+            supabaseUserId,
+            tombstonePayload,
+            TOMBSTONE_TTL_SECONDS,
+          );
+        } catch (err) {
+          logger.error({ err }, "Cache set failed");
+        }
       }
 
       if (profileIsDeactivated) {
@@ -402,39 +433,40 @@ export async function authenticate(req, res, next) {
           hint: "Contact support to reactivate your account.",
         });
       }
+
       return res.status(403).json({
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",
       });
-    }
 
-    // Attach user data to request context
-    req.user = {
-      id: userProfile.id,
-      uid: userProfile.firebase_uid,
-      role: userProfile.role,
-      fullName: userProfile.full_name,
-      phone: userProfile.phone,
-      isActive: true,
-    };
+    req.user = formatUserProfile(userProfile);
 
-    // Populate cache on successful DB fetch
+    // Cache successful DB lookup
     if (userProfile.firebase_uid) {
       try {
-        await setCachedProfile(userProfile.firebase_uid, req.user);
+        // Clamp the cached profile TTL to the token's remaining lifetime so a
+        // cached profile can never outlive the access token that authorised it.
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const firebaseTokenRemaining = decodedToken.exp
+          ? decodedToken.exp - nowSeconds
+          : TTL_SECONDS;
+        const firebaseTtl = Math.max(1, Math.min(TTL_SECONDS, firebaseTokenRemaining));
+        await setCachedProfile(userProfile.firebase_uid, req.user, firebaseTtl);
       } catch (err) {
         logger.error({ err }, "Cache set failed");
       }
     }
     if (supabaseUserId) {
-      // Clamp the cache lifetime to the token's remaining validity so a cached
-      // profile can never outlive the access token that authorised it.
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      const ttlSeconds =
-        isSupabaseToken && Number.isFinite(decoded?.exp)
-          ? Math.min(TTL_SECONDS, decoded.exp - nowSeconds)
-          : TTL_SECONDS;
-      void setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
+      // For Supabase tokens, use fixed TTL instead of deriving from unverified JWT exp claim.
+      // The unverified decoded.exp could be forged by an attacker to extend cache TTL indefinitely.
+      // The token was already verified via supabase.auth.getUser() above, so we trust it,
+      // but we don't rely on its exp claim for cache TTL (issue #11187).
+      const ttlSeconds = TTL_SECONDS;
+      try {
+        await setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
+      } catch (err) {
+        logger.error({ err }, "Cache set failed");
+      }
     }
 
     next();
@@ -447,14 +479,6 @@ export async function authenticate(req, res, next) {
   }
 }
 
-/**
- * Middleware to restrict route access to specific roles.
- * Must be used after authenticate middleware.
- *
- * This middleware delegates to the centralized authorization logging system
- * for consistent audit trails. For new routes, prefer using requirePolicy()
- * with named actions instead of requireRole() for better maintainability.
- */
 export function requireRole(allowedRoles) {
   if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
     throw new Error(
@@ -462,7 +486,19 @@ export function requireRole(allowedRoles) {
     );
   }
 
-  const sanitizedAllowedRoles = allowedRoles.map(r => typeof r === "string" ? r.trim() : r);
+  // Trim each entry and drop anything that is not a non-empty string, so a
+  // misconfigured array like ['admin', 42, '   '] cannot silently produce a
+  // role check that never matches (denying every user) or worse, matches on
+  // a garbage value.
+  const sanitizedAllowedRoles = allowedRoles
+    .map(r => typeof r === "string" ? r.trim() : "")
+    .filter(r => r.length > 0);
+
+  if (sanitizedAllowedRoles.length === 0) {
+    throw new Error(
+      "requireRole middleware requires at least one non-empty role string.",
+    );
+  }
 
   return (req, res, next) => {
     if (!req.user) {

@@ -1,0 +1,18 @@
+{
+  "name": "truxify-postgres-cdc-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "plugin.name": "pgoutput",
+    "database.hostname": "localhost",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "truxify",
+    "database.server.name": "truxify_db_server",
+    "table.include.list": "public.orders,public.driver_details",
+    "tombstones.on.delete": "false",
+    "schema.history.internal.kafka.bootstrap.servers": "localhost:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.postgres"
+  }
+}

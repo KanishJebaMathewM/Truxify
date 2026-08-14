@@ -81,7 +81,10 @@ router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) =>
     const result = await digilockerService.verifyAndSyncDocuments(req.user.id, code);
     res.json(result);
   } catch (err) {
-    logger.error('[DocumentRoutes] Digilocker sync failed:', err.message);
+    logger.error(
+      { event: 'DOCUMENT_DIGILOCKER_SYNC_ERROR', requestId: req.requestId || req.id, userId: req.user && req.user.id, error: err && err.message },
+      '[DocumentRoutes] Digilocker sync failed',
+    );
     res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 });

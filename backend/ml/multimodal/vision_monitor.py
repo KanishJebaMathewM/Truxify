@@ -32,9 +32,16 @@ class VisionMonitor:
             min_tracking_confidence=0.5
         )
         
-        # Initialize dlib for facial landmarks
+        # Initialize dlib for facial landmarks. The 68-landmark shape
+        # predictor requires a ~100 MB .dat model that is not shipped in the
+        # repo, so tolerate its absence here — constructing VisionMonitor()
+        # at module import must never crash the ML service.
         self.detector = dlib.get_frontal_face_detector()
-        self.predictor = dlib.shape_predictor('models/shape_predictor_68_face_landmarks.dat')
+        self.predictor = None
+        try:
+            self.predictor = dlib.shape_predictor('models/shape_predictor_68_face_landmarks.dat')
+        except (RuntimeError, OSError) as e:
+            logger.warning("dlib shape predictor model unavailable (%s); landmark extraction disabled", e)
         
         # Load models
         self.drowsiness_model = self._load_drowsiness_model()

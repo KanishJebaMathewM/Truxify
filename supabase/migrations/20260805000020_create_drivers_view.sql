@@ -25,7 +25,13 @@ SELECT
 FROM driver_details dd
 JOIN profiles p       ON p.id = dd.user_id
 LEFT JOIN trucks t    ON t.id = dd.truck_id
-LEFT JOIN driver_locations dl ON dl.driver_id = dd.user_id AND dl.is_active = true;
+LEFT JOIN LATERAL (
+  SELECT *
+  FROM driver_locations
+  WHERE driver_id = dd.user_id AND is_active = true
+  ORDER BY id DESC
+  LIMIT 1
+) dl ON true;
 
 -- RLS on views is not enforced by PostgREST for the GraphQL client; keep it simple
 -- and readable. The subgraph service uses the service/client key.
@@ -54,6 +60,10 @@ BEGIN
   END IF;
 
   IF NEW.current_location IS DISTINCT FROM OLD.current_location THEN
+    UPDATE driver_locations
+       SET is_active = false
+     WHERE driver_id = NEW.user_id AND is_active = true;
+
     INSERT INTO driver_locations (driver_id, latitude, longitude, accuracy, is_active)
     VALUES (
       NEW.user_id,
@@ -61,8 +71,7 @@ BEGIN
       (NEW.current_location ->> 'lng')::numeric(11, 8),
       NULL,
       true
-    )
-    ON CONFLICT DO NOTHING;
+    );
   END IF;
 
   UPDATE driver_details SET updated_at = now() WHERE id = NEW.id;

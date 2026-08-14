@@ -94,9 +94,18 @@ class EventRepository {
 
   async reemitEvent(event) {
     // Re-emit event to Kafka
-    const kafka = (await import('../config/kafka.config.js')).default;
+    const kafkaModule = await import('../config/kafka.config.js');
+    const kafka = kafkaModule.default;
+    const topic = kafkaModule.TOPICS[event.event_type];
+    if (!topic) {
+      logger.warn(`No Kafka topic mapped for event type ${event.event_type}; skipping replay`);
+      return;
+    }
+    // The Kafka message key MUST be the event id, not the order id: consumers
+    // use the key as the idempotency claim key (eventId). Using order_id here
+    // caused replays to be claimed under the order id and silently dropped.
     await kafka.publishEvent(
-      event.event_type,
+      topic,
       {
         eventId: event.event_id,
         eventType: event.event_type,
@@ -105,9 +114,11 @@ class EventRepository {
         metadata: {
           ...event.metadata,
           isReplay: true,
+          eventId: event.event_id,
+          replayedFrom: event.event_id,
         },
       },
-      event.order_id
+      event.event_id
     );
   }
 

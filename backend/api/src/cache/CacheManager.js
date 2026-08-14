@@ -27,6 +27,7 @@ const stats = {
 export function init(client) {
   if (initialized) return;
   redisClient = client;
+  CacheKeyBuilder._setRedisClient(client);
   if (!client) {
     logger.warn('[CacheManager] No Redis client provided - caching disabled.');
     return;
@@ -50,6 +51,7 @@ export async function get(namespace, entityId, subKey) {
     return null;
   } catch (err) {
     stats.errors++;
+    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] GET error');
     return null;
   }
@@ -71,6 +73,7 @@ export async function set(namespace, entityId, value, opts = {}) {
     return true;
   } catch (err) {
     stats.errors++;
+    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] SET error');
     return false;
   }
@@ -101,6 +104,7 @@ export async function invalidateBatch(namespace, entityIds, opts = {}) {
     }
   } catch (err) {
     stats.errors++;
+    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, namespace }, '[CacheManager] Batch invalidation error');
   }
 }
@@ -159,6 +163,7 @@ export function isInitialized() {
 
 export function shutdown() {
   redisClient = null;
+  CacheKeyBuilder._setRedisClient(null);
   initialized = false;
   logger.info('[CacheManager] Shut down.');
 }

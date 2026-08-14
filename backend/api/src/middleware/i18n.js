@@ -3,12 +3,28 @@ import middleware from 'i18next-http-middleware';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import logger from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const enDict = JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
-const esDict = JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
+const enDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
+  } catch (err) {
+    logger.warn({ event: 'I18N_LOCALE_LOAD_ERROR', locale: 'en', error: err && err.message }, '[i18n] Failed to load en.json locale, falling back to empty object');
+    return {};
+  }
+})();
+
+const esDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
+  } catch (err) {
+    logger.warn({ event: 'I18N_LOCALE_LOAD_ERROR', locale: 'es', error: err && err.message }, '[i18n] Failed to load es.json locale, falling back to empty object');
+    return {};
+  }
+})();
 
 i18next
   .use(middleware.LanguageDetector)

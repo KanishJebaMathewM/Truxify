@@ -2,7 +2,7 @@
 import express from 'express';
 import request from 'supertest';
 
-const warnMock = vi.fn();
+const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
 
 vi.mock('../src/middleware/logger.js', () => ({
   default: {
@@ -80,13 +80,16 @@ describe('cookieSecurityValidator', () => {
     );
   });
 
-  it('does not log warnings in production', async () => {
+  it('logs warnings in production too', async () => {
     process.env.NODE_ENV = 'production';
 
     const app = createApp('session=abc123');
 
     await request(app).get('/test');
 
-    expect(warnMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock.mock.calls[0][1]).toBe(
+      'Cookie missing recommended security attributes'
+    );
   });
 });

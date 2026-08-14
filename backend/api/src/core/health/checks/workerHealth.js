@@ -3,16 +3,19 @@ import { HealthStatus, executeCheck } from '../HealthCheck.js';
 const NAME = 'workers';
 
 function check() {
+  const registeredWorkers = globalThis.__truxify_workers;
   const activeWorkers = [];
-  if (globalThis.__truxify_workers) {
-    for (const [name, running] of Object.entries(globalThis.__truxify_workers)) {
+  if (registeredWorkers && typeof registeredWorkers === 'object') {
+    for (const [name, running] of Object.entries(registeredWorkers)) {
       activeWorkers.push({ name, running });
     }
   }
 
   if (activeWorkers.length === 0) {
+    // No worker states were registered: fail closed instead of reporting a
+    // process with no running background workers as healthy.
     return {
-      status: HealthStatus.HEALTHY,
+      status: HealthStatus.UNHEALTHY,
       message: 'no_registered_workers',
       metadata: { workerCount: 0 },
     };

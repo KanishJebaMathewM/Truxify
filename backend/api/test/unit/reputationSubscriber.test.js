@@ -31,7 +31,7 @@ vi.mock('../../src/repositories/orderRepository.js', () => ({
     }
   },
 }))
-vi.mock('../../src/config/db.js', () => ({ supabase: {} }))
+vi.mock('../../src/config/db.js', () => ({ supabase: {}, supabaseAdmin: {} }))
 vi.mock('../../src/middleware/logger.js', () => ({ default: mocks.logger }))
 vi.mock('../../src/core/telemetry/ContextPropagator.js', () => ({
   ContextPropagator: { extractFromEventPayload: vi.fn().mockReturnValue({}) },

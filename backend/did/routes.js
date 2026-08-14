@@ -6,10 +6,10 @@ const router = express.Router();
 
 router.post('/did/create', async (req, res) => {
     try {
-        const { userAddress } = req.body;
+        const { userAddress, publicKey } = req.body;
         if (!userAddress) return res.status(400).json({ success: false, error: 'userAddress required' });
 
-        const result = await didService.createDID(userAddress);
+        const result = await didService.createDID(userAddress, publicKey);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('DID creation error:', error);

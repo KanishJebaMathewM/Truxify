@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "WASI for Cross-Platform Edge Computing",
   "scripts": {
-    "build": "cargo build --target wasm32-wasi --release",
+    "build": "cargo build --manifest-path src/Cargo.toml --target wasm32-wasi --release",
     "test": "cargo test",
     "start": "node index.js"
   },

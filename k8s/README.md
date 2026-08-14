@@ -16,8 +16,9 @@ docker push truxify/ml:latest
 
 2. Deploy to Kubernetes
 bash
-chmod +x scripts/deploy-k8s.sh
-./scripts/deploy-k8s.sh
+# Deploy using kubectl directly:
+kubectl apply -f api-deployment.yaml
+kubectl apply -f ml-deployment.yaml
 3. Check Status
 bash
 kubectl get pods -n truxify

@@ -572,19 +572,33 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(!booking.paid, "TruxifyEscrow: Already paid");
 
         // ── EFFECTS: Default to refunding customer ──────────────────────────
-        uint256 refundAmount = booking.amount;
+        uint256 escrowAmount = booking.amount;
         address payable customer = booking.customer;
+        address payable driver = booking.driver;
 
         booking.amount = 0;
         booking.paid = true;
         booking.status = BookingStatus.Cancelled;
 
         // ── INTERACTIONS ──────────────────────────────────────────────────
-        pendingWithdrawals[customer] += refundAmount;
-        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+        uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
 
-        emit WithdrawalReady(bookingId, customer, refundAmount);
-        emit BookingCancelled(bookingId, customer, refundAmount);
+        if (booking.started) {
+            // Trip already started: the driver performed work, so the staleness
+            // fallback must compensate the driver instead of refunding the
+            // customer in full (issue #13964).
+            pendingWithdrawals[driver] += escrowAmount;
+            if (releaseTimestamps[driver] == 0 || newDeadline > releaseTimestamps[driver]) {
+                releaseTimestamps[driver] = newDeadline;
+            }
+            emit WithdrawalReady(bookingId, driver, escrowAmount);
+            emit BookingCancelled(bookingId, customer, 0);
+        } else {
+            pendingWithdrawals[customer] += escrowAmount;
+            releaseTimestamps[customer] = newDeadline;
+            emit WithdrawalReady(bookingId, customer, escrowAmount);
+            emit BookingCancelled(bookingId, customer, escrowAmount);
+        }
 
         // Release the slot so a retried/regenerated order can re-use the id.
         _releaseBookingSlot(bookingId);

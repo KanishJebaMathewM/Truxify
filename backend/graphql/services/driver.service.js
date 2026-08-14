@@ -4,6 +4,7 @@ import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
 
 const DISPATCH_ROLES = new Set(['ADMIN', 'admin', 'DISPATCHER', 'dispatcher']);
 
@@ -209,7 +210,13 @@ async function startDriverService() {
     });
 
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4002 }
+        listen: { port: 4002 },
+        context: async ({ req }) => {
+            // Identity is derived only from gateway-signed trusted headers;
+            // forged x-user-id/x-user-role reaching the subgraph directly are
+            // rejected (no IDOR / privilege escalation).
+            return { user: resolveUserFromTrustedHeaders(req.headers) };
+        }
     });
 
     logger.info(`OK Driver GraphQL service running at ${url}`);

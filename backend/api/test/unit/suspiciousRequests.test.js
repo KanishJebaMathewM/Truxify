@@ -14,7 +14,6 @@ describe('suspiciousRequests Middleware', () => {
 
 
 // === Spec 6 test ===
-import { describe, it, expect } from 'vitest';
 import { sanitizeKey, sanitizeQueryParams } from '../../src/middleware/suspiciousRequests.js';
 describe('sanitizeKey', () => {
   it('rejects __proto__', () => { expect(sanitizeKey('__proto__')).toBeNull(); });

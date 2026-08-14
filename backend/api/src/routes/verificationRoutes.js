@@ -61,7 +61,7 @@ const kycUploadLimiter = rateLimit({
 router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('id, customer_id, driver_id')
       .eq('id', orderId)
@@ -184,9 +184,7 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
       error: error.message
     });
   }
-});
-
-const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
+}); = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 
@@ -292,6 +290,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     if (error?.name === 'AbortError') {
       return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
     }
+    logger.error({ event: 'KYC_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'KYC upload error');
     res.status(500).json({
       success: false,
       error: error.message

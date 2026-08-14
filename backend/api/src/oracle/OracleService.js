@@ -50,6 +50,8 @@ class OracleService {
 
   async _verifyOTP(orderId, otp) {
     try {
+      // Note: order.otp_verified is set by the driver's OTP verification step before this function is called.
+      // If it is already true, this function still completes successfully (idempotent).
       // Confirm directly when the order is already flagged otp_verified, or
       // when the delivery_otps record is itself marked verified.
       const { data: order, error: orderErr } = await this.supabase

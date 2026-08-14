@@ -13,8 +13,7 @@ export function escapeLike(value) {
 const W = ['\\', '%', '_', '[', ']'];
 export function escapeSqlLike(value) {
   if (value == null) return value;
-  if (typeof value !== 'string') return value;
-  if (value === '') return value;
+  if (typeof value !== 'string') return String(value);
   let out = value;
   for (const ch of W) out = out.split(ch).join('\\' + ch);
   return out;

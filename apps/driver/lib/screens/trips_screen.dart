@@ -387,7 +387,7 @@ class _TripsScreenState extends State<TripsScreen> {
           final val = row['net_earnings'];
           if (val is num) return sum + val.toInt();
           if (val is String) return sum + (num.tryParse(val)?.toInt() ?? 0);
-          return sum + ((val ?? 0) as num).toInt();
+          return sum + (val is num ? val.toInt() : int.tryParse(val.toString()) ?? 0);
         },
       );
 
@@ -1634,6 +1634,18 @@ class _TripsScreenState extends State<TripsScreen> {
         (point['longitude'] as num).toDouble(),
       );
     }).toList();
+
+    if (points.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: TruxifyColors.subtleBorder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: Icon(Icons.map_outlined, color: Colors.grey),
+        ),
+      );
+    }
 
     return RepaintBoundary(
       child: ClipRRect(

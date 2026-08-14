@@ -41,7 +41,7 @@ router.post(
         return res.status(503).json({ error: 'ML recommendation engine is temporarily unavailable.' });
       }
       logger.error({ err, requestId: req.requestId }, 'Deadhead matching failed');
-      res.status(500).json({ error: 'Deadhead matching failed.' });
+      return res.status(500).json({ error: 'Deadhead matching failed.' });
     }
   },
 );

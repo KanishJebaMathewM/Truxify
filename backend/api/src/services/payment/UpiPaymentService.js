@@ -23,6 +23,12 @@ class UpiPaymentService {
    * Mock payout to driver UPI ID
    */
   async processDriverPayout(driverUpiId, amountPaisa) {
+    if (typeof driverUpiId !== 'string' || !driverUpiId.trim()) {
+      throw new TypeError('driverUpiId must be a non-empty string');
+    }
+    if (!Number.isFinite(amountPaisa) || amountPaisa <= 0) {
+      throw new TypeError('amountPaisa must be a positive finite number');
+    }
     logger.info(`[UPI Payout] Initiating driver payout via ${this.gatewayName} to ${driverUpiId}, amount: ${amountPaisa} paisa`);
     // Simulate payout API delay
     await new Promise(resolve => setTimeout(resolve, MOCK_PAYOUT_DELAY_MS));

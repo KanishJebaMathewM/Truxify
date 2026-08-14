@@ -220,7 +220,8 @@ export async function getDriverReputation(walletAddress) {
         }),
       ]);
       clearTimeout(timeoutId);
-      return Number(score);
+      const n = Number(score);
+      return Number.isFinite(n) ? n : null;
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_FETCH_ERROR', walletAddress, error: err && (err.message || String(err)) },

@@ -91,7 +91,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
     weekly_chart: weeklyChart,
     cumulative_stats: {
       total_km: totalKm,
-      avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+      avg_earning_per_km: (Number.isFinite(totalKm) && totalKm > 0 && Number.isFinite(totalNetEarnings)) ? (totalNetEarnings / 100.0) / totalKm : 0,
       lifetime_trips: lifetimeTrips !== null ? lifetimeTrips : null
     },
     deadhead_trips_saved: deadheadTripsSaved

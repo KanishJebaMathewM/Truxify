@@ -49,7 +49,7 @@ async function reconcileInMemoryIntoRedis(orderId) {
       await redisClient.set(lockKey, '1', 'EX', remainingSec);
     }
   } catch (err) {
-    logger.error('[OTP] Redis error during in-memory reconciliation, keeping memory fallback:', err.message);
+    logger.error({ err }, '[OTP] Redis error during in-memory reconciliation, keeping memory fallback');
     return;
   }
   inMemoryOtpFailedAttempts.delete(orderId);
@@ -65,7 +65,7 @@ export async function checkOtpLockout(orderId) {
       const isLocked = await redisClient.get(lockKey);
       return !!isLocked;
     } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
+      logger.error({ err }, '[OTP] Redis error in checkOtpLockout, falling back to memory');
     }
   }
   const record = inMemoryOtpFailedAttempts.get(orderId);
@@ -93,7 +93,7 @@ export async function recordOtpFailure(orderId) {
       }
       return count;
     } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
+      logger.error({ err }, '[OTP] Redis error in recordOtpFailure, falling back to memory');
     }
   }
 
@@ -127,7 +127,7 @@ export async function clearOtpState(orderId) {
       inMemoryOtpFailedAttempts.delete(orderId);
       return;
     } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
+      logger.error({ err }, '[OTP] Redis error in clearOtpState, falling back to memory');
     }
   }
   const record = inMemoryOtpFailedAttempts.get(orderId);

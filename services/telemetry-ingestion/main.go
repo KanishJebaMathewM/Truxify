@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/list"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -47,22 +48,36 @@ type IngestionStats struct {
 var (
 	pingCounter         uint64
 	activeDrivers       sync.Map
+	activeDriverCount   uint64
 	geofenceRateLimit   sync.Map
 	geofenceRateTracked uint64
-	// geofenceOrder tracks geofence rate-limit entries in insertion order so
-	// the oldest entry can be evicted when the map exceeds maxRateTracked,
-	// without scanning the whole map per insert.
-	geofenceOrder   []*rateEntry
-	geofenceOrderMu sync.Mutex
-	pingRateLimit   sync.Map
-	serviceStartTime = time.Now()
-	jwtSecret        []byte
-	bypassAuth       bool
-	driverTTL        = 5 * time.Minute
-	maxActiveDrivers = 100000
-	maxPingsPerSec   = 10
+	// geofenceOrder tracks live geofence rate-limit entries in insertion order
+	// so the oldest entry can be evicted when the map exceeds maxRateTracked,
+	// without scanning the whole map per insert. Every live entry has exactly
+	// one element in the queue; the element is removed when the entry is
+	// retired, so the queue stays as bounded as the map itself.
+	geofenceOrder     list.List
+	geofenceOrderMu   sync.Mutex
+	pingRateLimit     sync.Map
+	serviceStartTime  = time.Now()
+	jwtSecret         []byte
+	bypassAuth        bool
+	driverTTL         = 5 * time.Minute
+	maxActiveDrivers  = 100000
+	maxPingsPerSec    = 10
 	maxGeofencePerSec = 10
 	maxRateTracked    = 100000
+)
+
+const (
+	// onPathEvictLimit bounds the geofence eviction work done on the request
+	// path when a new entry pushes the tracker over the cap, so a single ping
+	// never pays for draining the whole overflow.
+	onPathEvictLimit = 64
+	// sweepEvictLimit bounds the geofence eviction work done per background
+	// sweep. It only matters when the queue is full of in-flight entries; the
+	// sweep loop otherwise exits as soon as the tracker is back under the cap.
+	sweepEvictLimit = 1 << 20
 )
 
 // driverEntry is a cached ping plus its last-seen time so stale drivers can be evicted.
@@ -72,10 +87,22 @@ type driverEntry struct {
 }
 
 // rateEntry holds a sliding window of request timestamps for one driver.
+//
+// inUse counts the in-flight requests currently holding the entry. Eviction
+// never removes an entry with inUse > 0, so an eviction can never reset a
+// driver's rate window while a request is still using the entry. Once
+// retired, the entry is removed from its map and any late acquirer sees the
+// retired flag and retries against a fresh entry instead of writing into
+// orphaned state whose stamps would be lost.
 type rateEntry struct {
 	mu       sync.Mutex
 	stamps   []time.Time
 	driverID string
+	inUse    int
+	retired  bool
+	// orderElem is the entry's position in geofenceOrder while it is live;
+	// it is only accessed under geofenceOrderMu.
+	orderElem *list.Element
 }
 
 // jwtClaims holds the subset of JWT claims the telemetry service needs.
@@ -310,16 +337,81 @@ func validatePing(ping *TelemetryPing) error {
 	return nil
 }
 
-// allowGeofence enforces a per-driver sliding-window rate limit.
-func allowGeofence(driverID string) bool {
-	v, loaded := geofenceRateLimit.LoadOrStore(driverID, &rateEntry{driverID: driverID})
-	if !loaded {
+// acquireRateEntry returns the live rate entry for driverID in m, marking it
+// in use so eviction defers until the caller releases it with endUse. created
+// reports whether the returned entry was freshly inserted into m; when it was,
+// onCreated is invoked once (e.g. for order-queue bookkeeping) before the
+// entry is used.
+func acquireRateEntry(m *sync.Map, driverID string, onCreated func(*rateEntry)) (*rateEntry, bool) {
+	for {
+		v, loaded := m.LoadOrStore(driverID, &rateEntry{driverID: driverID})
+		e := v.(*rateEntry)
+		if !loaded && onCreated != nil {
+			onCreated(e)
+		}
+		e.mu.Lock()
+		if e.retired {
+			// The entry was evicted between LoadOrStore and the lock; a fresh
+			// one must be created so the caller never writes into orphaned
+			// state that would be dropped on eviction.
+			e.mu.Unlock()
+			continue
+		}
+		e.inUse++
+		e.mu.Unlock()
+		return e, !loaded
+	}
+}
+
+// endUse releases an entry previously acquired with acquireRateEntry.
+func (e *rateEntry) endUse() {
+	e.mu.Lock()
+	e.inUse--
+	e.mu.Unlock()
+}
+
+// tryRetireRateEntry removes e from m if it is not in use and not already
+// retired, decrementing tracked when non-nil. It reports whether the entry was
+// retired. The caller is responsible for removing e from geofenceOrder.
+func tryRetireRateEntry(m *sync.Map, e *rateEntry, tracked *uint64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.retired || e.inUse > 0 {
+		return false
+	}
+	// Only retire the exact entry still mapped to the driver; a newer entry
+	// would have its own slot and must not be disturbed.
+	if cur, ok := m.Load(e.driverID); !ok || cur.(*rateEntry) != e {
+		return false
+	}
+	e.retired = true
+	m.Delete(e.driverID)
+	if tracked != nil {
+		atomic.AddUint64(tracked, ^uint64(0))
+	}
+	return true
+}
+
+// acquireGeofenceEntry acquires the geofence rate entry for driverID and
+// performs the insertion-order bookkeeping for new entries, enforcing the hard
+// maxRateTracked bound with a bounded eviction pass.
+func acquireGeofenceEntry(driverID string) *rateEntry {
+	e, created := acquireRateEntry(&geofenceRateLimit, driverID, func(entry *rateEntry) {
 		atomic.AddUint64(&geofenceRateTracked, 1)
 		geofenceOrderMu.Lock()
-		geofenceOrder = append(geofenceOrder, v.(*rateEntry))
+		entry.orderElem = geofenceOrder.PushBack(entry)
 		geofenceOrderMu.Unlock()
+	})
+	if created && atomic.LoadUint64(&geofenceRateTracked) > uint64(maxRateTracked) {
+		evictGeofenceOverflow(onPathEvictLimit)
 	}
-	e := v.(*rateEntry)
+	return e
+}
+
+// allowGeofence enforces a per-driver sliding-window rate limit.
+func allowGeofence(driverID string) bool {
+	e := acquireGeofenceEntry(driverID)
+	defer e.endUse()
 
 	e.mu.Lock()
 
@@ -340,47 +432,65 @@ func allowGeofence(driverID string) bool {
 	e.stamps = append(e.stamps, time.Now())
 	e.mu.Unlock()
 
-	// Enforce the hard bound: once the map exceeds maxRateTracked, evict the
-	// oldest tracked entries regardless of whether they still have timestamps.
-	// This runs only when a new entry pushes the tracker over the cap and
-	// evicts at most the overflow amount, keeping memory bounded without
-	// scanning the whole map on every insert.
-	if !loaded && atomic.LoadUint64(&geofenceRateTracked) > uint64(maxRateTracked) {
-		evictGeofenceOverflow()
-	}
-
 	return true
 }
 
-// evictGeofenceOverflow removes the oldest geofence rate-limit entries (in
-// insertion order) until the tracker is back under maxRateTracked.
-func evictGeofenceOverflow() {
-	for atomic.LoadUint64(&geofenceRateTracked) > uint64(maxRateTracked) {
+// evictGeofenceOverflow retires the oldest geofence rate entries (in insertion
+// order) until the tracker is under maxRateTracked or limit candidates have
+// been examined. Entries still in use are moved to the back of the queue
+// instead of being evicted, so the request that owns them keeps its rate
+// window.
+func evictGeofenceOverflow(limit int) {
+	for attempts := 0; attempts < limit; attempts++ {
+		if atomic.LoadUint64(&geofenceRateTracked) <= uint64(maxRateTracked) {
+			return
+		}
+
 		geofenceOrderMu.Lock()
-		if len(geofenceOrder) == 0 {
+		front := geofenceOrder.Front()
+		if front == nil {
 			geofenceOrderMu.Unlock()
 			return
 		}
-		e := geofenceOrder[0]
-		geofenceOrder = geofenceOrder[1:]
+		e := front.Value.(*rateEntry)
+		geofenceOrder.Remove(front)
+		e.orderElem = nil
 		geofenceOrderMu.Unlock()
 
-		// Only evict the entry if it is still the exact entry that was queued;
-		// the same driver may have re-created an entry since it was ordered.
-		if cur, ok := geofenceRateLimit.Load(e.driverID); ok && cur.(*rateEntry) == e {
-			geofenceRateLimit.Delete(e.driverID)
-			atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
+		e.mu.Lock()
+		if e.retired {
+			// Already cleaned up by a pruner; drop it.
+			e.mu.Unlock()
+			continue
 		}
+		if e.inUse > 0 {
+			// In flight; keep the entry and try again on a later pass.
+			e.mu.Unlock()
+			geofenceOrderMu.Lock()
+			e.orderElem = geofenceOrder.PushBack(e)
+			geofenceOrderMu.Unlock()
+			continue
+		}
+		e.retired = true
+		geofenceRateLimit.Delete(e.driverID)
+		atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
+		e.mu.Unlock()
 	}
 }
 
-// pruneGeofenceRateEntries removes empty rate entries once the tracker grows
-// beyond its cap, keeping the in-memory map bounded.
+// pruneGeofenceRateEntries removes empty geofence rate entries whose sliding
+// window has expired, keeping the in-memory map bounded. Only idle entries are
+// retired: an entry an in-flight request is holding is left alone so the
+// driver's window is never reset mid-request.
 func pruneGeofenceRateEntries() {
 	cutoff := time.Now().Add(-time.Second)
 	geofenceRateLimit.Range(func(key, value interface{}) bool {
 		e := value.(*rateEntry)
 		e.mu.Lock()
+		if e.retired || e.inUse > 0 {
+			e.mu.Unlock()
+			return true
+		}
 		kept := e.stamps[:0]
 		for _, t := range e.stamps {
 			if t.After(cutoff) {
@@ -388,14 +498,24 @@ func pruneGeofenceRateEntries() {
 			}
 		}
 		e.stamps = kept
-		// Delete under the entry lock: a concurrent allowGeofence that
-		// re-locks the entry between the emptiness check and the removal
-		// would otherwise lose its timestamps when the entry is deleted,
-		// resetting that driver's 1-second window and allowing bursts
-		// above the cap.
 		if len(e.stamps) == 0 {
+			// Delete under the entry lock: a concurrent allowGeofence that
+			// re-locks the entry between the emptiness check and the removal
+			// would otherwise lose its timestamps when the entry is deleted,
+			// resetting that driver's 1-second window and allowing bursts
+			// above the cap.
+			e.retired = true
 			geofenceRateLimit.Delete(key)
 			atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
+			e.mu.Unlock()
+
+			geofenceOrderMu.Lock()
+			if e.orderElem != nil {
+				geofenceOrder.Remove(e.orderElem)
+				e.orderElem = nil
+			}
+			geofenceOrderMu.Unlock()
+			return true
 		}
 		e.mu.Unlock()
 		return true
@@ -404,8 +524,8 @@ func pruneGeofenceRateEntries() {
 
 // allowPing enforces a per-driver sliding-window rate limit.
 func allowPing(driverID string) bool {
-	v, _ := pingRateLimit.LoadOrStore(driverID, &rateEntry{})
-	e := v.(*rateEntry)
+	e, _ := acquireRateEntry(&pingRateLimit, driverID, nil)
+	defer e.endUse()
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -429,63 +549,123 @@ func allowPing(driverID string) bool {
 
 // countActiveDrivers returns the current number of cached drivers.
 func countActiveDrivers() int {
-	count := 0
-	activeDrivers.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-	return count
+	return int(atomic.LoadUint64(&activeDriverCount))
 }
 
-// storePing caches a ping for a driver, enforcing the max-map-size cap.
-func storePing(driverID string, ping TelemetryPing) bool {
-	now := time.Now()
-
-	if _, ok := activeDrivers.Load(driverID); ok {
-		activeDrivers.Store(driverID, driverEntry{ping: ping, lastSeen: now})
-		return true
-	}
-
-	if countActiveDrivers() >= maxActiveDrivers {
-		sweepDrivers()
-		if countActiveDrivers() >= maxActiveDrivers {
+// reserveActiveDriver atomically reserves a slot under maxActiveDrivers. It
+// reports whether the reservation succeeded, so concurrent requests cannot
+// pass a check-then-act and collectively exceed the cap.
+func reserveActiveDriver() bool {
+	for {
+		cur := atomic.LoadUint64(&activeDriverCount)
+		if cur >= uint64(maxActiveDrivers) {
 			return false
 		}
+		if atomic.CompareAndSwapUint64(&activeDriverCount, cur, cur+1) {
+			return true
+		}
 	}
+}
 
-	activeDrivers.Store(driverID, driverEntry{ping: ping, lastSeen: now})
-	return true
+// releaseActiveDriver releases a slot previously reserved by
+// reserveActiveDriver.
+func releaseActiveDriver() {
+	for {
+		cur := atomic.LoadUint64(&activeDriverCount)
+		if cur == 0 {
+			return
+		}
+		if atomic.CompareAndSwapUint64(&activeDriverCount, cur, cur-1) {
+			return
+		}
+	}
+}
+
+// expireActiveDriver removes a stale driver entry from the cache, releasing
+// its capacity slot only when the exact entry is still present.
+func expireActiveDriver(key interface{}, e driverEntry) {
+	if activeDrivers.CompareAndDelete(key, e) {
+		releaseActiveDriver()
+	}
+}
+
+// storePing caches a ping for a driver, enforcing the maxActiveDrivers cap via
+// atomic admission. The map is never scanned on this path; refreshes of
+// existing drivers are done in place with compare-and-swap.
+func storePing(driverID string, ping TelemetryPing) bool {
+	now := time.Now()
+	entry := driverEntry{ping: ping, lastSeen: now}
+
+	for {
+		if prev, ok := activeDrivers.Load(driverID); ok {
+			// Refresh the existing entry in place; no capacity slot is needed
+			// because the map does not grow. If a concurrent sweep removed the
+			// entry, the CAS fails and we fall through to the admission path.
+			if activeDrivers.CompareAndSwap(driverID, prev, entry) {
+				return true
+			}
+			continue
+		}
+
+		// New driver: atomically reserve a slot before inserting so the
+		// configured cap can never be exceeded by concurrent requests.
+		if !reserveActiveDriver() {
+			return false
+		}
+		if _, loaded := activeDrivers.LoadOrStore(driverID, entry); loaded {
+			// Another goroutine inserted this driver concurrently; release the
+			// slot we reserved and refresh the existing entry instead.
+			releaseActiveDriver()
+			continue
+		}
+		return true
+	}
+}
+
+// retireStalePingEntry removes a ping rate entry once the driver goes quiet for
+// a full driverTTL, unless it is currently in use by an in-flight request.
+func retireStalePingEntry(key interface{}, e *rateEntry, now time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.retired || e.inUse > 0 {
+		return
+	}
+	// Stamps are appended in order and pruned oldest-first, so the last stamp
+	// is the driver's most recent activity. Entries are aged out once they go
+	// quiet for a full driverTTL, not only when empty.
+	stale := len(e.stamps) == 0 || now.Sub(e.stamps[len(e.stamps)-1]) > driverTTL
+	if !stale {
+		return
+	}
+	// Delete under the entry lock: a concurrent allowPing that re-locks the
+	// entry between the staleness check and the removal would otherwise lose
+	// its timestamps when the entry is deleted, resetting that driver's
+	// 1-second window and allowing bursts above the cap.
+	e.retired = true
+	pingRateLimit.Delete(key)
 }
 
 // sweepDrivers removes drivers whose last ping is older than the TTL and drops
-// stale rate-limit entries.
+// stale rate-limit entries. It runs from a background goroutine, never from the
+// request path.
 func sweepDrivers() {
 	now := time.Now()
 
 	activeDrivers.Range(func(key, value interface{}) bool {
-		if now.Sub(value.(driverEntry).lastSeen) > driverTTL {
-			activeDrivers.Delete(key)
+		e := value.(driverEntry)
+		if now.Sub(e.lastSeen) > driverTTL {
+			expireActiveDriver(key, e)
 		}
 		return true
 	})
 
 	pingRateLimit.Range(func(key, value interface{}) bool {
-		e := value.(*rateEntry)
-		e.mu.Lock()
-		// Stamps are appended in order and pruned oldest-first, so the last
-		// stamp is the driver's most recent activity. Entries are aged out
-		// once they go quiet for a full driverTTL, not only when empty.
-		stale := len(e.stamps) == 0 || now.Sub(e.stamps[len(e.stamps)-1]) > driverTTL
-		// Delete under the entry lock: a concurrent allowPing that re-locks
-		// the entry between the emptiness check and the removal would
-		// otherwise lose its timestamps when the entry is deleted, resetting
-		// that driver's 1-second window and allowing bursts above the cap.
-		if stale {
-			pingRateLimit.Delete(key)
-		}
-		e.mu.Unlock()
+		retireStalePingEntry(key, value.(*rateEntry), now)
 		return true
 	})
+
+	pruneGeofenceRateEntries()
+	evictGeofenceOverflow(sweepEvictLimit)
 }
 
 // Handle Single Telemetry Ping
@@ -623,7 +803,7 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 
 	entry := val.(driverEntry)
 	if time.Since(entry.lastSeen) > driverTTL {
-		activeDrivers.Delete(req.DriverID)
+		expireActiveDriver(req.DriverID, entry)
 		http.Error(w, "Driver telemetry not found", http.StatusNotFound)
 		return
 	}
@@ -642,12 +822,6 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 
 // Handle Telemetry Health & Throughput Stats
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	driverCount := 0
-	activeDrivers.Range(func(key, value interface{}) bool {
-		driverCount++
-		return true
-	})
-
 	uptimeSec := time.Since(serviceStartTime).Seconds()
 	pingsPerSec := 0.0
 	if uptimeSec > 0 {
@@ -657,7 +831,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(IngestionStats{
 		TotalPingsProcessed: atomic.LoadUint64(&pingCounter),
-		ActiveDrivers:       driverCount,
+		ActiveDrivers:       int(atomic.LoadUint64(&activeDriverCount)),
 		PingsPerSecond:      math.Round(pingsPerSec*100) / 100,
 		StartedAt:           serviceStartTime,
 		Status:              "healthy",

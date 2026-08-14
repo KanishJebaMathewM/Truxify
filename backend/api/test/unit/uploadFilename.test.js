@@ -5,6 +5,7 @@
  * unsanitised from the voice upload endpoint into the speech pipeline.
  */
 import { describe, expect, it } from 'vitest';
+import { checkContentLength, sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {
@@ -114,3 +115,16 @@ describe('checkContentLength', () => {
   });
 });
 
+
+describe('sanitizeUploadFilename - additional edge cases', () => {
+  it('handles whitespace-only string as fallback', () => {
+    expect(sanitizeUploadFilename('   ', 'doc')).toBe('doc');
+  });
+
+  it('preserves file extension when collapsing characters', () => {
+    const result = sanitizeUploadFilename('my<>file.pdf');
+    expect(result.endsWith('.pdf')).toBe(true);
+    expect(result).not.toContain('<');
+    expect(result).not.toContain('>');
+  });
+});

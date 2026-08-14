@@ -44,6 +44,20 @@ class OPAService {
         }
     }
 
+    // OPA CLI output can carry non-JSON noise (runtime warnings, notices)
+    // before the payload. Never let a bare JSON.parse abort an authorization
+    // decision — on failure, log the raw output and return null so the caller
+    // can produce a deny result instead of an unhandled exception.
+    _parseOpaOutput(stdout, policyName) {
+        try {
+            return JSON.parse(stdout);
+        } catch (err) {
+            logger.error(`OPA evaluation produced non-JSON output for policy ${policyName}: ${err.message}`);
+            logger.error(`Raw OPA output: ${stdout}`);
+            return null;
+        }
+    }
+
     async evaluatePolicy(policyName, input) {
         try {
             const policy = this.policyCache.get(`${policyName}.rego`);
@@ -66,7 +80,15 @@ class OPAService {
                     throw new Error(stderr);
                 }
 
-                const result = JSON.parse(stdout);
+                const result = this._parseOpaOutput(stdout, policyName);
+                if (!result) {
+                    return {
+                        allowed: false,
+                        error: `OPA returned no parseable result for policy ${policyName}`,
+                        policy: policyName,
+                        timestamp: new Date().toISOString()
+                    };
+                }
                 const allowed = result.result && result.result[0]?.value === true;
 
                 // Get violations
@@ -75,8 +97,8 @@ class OPAService {
                     const { stdout: denyStdout } = await execAsync(
                         `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.deny"`
                     );
-                    const denyResult = JSON.parse(denyStdout);
-                    if (denyResult.result) {
+                    const denyResult = this._parseOpaOutput(denyStdout, policyName);
+                    if (denyResult && denyResult.result) {
                         for (const r of denyResult.result) {
                             violations.push(r.value);
                         }

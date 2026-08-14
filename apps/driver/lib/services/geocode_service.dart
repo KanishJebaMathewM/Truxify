@@ -156,9 +156,8 @@ class GeocodeService {
           .where((s) => s.isNotEmpty)
           .toList();
     } catch (e) {
-      debugPrint('[GeocodeService] reverseGeocode failed for '
-          '${point.latitude},${point.longitude}: $e');
-      return null;
+      debugPrint('[GeocodeService] autocomplete failed for "$query": $e');
+      return [];
     }
   }
 

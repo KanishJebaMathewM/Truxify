@@ -74,6 +74,7 @@ export class OutboxService {
 
     if (error) {
       logger.error('[OutboxService] Failed to mark event published:', error.message, { eventId });
+      throw error;
     }
   }
 

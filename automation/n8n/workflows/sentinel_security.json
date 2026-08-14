@@ -58,13 +58,34 @@
     {
       "parameters": {
         "url": "http://api:5000/api/internal/defensive-pause",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "POST",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "reason",
+              "value": "=flash-loan/frontrun heuristic matched: gasPrice={{ $json.gasPrice }} wei (threshold 500 gwei)"
+            },
+            {
+              "name": "txHash",
+              "value": "={{ $json.hash || ($json.params && $json.params.result ? $json.params.result.hash : '') }}"
+            }
+          ]
+        },
         "options": {}
       },
       "name": "Trigger Frontrun Defensive Pause",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [850, 200]
+      "position": [850, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     }
   ],
   "connections": {

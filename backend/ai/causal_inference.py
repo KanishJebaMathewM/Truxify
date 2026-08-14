@@ -208,8 +208,12 @@ class CausalImpact:
         """Measure impact of intervention"""
         # The causalimpact library expects a single full data series with
         # period indices that point into it, so the pre- and post-intervention
-        # arrays are combined into one series before analysis.
+        # arrays are combined into one series before analysis. Wrap it in a
+        # DataFrame with a default (integer) index so the pre_period /
+        # post_period positions line up exactly and the model is fit on the
+        # pre-intervention baseline.
         data = np.concatenate([pre_data, post_data])
+        series = pd.DataFrame({'value': data})
 
         # Reject intervention points outside the combined pre/post series so
         # callers get an explicit error instead of a silently-null result.
@@ -227,7 +231,7 @@ class CausalImpact:
             # Calculate counterfactual
             from causalimpact import CausalImpact
             
-            impact = CausalImpact(data, pre_period, post_period)
+            impact = CausalImpact(series, pre_period, post_period)
             impact.run()
             
             summary = impact.summary()

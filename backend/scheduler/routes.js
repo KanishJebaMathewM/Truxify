@@ -80,7 +80,14 @@ router.delete('/scheduler/tasks', (req, res) => {
                 'LOW': Priority.LOW,
                 'IDLE': Priority.IDLE
             };
-            priorityValue = prioMap[priority.toUpperCase()];
+            const upperPriority = priority.toUpperCase();
+            if (!(upperPriority in prioMap)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid priority value. Must be one of: CRITICAL, HIGH, MEDIUM, LOW, IDLE'
+                });
+            }
+            priorityValue = prioMap[upperPriority];
         }
         
         const count = scheduler.cancelAll(priorityValue);

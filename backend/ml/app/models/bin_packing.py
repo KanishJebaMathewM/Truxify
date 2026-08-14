@@ -48,7 +48,7 @@ class _Shelf:
         self.shelf_height = 0.0        # tallest item placed so far
         self.cursor_x = 0.0            # next free x position
         self.cursor_y = 0.0            # next free y position (row within shelf)
-        self.row_height = 0.0          # tallest item in current row
+        self.row_height = 0.0          # max item depth (w) in current row
         self.row_width = 0.0           # max width used by any row so far
         self.items: List[dict] = []
 

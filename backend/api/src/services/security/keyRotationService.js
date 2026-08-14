@@ -249,7 +249,7 @@ class KeyRotationService {
           status,
           error_message: errorMessage,
           timestamp: new Date().toISOString(),
-          ip_address: requestIp || process.env.REQUEST_IP || 'unknown',
+          ip_address: requestIp || 'unknown',
         }]);
     } catch (err) {
       logger.error('[KeyRotationService] Failed to log rotation event:', err.message);

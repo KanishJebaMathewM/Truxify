@@ -519,7 +519,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
-  const isAscending = sort !== 'desc';
+  const isAscending = sort === 'asc';
   const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
   const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
 

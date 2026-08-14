@@ -145,34 +145,6 @@ export async function verifyAuthToken(token) {
       .eq("firebase_uid", firebaseUid)
       .maybeSingle();
 
-      const userClient = createUserClient?.(token) || supabase;
-      const { data: profile, error } = await userClient
-        .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone")
-        .eq("firebase_uid", firebaseUid)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (error) {
-        throw new Error("Database query failed verification: " + error.message);
-      }
-      userProfile = profile;
-
-      if (userProfile) {
-        // Clamp the cached profile TTL to the token's remaining lifetime so a
-        // cached profile can never outlive the access token that authorised it.
-        const cacheTtl = Math.max(1, Math.min(TTL_SECONDS, tokenRemaining));
-        await setCachedProfile(firebaseUid, {
-          id: userProfile.id,
-          uid: userProfile.firebase_uid,
-          role: userProfile.role,
-          fullName: userProfile.full_name,
-          phone: userProfile.phone,
-          isActive: true,
-        }, cacheTtl);
-      }
-    }
-
     if (!profile) {
       await setCachedProfile(
         firebaseUid,

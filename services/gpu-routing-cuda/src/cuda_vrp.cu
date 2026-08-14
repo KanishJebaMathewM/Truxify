@@ -12,6 +12,11 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
     if (stops.empty()) {
         return { 0.0f, 0, true };
     }
+    // Reject zero capacity before the division below, which would otherwise be
+    // a division-by-zero (UB / SIGFPE) on this reachable, non-empty input.
+    if (vehicleCapacity == 0) {
+        return { 0.0f, 0, false };
+    }
 
     float distance = 0.0f;
     Location prev = depot;

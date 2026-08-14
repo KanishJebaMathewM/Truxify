@@ -755,7 +755,7 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
   }
 });
 
-export default router;
+// export default moved to end
 
 // ============================================================================
 // INTELLIGENT FUEL ADVISOR
@@ -828,3 +828,5 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
 });
 
 // Resolves #2053: Prevent race conditions in truck allocation
+
+export default router;

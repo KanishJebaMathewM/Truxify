@@ -17,22 +17,38 @@ async function relayOnce() {
     const events = await outboxService.fetchPendingEvents(50);
 
     for (const event of events) {
-      try {
-        // Publish via existing eventBus — idempotent on consumer side via processed_events
-        eventBus.emitSafe(event.event_type, {
-          eventId: event.id,
-          aggregateId: event.aggregate_id,
-          aggregateType: event.aggregate_type,
-          payload: event.payload,
-          createdAt: event.created_at,
-        });
+      const payload = {
+        eventId: event.id,
+        aggregateId: event.aggregate_id,
+        aggregateType: event.aggregate_type,
+        payload: event.payload,
+        createdAt: event.created_at,
+      };
 
-        await outboxService.markPublished(event.id);
-        logger.info('[OutboxRelay] Published event:', { eventId: event.id, type: event.event_type });
+      let report;
+      try {
+        // Publish via existing eventBus and inspect the delivery report. Only
+        // acknowledge the message when an adapter actually attempted it — a
+        // no-op publish (no registered consumer/adapter) must be retried, not
+        // marked published (regression #11209).
+        report = await eventBus.publishAndReport(
+          { eventId: event.id, eventType: event.event_type, ...payload },
+          { adapters: ['kafka'] },
+        );
       } catch (err) {
         logger.error('[OutboxRelay] Failed to publish event:', { eventId: event.id, err: err.message });
         await outboxService.markFailed(event.id, err.message);
+        continue;
       }
+
+      if (report.adapterAttempted === 0) {
+        logger.warn('[OutboxRelay] No event consumer handled event:', { eventId: event.id, type: event.event_type });
+        await outboxService.markFailed(event.id, 'No event consumer handled the event');
+        continue;
+      }
+
+      await outboxService.markPublished(event.id);
+      logger.info('[OutboxRelay] Published event:', { eventId: event.id, type: event.event_type });
     }
   } catch (err) {
     logger.error('[OutboxRelay] Relay cycle error:', err.message);

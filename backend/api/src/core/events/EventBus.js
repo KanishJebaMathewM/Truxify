@@ -241,6 +241,104 @@ class EventBus extends EventEmitter {
     });
   }
 
+  /**
+   * Publish an event and report the delivery outcome so callers (e.g. the
+   * outbox relay worker) can decide whether to acknowledge a message.
+   * Accepts the same (event | eventType) shapes as publish() plus a plain
+   * event object carrying an eventType field.
+   *
+   * @returns {Promise<{
+   *   published: boolean,
+   *   deduplicated: boolean,
+   *   consumed: boolean,
+   *   adapterAttempted: number,
+   *   adapterFailures: number,
+   *   adapterErrors: string[],
+   * }>}
+   */
+  async publishAndReport(eventOrType, payloadOrOptions, optionsOrUndefined) {
+    let event;
+    let options;
+
+    if (eventOrType && typeof eventOrType === 'object' && eventOrType.metadata) {
+      event = eventOrType;
+      options = payloadOrOptions || {};
+    } else if (typeof eventOrType === 'string') {
+      const eventType = eventOrType;
+      const payload = payloadOrOptions;
+      options = optionsOrUndefined || {};
+      const metadata = new EventMetadata({
+        eventType,
+        source: options.source,
+        category: options.category || EVENT_CATEGORIES.DOMAIN,
+        version: options.version,
+        correlationId: options.correlationId,
+      });
+      event = { metadata, payload: payload !== undefined ? payload : {} };
+    } else if (eventOrType && typeof eventOrType === 'object' && eventOrType.eventType) {
+      const { payload, ...rest } = eventOrType;
+      const metadata = new EventMetadata({
+        eventType: eventOrType.eventType,
+        source: payloadOrOptions?.source,
+        category: payloadOrOptions?.category || EVENT_CATEGORIES.DOMAIN,
+        version: payloadOrOptions?.version,
+        correlationId: payloadOrOptions?.correlationId,
+      });
+      options = payloadOrOptions || {};
+      event = { metadata, payload: payload !== undefined ? payload : {}, ...rest };
+    } else {
+      throw new Error('EventBus.publishAndReport() requires a BaseEvent instance, (eventType, payload, options), or an event object with an eventType field');
+    }
+
+    const eventType = event.metadata?.eventType || event.eventType;
+
+    const report = {
+      published: true,
+      deduplicated: false,
+      consumed: false,
+      adapterAttempted: 0,
+      adapterFailures: 0,
+      adapterErrors: [],
+    };
+
+    if (this._registry.isValid(eventType)) {
+      const validation = this._registry.validate(eventType, event.payload);
+      if (!validation.valid) {
+        logger.warn(`[EventBus] Event validation failed for "${eventType}": ${validation.error}`);
+      }
+    }
+
+    if (options.deduplicate !== false && this._isDuplicate(event)) {
+      this._metrics.deduplicated++;
+      report.deduplicated = true;
+      report.published = false;
+      logger.debug(`[EventBus] Duplicate event suppressed: ${event.metadata?.eventId}`);
+      return report;
+    }
+
+    const enrichedEvent = ContextPropagator.injectIntoEventPayload(event);
+    this._metrics.published++;
+    report.consumed = this.emitSafe(eventType, enrichedEvent);
+
+    if (options.adapters !== false) {
+      const targetAdapters = options.adapters || null;
+      for (const [name, adapter] of this._adapters) {
+        if (targetAdapters && !targetAdapters.includes(name)) continue;
+        if (typeof adapter.publish !== 'function') continue;
+        report.adapterAttempted++;
+        try {
+          await adapter.publish(enrichedEvent);
+        } catch (err) {
+          report.adapterFailures++;
+          report.adapterErrors.push(`${name}: ${err.message}`);
+          this._metrics.errors++;
+        }
+      }
+    }
+
+    return report;
+  }
+
   _isDuplicate(event) {
     const eventId = event.metadata?.eventId;
     if (!eventId) return false;

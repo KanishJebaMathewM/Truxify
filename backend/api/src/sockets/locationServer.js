@@ -233,8 +233,7 @@ export function initLocationServer(httpServer) {
         return;
       }
 
-      const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
-        const gpsTimestamp = parseGpsTimestamp(timestamp);
+      const gpsTimestamp = parseGpsTimestamp(timestamp);
 
       // 1. Buffer GPS point into the shared telemetry pipeline. Synchronous and
       //    fail-open — a slow or unavailable MongoDB must never delay the

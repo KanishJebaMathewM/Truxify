@@ -132,9 +132,9 @@ class ShardManager {
           password: config.password,
           max: 10,
         });
-        logger.info(`✅ Shard ${name} initialized`);
+        logger.info(`[OK] Shard ${name} initialized`);
       } catch (error) {
-        logger.error(`❌ Failed to initialize shard ${name}:`, error);
+        logger.error(`[ERROR] Failed to initialize shard ${name}:`, error);
       }
     }
   }

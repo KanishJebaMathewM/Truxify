@@ -61,7 +61,7 @@ function parsePositiveFloat(raw, fallback, label) {
     return fallback;
   }
   const n = Number(raw);
-  if (Number.isFinite(n) && n > 0) return n;
+  if (Number.isFinite(n) && n >= 0) return n;
   if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
   return fallback;
 }
@@ -203,7 +203,7 @@ export function convertKmToMiles(km) {
   return km * 0.621371;
 }
 
-export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM };
+export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat };
 
 
 // === Spec 10: ===

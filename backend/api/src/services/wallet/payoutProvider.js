@@ -32,6 +32,9 @@ export function isPayoutProviderConfigured() {
 }
 
 export async function dispatchPayout({ driverId, withdrawal }) {
+  if (!Number.isFinite(withdrawal.amount) || withdrawal.amount <= 0) {
+    throw new Error(`Invalid withdrawal amount: ${withdrawal.amount}. Amount must be a positive number.`);
+  }
   const provider = process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   const webhookUrl = process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL;
 
@@ -63,7 +66,7 @@ export async function dispatchPayout({ driverId, withdrawal }) {
       // failure so the caller keeps its existing fail-safe handling rather
       // than hanging the settlement worker forever.
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-        throw new Error(`Payout webhook did not respond within ${timeoutMs}ms.`);
+        throw new Error(`Payout webhook did not respond within ${timeoutMs}ms.`, { cause: err });
       }
       throw err;
     }
@@ -72,16 +75,12 @@ export async function dispatchPayout({ driverId, withdrawal }) {
       throw new Error(`Payout webhook returned HTTP ${response.status}.`);
     }
 
-    const body = await response.json().catch(() => ({}));
-    // A 2xx transport response is not proof the payout succeeded: gateways
-    // routinely return HTTP 200 with an error/empty JSON body. Require an
-    // explicit provider-confirmed settlement reference before reporting
-    // success; otherwise fail so the caller retries and keeps funds reserved.
-    const settlementRef = body.settlement_ref || body.reference;
-    if (typeof settlementRef !== 'string' || settlementRef.trim() === '') {
-      throw new Error(
-        'Payout webhook returned HTTP 200 without a settlement_ref — payout not confirmed.'
-      );
+    const body = await response.json().catch(() => null);
+    const settlementRef = body && typeof body === 'object'
+      ? (body.settlement_ref || body.reference)
+      : null;
+    if (!settlementRef) {
+      throw new Error('Payout webhook returned HTTP 200 but body contains no settlement_ref or reference.');
     }
     return {
       success: true,

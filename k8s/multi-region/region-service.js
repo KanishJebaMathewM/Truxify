@@ -8,6 +8,7 @@ class RegionService {
         this.regions = [];
         this.activeRegions = [];
         this.primaryRegion = null;
+        this._healthInterval = null;
         this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
         
         // Load region config
@@ -23,29 +24,44 @@ class RegionService {
     }
 
     loadRegionConfig() {
-        const config = process.env.REGIONS ? JSON.parse(process.env.REGIONS) : [
-            {
-                name: 'us-east-1',
-                endpoint: process.env.US_EAST_ENDPOINT || 'https://us-east.truxify.com',
-                cluster: 'us-east',
-                primary: true,
-                weight: 33
-            },
-            {
-                name: 'eu-west-1',
-                endpoint: process.env.EU_WEST_ENDPOINT || 'https://eu-west.truxify.com',
-                cluster: 'eu-west',
-                primary: false,
-                weight: 33
-            },
-            {
-                name: 'ap-south-1',
-                endpoint: process.env.AP_SOUTH_ENDPOINT || 'https://ap-south.truxify.com',
-                cluster: 'ap-south',
-                primary: false,
-                weight: 34
+        let config;
+        if (process.env.REGIONS) {
+            try {
+                config = JSON.parse(process.env.REGIONS);
+            } catch (err) {
+                logger.error(`Invalid REGIONS env var (must be valid JSON). Value: ${process.env.REGIONS}`);
+                logger.error(`JSON parse error: ${err.message}`);
+                process.exit(1);
             }
-        ];
+            if (!Array.isArray(config)) {
+                logger.error(`REGIONS env var must be a JSON array of region objects. Value: ${process.env.REGIONS}`);
+                process.exit(1);
+            }
+        } else {
+            config = [
+                {
+                    name: 'us-east-1',
+                    endpoint: process.env.US_EAST_ENDPOINT || 'https://us-east.truxify.com',
+                    cluster: 'us-east',
+                    primary: true,
+                    weight: 33
+                },
+                {
+                    name: 'eu-west-1',
+                    endpoint: process.env.EU_WEST_ENDPOINT || 'https://eu-west.truxify.com',
+                    cluster: 'eu-west',
+                    primary: false,
+                    weight: 33
+                },
+                {
+                    name: 'ap-south-1',
+                    endpoint: process.env.AP_SOUTH_ENDPOINT || 'https://ap-south.truxify.com',
+                    cluster: 'ap-south',
+                    primary: false,
+                    weight: 34
+                }
+            ];
+        }
 
         this.regions = config;
         this.activeRegions = config.filter(r => r.active !== false);
@@ -57,7 +73,8 @@ class RegionService {
     // ============ Health Checks ============
 
     async startHealthChecks() {
-        clearInterval(window.__interval); window.__interval = setInterval(async () => {
+        if (this._healthInterval) clearInterval(this._healthInterval);
+        this._healthInterval = setInterval(async () => {
             await this.checkAllRegions();
         }, 10000); // Every 10 seconds
     }
@@ -72,9 +89,13 @@ class RegionService {
         // Update active regions
         const previousActive = this.activeRegions.map(r => r.name);
         this.activeRegions = this.regions.filter(r => results[r.name].healthy);
-        
-        // Check if failover needed
-        if (previousActive.length !== this.activeRegions.length) {
+
+        // Check if failover needed by comparing set membership
+        const currentActive = this.activeRegions.map(r => r.name);
+        const failed = previousActive.filter(p => !currentActive.includes(p));
+        const recovered = currentActive.filter(c => !previousActive.includes(c));
+
+        if (failed.length > 0 || recovered.length > 0) {
             await this.handleFailover(previousActive, this.activeRegions);
         }
         
@@ -216,6 +237,7 @@ class RegionService {
     async replicateToRegion(region, data) {
         try {
             await axios.post(`${region.endpoint}/api/replication/receive`, data);
+            await this.redis.set(`replication:${region.name}:last_sync`, Date.now());
         } catch (error) {
             logger.error(`Failed to replicate to ${region.name}:`, error);
         }

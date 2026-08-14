@@ -123,6 +123,10 @@ abstract class LocationQueueStore {
   /// Deletes the [count] oldest rows of any kind (last-resort trim).
   Future<int> deleteOldestRows(int count);
 
+  /// Deletes the [count] oldest non-milestone rows; milestone rows are never
+  /// dropped by capacity trimming.
+  Future<int> deleteOldestNonMilestones(int count);
+
   /// Looks up a row by its unique idempotency key (or null).
   Future<Map<String, dynamic>?> findByIdempotencyKey(String key);
 }
@@ -203,6 +207,24 @@ class SqfliteLocationQueueStore implements LocationQueueStore {
     final db = await _db;
     final rows = await db.rawQuery(
       'SELECT id FROM $table ORDER BY created_at ASC, id ASC LIMIT ?',
+      [count],
+    );
+    if (rows.isEmpty) return 0;
+    final ids = rows.map((r) => r['id']).toList();
+    return db.delete(
+      table,
+      where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+      whereArgs: ids,
+    );
+  }
+
+  @override
+  Future<int> deleteOldestNonMilestones(int count) async {
+    final db = await _db;
+    final rows = await db.rawQuery(
+      'SELECT id FROM $table '
+      'WHERE kind != "milestone" '
+      'ORDER BY created_at ASC, id ASC LIMIT ?',
       [count],
     );
     if (rows.isEmpty) return 0;
@@ -498,7 +520,7 @@ class OfflineLocationQueue {
           keepNewestId: newest.id,
         );
       } else {
-        await _store.deleteOldestRows(total - maxEntries);
+        await _store.deleteOldestNonMilestones(total - maxEntries);
       }
       final after = await _store.count();
       if (after >= before) return; // nothing deleted — stop to avoid a loop
@@ -510,7 +532,9 @@ class OfflineLocationQueue {
     if (id is! int) return;
     try {
       await _store.deleteWhereId(id);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[OfflineLocationQueue] Failed to quarantine corrupt '
+          'queue row $id: $e');
       // Never let a corrupt row block the queue.
     }
   }

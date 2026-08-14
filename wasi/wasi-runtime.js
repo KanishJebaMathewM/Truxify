@@ -137,7 +137,7 @@ class WASIRuntime {
             return result;
 
         } catch (error) {
-            logger.error('Function execution failed:', error);
+            logger.error({ err: error, functionName, instanceId }, 'WASI function execution failed');
             throw error;
         }
     }

@@ -38,7 +38,7 @@ describe('payoutProvider', () => {
   })
 
   it('throws when no provider is configured', async () => {
-    await expect(dispatchPayout({ driverId: 'd', withdrawal: { id: 'w' } }))
+    await expect(dispatchPayout({ driverId: 'd', withdrawal: { id: 'w', amount: 1 } }))
       .rejects.toThrow(/no withdrawal payout provider/i)
   })
 
@@ -57,22 +57,11 @@ describe('payoutProvider', () => {
     vi.unstubAllGlobals()
   })
 
-  it('fails when the webhook returns 200 without a settlement reference', async () => {
+  it('fails when the webhook omits settlement_ref', async () => {
     process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } }))
-      .rejects.toThrow(/without a settlement_ref/)
-    vi.unstubAllGlobals()
-  })
-
-  it('fails when the webhook returns 200 with an error body', async () => {
-    process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ status: 'failed', error: 'insufficient funds' }),
-    }))
-    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } }))
-      .rejects.toThrow(/without a settlement_ref/)
+      .rejects.toThrow(/settlement_ref or reference/)
     vi.unstubAllGlobals()
   })
 

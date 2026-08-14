@@ -53,7 +53,7 @@ class Tracing {
             this.registerInstrumentations();
 
             this.isInitialized = true;
-            logger.info(`✅ OpenTelemetry initialized for ${serviceName}`);
+            logger.info(`OpenTelemetry initialized for ${serviceName}`);
         } catch (error) {
             logger.error('❌ OpenTelemetry initialization failed:', error);
         }

@@ -1,7 +1,10 @@
+import logger from '../middleware/logger.js';
+
 const MISSING = Symbol('RequestCache:missing');
 export class RequestCache {
   constructor() {
     this._cache = new Map();
+    this._errorCount = 0;
   }
 
   /**
@@ -30,6 +33,19 @@ export class RequestCache {
 
   clear() {
     this._cache.clear();
+  }
+
+  setBatch(entries) {
+    // entries is an array of {key, value} objects
+    if (!Array.isArray(entries)) return;
+    for (const { key, value } of entries) {
+      try {
+        this.set(key, value);
+      } catch (err) {
+        logger.error({ event: 'REQUEST_CACHE_SET_ERROR', key }, '[RequestCache] setBatch failed for key');
+        this._errorCount = (this._errorCount || 0) + 1;
+      }
+    }
   }
 
   get size() {

@@ -45,3 +45,6 @@ jobs:
 
       - name: Audit dispute-resolution escrow webhooks
         run: node automation/n8n/tests/dispute-resolution.security.test.js
+
+      - name: Audit internal control-plane call authentication
+        run: node automation/n8n/tests/internal-api-auth.security.test.js

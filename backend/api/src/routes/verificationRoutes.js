@@ -61,8 +61,7 @@ const kycUploadLimiter = rateLimit({
 router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const userClient = createUserClient(req.token);
-    const { data: order, error: orderError } = await userClient
+    const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('id, customer_id, driver_id')
       .eq('id', orderId)
@@ -219,6 +218,7 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
         return res.status(422).json({ success: false, error: 'Uploaded image failed malware scanning.' });
       }
     } catch (error) {
+      logger.error({ error: error.message, stack: error.stack }, '[verificationRoutes] KYC upload validation/malware scan error');
       if (error instanceof DocumentValidationError) {
         return res.status(422).json({ success: false, error: error.message });
       }

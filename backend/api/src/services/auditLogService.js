@@ -68,6 +68,12 @@ class AuditLogService {
       return null;
     }
 
+    // Guard against missing actorId to prevent silent failures
+    if (!entry.actorId) {
+      logger.warn('[AuditLog] Skipping audit entry — missing actorId:', { action: entry.action, path: entry.path });
+      return null;
+    }
+
     const record = {
       actor_id: entry.actorId,
       actor_role: entry.actorRole,

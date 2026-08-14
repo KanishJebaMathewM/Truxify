@@ -409,7 +409,7 @@ router.post(
 
         sendPushNotification(
           pending.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
@@ -417,7 +417,7 @@ router.post(
       } else if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }

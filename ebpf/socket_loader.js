@@ -1,32 +1,15 @@
 import { spawn } from 'child_process';
 import path from 'path';
-<<<<<<< HEAD
-=======
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
->>>>>>> upstream/main
 
 /**
  * Node.js loader script attaching eBPF socket filter (SO_ATTACH_BPF)
  */
 export class EbpfSocketLoader {
-<<<<<<< HEAD
-  constructor() {
-    this.objPath = path.join(process.cwd(), 'ebpf', 'socket_buffer_filter.o');
-  }
-
-  attachToSocket(socketFd) {
-    console.log(`[eBPF Socket Loader] Attaching eBPF filter to socket descriptor ${socketFd}...`);
-    // Simulated native BPF socket attachment
-    return true;
-  }
-}
-
-export const socketLoader = new EbpfSocketLoader();
-=======
   constructor(options = {}) {
     this.objPath = options.objPath || path.join(__dirname, 'socket_buffer_filter.o');
     this.trustedPort = options.trustedPort || 0;
@@ -102,11 +85,24 @@ export const socketLoader = new EbpfSocketLoader();
 
   async _attachToSocket(socketFd, progId) {
     return new Promise((resolve) => {
-      // bpftool prog attach <prog_id> /proc/self/fd/<socketFd>
-      const fdPath = `/proc/self/fd/${socketFd}`;
-      const child = spawn('bpftool', ['prog', 'attach', progId.toString(), fdPath], {
-        stdio: 'ignore'
-      });
+      // A socket filter is attached to an existing socket fd via the
+      // SO_ATTACH_BPF setsockopt. `bpftool prog attach <id> <fd>` is not a
+      // valid invocation for this, so we open the pinned BPF program (which
+      // yields a usable program fd in-process) and call setsockopt with it.
+      const pinPath = '/sys/fs/bpf/truxify_telemetry_filter';
+      const child = spawn('python3', [
+        '-c',
+        'import socket,struct,sys;' +
+        'pin=sys.argv[1]; sfd=int(sys.argv[2]);' +
+        'fd=open(pin,"rb").fileno();' +
+        's=socket.fromfd(sfd,socket.AF_INET,socket.SOCK_STREAM);' +
+        'SO_ATTACH_BPF=50;' +
+        's.setsockopt(socket.SOL_SOCKET,SO_ATTACH_BPF,struct.pack("I",fd));' +
+        'sys.exit(0)',
+        pinPath,
+        socketFd.toString()
+      ], { stdio: 'ignore' });
+      child.on('error', () => resolve(false));
       child.on('close', (code) => resolve(code === 0));
     });
   }
@@ -151,4 +147,3 @@ export const socketLoader = new EbpfSocketLoader();
 }
 
 export const socketLoader = new EbpfSocketLoader();
->>>>>>> upstream/main

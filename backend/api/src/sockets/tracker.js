@@ -1127,10 +1127,21 @@ export async function handleLocationPing(ws, data, req) {
             orderDisplayId: order.order_display_id,
             assignedDriverId: order.driver_id,
           }, 'Driver attempted to submit location for order they are not assigned to');
+          // Drop the stale cache entry so a reassignment can never be silently
+          // reused to authorize a driver that is no longer assigned to this order.
+          await invalidateDriverOrderCache(driver_id);
           return ws.send(JSON.stringify({
             error: 'Not authorized to track this order',
             orderId: orderDisplayId || orderUUID,
           }));
+        }
+        // Keep the cache in sync with the authoritative assignment. If the order
+        // was reassigned (or the cached mapping went stale), this overwrites it
+        // with the current driver→order binding on every authorized ping.
+        if (order) {
+          orderUUID = order.id;
+          orderDisplayId = order.order_display_id;
+          await setCachedDriverOrder(driver_id, order.id, order.order_display_id);
         }
       }
     } catch (err) {

@@ -200,7 +200,8 @@ const getOrderResource = async (req) => {
 };
 
 
-router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+  const { id } = req.params;
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
@@ -295,13 +296,13 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), valid
 });
 
 // ============================================================================
-// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/deliveries/:id/confirm-otp
+// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
 // ============================================================================
 /**
  * Friendly alias of /:id/verify-delivery for the driver app.
  * Accepts the same body { otp } and delegates to the same pipeline.
- * Mounted on the *orders* router but exposed as /api/deliveries/:id/confirm-otp
- * via the separate deliveryRoutes mount in index.js (see below).
+ * Registered on the orders router as /:id/confirm-otp, exposed to the driver
+ * app at /api/orders/:id/confirm-otp via the /api/orders mount in index.js.
  *
  * This keeps the driver app URL surface clean while reusing identical logic.
  */

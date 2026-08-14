@@ -24,6 +24,18 @@ function parseCoord(value, min, max) {
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
+// Sanitize a trip identifier before interpolating it into a PostgREST `.or()`
+// filter. The filter grammar treats `)`, `,`, quotes and whitespace as syntax,
+// so an unsanitized value could break out of the intended predicate
+// (injection / malformed query / DoS). Rejects any such characters.
+function sanitizeTripId(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (/[,)(\s'"]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 // ============================================================================
 // GET /api/ml/eta?tripId=...&lat=...&lng=...
 // ============================================================================
@@ -34,12 +46,18 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'tripId is required.' });
     }
 
+    // Sanitize before interpolating into the PostgREST filter (see sanitizeTripId).
+    const safeTripId = sanitizeTripId(tripId);
+    if (!safeTripId) {
+      return res.status(400).json({ error: 'tripId contains invalid characters.' });
+    }
+
     // Resolve the trip by primary key or display id, then its linked order for
     // the drop coordinates that define the remaining route.
     const { data: trip, error: tripErr } = await supabaseAdmin
       .from('trips')
       .select('id, trip_display_id, order_id')
-      .or(`id.eq.${tripId},trip_display_id.eq.${tripId}`)
+      .or(`id.eq.${safeTripId},trip_display_id.eq.${safeTripId}`)
       .maybeSingle();
 
     if (tripErr) {

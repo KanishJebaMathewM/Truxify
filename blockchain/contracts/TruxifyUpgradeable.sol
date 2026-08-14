@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 
 
@@ -46,6 +47,7 @@ contract TruxifyUpgradeable is
         string reason;
         uint256 createdAt;
         uint256 votingEndsAt;
+        uint256 snapshotBlock;
         uint256 votesFor;
         uint256 votesAgainst;
         bool executed;
@@ -359,6 +361,7 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
             reason: reason,
             createdAt: block.timestamp,
             votingEndsAt: block.timestamp + daoVotingPeriod,
+            snapshotBlock: block.number,
             votesFor: 0,
             votesAgainst: 0,
             executed: false,
@@ -376,10 +379,12 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
         require(!hasVoted[proposalId][msg.sender], "Already voted");
         require(address(governanceToken) != address(0), "Governance token not configured");
 
-        // Voting power comes from token balance, not address count. An
-        // attacker who spins up 1000 empty addresses gets zero extra votes —
-        // they'd need to actually acquire 1000 addresses' worth of tokens.
-        uint256 weight = governanceToken.balanceOf(msg.sender);
+        // Voting power is snapshotted at the proposal's creation block via the
+        // token's checkpointing (OpenZeppelin Votes). This locks each token's
+        // weight to the moment the proposal was created, so transferring tokens
+        // to a fresh address after voting cannot conjure new voting power — the
+        // new address held zero tokens at the snapshot block and reverts below.
+        uint256 weight = IVotes(address(governanceToken)).getPastVotes(msg.sender, proposal.snapshotBlock);
         require(weight > 0, "No voting power");
 
         hasVoted[proposalId][msg.sender] = true;

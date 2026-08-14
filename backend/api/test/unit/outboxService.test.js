@@ -148,6 +148,17 @@ describe('OutboxService', () => {
       expect(mocks.chain.lastUpdate.retry_count).toBe(1);
     });
 
+    it('does not embed an unawaited rpc() Promise as the retry_count value (#12178)', async () => {
+      mocks.chain.data = { retry_count: 4 };
+      await outboxService.markFailed('evt-3', 'boom');
+
+      // The increment must be computed in JS and passed as a plain number,
+      // never by assigning the rpc() query builder to the column.
+      expect(mocks.chain.lastUpdate.retry_count).toBe(5);
+      expect(mocks.chain.lastUpdate.retry_count).toBeTypeOf('number');
+      expect(mocks.chain.rpc).not.toHaveBeenCalled();
+    });
+
     it('skips when eventId is missing', async () => {
       await outboxService.markFailed(null, 'err');
       expect(mocks.supabase.from).not.toHaveBeenCalled();

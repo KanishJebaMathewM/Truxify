@@ -131,7 +131,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   if (!rateCard.ratePerTonneKm || rateCard.ratePerTonneKm <= 0) {
     throw new RangeError(`ratePerTonneKm must be > 0, got ${rateCard.ratePerTonneKm}`);
   }
-  if (!rateCard.handlingFee || rateCard.handlingFee < 0) {
+  if (rateCard.handlingFee == null || rateCard.handlingFee < 0) {
     throw new RangeError(`handlingFee must be >= 0, got ${rateCard.handlingFee}`);
   }
 

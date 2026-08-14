@@ -941,10 +941,10 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
       return Center(child: Text(_error!, style: const TextStyle(color: TruxifyColors.error)));
     }
 
-    final totalPayout = (_data!['totalPayout'] as num?)?.toDouble() ?? 0.0;
-    final estFuel = (_data!['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0;
-    final margin = (_data!['profitMargin'] as num?)?.toDouble() ?? 0.0;
-    final chartPoints = (_data!['chartPoints'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final totalPayout = (_data?['totalPayout'] as num?)?.toDouble() ?? 0.0;
+    final estFuel = (_data?['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0;
+    final margin = (_data?['profitMargin'] as num?)?.toDouble() ?? 0.0;
+    final chartPoints = (_data?['chartPoints'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
 
     return RefreshIndicator(
       onRefresh: _load,

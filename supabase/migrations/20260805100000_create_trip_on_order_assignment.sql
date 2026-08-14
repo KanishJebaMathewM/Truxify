@@ -27,6 +27,8 @@ DECLARE
   v_driver_active_trip text;
   v_customer_name text;
   v_trip_display_id text;
+  v_fuel_deducted int;
+  v_distance_km numeric;
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.status = 'truck_assigned'
      AND OLD.status IS DISTINCT FROM 'truck_assigned' THEN
@@ -59,9 +61,24 @@ BEGIN
 
     v_trip_display_id := 'TX-' || NEW.order_display_id;
 
+    -- Estimated fuel deduction mirrors the backend rate card
+    -- (backend/api/src/lib/pricing.js DEFAULTS.FUEL_COST_PCT = 45% of base
+    -- freight). It is a driver-side estimate for display only; wallet payouts
+    -- use orders.total_amount.
+    v_fuel_deducted := ROUND(COALESCE(NEW.base_freight, 0)::numeric * 45 / 100)::int;
+
+    -- Straight-line (haversine) pickup → drop estimate, the same formula the
+    -- pricing engine uses as its fallback when no road distance is available.
+    v_distance_km := 6371.0088 * acos(least(1, greatest(-1,
+      sin(radians(NEW.pickup_lat)) * sin(radians(NEW.drop_lat)) +
+      cos(radians(NEW.pickup_lat)) * cos(radians(NEW.drop_lat)) *
+      cos(radians(NEW.pickup_lng) - radians(NEW.drop_lng))
+    )));
+
     INSERT INTO trips (
       trip_display_id, driver_id, order_id, route_label, status, trip_date,
-      base_freight, total_earnings
+      base_freight, total_earnings,
+      platform_fee, toll_deducted, fuel_deducted, net_earnings, distance
     ) VALUES (
       v_trip_display_id,
       NEW.driver_id,
@@ -70,7 +87,15 @@ BEGIN
       'active',
       COALESCE(NEW.pickup_date, CURRENT_DATE),
       COALESCE(NEW.base_freight, 0),
+      COALESCE(NEW.total_amount, 0),
+      COALESCE(NEW.platform_fee, 0),
+      COALESCE(NEW.toll_estimate, 0),
+      v_fuel_deducted,
       COALESCE(NEW.total_amount, 0)
+        - COALESCE(NEW.platform_fee, 0)
+        - COALESCE(NEW.toll_estimate, 0)
+        - v_fuel_deducted,
+      ROUND(v_distance_km)::text || ' km'
     );
 
     INSERT INTO trip_items (
@@ -113,3 +138,28 @@ CREATE TRIGGER trg_trips_ensure_on_assignment
   FOR EACH ROW
   WHEN (NEW.status = 'truck_assigned')
   EXECUTE FUNCTION ensure_trip_on_assignment();
+
+-- =============================================================================
+-- Backfill: persist money/distance on trips created before this migration, so
+-- previously-completed trips stop reporting NULL net_earnings/fuel_deducted
+-- (the analytics endpoint and driver app then show real values, not ₹0/0 km).
+-- Guarded on net_earnings IS NULL so it is idempotent. Duration is intentionally
+-- left alone: the schema stores no trip start time, so it cannot be derived.
+-- =============================================================================
+update trips t
+set platform_fee  = COALESCE(o.platform_fee, 0),
+    toll_deducted = COALESCE(o.toll_estimate, 0),
+    fuel_deducted = ROUND(COALESCE(o.base_freight, 0)::numeric * 45 / 100)::int,
+    net_earnings  = COALESCE(o.total_amount, 0)
+                    - COALESCE(o.platform_fee, 0)
+                    - COALESCE(o.toll_estimate, 0)
+                    - ROUND(COALESCE(o.base_freight, 0)::numeric * 45 / 100)::int,
+    distance      = ROUND(6371.0088 * acos(least(1, greatest(-1,
+                      sin(radians(o.pickup_lat)) * sin(radians(o.drop_lat)) +
+                      cos(radians(o.pickup_lat)) * cos(radians(o.drop_lat)) *
+                      cos(radians(o.pickup_lng) - radians(o.drop_lng))
+                    ))))::text || ' km',
+    updated_at    = now()
+from orders o
+where t.order_id = o.id
+  and t.net_earnings is null;

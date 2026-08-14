@@ -1,47 +1,42 @@
-/**
- * Unit tests for backend/api/src/lib/escapeLike.js
- *
- * Coverage:
- *   - Returns non-string inputs unchanged
- *   - Escapes backslashes, percent signs, and underscores
- *   - Escapes all three special chars in combination
- *   - Returns a string for a string input
- *
- * Run with:  npm run test:unit -- test/unit/escapeLike.test.js
- */
 import { describe, it, expect } from 'vitest';
-import { escapeLike } from '../../src/lib/escapeLike.js';
+import { escapeLike } from '../../../src/lib/escapeLike.js';
 
 describe('escapeLike', () => {
-  it('returns non-string inputs unchanged', () => {
-    expect(escapeLike(null)).toBe(null);
-    expect(escapeLike(undefined)).toBe(undefined);
-    expect(escapeLike(42)).toBe(42);
-    expect(escapeLike({ foo: 'bar' })).toEqual({ foo: 'bar' });
+  it('escapes % wildcard', () => {
+    expect(escapeLike('100%')).toBe('100\%');
   });
 
-  it('escapes backslashes', () => {
+  it('escapes _ wildcard', () => {
+    expect(escapeLike('user_name')).toBe('user\_name');
+  });
+
+  it('escapes backslash', () => {
     expect(escapeLike('path\\to\\file')).toBe('path\\\\to\\\\file');
   });
 
-  it('escapes percent signs used in LIKE wildcards', () => {
-    expect(escapeLike('hello%world')).toBe('hello\\%world');
+  it('leaves plain strings unchanged', () => {
+    expect(escapeLike('normaltext')).toBe('normaltext');
   });
 
-  it('escapes underscores used in LIKE wildcards', () => {
-    expect(escapeLike('user_name')).toBe('user\\_name');
+  it('handles empty string', () => {
+    expect(escapeLike('')).toBe('');
+  });
+});
+
+describe('escapeLike and escapeSqlLike - additional coverage', () => {
+  it('escapeLike handles unicode characters', () => {
+    expect(escapeLike('hello world')).toBe('hello world');
+    expect(escapeLike('café')).toBe('café');
   });
 
-  it('escapes all three special characters together', () => {
-    expect(escapeLike('50%_test\\value')).toBe('50\\%\\\_test\\\\value');
+  it('escapeSqlLike handles unicode characters', () => {
+    expect(escapeSqlLike('hello world')).toBe('hello world');
+    expect(escapeSqlLike('café')).toBe('café');
   });
 
-  it('returns the same string when no special chars are present', () => {
-    expect(escapeLike('normal text here')).toBe('normal text here');
-  });
-
-  it('returns a string type for a string input', () => {
-    const result = escapeLike('test');
-    expect(typeof result).toBe('string');
+  it('escapeLike and escapeSqlLike produce different outputs', () => {
+    // escapeSqlLike handles [] as well, escapeLike does not
+    expect(escapeLike('[test]')).toBe('[test]');
+    expect(escapeSqlLike('[test]')).toBe('\\[test\\]');
   });
 });

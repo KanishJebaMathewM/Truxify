@@ -58,7 +58,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   DateTime? _startDate;
   DateTime? _endDate;
   String _selectedSort = 'Newest';
-  final List<String> _sortOptions = ['Newest', 'Oldest', 'Delivery Date'];
+  final List<String> _sortOptions = ['Newest', 'Oldest'];
 
   void _resetFilters() {
     setState(() {
@@ -102,11 +102,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     _orderService = widget.orderService ?? OrderService();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) {
-        _controller?.setOrdersTab(_tabController.index);
-      }
-    });
+    _tabController.addListener(_onTabChanged);
     _loadOrders();
     _subscribeToOrdersListUpdates();
   }
@@ -136,9 +132,7 @@ class _OrdersScreenState extends State<OrdersScreen>
     try {
       if (hasNetwork) {
         final activeOrders = await _orderService.fetchActiveOrders();
-        debugPrint("Supabase active orders: $activeOrders");
         final historyOrders = await _orderService.fetchHistoryOrders();
-        debugPrint("Supabase history orders: $historyOrders");
 
         String? updatedAt;
 
@@ -198,6 +192,10 @@ class _OrdersScreenState extends State<OrdersScreen>
               isStackable: order['is_stackable'] as bool?,
               isFragile: order['is_fragile'] as bool?,
               specialRequirements: order['special_requirements']?.toString(),
+              pickupLat: (order['pickup_lat'] as num?)?.toDouble(),
+              pickupLng: (order['pickup_lng'] as num?)?.toDouble(),
+              dropLat: (order['drop_lat'] as num?)?.toDouble(),
+              dropLng: (order['drop_lng'] as num?)?.toDouble(),
             );
           }).toList();
         });
@@ -341,8 +339,15 @@ class _OrdersScreenState extends State<OrdersScreen>
         .subscribe();
   }
 
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging) {
+      _controller?.setOrdersTab(_tabController.index);
+    }
+  }
+
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
     if (SupabaseConfig.isConfigured && _ordersChannel != null) {
@@ -432,12 +437,9 @@ class _OrdersScreenState extends State<OrdersScreen>
       final dateB = DateTime.tryParse(b.date) ?? DateTime(1970);
       if (_selectedSort == 'Oldest') {
         return dateA.compareTo(dateB);
-      } else if (_selectedSort == 'Delivery Date') {
-        return dateB.compareTo(dateA); // Or delivery date equivalent fallback
-      } else {
-        // Default 'Newest'
-        return dateB.compareTo(dateA);
       }
+      // Default 'Newest'
+      return dateB.compareTo(dateA);
     });
 
     return filtered;

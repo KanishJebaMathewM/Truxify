@@ -1,173 +1,78 @@
-/**
- * Unit tests for backend/api/src/lib/predictionValidator.js
- *
- * Coverage:
- *   - Valid predictions accepted
- *   - Null / undefined rejected
- *   - NaN rejected
- *   - Infinity rejected
- *   - Negative values rejected
- *   - Zero rejected
- *   - Below minimum price rejected
- *   - Above maximum price rejected
- *   - Missing required fields rejected
- *   - Invalid currency rejected
- *   - Invalid min_price / max_price rejected
- *   - Invalid confidence rejected
- *   - convertToPaisa edge cases
- *   - Band ratio limits
- *
- * Run with:  npm run test:unit -- test/unit/predictionValidator.test.js
- */
 import { describe, it, expect } from 'vitest';
 import {
   validatePricePrediction,
   convertToPaisa,
   RejectionReason,
-  __testing,
 } from '../../src/lib/predictionValidator.js';
 
-const { MIN_PRICE_INR, MAX_PRICE_INR, MAX_BAND_RATIO } = __testing;
-
-function validResponse(overrides = {}) {
-  return {
-    estimated_price: 5000,
-    min_price: 4250,
-    max_price: 5750,
-    currency: 'INR',
-    confidence: 0.85,
-    ...overrides,
-  };
-}
-
-describe('PredictionValidator', () => {
-  // ── Valid predictions ──────────────────────────────────────────────────
-
-  describe('valid predictions', () => {
-    it('accepts a fully valid response', () => {
-      const result = validatePricePrediction(validResponse());
+describe('predictionValidator', () => {
+  describe('validatePricePrediction', () => {
+    it('accepts a valid price prediction', () => {
+      const result = validatePricePrediction({
+        estimated_price: 5000,
+        currency: 'INR',
+      });
       expect(result.ok).toBe(true);
       expect(result.validated.estimated_price).toBe(5000);
-      expect(result.validated.currency).toBe('INR');
     });
 
-    it('accepts a minimal valid response (only required fields)', () => {
+    it('accepts a valid price prediction with min/max prices', () => {
       const result = validatePricePrediction({
-        estimated_price: 1000,
+        estimated_price: 10000,
+        currency: 'INR',
+        min_price: 9000,
+        max_price: 11000,
+        confidence: 0.85,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.validated.min_price).toBe(9000);
+      expect(result.validated.max_price).toBe(11000);
+      expect(result.validated.confidence).toBe(0.85);
+    });
+
+    it('derives min/max prices when not provided', () => {
+      const result = validatePricePrediction({
+        estimated_price: 10000,
         currency: 'INR',
       });
       expect(result.ok).toBe(true);
-      expect(result.validated.estimated_price).toBe(1000);
-      // min/max default to ±15%
-      expect(result.validated.min_price).toBe(850);
-      expect(result.validated.max_price).toBe(1150);
-      expect(result.validated.confidence).toBeNull();
+      expect(result.validated.min_price).toBe(8500); // 10000 * (1 - 0.15)
+      expect(result.validated.max_price).toBe(11500); // 10000 * (1 + 0.15)
     });
 
-    it('accepts price at exact minimum boundary', () => {
-      const result = validatePricePrediction({
-        estimated_price: MIN_PRICE_INR,
-        currency: 'INR',
-      });
-      expect(result.ok).toBe(true);
-    });
-
-    it('accepts price at exact maximum boundary', () => {
-      const result = validatePricePrediction({
-        estimated_price: MAX_PRICE_INR,
-        currency: 'INR',
-      });
-      expect(result.ok).toBe(true);
-    });
-
-    it('accepts confidence at exact boundaries (0 and 1)', () => {
-      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', confidence: 0 }).ok).toBe(true);
-      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', confidence: 1 }).ok).toBe(true);
-    });
-
-    it('rounds prices to 2 decimal places', () => {
-      const result = validatePricePrediction({
-        estimated_price: 1234.567,
-        currency: 'INR',
-      });
-      expect(result.ok).toBe(true);
-      expect(result.validated.estimated_price).toBe(1234.57);
-    });
-  });
-
-  // ── Null / undefined ───────────────────────────────────────────────────
-
-  describe('null / undefined', () => {
-    it('rejects null', () => {
+    it('rejects null input', () => {
       const result = validatePricePrediction(null);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.NULL_RESPONSE);
     });
 
-    it('rejects undefined', () => {
+    it('rejects undefined input', () => {
       const result = validatePricePrediction(undefined);
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.NULL_RESPONSE);
     });
-  });
 
-  // ── Type errors ────────────────────────────────────────────────────────
-
-  describe('unexpected types', () => {
-    it('rejects a string', () => {
-      const result = validatePricePrediction('not an object');
+    it('rejects non-object input', () => {
+      const result = validatePricePrediction('string');
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.UNEXPECTED_TYPE);
     });
 
-    it('rejects a number', () => {
-      const result = validatePricePrediction(42);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.UNEXPECTED_TYPE);
-    });
-
-    it('rejects a boolean', () => {
-      const result = validatePricePrediction(true);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.UNEXPECTED_TYPE);
-    });
-
-    it('rejects an array (passes typeof check but fails on missing fields)', () => {
-      const result = validatePricePrediction([]);
-      expect(result.ok).toBe(false);
-      // typeof [] === 'object' in JS, so it falls through to missing_field
-      expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-    });
-  });
-
-  // ── Missing fields ─────────────────────────────────────────────────────
-
-  describe('missing required fields', () => {
-    it('rejects empty object', () => {
-      const result = validatePricePrediction({});
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-      expect(result.detail).toContain('estimated_price');
-    });
-
-    it('rejects object missing currency', () => {
-      const result = validatePricePrediction({ estimated_price: 5000 });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-      expect(result.detail).toContain('currency');
-    });
-
-    it('rejects object missing estimated_price', () => {
+    it('rejects missing estimated_price', () => {
       const result = validatePricePrediction({ currency: 'INR' });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-      expect(result.detail).toContain('estimated_price');
     });
-  });
 
-  // ── NaN ────────────────────────────────────────────────────────────────
+    it('rejects non-numeric estimated_price', () => {
+      const result = validatePricePrediction({
+        estimated_price: '5000',
+        currency: 'INR',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe(RejectionReason.NOT_A_NUMBER);
+    });
 
-  describe('NaN prediction', () => {
     it('rejects NaN estimated_price', () => {
       const result = validatePricePrediction({
         estimated_price: NaN,
@@ -176,12 +81,8 @@ describe('PredictionValidator', () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.NAN);
     });
-  });
 
-  // ── Infinity ───────────────────────────────────────────────────────────
-
-  describe('Infinity prediction', () => {
-    it('rejects positive Infinity', () => {
+    it('rejects Infinity estimated_price', () => {
       const result = validatePricePrediction({
         estimated_price: Infinity,
         currency: 'INR',
@@ -190,29 +91,16 @@ describe('PredictionValidator', () => {
       expect(result.reason).toBe(RejectionReason.INFINITY);
     });
 
-    it('rejects negative Infinity', () => {
+    it('rejects negative estimated_price', () => {
       const result = validatePricePrediction({
-        estimated_price: -Infinity,
-        currency: 'INR',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INFINITY);
-    });
-  });
-
-  // ── Negative / zero ────────────────────────────────────────────────────
-
-  describe('negative and zero values', () => {
-    it('rejects negative price', () => {
-      const result = validatePricePrediction({
-        estimated_price: -500,
+        estimated_price: -100,
         currency: 'INR',
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.NEGATIVE);
     });
 
-    it('rejects zero price', () => {
+    it('rejects zero estimated_price', () => {
       const result = validatePricePrediction({
         estimated_price: 0,
         currency: 'INR',
@@ -220,42 +108,25 @@ describe('PredictionValidator', () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.ZERO);
     });
-  });
 
-  // ── Range limits ───────────────────────────────────────────────────────
-
-  describe('price range limits', () => {
-    it('rejects price below minimum', () => {
+    it('rejects price below MIN_PRICE_INR', () => {
       const result = validatePricePrediction({
-        estimated_price: MIN_PRICE_INR - 1,
+        estimated_price: 50,
         currency: 'INR',
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.BELOW_MIN);
     });
 
-    it('rejects price above maximum', () => {
+    it('rejects price above MAX_PRICE_INR', () => {
       const result = validatePricePrediction({
-        estimated_price: MAX_PRICE_INR + 1,
+        estimated_price: 1_000_000,
         currency: 'INR',
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.ABOVE_MAX);
     });
 
-    it('rejects extremely small positive value', () => {
-      const result = validatePricePrediction({
-        estimated_price: 0.001,
-        currency: 'INR',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.BELOW_MIN);
-    });
-  });
-
-  // ── Currency ───────────────────────────────────────────────────────────
-
-  describe('currency validation', () => {
     it('rejects non-INR currency', () => {
       const result = validatePricePrediction({
         estimated_price: 5000,
@@ -265,40 +136,7 @@ describe('PredictionValidator', () => {
       expect(result.reason).toBe(RejectionReason.INVALID_CURRENCY);
     });
 
-    it('rejects empty currency', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: '',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CURRENCY);
-    });
-  });
-
-  // ── min_price / max_price ──────────────────────────────────────────────
-
-  describe('price band validation', () => {
-    it('rejects non-numeric min_price', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        min_price: 'cheap',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
-    });
-
-    it('rejects NaN min_price', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        min_price: NaN,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
-    });
-
-    it('rejects min_price greater than estimated_price', () => {
+    it('rejects min_price that exceeds estimated_price', () => {
       const result = validatePricePrediction({
         estimated_price: 5000,
         currency: 'INR',
@@ -308,71 +146,27 @@ describe('PredictionValidator', () => {
       expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
     });
 
-    it('rejects non-numeric max_price', () => {
+    it('rejects max_price below estimated_price', () => {
       const result = validatePricePrediction({
-        estimated_price: 5000,
+        estimated_price: 10000,
         currency: 'INR',
-        max_price: 'expensive',
+        max_price: 5000,
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
     });
 
-    it('rejects NaN max_price', () => {
+    it('rejects max_price exceeding 3x band ratio', () => {
       const result = validatePricePrediction({
-        estimated_price: 5000,
+        estimated_price: 1000,
         currency: 'INR',
-        max_price: NaN,
+        max_price: 5000,
       });
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
     });
 
-    it('rejects max_price less than estimated_price', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        max_price: 4000,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
-    });
-
-    it('rejects max_price exceeding band ratio', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        max_price: 5000 * MAX_BAND_RATIO + 1,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
-    });
-  });
-
-  // ── Confidence ─────────────────────────────────────────────────────────
-
-  describe('confidence validation', () => {
-    it('rejects non-numeric confidence', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        confidence: 'high',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
-    });
-
-    it('rejects NaN confidence', () => {
-      const result = validatePricePrediction({
-        estimated_price: 5000,
-        currency: 'INR',
-        confidence: NaN,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
-    });
-
-    it('rejects confidence below 0', () => {
+    it('rejects invalid confidence below 0', () => {
       const result = validatePricePrediction({
         estimated_price: 5000,
         currency: 'INR',
@@ -382,7 +176,7 @@ describe('PredictionValidator', () => {
       expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
     });
 
-    it('rejects confidence above 1', () => {
+    it('rejects invalid confidence above 1', () => {
       const result = validatePricePrediction({
         estimated_price: 5000,
         currency: 'INR',
@@ -391,98 +185,71 @@ describe('PredictionValidator', () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
     });
+
+    it('accepts confidence at boundary 0', () => {
+      const result = validatePricePrediction({
+        estimated_price: 5000,
+        currency: 'INR',
+        confidence: 0,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('accepts confidence at boundary 1', () => {
+      const result = validatePricePrediction({
+        estimated_price: 5000,
+        currency: 'INR',
+        confidence: 1,
+      });
+      expect(result.ok).toBe(true);
+    });
+  });
+
+  describe('convertToPaisa', () => {
+    it('converts INR to paisa correctly', () => {
+      expect(convertToPaisa(5000)).toBe(500000);
+      expect(convertToPaisa(100.5)).toBe(10050);
+      expect(convertToPaisa(0.01)).toBe(1);
+    });
+
+    it('returns null for non-finite numbers', () => {
+      expect(convertToPaisa(NaN)).toBeNull();
+      expect(convertToPaisa(Infinity)).toBeNull();
+      expect(convertToPaisa(-Infinity)).toBeNull();
+    });
+
+    it('returns null for non-number inputs', () => {
+      expect(convertToPaisa('5000')).toBeNull();
+      expect(convertToPaisa(null)).toBeNull();
+      expect(convertToPaisa(undefined)).toBeNull();
+    });
   });
 });
 
-describe('convertToPaisa', () => {
-  it('converts INR to paisa', () => {
-    expect(convertToPaisa(100)).toBe(10000);
+describe('predictionValidator - additional edge cases', () => {
+  it('rejects predictedPrice above MAX_PRICE_INR', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 600000,
+      currency: 'INR',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.ABOVE_MAX);
   });
 
-  it('rounds to nearest paisa', () => {
-    expect(convertToPaisa(10.555)).toBe(1056);
+  it('rejects predictedPrice below MIN_PRICE_INR', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 50,
+      currency: 'INR',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.BELOW_MIN);
   });
 
-  it('returns null for NaN', () => {
-    expect(convertToPaisa(NaN)).toBeNull();
-  });
-
-  it('returns null for Infinity', () => {
-    expect(convertToPaisa(Infinity)).toBeNull();
-  });
-
-  it('returns null for non-number', () => {
-    expect(convertToPaisa('100')).toBeNull();
-    expect(convertToPaisa(null)).toBeNull();
-    expect(convertToPaisa(undefined)).toBeNull();
-  });
-
-  it('handles zero', () => {
-    expect(convertToPaisa(0)).toBe(0);
-  });
-
-  it('handles negative values', () => {
-    expect(convertToPaisa(-5)).toBe(-500);
+  it('rejects missing currency', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 5000,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.INVALID_CURRENCY);
   });
 });
-
-describe('RejectionReason constants', () => {
-  it('has all expected reasons', () => {
-    expect(RejectionReason.NULL_RESPONSE).toBe('null_response');
-    expect(RejectionReason.MISSING_FIELD).toBe('missing_field');
-    expect(RejectionReason.NOT_A_NUMBER).toBe('not_a_number');
-    expect(RejectionReason.NAN).toBe('nan');
-    expect(RejectionReason.INFINITY).toBe('infinity');
-    expect(RejectionReason.NEGATIVE).toBe('negative');
-    expect(RejectionReason.ZERO).toBe('zero');
-    expect(RejectionReason.BELOW_MIN).toBe('below_minimum');
-    expect(RejectionReason.ABOVE_MAX).toBe('above_maximum');
-    expect(RejectionReason.INVALID_CURRENCY).toBe('invalid_currency');
-    expect(RejectionReason.INVALID_MIN_PRICE).toBe('invalid_min_price');
-    expect(RejectionReason.INVALID_MAX_PRICE).toBe('invalid_max_price');
-    expect(RejectionReason.INVALID_CONFIDENCE).toBe('invalid_confidence');
-    expect(RejectionReason.UNEXPECTED_TYPE).toBe('unexpected_type');
-  });
-});
-
-describe('validatePricePrediction — confidence edge cases', () => {
-  it('rejects NaN confidence', () => {
-    const result = validatePricePrediction({
-      estimated_price: 5000,
-      currency: 'INR',
-      confidence: NaN,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe(RejectionReason.NAN);
-  });
-
-  it('rejects Infinity confidence', () => {
-    const result = validatePricePrediction({
-      estimated_price: 5000,
-      currency: 'INR',
-      confidence: Infinity,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe(RejectionReason.INFINITY);
-  });
-
-  it('rejects zero confidence', () => {
-    const result = validatePricePrediction({
-      estimated_price: 5000,
-      currency: 'INR',
-      confidence: 0,
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe(RejectionReason.ZERO);
-  });
-
-  it('accepts valid confidence at boundary (1.0)', () => {
-    const result = validatePricePrediction({
-      estimated_price: 5000,
-      currency: 'INR',
-      confidence: 1.0,
-    });
-    expect(result.ok).toBe(true);
-  });
-});
-

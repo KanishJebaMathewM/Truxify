@@ -1,112 +1,107 @@
-# Truxify Cron Run Report
-**Date:** 2026-08-06
-**Cron Task:** KanishJebaMathewM/Truxify (fork: tmdeveloper007/Truxify)
-**Run completed at:** ~04:00 UTC
-
-## Phase 1: Prior Open PRs (Triage + Fix)
-
-### 5 Prior Open PRs Found
-| PR | Title | Root Cause | Action |
-|----|-------|-----------|--------|
-| #6758 | fix: driver_details column migration | requireRole missing import in orderRoutes.js | Rebased onto fix |
-| #6757 | fix: reputation jitter retry | requireRole missing import | Rebased onto fix |
-| #6756 | fix: idempotency max-size cap | requireRole missing import | Rebased onto fix |
-| #6733 | fix: circuitBreaker half-open timer | requireRole missing import | Rebased onto fix |
-| #6732 | fix: notificationService supabaseAdmin | requireRole missing import | Rebased onto fix |
-
-### Fix Applied: PR #6784
-Added missing `requireRole` import to `backend/api/src/routes/orderRoutes.js`.
-All 5 prior PRs were rebased onto the fix branch and force-pushed with `--force-with-lease`.
-
-### Pre-existing ESLint Bug Found
-`backend/api/test/integration/driverEarnings.test.js` referenced `mockTrips` and `mockAllTrips` in a mock callback without defining them at module scope. Fixed by adding mock data definitions. This fix was cherry-picked to ALL 19 new PR branches.
+# GSSOC Auto-PR Run Report — Truxify
+**Run Timestamp:** 2026-08-14T12:XX:00Z
+**Fork:** tmdeveloper007/Truxify
+**Upstream:** KanishJebaMathewM/Truxify
+**Branch Base:** upstream/main @ ee9024549
 
 ---
 
-## Phase 2: 20 Issues Created + 19 PRs Opened
-
-### Issues Created (20 total)
-| Issue | Title | Category | PR | Status |
-|-------|-------|---------|-----|--------|
-| #6785 | fix: KYC upload file-size limit and MIME allowlist | fix | #6805 | CI running |
-| #6786 | fix: assigned driver can view shipment details | fix | #6824 | ESLint PASS |
-| #6787 | fix: confirm-otp NaN | SKIPPED | - | Already fixed upstream |
-| #6788 | fix: CausalImpact pre_data baseline | fix | #6808 | CI running |
-| #6789 | fix: DLQ handlers receive original event | fix | #6807 | CI running |
-| #6790 | fix: type validation in isValidCachedProfile | fix | #6809 | CI running |
-| #6791 | fix: CachePublisher logs JSON.parse errors | fix | #6810 | CI running |
-| #6792 | fix: pricing NaN guards and safePaisa | fix | #6811 | CI running |
-| #6793 | fix: orphan comment in escrow.js | SKIPPED | - | No bug found on code review |
-| #6794 | fix: console.log to logger in authorizationLogger | fix | #6812 | CI running |
-| #6795 | test: unit tests for pricing.js | test | #6813 | CI running |
-| #6796 | test: unit tests for escrow.js | test | #6814 | CI running |
-| #6797 | test: unit tests for notificationService | test | #6815 | CI running |
-| #6798 | test: unit tests for predictionValidator | test | #6822 | CI running |
-| #6799 | test: unit tests for sentry middleware | test | #6816 | CI running |
-| #6800 | docs: rate limiting architecture guide | docs | #6820 | CI running |
-| #6801 | docs: error handling patterns guide | docs | #6821 | CI running |
-| #6802 | fix: idempotency type guards | fix | #6817 | CI running |
-| #6803 | fix: config validation for required env vars | fix | #6818 | CI running |
-| #6804 | test: unit tests for pagination.js | test | #6819 | CI running |
-
-**Bonus fix PR:** #6823 - driverEarnings ESLint fix (cherry-picked to all PRs)
-
-### PRs Summary (19 total)
-| PR | Issue | Description | ESLint | Unit Tests |
-|----|-------|------------|--------|------------|
-| #6805 | #6785 | KYC multer hardening | PASS | Running |
-| #6807 | #6789 | DLQ replay fix | PASS | Running |
-| #6808 | #6788 | CausalImpact pre_data | PASS | Running |
-| #6809 | #6790 | profileCache type validation | PASS | Running |
-| #6810 | #6791 | CachePublisher bare catch | PASS | Running |
-| #6811 | #6792 | pricing NaN guards | PASS | Running |
-| #6812 | #6794 | console.log to logger | PASS | Running |
-| #6813 | #6795 | pricing unit tests | PASS | Running |
-| #6814 | #6796 | escrow unit tests | PASS | Running |
-| #6815 | #6797 | notificationService tests | PASS | Running |
-| #6816 | #6799 | sentry unit tests | PASS | Running |
-| #6817 | #6802 | idempotency type guards | PASS | Running |
-| #6818 | #6803 | config validation | PASS | Running |
-| #6819 | #6804 | pagination unit tests | PASS | Running |
-| #6820 | #6800 | rate limiting docs | PASS | Running |
-| #6821 | #6801 | error handling docs | PASS | Running |
-| #6822 | #6798 | predictionValidator tests | PASS | Running |
-| #6823 | - | driverEarnings ESLint fix | PASS | - |
-| #6824 | #6786 | driver shipment access | PASS | Running |
+## Phase 1 — Pre-flight Triage (SKIPPED)
+Per IMPORTANT OVERRIDE directive, Phase 1 triage was skipped.
+20 prematurely-created issues from prior run were identified: #13671–13690.
+All 20 closed as duplicates via API in this session.
 
 ---
 
-## Phase 3: CI Monitoring
+## Phase 2 — Issue & PR Creation
 
-### Backend ESLint: GREEN (all 19 PRs)
-All PRs include the driverEarnings ESLint fix and pass Backend ESLint.
+### Issues Created (20)
+| # | Title |
+|---|-------|
+| 13691 | fix : correct hasNextPage off-by-one in apiResponse paginated |
+| 13692 | fix : clean up temp audio file and validate language in voice assistant route |
+| 13693 | test : add unit tests for voice.routes.js |
+| 13694 | test : add unit tests for apiResponseHelpers.js |
+| 13695 | test : add unit tests for orderDisplayIdValidation.js |
+| 13696 | test : add unit tests for CachePublisher.js |
+| 13697 | test : add unit tests for locationEventBus.js |
+| 13698 | test : add unit tests for zkp.service.js |
+| 13699 | test : add unit tests for zkp.routes.js |
+| 13700 | test : add unit tests for adminRoutes.js |
+| 13701 | test : add unit tests for webrtc.js socket module |
+| 13702 | test : add unit tests for healthRoutes.js |
+| 13703 | test : add unit tests for webhookRoutes.js |
+| 13704 | test : add unit tests for orderRoutes.js controller helpers |
+| 13705 | test : add unit tests for profileRoutes.js |
+| 13706 | test : add unit tests for tripRoutes.js |
+| 13707 | test : add unit tests for paymentRoutes.js |
+| 13708 | test : add unit tests for truckRoutes.js |
+| 13709 | fix : add null guard for decoded cursor object in decodeCursor |
+| 13710 | fix : validate language parameter in voice assistant route |
 
-### Unit Tests: ALL SHARDS FAIL (pre-existing)
-All 4 unit test shards fail due to pre-existing issues in 18 test files:
-- auditLog.test.js (10 failures - res.finish timing)
-- idempotency.test.js (1 failure - fake timer timeout)
-- escrowRefundReconciliation.test.js, tracker.test.js, backwardCompat.test.js,
-  eventBus.test.js, orderTimelineService.test.js, profileModel.test.js,
-  events.test.js, orderRepository.test.js, eventHandler.test.js,
-  bidAcceptanceService.test.js, orderLifecycleService.test.js,
-  redisLock.test.js, securityHeaders.test.js, apiKey.test.js,
-  deliveryVerificationGeofence.test.js, escrowReleaseReconciliation.test.js
+### PRs Opened (15)
+| PR # | Title | Type | Issues | CI Status |
+|------|-------|------|--------|-----------|
+| #13711 | fix : correct hasNextPage off-by-one in apiResponse paginated | fix | #13691 | success |
+| #13712 | fix : clean up temp audio file and validate language in voice assistant route | fix | #13692, #13710 | success |
+| #13713 | fix : guard decodeCursor return against null/array/non-object decoded values | fix | #13709 | success |
+| #13714 | chore: remove accidentally committed .mavis run report | chore | (cleanup) | success |
+| #13715 | test : add unit tests for apiResponseHelpers.js | test | #13694 | success |
+| #13716 | test : add unit tests for orderDisplayIdValidation.js | test | #13695 | success |
+| #13717 | test : add unit tests for CachePublisher.js | test | #13696 | success |
+| #13718 | test : add unit tests for locationEventBus.js | test | #13697 | success |
+| #13719 | test : add unit tests for zkp.service.js | test | #13698 | success |
+| #13720 | test : add unit tests for zkp.routes.js | test | #13699 | success |
+| #13721 | test : add unit tests for webrtc.js socket module | test | #13701 | success |
+| #13722 | test : add unit tests for healthRoutes.js | test | #13702 | success |
+| #13723 | test : add unit tests for profileRoutes.js | test | #13705 | success |
+| #13724 | test : add unit tests for tripRoutes.js | test | #13706 | success |
+| #13725 | test : add unit tests for truckRoutes.js | test | #13708 | success |
 
-**None of these failures are caused by this cron run's changes.**
-
-### Flutter CI: PRE-EXISTING FAILURES
-- Customer App Analyzer: FAIL (pre-existing)
-- Driver App Analyzer: FAIL (pre-existing)
-- SonarCloud Scan: FAIL (project not on SonarCloud)
+### Coverage Notes
+- **#13693** (voice.routes): Already covered by existing `voiceDotRoutes.test.js` in upstream
+- **#13700** (adminRoutes): Skipped — complex dependency chain with oxc parse errors
+- **#13703** (webhookRoutes): Skipped — ebpf loader dependency blocks test execution
+- **#13704** (orderRoutes helpers): Skipped — no standalone helper file; integrated route tests cover routes
+- **#13707** (paymentRoutes): Partially covered — existing tests in `paymentRoutesLockAcceptBid.test.js` and `paymentRoutesRateLimit.test.js`
 
 ---
 
-## Key Lessons
+## Phase 3 — CI Monitoring
 
-1. **ESLint gate blocks ALL PRs**: The mockTrips/mockAllTrips ESLint bug in driverEarnings.test.js affected every single PR. Future runs should check ESLint on the base branch first.
+### CI Status Summary
+All 15 PRs show CI status: **success** (at time of report)
 
-2. **Branch naming affects workflow triggers**: PR #6806 from branch `#6786` failed to trigger the lint.yml workflow (likely due to the branch name containing `#` which conflicted with GitHub's pull request reference syntax). Fixed by using branch name `issue-6786-driver-shipment`.
+### Pre-existing Test Coverage
+The project already had 467 test files. Key files not overwritten:
+- voice.routes tests: `voiceRoutes.test.js`, `voiceDotRoutes.test.js`
+- zkp: `zkpService.test.js`, `zkp.routes.test.js` (NEW)
+- cache: `CacheEvent.test.js`, `CacheInvalidator.test.js`, `CacheKeyBuilder.test.js`, `CacheManager.test.js`, `CacheNamespace.test.js` (CachePublisher.test.js is NEW)
+- socket: `locationServer.test.js` (locationEventBus.test.js is NEW)
 
-3. **Rebase conflicts on open PRs**: Cherry-picking the ESLint fix onto already-open PR branches (which were based on an older main) caused merge conflicts when rebasing onto latest main. The driverEarnings ESLint fix commit was cherry-picked instead.
+---
 
-4. **Local node_modules state affects test runs**: The vitest runner was not properly installed in the local environment (`npm install --ignore-scripts` skipped postinstall). Unit tests could not be run locally and were only validated via CI.
+## Implementation Notes
+
+### Bug Fixes Delivered
+1. **hasNextPage off-by-one** (`apiResponse.js`): Changed `Number(page) < totalPages - 1` to `Number(page) < totalPages`. Fixes case where total=30, limit=10, page=2 incorrectly returns hasNextPage=false.
+
+2. **Voice temp file cleanup** (`voice.routes.js`): Added `fs.unlink` to clean up temp audio files after TTS generation. Added `VALID_LANGUAGES` set and language validation.
+
+3. **decodeCursor null guard** (`cursorPagination.js`): Added check `if (!result || typeof result !== 'object' || Array.isArray(result)) return null;` before returning parsed cursor.
+
+### NAS Mount Git Staging
+The workspace `/workspace/truxify` is NAS-mounted. Files modified on NAS mounts are not tracked by `git add`. Workaround: `git hash-object -w <file>` to write blob, then `git add -f <file>` to stage.
+
+### Test File Creation
+11 new test files created with 69 passing tests covering: apiResponseHelpers, orderDisplayIdValidation, CachePublisher, locationEventBus, zkpService, zkpRoutes, webrtc, healthRoutes, profileRoutes, tripRoutes, truckRoutes.
+
+---
+
+## Constraints Verified
+- No emojis in titles, bodies, commits, or reports
+- No force-push without `--force-with-lease`
+- `.github/workflows/` not modified
+- `package.json` not modified
+- GSSOC mentioned in all PR descriptions
+- 20 PRs maximum per run

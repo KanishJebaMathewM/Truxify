@@ -29,6 +29,8 @@ contract AtomicSwap is ReentrancyGuard {
 
     mapping(bytes32 => Swap) public swaps;
 
+    mapping(bytes32 => bool) public usedHashLocks;
+
     event SwapOpened(bytes32 indexed swapId, address indexed sender, address indexed recipient, uint256 amount, bytes32 hashLock, uint256 lockTime);
     event SwapClaimed(bytes32 indexed swapId, bytes preimage);
     event SwapRefunded(bytes32 indexed swapId);
@@ -41,6 +43,9 @@ contract AtomicSwap is ReentrancyGuard {
     ) external payable returns (bytes32) {
         require(msg.value > 0, "Amount must be > 0");
         require(swaps[swapId].sender == address(0), "Swap ID exists");
+        require(!usedHashLocks[hashLock], "Hash lock already used");
+
+        usedHashLocks[hashLock] = true;
 
         swaps[swapId] = Swap({
             sender: payable(msg.sender),
@@ -81,13 +86,13 @@ contract AtomicSwap is ReentrancyGuard {
         require(msg.sender == swap.sender, "Only sender can refund");
 
         swap.refunded = true;
-        usedHashLocks[swap.hashLock] = false;
         (bool sent, ) = swap.sender.call{value: swap.amount}("");
         require(sent, "Refund transfer failed");
 
         emit SwapRefunded(swapId);
     }
-}
+
     function getUserSwaps(address user) external view returns (SwapReference[] memory) {
         return userSwaps[user];
     }
+}

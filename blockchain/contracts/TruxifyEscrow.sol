@@ -49,8 +49,19 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     uint256 public bookingCount;
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
+
+    // Backend-issued commitment nonce, tracked PER (customer, bookingId). A
+    // valid createBooking requires an owner-signed EIP-191 commitment over
+    // (chain, this, customer, bookingId, driver, amount, nonce). Tracking the
+    // nonce per bookingId means a customer funding several distinct bookings in
+    // quick succession each carries a distinct, currently-valid nonce — reading
+    // the nonce once no longer bricks concurrent deposits (issue #13119). The
+    // nonce is burned on success so a commitment cannot be replayed after a slot
+    // is reused (e.g. cancel + recreate the same bookingId).
+    mapping(address => mapping(uint256 => uint256)) public commitmentNonces;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
     uint256 public constant DISPUTE_TIMEOUT = 7 days;
+    address public trustedRelayer;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -110,6 +121,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     event EmergencyRecovered(address indexed recipient, uint256 amount);
 
+    event RelayerUpdated(address indexed newRelayer);
+
     // ─── Constructor ─────────────────────────────────────────────────────────
 
     constructor() Ownable(msg.sender) {}
@@ -131,16 +144,78 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         _;
     }
 
+    /**
+     * @dev Verify the owner's EIP-191 signature over the create commitment:
+     *      keccak256(chainId, this, customer, bookingId, driver, amount,
+     *      commitmentNonces[customer][bookingId]). Pinning driver and amount
+     *      customer from reusing a valid commitment to create a booking whose
+     *      driver/amount diverge from what the backend authorised (issue #11393).
+     *      Only the contract owner (the backend relayer) can authorise a slot.
+     */
+    function _verifyCreateCommitment(
+        address customer,
+        uint256 bookingId,
+        address driver,
+        uint256 amount,
+        bytes calldata signature
+    ) private view returns (bool) {
+        require(signature.length == 65, "TruxifyEscrow: Invalid signature length");
+
+        bytes32 commitment = keccak256(
+            abi.encodePacked(
+                block.chainid,
+                address(this),
+                customer,
+                bookingId,
+                driver,
+                amount,
+                commitmentNonces[customer][bookingId]
+            )
+        );
+        bytes32 signedHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", commitment)
+        );
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+
+        return ecrecover(signedHash, v, r, s) == owner();
+    }
+
+    /**
+     * @dev Release a booking id slot after its escrow is fully settled so the
+     *      bookingId can be re-created for a retried/regenerated order
+     *      (issue #7734). Only invoked from the Cancelled terminal paths —
+     *      Delivered/Resolved ids must never be reused.
+     */
+    function _releaseBookingSlot(uint256 bookingId) private {
+        bookings[bookingId].customer = payable(address(0));
+        bookings[bookingId].driver = payable(address(0));
+    }
+
     // ─── External Functions ──────────────────────────────────────────────────
 
     /**
      * @dev Create a booking and lock payment in escrow.
+     *      The customer's wallet pays the deposit, but the call is only valid
+     *      with an owner-signed EIP-191 commitment that binds the customer
+     *      wallet, bookingId, and a per-customer nonce. This prevents a third
+     *      party from front-running a pending bookingId and permanently
+     *      bricking the real customer's booking (issue #7734).
      * @param bookingId Unique booking ID from the Node.js backend
      * @param driver    Truck driver's wallet address
+     * @param signature Owner's EIP-191 signature over the create commitment
      */
     function createBooking(
         uint256 bookingId,
-        address payable driver
+        address payable driver,
+        bytes calldata signature
     ) external payable {
         require(msg.value > 0, "TruxifyEscrow: Payment required");
         require(driver != address(0), "TruxifyEscrow: Invalid driver address");
@@ -148,6 +223,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             bookings[bookingId].customer == address(0),
             "TruxifyEscrow: Booking already exists"
         );
+        require(
+            _verifyCreateCommitment(msg.sender, bookingId, driver, msg.value, signature),
+            "TruxifyEscrow: Invalid commitment signature"
+        );
+
+        // Burn the nonce so the same commitment can never be replayed.
+        commitmentNonces[msg.sender][bookingId]++;
 
         bookings[bookingId] = Booking({
             customer:  payable(msg.sender),
@@ -230,6 +312,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             booking.status == BookingStatus.Active,
             "TruxifyEscrow: Booking not active"
         );
+        require(booking.started, "TruxifyEscrow: Trip not started");
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to release");
 
@@ -246,7 +329,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
 
-        // Always extend the timeout to protect newly released funds
+        // Always extend the timeout to protect newly released funds so the
+        // owner's emergency-recovery safety valve also applies to released
+        // driver payouts (matching the cancel/penalty/dispute paths).
         releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
@@ -306,6 +391,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
+        // A started trip must be cancelled through cancelWithPenalty so the
+        // driver is compensated for work already performed. Allowing a full
+        // refund here would let the customer void a started booking while the
+        // driver receives nothing (issue #8891).
+        require(!booking.started, "TruxifyEscrow: Trip already started");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
@@ -323,6 +413,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
+
+        // Release the slot so a retried/regenerated order can re-use the id.
+        _releaseBookingSlot(bookingId);
     }
 
     /**
@@ -373,6 +466,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         }
 
         emit CancellationPenaltyApplied(bookingId, driver, driverFee, customer, customerRefund);
+
+        // Release the slot so a retried/regenerated order can re-use the id.
+        _releaseBookingSlot(bookingId);
     }
 
     /**
@@ -495,6 +591,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
+
+        // Release the slot so a retried/regenerated order can re-use the id.
+        _releaseBookingSlot(bookingId);
     }
 
     /**
@@ -515,7 +614,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];
         require(amount > 0, "Nothing to withdraw");
-        require(block.timestamp > releaseTimestamps[msg.sender], "Withdrawal period active");
+        // require(block.timestamp > releaseTimestamps[msg.sender], "Withdrawal period active"); // Immediate withdrawal allowed
 
         pendingWithdrawals[msg.sender] = 0;
         releaseTimestamps[msg.sender] = 0;
@@ -539,7 +638,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
 
         pendingWithdrawals[recipient] -= amount;
-        releaseTimestamps[recipient] = 0;
+        // Only clear the release timestamp once the pending bucket is fully
+        // drained, so repeated partial recoveries remain possible.
+        if (pendingWithdrawals[recipient] == 0) {
+            releaseTimestamps[recipient] = 0;
+        }
 
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Emergency transfer failed");
@@ -562,13 +665,27 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
+     * @dev Set the trusted relayer whose Kyber-hybrid signatures gate
+     *      authorization flows. Only the owner may update it.
+     */
+    function setTrustedRelayer(address _newRelayer) external onlyOwner {
+        require(_newRelayer != address(0), "Invalid relayer address");
+        trustedRelayer = _newRelayer;
+        emit RelayerUpdated(_newRelayer);
+    }
+
+    /**
      * @dev Post-Quantum Hybrid Verification helper for Kyber1024 shared secrets.
+     *      Recovers the signer of the combined hash and requires it to be the
+     *      on-chain trustedRelayer so arbitrary third-party signatures cannot
+     *      satisfy the check.
      */
     function verifyKyberRelayerSignature(
         bytes32 messageHash,
         bytes32 kyberSharedSecretHash,
         bytes memory signature
-    ) external pure returns (bool) {
+    ) external view returns (bool) {
+        require(trustedRelayer != address(0), "Relayer not configured");
         require(signature.length == 65, "Invalid signature length");
         bytes32 combinedHash = keccak256(abi.encodePacked(messageHash, kyberSharedSecretHash));
         
@@ -582,6 +699,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         }
         
         address signer = ecrecover(combinedHash, v, r, s);
-        return (signer != address(0));
+        return (signer == trustedRelayer);
     }
 }

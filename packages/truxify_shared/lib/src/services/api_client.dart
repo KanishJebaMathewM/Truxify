@@ -120,9 +120,9 @@ class ApiClient {
     if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
     
-    if (kIsWeb) return 'http://localhost:8080';
-    if (Platform.isAndroid) return 'http://10.0.2.2:8080';
-    return 'http://localhost:8080';
+    if (kIsWeb) return 'http://localhost:5000';
+    if (defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:5000';
+    return 'http://localhost:5000';
   }
 
   static String _normalise(String url) =>
@@ -518,8 +518,8 @@ Future<http.Response> _execute(
     if (response.statusCode == 429) {
         final retryAfterHeader = response.headers['retry-after'];
 
-        final retryAfterSeconds =
-            int.tryParse(retryAfterHeader ?? '') ?? 0;
+        final rawRetryAfterSeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
+        final retryAfterSeconds = rawRetryAfterSeconds.clamp(1, 30);
 
         throw RateLimitException(
             response.statusCode,

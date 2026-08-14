@@ -5,6 +5,7 @@
  * unsanitised from the voice upload endpoint into the speech pipeline.
  */
 import { describe, expect, it } from 'vitest';
+import { checkContentLength, sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {
@@ -99,5 +100,31 @@ describe('sanitizeUploadFilename', () => {
       expect(result).not.toContain('..');
       expect(result).toMatch(/^[A-Za-z0-9._-]+$/);
     }
+  });
+});
+
+
+// === Spec 18 test ===
+import { checkContentLength } from '../../src/lib/uploadFilename.js';
+describe('checkContentLength', () => {
+  it('passes small', () => { expect(checkContentLength({ headers: { 'content-length': '100' } }, 1024).ok).toBe(true); });
+  it('rejects large', () => {
+    const r = checkContentLength({ headers: { 'content-length': '5000' } }, 1024);
+    expect(r.ok).toBe(false);
+    expect(r.error.status).toBe(413);
+  });
+});
+
+
+describe('sanitizeUploadFilename - additional edge cases', () => {
+  it('handles whitespace-only string as fallback', () => {
+    expect(sanitizeUploadFilename('   ', 'doc')).toBe('doc');
+  });
+
+  it('preserves file extension when collapsing characters', () => {
+    const result = sanitizeUploadFilename('my<>file.pdf');
+    expect(result.endsWith('.pdf')).toBe(true);
+    expect(result).not.toContain('<');
+    expect(result).not.toContain('>');
   });
 });

@@ -5,8 +5,9 @@ const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 
 export class TrackingTokenService {
-  constructor({ supabase, logger: injectedLogger }) {
+  constructor({ supabase, supabaseAdmin, logger: injectedLogger }) {
     this._supabase = supabase;
+    this._supabaseAdmin = supabaseAdmin;
     this._logger = injectedLogger || logger;
   }
 
@@ -25,6 +26,11 @@ export class TrackingTokenService {
   }
 
   async createToken({ orderDisplayId, createdBy }) {
+    if (!orderDisplayId) {
+      this._logger.error({ orderDisplayId }, 'orderDisplayId is required to create a tracking token');
+      throw new Error('orderDisplayId is required');
+    }
+
     const rawToken = this.generateRawToken();
     const tokenHash = this.hashToken(rawToken);
     const expiresAt = this.getExpiryDate();
@@ -196,6 +202,11 @@ export class TrackingTokenService {
   }
 
   async getDriverLocation(orderDisplayId) {
+    if (!this._supabaseAdmin) {
+      this._logger.error('getDriverLocation requires service-role client');
+      throw new Error('Service-role client required for driver location tracking');
+    }
+
     const { data: order, error: orderError } = await this._supabase
       .from('orders')
       .select('driver_id')
@@ -206,7 +217,9 @@ export class TrackingTokenService {
       return null;
     }
 
-    const { data: location, error: locationError } = await this._supabase
+    // `driver_locations` has no anon RLS policy, so the service-role client is
+    // required to read the rows written by the tracker (issue #8932).
+    const { data: location, error: locationError } = await this._supabaseAdmin
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)

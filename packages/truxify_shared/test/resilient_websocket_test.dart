@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -32,6 +35,57 @@ void main() {
       // Should not throw when there is no active channel.
       expect(() => ws.send({'test': 'data'}), returnsNormally);
       expect(() => ws.send('plain string'), returnsNormally);
+    });
+
+    test('send reports false when not connected (no silent pretend-success)', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      // A disconnected socket must NOT claim the message was handed off.
+      expect(ws.send({'test': 'data'}), isFalse);
+      expect(ws.send('plain string'), isFalse);
+    });
+
+    test('sendResult reports failed when not connected', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      expect(ws.sendResult({'test': 'data'}), WsSendResult.failed);
+      expect(ws.sendResult('plain string'), WsSendResult.failed);
+    });
+
+    test('sendResult reports failed while connecting', () async {
+      // No server is listening; after connect() the wrapper is in the
+      // connecting/reconnecting states, never `connected`.
+      final ws = ResilientWebSocket('ws://localhost:1/nonexistent');
+      await ws.connect();
+      expect(
+        ws.sendResult({'test': 'data'}),
+        WsSendResult.failed,
+        reason: 'Messages must never be accepted while the socket is not '
+            'confirmed connected.',
+      );
+      await ws.close();
+    });
+
+    test('sendResult reports failed after close', () async {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      await ws.close();
+      expect(ws.sendResult('anything'), WsSendResult.failed);
+    });
+
+    test('connection state starts disconnected', () {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      expect(ws.connectionStateValue, WsConnectionState.disconnected);
+      expect(ws.isConnected, isFalse);
+    });
+
+    test('connection state transitions to disconnected after close', () async {
+      final ws = ResilientWebSocket('ws://localhost:8080/ws');
+      final states = <WsConnectionState>[];
+      final sub = ws.connectionState.listen(states.add);
+      await ws.close();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await sub.cancel();
+      expect(states, isNotEmpty);
+      expect(states.last, WsConnectionState.disconnected);
+      expect(ws.isConnected, isFalse);
     });
 
     test('close is safe when not connected', () async {
@@ -114,6 +168,36 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 50));
       expect(connectCount, 0);
       await ws.close();
+    });
+
+    test('buffers outbound while disconnected and replays on connect', () async {
+      // Local echo server so we can observe what the wrapper actually sends.
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final received = <dynamic>[];
+      server.transform(WebSocketTransformer()).listen((socket) {
+        socket.listen((message) => received.add(message));
+      });
+      final port = server.port;
+
+      final ws = ResilientWebSocket('ws://127.0.0.1:$port/ws');
+      // Issued while disconnected — must be queued, not dropped.
+      expect(ws.send('hello'), isFalse);
+      expect(ws.send({'a': 1}), isFalse);
+
+      await ws.connect();
+      // Drain happens synchronously inside connect(); give the server a moment to
+      // echo the replayed frames back to its own listener.
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      await ws.close();
+      await server.close();
+
+      expect(received, contains('hello'));
+      expect(
+        received.whereType<String>().any((s) => s.contains('"a"')),
+        isTrue,
+        reason: 'Non-string payloads must be JSON-encoded before replay.',
+      );
     });
   });
 }

@@ -25,6 +25,7 @@ contract StateChannel is ReentrancyGuard {
     }
 
     mapping(bytes32 => Channel) public channels;
+    uint256 public channelCounter;
     uint256 public constant CHALLENGE_PERIOD = 1 days;
 
     event ChannelOpened(bytes32 indexed channelId, address indexed userA, address indexed userB, uint256 deposit);
@@ -35,7 +36,9 @@ contract StateChannel is ReentrancyGuard {
         require(msg.value > 0, "Deposit required");
         require(userB != address(0), "Invalid user B");
 
-        channelId = keccak256(abi.encodePacked(msg.sender, userB, block.timestamp));
+        channelCounter++;
+        channelId = keccak256(abi.encodePacked(msg.sender, userB, block.timestamp, channelCounter));
+        require(channels[channelId].userA == address(0), "Channel exists");
         channels[channelId] = Channel({
             userA: msg.sender,
             userB: userB,
@@ -61,6 +64,7 @@ contract StateChannel is ReentrancyGuard {
         require(!channel.isClosed, "Channel closed");
         require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
         require(sequence >= channel.sequence, "Stale sequence");
+        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
         bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
         
@@ -111,8 +115,9 @@ contract StateChannel is ReentrancyGuard {
         require(block.timestamp >= channel.challengeExpiry, "Challenge period active");
         require(!channel.isClosed, "Already closed");
 
-        channel.isClosed = true;
-
+        // Effects-before-interactions: pay out first so a failed transfer
+        // reverts the whole call instead of leaving isClosed set with funds
+        // stuck (issue #7736).
         uint256 amountA = channel.balanceA;
         uint256 amountB = channel.balanceB;
 
@@ -121,6 +126,8 @@ contract StateChannel is ReentrancyGuard {
 
         (bool sentB, ) = channel.userB.call{value: amountB}("");
         require(sentB, "Transfer B failed");
+
+        channel.isClosed = true;
 
         emit ChannelClosed(channelId, amountA, amountB);
     }

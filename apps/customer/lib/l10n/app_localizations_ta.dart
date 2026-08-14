@@ -483,4 +483,13 @@ class AppLocalizationsTa extends AppLocalizations {
 
   @override
   String get networkError => 'Network error. Please check your connection.';
+
+  @override
+  String get english => 'ஆங்கிலம்';
+
+  @override
+  String get hindi => 'இந்தி';
+
+  @override
+  String get tamil => 'தமிழ்';
 }

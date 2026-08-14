@@ -1,3 +1,4 @@
+import wimBypassRouter from './routes/wimBypass.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
 import { compressionMiddleware } from './config/compression.js'
@@ -25,7 +26,7 @@ import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
-import { CacheManager } from './cache/CacheManager.js'
+import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
@@ -46,6 +47,7 @@ import supportRoutes from './routes/supportRoutes.js'
 import profileRoutes from './routes/profileRoutes.js'
 import shipmentRoutes from './routes/shipmentRoutes.js'
 import loadRoutes from './routes/loadRoutes.js'
+import iotRoutes from './routes/iotRoutes.js'
 import deadheadRoutes from './routes/deadheadRoutes.js'
 import truckRoutes from './routes/truckRoutes.js'
 import authRoutes from './routes/authRoutes.js'
@@ -59,13 +61,28 @@ import auditRoutes from './routes/auditRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
+import voiceAssistantRoutes from './routes/voice.routes.js'
 import demandRoutes from './routes/demandRoutes.js'
+import roadConditionRoutes from './routes/roadConditionRoutes.js'
+import escortWalletRoutes from './routes/escortWalletRoutes.js'
+import mlRoutes from './routes/mlRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
 // ============================================================================
 import verificationRoutes from './routes/verificationRoutes.js'
 import oracleRoutes from './routes/oracleRoutes.js'
+import internalRoutes from './routes/internalRoutes.js'
+import blockchainMonitoringRoutes from './routes/blockchainMonitoringRoutes.js'
+
+// ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// ============================================================================
+import zkidRoutes from '../../zkid/routes.js'
+import daoRoutes from '../../dao/routes.js'
+import mevRoutes from '../../mev/routes.js'
+import tokenizationRoutes from '../../tokenization/routes.js'
+import atomicSwapRoutes from '../../atomic-swap/routes.js'
 
 // ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
@@ -89,6 +106,7 @@ import wasiRoutes from '../../../wasi/routes.js'
 import wasmRoutes from '../../../wasm/routes.js'
 import snykRoutes from '../../../snyk/routes.js'
 import liquibaseRoutes from '../../../database/liquibase/routes.js'
+import kedaRoutes from './routes/kedaRoutes.js'
 import earningsRouter from '../routes/earnings.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
@@ -97,6 +115,8 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
+import { authenticate, requireRole } from './middleware/auth.js'
+import { requireApiKey } from './middleware/apiKey.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
@@ -104,6 +124,7 @@ import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 // 🆕 ZK-PROOFS FOR DRIVER KYC
 // ============================================================================
 import zkpRoutes from './routes/zkp.routes.js'
+import crossDockRoutes from './routes/crossDockRoutes.js'
 
 
 // ============================================================================
@@ -139,10 +160,15 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startDevicePruningWorker } from './workers/devicePruningWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
+import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
+import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -166,6 +192,12 @@ try {
 // INITIALIZE DISTRIBUTED CACHE MANAGER
 // ============================================================================
 CacheManager.init(redisClient)
+
+// ============================================================================
+// BLOCKCHAIN MONITORING — singletons shared with blockchainMonitoringRoutes
+// ============================================================================
+const blockchainMetrics = new BlockchainMetrics()
+const escalationHandler = new EscalationHandler({})
 
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
@@ -204,7 +236,7 @@ if (!process.env.WEBHOOK_SECRET) {
     logger.fatal('WEBHOOK_SECRET is not set. POST /api/webhooks/escrow would fail closed and reject all incoming webhooks. Set WEBHOOK_SECRET and restart.')
     process.exit(1)
   } else {
-    logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
+    logger.warn('WARNING: WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
 }
 
@@ -212,7 +244,7 @@ if (!process.env.WEBHOOK_SECRET) {
 // 🆕 OTEL VALIDATION
 // ============================================================================
 if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-  logger.warn('⚠️ OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
+  logger.warn('WARNING: OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
 }
 
 // ============================================================================
@@ -228,14 +260,14 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 // ============================================================================
 // 🆕 SHARDING VALIDATION
 // ============================================================================
-if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST || 
-    !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
-  logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
+if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
+  !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
+  logger.warn('WARNING: Shard hosts not fully configured. Using localhost defaults.')
 }
 
-if (!process.env.SHARD_NORTH_PASSWORD || !process.env.SHARD_SOUTH_PASSWORD || 
-    !process.env.SHARD_EAST_PASSWORD || !process.env.SHARD_WEST_PASSWORD) {
-  logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_*_PASSWORD env vars are set.')
+if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
+  !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
+  logger.warn('WARNING: Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
 
@@ -261,10 +293,10 @@ if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
 // 🆕 ZK-PROOFS VALIDATION
 // ============================================================================
 if (!process.env.KYC_VERIFIER_CONTRACT) {
-  logger.warn('⚠️ KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
+  logger.warn('WARNING: KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
 }
 if (!process.env.PRIVATE_KEY) {
-  logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
+  logger.warn('WARNING: PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
 
 
@@ -273,16 +305,16 @@ if (!process.env.PRIVATE_KEY) {
 // 🆕 MULTI-CLOUD DR VALIDATION
 // ============================================================================
 if (!process.env.AWS_ACCESS_KEY || !process.env.AWS_SECRET_KEY) {
-  logger.warn('⚠️ AWS credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: AWS credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.AZURE_CONNECTION_STRING) {
-  logger.warn('⚠️ Azure connection string not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: Azure connection string not set. Multi-cloud DR may not work.')
 }
 if (!process.env.GCP_PROJECT_ID) {
-  logger.warn('⚠️ GCP credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: GCP credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.ACTIVE_CLOUD) {
-  logger.warn('⚠️ ACTIVE_CLOUD not set. Using default: aws')
+  logger.warn('WARNING: ACTIVE_CLOUD not set. Using default: aws')
 }
 
 
@@ -290,7 +322,7 @@ if (!process.env.ACTIVE_CLOUD) {
 // but don't crash (non-escrow functionality should still work).
 validateEscrowSetup().then((valid) => {
   if (!valid) {
-    logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
+    logger.warn('WARNING: Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
 
@@ -303,7 +335,8 @@ app.use(headerSizeMonitor);
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
 //   - Docker Compose (no proxy)                 → 0
 //   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
-const trustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const _parsedTrustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const trustProxy = Number.isFinite(_parsedTrustProxy) ? _parsedTrustProxy : 1
 app.set('trust proxy', trustProxy)
 
 // ============================================================================
@@ -444,7 +477,7 @@ app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)
 app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
-app.use('/api/v1/trips', fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
+app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
 app.use('/api/trips', tripRoutes)
 // ============================================================================
 // REQUEST-SCOPED CACHE — created per-request, destroyed after response.
@@ -455,8 +488,11 @@ app.use('/api', requestCacheMiddleware)
 // ============================================================================
 // REST API ROUTING
 // ============================================================================
-app.use('/api/orders', fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
-app.use('/api/payments', fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
+app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
+// Cross-docking synchronization engine (#6181): handoff relay lifecycle for
+// long-haul loads. Sits behind authenticate + per-route policy checks.
+app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
+app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
@@ -465,8 +501,10 @@ app.use('/api/driver', driverRoutes)
 // content-type enforcement, fraud detection and the /api rate limiter.
 // Registering it earlier silently bypasses every one of them.
 app.use('/api/earnings', earningsRouter)
+app.use('/api/routes', routeRoutes)
 app.use('/api/v1/shipment', shipmentRoutes)
 app.use('/api/loads', loadRoutes)
+app.use('/api/iot', iotRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/users', userRoutes)
@@ -479,8 +517,23 @@ app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
+app.use('/api/v1/admin', authenticate, requireRole(['admin']), kedaRoutes)
 app.use('/api/voice', voiceRoutes)
+app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/road-conditions', roadConditionRoutes)
+app.use('/api/escorts/wallet', escortWalletRoutes)
+
+// ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// Each router already declares its own full path prefix (e.g. `/zkid/...`,
+// `/swap/...`), so they are mounted on the `/api` base only.
+// ============================================================================
+app.use('/api', zkidRoutes)
+app.use('/api', daoRoutes)
+app.use('/api', mevRoutes)
+app.use('/api', tokenizationRoutes)
+app.use('/api', atomicSwapRoutes)
 
 // ============================================================================
 // WEBHOOK ROUTES
@@ -492,7 +545,29 @@ app.use('/api/webhooks', webhookRoutes)
 // ============================================================================
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
-app.use('/api/webhooks', webhookRoutes)
+app.use('/api/ml', mlRoutes)
+
+// ============================================================================
+// 🆕 BLOCKCHAIN MONITORING ROUTES
+// Attach the monitoring services and service-role client per request so the
+// handlers never fall back to the anon-key client (RLS would hide all rows).
+// NOTE: /api/blockchain must be mounted exactly once — a duplicate mount
+// registered earlier shadows this one and leaves req.supabase undefined.
+// ============================================================================
+app.use('/api/blockchain', (req, _res, next) => {
+  req.blockchainMetrics = blockchainMetrics
+  req.escalationHandler = escalationHandler
+  req.supabase = supabaseAdmin
+  next()
+}, blockchainMonitoringRoutes)
+
+// ============================================================================
+// 🆕 INTERNAL B2B ROUTES (n8n circuit breaker workflow)
+// Auth-gated internal endpoints consumed by automation/n8n workflows:
+//   GET  /api/internal/escrow-velocity
+//   POST /api/internal/pause-escrow
+// ============================================================================
+app.use('/api/internal', requireApiKey, internalRoutes)
 
 // 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {
@@ -546,6 +621,7 @@ app.use('/api', wasiRoutes)
 app.use('/api', wasmRoutes)
 app.use('/api', snykRoutes)
 app.use('/api', liquibaseRoutes)
+app.use('/api/wim', wimBypassRouter)
 
 // 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
@@ -580,6 +656,9 @@ app.get('/api/fraud/health', (req, res) => {
 // 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
 // ============================================================================
 app.use('/api/zkp', zkpRoutes)
+
+// 🆕 BLOCKCHAIN MONITORING ROUTES
+app.use('/api/blockchain', blockchainMonitoringRoutes)
 
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
@@ -666,13 +745,15 @@ server.listen(PORT, () => {
     ? new OrderRepository(supabaseAdmin)
     : orderRepository;
   startEscrowRefundReconciliation(escrowReconciliationOrderRepository)
-  startEscrowReleaseReconciliation()
+  startEscrowReleaseReconciliation(escrowReconciliationOrderRepository)
   startEscrowFundingReconciliation(escrowReconciliationOrderRepository)
   startReputationReconciliation(orderRepository)
   startDlqWorker()
-  startStaleOrderWorker()
+  startStaleOrderWorker(escrowReconciliationOrderRepository)
+  startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
+  startOutboxRelayWorker()
 
   // Register worker states for health aggregation
   globalThis.__truxify_workers = {
@@ -682,6 +763,7 @@ server.listen(PORT, () => {
     reputationReconciliation: true,
     dlqWorker: true,
     staleOrderWorker: true,
+    devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
   }
@@ -695,7 +777,7 @@ const SHUTDOWN_TIMEOUT_MS = 10_000
 /** @type {boolean} */
 let shuttingDown = false
 
-async function shutdown (signal) {
+async function shutdown(signal) {
   // Guard against recursive shutdown calls (e.g. an error inside shutdown
   // triggering uncaughtException while we're already shutting down).
   if (shuttingDown) {
@@ -714,6 +796,7 @@ async function shutdown (signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
+  stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

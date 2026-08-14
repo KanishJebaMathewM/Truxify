@@ -2,7 +2,7 @@
 import express from 'express';
 import request from 'supertest';
 
-const warnMock = vi.fn();
+const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
 
 vi.mock('../src/middleware/logger.js', () => ({
   default: {

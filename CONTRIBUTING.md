@@ -681,7 +681,7 @@ For local Supabase, use:
 flutter run --dart-define=ENV=dev \
             --dart-define=SUPABASE_URL=http://localhost:54321 \
             --dart-define=SUPABASE_ANON_KEY=your-local-key \
-            --dart-define=API_BASE_URL=http://localhost:3000
+            --dart-define=TRUXIFY_API_BASE_URL=http://localhost:5000
 ```
 
 **Windows PowerShell:**
@@ -690,5 +690,5 @@ flutter run `
   --dart-define=ENV=dev `
   --dart-define=SUPABASE_URL=http://localhost:54321 `
   --dart-define=SUPABASE_ANON_KEY=your-local-key `
-  --dart-define=API_BASE_URL=http://localhost:3000
+  --dart-define=TRUXIFY_API_BASE_URL=http://localhost:5000
 ```

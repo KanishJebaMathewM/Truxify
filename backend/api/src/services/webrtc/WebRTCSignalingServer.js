@@ -2,11 +2,14 @@ import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
-import { supabase, redisClient } from '../../config/db.js';
+import { supabase, redisClient, createUserClient } from '../../config/db.js';
+
+const OFFLINE_GPS_PAGE_SIZE = 1000;
 
 class WebRTCSignalingServer {
   constructor(server) {
-    this.wss = new WebSocketServer({ server, path: '/webrtc' });
+    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
+    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: MAX_WS_PAYLOAD_BYTES });
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -14,16 +17,22 @@ class WebRTCSignalingServer {
     this.setupWebSocket();
     this.startDiscovery();
     
-    logger.info('✅ WebRTC Signaling Server initialized');
+    logger.info('WebRTC Signaling Server initialized');
   }
 
   setupWebSocket() {
     this.wss.on('connection', async (ws, req) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Authenticate via token query parameter or Authorization header
-      const token = url.searchParams.get('token')
-        || req.headers.authorization?.replace('Bearer ', '');
+      // Reject tokens in the URL query string — they leak via logs, proxies,
+      // and browser history. Only the Authorization header is accepted.
+      if (url.searchParams.get('token')) {
+        logger.warn('WebRTC connection rejected: token provided in query string');
+        ws.close(4001, 'Token in URL is not allowed');
+        return;
+      }
+
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
       if (!token) {
         logger.warn('WebRTC connection rejected: no token provided');
@@ -48,6 +57,7 @@ class WebRTCSignalingServer {
         ws,
         userId: decoded.id,
         role: decoded.role,
+        token,
         location: null,
         meshId,
         connectedAt: Date.now(),
@@ -218,6 +228,10 @@ class WebRTCSignalingServer {
       return;
     }
 
+    // Use an authenticated Supabase client for GPS data inserts (RLS requires authenticated role)
+    const userClient = peer.token ? createUserClient(peer.token) : null;
+    const gpsClient = userClient || supabase;
+
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
@@ -232,7 +246,7 @@ class WebRTCSignalingServer {
     };
 
     try {
-      const { error } = await supabase.from('gps_offline_data').insert([gpsEntry]);
+      const { error } = await gpsClient.from('gps_offline_data').insert([gpsEntry]);
       if (error) {
         logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${error.message}`);
       }
@@ -308,13 +322,13 @@ class WebRTCSignalingServer {
   }
 
   getOrCreateMesh() {
-    const meshId = `mesh_${crypto.randomBytes(8).toString('hex')}`;
+    const meshId = `mesh_${crypto.randomUUID()}`;
     this.meshes.set(meshId, new Set());
     return meshId;
   }
 
   generatePeerId() {
-    return `peer_${crypto.randomBytes(8).toString('hex')}`;
+    return `peer_${crypto.randomUUID()}`;
   }
 
   startDiscovery() {
@@ -404,25 +418,31 @@ class WebRTCSignalingServer {
     }
     const { data } = await supabase
       .from('gps_offline_data')
-      .select('*')
+      .select('id, data, timestamp, synced')
       .eq('peerId', peerId)
-      .gt('timestamp', since || 0)
-      .order('timestamp', { ascending: true });
-    
+      .gt('timestamp', since)
+      .order('timestamp', { ascending: true })
+      .limit(OFFLINE_GPS_PAGE_SIZE);
+
     return data || [];
   }
 
-  async syncOfflineData(peerId, requestingUser) {
+  async syncOfflineData(peerId, ackedIds, requestingUser) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
-    // Mark data as synced for this peer
+    if (!Array.isArray(ackedIds) || ackedIds.length === 0) {
+      logger.warn(`[WebRTC] Sync for peer ${peerId} skipped: no acknowledged row ids provided`);
+      return;
+    }
+    // Mark only the rows the client actually acknowledged as synced, never
+    // the peer's entire unsynced backlog.
     await supabase
       .from('gps_offline_data')
       .update({ synced: true })
       .eq('peerId', peerId)
-      .eq('synced', false);
+      .in('id', ackedIds);
   }
 }
 

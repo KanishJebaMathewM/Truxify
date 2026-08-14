@@ -11,7 +11,18 @@ import logger from '../../middleware/logger.js';
  *   WITHDRAWAL_PAYOUT_WEBHOOK_URL - HTTP endpoint that executes the payout;
  *                                   it must POST back a JSON body with a
  *                                   `settlement_ref` (or `reference`) string.
+ *   WITHDRAWAL_PAYOUT_TIMEOUT_MS  - abort the payout request after this many
+ *                                   milliseconds (default 15000).
  */
+
+const DEFAULT_PAYOUT_TIMEOUT_MS = 15000;
+
+function payoutTimeoutMs() {
+  const configured = Number(process.env.WITHDRAWAL_PAYOUT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_PAYOUT_TIMEOUT_MS;
+}
 
 export function isPayoutProviderConfigured() {
   return Boolean(
@@ -21,6 +32,9 @@ export function isPayoutProviderConfigured() {
 }
 
 export async function dispatchPayout({ driverId, withdrawal }) {
+  if (!Number.isFinite(withdrawal.amount) || withdrawal.amount <= 0) {
+    throw new Error(`Invalid withdrawal amount: ${withdrawal.amount}. Amount must be a positive number.`);
+  }
   const provider = process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   const webhookUrl = process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL;
 
@@ -31,27 +45,46 @@ export async function dispatchPayout({ driverId, withdrawal }) {
   }
 
   if (webhookUrl) {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        provider,
-        driver_id: driverId,
-        withdrawal_id: withdrawal.id,
-        amount: withdrawal.amount,
-        reference: `w${withdrawal.id}`,
-      }),
-    });
+    const timeoutMs = payoutTimeoutMs();
+    let response;
+    try {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          driver_id: driverId,
+          withdrawal_id: withdrawal.id,
+          amount: withdrawal.amount,
+          reference: `w${withdrawal.id}`,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      // A timeout is indistinguishable from any other transport failure: the
+      // payout may or may not have been accepted. Surface it as a dispatch
+      // failure so the caller keeps its existing fail-safe handling rather
+      // than hanging the settlement worker forever.
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+        throw new Error(`Payout webhook did not respond within ${timeoutMs}ms.`, { cause: err });
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       throw new Error(`Payout webhook returned HTTP ${response.status}.`);
     }
 
-    const body = await response.json().catch(() => ({}));
+    const body = await response.json().catch(() => null);
+    const settlementRef = body && typeof body === 'object'
+      ? (body.settlement_ref || body.reference)
+      : null;
+    if (!settlementRef) {
+      throw new Error('Payout webhook returned HTTP 200 but body contains no settlement_ref or reference.');
+    }
     return {
       success: true,
-      settlementRef:
-        body.settlement_ref || body.reference || `w${withdrawal.id}`,
+      settlementRef,
     };
   }
 

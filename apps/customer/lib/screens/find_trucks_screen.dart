@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
@@ -241,7 +243,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     } else {
       try {
         date = DateFormat('dd MMM yyyy').parseStrict(parts.first.trim());
-      } catch (_) {
+      } catch (e) {
+        developer.log('Failed to parse pickup date "${parts.first.trim()}": $e');
         return null;
       }
     }
@@ -249,7 +252,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     DateTime parsedTime;
     try {
       parsedTime = DateFormat('h:mm a').parseStrict(timePart.toUpperCase());
-    } catch (_) {
+    } catch (e) {
+      developer.log('Failed to parse pickup time "$timePart": $e');
       return null;
     }
 
@@ -335,6 +339,9 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       minCapacity: _filterMinCapacity > 0 ? _filterMinCapacity : null,
       maxCapacity: _filterMaxCapacity < 25 ? _filterMaxCapacity : null,
       materialType: _filterMaterialType != 'Any' ? _filterMaterialType : null,
+      requiresRefrigeration: _requirements.contains('Temperature control'),
+      targetTemperatureMin: double.tryParse(_tempMinController.text),
+      targetTemperatureMax: double.tryParse(_tempMaxController.text),
     );
   }
 

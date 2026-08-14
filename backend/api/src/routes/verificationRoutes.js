@@ -2,16 +2,16 @@ import express from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
-import { PolicyError, policy } from '../security/policyEngine.js';
-import digilockerService from '../services/verification/DigilockerService.js';
-import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
 import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
+import { PolicyError, policy } from '../security/policyEngine.js';
+import digilockerService from '../services/digilockerService.js';
+import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
 
 const router = express.Router();
 const orderVerificationLimiter = rateLimit({
@@ -61,7 +61,7 @@ const kycUploadLimiter = rateLimit({
 router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { data: order, error: orderError } = await supabase
+    const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .select('id, customer_id, driver_id')
       .eq('id', orderId)
@@ -103,7 +103,7 @@ router.get('/order/:orderId', orderVerificationLimiter, authenticate, validatePa
         error: error.message,
       });
     }
-
+    logger.error({ event: 'VERIFICATION_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'Verification upload error');
     res.status(500).json({
       success: false,
       error: error.message
@@ -165,10 +165,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken, userId: bodyUserId } = req.body;
-    const userId = req.user?.id || bodyUserId;
+    const { accessToken } = req.body;
+    const userId = req.user?.id;
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID is required' });
+      return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
@@ -188,6 +188,7 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
 
 const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -201,7 +202,7 @@ const upload = multer({
   },
 });
 
-router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticate, async (req, res) => {
+router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;
     if (!req.file) {
@@ -217,6 +218,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
         return res.status(422).json({ success: false, error: 'Uploaded image failed malware scanning.' });
       }
     } catch (error) {
+      logger.error({ error: error.message, stack: error.stack }, '[verificationRoutes] KYC upload validation/malware scan error');
       if (error instanceof DocumentValidationError) {
         return res.status(422).json({ success: false, error: error.message });
       }
@@ -227,7 +229,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     }
 
     // Set status to pending
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('driver_details')
       .update({ kyc_status: 'Pending KYC' })
       .eq('user_id', userId);
@@ -240,12 +242,21 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
     formData.append('file', blob, req.file.originalname);
 
-    const mlResponse = await fetch('http://127.0.0.1:8000/verify/kyc', {
+    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '').trim();
+    const mlApiKey = (process.env.ML_API_KEY || '').trim();
+
+    if (!mlBaseUrl || !mlApiKey) {
+      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED', ip: req.ip }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
+      return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
+    }
+
+    const mlResponse = await fetch(`${mlBaseUrl}/verify/kyc`, {
       method: 'POST',
       body: formData,
       headers: {
-        'X-API-Key': process.env.ML_API_KEY || 'truxify_ml_dev_key',
+        'X-API-Key': mlApiKey,
       },
+      signal: AbortSignal.timeout(OCR_HTTP_TIMEOUT_MS),
     });
 
     if (!mlResponse.ok) {
@@ -256,17 +267,20 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const ocrData = await mlResponse.json();
 
     if (ocrData.verified) {
-      const { error: verifyError } = await supabase
+      const docNumber = ocrData.extracted_number && ocrData.extracted_number.trim()
+        ? ocrData.extracted_number.trim()
+        : null;
+      const { error: verifyError } = await supabaseAdmin
         .from('driver_details')
-        .update({ 
+        .update({
           kyc_status: 'Verified',
-          kyc_doc_number: ocrData.extracted_number
+          kyc_doc_number: docNumber,
         })
         .eq('user_id', userId);
 
       if (verifyError) throw verifyError;
     } else {
-       const { error: rejectError } = await supabase
+       const { error: rejectError } = await supabaseAdmin
         .from('driver_details')
         .update({ kyc_status: 'Rejected' })
         .eq('user_id', userId);
@@ -279,6 +293,10 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
       data: ocrData
     });
   } catch (error) {
+    if (error?.name === 'AbortError') {
+      return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
+    }
+    logger.error({ event: 'KYC_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'KYC upload error');
     res.status(500).json({
       success: false,
       error: error.message

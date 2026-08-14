@@ -5,6 +5,8 @@ class ObdTelemetry {
   final double? oilLevel;
   final double? tirePressureAvg;
   final double? predictiveHealthScore;
+  final double? defUreaConcentration;
+  final double? noxLevel;
   final List<String> warnings;
 
   ObdTelemetry({
@@ -12,6 +14,8 @@ class ObdTelemetry {
     this.oilLevel,
     this.tirePressureAvg,
     this.predictiveHealthScore,
+    this.defUreaConcentration,
+    this.noxLevel,
     required this.warnings,
   });
 
@@ -20,15 +24,26 @@ class ObdTelemetry {
     final ol = json['oilLevel']?.toDouble();
     final tp = json['tirePressureAvg']?.toDouble();
     final ph = json['predictiveHealthScore']?.toDouble();
-    if (et == null) debugPrint('ObdTelemetry: engineTemperature missing or null');
-    if (ol == null) debugPrint('ObdTelemetry: oilLevel missing or null');
-    if (tp == null) debugPrint('ObdTelemetry: tirePressureAvg missing or null');
-    if (ph == null) debugPrint('ObdTelemetry: predictiveHealthScore missing or null');
+    final def = json['defUreaConcentration']?.toDouble();
+    final nox = json['noxLevel']?.toDouble();
+    final missingFields = <String>[
+      if (et == null) 'engineTemperature',
+      if (ol == null) 'oilLevel',
+      if (tp == null) 'tirePressureAvg',
+      if (ph == null) 'predictiveHealthScore',
+      if (def == null) 'defUreaConcentration',
+      if (nox == null) 'noxLevel',
+    ];
+    if (missingFields.isNotEmpty) {
+      debugPrint('ObdTelemetry: missing fields: ${missingFields.join(', ')}');
+    }
     return ObdTelemetry(
       engineTemperature: et,
       oilLevel: ol,
       tirePressureAvg: tp,
       predictiveHealthScore: ph,
+      defUreaConcentration: def,
+      noxLevel: nox,
       warnings: List<String>.from(json['warnings'] ?? []),
     );
   }

@@ -78,7 +78,7 @@ async def predict_pinns(x: List[List[float]]):
             'success': True,
             'data': {
                 'predictions': predictions.tolist(),
-                'shape': predictions.shape
+                'shape': list(predictions.shape)
             },
             'timestamp': datetime.now().isoformat()
         }

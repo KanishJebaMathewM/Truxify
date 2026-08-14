@@ -53,6 +53,14 @@ describe('GET /api/health/full (Centralized Health Aggregation)', () => {
     delete process.env.ML_ENGINE_URL;
     delete globalThis.__truxify_workers;
     delete globalThis.__truxify_wsState;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ jsonrpc: '2.0', id: 1, result: '0x100' }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('returns 200 with aggregated status when all critical services are healthy', async () => {

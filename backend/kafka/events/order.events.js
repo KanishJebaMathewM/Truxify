@@ -1,5 +1,4 @@
-import { TOPICS } from '../config/kafka.config.js';
-import kafka from '../config/kafka.config.js';
+import kafka, { TOPICS } from '../config/kafka.config.js';
 import { BaseEvent, EventMetadata, EVENT_SOURCES } from '../../api/src/core/events/index.js';
 import { ContextPropagator } from '../../api/src/core/telemetry/ContextPropagator.js';
 import spanFactory from '../../api/src/core/telemetry/SpanFactory.js';

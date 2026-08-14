@@ -149,7 +149,6 @@ import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateDocumentBuffer } from '../lib/documentValidation.js';
 import { scanDocument } from '../lib/malwareScanner.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { z } from 'zod';
 import {
   createOrderSchema, submitBidSchema, submitRatingSchema, paramIdSchema, acceptBidParamsSchema,
   updateMilestoneSchema, verifyDeliverySchema, predictDemandSchema, changeDropSchema, cancelOrderSchema,
@@ -210,8 +209,6 @@ const milestoneLimiter = rateLimit({
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
-const router = express.Router();
-
 const getOrderResource = async (req) => {
   const { id } = req.params;
   if (!id) return null;
@@ -228,16 +225,6 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), g
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
 
-  if (!req.params.id || !req.params.id.trim()) {
-    return res.status(400).json({ error: 'Invalid order id' });
-  }
-  let geofenceRadiusM;
-  if (geofence_radius_m !== undefined) {
-    geofenceRadiusM = parseFloat(geofence_radius_m);
-    if (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0) {
-      return res.status(400).json({ error: 'Invalid geofence_radius_m' });
-    }
-  }
 
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), getOrderHistory);
@@ -248,7 +235,18 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), get
 // 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
 router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
-  const orderId = req.params.id;
+  try {
+    const orderId = req.params.id;
+    const timeline = await orderTimelineService.getOrderTimeline(orderId, req.user.id);
+    return res.json(timeline);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Failed to fetch order timeline:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
 
 // ============================================================================
 // 13b. FETCH EN-ROUTE LOAD OFFERS (DRIVER) — GET /api/orders/load-offers/en-route
@@ -339,41 +337,8 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
 });
 
 // ============================================================================
-// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
-// ============================================================================
-/**
- * Friendly alias of /:id/verify-delivery for the driver app.
- * Accepts the same body { otp } and delegates to the same pipeline.
- * Registered on the orders router as /:id/confirm-otp, exposed to the driver
- * app at /api/orders/:id/confirm-otp via the /api/orders mount in index.js.
- *
- * This keeps the driver app URL surface clean while reusing identical logic.
- */
-const handleDeliveryVerification = async (req, res) => {
-  try {
-    let order = null;
-    if (UUID_RE.test(orderId)) {
-      const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
-      order = orderById;
-    }
-    if (!order) {
-      const { data: orderByDisplay } = await orderRepository.findOrderByDisplayForTimeline(orderId);
-      order = orderByDisplay;
-    }
-
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-// 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
-router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), submitBid);
-
 // 9. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), submitRating);
-
-// 10. VIEW BIDS FOR AN ORDER (CUSTOMER)
-router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), getBids);
-
-// 11. ACCEPT BID (CUSTOMER)
-router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(acceptBidParamsSchema), acceptBid);
 
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), updateMilestone);

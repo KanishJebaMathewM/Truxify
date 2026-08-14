@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getCacheStats,
   resetCacheStats,
+  isValidProfile,
 } from '../../src/lib/profileCache.js';
 
 describe('profileCache stats', () => {

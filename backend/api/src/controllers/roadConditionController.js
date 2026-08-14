@@ -59,8 +59,10 @@ export const getNearbyGripData = async (req, res) => {
 
     // Approximate bounding box (1 degree is roughly 69 miles)
     const radiusDeg = radiusMiles / 69.0;
-    const minLat = latitude - radiusDeg;
-    const maxLat = latitude + radiusDeg;
+    // Clamp the latitude bounds to the valid range so that coordinates near the
+    // poles cannot produce an inverted or out-of-range bounding box.
+    const minLat = Math.max(-90, latitude - radiusDeg);
+    const maxLat = Math.min(90, latitude + radiusDeg);
     // Longitude degree distance varies by latitude; clamp the cos term so that
     // latitudes near ±90 cannot produce an infinite lng span.
     const latRad = latitude * (Math.PI / 180);

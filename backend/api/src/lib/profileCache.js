@@ -110,7 +110,7 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
     return false;
   }
   if (
-    !cachedProfile ||
+    cachedProfile === null ||
     typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
@@ -165,7 +165,7 @@ export function isValidCachedSupabaseProfile(userId, cachedProfile) {
     return false;
   }
   if (
-    !cachedProfile ||
+    cachedProfile === null ||
     typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {

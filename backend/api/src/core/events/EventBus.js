@@ -143,19 +143,28 @@ class EventBus extends EventEmitter {
 
   emitSafe(event, ...args) {
     const listeners = this.rawListeners(event);
+    const promises = [];
     for (const listener of listeners) {
       try {
         const result = listener.apply(this, args);
-        if (result && typeof result.catch === 'function') {
-          result.catch(err => {
+        if (result && typeof result.then === 'function') {
+          // Capture the async listener's rejection but do not block other listeners.
+          const p = result.catch(err => {
             logger.error(`[EventBus] Unhandled async listener error for "${event}":`, err);
             this._metrics.errors++;
           });
+          promises.push(p);
         }
       } catch (err) {
         logger.error(`[EventBus] Sync listener error for "${event}":`, err);
         this._metrics.errors++;
       }
+    }
+    // Return a promise that resolves when all async listeners have settled.
+    // Await this in the caller to confirm all listeners completed before
+    // marking an event as successfully published.
+    if (promises.length > 0) {
+      return Promise.allSettled(promises).then(() => listeners.length > 0);
     }
     return listeners.length > 0;
   }

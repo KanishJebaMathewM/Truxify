@@ -277,6 +277,9 @@ export async function createTransferRequest({
       .single();
 
     if (insertErr) {
+      if (insertErr.code === '23505') {
+        throw new DomainError(409, { error: 'An active cross-dock transfer already exists for this load.' });
+      }
       throw new DomainError(500, { error: 'Failed to create cross-dock transfer.', details: insertErr.message });
     }
 

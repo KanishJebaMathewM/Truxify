@@ -59,7 +59,6 @@ describe('RequestCache', () => {
 
 
 // === Spec 25 test ===
-import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { attachResponseCleanup } from '../../src/lib/requestCache.js';
 describe('attachResponseCleanup', () => {

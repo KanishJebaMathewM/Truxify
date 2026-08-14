@@ -798,6 +798,89 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 });
 
 // ============================================================================
+// 18b. VIEW BIDS FOR AN ORDER (CUSTOMER) — GET /api/orders/:id/bids
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}/bids:
+ *   get:
+ *     tags: [Orders]
+ *     summary: List bids for an order
+ *     description: Returns the pending bids for the authenticated customer's order, enriched with driver and truck info.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Enriched bid list
+ *       403:
+ *         description: Forbidden for non-owner
+ */
+router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bids'), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const bids = await orderLifecycleService.getBidsForOrder(req.params.id, req.user.id);
+    return res.json(bids);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Failed to fetch bids:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
+// ============================================================================
+// 18c. ACCEPT A BID (CUSTOMER) — POST /api/orders/:id/bids/:bidId/accept
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}/bids/{bidId}/accept:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Accept a bid
+ *     description: Reserves a bid for the order and returns the escrow deposit transaction for the customer to sign. Two-phase — the driver is assigned only after the deposit is confirmed.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: bidId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Bid reserved with escrow deposit transaction
+ *       403:
+ *         description: Forbidden (bid not on this order)
+ *       404:
+ *         description: Order or bid not found
+ *       422:
+ *         description: Missing wallet
+ */
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:accept-bid'), auditLog({ action: 'order:accept-bid', resourceType: 'order' }), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
+  try {
+    const result = await orderLifecycleService.acceptBid(req.params.id, req.params.bidId, req.user.id);
+    return res.status(result.status).json(result.body);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Bid acceptance exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
 // 18. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
 /**

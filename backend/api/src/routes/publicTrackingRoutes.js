@@ -138,21 +138,23 @@ router.get(
       }
 
       if (!validation.valid) {
-        return res.status(404).json({ error: 'Tracking link not found or invalid' });
+        const statusMessages = {
+          not_found: { status: 404, message: 'Tracking link not found or invalid' },
+          revoked: { status: 410, message: 'This tracking link has been revoked' },
+          expired: { status: 410, message: 'This tracking link has expired' },
+        };
+
+        const { status, message } = statusMessages[validation.reason] || statusMessages.not_found;
+        return res.status(status).json({ error: message });
       }
 
       const { orderDisplayId } = validation;
 
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .select('pickup_lat, pickup_lng, drop_lat, drop_lng, driver_id')
-        .eq('order_display_id', orderDisplayId)
-        .maybeSingle();
-
-      if (orderError) {
-        logger.error({ err: orderError, orderDisplayId }, 'Failed to fetch public route order');
-        return res.status(500).json({ error: 'Failed to load route information' });
-      }
+      // Read via the service-role client (TrackingTokenService uses
+      // supabaseAdmin). The anon `supabase` client cannot read `orders`
+      // (no anon RLS policy; anon privileges revoked) → previously every
+      // request 404'd even with a valid token (issue #13906).
+      const order = await trackingTokenService.getOrderRouteCoords(orderDisplayId);
 
       if (!order) {
         return res.status(404).json({ error: 'Order not found' });

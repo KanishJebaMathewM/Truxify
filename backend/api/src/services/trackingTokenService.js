@@ -183,6 +183,34 @@ export class TrackingTokenService {
     return order;
   }
 
+  async getOrderRouteCoords(orderDisplayId) {
+    // `orders` has no anon RLS policy and anon privileges are revoked
+    // (see trackingRoutes.js), so the service-role client is required to read
+    // it — the public `/route` handler must not use the anon `supabase` client
+    // (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderRouteCoords requires service-role client');
+      throw new Error('Service-role client required for order route coordinates');
+    }
+
+    const { data: order, error: orderError } = await this._supabaseAdmin
+      .from('orders')
+      .select('pickup_lat, pickup_lng, drop_lat, drop_lng, driver_id')
+      .eq('order_display_id', orderDisplayId)
+      .maybeSingle();
+
+    if (orderError) {
+      this._logger.error({ error: orderError, orderDisplayId }, 'Failed to fetch public route order');
+      throw new Error('Failed to fetch public route order');
+    }
+
+    if (!order) {
+      return null;
+    }
+
+    return order;
+  }
+
   async getOrderTimeline(orderDisplayId) {
     const { data, error } = await this._supabase
       .from('order_timeline')

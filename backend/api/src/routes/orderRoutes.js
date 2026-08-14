@@ -798,6 +798,58 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 });
 
 // ============================================================================
+// 18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}/bids:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Submit a bid for a load offer
+ *     description: Allows an authenticated driver to submit a bid on an available load offer. Rate-limited per driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SubmitBidRequest'
+ *     responses:
+ *       201:
+ *         description: Bid submitted
+ *       400:
+ *         description: Validation error
+ *       403:
+ *         description: Forbidden (bidding on own load)
+ *       404:
+ *         description: Load offer not found
+ *       409:
+ *         description: Duplicate pending bid
+ *       410:
+ *         description: Load no longer available
+ */
+router.post('/:id/bids', authenticate, userLimiter, requirePolicy('bid:submit'), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+  try {
+    const { bid_amount } = req.body;
+    const result = await orderLifecycleService.submitBid(req.params.id, req.user.id, bid_amount);
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Failed to submit bid:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
+// ============================================================================
 // 18. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
 /**

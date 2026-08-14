@@ -12,9 +12,9 @@ class TruckDigitalTwinSimulator:
 
     def update_telemetry(self, speed_kmh: float, engine_rpm: float, ambient_temp_c: float):
         # Update virtual physical parameters based on continuous operating dynamics
-        self.engine_temp_c += (engine_rpm / 3000.0) * 0.5 + (ambient_temp_c * 0.05)
-        self.brake_pad_wear_pct += (speed_kmh / 100.0) * 0.02
-        self.tire_pressure_psi -= 0.01
+        self.engine_temp_c += (ambient_temp_c - self.engine_temp_c) * 0.05 + (engine_rpm / 3000.0) * 0.5
+        self.brake_pad_wear_pct = min(100.0, self.brake_pad_wear_pct + (speed_kmh / 100.0) * 0.02)
+        self.tire_pressure_psi += (110.0 - self.tire_pressure_psi) * 0.05
 
         failure_risk_pct = max(0.0, min(100.0, (self.engine_temp_c - 90.0) * 2.0 + self.brake_pad_wear_pct * 0.5))
 

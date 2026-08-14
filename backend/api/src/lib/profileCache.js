@@ -32,7 +32,10 @@ async function _publishProfileInvalidation(eventOpts) {
   }
 }
 
-export const TTL_SECONDS = parseInt(process.env.REDIS_CACHE_TTL || "120", 10); // 2 minutes default so role/status changes (suspension, demotion) propagate quickly
+const _parsedTtlSeconds = parseInt(process.env.REDIS_CACHE_TTL, 10);
+export const TTL_SECONDS = Number.isFinite(_parsedTtlSeconds) && _parsedTtlSeconds > 0
+  ? _parsedTtlSeconds
+  : 120; // 2 minutes default so role/status changes (suspension, demotion) propagate quickly
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 
 let cacheHits = 0;
@@ -110,7 +113,7 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
     return false;
   }
   if (
-    !cachedProfile ||
+    cachedProfile === null ||
     typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
@@ -165,7 +168,7 @@ export function isValidCachedSupabaseProfile(userId, cachedProfile) {
     return false;
   }
   if (
-    !cachedProfile ||
+    cachedProfile === null ||
     typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
@@ -206,8 +209,19 @@ export async function getCachedProfile(firebaseUid) {
   try {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
-      cacheHits++;
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        cacheHits++;
+        return parsed;
+      }
+      // Corrupt payload (not a plain object): treat as a miss and purge the key
+      cacheMisses++;
+      try {
+        await redisClient.del(firebaseProfileKey(firebaseUid));
+      } catch (delErr) {
+        // Ignore failures on background cleanup deletion
+      }
+      return null;
     }
     cacheMisses++;
     return null;
@@ -238,6 +252,8 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       firebaseProfileKey(firebaseUid),
@@ -368,7 +384,9 @@ export async function getCachedCustomerStats(userId) {
     logCacheError("getCachedCustomerStats", err);
     try {
       await redisClient.del(customerStatsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedCustomerStats.del", delErr);
+    }
     return null;
   }
 }
@@ -418,7 +436,9 @@ export async function getCachedDriverDetails(userId) {
     logCacheError("getCachedDriverDetails", err);
     try {
       await redisClient.del(driverDetailsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedDriverDetails.del", delErr);
+    }
     return null;
   }
 }

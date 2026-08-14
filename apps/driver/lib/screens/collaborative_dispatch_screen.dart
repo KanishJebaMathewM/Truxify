@@ -93,10 +93,20 @@ class _CollaborativeDispatchScreenState extends State<CollaborativeDispatchScree
     );
   }
 
+  static Color _parseLockColor(String? hex) {
+    // lock colors are sent as '0xFF2196F3'; a locked load may also arrive
+    // without any color (null) or with a malformed value. Fall back to the
+    // default blue rather than crashing the whole load list.
+    if (hex == null || hex.isEmpty) return const Color(0xFF2196F3);
+    final cleaned = hex.startsWith('0x') ? hex.substring(2) : hex;
+    final value = int.tryParse(cleaned, radix: 16);
+    return value != null ? Color(value) : const Color(0xFF2196F3);
+  }
+
   Widget _buildLoadCard(DispatchLoadItem load) {
     bool isLocked = load.isLocked;
     bool isLockedByMe = load.lockedByUserId == 'ME';
-    Color lockColor = isLocked ? Color(int.parse(load.lockedColorHex!)) : Colors.transparent;
+    Color lockColor = isLocked ? _parseLockColor(load.lockedColorHex) : Colors.transparent;
 
     return GestureDetector(
       onTap: () {

@@ -15,7 +15,7 @@ class WebRTCSignalingServer {
     this.setupWebSocket();
     this.startDiscovery();
     
-    logger.info('✅ WebRTC Signaling Server initialized');
+    logger.info('WebRTC Signaling Server initialized');
   }
 
   setupWebSocket() {

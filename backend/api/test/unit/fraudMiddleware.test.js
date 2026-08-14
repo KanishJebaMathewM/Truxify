@@ -96,7 +96,6 @@ describe('fraudMiddleware', () => {
 
 
 // === Spec 13 test ===
-import { describe, it, expect } from 'vitest';
 import { clampRiskScore, accumulateRisk } from '../../src/middleware/fraudMiddleware.js';
 describe('clampRiskScore', () => {
   it('50 passes', () => { expect(clampRiskScore(50)).toBe(50); });

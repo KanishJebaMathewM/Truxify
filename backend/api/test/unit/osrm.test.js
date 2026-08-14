@@ -382,7 +382,6 @@ describe('osrm - getRouteEstimate edge cases', () => {
 });
 
 // === Spec 22 test ===
-import { describe, it, expect, vi } from 'vitest';
 import { routeWithFailover } from '../../src/services/osrm.js';
 describe('routeWithFailover', () => {
   it('uses primary', async () => {
@@ -391,3 +390,50 @@ describe('routeWithFailover', () => {
   });
 });
 
+
+describe('routeWithFailover edge cases', () => {
+  let osrm;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    osrm = await import('../../src/services/osrm.js');
+  });
+
+  it('returns distance 0 when coords are null', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      null,
+      null
+    );
+    expect(result).toEqual({ distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' });
+  });
+
+  it('returns distance 0 when coords array is empty', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [],
+      null
+    );
+    expect(result.distance).toBe(0);
+    expect(result.source).toBe('haversine-fallback');
+  });
+
+  it('returns distance 0 when only one coord pair is provided', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [[0, 0]],
+      null
+    );
+    expect(result.distance).toBe(0);
+  });
+
+  it('returns primary result when primary succeeds', async () => {
+    const primaryResult = { distance: 50, source: 'osrm' };
+    const result = await osrm.routeWithFailover(
+      async () => primaryResult,
+      null,
+      [[0, 0], [1, 1]]
+    );
+    expect(result).toEqual(primaryResult);
+  });
+});

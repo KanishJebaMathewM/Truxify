@@ -72,7 +72,6 @@ describe('requestContext', () => {
 
 
 // === Spec 1 test ===
-import { describe, it, expect } from 'vitest';
 import { safeJsonParseWithFallback } from '../../src/lib/requestContext.js';
 describe('safeJsonParseWithFallback', () => {
   it('returns parsed object for valid JSON', () => { expect(safeJsonParseWithFallback('{"a":1}', {})).toEqual({ a: 1 }); });

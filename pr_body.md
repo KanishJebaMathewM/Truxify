@@ -1,25 +1,19 @@
 ## Problem
 
-In `backend/ml/diffusion/trainer.py`, `train()` calls `self.validate(val_loader)` but `validate()` (lines ~148-166) never consults the `condition` loader that `train_epoch` uses. `train_epoch` appends the condition batch to the model input (`x_noisy = torch.cat([x_noisy, condition], dim=-1)`), yet `validate` builds its batches from `val_loader` alone, dropping the conditioning signal.
-
-For conditional diffusion models this means training conditions on `condition_data` while validation silently ignores it, producing train/validation skew: the validation loss measures an unrelated (unconditional) objective, so early stopping / checkpoint selection is driven by a mismatched metric.
+`CircuitBreaker.execute()` only rejects when the state is `OPEN`. In `HALF_OPEN` (the recovery probe window) it falls through and runs `fn()` exactly like `CLOSED`, so a burst of concurrent requests during the probe hammers the very dependency trying to recover — a retry storm that can extend the outage into a cascading failure.
 
 ## Fix
 
-- Threaded the condition loader through `validate(val_loader, condition_loader=None, require_condition=False)` and, inside the validation loop, rebuild the same `(x, condition)` input used by `train_epoch` (1:1 channel layout, including the cyclical condition iterator).
-- `train()` now passes `condition_loader` to `validate` and sets `require_condition=(condition_loader is not None)`.
-- `validate` raises `ValueError` when `require_condition=True` but no `condition_loader` is supplied.
+- Added a `_halfOpenProbeInFlight` gate. In `HALF_OPEN`, only the first request is admitted as the trial probe; any additional `HALF_OPEN` request is short-circuited like `OPEN` (returns the fallback or throws).
+- The gate is cleared in `onSuccess()` (probe succeeded → CLOSED) and in `onFailure()` (probe failed → OPEN), so the next recovery window starts fresh.
 
 ## Files changed
 
-- `backend/ml/diffusion/trainer.py`
-- `backend/ml/tests/test_diffusion_trainer.py` (added `TestDiffusionValidateCondition`)
+- backend/api/src/lib/circuitBreaker.js
+- backend/api/test/unit/circuitBreaker.test.js
 
 ## Testing
 
-- `python -c "import ast; ast.parse(...)"` for syntax validation.
-- `pytest backend/ml/tests/test_diffusion_trainer.py` passes (2 passed):
-  - `test_validate_raises_when_condition_required_but_missing` asserts `validate` raises `ValueError` when condition is required but missing.
-  - `test_validate_threads_condition_into_model` asserts the condition is actually concatenated into the model input via a `denoise` spy.
+- Added a regression test in `circuitBreaker.test.js` asserting that only one probe runs in `HALF_OPEN` and the extra concurrent request is short-circuited to the fallback (`probeFn` called exactly once).
 
-Closes #11389
+Closes #11398

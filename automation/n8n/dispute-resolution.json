@@ -223,6 +223,10 @@
       "name": "Create Arbitration Record",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "position": [
         1850,
         200
@@ -417,6 +421,24 @@
             "type": "main",
             "index": 0
           },
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Arbitration Record": {
+      "main": [
+        [
+          {
+            "node": "Admin Resolution Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
           {
             "node": "Email Admin",
             "type": "main",

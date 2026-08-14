@@ -98,6 +98,9 @@ class QUBOFormatter:
     
     def formulate_route_optimization(self, graph: nx.Graph) -> QuadraticProgram:
         """Formulate route optimization as QUBO"""
+        # Reject self-loops because a route cannot connect a node to itself
+        if any(u == v for u, v in graph.edges()):
+           raise ValueError("Route optimization does not support self-loop edges")
         # Create quadratic program
         qubo = QuadraticProgram()
         
@@ -145,16 +148,34 @@ class QUBOFormatter:
             # Use QAOA
             qaoa = QAOA(optimizer=COBYLA(), reps=1)
             optimizer = MinimumEigenOptimizer(qaoa)
-            
+
             # Solve
             result = optimizer.solve(qubo)
-            
+
+            # Check whether the solution is feasible
+            if result.status.name != "SUCCESS":
+                logger.warning(
+                    f"QUBO optimization did not find a feasible solution: "
+                    f"{result.status}"
+                )
+
+                return {
+                    'success': False,
+                    'error': (
+                        f"QUBO optimization failed with status: "
+                        f"{result.status.name}"
+                    ),
+                    'status': result.status.name
+                }
+
             return {
                 'success': True,
                 'solution': result.x,
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': self.variables,
+                'status': result.status.name
             }
+
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")
             return {'success': False, 'error': str(e)}

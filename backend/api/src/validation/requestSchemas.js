@@ -103,6 +103,29 @@ export const driverIdParamSchema = z.object({
   driverId: uuidSchema
 });
 
+// Cross-docking synchronization engine (#6181)
+export const crossDockParamSchema = z.object({
+  id: uuidSchema,
+});
+
+export const crossDockCandidateSchema = z.object({
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  radius_km: coerceNumber(z.number().min(1).max(500)).optional(),
+  limit: coerceNumber(z.number().int().min(1).max(50)).optional(),
+});
+
+export const createCrossDockSchema = z.object({
+  to_driver_id: uuidSchema,
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  cross_dock_note: z.string().max(500).optional(),
+});
+
+export const verifyHandoffSchema = z.object({
+  handoff_code: z.string().regex(/^\d{6}$/, "Handoff code must be 6 digits"),
+});
+
 export const submitBidSchema = z.object({
   bid_amount: z
     .number()
@@ -397,3 +420,23 @@ export const shareTrackingSchema = z.object({}).strict();
 export const publicTrackingTokenSchema = z.object({
   token: z.string().min(1, 'Tracking token is required').max(512),
 });
+
+export const reportGripDataSchema = z.object({
+  latitude: latitudeSchema,
+  longitude: longitudeSchema,
+  grip_index: coerceNumber(
+    z.number({ invalid_type_error: "grip_index must be a number" })
+      .min(0, { message: 'Grip index must be between 0 and 10' })
+      .max(10, { message: 'Grip index must be between 0 and 10' })
+  ),
+  slip_events_count: coerceNumber(
+    z.number({ invalid_type_error: "slip_events_count must be a number" })
+      .nonnegative({ message: 'slip_events_count must be >= 0' })
+  ).optional().default(0),
+}).strict();
+
+/**
+ * Schema for POST /api/driver/weigh-stations/sync-weight.
+ * NOTE: defined once above (truck_id + string axle position); the driver
+ * route reads truck_id/axles from req.body, so keep this single export.
+ */

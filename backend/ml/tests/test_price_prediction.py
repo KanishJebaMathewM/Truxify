@@ -248,3 +248,19 @@ def test_get_weather_multiplier_async_empty_city():
             return await pp._get_weather_multiplier_async(client, "")
     result = asyncio.run(run())
     assert result == 1.0
+
+
+# Regression tests for issue #8896 - price_prediction.py had an IndentationError
+# (leftover dead code after an early return), so the module could not be imported.
+def test_price_prediction_module_parses():
+    """The module must be syntactically valid Python (no IndentationError)."""
+    import ast, pathlib
+    source = pathlib.Path(pp.__file__).read_text()
+    ast.parse(source)
+
+
+def test_price_prediction_module_importable():
+    """The module must be importable - the ML service loads it on boot."""
+    import importlib
+    module = importlib.import_module("app.models.price_prediction")
+    assert hasattr(module, "train_price_model")

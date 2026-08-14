@@ -58,11 +58,8 @@ describe('processEscrowWebhookEvent', () => {
 
   it('keeps processor failures visible to the DLQ retry loop', async () => {
     await expect(
-      processEscrowWebhookEvent('EscrowDeposited', {
-        orderId: 'order-1',
-        simulateFailure: true,
-      })
-    ).rejects.toThrow('Simulated database lock or processing failure');
+      processEscrowWebhookEvent('PaymentReleased', {})
+    ).rejects.toThrow('Missing orderId in escrow webhook payload');
   });
 
   it('rejects payloads without an event type', async () => {

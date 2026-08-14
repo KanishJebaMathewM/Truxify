@@ -52,11 +52,12 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const r = (n) => Number(n.toFixed(8));
+  const r = (n) => Number(n.toFixed(6));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(input = {}) {
+  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -78,7 +79,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error:', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_ERROR', error: err && err.message }, '[osrm] Redis get error');
     }
   }
 
@@ -122,7 +123,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         try {
           await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
         } catch (err) {
-          logger.error('[osrm] Redis set error:', err.message);
+          logger.error({ event: 'OSRM_REDIS_SET_ERROR', error: err && err.message }, '[osrm] Redis set error');
         }
       }
 
@@ -188,7 +189,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error (geometry):', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis get error (geometry)');
     }
   }
 
@@ -229,7 +230,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       try {
         await redisClient.set(cacheKey, JSON.stringify(feature), 'EX', ROUTE_CACHE_TTL_SECONDS);
       } catch (err) {
-        logger.error('[osrm] Redis set error (geometry):', err.message);
+        logger.error({ event: 'OSRM_REDIS_SET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis set error (geometry)');
       }
     }
     return feature;
@@ -276,3 +277,27 @@ export const __testing = {
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
+
+
+// === Spec 22: ===
+// === Spec 22: OSRM failover ===
+export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const t = (d) => (d * Math.PI) / 180;
+  const dLat = t(lat2 - lat1);
+  const dLon = t(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(t(lat1))*Math.cos(t(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+export async function routeWithFailover(primary, _fb, coords) {
+  try { return await primary(coords); }
+  catch (err) {
+    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+    if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
+      return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
+    }
+    const [a, b] = coords[0];
+    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+  }
+}
+

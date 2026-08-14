@@ -5,8 +5,7 @@
  * setup) and provide the `x-user-id` / `x-user-role` headers.
  *
  * Usage:
- *   import { createSupabaseMock } from './helpers/supabaseMock.js';
- *   import { buildTestApp } from './helpers/testApp.js';
+ *   import { createSupabaseMock } from './supabaseMock.js';
  *
  *   const m = createSupabaseMock();
  *   vi.mock('../../src/config/db.js', () => ({ supabase: m.supabase }));

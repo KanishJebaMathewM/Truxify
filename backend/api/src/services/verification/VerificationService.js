@@ -4,9 +4,15 @@ import logger from '../../middleware/logger.js';
 
 const REQUIRED_DOCUMENT_TYPES = ['rc_book', 'driving_licence'];
 
+// Statuses that represent an in-progress delivery. This must mirror the
+// OracleService's DELIVERY_IN_PROGRESS_STATUSES: confirmDelivery runs BEFORE
+// the order is marked 'delivered'/'payment_released', so requiring a terminal
+// status here would make deliveryVerified unreachable even when the oracle
+// reaches 2-of-3 provider consensus.
 const ACTIVE_DELIVERY_STATUSES = new Set([
-  'delivered',
-  'payment_released',
+  'picked_up',
+  'in_transit',
+  'arriving',
 ]);
 
 class VerificationService {

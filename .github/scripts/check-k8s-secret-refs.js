@@ -50,7 +50,7 @@ function walkYamlFiles(dir) {
   return out;
 }
 
-const secrets = collectSecretKeys('secrets.yaml');
+const secrets = collectSecretKeys('secrets.enc.yaml');
 let failed = false;
 
 for (const file of walkYamlFiles(K8S_DIR)) {
@@ -84,13 +84,13 @@ for (const file of walkYamlFiles(K8S_DIR)) {
     }
 
     if (!secrets.has(name)) {
-      console.error(`Secret "${name}" referenced by ${file}:${i + 1} is not defined in k8s/secrets.yaml`);
+      console.error(`Secret "${name}" referenced by ${file}:${i + 1} is not defined in k8s/secrets.enc.yaml`);
       failed = true;
       continue;
     }
 
     if (!secrets.get(name).has(key)) {
-      console.error(`Secret key "${key}" referenced by ${file}:${i + 1} is missing from Secret "${name}" (k8s/secrets.yaml)`);
+      console.error(`Secret key "${key}" referenced by ${file}:${i + 1} is missing from Secret "${name}" (k8s/secrets.enc.yaml)`);
       failed = true;
     }
   }
@@ -99,4 +99,4 @@ for (const file of walkYamlFiles(K8S_DIR)) {
 if (failed) {
   process.exit(1);
 }
-console.log('All secretKeyRef references resolve to keys defined in k8s/secrets.yaml.');
+console.log('All secretKeyRef references resolve to keys defined in k8s/secrets.enc.yaml.');

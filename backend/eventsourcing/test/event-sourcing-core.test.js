@@ -252,6 +252,142 @@ describe('EventStoreCore — snapshots', () => {
     const snap = await core.getSnapshot(orderId);
     assert.equal(snap.version, 5);
   });
+
+  test('Test 1 — Snapshot + post-snapshot events', async () => {
+    const orderId = 'test_snap_post';
+    const db = new InMemoryDb({
+      initialSnapshots: [{
+        aggregate_id: orderId,
+        version: 10,
+        state: { id: orderId, customerId: 'customer-42', status: 'confirmed', total: 5000, version: 10 },
+        snapshot_version: 1,
+      }],
+      initialEvents: [
+        dbRow({ id: 'e11', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { status: 'shipped' }, version: 11 }),
+        dbRow({ id: 'e12', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { trackingNumber: 'TRK-999' }, version: 12 }),
+      ],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    assert.equal(state.id, orderId);
+    assert.equal(state.customerId, 'customer-42');
+    assert.equal(state.total, 5000);
+    assert.equal(state.status, 'shipped');
+    assert.equal(state.trackingNumber, 'TRK-999');
+    assert.equal(state.version, 12);
+  });
+
+  test('Test 2 — Pre-snapshot events are not replayed', async () => {
+    const orderId = 'test_pre_snap';
+    const preSnapshotEvents = Array.from({ length: 10 }, (_, i) => 
+      dbRow({ id: `e${i + 1}`, type: 'ORDER_UPDATED', aggregateId: orderId, payload: { counter: i + 1, flagFromEvent: true }, version: i + 1 })
+    );
+    const postSnapshotEvents = [
+      dbRow({ id: 'e11', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { note: 'eleven' }, version: 11 }),
+      dbRow({ id: 'e12', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { note: 'twelve' }, version: 12 }),
+    ];
+
+    const db = new InMemoryDb({
+      initialSnapshots: [{
+        aggregate_id: orderId,
+        version: 10,
+        state: { id: orderId, customerId: 'customer-42', flagFromEvent: false, version: 10 },
+        snapshot_version: 1,
+      }],
+      initialEvents: [...preSnapshotEvents, ...postSnapshotEvents],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    // flagFromEvent in snapshot is false; if events 1..10 were replayed, flagFromEvent would become true.
+    assert.equal(state.flagFromEvent, false);
+    assert.equal(state.note, 'twelve');
+    assert.equal(state.version, 12);
+  });
+
+  test('Test 3 — Snapshot with no newer events', async () => {
+    const orderId = 'test_snap_only';
+    const db = new InMemoryDb({
+      initialSnapshots: [{
+        aggregate_id: orderId,
+        version: 10,
+        state: { id: orderId, customerId: 'customer-42', status: 'confirmed', total: 5000, version: 10 },
+        snapshot_version: 1,
+      }],
+      initialEvents: [],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    assert.deepEqual(state, { id: orderId, customerId: 'customer-42', status: 'confirmed', total: 5000, version: 10 });
+  });
+
+  test('Test 4 — No snapshot', async () => {
+    const orderId = 'test_no_snap';
+    const db = new InMemoryDb({
+      initialEvents: [
+        dbRow({ id: 'e1', type: 'ORDER_CREATED', aggregateId: orderId, payload: { customerId: 'c1', amount: 100, pickup: 'p', dropoff: 'd' }, version: 1 }),
+        dbRow({ id: 'e2', type: 'DRIVER_ASSIGNED', aggregateId: orderId, payload: { orderId, driverId: 'drv-1' }, version: 2 }),
+      ],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    assert.equal(state.customerId, 'c1');
+    assert.equal(state.driverId, 'drv-1');
+    assert.equal(state.status, 'ASSIGNED');
+    assert.equal(state.version, 2);
+  });
+
+  test('Test 5 — Historical field preservation', async () => {
+    const orderId = 'test_hist_preservation';
+    const db = new InMemoryDb({
+      initialSnapshots: [{
+        aggregate_id: orderId,
+        version: 10,
+        state: { id: orderId, customerId: 'customer-42', total: 5000, createdAt: '2026-01-01T00:00:00Z', status: 'CREATED', version: 10 },
+        snapshot_version: 1,
+      }],
+      initialEvents: [
+        dbRow({ id: 'e11', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { status: 'CANCELLED' }, version: 11 }),
+      ],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    assert.equal(state.customerId, 'customer-42');
+    assert.equal(state.total, 5000);
+    assert.equal(state.createdAt, '2026-01-01T00:00:00Z');
+    assert.equal(state.status, 'CANCELLED');
+    assert.equal(state.version, 11);
+  });
+
+  test('Test 6 — Multiple post-snapshot events', async () => {
+    const orderId = 'test_multi_post';
+    const db = new InMemoryDb({
+      initialSnapshots: [{
+        aggregate_id: orderId,
+        version: 10,
+        state: { id: orderId, count: 10, version: 10 },
+        snapshot_version: 1,
+      }],
+      initialEvents: [
+        dbRow({ id: 'e11', type: 'ORDER_UPDATED', aggregateId: orderId, payload: { step1: 'complete' }, version: 11 }),
+        dbRow({ id: 'e12', type: 'DRIVER_ASSIGNED', aggregateId: orderId, payload: { orderId, driverId: 'drv-77' }, version: 12 }),
+        dbRow({ id: 'e13', type: 'ORDER_CANCELLED', aggregateId: orderId, payload: { reason: 'user request', cancelledAt: 'now' }, version: 13 }),
+      ],
+    });
+    const core = createCore({ db });
+
+    const state = await core.getAggregateState(orderId);
+    assert.equal(state.count, 10);
+    assert.equal(state.step1, 'complete');
+    assert.equal(state.driverId, 'drv-77');
+    assert.equal(state.status, 'CANCELLED');
+    assert.equal(state.reason, 'user request');
+    assert.equal(state.version, 13);
+  });
 });
 
 describe('EventStoreCore — optimistic concurrency', () => {

@@ -582,7 +582,8 @@ class LocationService {
               return;
             }
             if (parsed['code'] != null) {
-              _lastCloseCode = parsed['code'] as int;
+              final raw = parsed['code'];
+              _lastCloseCode = raw is num ? raw.toInt() : int.tryParse(raw.toString()) ?? -1;
               if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
                 debugPrint(
                   '[LocationService] Auth rejected (code $_lastCloseCode) — stopping tracking',

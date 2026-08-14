@@ -106,6 +106,7 @@ router.post("/logout", authenticate, async (req, res) => {
 
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
   // Bounded timeout prevents Redis hangs from blocking the logout response.
+  let cacheInvalidated = false;
   try {
     await withTimeout(
       Promise.all([
@@ -117,6 +118,7 @@ router.post("/logout", authenticate, async (req, res) => {
       2000,
       "Redis invalidation timeout",
     );
+    cacheInvalidated = true;
   } catch (err) {
     logger.warn(
       `[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`,
@@ -142,7 +144,7 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Logged out successfully",
-    cacheInvalidated: true, // Redis errors are non-fatal — logout always succeeds
+    cacheInvalidated,
   });
 });
 
@@ -171,7 +173,6 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
 });
 
 import crypto from "crypto";
-import { otpSendSchema } from "../validation/requestSchemas.js";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
 
@@ -241,15 +242,9 @@ async function clearAuthOtpFailures(phone) {
   if (redisClient) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
-      return;
     } catch (err) {
       logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
     }
-  }
-  const record = authOtpFailedAttempts.get(phoneKey);
-  if (record) {
-    record.count = 0;
-    if (record.lockedUntil) return;
   }
   authOtpFailedAttempts.delete(phoneKey);
 }

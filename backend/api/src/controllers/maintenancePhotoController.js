@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { supabase } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -39,6 +39,14 @@ export async function uploadMaintenancePhotos(req, res) {
     if (!driverId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
+
+    // The append_maintenance_photos RPC is SECURITY DEFINER and calls
+    // auth.uid(), so it must be invoked with the caller's JWT attached rather
+    // than through the shared anon client (which would make auth.uid() NULL).
+    if (!req.token) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const userClient = createUserClient(req.token);
 
     const { ticketId } = req.params;
     if (!ticketId) {
@@ -166,7 +174,7 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Atomically append new paths via PostgreSQL RPC to enforce MAX_PHOTOS and prevent race conditions
-    const { error: updateError } = await supabase.rpc('append_maintenance_photos', {
+    const { error: updateError } = await userClient.rpc('append_maintenance_photos', {
       p_ticket_id: ticketId,
       p_new_paths: uploadedPaths,
       p_max_photos: MAX_PHOTOS,

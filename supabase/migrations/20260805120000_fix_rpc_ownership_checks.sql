@@ -23,6 +23,9 @@
 --   already passes profiles.id (req.user.id) as p_driver_id/p_customer_id, so
 --   no API change is required. The service_role bypass on accept_bid_tx (used
 --   by escrow-funding reconciliation and confirm-deposit) is preserved.
+--   accept_bid_tx also keeps the Issue #5777 anti-tamper guard: the order must
+--   carry a pending_bid_acceptance snapshot whose bid_amount still matches the
+--   stored bid before the bid is finalized.
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -44,8 +47,10 @@ DECLARE
 BEGIN
   -- Verify the caller IS the driver. get_profile_id() maps the Firebase JWT
   -- sub to profiles.id, which is what p_driver_id/req.user.id actually store
-  -- (auth.uid() is the Firebase UID and would never match).
-  IF auth.uid() IS NOT NULL AND get_profile_id() <> p_driver_id THEN
+  -- (auth.uid() is the Firebase UID and would never match). Null-safe: an
+  -- unauthenticated caller (auth.uid() IS NULL) must also be rejected, not
+  -- just skipped.
+  IF auth.uid() IS NULL OR get_profile_id() <> p_driver_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only withdraw your own funds';
   END IF;
 
@@ -98,6 +103,12 @@ BEGIN
 END;
 $$;
 
+-- Function creation grants EXECUTE to PUBLIC by default (callable with the
+-- public anon key). Revoke it and allow only authenticated sessions so the
+-- ownership guard above is the only gate for real users.
+REVOKE EXECUTE ON FUNCTION withdraw_funds_tx(UUID, INT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION withdraw_funds_tx(UUID, INT) TO authenticated;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. submit_rating_tx — verify the caller IS the customer by profiles.id
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -117,8 +128,10 @@ DECLARE
 BEGIN
   -- Verify the caller IS the customer. get_profile_id() maps the Firebase JWT
   -- sub to profiles.id, which is what p_customer_id/req.user.id actually store
-  -- (auth.uid() is the Firebase UID and would never match).
-  IF auth.uid() IS NOT NULL AND get_profile_id() <> p_customer_id THEN
+  -- (auth.uid() is the Firebase UID and would never match). Null-safe: an
+  -- unauthenticated caller (auth.uid() IS NULL) must also be rejected, not
+  -- just skipped.
+  IF auth.uid() IS NULL OR get_profile_id() <> p_customer_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only submit ratings for yourself';
   END IF;
 
@@ -162,6 +175,12 @@ BEGIN
 END;
 $$;
 
+-- Function creation grants EXECUTE to PUBLIC by default (callable with the
+-- public anon key). Revoke it and allow only authenticated sessions so the
+-- ownership guard above is the only gate for real users.
+REVOKE EXECUTE ON FUNCTION submit_rating_tx(TEXT, UUID, UUID, SMALLINT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION submit_rating_tx(TEXT, UUID, UUID, SMALLINT, TEXT) TO authenticated;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. accept_bid_tx — verify the caller IS the order's customer by profiles.id
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +215,8 @@ DECLARE
   v_driver_rating    numeric;
   v_truck_id         uuid;
   v_truck_number     text;
+  v_pending_acceptance jsonb;
+  v_pending_bid_amount  int;
 BEGIN
   -- Resolve the bid by p_bid_id and derive the load/order chain from it.
   -- The caller-supplied p_load_id/p_order_id/p_order_display_id/p_driver_id/
@@ -219,14 +240,29 @@ BEGIN
     RAISE EXCEPTION 'Load offer is no longer available';
   END IF;
 
-  SELECT customer_id, status, version
-    INTO v_customer_id, v_order_status, v_current_version
+  SELECT customer_id, status, version, pending_bid_acceptance
+    INTO v_customer_id, v_order_status, v_current_version, v_pending_acceptance
     FROM orders
    WHERE order_display_id = v_order_display_id
      FOR UPDATE;
 
   IF v_customer_id IS NULL THEN
     RAISE EXCEPTION 'Order not found';
+  END IF;
+
+  -- Two-phase acceptance: the order must carry the snapshot the customer
+  -- agreed to and funded. Compare the snapshot amount with the amount still
+  -- stored on the bid row; if the bid was rewritten after acceptance (e.g. by
+  -- a driver inflating bid_amount), refuse to finalize so escrow can never pay
+  -- out more than was actually funded (Issue #5777).
+  IF v_pending_acceptance IS NULL THEN
+    RAISE EXCEPTION 'Pending bid acceptance snapshot is missing';
+  END IF;
+
+  v_pending_bid_amount := (v_pending_acceptance->>'bid_amount')::int;
+
+  IF v_pending_bid_amount IS NULL OR v_bid_amount <> v_pending_bid_amount THEN
+    RAISE EXCEPTION 'Bid amount was modified after acceptance; refusing to finalize';
   END IF;
 
   -- Ownership guard: the backend (service_role, e.g. confirm-deposit and

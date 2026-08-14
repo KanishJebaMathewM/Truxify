@@ -102,4 +102,35 @@ describe('otpHashing', () => {
       expect(verifyOtpHash(otp, otpRecord)).toBe(false);
     });
   });
+
+  describe('hashOtp edge cases', () => {
+    it('throws TypeError when OTP is null', () => {
+      expect(() => hashOtp(null)).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is undefined', () => {
+      expect(() => hashOtp(undefined)).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is an empty string', () => {
+      expect(() => hashOtp('')).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is only whitespace', () => {
+      expect(() => hashOtp('   ')).toThrow(TypeError);
+    });
+  });
+
 });
+
+
+// === Spec 12 test ===
+import { describe, it, expect } from 'vitest';
+import { constantTimeEqualHex } from '../../src/lib/otpHashing.js';
+describe('constantTimeEqualHex', () => {
+  it('equal returns true', () => { expect(constantTimeEqualHex('abcdef', 'abcdef')).toBe(true); });
+  it('different returns false', () => { expect(constantTimeEqualHex('abcdef', '123456')).toBe(false); });
+  it('length mismatch', () => { expect(constantTimeEqualHex('abc', 'abcd')).toBe(false); });
+  it('invalid hex', () => { expect(constantTimeEqualHex('xyz', 'xyz')).toBe(false); });
+});
+

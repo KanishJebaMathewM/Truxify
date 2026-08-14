@@ -43,6 +43,9 @@ contract AtomicSwap is ReentrancyGuard {
     ) external payable returns (bytes32) {
         require(msg.value > 0, "Amount must be > 0");
         require(swaps[swapId].sender == address(0), "Swap ID exists");
+        require(!usedHashLocks[hashLock], "Hash lock already used");
+
+        usedHashLocks[hashLock] = true;
 
         swaps[swapId] = Swap({
             sender: payable(msg.sender),
@@ -83,7 +86,6 @@ contract AtomicSwap is ReentrancyGuard {
         require(msg.sender == swap.sender, "Only sender can refund");
 
         swap.refunded = true;
-        usedHashLocks[swap.hashLock] = false;
         (bool sent, ) = swap.sender.call{value: swap.amount}("");
         require(sent, "Refund transfer failed");
 

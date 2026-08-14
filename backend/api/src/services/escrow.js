@@ -43,6 +43,8 @@ import { ethers } from 'ethers'
 import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
+import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
+import { supabaseAdmin } from '../config/db.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
@@ -85,7 +87,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
-    logger.error('❌ Failed to initialise Escrow contract client:', err.message)
+    logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
@@ -127,11 +129,13 @@ export async function validateEscrowSetup () {
         `[escrow] ❌ No contract deployed at ${address}. ` +
         'Check ESCROW_CONTRACT_ADDRESS in your .env.'
       )
+      escrowContract = null
       return false
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
-    logger.error(`[escrow] ❌ Failed to query bytecode at ${address}: ${err.message}`)
+    logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
+    escrowContract = null
     return false
   }
 
@@ -149,6 +153,7 @@ export async function validateEscrowSetup () {
       'Check that ESCROW_CONTRACT_ADDRESS points to the active TruxifyEscrow contract, ' +
       'not the deprecated Escrow.sol.'
     )
+    escrowContract = null
     return false
   }
 
@@ -184,6 +189,9 @@ export const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
  * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
  */
 export function paisaToMaticWei(paisa) {
+  if (paisa == null) {
+    throw new TypeError('paisa argument is required');
+  }
   const numeric = Number(paisa);
   if (!Number.isFinite(numeric) || numeric < 0) {
     throw new RangeError(`Invalid paisa amount: ${paisa}`);
@@ -372,6 +380,11 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     return { txData: null, bookingId }
   }
 
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to build deposit tx for booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId, { txData: null })
+  }
+
   if (!ethers.isAddress(driverWalletAddress) || !ethers.isAddress(customerWalletAddress)) {
     return { txData: null, bookingId }
   }
@@ -447,9 +460,28 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       if (expectedDriverAddress && booking.driver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
         return { error: 'Existing booking was created for a different driver than the one assigned to this order' }
       }
-      if (expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+      // Always verify the on-chain booking amount against the authoritative
+      // server figure. When the caller does not supply expectedAmountWei,
+      // resolve it server-side from the order's escrow_amount_wei so a funded
+      // booking is never accepted with zero amount validation.
+      let authoritativeAmountWei = expectedAmountWei
+      if (authoritativeAmountWei === null && supabaseAdmin) {
+        try {
+          const { data: orderRow } = await supabaseAdmin
+            .from('orders')
+            .select('escrow_amount_wei')
+            .eq('escrow_booking_id', bookingId)
+            .maybeSingle()
+          if (orderRow?.escrow_amount_wei != null) {
+            authoritativeAmountWei = orderRow.escrow_amount_wei
+          }
+        } catch (lookupErr) {
+          logger.warn(`[escrow] Failed to resolve escrow_amount_wei for booking ${bookingId}: ${lookupErr.message}`)
+        }
+      }
+      if (authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
         return {
-          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei) of this order`,
+          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei) of this order`,
           code: 'DEPOSIT_AMOUNT_MISMATCH',
         }
       }
@@ -474,6 +506,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   if (!tx.to || tx.to.toLowerCase() !== contractAddress.toLowerCase()) {
     return { error: 'Transaction destination is not the Escrow contract' }
   }
+
+  // Critical Security Check: Verify tx.value (deposit amount). The exact
+  // equality check below (expectedAmountWei !== null) is the authoritative
+  // gate — a redundant less-than guard here would shadow the booking-id,
+  // sender, and driver checks for under-funded deposits.
 
   let decoded
   try {
@@ -544,6 +581,11 @@ export async function markEscrowBookingStarted (orderDisplayId) {
     return { txHash: null, bookingId }
   }
 
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to mark booking started for ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
+  }
+
   try {
     const tx = await escrowContract.markBookingStarted(bookingId)
     logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
@@ -589,20 +631,44 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
     return { txHash: null, bookingId }
   }
 
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to release funds for booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
+  }
+
   try {
     const booking = await escrowContract.bookings(bookingId)
     if (booking && booking.paid === true) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`)
       return { txHash: null, bookingId, alreadyReleased: true }
     }
-    if (booking && expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+    // Always verify the on-chain booking amount against the authoritative
+    // server figure (the order's escrow_amount_wei). When the caller does not
+    // supply expectedAmountWei, resolve it server-side from the order so the
+    // amount guard can never be skipped.
+    let authoritativeAmountWei = expectedAmountWei
+    if (authoritativeAmountWei === null && supabaseAdmin) {
+      try {
+        const { data: orderRow } = await supabaseAdmin
+          .from('orders')
+          .select('escrow_amount_wei')
+          .eq('order_display_id', orderDisplayId)
+          .maybeSingle()
+        if (orderRow?.escrow_amount_wei != null) {
+          authoritativeAmountWei = orderRow.escrow_amount_wei
+        }
+      } catch (lookupErr) {
+        logger.warn(`[escrow] Failed to resolve escrow_amount_wei for ${orderDisplayId}: ${lookupErr.message}`)
+      }
+    }
+    if (booking && authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
       logger.error(
-        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(expectedAmountWei)} wei — refusing to release.`
+        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(authoritativeAmountWei)} wei — refusing to release.`
       )
       return {
         txHash: null,
         bookingId,
-        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei). Refusing to release payment.`,
+        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei). Refusing to release payment.`,
         code: 'DEPOSIT_AMOUNT_MISMATCH',
       }
     }
@@ -634,7 +700,6 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
 }
 
 
-
 /**
  * Submit an escrow refund and return its hash before confirmation.
  */
@@ -645,6 +710,11 @@ export async function submitEscrowRefund (orderDisplayId) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — skipping refundFunds.')
     return { txHash: null, bookingId }
+  }
+
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to refund booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
   }
 
   let tx
@@ -708,6 +778,11 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
       return { txHash: null, bookingId };
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to lock payment for booking ${orderDisplayId}.`);
+      return escrowPausedResult(bookingId);
+    }
+
     try {
       const tx = await escrowContract.lockPayment(
         bookingId,
@@ -745,6 +820,11 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to cancel booking ${orderDisplayId} with penalty.`)
+      return escrowPausedResult(bookingId)
+    }
+
     try {
       const tx = await escrowContract.cancelWithPenalty(bookingId, driverFeeWei)
       logger.info(`[escrow] cancelWithPenalty tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
@@ -778,6 +858,11 @@ export async function submitEscrowRaiseDispute (orderDisplayId) {
     if (!escrowContract) {
       logger.warn('[escrow] Contract not initialised — skipping raiseDispute.')
       return { txHash: null, bookingId }
+    }
+
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to raise dispute for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
     }
 
     let tx
@@ -820,6 +905,11 @@ export async function submitEscrowResolveDispute (orderDisplayId, driverAmountWe
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to resolve dispute for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
+    }
+
     let tx
     try {
       tx = await escrowContract.resolveDispute(bookingId, driverAmountWei)
@@ -856,6 +946,11 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to resolve dispute timeout for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
+    }
+
     let tx
     try {
       tx = await escrowContract.resolveDisputeTimeout(bookingId)
@@ -882,7 +977,7 @@ export const lockPayment = escrowLockPayment;
 
 
 
-async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+export async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
   const bookingOnChain = await escrowContract.bookings(bookingId);
   const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
   const expectedWeiBN = BigInt(expectedWei);
@@ -892,5 +987,3 @@ async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
     expectedAmount: expectedWeiBN.toString()
   };
 }
-
-module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

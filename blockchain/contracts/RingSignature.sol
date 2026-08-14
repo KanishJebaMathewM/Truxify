@@ -12,10 +12,14 @@ contract RingSignature is Ownable {
     mapping(bytes32 => bool) public usedKeyImages;
     event RingSignatureVerified(bytes32 indexed keyImage, address[] ringMembers, bytes32 messageHash);
 
+    error NotImplemented();
+
     constructor() Ownable(msg.sender) {}
 
     /**
      * @dev Verifies LSAG ring signature for an anonymous shipper commitment.
+     *      Genuine LSAG verification is not implemented yet. This function
+     *      reverts instead of unconditionally accepting forged signatures.
      */
     function verifyRingSignature(
         bytes32 _messageHash,
@@ -24,14 +28,6 @@ contract RingSignature is Ownable {
         bytes32[] calldata _c,
         bytes32[] calldata _r
     ) external returns (bool) {
-        require(_pubKeys.length > 1, "Ring size must be > 1");
-        require(!usedKeyImages[_keyImage], "Key image already used (Double spending attempt)");
-        require(_c.length == _pubKeys.length && _r.length == _pubKeys.length, "Invalid signature vector dimensions");
-
-        // Mark key image as used to enforce linkability & prevent double booking
-        usedKeyImages[_keyImage] = true;
-
-        emit RingSignatureVerified(_keyImage, _pubKeys, _messageHash);
-        return true;
+        revert NotImplemented();
     }
 }

@@ -37,6 +37,7 @@ vi.mock('../../src/config/db.js', () => ({
   supabase: {
     from: mockSupabaseFrom,
   },
+  supabaseAdmin: undefined,
 }));
 
 // Mock crypto

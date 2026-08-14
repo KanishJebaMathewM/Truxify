@@ -85,6 +85,11 @@ class ResilientWebSocket {
   bool _reconnecting = false;
   int _attempt = 0;
 
+  /// Buffer of outbound messages issued while disconnected. Drained (in order)
+  /// every time the socket (re)establishes, so callers do not need to buffer
+  /// themselves and control frames (auth / subscribe) are never silently lost.
+  final List<dynamic> _pendingOutbound = [];
+
   final StreamController<dynamic> _controller =
       StreamController<dynamic>.broadcast();
 
@@ -130,8 +135,14 @@ class ResilientWebSocket {
     try {
       final targetUrl = urlFactory != null ? urlFactory!() : url;
       _channel = WebSocketChannel.connect(Uri.parse(targetUrl));
-      // Wait for the TCP/TLS handshake to complete before proceeding.
-      await _channel!.ready;
+      // Wait for the TCP/TLS handshake to complete before proceeding. Bound the
+      // wait so a stalled upgrade (proxy silently holds the connection open,
+      // flaky mobile network) cannot hang the wrapper in `connecting` forever —
+      // on timeout we throw and fall into the normal reconnect path.
+      await _channel!.ready.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('WS handshake timed out'),
+      );
       _subscription = _channel!.stream.listen(
         (message) {
           _controller.add(message);
@@ -153,6 +164,9 @@ class ResilientWebSocket {
       _startHeartbeat();
       _setConnectionState(WsConnectionState.connected);
       onConnect?.call();
+      // Flush anything the caller enqueued while we were disconnected so it is
+      // replayed on every (re)connection automatically.
+      _drainPendingOutbound();
     } catch (_) {
       if (!_reconnecting) {
         _reconnecting = true;
@@ -176,20 +190,49 @@ class ResilientWebSocket {
   ///
   /// See also [send], the backwards-compatible boolean wrapper.
   WsSendResult sendResult(dynamic message) {
-    if (_connectionState != WsConnectionState.connected) {
-      return WsSendResult.failed;
-    }
-    final channel = _channel;
-    if (channel == null) {
-      return WsSendResult.failed;
+    if (_connectionState == WsConnectionState.connected) {
+      final channel = _channel;
+      if (channel == null) {
+        // Connected state but channel already torn down — buffer for replay.
+        _pendingOutbound.add(message);
+        return WsSendResult.failed;
+      }
+
+      try {
+        final payload = message is String ? message : jsonEncode(message);
+        channel.sink.add(payload);
+        return WsSendResult.delivered;
+      } catch (_) {
+        // Delivery failed mid-send; keep it buffered so it is replayed on
+        // reconnect rather than dropped.
+        _pendingOutbound.add(message);
+        return WsSendResult.failed;
+      }
     }
 
-    try {
-      final payload = message is String ? message : jsonEncode(message);
-      channel.sink.add(payload);
-      return WsSendResult.delivered;
-    } catch (_) {
-      return WsSendResult.failed;
+    // Not connected: buffer the message and replay it once the socket
+    // (re)establishes, instead of silently discarding it.
+    _pendingOutbound.add(message);
+    return WsSendResult.failed;
+  }
+
+  /// Replays any buffered outbound messages in FIFO order over the live channel.
+  /// Called after every successful (re)connect. Stops at the first write that
+  /// throws and re-queues that message so it is not lost.
+  void _drainPendingOutbound() {
+    while (_pendingOutbound.isNotEmpty) {
+      final message = _pendingOutbound.removeAt(0);
+      final channel = _channel;
+      if (channel == null) {
+        _pendingOutbound.insert(0, message);
+        break;
+      }
+      try {
+        channel.sink.add(message is String ? message : jsonEncode(message));
+      } catch (_) {
+        _pendingOutbound.insert(0, message);
+        break;
+      }
     }
   }
 

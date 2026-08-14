@@ -406,16 +406,6 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
         multiplier = _parse_weather_multiplier(response)
         _cache_weather_multiplier(city, multiplier)
         return multiplier
-        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
-        with httpx.Client(timeout=5.0) as client:
-        response = client.get(url, timeout=2.0)
-        response = httpx.get(url, timeout=2.0)
-        if response.status_code == 200:
-            weather_main = response.json().get("weather", [{}])[0].get("main", "").lower()
-            if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
-                return 1.2
-            elif weather_main in ["drizzle", "mist", "fog", "haze", "dust", "sand", "ash"]:
-                return 1.1
     except Exception as e:
         logger.warning("Weather API failed for %s: %s", city, e)
         _cache_weather_multiplier(city, 1.0)

@@ -407,3 +407,14 @@ describe('auditWithState convenience', () => {
     expect(typeof middleware).toBe('function');
   });
 });
+
+
+// === Spec 20 test ===
+import { maskPii } from '../../src/middleware/auditLog.js';
+describe('maskPii', () => {
+  it('masks password', () => { expect(maskPii({ password: 'x' })).toEqual({ password: '***' }); });
+  it('masks token', () => { expect(maskPii({ token: 'x' })).toEqual({ token: '***' }); });
+  it('recursive', () => { expect(maskPii({ u: { ssn: '1' } })).toEqual({ u: { ssn: '***' } }); });
+  it('leaves non-PII', () => { expect(maskPii({ name: 'A' })).toEqual({ name: 'A' }); });
+});
+

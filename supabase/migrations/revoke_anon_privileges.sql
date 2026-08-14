@@ -31,8 +31,10 @@ REVOKE ALL ON TABLE public.delivery_otps FROM anon;
 REVOKE ALL ON TABLE public.driver_locations FROM anon;
 REVOKE ALL ON TABLE public.user_devices FROM anon;
 REVOKE ALL ON TABLE public.driver_documents FROM anon;
-REVOKE ALL ON TABLE public.vehicle_types FROM anon;
-REVOKE ALL ON TABLE public.regions FROM anon;
+-- vehicle_types and regions are intentionally public reference tables: their
+-- RLS policies in 20260805000050_create_vehicle_types_regions.sql grant SELECT
+-- to anon+authenticated so GET /api/v1/vehicle-types and /api/v1/regions work
+-- for unauthenticated clients. They are exempt from the revoke below.
 REVOKE ALL ON TABLE public.webhook_failures FROM anon;
 REVOKE ALL ON TABLE public.reputation_failures FROM anon;
 REVOKE ALL ON TABLE public.tracking_tokens FROM anon;

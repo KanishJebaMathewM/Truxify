@@ -34,7 +34,7 @@ async function getUserFcmToken(userId) {
     if (error || !data?.fcm_token) return null;
     return data.fcm_token;
   } catch (err) {
-    logger.error(`[NotificationService] Failed to fetch FCM token: ${err.message}`);
+    logger.error({ err }, '[NotificationService] Failed to fetch FCM token');
     return null;
   }
 }
@@ -50,7 +50,7 @@ async function clearInvalidToken(userId) {
       })
       .eq('id', userId);
   } catch (dbErr) {
-    logger.error(`[FCM] Failed to clear invalid FCM token for user ${userId}: ${dbErr.message}`);
+    logger.error({ err: dbErr, userId }, '[FCM] Failed to clear invalid FCM token');
   }
 }
 
@@ -95,7 +95,8 @@ export async function sendFcmNotification(userId, notification, data = {}) {
     } catch (err) {
       lastError = err;
       logger.error(
-        `[FCM] Delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${err.code ?? 'unknown'} — ${err.message}`
+        { err, userId, attempt: attempt + 1, maxRetries: MAX_RETRIES },
+        '[FCM] Delivery failed for user'
       );
 
       if (isInvalidTokenError(err.code)) {
@@ -122,15 +123,75 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   };
 }
 
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot persist notification.');
+      dbSuccess = false;
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err }, '[NotificationService] Unexpected sendFcmNotification error');
+    fcmResult = { success: false, error: err?.message ?? 'Unexpected sendFcmNotification error' };
+  }
+
+  // `success` reflects the actual push (FCM) delivery, not the DB
+  // persistence side-effect. Reporting DB persistence as push success masked
+  // FCM delivery failures (see issue #11212).
+  return { success: Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
+}
+
 export const hashDeliveryOtp = hashOtp;
 export const verifyDeliveryOtpHash = verifyOtpHash;
 
 export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
   return measureExecution('NotificationService.storeDeliveryOtp', async () => {
     if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot store OTP.');
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot store OTP.');
       return null;
     }
+
+    // Invalidate all existing unverified OTPs for this order so that only one
+    // active OTP can ever exist per order within the TTL window. This prevents
+    // an attacker who obtained an older OTP from using it after a new one is
+    // issued (see issue #11205).
+    const { error: invalidateError } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({ expires_at: new Date().toISOString(), verified: true })
+      .eq('order_id', orderId)
+      .eq('verified', false);
+
+    if (invalidateError) {
+      logger.error({ err: invalidateError }, '[NotificationService] Failed to invalidate existing OTPs');
+    }
+
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 
@@ -147,7 +208,7 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
       .single();
 
     if (error) {
-      logger.error('[NotificationService] Failed to store OTP:', error.message);
+      logger.error({ err: error }, '[NotificationService] Failed to store OTP');
       return null;
     }
 
@@ -159,7 +220,7 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
 export async function getActiveDeliveryOtp(orderId) {
   return measureExecution('NotificationService.getActiveDeliveryOtp', async () => {
     if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot read OTP.');
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot read OTP.');
       return null;
     }
     const { data, error } = await supabaseAdmin
@@ -173,7 +234,7 @@ export async function getActiveDeliveryOtp(orderId) {
       .maybeSingle();
 
     if (error) {
-      logger.error('[NotificationService] Failed to fetch active OTP:', error.message);
+      logger.error({ err: error }, '[NotificationService] Failed to fetch active OTP');
       return null;
     }
 
@@ -188,7 +249,7 @@ export async function verifyDeliveryOtp(otpId) {
     // (which was validated by the caller via timing-safe hash comparison)
     // is consumed, preventing any future caller from bypassing verification.
     if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot verify OTP.');
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot verify OTP.');
       return false;
     }
     const { data, error } = await supabaseAdmin
@@ -203,7 +264,10 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      console.error('Error inserting notification:', error);
+      logger.error(
+        { event: 'NOTIFICATION_INSERT_ERROR', error: error && error.message },
+        'Error inserting notification',
+      );
       throw error;
     }
 
@@ -219,7 +283,7 @@ export async function verifyDeliveryOtp(otpId) {
 export async function expireDeliveryOtps(orderId) {
   return measureExecution('NotificationService.expireDeliveryOtps', async () => {
     if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot expire OTPs.');
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot expire OTPs.');
       return;
     }
     const { error } = await supabaseAdmin
@@ -229,7 +293,7 @@ export async function expireDeliveryOtps(orderId) {
       .eq('verified', false);
 
     if (error) {
-      logger.error('[NotificationService] Failed to expire OTPs:', error.message);
+      logger.error({ err: error }, '[NotificationService] Failed to expire OTPs');
     }
   });
 }
@@ -243,13 +307,14 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   let dbSuccess = false;
   try {
     if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot persist notification.');
+      dbSuccess = false;
     } else {
       const { error } = await supabaseAdmin.from('notifications').insert({
         user_id: customerId,
         title,
         body,
-        notif_type: 'order_update',
+        notif_type: 'delivery_otp',
         // No OTP or OTP-derived value is persisted here: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }
@@ -271,12 +336,23 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp',  }
+      { orderDisplayId, notifType: 'delivery_otp', otp }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-    // Push notification logic placeholder / dispatch
-    return { success: true };
+    // Return the actual push-delivery result so callers can branch on it.
+    // The notification row is persisted independently of push delivery, so
+    // overall success is driven by the FCM outcome.
+    const fcmOk = Boolean(fcmResult?.success);
+    return {
+      success: fcmOk,
+      dbSuccess,
+      fcm: {
+        success: fcmOk,
+        messageId: fcmResult?.messageId ?? null,
+        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
+      },
+    };
   }

@@ -121,6 +121,10 @@ contract TruxifyUpgradeable is
     event EscrowCreated(uint256 indexed escrowId, address customer, address driver, uint256 amount);
     event EscrowReleased(uint256 indexed escrowId, address driver, uint256 amount);
     event EscrowDisputed(uint256 indexed escrowId, address customer);
+<<<<<<< HEAD
+=======
+    event EscrowResolved(uint256 indexed escrowId, address recipient, uint256 amount);
+>>>>>>> upstream/main
     event ProposalCreated(uint256 indexed proposalId, address proposer, address implementation);
     event VoteCast(uint256 indexed proposalId, address voter, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed proposalId, bool passed);
@@ -226,6 +230,13 @@ contract TruxifyUpgradeable is
         uint256 requestTimestamp = emergencyUpgradeRequests[newImplementation];
         if (requestTimestamp != 0) {
             require(
+<<<<<<< HEAD
+=======
+                approvedImplementations[newImplementation],
+                "Implementation not approved"
+            );
+            require(
+>>>>>>> upstream/main
                 block.timestamp >= requestTimestamp + EMERGENCY_UPGRADE_TIMELOCK,
                 "Emergency timelock not yet elapsed"
             );
@@ -303,6 +314,33 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
     emit EscrowDisputed(escrowId, msg.sender);
 }
 
+<<<<<<< HEAD
+=======
+/**
+ * @dev Resolves a disputed escrow by releasing the funds to either the
+ *      customer (refund) or the driver, as determined by the dispute
+ *      outcome. Only DEFAULT_ADMIN_ROLE may settle, and the recipient must
+ *      be one of the two escrow parties — funds can never be redirected to
+ *      an arbitrary address. Without this path, a disputed escrow's funds
+ *      were permanently locked.
+ */
+function resolveDisputedEscrow(uint256 escrowId, address recipient) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused {
+    Escrow storage escrow = escrows[escrowId];
+    require(escrow.customer != address(0), "Escrow not found");
+    require(escrow.disputed, "Not disputed");
+    require(!escrow.released, "Already released");
+    require(recipient == escrow.customer || recipient == escrow.driver, "Recipient must be a party to the escrow");
+
+    escrow.released = true;
+    escrow.releasedAt = block.timestamp;
+
+    (bool success, ) = payable(recipient).call{value: escrow.amount}("");
+    require(success, "Transfer failed");
+
+    emit EscrowResolved(escrowId, recipient, escrow.amount);
+}
+
+>>>>>>> upstream/main
     // ============ DAO Governance ============
     function createProposal(
         address newImplementation,
@@ -461,6 +499,13 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
         require(
+<<<<<<< HEAD
+=======
+            approvedImplementations[newImplementation],
+            "Implementation not approved"
+        );
+        require(
+>>>>>>> upstream/main
             emergencyUpgradeRequests[newImplementation] == 0,
             "Emergency upgrade already requested for this implementation"
         );

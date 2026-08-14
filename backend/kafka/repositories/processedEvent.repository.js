@@ -100,7 +100,8 @@ class ProcessedEventRepository {
         .from('kafka_processed_events')
         .update({ status: 'completed' })
         .eq('topic', topic)
-        .eq('event_id', eventId);
+        .eq('event_id', eventId)
+        .eq('status', 'processing');
       if (error) throw error;
     } catch (error) {
       logger.error(`Failed to mark processed event ${eventId} on ${topic} as completed:`, error);
@@ -118,7 +119,8 @@ class ProcessedEventRepository {
         .from('kafka_processed_events')
         .update({ status: 'failed' })
         .eq('topic', topic)
-        .eq('event_id', eventId);
+        .eq('event_id', eventId)
+        .eq('status', 'processing');
       if (error) throw error;
     } catch (error) {
       logger.error(`Failed to mark processed event ${eventId} on ${topic} as failed:`, error);

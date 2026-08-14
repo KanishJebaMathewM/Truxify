@@ -19,8 +19,11 @@ export function normalizePhone(phone) {
   // Handle the E.164 + prefix explicitly before stripping digits
   let digits = phone.replace(/[^\d]/g, '');
 
-  // Strip a leading trunk prefix 0 (e.g. 0919876543210 -> 919876543210)
-  if (digits.startsWith('0')) {
+  // Strip a leading trunk prefix 0 only for the country-code form
+  // (e.g. 0919876543210 -> 919876543210). A bare 0-prefixed local number is
+  // not a valid trunk form and is left alone so it fails the 10-digit
+  // validation below instead of being silently corrupted.
+  if (digits.startsWith('0') && digits.length === 13) {
     digits = digits.slice(1);
   }
 

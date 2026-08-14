@@ -454,9 +454,28 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       if (expectedDriverAddress && booking.driver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
         return { error: 'Existing booking was created for a different driver than the one assigned to this order' }
       }
-      if (expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+      // Always verify the on-chain booking amount against the authoritative
+      // server figure. When the caller does not supply expectedAmountWei,
+      // resolve it server-side from the order's escrow_amount_wei so a funded
+      // booking is never accepted with zero amount validation.
+      let authoritativeAmountWei = expectedAmountWei
+      if (authoritativeAmountWei === null && supabaseAdmin) {
+        try {
+          const { data: orderRow } = await supabaseAdmin
+            .from('orders')
+            .select('escrow_amount_wei')
+            .eq('escrow_booking_id', bookingId)
+            .maybeSingle()
+          if (orderRow?.escrow_amount_wei != null) {
+            authoritativeAmountWei = orderRow.escrow_amount_wei
+          }
+        } catch (lookupErr) {
+          logger.warn(`[escrow] Failed to resolve escrow_amount_wei for booking ${bookingId}: ${lookupErr.message}`)
+        }
+      }
+      if (authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
         return {
-          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei) of this order`,
+          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei) of this order`,
           code: 'DEPOSIT_AMOUNT_MISMATCH',
         }
       }

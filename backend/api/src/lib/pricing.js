@@ -17,10 +17,15 @@
 
 import logger from '../middleware/logger.js';
 
+// Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
+// Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
+const MIN_FREIGHT_PAISa = 0;
+const MAX_FREIGHT_PAISa = 100_000_000;
+
 export function sanitizePrice(value) {
   const num = Number(value);
-  const clamped = Math.max(MIN_FREIGHT_PAISa, Math.min(MAX_FREIGHT_PAISa, num));
-  return Number.isFinite(clamped) && clamped >= 0 ? Math.round(clamped) : MIN_FREIGHT_PAISa;
+  if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
+  return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
 
 const EARTH_RADIUS_KM = 6371.0088;

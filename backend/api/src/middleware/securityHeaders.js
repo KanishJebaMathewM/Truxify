@@ -14,7 +14,7 @@ const MAX_HSTS_MAX_AGE = 63072000; // 2 years
 // the value to 0, a negative number, or an unbounded one.
 function resolveHstsMaxAge() {
   const raw = Number(process.env.SECURE_HSTS_MAX_AGE);
-  if (Number.isFinite(raw) && raw >= MIN_HSTS_MAX_AGE && raw <= MAX_HSTS_MAX_AGE) {
+  if (Number.isFinite(raw) && raw > MIN_HSTS_MAX_AGE && raw <= MAX_HSTS_MAX_AGE) {
     return Math.floor(raw);
   }
   return DEFAULT_HSTS_MAX_AGE;

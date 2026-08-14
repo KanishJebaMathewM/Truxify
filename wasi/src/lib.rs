@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use url::Url;
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
@@ -215,6 +216,29 @@ mod tests {
         assert_eq!(resolve_lexically("./data/../data/x"), Some("data/x".to_string()));
         assert_eq!(resolve_lexically("../data/../../etc/hostname"), Some("../../etc/hostname".to_string()));
     }
+
+    #[test]
+    fn allows_exact_allowed_hosts() {
+        assert!(is_url_allowed("http://api.truxify.com/v1"));
+        assert!(is_url_allowed("https://api.truxify.com/"));
+        assert!(is_url_allowed("http://localhost:8080/health"));
+        assert!(is_url_allowed("http://127.0.0.1/x"));
+    }
+
+    #[test]
+    fn rejects_subdomain_and_query_bypass_attempts() {
+        // Subdomain squatting of an allowed host.
+        assert!(!is_url_allowed("http://api.truxify.com.evil.com/"));
+        assert!(!is_url_allowed("http://localhost.evil.com/"));
+        assert!(!is_url_allowed("http://attacker127.0.0.1.com/"));
+        // Domain present only inside the query string.
+        assert!(!is_url_allowed("http://evil.com/?redirect=api.truxify.com"));
+        // Non-http(s) schemes must be refused.
+        assert!(!is_url_allowed("ftp://api.truxify.com/"));
+        // Bare host (no scheme) and non-URLs must be refused.
+        assert!(!is_url_allowed("api.truxify.com"));
+        assert!(!is_url_allowed("not a url"));
+    }
 }
 
 // ============ Network System Calls ============
@@ -262,19 +286,20 @@ pub fn wasi_sleep(ms: u64) {
 }
 
 fn is_url_allowed(url: &str) -> bool {
-    // Capability-based security: only allow specific domains
-    let allowed_domains = vec![
-        "api.truxify.com",
-        "localhost",
-        "127.0.0.1",
-    ];
-    
-    for domain in allowed_domains {
-        if url.contains(domain) {
-            return true;
-        }
+    // Capability-based security: only allow specific hosts. Parse the URL and
+    // compare the *actual* host exactly. A raw substring check (`url.contains`)
+    // is trivially bypassed via subdomain squatting or by embedding the domain
+    // in the query string, which would let a guest reach arbitrary external
+    // hosts (SSRF / data exfiltration).
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
     }
-    false
+    let host = parsed.host_str().map(|h| h.to_ascii_lowercase());
+    let allowed = ["api.truxify.com", "localhost", "127.0.0.1"];
+    allowed.iter().any(|d| host == Some(d.to_string()))
 }
 
 // ============ Process System Calls ============

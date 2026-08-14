@@ -43,15 +43,20 @@ create index if not exists idx_fraud_review_queue_pending
   on fraud_review_queue (risk_score desc)
   where status = 'pending';
 
--- RLS: the fraud service runs with the service-role client key. Keep the tables
--- locked down for row-level requests.
+-- RLS: the fraud service runs with the service-role client key, so restrict
+-- the policies to service_role and keep the tables locked down for any other
+-- row-level requests.
 alter table behavioral_profiles enable row level security;
 alter table fraud_risk_scores   enable row level security;
 alter table fraud_review_queue  enable row level security;
 
 create policy behavioral_profiles_service_policy on behavioral_profiles
-  for all using (true) with check (true);
+  for all to service_role using (true) with check (true);
 create policy fraud_risk_scores_service_policy on fraud_risk_scores
-  for all using (true) with check (true);
+  for all to service_role using (true) with check (true);
 create policy fraud_review_queue_service_policy on fraud_review_queue
-  for all using (true) with check (true);
+  for all to service_role using (true) with check (true);
+
+revoke all on table behavioral_profiles from anon, authenticated;
+revoke all on table fraud_risk_scores   from anon, authenticated;
+revoke all on table fraud_review_queue  from anon, authenticated;

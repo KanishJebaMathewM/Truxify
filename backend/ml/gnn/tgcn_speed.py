@@ -7,7 +7,8 @@ class TemporalGcnSpeedPredictor:
     def __init__(self, num_nodes: int = 5):
         self.num_nodes = num_nodes
         # Simulated GCN spatial weights & GRU hidden state weights
-        self.gcn_weights = np.array([0.4, 0.35, 0.25])
+        base = [0.4, 0.35, 0.25]
+        self.gcn_weights = np.array((base + [0.3] * (self.num_nodes - len(base)))[:self.num_nodes], dtype=float)
         self.gru_weights = 0.85
 
     def predict_speed_forecast(self, time_series_node_speeds: np.ndarray) -> dict:

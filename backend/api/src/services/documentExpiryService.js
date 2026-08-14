@@ -232,8 +232,8 @@ try {
       workerRunning = false;
     }
   }
-  logger.info(`[document-expiry] Batch complete. Total notifications sent: ${totalNotificationsSent}`
-    
+  logger.info(
+    `[document-expiry] Batch complete. Total notifications sent: ${totalNotificationsSent}`
   );
 }
 

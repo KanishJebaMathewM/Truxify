@@ -35,11 +35,38 @@ deny[msg] {
     msg = "Resource limits must be specified."
 }
 
-# Deny if memory limit > 2GB
+# Deny if memory limit > 2Gi
 deny[msg] {
     container := input.review.object.spec.containers[_]
-    container.resources.limits.memory == "2Gi"
-    msg = "Memory limit exceeded. Max allowed: 2Gi"
+    mem := container.resources.limits.memory
+    bytes := parse_memory(mem)
+    bytes > 2147483648
+    msg = sprintf("Memory limit %v exceeds max allowed 2Gi", [mem])
+}
+
+parse_memory(qty) = bytes {
+    endswith(qty, "Gi")
+    num := to_number(replace(qty, "Gi", ""))
+    bytes := num * 1073741824
+}
+
+parse_memory(qty) = bytes {
+    endswith(qty, "Mi")
+    num := to_number(replace(qty, "Mi", ""))
+    bytes := num * 1048576
+}
+
+parse_memory(qty) = bytes {
+    endswith(qty, "Ki")
+    num := to_number(replace(qty, "Ki", ""))
+    bytes := num * 1024
+}
+
+parse_memory(qty) = bytes {
+    not endswith(qty, "Gi")
+    not endswith(qty, "Mi")
+    not endswith(qty, "Ki")
+    bytes := to_number(qty)
 }
 
 # Allow if all checks pass

@@ -94,7 +94,7 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error('[health] Supabase check failed:', err.message);
+    logger.error({ err }, '[health] Supabase check failed');
     return 'failed';
   }
 }
@@ -105,7 +105,7 @@ async function checkMongo() {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error('[health] MongoDB check failed:', err.message);
+    logger.error({ err }, '[health] MongoDB check failed');
     return 'failed';
   }
 }
@@ -116,7 +116,7 @@ async function checkRedis() {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error('[health] Redis check failed:', err.message);
+    logger.error({ err }, '[health] Redis check failed');
     return 'failed';
   }
 }
@@ -130,7 +130,7 @@ async function checkEscrow() {
     const result = await checkEscrowHealth();
     return result.status;
   } catch (err) {
-    logger.error('[Health] checkEscrow failed:', err?.message || err);
+    logger.error({ err }, '[Health] checkEscrow failed');
     return 'failed';
   }
 }

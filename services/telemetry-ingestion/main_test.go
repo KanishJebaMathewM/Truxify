@@ -128,6 +128,15 @@ func TestHaversineDistanceAntipodalFinite(t *testing.T) {
 	}
 }
 
+// TestHaversineDistanceCoincidentZero verifies identical coordinates return
+// exactly zero distance instead of a NaN/epsilon-polluted aggregate sample.
+func TestHaversineDistanceCoincidentZero(t *testing.T) {
+	d := haversineDistance(19.076, 72.8777, 19.076, 72.8777)
+	if d != 0 {
+		t.Fatalf("expected zero distance for coincident points, got %v", d)
+	}
+}
+
 // TestGeofenceRadiusZeroIsExactCheck verifies an explicit radius_meters: 0 is
 // kept (exact-position check) instead of being coerced to the default.
 func TestGeofenceRadiusZeroIsExactCheck(t *testing.T) {

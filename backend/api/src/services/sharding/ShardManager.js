@@ -132,9 +132,9 @@ class ShardManager {
           password: config.password,
           max: 10,
         });
-        logger.info(`✅ Shard ${name} initialized`);
+        logger.info(`[OK] Shard ${name} initialized`);
       } catch (error) {
-        logger.error(`❌ Failed to initialize shard ${name}:`, error);
+        logger.error(`[ERROR] Failed to initialize shard ${name}:`, error);
       }
     }
   }
@@ -209,7 +209,13 @@ class ShardManager {
     // Check cache first
     const cached = await this.redis.get(`order:${orderId}:location`);
     if (cached) {
-      return JSON.parse(cached);
+      try {
+        return JSON.parse(cached);
+      } catch (err) {
+        // Corrupt cache entry — fall through to the authoritative lookup
+        // instead of throwing (issue #12751).
+        logger.warn(`[ShardManager] Corrupt cached location for order ${orderId}, falling back to database: ${err.message}`);
+      }
     }
     // Resolve the real pickup location from the authoritative orders table when
     // a primary PostgreSQL connection is configured. This prevents every

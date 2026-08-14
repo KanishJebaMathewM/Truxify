@@ -1,7 +1,36 @@
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { appendFile } from 'fs/promises';
+import path from 'path';
 
 const TABLE = 'application_audit_logs';
+
+const DEAD_LETTER_PATH =
+  process.env.AUDIT_DEAD_LETTER_FILE ||
+  path.join(process.cwd(), 'audit-dead-letter.log');
+
+/**
+ * Persist a failed audit record to a durable, append-only dead-letter log so
+ * entries are never silently lost during a DB outage. The file can be replayed
+ * once the database is healthy.
+ */
+async function deadLetterAuditEntry(record, reason) {
+  try {
+    await appendFile(
+      DEAD_LETTER_PATH,
+      JSON.stringify({
+        ...record,
+        _deadLetterReason: reason,
+        _deadLetteredAt: new Date().toISOString(),
+      }) + '\n'
+    );
+  } catch (writeErr) {
+    logger.error(
+      { err: writeErr },
+      '[AuditLog] Failed to write audit entry to dead-letter log'
+    );
+  }
+}
 
 /**
  * Centralized audit log service for recording privileged administrative operations.
@@ -68,12 +97,14 @@ class AuditLogService {
 
       if (error) {
         logger.error({ err: error }, '[AuditLog] Failed to insert audit entry');
+        await deadLetterAuditEntry(record, error.message || 'insert_error');
         return null;
       }
 
       return data;
     } catch (err) {
       logger.error({ err }, '[AuditLog] Exception inserting audit entry');
+      await deadLetterAuditEntry(record, err.message || 'insert_exception');
       return null;
     }
   }

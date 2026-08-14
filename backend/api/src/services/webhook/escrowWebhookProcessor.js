@@ -114,9 +114,10 @@ async function verifyPolygonTransactionReceipt(txHash) {
 }
 
 async function handlePaymentReleased(payload) {
-  if (payload.txHash) {
-    await verifyPolygonTransactionReceipt(payload.txHash);
+  if (!payload.txHash) {
+    throw new Error('Missing txHash in escrow release webhook payload — release requires on-chain proof');
   }
+  await verifyPolygonTransactionReceipt(payload.txHash);
   const order = await findOrderByIdOrDisplayId(payload.orderId);
   const now = new Date().toISOString();
 
@@ -238,14 +239,7 @@ async function handleWithdrawalSettled(payload) {
 
   const { data: updatedOrders, error } = await requireDb()
     .from('orders')
-    .update({
-      escrow_status: isRefund ? 'refunded' : 'released',
-      release_tx_hash: isRefund ? undefined : (txHash || order.release_tx_hash || null),
-      refund_tx_hash: isRefund ? (txHash || order.refund_tx_hash || null) : undefined,
-      escrow_released_at: isRefund ? undefined : now,
-      escrow_release_error: isRefund ? undefined : null,
-      updated_at: now,
-    })
+    .update({ ...settlement, updated_at: now })
     .eq('id', order.id)
     .in('escrow_status', [...REFUND_RECONCILABLE_STATUSES, ...RELEASE_RECONCILABLE_STATUSES])
     .select('id');

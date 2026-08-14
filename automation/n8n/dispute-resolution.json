@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
         "options": {}
@@ -127,7 +127,11 @@
       "position": [
         850,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -159,7 +163,11 @@
       "position": [
         1050,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -223,6 +231,10 @@
       "name": "Create Arbitration Record",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "position": [
         1850,
         200
@@ -230,7 +242,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escalation Alert: Arbitration Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=The dispute for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}} has remained unresolved for 24 hours. Please review the packaged GPS trail and OTP logs.",
         "options": {}
@@ -293,7 +305,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Release Escrow Payment Failed for Booking {{$json.body.bookingId}}",
         "textBody": "=CRITICAL: The Release Escrow Payment step failed after 3 retries for Booking {{$json.body.bookingId}}. Escrow payment was not released on-chain. Immediate manual intervention required.",
         "options": {}
@@ -305,6 +317,38 @@
       "position": [
         500,
         800
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Package Dispute PDF Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Package Dispute PDF step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Dispute evidence could not be packaged. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-dispute-pdf-failed",
+      "name": "Alert Admin — Dispute PDF Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        850,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Notify Both Parties Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Notify Both Parties step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. The disputed parties were not notified. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-notify-failed",
+      "name": "Alert Admin — Notify Parties Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        500
       ]
     }
   ],
@@ -354,22 +398,18 @@
         ]
       ]
     },
-    "Query Supabase OTP Logs": {
-      "main": [
-        [
-          {
-            "node": "Package Dispute PDF",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Package Dispute PDF": {
       "main": [
         [
           {
             "node": "Notify Both Parties",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Dispute PDF Failed",
             "type": "main",
             "index": 0
           }
@@ -381,6 +421,13 @@
         [
           {
             "node": "Wait 24h",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Notify Parties Failed",
             "type": "main",
             "index": 0
           }
@@ -417,6 +464,24 @@
             "type": "main",
             "index": 0
           },
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Arbitration Record": {
+      "main": [
+        [
+          {
+            "node": "Admin Resolution Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
           {
             "node": "Email Admin",
             "type": "main",

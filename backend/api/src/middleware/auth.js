@@ -138,6 +138,14 @@ export async function authenticate(req, res, next) {
   const bypassAuth = process.env.BYPASS_AUTH === "true";
   const testAuthEnabled = process.env.ENABLE_TEST_AUTH === "true";
 
+  // Capture test-identity headers before sanitization so DEV_ACCESS_TOKEN
+  // bypass (gated on a shared secret, not bare headers) can still use them.
+  const devIdentity = {
+    id: req.headers["x-user-id"],
+    role: req.headers["x-user-role"],
+    name: req.headers["x-user-name"],
+  };
+
   // ── Production header sanitization ──────────────────────────────────
   if (
     process.env.NODE_ENV === "production" ||
@@ -187,9 +195,14 @@ export async function authenticate(req, res, next) {
       process.env.DEV_ACCESS_TOKEN &&
       devToken === process.env.DEV_ACCESS_TOKEN
     ) {
+      const devIdentity = {
+        id: req.headers["x-user-id"],
+        role: req.headers["x-user-role"] || "customer",
+        name: req.headers["x-user-name"] || "Test User",
+      };
       const testUserId = devIdentity.id;
-      const testUserRole = devIdentity.role || "customer";
-      const testFullName = devIdentity.name || "Test User";
+      const testUserRole = devIdentity.role;
+      const testFullName = devIdentity.name;
 
       if (testUserId) {
         req.user = {
@@ -425,7 +438,6 @@ export async function authenticate(req, res, next) {
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",
       });
-    }
 
     req.user = formatUserProfile(userProfile);
 

@@ -324,7 +324,7 @@ class _TripsScreenState extends State<TripsScreen> {
         fuelDeducted: '₹0',
         tollDeducted: '₹0',
         platformFee: '₹0',
-        netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        netEarnings: '₹${((row['net_earnings'] is num ? row['net_earnings'] as num : 0) / 100).toStringAsFixed(0)}',
       ),
       tripItems: tripItems,
       escrowStatus: row['escrow_status']?.toString(),
@@ -383,7 +383,12 @@ class _TripsScreenState extends State<TripsScreen> {
 
   int _totalEarningsPaise() => _trips.fold(
         0,
-        (sum, row) => sum + ((row['net_earnings'] ?? 0) as num).toInt(),
+        (sum, row) {
+          final val = row['net_earnings'];
+          if (val is num) return sum + val.toInt();
+          if (val is String) return sum + (num.tryParse(val)?.toInt() ?? 0);
+          return sum + ((val ?? 0) as num).toInt();
+        },
       );
 
   int _completedCount() =>
@@ -453,8 +458,8 @@ class _TripsScreenState extends State<TripsScreen> {
         final routePoints = tripId != null ? (_routePointsByTripId[tripId] ?? []) : [];
         if (routePoints.isNotEmpty) {
           final lastPoint = routePoints.last;
-          currentLat = (lastPoint['latitude'] as num?)?.toDouble();
-          currentLng = (lastPoint['longitude'] as num?)?.toDouble();
+          currentLat = lastPoint['latitude'] is num ? (lastPoint['latitude'] as num).toDouble() : null;
+          currentLng = lastPoint['longitude'] is num ? (lastPoint['longitude'] as num).toDouble() : null;
         }
       }
 
@@ -1621,7 +1626,9 @@ class _TripsScreenState extends State<TripsScreen> {
       );
     }
 
-    final points = routePoints.map((point) {
+    final points = routePoints.where((point) {
+      return point['latitude'] is num && point['longitude'] is num;
+    }).map((point) {
       return ll.LatLng(
         (point['latitude'] as num).toDouble(),
         (point['longitude'] as num).toDouble(),
@@ -1658,7 +1665,8 @@ class _TripsScreenState extends State<TripsScreen> {
               p == routePoints.first ||
               p == routePoints.last ||
               p['is_claimed'] == true
-            ).map<Marker>((point) {
+            ).where((p) => p['latitude'] is num && p['longitude'] is num)
+            .map<Marker>((point) {
               return Marker(
                 point: ll.LatLng(
                   (point['latitude'] as num).toDouble(),

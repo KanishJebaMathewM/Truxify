@@ -51,7 +51,7 @@ class KEDAService {
             logger.error({ event: 'KEDA_METRICS_FETCH_ERROR', error: error?.message }, 'Metrics fetch failed');
             return {
                 success: false,
-                error: error.message,
+                error: error?.message ?? String(error),
                 timestamp: new Date().toISOString()
             };
         }
@@ -108,7 +108,7 @@ class KEDAService {
             logger.error({ event: 'KEDA_CPU_FETCH_ERROR', error: error?.message }, 'CPU usage fetch failed');
             return {
                 success: false,
-                error: error.message,
+                error: error?.message ?? String(error),
                 timestamp: new Date().toISOString()
             };
         }
@@ -124,7 +124,7 @@ class KEDAService {
             logger.error({ event: 'KEDA_MEMORY_FETCH_ERROR', error: error?.message }, 'Memory usage fetch failed');
             return {
                 success: false,
-                error: error.message,
+                error: error?.message ?? String(error),
                 timestamp: new Date().toISOString()
             };
         }
@@ -140,7 +140,7 @@ class KEDAService {
             logger.error({ event: 'KEDA_REPLICA_FETCH_ERROR', error: error?.message }, 'Replica count fetch failed');
             return {
                 success: false,
-                error: error.message,
+                error: error?.message ?? String(error),
                 timestamp: new Date().toISOString()
             };
         }

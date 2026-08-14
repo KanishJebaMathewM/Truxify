@@ -42,29 +42,44 @@ class SyncService {
     try {
       final pendingPoDs = await LocalDbService.instance.getPendingPoDs();
       for (final pod in pendingPoDs) {
-        final orderId = pod['order_id'] as String?;
-        final stopId = pod['stop_id'] as String;
-        final tripId = pod['trip_display_id'] as String;
-        final photoPath = pod['photo_path'] as String?;
-        final signaturePath = pod['signature_path'] as String?;
-        final podId = pod['id'] as int;
-
         try {
+          // Local PoD rows are written by multiple generations of the app;
+          // any column may be missing or of the wrong type. Guard every cast
+          // so a single malformed row is skipped instead of aborting the whole
+          // sync batch with a TypeError.
+          final orderId = pod['order_id'] is String ? pod['order_id'] as String : null;
+          final stopId = pod['stop_id'] is String ? pod['stop_id'] as String : '';
+          final tripId = pod['trip_display_id'] is String ? pod['trip_display_id'] as String : '';
+          final photoPath = pod['photo_path'] is String ? pod['photo_path'] as String : null;
+          final signaturePath = pod['signature_path'] is String ? pod['signature_path'] as String : null;
+          final podId = pod['id'] is int ? pod['id'] as int : -1;
+
+          if (stopId.isEmpty || tripId.isEmpty || podId < 0) {
+            debugPrint('Skipping malformed PoD row: $pod');
+            continue;
+          }
+
           if (orderId != null && (photoPath != null || signaturePath != null)) {
-            await _uploadPodFiles(orderId!, photoPath: photoPath, signaturePath: signaturePath);
+            await _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
           }
           await _tripService.markStopCompleted(stopId, tripId);
           await LocalDbService.instance.markPoDSynced(podId);
         } catch (e) {
-          debugPrint('Failed to sync PoD $podId: $e');
+          final failedPodId = pod['id'] is int ? pod['id'] as int : -1;
+          debugPrint('Failed to sync PoD $failedPodId: $e');
           try {
-            if (orderId != null && (photoPath != null || signaturePath != null)) {
-              await _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
+            if (pod['order_id'] is String && pod['order_id'] != null) {
+              final safePhoto = pod['photo_path'] is String ? pod['photo_path'] as String : null;
+              final safeSignature = pod['signature_path'] is String ? pod['signature_path'] as String : null;
+              await _uploadPodFiles(pod['order_id'] as String, photoPath: safePhoto, signaturePath: safeSignature);
             }
-            await _tripService.markStopCompleted(stopId, tripId);
-            await LocalDbService.instance.markPoDSynced(podId);
+            await _tripService.markStopCompleted(
+              pod['stop_id'] is String ? pod['stop_id'] as String : '',
+              pod['trip_display_id'] is String ? pod['trip_display_id'] as String : '',
+            );
+            await LocalDbService.instance.markPoDSynced(failedPodId);
           } catch (retryErr) {
-            debugPrint('Retry also failed for pod $podId: $retryErr');
+            debugPrint('Retry also failed for pod $failedPodId: $retryErr');
           }
         }
       }

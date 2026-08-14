@@ -38,7 +38,8 @@ vi.mock('../../../src/config/db.js', () => ({
         eq: vi.fn().mockResolvedValue({ error: null })
       }))
     }))
-  }
+  },
+  supabaseAdmin: { from: vi.fn() },
 }));
 
 vi.mock('../../../src/middleware/logger.js', () => ({

@@ -12,7 +12,7 @@ const NOMINATIM_TIMEOUT_MS = 5000;
  */
 function getTimeoutMs() {
   const configured = Number(process.env.NOMINATIM_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : NOMINATIM_TIMEOUT_MS;
+  return Number.isFinite(configured) && configured > 0 && !Number.isNaN(configured) ? configured : NOMINATIM_TIMEOUT_MS;
 }
 
 /**

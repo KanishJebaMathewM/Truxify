@@ -15,7 +15,6 @@ describe('redisRateLimiter Middleware', () => {
 
 
 // === Spec 2 test ===
-import { describe, it, expect, vi } from 'vitest';
 import { checkSlidingWindow } from '../../src/middleware/redisRateLimiter.js';
 describe('checkSlidingWindow', () => {
   it('allows under limit', async () => {

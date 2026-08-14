@@ -53,9 +53,20 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         _cameraController = CameraController(cameras.first, ResolutionPreset.medium);
         await _cameraController!.initialize();
         if (mounted) setState(() {});
+      } else {
+        _showCameraError('No camera found on this device.');
       }
     } catch (e) {
       debugPrint('Error initializing camera: $e');
+      _showCameraError('Camera unavailable. Please check camera permissions.');
+    }
+  }
+
+  void _showCameraError(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: TruxifyColors.error),
+      );
     }
   }
 
@@ -77,6 +88,14 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
       });
     } catch (e) {
       debugPrint('Error taking photo: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to capture photo. Please try again.'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
     }
   }
 

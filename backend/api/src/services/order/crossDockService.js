@@ -50,6 +50,8 @@ const HANDOFF_WINDOW_MINUTES = parseInt(process.env.CROSS_DOCK_HANDOFF_WINDOW_MI
 const OTP_TTL_MINUTES = parseInt(process.env.CROSS_DOCK_OTP_TTL_MINUTES || '30', 10);
 const MAX_OTP_ATTEMPTS = parseInt(process.env.CROSS_DOCK_OTP_MAX_ATTEMPTS || '5', 10);
 const SEARCH_RADIUS_KM = parseFloat(process.env.CROSS_DOCK_SEARCH_RADIUS_KM || '50');
+// How recent a relay driver's location must be to count as "active".
+const DRIVER_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.CROSS_DOCK_LOCATION_FRESHNESS_SECONDS || '900', 10);
 
 const TABLE = 'cross_dock_transfers';
 
@@ -123,17 +125,17 @@ export async function findHandoffCandidates({
     // .maybeSingle() on it — that would treat the array as a single object and
     // throw, silently forcing the fallback path. We read the array directly.
     const { data: rpcDrivers, error: rpcError } = await supabaseAdmin.rpc('get_nearby_active_drivers', {
-      p_lat: crossDockLat,
-      p_lng: crossDockLng,
-      p_radius_km: radiusKm,
-      p_limit: limit,
+      origin_lat: crossDockLat,
+      origin_lng: crossDockLng,
+      radius_meters: radiusKm * 1000,
+      freshness_seconds: DRIVER_LOCATION_FRESHNESS_SECONDS,
     });
 
     let drivers = [];
     if (!rpcError && Array.isArray(rpcDrivers)) {
       drivers = rpcDrivers;
     } else if (rpcError) {
-      logger.debug?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
+      logger.error?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
     }
 
     if (drivers.length === 0) {
@@ -153,7 +155,7 @@ export async function findHandoffCandidates({
           lng: Number(d.lng),
           last_seen_at: d.last_seen_at,
         }))
-        .filter((d) => d.from_driver !== fromDriverId && d.driver_id !== fromDriverId)
+        .filter((d) => d.driver_id !== fromDriverId)
         .map((d) => ({
           driver_id: d.driver_id,
           name: d.name,
@@ -277,6 +279,9 @@ export async function createTransferRequest({
       .single();
 
     if (insertErr) {
+      if (insertErr.code === '23505') {
+        throw new DomainError(409, { error: 'An active cross-dock transfer already exists for this load.' });
+      }
       throw new DomainError(500, { error: 'Failed to create cross-dock transfer.', details: insertErr.message });
     }
 
@@ -498,6 +503,18 @@ export async function verifyHandoff({ transferId, driverId, handoffCode }) {
 
     if (updErr || !verified) {
       throw new DomainError(409, { error: 'Transfer was modified concurrently; please retry.' });
+    }
+
+    // Reassign order custody to the receiving driver now that handoff is verified.
+    if (verified.order_id) {
+      const { error: orderErr } = await supabaseAdmin
+        .from('orders')
+        .update({ driver_id: verified.to_driver_id })
+        .eq('id', verified.order_id)
+        .eq('driver_id', verified.from_driver_id); // Only update if still assigned to from_driver
+      if (orderErr) {
+        logger.warn?.({ err: orderErr.message, orderId: verified.order_id, toDriverId: verified.to_driver_id }, '[cross-dock] failed to reassign order custody');
+      }
     }
 
     try {

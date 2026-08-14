@@ -264,6 +264,10 @@ services:
       EXECUTIONS_DATA_MAX_AGE: 336
       N8N_METRICS: "true"
       BACKEND_API_URL: ${BACKEND_API_URL:?BACKEND_API_URL is required}
+      # Operator mailbox for escrow freeze/release failures and arbitration
+      # escalation. Required: a stuck-escrow alert that reaches nobody is worse
+      # than a boot failure, so n8n refuses to start until this is set.
+      ADMIN_ALERT_EMAIL: ${ADMIN_ALERT_EMAIL:?ADMIN_ALERT_EMAIL is required}
     volumes:
       - n8n_data:/home/node/.n8n
     deploy:

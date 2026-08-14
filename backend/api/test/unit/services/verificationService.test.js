@@ -84,11 +84,13 @@ describe('VerificationService', () => {
       expect(result.error).toBe('Order not found');
     });
 
-    it('returns full verification result for a valid delivered order', async () => {
+    it('returns full verification result for a valid active delivery', async () => {
       const order = {
         id: VALID_ORDER_ID,
         order_display_id: 'ORD-001',
-        status: 'payment_released',
+        // confirmDelivery runs before the order is marked delivered, so
+        // deliveryVerified requires an active status (picked_up/in_transit/arriving).
+        status: 'in_transit',
         customer_id: 'customer-1',
         driver_id: VALID_DRIVER_ID,
         truck_id: VALID_TRUCK_ID,
@@ -121,10 +123,10 @@ describe('VerificationService', () => {
       expect(result.timestamp).toBeDefined();
     });
 
-    it('marks deliveryVerified as false when order status is not delivered', async () => {
+    it('marks deliveryVerified as false when order status is terminal', async () => {
       const order = {
         id: VALID_ORDER_ID,
-        status: 'in_transit',
+        status: 'payment_released',
         driver_id: VALID_DRIVER_ID,
         truck_id: VALID_TRUCK_ID,
         blockchain_tx_hash: null,

@@ -52,11 +52,12 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const r = (n) => Number(n.toFixed(8));
+  const r = (n) => Number(n.toFixed(6));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(input = {}) {
+  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -291,6 +292,7 @@ export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
 export async function routeWithFailover(primary, _fb, coords) {
   try { return await primary(coords); }
   catch (err) {
+    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
     if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
       return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
     }

@@ -19,14 +19,13 @@ import logger from '../middleware/logger.js';
 
 export function sanitizePrice(value) {
   const num = Number(value);
-  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+  const clamped = Math.max(MIN_FREIGHT_PAISa, Math.min(MAX_FREIGHT_PAISa, num));
+  return Number.isFinite(clamped) && clamped >= 0 ? Math.round(clamped) : MIN_FREIGHT_PAISa;
 }
 
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)
-const MIN_FREIGHT_PAISa = 0;
-const MAX_FREIGHT_PAISa = 10_000_000_00; // 1 crore in paisa
 const TOLL_ESCALATION_HOURS = 6;
 const DEFAULT_RATE_PER_TONNE_KM = 50; // paisa per tonne-km
 

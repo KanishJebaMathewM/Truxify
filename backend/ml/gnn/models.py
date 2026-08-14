@@ -10,10 +10,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# True per-node feature dimension produced by `extract_features` (lat, lng,
+# traffic, 5-element road-type one-hot, speed_limit -> 9 features). The GNN
+# conv layers must consume this dimension or `data.x` raises a size mismatch.
+GNN_NODE_FEATURE_DIM = 9
+
 class GNNRouteModel(nn.Module):
     """Graph Neural Network for Route Optimization"""
     
-    def __init__(self, input_dim=64, hidden_dim=128, output_dim=32):
+    def __init__(self, input_dim=GNN_NODE_FEATURE_DIM, hidden_dim=128, output_dim=32):
         super(GNNRouteModel, self).__init__()
         
         # Graph convolution layers
@@ -179,7 +184,14 @@ class RouteOptimizer:
         try:
             # Convert to PyTorch Geometric
             data = graph_data.to(self.device)
-            
+
+            # Validate the node-feature dimension matches the model before the
+            # GCN conv layers run (otherwise Linear raises a cryptic size mismatch).
+            if data.x.shape[1] != self.model.input_dim:
+                raise ValueError(
+                    f"Node feature dim mismatch: model expects {self.model.input_dim}, got {data.x.shape[1]}"
+                )
+
             # Get node embeddings
             with torch.no_grad():
                 embeddings = self.model(data.x, data.edge_index, data.edge_attr)

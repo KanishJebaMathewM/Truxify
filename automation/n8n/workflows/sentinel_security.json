@@ -61,6 +61,19 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "method": "POST",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "reason",
+              "value": "=flash-loan/frontrun heuristic matched: gasPrice={{ $json.gasPrice }} wei (threshold 500 gwei)"
+            },
+            {
+              "name": "txHash",
+              "value": "={{ $json.hash || ($json.params && $json.params.result ? $json.params.result.hash : '') }}"
+            }
+          ]
+        },
         "options": {}
       },
       "name": "Trigger Frontrun Defensive Pause",

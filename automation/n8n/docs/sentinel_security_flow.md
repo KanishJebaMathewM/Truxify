@@ -23,3 +23,13 @@ pause never fires (#13925).
 
 The endpoint is one-way: it only ever *opens* the escrow circuit breaker. Closing
 it is an operator action — `POST /api/internal/pause-escrow {"paused": false}`.
+
+## Payload and failure handling
+The pause node forwards `reason` (the matched heuristic and observed gas price)
+and `txHash`, which the API records on the `DEFENSIVE_PAUSE_TRIGGERED` audit
+event so an incident can be traced back to the triggering transaction.
+
+The circuit breaker is Redis-backed and `isEscrowPaused()` fails open, so when
+Redis is unreachable the pause does not take effect. The endpoint answers **503**
+in that case rather than 200 — the n8n execution fails visibly instead of the
+sentinel recording a defensive pause that never happened.

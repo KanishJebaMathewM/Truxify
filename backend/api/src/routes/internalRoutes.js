@@ -187,11 +187,13 @@ router.post('/pause-escrow', async (req, res) => {
  *                 description: Mempool transaction that triggered the pause.
  *     responses:
  *       200:
- *         description: Circuit breaker opened
+ *         description: Circuit breaker opened and persisted
  *       401:
  *         description: Missing or invalid API key
  *       500:
  *         description: Failed to persist pause state
+ *       503:
+ *         description: Redis unavailable — the pause did not take effect
  */
 router.post('/defensive-pause', async (req, res) => {
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : null;
@@ -202,6 +204,23 @@ router.post('/defensive-pause', async (req, res) => {
     // opens the circuit. The sentinel is an automated detector, so giving it a
     // close path would let a single forged call undo an emergency pause.
     const result = await setEscrowPaused(true);
+
+    // setEscrowPaused resolves with persisted:false instead of throwing when
+    // Redis is down, and isEscrowPaused() fails open, so the circuit is not
+    // actually open in that case. Answering 2xx here would tell an unattended
+    // detector its defensive pause succeeded while escrow submissions keep
+    // flowing. Fail loudly so the n8n execution errors and alerts.
+    if (result.persisted === false) {
+      logger.error(
+        { event: 'DEFENSIVE_PAUSE_NOT_PERSISTED', source: 'security-sentinel', reason, txHash },
+        '[internal] Defensive pause could not be persisted — escrow is NOT paused.'
+      );
+      return res.status(503).json({
+        error: 'Defensive pause was not persisted; escrow is not paused.',
+        paused: false,
+        persisted: false,
+      });
+    }
 
     logger.warn(
       {

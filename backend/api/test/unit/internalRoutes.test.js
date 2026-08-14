@@ -230,6 +230,26 @@ describe('POST /api/internal/defensive-pause', () => {
     expect(res.body.error).toContain('Failed to apply defensive pause');
   });
 
+  // setEscrowPaused resolves (does not throw) with persisted:false when Redis is
+  // unavailable, and isEscrowPaused() fails open — so the circuit is not really
+  // open. A 2xx here would tell the sentinel its pause worked.
+  it('reports 503 rather than success when the pause was not persisted', async () => {
+    circuitBreakerMock.setEscrowPaused.mockResolvedValue({
+      paused: true,
+      updatedAt: '2026-08-14T00:00:00.000Z',
+      persisted: false,
+    });
+
+    const res = await request(buildGuardedApp())
+      .post('/api/internal/defensive-pause')
+      .set('x-api-key', VALID_KEY)
+      .send({});
+
+    expect(res.status).toBe(503);
+    expect(res.body.paused).toBe(false);
+    expect(res.body.persisted).toBe(false);
+  });
+
   it('is reachable at all — the route exists rather than falling through to 404', async () => {
     const res = await request(buildGuardedApp())
       .post('/api/internal/defensive-pause')

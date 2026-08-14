@@ -126,6 +126,25 @@ test("the security sentinel still routes its detection to a defensive pause", ()
   assert.ok(wired, "the flash-loan detector is no longer wired to the pause node");
 });
 
+test("the defensive pause forwards detector context for incident tracing", () => {
+  const sentinel = require(path.join(WORKFLOW_DIR, "sentinel_security.json"));
+  const pause = (sentinel.nodes || []).find(
+    (n) => n.name === "Trigger Frontrun Defensive Pause",
+  );
+  const params = pause.parameters || {};
+
+  assert.strictEqual(
+    params.sendBody,
+    true,
+    "the pause node must send a body — without it the DEFENSIVE_PAUSE_TRIGGERED audit event records reason=null, txHash=null and an incident cannot be traced to a transaction",
+  );
+
+  const sent = ((params.bodyParametersUi || {}).parameter || []).map((p) => p.name);
+  for (const field of ["reason", "txHash"]) {
+    assert.ok(sent.includes(field), `the pause node must send "${field}"`);
+  }
+});
+
 console.log(
   `\n${nodes.length} internal-API node(s) audited across ${loadWorkflows().length} workflow(s).`,
 );

@@ -1,5 +1,5 @@
 import logger from "../../middleware/logger.js";
-import { HealthStatus } from "./HealthCheck.js";
+import { HealthStatus, withTimeout } from "./HealthCheck.js";
 
 /**
  * @typedef {object} ServiceHealthResult
@@ -55,19 +55,43 @@ export class HealthAggregator {
     const start = Date.now();
 
     const results = await Promise.all(
-      this._checks.map(async ({ name, checkFn }) => {
+      this._checks.map(async ({ name, checkFn, critical, timeoutMs }) => {
+        const startTime = Date.now();
+
+        const run = async () => {
+          try {
+            return await checkFn();
+          } catch (err) {
+            logger.error(
+              `[health] Aggregator check "${name}" threw: ${err.message}`,
+            );
+            return {
+              name,
+              status: HealthStatus.UNHEALTHY,
+              message: err.message,
+              responseTime: Date.now() - startTime,
+              critical: Boolean(critical),
+              timestamp: new Date().toISOString(),
+            };
+          }
+        };
+
+        // Apply the registered per-check timeoutMs when set. A timed-out
+        // check resolves as UNHEALTHY so aggregation always completes.
+        const executed = timeoutMs ? withTimeout(run(), timeoutMs) : run();
+
         try {
-          return await checkFn();
+          return await executed;
         } catch (err) {
           logger.error(
-            `[health] Aggregator check "${name}" threw: ${err.message}`,
+            `[health] Aggregator check "${name}" timed out: ${err.message}`,
           );
           return {
             name,
             status: HealthStatus.UNHEALTHY,
             message: err.message,
-            responseTime: 0,
-            critical: false,
+            responseTime: Date.now() - startTime,
+            critical: Boolean(critical),
             timestamp: new Date().toISOString(),
           };
         }

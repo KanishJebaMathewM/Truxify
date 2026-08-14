@@ -155,7 +155,7 @@ export class BidAcceptanceService {
             recovery: 'Configure ESCROW_MATIC_PER_PAISA / MAX_ESCROW_MATIC or contact support for a larger escrow limit.',
           });
         }
-        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshDriverWallet, amountWei);
+        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshCustomerWallet, freshDriverWallet, amountWei);
         const bookingId = depositTx?.bookingId || getEscrowBookingId(order.order_display_id);
 
         // Guard against silent escrow disable: if buildDepositTx returned

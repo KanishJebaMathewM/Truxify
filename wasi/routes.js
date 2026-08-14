@@ -2,8 +2,14 @@ import express from 'express';
 import wasiRuntime from './wasi-runtime.js';
 import rateLimit from 'express-rate-limit';
 import logger from '../backend/api/src/middleware/logger.js';
+import { authenticate } from '../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
+
+// The WASI runtime can read files, make HTTP requests and instantiate WASM —
+// keep it isolated from the public API: authenticated admin-only.
+router.use(authenticate, requirePolicy('wasi:manage'));
 
 // Rate limiters
 const wasiActionLimiter = rateLimit({

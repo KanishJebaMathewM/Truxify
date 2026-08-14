@@ -1,4 +1,4 @@
-import { EventPublisher, EventSubscriber } from '../EventPublisher.js';
+import { EventPublisher } from '../EventPublisher.js';
 import { EventSubscriber as EventSubscriberBase } from '../EventSubscriber.js';
 import logger from '../../../middleware/logger.js';
 import EventEmitter from 'events';

@@ -3,7 +3,7 @@ import time
 import json
 import base64
 import random
-from typing import Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Any, Optional
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -19,7 +19,8 @@ class VDF:
     def __init__(self, iterations: int = 100000):
         self.iterations = iterations
         self.backend = default_backend()
-        
+        self.modulus = self._generate_modulus()
+
         logger.info(f"✅ VDF initialized with {iterations} iterations")
     
     def _hash_to_point(self, data: bytes) -> int:
@@ -36,9 +37,8 @@ class VDF:
     def eval(self, input_data: bytes) -> Tuple[bytes, bytes]:
         """Evaluate VDF: y = x^(2^T) mod N"""
         try:
-            # Generate modulus (simplified - in production use RSA modulus)
-            # For demo: use a large prime
-            modulus = self._generate_modulus()
+            # Use the fixed public modulus for this service
+            modulus = self.modulus
             
             # Convert input to integer
             x = self._hash_to_point(input_data)
@@ -125,34 +125,35 @@ class VDF:
         return True
     
     def _generate_proof(self, x: int, y: int, modulus: int) -> str:
-        """Generate proof of VDF computation"""
-        # Simplified proof generation
+        """Generate deterministic proof of VDF computation"""
         proof_data = {
             'x': hex(x)[2:],
             'y': hex(y)[2:],
             'modulus': hex(modulus)[2:],
-            'iterations': self.iterations,
-            'timestamp': time.time()
+            'iterations': self.iterations
         }
         proof_hash = hashlib.sha256(json.dumps(proof_data).encode()).hexdigest()
         return proof_hash
-    
+
     def verify(self, input_data: bytes, output_data: bytes, proof_data: bytes) -> bool:
         """Verify VDF proof"""
         try:
-            # Parse proof
             proof_json = json.loads(proof_data.decode())
-            
-            # Recompute the VDF output: y' = x^(2^T) mod N
+
+            # Recompute the VDF output with the fixed public parameters
+            # (T = self.iterations, N = self.modulus). The iteration count,
+            # modulus and output from the proof payload are never trusted.
             x = self._hash_to_point(input_data)
-            modulus = int(proof_json['modulus'], 16)
-            iterations = int(proof_json.get('iterations', self.iterations))
             y = x
-            for _ in range(iterations):
-                y = self._square_mod(y, modulus)
+            for _ in range(self.iterations):
+                y = self._square_mod(y, self.modulus)
 
             # The recomputed output must match the claimed output in the proof
             if int(proof_json['output'], 16) != y:
+                return False
+
+            # Validate the embedded proof hash against the recomputed values
+            if proof_json.get('proof') != self._generate_proof(x, y, self.modulus):
                 return False
 
             # And the caller-provided expected output, when given
@@ -160,7 +161,7 @@ class VDF:
                 return False
 
             return True
-            
+
         except Exception as e:
             logger.error(f"VDF verification failed: {e}")
             return False

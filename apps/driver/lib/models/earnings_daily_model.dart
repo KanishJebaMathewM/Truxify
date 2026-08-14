@@ -24,12 +24,27 @@ class EarningsDailyModel {
   double get netAmount => amount - fuelTollDeduction;
 
   factory EarningsDailyModel.fromMap(Map<String, dynamic> map) {
-    final gross = ((map['amount'] ?? 0) / 100.0) as double;
+    // Guard against non-numeric amount values (e.g. string from API).
+    final rawAmount = map['amount'];
+    double gross;
+    if (rawAmount is num) {
+      gross = (rawAmount / 100.0).toDouble();
+    } else if (rawAmount is String) {
+      gross = (num.tryParse(rawAmount)?.toDouble() ?? 0.0) / 100.0;
+    } else {
+      gross = 0.0;
+    }
     // If the backend ever starts sending 'fuel_toll_deduction', use it;
     // otherwise fall back to the 15% estimate.
-    final deduction = map['fuel_toll_deduction'] != null
-        ? ((map['fuel_toll_deduction'] as num) / 100.0)
-        : gross * 0.15;
+    final rawDeduction = map['fuel_toll_deduction'];
+    double deduction;
+    if (rawDeduction is num) {
+      deduction = (rawDeduction / 100.0).toDouble();
+    } else if (rawDeduction is String) {
+      deduction = (num.tryParse(rawDeduction)?.toDouble() ?? gross * 0.15) / 100.0;
+    } else {
+      deduction = gross * 0.15;
+    }
 
     return EarningsDailyModel(
       dayDate:

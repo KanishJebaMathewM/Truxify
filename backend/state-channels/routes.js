@@ -7,58 +7,18 @@ const router = express.Router();
 // Open channel
 router.post('/channels/open', async (req, res) => {
     try {
-        const { participantA, participantB } = req.body;
-        if (!participantA || !participantB) {
+        const { participantA, participantB, amount } = req.body;
+        if (!participantA || !participantB || !amount) {
             return res.status(400).json({
                 success: false,
-                error: 'participantA and participantB required'
+                error: 'participantA, participantB, and amount required'
             });
         }
 
-        const result = await channelService.openChannel(participantA, participantB);
+        const result = await channelService.openChannel(participantA, participantB, amount);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Open channel error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Fund channel
-router.post('/channels/fund/:channelId', async (req, res) => {
-    try {
-        const { channelId } = req.params;
-        const { amount, participant } = req.body;
-        if (!amount || !participant) {
-            return res.status(400).json({
-                success: false,
-                error: 'amount and participant required'
-            });
-        }
-
-        const result = await channelService.fundChannel(channelId, amount, participant);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Fund channel error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Update state
-router.post('/channels/update/:channelId', async (req, res) => {
-    try {
-        const { channelId } = req.params;
-        const { balances, nonce, signatures } = req.body;
-        if (!balances || nonce === undefined || !signatures) {
-            return res.status(400).json({
-                success: false,
-                error: 'balances, nonce, and signatures required'
-            });
-        }
-
-        const result = await channelService.updateState(channelId, balances, nonce, signatures);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Update state error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -67,7 +27,15 @@ router.post('/channels/update/:channelId', async (req, res) => {
 router.post('/channels/close/:channelId', async (req, res) => {
     try {
         const { channelId } = req.params;
-        const result = await channelService.closeChannel(channelId);
+        const { balanceA, balanceB, signatureA, signatureB } = req.body;
+        if (balanceA === undefined || balanceB === undefined || !signatureA || !signatureB) {
+            return res.status(400).json({
+                success: false,
+                error: 'balanceA, balanceB, signatureA, and signatureB required'
+            });
+        }
+
+        const result = await channelService.closeChannel(channelId, balanceA, balanceB, signatureA, signatureB);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Close channel error:', error);
@@ -79,37 +47,18 @@ router.post('/channels/close/:channelId', async (req, res) => {
 router.post('/channels/dispute/:channelId', async (req, res) => {
     try {
         const { channelId } = req.params;
-        const { stateHash } = req.body;
-        if (!stateHash) {
+        const { sequence, balanceA, balanceB, signature } = req.body;
+        if (sequence === undefined || balanceA === undefined || balanceB === undefined || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'stateHash required'
+                error: 'sequence, balanceA, balanceB, and signature required'
             });
         }
 
-        const result = await channelService.raiseDispute(channelId, stateHash);
+        const result = await channelService.raiseDispute(channelId, sequence, balanceA, balanceB, signature);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Raise dispute error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Batch settle
-router.post('/channels/batch-settle', async (req, res) => {
-    try {
-        const { channelIds } = req.body;
-        if (!channelIds || !Array.isArray(channelIds)) {
-            return res.status(400).json({
-                success: false,
-                error: 'channelIds array required'
-            });
-        }
-
-        const result = await channelService.batchSettle(channelIds);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Batch settle error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
@@ -122,30 +71,6 @@ router.get('/channels/:channelId', async (req, res) => {
         res.json({ success: true, data: channel });
     } catch (error) {
         logger.error('Get channel error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Get channel states
-router.get('/channels/:channelId/states', async (req, res) => {
-    try {
-        const { channelId } = req.params;
-        const states = await channelService.getChannelStates(channelId);
-        res.json({ success: true, data: states });
-    } catch (error) {
-        logger.error('Get channel states error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Get user channels
-router.get('/channels/user/:address', async (req, res) => {
-    try {
-        const { address } = req.params;
-        const channels = await channelService.getUserChannels(address);
-        res.json({ success: true, data: channels });
-    } catch (error) {
-        logger.error('Get user channels error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

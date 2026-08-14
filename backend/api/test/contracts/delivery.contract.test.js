@@ -60,6 +60,7 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
 
 vi.mock("../../src/config/db.js", () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() {
@@ -244,7 +245,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
     expectContract(res, 200);
     expect(res.body).toHaveProperty("message");
     expect(typeof res.body.message).toBe("string");
-    expect(res.body.message).toMatch(/Delivery verified successfully/i);
+    expect(res.body.message).toMatch(/Delivery confirmed/i);
   });
 
   it("200: releases funded escrow and completes the trip", async () => {
@@ -308,9 +309,9 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
 
     expectContract(res, 200);
     expect(res.body.payment_released).toBe(true);
-    expect(typeof res.body.amount_inr).toBe("string");
-    expect(Number.isNaN(Number(res.body.amount_inr))).toBe(false);
-    expect(res.body.amount_inr).toBe("5000");
+    expect(typeof res.body.amount_inr).toBe("number");
+    expect(Number.isNaN(res.body.amount_inr)).toBe(false);
+    expect(res.body.amount_inr).toBe(5000);
     expect(res.body.order_display_id).toBe("ORD-COTP");
   });
 

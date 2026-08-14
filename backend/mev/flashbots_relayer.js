@@ -41,7 +41,12 @@ export class FlashbotsRelayerService {
   }
 }
 
+const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
+if (!relayerPrivateKey) {
+  throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required');
+}
+
 export const mevRelayer = new FlashbotsRelayerService(
   process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
-  process.env.RELAYER_WALLET_PRIVATE_KEY || '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+  relayerPrivateKey
 );

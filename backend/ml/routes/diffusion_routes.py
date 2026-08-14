@@ -54,7 +54,7 @@ async def generate_routes(request: GenerateRequest):
             'success': True,
             'data': {
                 'routes': routes.cpu().numpy().tolist(),
-                'shape': routes.shape,
+                'shape': list(routes.shape),
                 'num_routes': request.batch_size
             },
             'timestamp': datetime.now().isoformat()

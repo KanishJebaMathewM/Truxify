@@ -143,15 +143,21 @@ class LinkerdService {
 
     async getMeshedStatus(namespace = 'truxify') {
         const ns = sanitizePromQL(namespace);
-        const query = `
+        const meshedQuery = `
             count(proxy_requests_total{
                 namespace="${ns}"
             }) by (pod)
         `;
-        const result = await this.getMetrics(query);
+        const totalQuery = `
+            count(kube_pod_status_ready{
+                namespace="${ns}"
+            })
+        `;
+        const meshedResult = await this.getMetrics(meshedQuery);
+        const totalResult = await this.getMetrics(totalQuery);
         return {
-            totalPods: result.length,
-            meshedPods: result.length
+            totalPods: parseInt(totalResult[0]?.value[1], 10) || 0,
+            meshedPods: meshedResult.length
         };
     }
 

@@ -49,15 +49,20 @@ var (
 	activeDrivers       sync.Map
 	geofenceRateLimit   sync.Map
 	geofenceRateTracked uint64
-	pingRateLimit       sync.Map
-	serviceStartTime    = time.Now()
-	jwtSecret           []byte
-	bypassAuth          bool
-	driverTTL           = 5 * time.Minute
-	maxActiveDrivers    = 100000
-	maxPingsPerSec      = 10
-	maxGeofencePerSec   = 10
-	maxRateTracked      = 100000
+	// geofenceOrder tracks geofence rate-limit entries in insertion order so
+	// the oldest entry can be evicted when the map exceeds maxRateTracked,
+	// without scanning the whole map per insert.
+	geofenceOrder   []*rateEntry
+	geofenceOrderMu sync.Mutex
+	pingRateLimit   sync.Map
+	serviceStartTime = time.Now()
+	jwtSecret        []byte
+	bypassAuth       bool
+	driverTTL        = 5 * time.Minute
+	maxActiveDrivers = 100000
+	maxPingsPerSec   = 10
+	maxGeofencePerSec = 10
+	maxRateTracked    = 100000
 )
 
 // driverEntry is a cached ping plus its last-seen time so stale drivers can be evicted.
@@ -68,8 +73,9 @@ type driverEntry struct {
 
 // rateEntry holds a sliding window of request timestamps for one driver.
 type rateEntry struct {
-	mu     sync.Mutex
-	stamps []time.Time
+	mu       sync.Mutex
+	stamps   []time.Time
+	driverID string
 }
 
 // jwtClaims holds the subset of JWT claims the telemetry service needs.
@@ -92,12 +98,28 @@ var operatorRoles = map[string]bool{
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 
+	// Coincident points are exactly zero apart; return early so the trig
+	// below is never fed a degenerate zero-angle central argument.
+	if lat1 == lat2 && lon1 == lon2 {
+		return 0
+	}
+
 	dLat := (lat2 - lat1) * (math.Pi / 180.0)
 	dLon := (lon2 - lon1) * (math.Pi / 180.0)
 
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
 		math.Cos(lat1*(math.Pi/180.0))*math.Cos(lat2*(math.Pi/180.0))*
 			math.Sin(dLon/2)*math.Sin(dLon/2)
+
+	// Floating-point rounding (and slightly out-of-range inputs) can push `a`
+	// outside [0,1], making math.Sqrt(1-a) NaN and every comparison false.
+	// Clamp so the computation is numerically safe for all valid inputs.
+	if a < 0 {
+		a = 0
+	}
+	if a > 1 {
+		a = 1
+	}
 
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusMeters * c
@@ -170,7 +192,8 @@ func authenticate(w http.ResponseWriter, r *http.Request) (jwtClaims, bool) {
 		claims.Sub = r.Header.Get("X-Driver-ID")
 		claims.Role = r.Header.Get("X-Driver-Role")
 		if claims.Sub == "" {
-			claims.Sub = "dev-driver"
+			http.Error(w, "driver subject required", http.StatusUnauthorized)
+			return claims, false
 		}
 		if claims.Role == "" {
 			claims.Role = "driver"
@@ -196,6 +219,11 @@ func authenticate(w http.ResponseWriter, r *http.Request) (jwtClaims, bool) {
 		return claims, false
 	}
 
+	if claims.Sub == "" {
+		http.Error(w, "invalid token: missing subject", http.StatusUnauthorized)
+		return claims, false
+	}
+
 	return claims, true
 }
 
@@ -211,11 +239,12 @@ func authorizeGeofence(claims jwtClaims, driverID string) bool {
 // the driver role. On success it returns the authenticated subject (driver id).
 func authenticateDriver(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if bypassAuth {
-		sub := r.Header.Get("X-Driver-ID")
-		if sub == "" {
-			sub = "dev-driver"
+		callerID := r.Header.Get("X-Driver-ID")
+		if callerID == "" {
+			http.Error(w, "driver subject required", http.StatusUnauthorized)
+			return "", false
 		}
-		return sub, true
+		return callerID, true
 	}
 
 	if len(jwtSecret) == 0 {
@@ -232,6 +261,11 @@ func authenticateDriver(w http.ResponseWriter, r *http.Request) (string, bool) {
 	claims, err := parseDriverToken(strings.TrimPrefix(auth, "Bearer "))
 	if err != nil {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return "", false
+	}
+
+	if claims.Sub == "" {
+		http.Error(w, "invalid token: missing subject", http.StatusUnauthorized)
 		return "", false
 	}
 
@@ -278,9 +312,12 @@ func validatePing(ping *TelemetryPing) error {
 
 // allowGeofence enforces a per-driver sliding-window rate limit.
 func allowGeofence(driverID string) bool {
-	v, loaded := geofenceRateLimit.LoadOrStore(driverID, &rateEntry{})
+	v, loaded := geofenceRateLimit.LoadOrStore(driverID, &rateEntry{driverID: driverID})
 	if !loaded {
 		atomic.AddUint64(&geofenceRateTracked, 1)
+		geofenceOrderMu.Lock()
+		geofenceOrder = append(geofenceOrder, v.(*rateEntry))
+		geofenceOrderMu.Unlock()
 	}
 	e := v.(*rateEntry)
 
@@ -303,15 +340,41 @@ func allowGeofence(driverID string) bool {
 	e.stamps = append(e.stamps, time.Now())
 	e.mu.Unlock()
 
-	// Opportunistically shed empty tracking entries so the map stays bounded.
+	// Enforce the hard bound: once the map exceeds maxRateTracked, evict the
+	// oldest tracked entries regardless of whether they still have timestamps.
+	// This runs only when a new entry pushes the tracker over the cap and
+	// evicts at most the overflow amount, keeping memory bounded without
+	// scanning the whole map on every insert.
 	if !loaded && atomic.LoadUint64(&geofenceRateTracked) > uint64(maxRateTracked) {
-		pruneGeofenceRateEntries()
+		evictGeofenceOverflow()
 	}
 
 	return true
 }
 
-// pruneGeofenceRateEntries removes expired rate entries once the tracker grows
+// evictGeofenceOverflow removes the oldest geofence rate-limit entries (in
+// insertion order) until the tracker is back under maxRateTracked.
+func evictGeofenceOverflow() {
+	for atomic.LoadUint64(&geofenceRateTracked) > uint64(maxRateTracked) {
+		geofenceOrderMu.Lock()
+		if len(geofenceOrder) == 0 {
+			geofenceOrderMu.Unlock()
+			return
+		}
+		e := geofenceOrder[0]
+		geofenceOrder = geofenceOrder[1:]
+		geofenceOrderMu.Unlock()
+
+		// Only evict the entry if it is still the exact entry that was queued;
+		// the same driver may have re-created an entry since it was ordered.
+		if cur, ok := geofenceRateLimit.Load(e.driverID); ok && cur.(*rateEntry) == e {
+			geofenceRateLimit.Delete(e.driverID)
+			atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
+		}
+	}
+}
+
+// pruneGeofenceRateEntries removes empty rate entries once the tracker grows
 // beyond its cap, keeping the in-memory map bounded.
 func pruneGeofenceRateEntries() {
 	cutoff := time.Now().Add(-time.Second)
@@ -325,14 +388,16 @@ func pruneGeofenceRateEntries() {
 			}
 		}
 		e.stamps = kept
-		empty := len(e.stamps) == 0
-		e.mu.Unlock()
-
-		if empty {
-			if _, loaded := geofenceRateLimit.LoadAndDelete(key); loaded {
-				atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
-			}
+		// Delete under the entry lock: a concurrent allowGeofence that
+		// re-locks the entry between the emptiness check and the removal
+		// would otherwise lose its timestamps when the entry is deleted,
+		// resetting that driver's 1-second window and allowing bursts
+		// above the cap.
+		if len(e.stamps) == 0 {
+			geofenceRateLimit.Delete(key)
+			atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
 		}
+		e.mu.Unlock()
 		return true
 	})
 }
@@ -405,22 +470,20 @@ func sweepDrivers() {
 	})
 
 	pingRateLimit.Range(func(key, value interface{}) bool {
-		pingRateLimit.Range(func(key, value interface{}) bool {
-				e := value.(*rateEntry)
-				e.mu.Lock()
-				if len(e.stamps) > 0 {
-						if now.Sub(e.stamps[len(e.stamps)-1]) <= driverTTL {
-								e.mu.Unlock()
-								return true
-						}
-				}
-				e.mu.Unlock()
-				pingRateLimit.Delete(key)
-				return true
-		})
+		e := value.(*rateEntry)
+		e.mu.Lock()
+		// Stamps are appended in order and pruned oldest-first, so the last
+		// stamp is the driver's most recent activity. Entries are aged out
+		// once they go quiet for a full driverTTL, not only when empty.
+		stale := len(e.stamps) == 0 || now.Sub(e.stamps[len(e.stamps)-1]) > driverTTL
+		// Delete under the entry lock: a concurrent allowPing that re-locks
+		// the entry between the emptiness check and the removal would
+		// otherwise lose its timestamps when the entry is deleted, resetting
+		// that driver's 1-second window and allowing bursts above the cap.
 		if stale {
 			pingRateLimit.Delete(key)
 		}
+		e.mu.Unlock()
 		return true
 	})
 }
@@ -476,6 +539,48 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 // Handle Geofence Check
+
+// geofenceRequest is the payload of the /geofence check endpoint. RadiusM is a
+// pointer so an absent radius_meters is distinguishable from an explicit 0.
+type geofenceRequest struct {
+	DriverID  string   `json:"driver_id"`
+	TargetLat float64  `json:"target_latitude"`
+	TargetLng float64  `json:"target_longitude"`
+	RadiusM   *float64 `json:"radius_meters"`
+}
+
+// maxGeofenceRadiusMeters bounds how large a geofence radius may be so an
+// absurd value cannot be fed into the comparison.
+const maxGeofenceRadiusMeters = 500_000.0
+
+// defaultGeofenceRadiusMeters is used when radius_meters is absent.
+const defaultGeofenceRadiusMeters = 500.0
+
+// validateGeofenceInput validates radius and target coordinates before they
+// are used. An absent radius defaults to 500 m; an explicit 0 is a valid
+// exact-position check; negatives/oversized radii and out-of-range targets are
+// rejected with an error.
+func validateGeofenceInput(req *geofenceRequest) (float64, error) {
+	radius := defaultGeofenceRadiusMeters
+	if req.RadiusM != nil {
+		if *req.RadiusM < 0 {
+			return 0, fmt.Errorf("radius_meters cannot be negative")
+		}
+		if *req.RadiusM > maxGeofenceRadiusMeters {
+			return 0, fmt.Errorf("radius_meters exceeds the maximum allowed geofence")
+		}
+		radius = *req.RadiusM
+	}
+
+	if math.IsNaN(req.TargetLat) || math.IsNaN(req.TargetLng) ||
+		req.TargetLat < -90 || req.TargetLat > 90 ||
+		req.TargetLng < -180 || req.TargetLng > 180 {
+		return 0, fmt.Errorf("target latitude or longitude out of plausible bounds")
+	}
+
+	return radius, nil
+}
+
 func handleGeofence(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -487,15 +592,16 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		DriverID  string  `json:"driver_id"`
-		TargetLat float64 `json:"target_latitude"`
-		TargetLng float64 `json:"target_longitude"`
-		RadiusM   float64 `json:"radius_meters"`
-	}
+	var req geofenceRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	radius, err := validateGeofenceInput(&req)
+	if err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -523,10 +629,6 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ping := entry.ping
-	radius := req.RadiusM
-	if radius == 0 {
-		radius = 500.0 // Default 500 meters geofence
-	}
 
 	dist := haversineDistance(ping.Latitude, ping.Longitude, req.TargetLat, req.TargetLng)
 	within := dist <= radius

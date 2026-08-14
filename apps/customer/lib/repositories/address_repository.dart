@@ -1,3 +1,5 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/saved_address.dart';
 import '../services/supabase_service.dart';
 
@@ -35,25 +37,25 @@ class AddressRepository {
   }
 
   /// Set an address as the default, clearing all others.
+  ///
+  /// Clear-and-set runs atomically via the `set_default_address` RPC so a
+  /// failure partway through never leaves the user with no default address.
   Future<void> setDefault(String addressId) async {
     final userId = SupabaseService.requireUserId();
-    final existing = await SupabaseService.client
-        .from(_table)
-        .select('id')
-        .eq('id', addressId)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-    if (existing == null) {
-      throw StateError('Address not found.');
+    try {
+      await SupabaseService.client.rpc(
+        'set_default_address',
+        params: {
+          'p_address_id': addressId,
+          'p_user_id': userId,
+        },
+      );
+    } on PostgrestException catch (e) {
+      if (e.message.contains('Address not found')) {
+        throw StateError('Address not found.');
+      }
+      rethrow;
     }
-
-    await _clearDefaults(userId, exceptId: addressId);
-    await SupabaseService.client
-        .from(_table)
-        .update({'is_default': true})
-        .eq('id', addressId)
-        .eq('user_id', userId);
   }
 
   /// Delete an address by ID.

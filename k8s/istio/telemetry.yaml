@@ -1,4 +1,3 @@
-﻿apiVersion: telemetry.istio.io/v1alpha1
 apiVersion: telemetry.istio.io/v1alpha1
 kind: Telemetry
 metadata:
@@ -36,4 +35,3 @@ spec:
     - match:
         metric: REQUEST_SIZE
       disabled: false
-

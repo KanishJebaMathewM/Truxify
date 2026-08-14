@@ -843,5 +843,21 @@
   "withdrawalSuccessful": "பணம் எடுப்பு வெற்றிகரமாக முடிந்தது",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
+  },
+  "language": "மொழி",
+  "@language": {
+    "description": "Language selection setting"
+  },
+  "english": "ஆங்கிலம்",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "இந்தி",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "தமிழ்",
+  "@tamil": {
+    "description": "Tamil language name"
   }
 }

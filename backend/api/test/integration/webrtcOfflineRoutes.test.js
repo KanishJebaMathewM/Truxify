@@ -58,6 +58,13 @@ describe('WebRTC offline routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([{ peerId: 'peer-1' }]);
-    expect(signalingMock.getOfflineGPSData).toHaveBeenCalledWith('peer-1', undefined);
+    // The requesting user is forwarded so the service can re-check access:
+    // getOfflineGPSData returns [] for a peer the caller cannot reach, which is
+    // the last line of defence behind the route's own 403.
+    expect(signalingMock.getOfflineGPSData).toHaveBeenCalledWith(
+      'peer-1',
+      undefined,
+      expect.objectContaining({ id: 'user-1' }),
+    );
   });
 });

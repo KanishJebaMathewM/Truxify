@@ -438,6 +438,7 @@ export async function authenticate(req, res, next) {
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",
       });
+    }
 
     req.user = formatUserProfile(userProfile);
 

@@ -146,12 +146,12 @@ import {
   sumEarnings,
   toDateKey,
 } from '../services/driver/earningsReportService.js';
-import { userLimiter, createStore } from '../middleware/rateLimiter.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, paramIdSchema, predictDriverProfitSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';

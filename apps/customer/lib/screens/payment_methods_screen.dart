@@ -365,8 +365,14 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
       );
 
       Navigator.of(context).pop(method);
-    } catch (_) {
-      if (mounted) setState(() => _saving = false);
+    } catch (e) {
+      debugPrint('PaymentMethodsScreen: failed to save payment method: $e');
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save payment method')),
+        );
+      }
     }
   }
 

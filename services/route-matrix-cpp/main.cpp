@@ -9,6 +9,10 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
+#include <thread>
+
+#include "../include/http_parse.hpp"
+
 #include <climits>
 
 #if defined(_WIN32)
@@ -21,51 +25,163 @@ typedef int socklen_t;
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <cerrno>
 #define SOCKET int
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket close
 #endif
 
+// Total request byte budget per connection is defined in http_parse.hpp
+// (MAX_REQUEST_BYTES) and used here for the buffered-size cap below.
+
+// Applies read/write idle timeouts so a slow or idle client cannot stall a
+// handler thread forever: recv returns after the timeout instead of blocking
+// indefinitely.
+void set_socket_timeouts(SOCKET client) {
+#if defined(_WIN32)
+    unsigned long timeout_ms = 30000;
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout_ms), sizeof(timeout_ms));
+#else
+    timeval tv;
+    tv.tv_sec = 30;
+    tv.tv_usec = 0;
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+}
+
+// Point structure
+struct Location {
+    std::string id;
+    double lat;
+    double lng;
+};
+
+// Matrix Cell
+struct MatrixElement {
+    std::string origin_id;
+    std::string destination_id;
+    double distance_km;
+    double duration_mins;
+    double estimated_cost_inr;
+};
+
+// Haversine calculation in C++
+double haversine_km(double lat1, double lon1, double lat2, double lon2) {
+    const double R = 6371.0; // Earth radius in KM
+    double dLat = (lat2 - lat1) * M_PI / 180.0;
+    double dLon = (lon2 - lat1) * M_PI / 180.0;
+
+    double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
+               std::cos(lat1 * M_PI / 180.0) * std::cos(lat2 * M_PI / 180.0) *
+               std::sin(dLon / 2.0) * std::sin(dLon / 2.0);
+
+    // Floating-point rounding can push `a` marginally above 1.0 for
+    // near-identical or antipodal pairs; clamp so sqrt(1.0 - a) stays finite.
+    a = std::min(1.0, a);
+
+    double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+    return R * c;
+}
+
+// Generate simple JSON response for the NxN matrix over the given locations
+std::string compute_matrix_json(const std::vector<Location>& locs) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    std::stringstream ss;
+    ss << "{\n";
+    ss << "  \"success\": true,\n";
+    ss << "  \"engine\": \"Truxify C++ SIMD Matrix Solver v1.0\",\n";
+    ss << "  \"matrix\": [\n";
+
+    bool first = true;
+    for (size_t i = 0; i < locs.size(); ++i) {
+        for (size_t j = 0; j < locs.size(); ++j) {
+            if (!first) ss << ",\n";
+            first = false;
+
+            double dist = haversine_km(locs[i].lat, locs[i].lng, locs[j].lat, locs[j].lng);
+            double duration = (dist / 45.0) * 60.0; // 45 km/h avg truck speed
+            double cost = dist * 12.5;              // 12.5 INR / km tariff
+
+            ss << "    {\n";
+            ss << "      \"origin\": \"" << locs[i].id << "\",\n";
+            ss << "      \"destination\": \"" << locs[j].id << "\",\n";
+            ss << "      \"distance_km\": " << dist << ",\n";
+            ss << "      \"duration_mins\": " << duration << ",\n";
+            ss << "      \"tariff_inr\": " << cost << "\n";
+            ss << "    }";
+        }
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    double compute_us = std::chrono::duration<double, std::micro>(end_time - start_time).count();
+
+    ss << "\n  ],\n";
+    ss << "  \"compute_time_us\": " << compute_us << "\n";
+    ss << "}";
+
+    return ss.str();
+}
+
+// ---- Minimal JSON extraction helpers for the /matrix request body ----
+
+// Extracts a quoted string value for a quoted key, e.g. "id" : "A".
+std::string extract_string_field(const std::string& obj, const std::string& key) {
+    std::string quoted = "\"" + key + "\"";
+    size_t pos = obj.find(quoted);
+    if (pos == std::string::npos) return "";
+    pos = obj.find(':', pos);
+    if (pos == std::string::npos) return "";
+    pos = obj.find('"', pos);
+    if (pos == std::string::npos) return "";
+    pos++;
+    size_t end = obj.find('"', pos);
+    if (end == std::string::npos) return "";
+    return obj.substr(pos, end - pos);
+}
+
+// Extracts a numeric value for a quoted key, e.g. "lat" : 19.0760.
+double extract_number_field(const std::string& obj, const std::string& key) {
+    std::string quoted = "\"" + key + "\"";
+    size_t pos = obj.find(quoted);
+    if (pos == std::string::npos) return 0.0;
+    pos = obj.find(':', pos);
+    if (pos == std::string::npos) return 0.0;
+    pos++;
+    while (pos < obj.size() && (obj[pos] == ' ' || obj[pos] == '\t')) pos++;
+    const char* begin = obj.c_str() + pos;
+    char* end = nullptr;
+    double val = std::strtod(begin, &end);
+    return end == begin ? 0.0 : val;
+}
+
+// Parses {"locations": [{"id","lat","lng"}, ...]} into Location records.
+std::vector<Location> parse_locations(const std::string& body) {
+    std::vector<Location> locs;
+    size_t array = body.find('[');
+    if (array == std::string::npos) return locs;
+
+    size_t pos = array;
+    while (true) {
+        size_t open = body.find('{', pos);
+        size_t close = open == std::string::npos ? std::string::npos : body.find('}', open);
+        if (open == std::string::npos || close == std::string::npos) break;
+
+        std::string obj = body.substr(open, close - open + 1);
+        Location loc;
+        loc.id = extract_string_field(obj, "id");
+        loc.lat = extract_number_field(obj, "lat");
+        loc.lng = extract_number_field(obj, "lng");
+        locs.push_back(loc);
+
+        pos = close + 1;
+    }
+    return locs;
+}
 // ---- Minimal HTTP/1.1 server ----
-
-// Returns the body Content-Length from the request head, or 0.
-size_t parse_content_length(const std::string& request) {
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end == std::string::npos) return 0;
-
-    std::istringstream ss(request.substr(0, header_end));
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string name = line.substr(0, colon);
-        std::string value = line.substr(colon + 1);
-        for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (name == "content-length") {
-            return static_cast<size_t>(std::strtoul(value.c_str(), nullptr, 10));
-        }
-    }
-    return 0;
-}
-
-// Splits a request into method, path, and (read) body.
-void parse_request(const std::string& request, std::string& method, std::string& path, std::string& body) {
-    size_t line_end = request.find("\r\n");
-    std::string head = request.substr(0, line_end);
-    std::istringstream iss(head);
-    iss >> method >> path;
-
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end != std::string::npos) {
-        size_t content_length = parse_content_length(request);
-        size_t body_start = header_end + 4;
-        if (request.size() >= body_start + content_length) {
-            body = request.substr(body_start, content_length);
-        }
-    }
-}
 
 // Wraps a JSON payload in an HTTP/1.1 response.
 std::string build_response(const std::string& body, const std::string& status) {
@@ -165,24 +281,33 @@ void stream_matrix_response(SOCKET client, const std::vector<TruxifyMatrix::Loca
 void handle_client(SOCKET client) {
     char buf[8192];
     std::string request;
+    bool too_large = false;
     for (;;) {
+        // SO_RCVTIMEO bounds how long recv blocks on an idle/slow client, so a
+        // single connection cannot stall this handler thread indefinitely.
         int n = recv(client, buf, sizeof(buf), 0);
-        if (n <= 0) break;
+        if (n <= 0) break; // closed, errored, or idle timeout elapsed
         request.append(buf, static_cast<size_t>(n));
+
+        if (request.size() > MAX_REQUEST_BYTES) {
+            too_large = true;
+            break;
+        }
 
         size_t header_end = request.find("\r\n\r\n");
         if (header_end != std::string::npos) {
-            size_t content_length = parse_content_length(request);
-            if (request.size() >= header_end + 4 + content_length) break;
+            size_t content_length = 0, body_start = 0, body_len = 0;
+            if (compute_body_range(request, content_length, body_start, body_len)) break;
         }
-        if (request.size() > 65536) break;
     }
 
     std::string method, path, body;
     parse_request(request, method, path, body);
 
     std::string response;
-    if (method == "GET" && path == "/health") {
+    if (too_large) {
+        response = build_response("{\"error\":\"request too large\"}", "413 Content Too Large");
+    } else if (method == "GET" && path == "/health") {
         response = build_response("{\"status\":\"ok\",\"service\":\"route-matrix-cpp\"}", "200 OK");
     } else if (method == "POST" && path == "/matrix") {
         TruxifyMatrix::ParseLocationsResult parsed = TruxifyMatrix::parse_locations(body);
@@ -246,7 +371,14 @@ int main() {
     for (;;) {
         SOCKET client = accept(listen_sock, nullptr, nullptr);
         if (client == INVALID_SOCKET) continue;
-        handle_client(client);
-        closesocket(client);
+
+        set_socket_timeouts(client);
+
+        // Handle each connection on its own thread so an idle or slow client
+        // can never block the accept loop (and thus the whole service).
+        std::thread([client]() {
+            handle_client(client);
+            closesocket(client);
+        }).detach();
     }
 }

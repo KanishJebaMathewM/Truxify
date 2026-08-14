@@ -173,7 +173,6 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
 });
 
 import crypto from "crypto";
-import { otpSendSchema } from "../validation/requestSchemas.js";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
 

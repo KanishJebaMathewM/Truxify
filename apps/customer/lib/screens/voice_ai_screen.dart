@@ -186,7 +186,9 @@ class _VoiceAiScreenState extends State<VoiceAiScreen> with SingleTickerProvider
         if (await file.exists()) {
           await file.delete();
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('VoiceAIScreen: failed to delete temp audio file: $e');
+      }
     }
   }
 

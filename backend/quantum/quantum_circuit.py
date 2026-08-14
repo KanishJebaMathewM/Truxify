@@ -8,12 +8,8 @@ from qiskit_optimization.algorithms import MinimumEigenOptimizer
 from qiskit_algorithms.minimum_eigensolvers import QAOA
 from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
-<<<<<<< HEAD
-from typing import Dict, List, Tuple, Any
-=======
 from typing import Dict, List, Tuple, Any, Optional
 import itertools
->>>>>>> upstream/main
 import logging
 
 logger = logging.getLogger(__name__)
@@ -102,12 +98,6 @@ class QUBOFormatter:
         logger.info("✅ QUBO Formatter initialized")
     
     def formulate_route_optimization(self, graph: nx.Graph) -> QuadraticProgram:
-<<<<<<< HEAD
-        """Formulate route optimization as QUBO"""
-        # Create quadratic program
-        qubo = QuadraticProgram()
-        
-=======
         """Formulate route optimization as QUBO.
 
         The objective minimizes the total edge weight. To prevent the trivial
@@ -120,47 +110,18 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
->>>>>>> upstream/main
         # Add binary variables for each edge
         edge_vars = {}
         for i, (u, v) in enumerate(graph.edges()):
             var_name = f'x_{u}_{v}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
-<<<<<<< HEAD
-        
-        # Objective: minimize total distance
-        # Constraint: each node must have degree 2 (Hamiltonian cycle)
-        
-        # Objective function
-=======
 
         # Objective: minimize total distance
->>>>>>> upstream/main
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
             objective[(var, var)] = weight
-<<<<<<< HEAD
-        
-        qubo.minimize(quadratic=objective)
-        
-        # Constraints (simplified)
-        # In production: add degree constraints
-        
-        self.qubo = qubo
-        self.variables = list(edge_vars.values())
-        
-        return qubo
-    
-    def solve_qubo(self, qubo: QuadraticProgram) -> Dict:
-        """Solve QUBO using quantum optimizer"""
-        try:
-            # Use QAOA
-            qaoa = QAOA(optimizer=COBYLA(), reps=1)
-            optimizer = MinimumEigenOptimizer(qaoa)
-            
-=======
 
         qubo.minimize(quadratic=objective)
 
@@ -220,7 +181,6 @@ class QUBOFormatter:
                 eigensolver = QAOA(optimizer=COBYLA(), reps=1)
             optimizer = MinimumEigenOptimizer(eigensolver)
 
->>>>>>> upstream/main
             # Solve
             result = optimizer.solve(qubo)
             

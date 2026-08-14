@@ -3,7 +3,6 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
-import { errorResponse } from '../utils/apiResponse.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
 

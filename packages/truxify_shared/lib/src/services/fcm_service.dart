@@ -3,10 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-<<<<<<< HEAD
-=======
 import 'package:supabase_flutter/supabase_flutter.dart';
->>>>>>> upstream/main
 
 import 'api_client.dart';
 import 'notification_router.dart';
@@ -201,12 +198,8 @@ class FcmService {
     ApiClient? apiClient,
   }) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
-<<<<<<< HEAD
-    if (firebaseUser == null) {
-=======
     final supabaseUser = _currentSupabaseUser();
     if (firebaseUser == null && supabaseUser == null) {
->>>>>>> upstream/main
       debugPrint('[FCM] No authenticated user, skipping token unregister.');
       return;
     }
@@ -218,10 +211,7 @@ class FcmService {
         '/api/devices/unregister',
         body: <String, dynamic>{
           'fcmToken': token,
-<<<<<<< HEAD
-=======
           'userId': firebaseUser?.uid ?? supabaseUser?.id,
->>>>>>> upstream/main
         },
       );
       debugPrint('[FCM] Device token unregistered successfully.');
@@ -232,8 +222,6 @@ class FcmService {
     }
   }
 
-<<<<<<< HEAD
-=======
   /// Returns the currently signed-in Supabase user, or null if Supabase is
   /// not configured/initialized or no user is signed in.
   static User? _currentSupabaseUser() {
@@ -244,7 +232,6 @@ class FcmService {
     }
   }
 
->>>>>>> upstream/main
   static Future<void> clearToken({ApiClient? apiClient}) async {
     try {
       await _sendTokenToBackend(null, apiClient: apiClient);
@@ -258,12 +245,8 @@ class FcmService {
     ApiClient? apiClient,
   }) async {
     final firebaseUser = FirebaseAuth.instance.currentUser;
-<<<<<<< HEAD
-    if (firebaseUser == null) {
-=======
     final supabaseUser = _currentSupabaseUser();
     if (firebaseUser == null && supabaseUser == null) {
->>>>>>> upstream/main
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
@@ -275,10 +258,7 @@ class FcmService {
         '/api/profile/fcm-token',
         body: <String, dynamic>{
           'fcmToken': token,
-<<<<<<< HEAD
-=======
           'userId': firebaseUser?.uid ?? supabaseUser?.id,
->>>>>>> upstream/main
         },
       );
       debugPrint('[FCM] Token updated successfully on backend.');

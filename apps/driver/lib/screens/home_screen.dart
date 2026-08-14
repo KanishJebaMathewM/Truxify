@@ -660,7 +660,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final displayName = (decoded['display_name'] as String?)?.trim();
         if (displayName != null && displayName.isNotEmpty) return displayName;
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[_resolveCurrentLocationAddress] reverse geocode failed: $e');
       return 'Location Unavailable';
     }
     return 'Location Unavailable';
@@ -1260,110 +1261,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     onView: () {},
                     onDismiss: () =>
                         setState(() => _dismissedNewLoad = true),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: TruxifyColors.accent,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: TruxifyColors.accent
-                                .withValues(alpha: 0.25),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.local_shipping_rounded,
-                              color: Colors.white, size: 18),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  AppLocalizations.of(context)!
-                                      .newLoadAvailable,
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _latestNewLoad!.route,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.dmSans(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white),
-                                ),
-                                const SizedBox(height: 1),
-                                Text(
-                                  '${_latestNewLoad!.weight != '—' ? '${_latestNewLoad!.weight} ' : ''}'
-                                  '${_latestNewLoad!.goods} • ${_latestNewLoad!.estimatedProfit}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.dmSans(
-                                      fontSize: 10,
-                                      color: Colors.white
-                                          .withValues(alpha: 0.85)),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          GestureDetector(
-                            key: const Key(
-                                'realtime_notification_view_button'),
-                            onTap: () {
-                              setState(
-                                  () => _dismissedNewLoad = true);
-                              Navigator.of(context).pushNamed(
-                                AppRoutes.loadDetail,
-                                arguments: _latestNewLoad,
-                              );
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                AppLocalizations.of(context)!.view,
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: TruxifyColors.accent,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          GestureDetector(
-                            key: const Key(
-                                'realtime_notification_close_button'),
-                            onTap: () => setState(
-                                () => _dismissedNewLoad = true),
-                            child: Icon(
-                              Icons.close_rounded,
-                              color:
-                                  Colors.white.withValues(alpha: 0.7),
-                              size: 20,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               ),
@@ -2132,7 +2029,8 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text(AppLocalizations.of(context)!.unableToOpenGoogleMaps)),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[_openGoogleMapsRoute] route generation/launch failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(AppLocalizations.of(context)!.failedToGenerateRoute)),

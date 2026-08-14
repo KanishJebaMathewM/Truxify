@@ -1,17 +1,55 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock OTel API first
+vi.mock("@opentelemetry/api", () => ({
+  context: {
+    active: vi.fn().mockReturnValue({}),
+    with: vi.fn((_ctx, fn) => fn()),
+  },
+  trace: {
+    setSpan: vi.fn((ctx) => ctx),
+    getSpan: vi.fn(),
+    getActiveSpan: vi.fn(),
+  },
+  SpanStatusCode: { OK: 0, ERROR: 1, UNSET: 2 },
+}));
+
+// Mock logger
+vi.mock("../../../src/middleware/logger.js", () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+// Mock SpanFactory
 vi.mock("../../../src/core/telemetry/SpanFactory.js", () => ({
   default: {
-    startEventHandlerSpan: () => ({ setStatus: vi.fn(), end: vi.fn(), recordError: vi.fn() }),
+    startEventHandlerSpan: vi.fn().mockReturnValue({
+      setStatus: vi.fn(),
+      end: vi.fn(),
+      recordException: vi.fn(),
+      setAttribute: vi.fn(),
+      setAttributes: vi.fn(),
+    }),
+    recordError: vi.fn(),
   },
 }));
+
+// Mock ContextPropagator
 vi.mock("../../../src/core/telemetry/ContextPropagator.js", () => ({
-  ContextPropagator: { extractFromEventPayload: vi.fn() },
+  ContextPropagator: {
+    extractFromEventPayload: vi.fn().mockReturnValue(undefined),
+    injectIntoEventPayload: vi.fn((e) => e),
+    snapshot: vi.fn().mockReturnValue({}),
+    serialize: vi.fn().mockReturnValue({}),
+  },
 }));
 
-const { EventHandler } = await import("../../../src/core/events/EventHandler.js");
+const { EventHandler } = await import("../../src/core/events/EventHandler.js");
 
 describe("EventHandler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rejects non-function handler", () => {
     expect(() => new EventHandler("not a function")).toThrow("requires a function handler");
     expect(() => new EventHandler(123)).toThrow("requires a function handler");
@@ -20,8 +58,9 @@ describe("EventHandler", () => {
   it("calls the handler with the event", async () => {
     const handler = vi.fn().mockResolvedValue("result");
     const h = new EventHandler(handler);
-    await h.handle({ type: "order.created" });
+    const result = await h.handle({ type: "order.created" });
     expect(handler).toHaveBeenCalledWith({ type: "order.created" });
+    expect(result).toBe("result");
   });
 
   it("respects timeout option", async () => {

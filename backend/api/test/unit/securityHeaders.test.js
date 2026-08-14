@@ -144,7 +144,6 @@ describe('securityHeaders', () => {
 
 
 // === Spec 11 test ===
-import { describe, it, expect } from 'vitest';
 import { setHstsHeader } from '../../src/middleware/securityHeaders.js';
 describe('setHstsHeader', () => {
   it('sets when missing', () => {

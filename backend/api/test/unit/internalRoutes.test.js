@@ -121,4 +121,12 @@ describe('POST /api/internal/pause-escrow', () => {
     expect(res.status).toBe(500);
     expect(res.body.error).toContain('Failed to update escrow circuit breaker');
   });
+
+  it('closes the circuit for a stringified "false" body', async () => {
+    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: false, updatedAt: 't', persisted: true });
+    const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: 'false' });
+    expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(false);
+    expect(res.status).toBe(200);
+    expect(res.body.paused).toBe(false);
+  });
 });

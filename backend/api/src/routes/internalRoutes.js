@@ -140,7 +140,9 @@ router.get('/escrow-velocity', async (req, res) => {
  */
 router.post('/pause-escrow', async (req, res) => {
   try {
-    const paused = req.body?.paused === true;
+    const raw = req.body?.paused;
+    const unpause = raw === false || raw === 'false' || raw === 0 || raw === '0' || raw === null;
+    const paused = raw === undefined ? true : !unpause;
     const result = await setEscrowPaused(paused);
     return res.json({
       paused: result.paused,

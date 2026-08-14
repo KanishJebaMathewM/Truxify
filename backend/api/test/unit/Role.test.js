@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ROLES, isValidRole, allRoles } from "../../../src/core/auth/Role.js";
+import { ROLES, isValidRole, allRoles } from "../../src/core/auth/Role.js";
 
 describe("Role", () => {
   it("ROLES contains customer, driver, and admin", () => {

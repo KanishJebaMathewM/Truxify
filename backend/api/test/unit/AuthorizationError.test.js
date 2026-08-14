@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AuthorizationError } from "../../../src/core/auth/AuthorizationError.js";
+import { AuthorizationError } from "../../src/core/auth/AuthorizationError.js";
 
 describe("AuthorizationError", () => {
   it("creates error with 401 and infers UNAUTHENTICATED code", () => {

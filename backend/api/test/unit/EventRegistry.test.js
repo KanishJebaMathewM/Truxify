@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { EventRegistry } from "../../../src/core/events/EventRegistry.js";
+import { EventRegistry } from "../../src/core/events/EventRegistry.js";
 
 describe("EventRegistry", () => {
   it("rejects non-string eventType in register", () => {

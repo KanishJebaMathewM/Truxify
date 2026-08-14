@@ -161,7 +161,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateDocumentBuffer } from '../lib/documentValidation.js';
 import { scanDocument } from '../lib/malwareScanner.js';
-import { validateBody, validateParams } from '../middleware/validate.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { z } from 'zod';
 import {
   createOrderSchema, submitBidSchema, submitRatingSchema, paramIdSchema, acceptBidParamsSchema,
@@ -290,6 +290,94 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), valid
       return res.status(err.status).json(err.payload);
     }
     logger.error('Create order exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 13b. FETCH EN-ROUTE LOAD OFFERS (DRIVER) — GET /api/orders/load-offers/en-route
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders/load-offers/en-route:
+ *   get:
+ *     tags: [Orders]
+ *     summary: List en-route / deadhead load opportunities
+ *     description: Returns available load offers ranked for an en-route (deadhead) match using the Deadhead Eliminator ML model, falling back to a haversine-distance ranking when the ML engine is unavailable.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: current_lat
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: current_lng
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: max_detour_km
+ *         schema:
+ *           type: number
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: En-route load offers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 loads:
+ *                   type: array
+ */
+router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateQuery(z.object({
+  current_lat: z.coerce.number().optional(),
+  current_lng: z.coerce.number().optional(),
+  max_detour_km: z.coerce.number().positive('max_detour_km must be a positive number').optional(),
+})), async (req, res) => {
+  try {
+    const { current_lat, current_lng, max_detour_km } = req.query;
+
+    // load_offers is RLS-protected with all anon privileges revoked, so the
+    // marketplace board must read through the service-role client.
+    let query = supabaseAdmin
+      .from('load_offers')
+      .select('*', { count: 'exact' })
+      .eq('status', 'available');
+
+    query = query.order('created_at', { ascending: false });
+
+    const { data: offers, error } = await query;
+    if (error) {
+      logger.error('Failed to fetch en-route load offers:', error);
+      return res.status(500).json({ error: 'Failed to fetch en-route load offers.' });
+    }
+
+    const formattedOffers = (offers || []).map(offer => ({
+      ...offer,
+      pickup: offer.pickup_address,
+      destination: offer.drop_address,
+      estimated_price: offer.freight_value / 100,
+      vehicle_type: 'Truck',
+    }));
+
+    let loads = formattedOffers;
+
+    // Rank the offers for an en-route match only when the driver's current
+    // position is provided; otherwise return all available offers unsorted.
+    if (current_lat !== undefined && current_lng !== undefined) {
+      loads = await matchEnRouteLoads({
+        currentLat: Number(current_lat),
+        currentLng: Number(current_lng),
+        offers: formattedOffers,
+        maxDetourKm: max_detour_km !== undefined ? Number(max_detour_km) : 50,
+      });
+    }
+
+    return res.json({ loads });
+  } catch (err) {
+    logger.error('Internal Server Error in GET /api/orders/load-offers/en-route:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

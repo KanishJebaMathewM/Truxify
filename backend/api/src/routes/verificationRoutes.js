@@ -190,6 +190,15 @@ const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 
+// Normalize/validate an identity document number extracted by OCR. Returns the
+// normalized value or `null` when the format is obviously invalid.
+function normalizeKycDocNumber(value) {
+  if (typeof value !== 'string') return null;
+  const cleaned = value.replace(/\s+/g, '').toUpperCase();
+  if (!/^[A-Z0-9]{4,30}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: KYC_MAX_FILE_SIZE },
@@ -266,10 +275,16 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
 
     const ocrData = await mlResponse.json();
 
-    if (ocrData.verified) {
-      const docNumber = ocrData.extracted_number && ocrData.extracted_number.trim()
-        ? ocrData.extracted_number.trim()
-        : null;
+    // OCR output is only a *hint*. A bare ML/OCR `verified` boolean from an
+    // internal endpoint must never, on its own, flip a driver to KYC=Verified.
+    // Approval additionally requires an explicit government-source attestation
+    // flag (e.g. DigiLocker/registry) returned by the verification pipeline,
+    // binding the document to the user's real identity.
+    const governmentAttested =
+      ocrData && ocrData.attested === true && ocrData.verified === true;
+
+    if (governmentAttested) {
+      const docNumber = normalizeKycDocNumber(ocrData.extracted_number);
       const { error: verifyError } = await supabaseAdmin
         .from('driver_details')
         .update({

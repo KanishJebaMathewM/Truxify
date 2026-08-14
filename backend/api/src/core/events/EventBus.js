@@ -311,7 +311,9 @@ class EventBus extends EventEmitter {
 
     const span = spanFactory.startEventPublishSpan(eventType, { source, eventId });
 
-    const consumed = this.emitSafe(eventType, enrichedEvent);
+    // Await local listeners so that the outbox relay worker can safely mark
+    // an event as published only after all listeners have finished processing.
+    const consumed = await this.emitSafe(eventType, enrichedEvent);
 
     const targetAdapters = options.adapters || null;
     let adapterAttempted = 0;

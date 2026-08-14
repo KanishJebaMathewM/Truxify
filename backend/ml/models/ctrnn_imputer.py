@@ -17,14 +17,28 @@ class ContinuousTimeRnnImputer:
 
     def impute_missing_telemetry(self, last_known_coords: tuple, dt_seconds: float) -> tuple:
         """Interpolates smooth lat/lng continuous trajectory across irregular time gap dt_seconds."""
-        h = np.array([last_known_coords[0], last_known_coords[1], 0.0, 0.0])
-        dt_normalized = dt_seconds / 60.0 # Convert to minutes
-        
-        # Integrate over continuous time delta
+        # Standardize raw degree coordinates into ~[-1, 1] before feeding them to
+        # the tanh-based ODE. Feeding degree-scale values (up to +/-90 / +/-180)
+        # saturates tanh immediately and drags the state far outside valid bounds.
+        LAT_SCALE = 90.0
+        LNG_SCALE = 180.0
+        lat_scaled = last_known_coords[0] / LAT_SCALE
+        lng_scaled = last_known_coords[1] / LNG_SCALE
+
+        h = np.array([lat_scaled, lng_scaled, 0.0, 0.0])
+        dt_normalized = dt_seconds / 60.0  # Convert to minutes
+
+        # Integrate over continuous time delta in scaled space
         h_next = self.ode_step(h, dt_normalized)
-        
-        imputed_lat = float(h_next[0])
-        imputed_lng = float(h_next[1])
+
+        # Inverse-transform back to degrees
+        imputed_lat = float(h_next[0]) * LAT_SCALE
+        imputed_lng = float(h_next[1]) * LNG_SCALE
+
+        # Clamp to valid geographic bounds so downstream route/ETA consumers
+        # never receive out-of-range coordinates.
+        imputed_lat = max(-90.0, min(90.0, imputed_lat))
+        imputed_lng = max(-180.0, min(180.0, imputed_lng))
         return (imputed_lat, imputed_lng)
 
 ctrnn_imputer = ContinuousTimeRnnImputer()

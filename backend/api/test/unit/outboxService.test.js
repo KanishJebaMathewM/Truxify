@@ -148,6 +148,17 @@ describe('OutboxService', () => {
       expect(mocks.chain.lastUpdate.retry_count).toBe(1);
     });
 
+    it('does not embed an unawaited rpc() Promise as the retry_count value (#12178)', async () => {
+      mocks.chain.data = { retry_count: 4 };
+      await outboxService.markFailed('evt-3', 'boom');
+
+      // The increment must be computed in JS and passed as a plain number,
+      // never by assigning the rpc() query builder to the column.
+      expect(mocks.chain.lastUpdate.retry_count).toBe(5);
+      expect(mocks.chain.lastUpdate.retry_count).toBeTypeOf('number');
+      expect(mocks.chain.rpc).not.toHaveBeenCalled();
+    });
+
     it('skips when eventId is missing', async () => {
       await outboxService.markFailed(null, 'err');
       expect(mocks.supabase.from).not.toHaveBeenCalled();
@@ -171,6 +182,26 @@ describe('OutboxService', () => {
 
       expect(mocks.chain.lastUpdate).toEqual({ status: 'pending' });
       expect(mocks.chain.lastEq).toEqual(['status', 'failed']);
+    });
+
+    it('does not throw when the Supabase update returns an error', async () => {
+      mocks.chain.error = { message: 'connection timeout' };
+      // Should not throw — error is swallowed and logged.
+      await expect(outboxService.requeueFailedEvents(3)).resolves.toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    it('uses maxRetries as the lt threshold for retry_count', async () => {
+      mocks.chain.error = null;
+      // Track the .lt call to verify maxRetries is passed correctly.
+      const ltValues = [];
+      mocks.chain.lt = vi.fn(function (col) {
+        ltValues.push(col);
+        return this;
+      });
+      await outboxService.requeueFailedEvents(7);
+      expect(mocks.chain.lastEq).toEqual(['status', 'failed']);
+      expect(ltValues.length).toBeGreaterThan(0);
     });
   });
 });

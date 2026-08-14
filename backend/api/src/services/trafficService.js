@@ -20,9 +20,10 @@ const SURGE_PEAK_AMPLITUDE = 1.3;
  */
 export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   try {
-    // Valid coordinates include 0 (equator / prime meridian), so only bail
-    // out for missing or non-numeric values.
-    if (pickupLat == null || pickupLng == null || !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+    if (pickupLat == null || pickupLng == null) {
+      return 1.0;
+    }
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
       return 1.0;
     }
 

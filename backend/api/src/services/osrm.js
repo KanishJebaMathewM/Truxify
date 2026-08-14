@@ -52,11 +52,12 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const r = (n) => Number(n.toFixed(8));
+  const r = (n) => Number(n.toFixed(6));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(input = {}) {
+  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -281,16 +282,29 @@ export const __testing = {
 // === Spec 22: ===
 // === Spec 22: OSRM failover ===
 export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (!Number.isFinite(nLat1) || !Number.isFinite(nLon1) ||
+      !Number.isFinite(nLat2) || !Number.isFinite(nLon2)) {
+    return 0;
+  }
+  if (nLat1 < -90 || nLat1 > 90 || nLat2 < -90 || nLat2 > 90 ||
+      nLon1 < -180 || nLon1 > 180 || nLon2 < -180 || nLon2 > 180) {
+    return 0;
+  }
   const R = 6371.0088;
   const t = (d) => (d * Math.PI) / 180;
-  const dLat = t(lat2 - lat1);
-  const dLon = t(lon2 - lon1);
-  const a = Math.sin(dLat/2)**2 + Math.cos(t(lat1))*Math.cos(t(lat2))*Math.sin(dLon/2)**2;
+  const dLat = t(nLat2 - nLat1);
+  const dLon = t(nLon2 - nLon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 export async function routeWithFailover(primary, _fb, coords) {
   try { return await primary(coords); }
   catch (err) {
+    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
     if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
       return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
     }

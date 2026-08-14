@@ -81,6 +81,9 @@ class LocationService {
   // (Issue: Driver app must emit GPS updates every 5 seconds during active trip)
   static const double _minDistanceMeters = 10.0;
   static const Duration _maxInterval = Duration(seconds: 5);
+  // A GPS fix older than this is treated as a stale/cached position and must
+  // not be forwarded as the live driver location (issue #13103).
+  static const Duration _maxLocationAge = Duration(seconds: 10);
   static const List<String> _activeOrderStatuses = [
     'truck_assigned',
     'en_route_pickup',
@@ -222,6 +225,21 @@ class LocationService {
   }
 
   Future<void> _handleLocationUpdate(Position position) async {
+    // Drop stale/cached fixes: Geolocator routinely re-emits the last-known
+    // position with an old `timestamp` (after startup, GPS loss, or waking from
+    // background). Forwarding it would show the truck where it no longer is.
+    if (position.timestamp != null &&
+        DateTime.now().difference(position.timestamp!) > _maxLocationAge) {
+      debugPrint('[LocationService] Stale GPS fix dropped');
+      return;
+    }
+
+    // Never treat a mocked/inaccurate fix as the live position.
+    if (position.isMocked) {
+      debugPrint('[LocationService] Mocked GPS fix dropped');
+      return;
+    }
+
     // Implement displacement-based throttling
     if (_lastSentPosition == null) {
       // First position, always send
@@ -582,7 +600,8 @@ class LocationService {
               return;
             }
             if (parsed['code'] != null) {
-              _lastCloseCode = parsed['code'] as int;
+              final raw = parsed['code'];
+              _lastCloseCode = raw is num ? raw.toInt() : int.tryParse(raw.toString()) ?? -1;
               if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
                 debugPrint(
                   '[LocationService] Auth rejected (code $_lastCloseCode) — stopping tracking',

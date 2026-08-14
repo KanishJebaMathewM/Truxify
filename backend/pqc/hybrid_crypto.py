@@ -53,10 +53,43 @@ class HybridCrypto:
                 'public': dilithium_pub,
                 'private': dilithium_priv
             },
-            'hybrid_id': hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
+            'hybrid_id': self._derive_hybrid_id(
+                self.classical_key.public_key(),
+                self.quantum_key['public'],
+                dilithium_pub,
+            )
         }
         
         return hybrid_keys
+
+    @staticmethod
+    def _derive_hybrid_id(classical_pub, quantum_pub, dilithium_pub) -> str:
+        """Derive a stable, content-bound key identifier.
+
+        The id is a full SHA-256 digest of the encoded public key material so
+        the same key material always maps to the same id, it is high-entropy,
+        and it does not leak key-generation timing. This replaces the previous
+        ``time.time()``-based id which changed on every call (issue #13080).
+        """
+        def _material_bytes(material) -> bytes:
+            if hasattr(material, 'tobytes'):
+                return material.tobytes()
+            if hasattr(material, 'public_bytes'):
+                from cryptography.hazmat.primitives.serialization import (
+                    Encoding,
+                    PublicFormat,
+                )
+                return material.public_bytes(
+                    encoding=Encoding.DER,
+                    format=PublicFormat.SubjectPublicKeyInfo,
+                )
+            return bytes(material)
+
+        digest = hashlib.sha256()
+        digest.update(_material_bytes(classical_pub))
+        digest.update(_material_bytes(quantum_pub))
+        digest.update(_material_bytes(dilithium_pub))
+        return digest.hexdigest()
     
     @staticmethod
     def _rsa_oaep_max_plaintext(public_key) -> int:

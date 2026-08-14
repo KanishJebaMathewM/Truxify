@@ -4,6 +4,8 @@ import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient, createUserClient } from '../../config/db.js';
 
+const OFFLINE_GPS_PAGE_SIZE = 1000;
+
 class WebRTCSignalingServer {
   constructor(server) {
     const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
@@ -15,7 +17,7 @@ class WebRTCSignalingServer {
     this.setupWebSocket();
     this.startDiscovery();
     
-    logger.info('✅ WebRTC Signaling Server initialized');
+    logger.info('WebRTC Signaling Server initialized');
   }
 
   setupWebSocket() {
@@ -416,25 +418,31 @@ class WebRTCSignalingServer {
     }
     const { data } = await supabase
       .from('gps_offline_data')
-      .select('*')
+      .select('id, data, timestamp, synced')
       .eq('peerId', peerId)
-      .gt('timestamp', since || 0)
-      .order('timestamp', { ascending: true });
-    
+      .gt('timestamp', since)
+      .order('timestamp', { ascending: true })
+      .limit(OFFLINE_GPS_PAGE_SIZE);
+
     return data || [];
   }
 
-  async syncOfflineData(peerId, requestingUser) {
+  async syncOfflineData(peerId, ackedIds, requestingUser) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
-    // Mark data as synced for this peer
+    if (!Array.isArray(ackedIds) || ackedIds.length === 0) {
+      logger.warn(`[WebRTC] Sync for peer ${peerId} skipped: no acknowledged row ids provided`);
+      return;
+    }
+    // Mark only the rows the client actually acknowledged as synced, never
+    // the peer's entire unsynced backlog.
     await supabase
       .from('gps_offline_data')
       .update({ synced: true })
       .eq('peerId', peerId)
-      .eq('synced', false);
+      .in('id', ackedIds);
   }
 }
 

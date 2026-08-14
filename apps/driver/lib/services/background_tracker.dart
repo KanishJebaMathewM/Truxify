@@ -6,21 +6,30 @@ import 'isolate_handler.dart';
 class BackgroundTrackerService {
   Isolate? _isolate;
   SendPort? _workerSendPort;
-  final ReceivePort _mainReceivePort = ReceivePort();
-  final _locationController = StreamController<Map<String, dynamic>>.broadcast();
+  StreamSubscription<dynamic>? _receiveSubscription;
+  ReceivePort? _mainReceivePort;
+  StreamController<Map<String, dynamic>>? _locationController;
 
-  Stream<Map<String, dynamic>> get locationStream => _locationController.stream;
+  Stream<Map<String, dynamic>> get locationStream {
+    _locationController ??=
+        StreamController<Map<String, dynamic>>.broadcast();
+    return _locationController!.stream;
+  }
 
   Future<void> startBackgroundTracking() async {
     if (_isolate != null) return;
 
-    _isolate = await Isolate.spawn(isolateWorkerEntryPoint, _mainReceivePort.sendPort);
+    _mainReceivePort = ReceivePort();
+    _locationController ??=
+        StreamController<Map<String, dynamic>>.broadcast();
 
-    _mainReceivePort.listen((message) {
+    _isolate = await Isolate.spawn(isolateWorkerEntryPoint, _mainReceivePort!.sendPort);
+
+    _receiveSubscription = _mainReceivePort!.listen((message) {
       if (message is SendPort) {
         _workerSendPort = message;
       } else if (message is Map<String, dynamic>) {
-        _locationController.add(message);
+        _locationController!.add(message);
       }
     });
   }
@@ -33,5 +42,11 @@ class BackgroundTrackerService {
     _isolate?.kill(priority: Isolate.immediate);
     _isolate = null;
     _workerSendPort = null;
+    _receiveSubscription?.cancel();
+    _receiveSubscription = null;
+    _mainReceivePort?.close();
+    _mainReceivePort = null;
+    _locationController?.close();
+    _locationController = null;
   }
 }

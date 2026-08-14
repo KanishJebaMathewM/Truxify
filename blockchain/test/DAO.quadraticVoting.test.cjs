@@ -41,6 +41,8 @@ describe("DAO Quadratic Voting", function () {
     await token.transfer(voter.address, 1_000_000);
     await token.connect(voter).approve(await dao.getAddress(), 1_000_000);
 
+    await dao.registerVoter(ethers.id("identity:voter"));
+
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
   });
 
@@ -98,5 +100,53 @@ describe("DAO Quadratic Voting", function () {
 
   it("reverts when voting zero votes", async function () {
     await expectRevert(dao.connect(voter).voteQuadratic(0, 0), "Votes must be > 0");
+  });
+
+  it("refunds the sum of per-call quadratic costs, not (Σvotes)^2", async function () {
+    const balanceBefore = await token.balanceOf(voter.address);
+
+    // Split 5 votes across calls: 3 then 2 → deposit 9 + 4 = 13 tokens.
+    await dao.connect(voter).voteQuadratic(0, 3); // cost 9
+    await dao.connect(voter).voteQuadratic(0, 2); // cost 4
+
+    expect(await token.balanceOf(voter.address)).to.equal(balanceBefore - 13n);
+
+    await dao.connect(voter).releaseVotes(0);
+
+    // Must refund exactly 13 (Σ vᵢ²), NOT (3+2)² = 25.
+    expect(await token.balanceOf(voter.address)).to.equal(balanceBefore);
+    expect(await dao.tokensHeld(0, voter.address)).to.equal(13n);
+  });
+
+  it("reverts when releasing votes that were never cast", async function () {
+    await expectRevert(dao.connect(voter).releaseVotes(0), "No votes to release");
+  });
+
+  it("reverts when releasing the same votes twice", async function () {
+    await dao.connect(voter).voteQuadratic(0, 4); // cost 16
+    await dao.connect(voter).releaseVotes(0);
+
+    await expectRevert(dao.connect(voter).releaseVotes(0), "Already released");
+  });
+
+  it("reverts when an unregistered address tries to vote", async function () {
+    const [, , attacker] = await ethers.getSigners();
+
+    await token.transfer(attacker.address, 1_000_000);
+    await token.connect(attacker).approve(await dao.getAddress(), 1_000_000);
+
+    await expectRevert(
+      dao.connect(attacker).voteQuadratic(0, 1),
+      "Voter not registered"
+    );
+  });
+
+  it("rejects registering the same identity on a second address", async function () {
+    const [, , other] = await ethers.getSigners();
+
+    await expectRevert(
+      dao.connect(other).registerVoter(ethers.id("identity:voter")),
+      "Identity already registered"
+    );
   });
 });

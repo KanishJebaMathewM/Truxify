@@ -44,7 +44,7 @@ class GpsDeltaCompressor {
 
     final previous = _buffer.last;
     final moved = _distanceMeters(previous, point) >= minDistanceMeters;
-    final elapsed = point.timestampMs - previous.timestampMs >= flushInterval.inMilliseconds;
+    final elapsed = point.timestampMs - _buffer.first.timestampMs >= flushInterval.inMilliseconds;
 
     _buffer.add(point);
 

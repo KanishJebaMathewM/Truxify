@@ -160,12 +160,15 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startDevicePruningWorker } from './workers/devicePruningWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -233,7 +236,7 @@ if (!process.env.WEBHOOK_SECRET) {
     logger.fatal('WEBHOOK_SECRET is not set. POST /api/webhooks/escrow would fail closed and reject all incoming webhooks. Set WEBHOOK_SECRET and restart.')
     process.exit(1)
   } else {
-    logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
+    logger.warn('WARNING: WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
 }
 
@@ -241,7 +244,7 @@ if (!process.env.WEBHOOK_SECRET) {
 // 🆕 OTEL VALIDATION
 // ============================================================================
 if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-  logger.warn('⚠️ OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
+  logger.warn('WARNING: OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
 }
 
 // ============================================================================
@@ -259,12 +262,12 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 // ============================================================================
 if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
   !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
-  logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
+  logger.warn('WARNING: Shard hosts not fully configured. Using localhost defaults.')
 }
 
 if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
   !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
-  logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
+  logger.warn('WARNING: Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
 
@@ -290,10 +293,10 @@ if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
 // 🆕 ZK-PROOFS VALIDATION
 // ============================================================================
 if (!process.env.KYC_VERIFIER_CONTRACT) {
-  logger.warn('⚠️ KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
+  logger.warn('WARNING: KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
 }
 if (!process.env.PRIVATE_KEY) {
-  logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
+  logger.warn('WARNING: PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
 
 
@@ -302,16 +305,16 @@ if (!process.env.PRIVATE_KEY) {
 // 🆕 MULTI-CLOUD DR VALIDATION
 // ============================================================================
 if (!process.env.AWS_ACCESS_KEY || !process.env.AWS_SECRET_KEY) {
-  logger.warn('⚠️ AWS credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: AWS credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.AZURE_CONNECTION_STRING) {
-  logger.warn('⚠️ Azure connection string not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: Azure connection string not set. Multi-cloud DR may not work.')
 }
 if (!process.env.GCP_PROJECT_ID) {
-  logger.warn('⚠️ GCP credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: GCP credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.ACTIVE_CLOUD) {
-  logger.warn('⚠️ ACTIVE_CLOUD not set. Using default: aws')
+  logger.warn('WARNING: ACTIVE_CLOUD not set. Using default: aws')
 }
 
 
@@ -319,7 +322,7 @@ if (!process.env.ACTIVE_CLOUD) {
 // but don't crash (non-escrow functionality should still work).
 validateEscrowSetup().then((valid) => {
   if (!valid) {
-    logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
+    logger.warn('WARNING: Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
 
@@ -332,7 +335,8 @@ app.use(headerSizeMonitor);
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
 //   - Docker Compose (no proxy)                 → 0
 //   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
-const trustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const _parsedTrustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const trustProxy = Number.isFinite(_parsedTrustProxy) ? _parsedTrustProxy : 1
 app.set('trust proxy', trustProxy)
 
 // ============================================================================
@@ -562,6 +566,7 @@ app.use('/api/blockchain', (req, _res, next) => {
 // Auth-gated internal endpoints consumed by automation/n8n workflows:
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
+//   POST /api/internal/defensive-pause
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
@@ -653,6 +658,9 @@ app.get('/api/fraud/health', (req, res) => {
 // ============================================================================
 app.use('/api/zkp', zkpRoutes)
 
+// 🆕 BLOCKCHAIN MONITORING ROUTES
+app.use('/api/blockchain', blockchainMonitoringRoutes)
+
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
   res.json({
@@ -743,9 +751,9 @@ server.listen(PORT, () => {
   startReputationReconciliation(orderRepository)
   startDlqWorker()
   startStaleOrderWorker(escrowReconciliationOrderRepository)
+  startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
-  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   startOutboxRelayWorker()
 
   // Register worker states for health aggregation
@@ -756,6 +764,7 @@ server.listen(PORT, () => {
     reputationReconciliation: true,
     dlqWorker: true,
     staleOrderWorker: true,
+    devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
   }
@@ -788,7 +797,6 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
-  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

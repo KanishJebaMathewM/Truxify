@@ -17,16 +17,20 @@
 
 import logger from '../middleware/logger.js';
 
+// Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
+// Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
+const MIN_FREIGHT_PAISa = 0;
+const MAX_FREIGHT_PAISa = 100_000_000;
+
 export function sanitizePrice(value) {
   const num = Number(value);
-  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+  if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
+  return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
 
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)
-const MIN_FREIGHT_PAISa = 0;
-const MAX_FREIGHT_PAISa = 10_000_000_00; // 1 crore in paisa
 const TOLL_ESCALATION_HOURS = 6;
 const DEFAULT_RATE_PER_TONNE_KM = 50; // paisa per tonne-km
 
@@ -57,7 +61,7 @@ function parsePositiveFloat(raw, fallback, label) {
     return fallback;
   }
   const n = Number(raw);
-  if (Number.isFinite(n) && n > 0) return n;
+  if (Number.isFinite(n) && n >= 0) return n;
   if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
   return fallback;
 }
@@ -132,7 +136,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   if (!rateCard.ratePerTonneKm || rateCard.ratePerTonneKm <= 0) {
     throw new RangeError(`ratePerTonneKm must be > 0, got ${rateCard.ratePerTonneKm}`);
   }
-  if (!rateCard.handlingFee || rateCard.handlingFee < 0) {
+  if (rateCard.handlingFee == null || rateCard.handlingFee < 0) {
     throw new RangeError(`handlingFee must be >= 0, got ${rateCard.handlingFee}`);
   }
 
@@ -199,7 +203,7 @@ export function convertKmToMiles(km) {
   return km * 0.621371;
 }
 
-export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM };
+export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat };
 
 
 // === Spec 10: ===

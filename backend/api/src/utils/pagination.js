@@ -18,11 +18,12 @@ export function buildPagination(params = {}) {
   const rawPage = normalizeNumber(params.page);
   const rawLimit = normalizeNumber(params.limit);
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : DEFAULTS.page;
+  const safePage = Math.max(1, page);
   const limit = Number.isFinite(rawLimit)
     ? Math.min(Math.max(1, Math.floor(rawLimit)), DEFAULTS.maxLimit)
     : DEFAULTS.limit;
 
-  const offset = (page - 1) * limit;
+  const offset = (safePage - 1) * limit;
   const from = offset;
   const to = offset + limit - 1;
 

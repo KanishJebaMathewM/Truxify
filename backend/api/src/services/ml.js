@@ -44,10 +44,14 @@ function parseWeightKg(weight) {
 }
 
 function parseWeightKgSafe(weight) {
+  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
+    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
+    return null;
+  }
   const result = parseWeightKg(weight);
   if (Number.isNaN(result)) {
     logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return 0;
+    return null;
   }
   return result;
 }
@@ -92,7 +96,7 @@ async function handleResponse(response, url = '', method = 'GET') {
         throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
+        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
     }
 
     try {
@@ -199,11 +203,13 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
+  // Only forward min_price/max_price keys when the raw response actually
+  // carried them — injecting undefined values trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
-      min_price: typeof raw?.min_price === 'number' ? raw.min_price * safeMultiplier : undefined,
-      max_price: typeof raw?.max_price === 'number' ? raw.max_price * safeMultiplier : undefined,
+      ...(typeof raw?.min_price === 'number' ? { min_price: raw.min_price * safeMultiplier } : {}),
+      ...(typeof raw?.max_price === 'number' ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
@@ -304,7 +310,7 @@ export async function matchBilateral({ loads, drivers }) {
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
-  return handleResponse(response);
+  return handleResponse(response, url, 'POST');
 }
 
 /**
@@ -398,7 +404,7 @@ export async function optimisePacking({ packages, truck, deliveryAddresses }) {
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
-  return handleResponse(response);
+  return handleResponse(response, url, 'POST');
 }
 
 /**
@@ -733,6 +739,7 @@ export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
+  parseWeightKg,
 };
 
 class MLService {
@@ -740,20 +747,20 @@ class MLService {
     let data;
     try {
       data = await response.json();
-    } catch (e) {
-      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`, { cause: e });
+    } catch (_) {
+      throw new Error(`[ML] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
     }
 
     if (response.status === 401) {
-      throw new Error(`[MLService] Authentication failed: ${method} ${url} (${response.status})`);
+      throw new Error(`[ML] Authentication failed: ${method} ${url} (${response.status})`);
     }
 
     if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden: ${method} ${url} (${response.status})`);
+      throw new Error(`[ML] Forbidden: ${method} ${url} (${response.status})`);
     }
 
     if (!response.ok) {
-      throw new Error(`[MLService] Request failed: ${method} ${url} ${response.status}`);
+      throw new Error(`[ML] Request failed: ${method} ${url} ${response.status}`);
     }
 
     return data;

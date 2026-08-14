@@ -144,7 +144,13 @@ export class BidAcceptanceService {
           });
         }
 
-        // Build the escrow deposit transaction
+        // Reserve the escrow booking BEFORE building the on-chain deposit
+        // transaction. The Redis lock has a 10s TTL and can auto-expire while the
+        // blockchain call is still in flight (#12539); if a concurrent request
+        // re-enters after the lock lapses it would otherwise build a second,
+        // orphaned deposit. Reserving first lets the DB guard — which flips the
+        // order to 'funding' with a pending acceptance — reject the second
+        // attempt with a 409 before any on-chain deposit is ever built.
         let amountWei;
         try {
           amountWei = paisaToMaticWei(bid.bid_amount);
@@ -155,30 +161,17 @@ export class BidAcceptanceService {
             recovery: 'Configure ESCROW_MATIC_PER_PAISA / MAX_ESCROW_MATIC or contact support for a larger escrow limit.',
           });
         }
-        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshCustomerWallet, freshDriverWallet, amountWei);
-        const bookingId = depositTx?.bookingId || getEscrowBookingId(order.order_display_id);
 
-        // Guard against silent escrow disable: if buildDepositTx returned
-        // null txData (contract not initialised), reject immediately.
-        if (!depositTx?.txData) {
-          this.logger?.error?.('[escrow] Escrow deposit tx could not be built — escrow contract is not reachable or misconfigured.');
-          throw new DomainError(502, {
-            error: 'Escrow is not configured. Escrow deposit transaction could not be built.',
-            details: 'The escrow contract is unreachable or the blockchain environment variables are not set.',
-            recovery: 'This order cannot proceed with escrow protection. Please contact support.',
-          });
-        }
-
-        // Persist the escrow booking reference PLUS the full bid-acceptance context
-        // needed by confirm-deposit to finalize the driver assignment atomically.
-        // Two-phase design (#5724): the driver is NOT committed here. accept_bid_tx
-        // runs only from confirm-deposit, AFTER the on-chain deposit is verified.
         if (order.version == null) {
           throw new DomainError(500, {
             error: 'Order version is missing. Cannot safely reserve a bid.',
             recovery: 'Please retry the request.',
           });
         }
+
+        // bookingId is deterministic from the order display id and matches the
+        // value buildDepositTx returns, so reserving before the build is safe.
+        const bookingId = getEscrowBookingId(order.order_display_id);
 
         const pendingAcceptance = {
           bid_id: bidId,
@@ -213,6 +206,20 @@ export class BidAcceptanceService {
         if (!escrowUpdateResult) {
           throw new DomainError(409, {
             error: 'This order already has an active escrow flow. Reload the order before accepting another bid.'
+          });
+        }
+
+        // Build the escrow deposit transaction
+        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshCustomerWallet, freshDriverWallet, amountWei);
+
+        // Guard against silent escrow disable: if buildDepositTx returned
+        // null txData (contract not initialised), reject immediately.
+        if (!depositTx?.txData) {
+          this.logger?.error?.('[escrow] Escrow deposit tx could not be built — escrow contract is not reachable or misconfigured.');
+          throw new DomainError(502, {
+            error: 'Escrow is not configured. Escrow deposit transaction could not be built.',
+            details: 'The escrow contract is unreachable or the blockchain environment variables are not set.',
+            recovery: 'This order cannot proceed with escrow protection. Please contact support.',
           });
         }
 

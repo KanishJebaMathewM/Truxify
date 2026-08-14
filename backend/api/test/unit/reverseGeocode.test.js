@@ -4,14 +4,17 @@
  * Run with:  npm run test:unit -- test/unit/reverseGeocode.test.js
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 
-// Mock global fetch
-const mockFetch = vi.fn();
+// Use vi.hoisted so mock functions are accessible inside vi.mock factory (hoisted)
+const { mockFetch, mockRedisGet, mockRedisSet } = vi.hoisted(() => ({
+  mockFetch: vi.fn(),
+  mockRedisGet: vi.fn(),
+  mockRedisSet: vi.fn(),
+}));
+
 global.fetch = mockFetch;
 
-// Mock redis client
-const mockRedisGet = vi.fn();
-const mockRedisSet = vi.fn();
 vi.mock('../../src/config/db.js', () => ({
   redisClient: {
     get: mockRedisGet,
@@ -125,12 +128,10 @@ describe('reverseGeocode', () => {
 });
 
 
-// === Spec 21 test ===
-import { describe, it, expect } from 'vitest';
-import { clampGeohashPrecision } from '../../src/services/reverseGeocode.js';
+import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 describe('clampGeohashPrecision', () => {
-  it('null → 6', () => { expect(clampGeohashPrecision(null)).toBe(6); });
-  it('15 → 12', () => { expect(clampGeohashPrecision(15)).toBe(12); });
-  it('7 passes', () => { expect(clampGeohashPrecision(7)).toBe(7); });
+  it('null -> clamped to MIN 1', () => { expect(clampGeohashPrecision(null)).toBe(1); });
+  it('15 -> clamped to 12', () => { expect(clampGeohashPrecision(15)).toBe(12); });
+  it('7 passes through', () => { expect(clampGeohashPrecision(7)).toBe(7); });
 });
 

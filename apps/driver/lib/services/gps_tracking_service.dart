@@ -21,8 +21,6 @@ class GpsTrackingService {
 
   final LocationService _location;
 
-  StreamSubscription<WsConnectionStatus>? _statusSub;
-
   /// Whether GPS emission is currently active.
   bool get isTracking => _location.isTracking;
 
@@ -53,8 +51,6 @@ class GpsTrackingService {
   /// cancelled).
   Future<void> stop() async {
     debugPrint('[GpsTrackingService] Stopping GPS tracking.');
-    _statusSub?.cancel();
-    _statusSub = null;
     _location.stopTracking();
   }
 }

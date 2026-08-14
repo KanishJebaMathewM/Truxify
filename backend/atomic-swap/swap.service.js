@@ -47,11 +47,14 @@ class AtomicSwapService {
 
     async createSwap(counterparty, tokenAddress, amount, secret) {
         try {
-            const hashLock = this.generateHashLock(secret);
-            const parsedAmount = ethers.parseEther(amount.toString());
-            const swapId = this.generateSwapId();
+        const hashLock = this.generateHashLock(secret);
+        if (await this.swap.usedHashLocks(hashLock)) {
+            throw new Error('Hash lock already used');
+        }
+        const parsedAmount = ethers.parseEther(amount.toString());
+        const swapId = this.generateSwapId();
 
-            const tx = await this.swap.openSwap(
+        const tx = await this.swap.openSwap(
                 swapId,
                 counterparty,
                 hashLock,
@@ -70,7 +73,6 @@ class AtomicSwapService {
                 tokenAddress,
                 amount,
                 hashLock,
-                secret,
                 txHash: receipt.hash
             });
 
@@ -134,9 +136,12 @@ class AtomicSwapService {
 
     async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret) {
         try {
-            const hashLock = this.generateHashLock(secret);
-            const parsedAmount = ethers.parseEther(amount.toString());
-            const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${counterparty}:${Date.now()}`));
+        const hashLock = this.generateHashLock(secret);
+        if (await this.swap.usedHashLocks(hashLock)) {
+            throw new Error('Hash lock already used');
+        }
+        const parsedAmount = ethers.parseEther(amount.toString());
+        const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${counterparty}:${tokenAddress}:${amount}`));
             const swapId = this.generateSwapId();
 
             const tx = await this.swap.openSwap(
@@ -160,7 +165,6 @@ class AtomicSwapService {
                 tokenAddress,
                 amount,
                 hashLock,
-                secret,
                 proof,
                 txHash: receipt.hash
             });
@@ -276,7 +280,6 @@ class AtomicSwapService {
                 token_address: data.tokenAddress,
                 amount: data.amount,
                 hash_lock: data.hashLock,
-                secret: data.secret,
                 tx_hash: data.txHash,
                 status: 'pending',
                 created_at: new Date().toISOString()
@@ -296,7 +299,6 @@ class AtomicSwapService {
                 token_address: data.tokenAddress,
                 amount: data.amount,
                 hash_lock: data.hashLock,
-                secret: data.secret,
                 proof: data.proof,
                 tx_hash: data.txHash,
                 status: 'pending',

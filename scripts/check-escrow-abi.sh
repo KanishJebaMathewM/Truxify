@@ -34,7 +34,7 @@ echo "🔍 Checking escrow ABI compatibility..."
 declare -A EXPECTED_SELECTORS
 EXPECTED_SELECTORS["createBooking(uint256,address,bytes)"]="0bb7aa51"
 EXPECTED_SELECTORS["lockPayment(uint256,address,address)"]="044e8539"
-EXPECTED_SELECTORS["commitmentNonces(address)"]="09135335"
+EXPECTED_SELECTORS["commitmentNonces(address,uint256)"]="699ef9bb"
 EXPECTED_SELECTORS["releasePayment(uint256)"]="88685cd9"
 EXPECTED_SELECTORS["cancelBooking(uint256)"]="0dca825e"
 EXPECTED_SELECTORS["cancelWithPenalty(uint256,uint256)"]="ca9a63b1"

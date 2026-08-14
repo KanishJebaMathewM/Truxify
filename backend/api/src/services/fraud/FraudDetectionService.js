@@ -33,7 +33,7 @@ class FraudDetectionService {
       transaction: null
     };
     
-    logger.info('✅ Fraud Detection Service initialized');
+    logger.info('Fraud Detection Service initialized');
   }
 
   // ============ Behavioral Fingerprinting ============

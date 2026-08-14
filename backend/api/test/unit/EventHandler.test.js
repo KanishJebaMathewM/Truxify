@@ -1,12 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock OpenTelemetry API before importing EventHandler
+vi.mock("@opentelemetry/api", () => ({
+  context: {
+    active: vi.fn().mockReturnValue({}),
+    with: vi.fn((ctx, fn) => fn()),
+  },
+  trace: {
+    setSpan: vi.fn(),
+    SpanStatusCode: { OK: 0, ERROR: 1 },
+  },
+}));
+
 vi.mock("../../../src/core/telemetry/SpanFactory.js", () => ({
   default: {
-    startEventHandlerSpan: () => ({ setStatus: vi.fn(), end: vi.fn(), recordError: vi.fn() }),
+    startEventHandlerSpan: vi.fn().mockReturnValue({
+      setStatus: vi.fn(),
+      end: vi.fn(),
+      recordError: vi.fn(),
+      setAttribute: vi.fn(),
+      setAttributes: vi.fn(),
+    }),
   },
 }));
 vi.mock("../../../src/core/telemetry/ContextPropagator.js", () => ({
   ContextPropagator: { extractFromEventPayload: vi.fn() },
+}));
+vi.mock("../../../src/middleware/logger.js", () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
 const { EventHandler } = await import("../../src/core/events/EventHandler.js");

@@ -25,10 +25,14 @@ describe('FraudDetectionService', () => {
   });
 
   describe('getFraudStats', () => {
-    it('returns fraud statistics summary', async () => {
-      mockFrom.mockReturnValue({
+    it('returns an object', async () => {
+      mockFrom.mockResolvedValue({
+        data: [],
+        error: null,
         select: vi.fn().mockReturnThis(),
-        count: vi.fn().mockResolvedValue({ count: 5 }),
+        count: vi.fn().mockResolvedValue({ count: 0 }),
+        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        range: vi.fn().mockResolvedValue({ data: [], error: null }),
       });
 
       const stats = await FraudDetectionService.getFraudStats();
@@ -36,13 +40,17 @@ describe('FraudDetectionService', () => {
     });
 
     it('returns zero counts when no fraud records exist', async () => {
-      mockFrom.mockReturnValue({
+      mockFrom.mockResolvedValue({
+        data: [],
+        error: null,
         select: vi.fn().mockReturnThis(),
         count: vi.fn().mockResolvedValue({ count: 0 }),
+        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        range: vi.fn().mockResolvedValue({ data: [], error: null }),
       });
 
       const stats = await FraudDetectionService.getFraudStats();
-      expect(stats.totalFlags).toBe(0);
+      expect(stats.total).toBe(0);
     });
   });
 

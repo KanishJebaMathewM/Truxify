@@ -50,7 +50,7 @@ class TestModelCacheInvalidation:
         )
 
     def test_predict_after_train_uses_disk_model(self, monkeypatch, tmp_path):
-        """After train completes, predict refuses the synthetic-trained model."""
+        """After train completes and is promoted, predict serves the model."""
         monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
         import app.models.demand_forecast as df_module
 
@@ -58,14 +58,16 @@ class TestModelCacheInvalidation:
 
         # Train the model
         from app.models.demand_forecast import train_demand_forecast_model, predict_demand
-        train_demand_forecast_model()
+        metrics = train_demand_forecast_model()
 
         # Cache should be None (was invalidated by train)
         assert df_module._model_cache is None
 
-        # The freshly trained model is marked synthetic, so predict must refuse it.
-        with pytest.raises(RuntimeError, match="trained on synthetic data"):
-            predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
+        # The freshly trained and promoted model must be servable by predict.
+        assert metrics["promoted"] is True
+        result = predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
+        assert isinstance(result, float)
+        assert result >= 0
 
     def test_predict_serves_real_artifact(self, monkeypatch, tmp_path):
         """A verified non-synthetic artifact serves predictions normally."""

@@ -249,7 +249,8 @@ class FraudDetectionService {
           locations[i].lat, locations[i].lng
         );
         const hours = (locations[i].timestamp - locations[i-1].timestamp) / 3_600_000;
-        const speedKmh = hours > 0 ? dist / hours : Infinity;
+        if (hours <= 0) continue;
+        const speedKmh = dist / hours;
         if (speedKmh > maxSpeedKmh) {
           maxSpeedKmh = speedKmh;
         }

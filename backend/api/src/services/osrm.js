@@ -56,7 +56,8 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(input = {}) {
+  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||

@@ -30,6 +30,13 @@ export function validateArray(schema) {
 
 export function validateBody(schema) {
   return (req, res, next) => {
+    // Guard: req.body must be present before schema validation.
+    if (req.body == null) {
+      return res.status(400).json({
+        error: "Request body is required",
+      });
+    }
+
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
@@ -50,6 +57,13 @@ export function validateBody(schema) {
 
 export function validateParams(schema) {
   return (req, res, next) => {
+    // Guard: req.params must be present before schema validation.
+    if (req.params == null) {
+      return res.status(400).json({
+        error: "Request params are required",
+      });
+    }
+
     const result = schema.safeParse(req.params);
 
     if (!result.success) {

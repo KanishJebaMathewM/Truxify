@@ -734,6 +734,48 @@ func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry) {
 	})
 }
 
+// commitRetryTimeout bounds how long HandleCommitOrder waits for a single
+// entry to replicate to a quorum before answering 503. It is short on purpose:
+// the entry is already durable in the leader's log and will commit on a later
+// background heartbeat, so we only retry local replication rather than forcing
+// the client to retry (which, without trusting the idempotency guard, could
+// append a duplicate entry for the same OrderID).
+const commitRetryTimeout = 2 * time.Second
+
+// commitRetryInterval is the delay between replication rounds while waiting for
+// an entry to commit.
+const commitRetryInterval = 25 * time.Millisecond
+
+// waitForCommit drives background heartbeats for the entry at entryIndex and
+// returns once it is committed to a quorum, the node steps down, or the bounded
+// retry window elapses. Replication is looped (not a single round) so a slow
+// follower that misses the first heartbeat does not cause a spurious 503 and
+// does not force the client to retry-and-duplicate.
+func (rn *RaftNode) waitForCommit(entryIndex uint64) (committed bool, steppedDown bool, entry LogEntry) {
+	deadline := time.Now().Add(commitRetryTimeout)
+	for {
+		rn.sendHeartbeats()
+
+		rn.mu.Lock()
+		if rn.Role != Leader {
+			entry = rn.Log[entryIndex-1]
+			rn.mu.Unlock()
+			return false, true, entry
+		}
+		committed = rn.CommitIndex >= entryIndex
+		entry = rn.Log[entryIndex-1]
+		rn.mu.Unlock()
+
+		if committed {
+			return true, false, entry
+		}
+		if time.Now().After(deadline) {
+			return false, false, entry
+		}
+		time.Sleep(commitRetryInterval)
+	}
+}
+
 // HandleCommitOrder accepts a committed order entry on the leader.
 func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -828,13 +870,15 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 
 	rn.mu.Unlock()
 
-	// Replicate to followers and wait for a quorum acknowledgement before
-	// treating the entry as committed.
-	rn.sendHeartbeats()
+	// Replicate to followers and wait (bounded) for a quorum acknowledgement
+	// before treating the entry as committed. A single heartbeat round can miss
+	// slow followers even though the entry is durable in the leader's log, so we
+	// loop for a short bounded window instead of answering 503 after one round.
+	// The idempotency guard above (findEntryLocked) means a client that still
+	// retries never appends a duplicate entry for the same OrderID.
+	committed, steppedDown, entry := rn.waitForCommit(entryIndex)
 
-	rn.mu.Lock()
-	if rn.Role != Leader {
-		rn.mu.Unlock()
+	if steppedDown {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -844,23 +888,8 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	committed := rn.CommitIndex >= entryIndex
-	entry := rn.Log[entryIndex-1]
-	rn.mu.Unlock()
 
 	if !committed {
-		rn.mu.Lock()
-		defer rn.mu.Unlock()
-		if rn.Role != Leader {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success":   false,
-				"error":     "stepped down while replicating entry",
-				"leader_id": rn.LeaderID,
-			})
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{

@@ -72,15 +72,15 @@ router.post('/dao/proposal/create', async (req, res) => {
 // Cast vote
 router.post('/dao/vote/cast', async (req, res) => {
     try {
-        const { proposalId, support, votingPower, voterAddress } = req.body;
-        if (!proposalId) {
+        const { proposalId, votingPower, voterAddress } = req.body;
+        if (!proposalId || !votingPower) {
             return res.status(400).json({
                 success: false,
-                error: 'proposalId required'
+                error: 'proposalId and votingPower required'
             });
         }
 
-        const result = await daoService.castVote(proposalId, support, votingPower, voterAddress);
+        const result = await daoService.castVote(proposalId, votingPower, voterAddress);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Vote casting error:', error);
@@ -103,25 +103,6 @@ router.post('/dao/proposal/execute', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Proposal execution error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Treasury proposal
-router.post('/dao/treasury/proposal', async (req, res) => {
-    try {
-        const { recipient, amount, reason } = req.body;
-        if (!recipient || !amount) {
-            return res.status(400).json({
-                success: false,
-                error: 'recipient and amount required'
-            });
-        }
-
-        const result = await daoService.treasuryProposal(recipient, amount, reason);
-        res.json({ success: true, data: result });
-    } catch (error) {
-        logger.error('Treasury proposal error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

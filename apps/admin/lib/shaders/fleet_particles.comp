@@ -1,0 +1,38 @@
+#version 460 core
+
+layout(local_size_x = 256) in;
+
+struct VehicleParticle {
+    vec2 position;
+    vec2 velocity;
+    vec4 color;
+};
+
+layout(std430, binding = 0) buffer ParticleBuffer {
+    VehicleParticle particles[];
+};
+
+uniform float uTimeStep;
+uniform vec2 uMapBoundsMin;
+uniform vec2 uMapBoundsMax;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= particles.length()) return;
+
+    // Simulate kinematics: s = s + v * dt
+    particles[idx].position += particles[idx].velocity * uTimeStep;
+
+    // Wrap around boundaries
+    if (particles[idx].position.x < uMapBoundsMin.x) {
+        particles[idx].position.x = uMapBoundsMax.x;
+    } else if (particles[idx].position.x > uMapBoundsMax.x) {
+        particles[idx].position.x = uMapBoundsMin.x;
+    }
+
+    if (particles[idx].position.y < uMapBoundsMin.y) {
+        particles[idx].position.y = uMapBoundsMax.y;
+    } else if (particles[idx].position.y > uMapBoundsMax.y) {
+        particles[idx].position.y = uMapBoundsMin.y;
+    }
+}

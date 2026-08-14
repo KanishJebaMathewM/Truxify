@@ -15,12 +15,7 @@ spec:
         host: api-service
         port:
           number: 80
-      weight: 90
-    - destination:
-        host: api-service-v2
-        port:
-          number: 5000
-      weight: 10
+      weight: 100
     retries:
       attempts: 3
       perTryTimeout: 2s

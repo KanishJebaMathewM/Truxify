@@ -32,7 +32,7 @@ const validPayload = {
     events: [
         {
             id: 'event-1',
-            trip_id: 'trip-1',
+            trip_id: 'TX-ORDER1',
             type: 'location_update',
             occurred_at: new Date().toISOString(),
             payload: {
@@ -50,7 +50,7 @@ describe('Trip Routes', () => {
         m.store.trip_events = [];
         m.store.processed_batches = [];
         m.store.orders = [
-            { id: 'trip-1', driver_id: 'driver-1', customer_id: 'customer-1' },
+            { id: 'trip-1', order_display_id: 'ORDER1', driver_id: 'driver-1', customer_id: 'customer-1' },
         ];
         m.calls.length = 0;
     });
@@ -91,7 +91,7 @@ describe('Trip Routes', () => {
                 events: [
                     {
                         id: 'event-1',
-                        trip_id: 'trip-1',
+                        trip_id: 'TX-ORDER1',
                         type: 'location_update',
                         occurred_at: 'invalid-date',
                         payload: {},
@@ -185,7 +185,7 @@ describe('Trip Routes', () => {
             expect.objectContaining({
                 event_id: 'event-1',
                 user_id: 'driver-1',
-                trip_id: 'trip-1',
+                trip_id: 'TX-ORDER1',
                 event_type: 'location_update',
                 latitude: 19.076,
                 longitude: 72.8777,
@@ -247,7 +247,7 @@ describe('Trip Routes', () => {
 
     it('POST /events/batch returns 403 when the caller owns only some of the trips', async () => {
         m.store.orders = [
-            { id: 'trip-1', driver_id: 'driver-1', customer_id: 'customer-1' },
+            { id: 'trip-1', order_display_id: 'ORDER1', driver_id: 'driver-1', customer_id: 'customer-1' },
         ];
 
         const res = await request(buildApp())
@@ -260,7 +260,7 @@ describe('Trip Routes', () => {
                     {
                         ...validPayload.events[0],
                         id: 'event-other-trip',
-                        trip_id: 'other-trip',
+                        trip_id: 'TX-OTHER',
                     },
                 ],
             });
@@ -290,7 +290,7 @@ describe('Trip Routes', () => {
                 events: [
                     {
                         id: 'event-otp-leak',
-                        trip_id: 'trip-1',
+                        trip_id: 'TX-ORDER1',
                         type: 'otpDelivery',
                         occurred_at: new Date().toISOString(),
                         payload: {
@@ -314,7 +314,7 @@ describe('Trip Routes', () => {
                 events: [
                     {
                         id: 'event-gps-oob',
-                        trip_id: 'trip-1',
+                        trip_id: 'TX-ORDER1',
                         type: 'gpsUpdate',
                         occurred_at: new Date().toISOString(),
                         payload: {
@@ -355,7 +355,7 @@ describe('Trip Routes', () => {
                 events: [
                     {
                         id: 'event-sensitive',
-                        trip_id: 'trip-1',
+                        trip_id: 'TX-ORDER1',
                         type: 'gpsUpdate',
                         occurred_at: new Date().toISOString(),
                         payload: {
@@ -406,7 +406,7 @@ describe('Trip Routes', () => {
                 events: [
                     {
                         id: 'event-otp',
-                        trip_id: 'trip-1',
+                        trip_id: 'TX-ORDER1',
                         type: 'otpDelivery',
                         occurred_at: new Date().toISOString(),
                         payload: {
@@ -432,6 +432,68 @@ describe('Trip Routes', () => {
                 metadata: { stopId: 'stop-1' },
             })
         );
+    });
+
+    it('POST /events/batch replays markStopCompleted by completing the stop and advancing the current stop', async () => {
+        m.store.trip_stops = [
+            {
+                id: 'stop-1',
+                trip_display_id: 'TX-ORDER1',
+                is_completed: false,
+                is_current: true,
+                status_label: 'In Progress',
+                sort_order: 1,
+            },
+            {
+                id: 'stop-2',
+                trip_display_id: 'TX-ORDER1',
+                is_completed: false,
+                is_current: false,
+                status_label: 'Pending',
+                sort_order: 2,
+            },
+        ];
+
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-mark-stop-completed',
+                events: [
+                    {
+                        id: 'event-stop-completed',
+                        trip_id: 'TX-ORDER1',
+                        type: 'markStopCompleted',
+                        occurred_at: new Date().toISOString(),
+                        payload: { stopId: 'stop-1' },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+
+        const completedStop = m.store.trip_stops.find((s) => s.id === 'stop-1');
+        expect(completedStop.is_completed).toBe(true);
+        expect(completedStop.is_current).toBe(false);
+        expect(completedStop.status_label).toBe('Delivered');
+
+        const nextStop = m.store.trip_stops.find((s) => s.id === 'stop-2');
+        expect(nextStop.is_current).toBe(true);
+        expect(nextStop.status_label).toBe('In Progress');
     });
 });
 

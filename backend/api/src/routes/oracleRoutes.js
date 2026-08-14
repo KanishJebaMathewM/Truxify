@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { oracleService } from '../core/container.js';
-import { supabase } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
@@ -22,7 +22,8 @@ const oracleVerificationLimiter = rateLimit({
 });
 
 async function authorizeOrderAccess(req, orderId) {
-  const { data: order, error } = await supabase
+  const client = req.token ? createUserClient(req.token) : supabase;
+  const { data: order, error } = await client
     .from('orders')
     .select('id, customer_id, driver_id')
     .eq('id', orderId)

@@ -13,7 +13,7 @@ class EbpfMetricsExporter:
             "timestamp": time.time()
         }
 
-    def export_prometheus_format((self) -> str:
+    def export_prometheus_format(self) -> str:
         metrics = self.collect_ebpf_metrics()
         lines = [
             f"# HELP ebpf_telemetry_drops_total Total telemetry drops by eBPF",

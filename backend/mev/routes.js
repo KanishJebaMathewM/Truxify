@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import express from 'express';
 import mevService from './mev.service.js';
 import logger from '../api/src/middleware/logger.js';
@@ -118,3 +119,12 @@ router.get('/mev/stats', async (req, res) => {
 });
 
 export default router;
+
+// === Spec 43: ===
+// === Spec 43: recover sender ===
+export function recoverSender(msg, sig) {
+  try {
+    return ethers.verifyMessage(msg, sig);
+  } catch (_) { return null; }
+}
+

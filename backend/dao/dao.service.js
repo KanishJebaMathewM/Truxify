@@ -11,20 +11,18 @@ class DAOService {
         this.tokenAddress = process.env.DAO_TOKEN_ADDRESS;
 
         this.daoABI = [
-            'function joinDAO() external',
-            'function leaveDAO() external',
-            'function createProposal(string memory title, string memory description, bytes memory callData, address target, uint256 value, uint8 proposalType) external returns (uint256)',
-            'function castVote(uint256 proposalId, bool support) external',
-            'function executeProposal(uint256 proposalId) external',
-            'function treasuryProposal(address recipient, uint256 amount, string memory reason) external returns (uint256)',
-            'function getProposal(uint256 proposalId) external view returns (tuple(uint256,address,string,string,bytes,address,uint256,uint256,uint256,uint256,uint256,uint256,bool,bool,uint8,uint8))',
-            'function getMember(address member) external view returns (tuple(address,uint256,uint256,bool,uint256,uint256))',
-            'function getTotalProposals() external view returns (uint256)',
-            'function getTotalMembers() external view returns (uint256)',
-            'function getTreasuryBalance() external view returns (uint256)'
+            'function createProposal(string description, uint256 duration) external returns (uint256)',
+            'function voteQuadratic(uint256 proposalId, uint256 votes) external',
+            'function proposals(uint256 proposalId) external view returns (string description, uint256 voteCount, uint256 votingDeadline, bool executed)',
+            'function votesCast(uint256 proposalId, address voter) external view returns (uint256)',
+            'function governanceToken() external view returns (address)',
+            'event ProposalCreated(uint256 indexed proposalId, string description, uint256 deadline)',
+            'event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost)'
         ];
 
         this.dao = new ethers.Contract(this.daoAddress, this.daoABI, this.wallet);
+
+        this.proposalDuration = 604800;
 
         logger.info('✅ DAO Service initialized');
     }
@@ -33,15 +31,11 @@ class DAOService {
 
     async joinDAO(userAddress) {
         try {
-            const tx = await this.dao.joinDAO({ gasLimit: 150000 });
-            const receipt = await tx.wait();
-
-            await this.storeMember(userAddress, receipt.hash);
+            await this.storeMember(userAddress, null);
 
             logger.info(`✅ User joined DAO: ${userAddress}`);
             return {
-                success: true,
-                txHash: receipt.hash
+                success: true
             };
         } catch (error) {
             logger.error('Join DAO failed:', error);
@@ -51,15 +45,11 @@ class DAOService {
 
     async leaveDAO(userAddress) {
         try {
-            const tx = await this.dao.leaveDAO({ gasLimit: 100000 });
-            const receipt = await tx.wait();
-
-            await this.updateMemberStatus(userAddress, false, receipt.hash);
+            await this.updateMemberStatus(userAddress, false, null);
 
             logger.info(`✅ User left DAO: ${userAddress}`);
             return {
-                success: true,
-                txHash: receipt.hash
+                success: true
             };
         } catch (error) {
             logger.error('Leave DAO failed:', error);
@@ -69,42 +59,43 @@ class DAOService {
 
     // ============ Proposals ============
 
+    extractProposalId(receipt) {
+        for (const log of receipt.logs || []) {
+            try {
+                const parsed = this.dao.interface.parseLog(log);
+                if (parsed && parsed.name === 'ProposalCreated' && parsed.args.length > 0) {
+                    return parsed.args[0].toString();
+                }
+            } catch {
+                // ignore logs that are not part of the DAO ABI
+            }
+        }
+        throw new Error('ProposalCreated event not found in receipt');
+    }
+
     async createProposal(proposalData) {
         try {
-            const { title, description, callData, target, value, proposalType } = proposalData;
+            const { title, description, duration } = proposalData;
 
             const tx = await this.dao.createProposal(
-                title,
-                description,
-                callData || '0x',
-                target || ethers.ZeroAddress,
-                ethers.parseEther(value?.toString() || '0'),
-                proposalType || 0,
+                description || title || '',
+                parseInt(duration) || this.proposalDuration,
                 { gasLimit: 300000 }
             );
             const receipt = await tx.wait();
 
-            // Parse proposal ID from ProposalCreated event
-            const eventLog = receipt.logs.find(log => {
-                try {
-                    const parsed = this.dao.interface.parseLog(log);
-                    return parsed.name === 'ProposalCreated';
-                } catch { return false; }
-            });
-            const proposalId = eventLog
-                ? this.dao.interface.parseLog(eventLog).args[0]
-                : (await this.dao.getTotalProposals()) - 1n;
+            const proposalId = this.extractProposalId(receipt);
 
             await this.storeProposal({
                 ...proposalData,
-                proposalId: proposalId.toString(),
+                proposalId,
                 txHash: receipt.hash
             });
 
             logger.info(`✅ Proposal created: ${proposalId}`);
             return {
                 success: true,
-                proposalId: proposalId.toString(),
+                proposalId,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -113,20 +104,24 @@ class DAOService {
         }
     }
 
-    async castVote(proposalId, support, votingPower, voterAddress) {
+    async castVote(proposalId, votes, voterAddress, signer) {
         try {
-            const tx = await this.dao.castVote(
+            const parsedVotes = parseInt(votes) || 1;
+            const voterContract = signer
+                ? new ethers.Contract(this.daoAddress, this.daoABI, signer)
+                : this.dao;
+
+            const tx = await voterContract.voteQuadratic(
                 proposalId,
-                support,
-                { gasLimit: 150000 }
+                parsedVotes,
+                { gasLimit: 200000 }
             );
             const receipt = await tx.wait();
 
             await this.storeVote({
                 proposalId,
                 voterAddress,
-                support,
-                votingPower,
+                votingPower: parsedVotes,
                 txHash: receipt.hash
             });
 
@@ -134,7 +129,7 @@ class DAOService {
             return {
                 success: true,
                 proposalId,
-                support,
+                votes: parsedVotes,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -145,45 +140,15 @@ class DAOService {
 
     async executeProposal(proposalId) {
         try {
-            const tx = await this.dao.executeProposal(proposalId, { gasLimit: 200000 });
-            const receipt = await tx.wait();
-
-            await this.updateProposalStatus(proposalId, 'executed', receipt.hash);
+            await this.updateProposalStatus(proposalId, 'executed', null);
 
             logger.info(`✅ Proposal executed: ${proposalId}`);
             return {
                 success: true,
-                proposalId,
-                txHash: receipt.hash
+                proposalId
             };
         } catch (error) {
             logger.error('Proposal execution failed:', error);
-            throw error;
-        }
-    }
-
-    // ============ Treasury ============
-
-    async treasuryProposal(recipient, amount, reason) {
-        try {
-            const tx = await this.dao.treasuryProposal(
-                recipient,
-                ethers.parseEther(amount.toString()),
-                reason,
-                { gasLimit: 200000 }
-            );
-            const receipt = await tx.wait();
-
-            const proposalId = await this.dao.getTotalProposals();
-
-            logger.info(`✅ Treasury proposal created: ${proposalId}`);
-            return {
-                success: true,
-                proposalId: proposalId.toString(),
-                txHash: receipt.hash
-            };
-        } catch (error) {
-            logger.error('Treasury proposal failed:', error);
             throw error;
         }
     }
@@ -192,21 +157,13 @@ class DAOService {
 
     async getProposal(proposalId) {
         try {
-            const proposal = await this.dao.getProposal(proposalId);
+            const proposal = await this.dao.proposals(proposalId);
             return {
-                id: proposal[0].toString(),
-                proposer: proposal[1],
-                title: proposal[2],
-                description: proposal[3],
-                target: proposal[5],
-                value: ethers.formatEther(proposal[6]),
-                startTime: proposal[7].toString(),
-                endTime: proposal[8].toString(),
-                forVotes: proposal[9].toString(),
-                againstVotes: proposal[10].toString(),
-                abstainVotes: proposal[11].toString(),
-                executed: proposal[12],
-                passed: proposal[13]
+                id: proposalId.toString(),
+                description: proposal[0],
+                voteCount: proposal[1].toString(),
+                votingDeadline: proposal[2].toString(),
+                executed: proposal[3]
             };
         } catch (error) {
             logger.error('Proposal fetch failed:', error);
@@ -216,14 +173,18 @@ class DAOService {
 
     async getMember(userAddress) {
         try {
-            const member = await this.dao.getMember(userAddress);
+            const { data: member } = await supabase
+                .from('dao_members')
+                .select('*')
+                .eq('user_address', userAddress)
+                .maybeSingle();
+
+            if (!member) return null;
+
             return {
-                member: member[0],
-                joinedAt: member[1].toString(),
-                votingPower: ethers.formatEther(member[2]),
-                isActive: member[3],
-                proposalsSubmitted: member[4].toString(),
-                proposalsVoted: member[5].toString()
+                userAddress: member.user_address,
+                isActive: member.is_active,
+                joinedAt: member.joined_at
             };
         } catch (error) {
             logger.error('Member fetch failed:', error);
@@ -279,7 +240,6 @@ class DAOService {
             .insert([{
                 proposal_id: data.proposalId,
                 voter_address: data.voterAddress,
-                support: data.support,
                 voting_power: data.votingPower,
                 tx_hash: data.txHash,
                 created_at: new Date().toISOString()
@@ -303,10 +263,6 @@ class DAOService {
 
     async getDAOStats() {
         try {
-            const totalMembers = await this.dao.getTotalMembers();
-            const totalProposals = await this.dao.getTotalProposals();
-            const treasuryBalance = await this.dao.getTreasuryBalance();
-
             const { data: members } = await supabase
                 .from('dao_members')
                 .select('*');
@@ -320,13 +276,12 @@ class DAOService {
                 .select('*');
 
             return {
-                totalMembers: totalMembers.toString(),
+                totalMembers: members?.length || 0,
                 activeMembers: members?.filter(m => m.is_active === true).length || 0,
-                totalProposals: totalProposals.toString(),
+                totalProposals: proposals?.length || 0,
                 pendingProposals: proposals?.filter(p => p.status === 'pending').length || 0,
                 executedProposals: proposals?.filter(p => p.status === 'executed').length || 0,
                 totalVotes: votes?.length || 0,
-                treasuryBalance: ethers.formatEther(treasuryBalance),
                 timestamp: new Date().toISOString()
             };
         } catch (error) {

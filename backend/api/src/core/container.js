@@ -21,7 +21,14 @@ import {
   confirmEscrowRefund,
 } from '../services/escrow.js';
 
-const orderRepository = new OrderRepository(supabase);
+// The shared anon-key `supabase` client has no JWT session and `orders` RLS
+// only has `authenticated`-role policies, so every read through it is silently
+// filtered to zero rows (404 "Order not found"). Use the service-role client
+// for user-facing order data so RLS authorizes the rows; the API layer enforces
+// ownership via the policy engine. Fall back to the anon client where the
+// service-role key is not configured (tests, local dev).
+const repoClient = supabaseAdmin ?? supabase;
+const orderRepository = new OrderRepository(repoClient);
 // Service-role repository for release-path DB writes. The anon-key client has
 // no RLS policy on `orders` and `escrow_status`/`escrow_release_*` are REVOKE
 // UPDATE from anon/authenticated, so persisting release evidence through it
@@ -32,7 +39,7 @@ const oracleService = new OracleService({ orderRepository });
 const verificationService = new VerificationService({ orderRepository, oracleService });
 
 const orderTimelineService = new OrderTimelineService(orderRepository);
-const orderValidationService = new OrderValidationService({ supabase, logger });
+const orderValidationService = new OrderValidationService({ supabase: repoClient, logger });
 const orderNotificationService = new OrderNotificationService(orderRepository);
 
 const bidAcceptanceService = new BidAcceptanceService({
@@ -43,7 +50,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   logger,
 });
 
-const trackingTokenService = new TrackingTokenService({ supabase, logger });
+const trackingTokenService = new TrackingTokenService({ supabase: repoClient, logger });
 
 const deliveryVerificationService = new DeliveryVerificationService(orderRepository, {
   trackingTokenService,

@@ -28,6 +28,15 @@ export class FuelAdvisorService {
 
     // 2. Get weather forecast for destination
     const weather = await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    if (!weather || !Number.isFinite(weather.temperature_c)) {
+      this.logger?.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data — using safe default B20.');
+      return {
+        recommended_blend: 'B20',
+        reasoning: 'Weather forecast unavailable. B20 is recommended as the safest default blend for all conditions.',
+        risk_level: 'LOW',
+        factors: { weather_forecast: null, average_engine_load_percent: Math.round(avgEngineLoad) },
+      };
+    }
     const tempC = weather.temperature_c;
 
     // 3. Compute recommendation
@@ -85,25 +94,38 @@ export class FuelAdvisorService {
         return 50; // Default load if no active trip
       }
 
-      // Find recent gpsUpdate events in trip_events for this trip/driver
+      // Resolve the active trip for this order. trip_events.trip_id references
+      // trips.id (not orders.id), so we must look up the trip first.
+      const { data: trip, error: tripErr } = await this.supabase
+        .from('trips')
+        .select('id')
+        .eq('order_id', order.id)
+        .maybeSingle();
+
+      if (tripErr || !trip) {
+        this.logger?.debug(`[FuelAdvisorService] No trip found for order ${order.id}, assuming default load`);
+        return 50; // Default load if no trip exists yet
+      }
+
+      // Find recent gpsUpdate events in trip_events for this trip
       const { data: events, error: eventsErr } = await this.supabase
         .from('trip_events')
-        .select('payload')
-        .eq('trip_id', order.id) // trip_id is often order.id
+        .select('metadata')
+        .eq('trip_id', trip.id)
         .eq('event_type', 'gpsUpdate')
-        .order('occurred_at', { ascending: false })
+        .order('event_timestamp', { ascending: false })
         .limit(50);
 
       if (eventsErr || !events || events.length === 0) {
         return 50; // Default load
       }
 
-      // Extract engineLoad from payload and average
+      // Extract engineLoad from metadata and average
       let totalLoad = 0;
       let count = 0;
 
       for (const event of events) {
-        const load = event.payload?.engineLoad;
+        const load = event.metadata?.engineLoad;
         if (load !== undefined && load !== null && typeof load === 'number') {
           totalLoad += load;
           count++;

@@ -7,7 +7,7 @@ class TestCTRNN(unittest.TestCase):
         self.imputer = ContinuousTimeRnnImputer()
 
     def test_continuous_imputation(self):
-        last_coords = (28.6139, 77.2090) // Delhi coords
+        last_coords = (28.6139, 77.2090)  # Delhi coords
         imputed = self.imputer.impute_missing_telemetry(last_coords, dt_seconds=45.0)
         
         self.assertEqual(len(imputed), 2)

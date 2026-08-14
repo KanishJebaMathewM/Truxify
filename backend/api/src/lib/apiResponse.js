@@ -26,6 +26,7 @@ export function error(message = 'An error occurred', statusCode = 500, errors = 
 }
 
 export function paginated(data = [], page = 1, limit = 10, total = 0, message = 'Success') {
+  if (limit < 1) limit = 1;
   const totalPages = Math.ceil(total / limit) || 0;
   return {
     success: true,
@@ -37,7 +38,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
       limit: Number(limit),
       total: Number(total),
       totalPages,
-      hasNextPage: Number(page) < totalPages,
+      hasNextPage: Number(page) < totalPages - 1,
       hasPrevPage: Number(page) > 1,
     },
   };

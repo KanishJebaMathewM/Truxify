@@ -126,6 +126,8 @@ export function deserializeCacheEvent(json) {
 
     return event;
   } catch (err) {
+    // JSON.parse throws on invalid JSON; we catch it here to return null
+    // rather than propagating the exception to the caller.
     logger.warn({ err }, '[CacheEvent] Deserialization failed: invalid JSON.');
     return null;
   }

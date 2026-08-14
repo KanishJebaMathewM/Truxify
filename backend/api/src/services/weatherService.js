@@ -31,7 +31,12 @@ export class WeatherService {
     let tempC = 15; // default warm
     let condition = 'clear';
 
-    if (numLat > 40 || numLat < -40) {
+    // Number('abc') -> NaN; NaN comparisons are always false so a bad
+    // latitude would silently fall through to the warm default. Guard it
+    // explicitly so the intent is clear.
+    const validLat = Number.isFinite(numLat);
+
+    if (validLat && (numLat > 40 || numLat < -40)) {
       tempC = -5;
       condition = 'snow';
     }

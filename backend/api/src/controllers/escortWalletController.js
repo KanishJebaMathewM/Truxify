@@ -1,7 +1,49 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { validationResult } from 'express-validator';
-import { AppError } from '../errors/AppError.js';
+import { AppError } from '../utils/errors.js';
+import { supabase } from '../config/db.js';
+
+/**
+ * Resolve the resource for the 'escort:issue-credential' ownership check:
+ * the normalized subject from the body and the authenticated caller's own
+ * polygon wallet address. Administrators bypass the ownership check (see the
+ * policy definition), so drivers can only ever issue credentials for their own
+ * wallet address/DID.
+ */
+export const resolveCredentialSubject = async (req) => {
+    const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('polygon_wallet_address')
+        .eq('id', req.user.id)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError('Failed to load profile', 500);
+    }
+
+    const callerWallet = (profile?.polygon_wallet_address || '').trim().toLowerCase();
+    const subject = typeof req.body.subject === 'string' ? req.body.subject.trim().toLowerCase() : '';
+    return { subject, callerWallet };
+};
+
+/**
+ * Credentials may not be backdated. Returns true when validUntil is omitted
+ * (the service applies its default one-year TTL) or is a future point in time.
+ */
+function isValidFutureValidUntil(validUntil) {
+    if (validUntil === undefined || validUntil === null) return true;
+    let ms;
+    if (typeof validUntil === 'number') {
+        // Unix timestamp in seconds, matching didService.issueCredential.
+        ms = validUntil * 1000;
+    } else if (typeof validUntil === 'string') {
+        ms = Date.parse(validUntil);
+    } else {
+        return false;
+    }
+    return Number.isFinite(ms) && ms > Date.now();
+}
 
 export const loadCredential = async (req, res, next) => {
     try {
@@ -14,6 +56,10 @@ export const loadCredential = async (req, res, next) => {
         
         // subject is the Escort Driver's address or DID
         // credentialType: e.g., 'EscortCertification', 'Insurance', 'StatePermit'
+
+        if (!isValidFutureValidUntil(validUntil)) {
+            return res.status(400).json({ error: 'validUntil must be a future date (unix timestamp in seconds or ISO string)' });
+        }
 
         const result = await didService.issueCredential(
             subject,

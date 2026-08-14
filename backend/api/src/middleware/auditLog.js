@@ -61,6 +61,9 @@ function resolveResourceId(req) {
     || req.params?.reviewId
     || req.params?.ticketId
     || req.body?.id
+    || req.body?.order_id
+    || req.body?.withdrawal_id
+    || req.body?.payment_id
     || null;
 }
 
@@ -253,3 +256,21 @@ export function auditWithState(action, resourceType, getIdFn) {
     },
   });
 }
+
+
+// === Spec 20: ===
+// === Spec 20: PII masking ===
+const PII = new Set(['password', 'token', 'vpa', 'ssn', 'secret', 'pin']);
+export function maskPii(value, seen = new WeakSet()) {
+  if (value == null) return value;
+  if (typeof value !== 'object') return value;
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((v) => maskPii(v, seen));
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = PII.has(k.toLowerCase()) ? '***' : maskPii(v, seen);
+  }
+  return out;
+}
+

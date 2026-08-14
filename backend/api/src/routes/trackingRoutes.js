@@ -5,14 +5,12 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody } from '../middleware/validate.js';
 import { shareTrackingSchema } from '../validation/requestSchemas.js';
-import { supabase, redisClient } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import logger from '../middleware/logger.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
-
-const trackingTokenService = new TrackingTokenService({ supabase, logger });
 
 // Rate limiters
 const publicTrackingLimiter = rateLimit({
@@ -48,8 +46,14 @@ router.post(
       const orderDisplayId = req.params.id;
       const userId = req.user.id;
 
+      // Run reads/writes through the caller's user-scoped client. orders has no
+      // anon RLS policy (and anon privileges are revoked), so the shared anon
+      // client could never return the row and every request 404'd.
+      const userClient = createUserClient(req.token);
+      const tokenService = new TrackingTokenService({ supabase: userClient, logger });
+
       // Verify the order exists and belongs to the requesting customer
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await userClient
         .from('orders')
         .select('order_display_id, customer_id, status')
         .eq('order_display_id', orderDisplayId)
@@ -69,7 +73,7 @@ router.post(
         return res.status(400).json({ error: 'Cannot share tracking for completed or cancelled orders' });
       }
 
-      const tokenData = await trackingTokenService.createToken({
+      const tokenData = await tokenService.createToken({
         orderDisplayId,
         createdBy: userId,
       });
@@ -106,7 +110,10 @@ router.post(
       const orderDisplayId = req.params.id;
       const userId = req.user.id;
 
-      const { data: order, error: orderError } = await supabase
+      const userClient = createUserClient(req.token);
+      const tokenService = new TrackingTokenService({ supabase: userClient, logger });
+
+      const { data: order, error: orderError } = await userClient
         .from('orders')
         .select('order_display_id, customer_id')
         .eq('order_display_id', orderDisplayId)
@@ -120,7 +127,7 @@ router.post(
         return res.status(403).json({ error: 'You can only revoke tracking for your own orders' });
       }
 
-      await trackingTokenService.revokeAllForOrder(orderDisplayId);
+      await tokenService.revokeAllForOrder(orderDisplayId);
 
       return res.json({ success: true, message: 'All tracking links revoked' });
     } catch (err) {

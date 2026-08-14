@@ -216,7 +216,7 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
 
     const { data: truck, error: insertErr } = await supabase
       .from('trucks')
-      .insert({ name, truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
+      .insert({ name: sanitizeTruckName(name), truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
       .select('id, name, truck_type, number_plate, max_capacity_tons, created_at')
       .single();
 
@@ -583,11 +583,11 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
-        logger.error('MongoDB telemetry search error:', mongoErr.message);
+        logger.error({ event: 'TRUCK_MONGO_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: mongoErr && mongoErr.message }, 'MongoDB telemetry search error');
       }
     }
 
@@ -606,7 +606,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
-      logger.error('Driver search error:', driversErr.message);
+      logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -618,17 +618,17 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabaseAdmin.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('trucks').select('id, driver_id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
       supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
     if (trucksRes.error) {
-      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      logger.error({ event: 'TRUCK_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: trucksRes.error && trucksRes.error.message }, 'Truck enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (profilesRes.error) {
-      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      logger.error({ event: 'TRUCK_PROFILE_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: profilesRes.error && profilesRes.error.message }, 'Driver profile enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -639,15 +639,20 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       ? Math.round(routeEstimate.durationSeconds / 60)
       : null;
 
-    const results = drivers.map(d => {
+    const results = await Promise.all(drivers.map(async (d) => {
       const profile = profileMap[d.user_id] || {};
       const truck = truckMap[d.truck_id] || {};
+      let truckNumber = '';
+      if (truck.id) {
+        const access = await canViewTruckNumber(req.user, truck);
+        truckNumber = access.allowed ? (truck.number_plate || '') : '';
+      }
       return {
         driver: profile.full_name || 'Unknown Driver',
         driverId: d.user_id,
         rating: d.rating || 0,
         truck: truck.name || 'Unknown Truck',
-        truckNumber: truck.number_plate || '',
+        truckNumber,
         capacity: truck.max_capacity_tons ? `${truck.max_capacity_tons} tonnes` : '',
         capacityTons: truck.max_capacity_tons || 0,
         truckType: truck.truck_type || '',
@@ -659,7 +664,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         etaMinutes,
         isDigilockerVerified: profile.is_digilocker_verified || false,
       };
-    });
+    }));
 
     const filteredResults = results.filter(truck => {
       if (minCapFilter.value !== undefined && truck.capacityTons < minCapFilter.value) {
@@ -694,7 +699,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
     res.json(responseResults);
   } catch (err) {
-    logger.error('Truck search error:', err.message);
+    logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -806,7 +811,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
       .select('id')
       .eq('id', truckId)
       .eq('driver_id', req.user.id)
-      .single();
+      .maybeSingle();
 
     if (truckErr || !truck) {
       return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });

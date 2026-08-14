@@ -142,13 +142,26 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Verify the owner's EIP-191 signature over the create commitment:
+<<<<<<< HEAD
      *      keccak256(chainId, this, customer, bookingId, commitmentNonces[customer]).
      *      Only the contract owner (the backend relayer) can authorise a slot,
      *      so an external party cannot claim a pending bookingId for 1 wei.
+=======
+     *      keccak256(chainId, this, customer, bookingId, driver, amount,
+     *      commitmentNonces[customer]). Pinning driver and amount prevents a
+     *      customer from reusing a valid commitment to create a booking whose
+     *      driver/amount diverge from what the backend authorised (issue #11393).
+     *      Only the contract owner (the backend relayer) can authorise a slot.
+>>>>>>> upstream/main
      */
     function _verifyCreateCommitment(
         address customer,
         uint256 bookingId,
+<<<<<<< HEAD
+=======
+        address driver,
+        uint256 amount,
+>>>>>>> upstream/main
         bytes calldata signature
     ) private view returns (bool) {
         require(signature.length == 65, "TruxifyEscrow: Invalid signature length");
@@ -159,6 +172,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
                 address(this),
                 customer,
                 bookingId,
+<<<<<<< HEAD
+=======
+                driver,
+                amount,
+>>>>>>> upstream/main
                 commitmentNonces[customer]
             )
         );
@@ -214,7 +232,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Booking already exists"
         );
         require(
+<<<<<<< HEAD
             _verifyCreateCommitment(msg.sender, bookingId, signature),
+=======
+            _verifyCreateCommitment(msg.sender, bookingId, driver, msg.value, signature),
+>>>>>>> upstream/main
             "TruxifyEscrow: Invalid commitment signature"
         );
 
@@ -376,7 +398,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
+        // A started trip must be cancelled through cancelWithPenalty so the
+        // driver is compensated for work already performed. Allowing a full
+        // refund here would let the customer void a started booking while the
+        // driver receives nothing (issue #8891).
+        require(!booking.started, "TruxifyEscrow: Trip already started");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;

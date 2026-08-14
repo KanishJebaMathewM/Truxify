@@ -47,7 +47,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       .maybeSingle();
 
     if (loadErr) {
-      logger.error('Failed to fetch load for telemetry:', loadErr);
+      logger.error({ event: 'IOT_LOAD_FETCH_ERROR', requestId: req.requestId || req.id, loadId, error: loadErr && (loadErr.message || String(loadErr)) }, 'Failed to fetch load for telemetry');
       return res.status(500).json({ error: 'Database error' });
     }
 
@@ -59,24 +59,70 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       return res.status(400).json({ error: 'Load does not require refrigeration' });
     }
 
-    // Admins and provisioned IoT devices may always ingest telemetry.
+    // Admins may always ingest telemetry.
+    // Provisioned IoT devices may ingest telemetry if they map to this specific load.
     // Everyone else must mirror GET authorization: the load owner OR the
     // assigned driver. The driver is the party physically carrying the load
     // and the only person able to record cold-chain readings in transit.
-    if (req.user.role !== 'admin' && req.user.role !== 'iot_device') {
-      let isAuthorized = load.customer_id === req.user.id;
-      if (!isAuthorized && load.order_display_id) {
-        const { data: order } = await supabaseAdmin
-          .from('orders')
-          .select('driver_id')
-          .eq('order_display_id', load.order_display_id)
-          .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered'])
+    if (req.user.role !== 'admin') {
+      let isAuthorized = false;
+
+      if (req.user.role === 'iot_device') {
+        // Look up the device-to-load assignment via the iot_device_loads table.
+        // The previous check (device_id === load_id) was semantically wrong since
+        // a device UUID and a load UUID are never meaningfully comparable.
+        const { data: assignment } = await supabaseAdmin
+          .from('iot_device_loads')
+          .select('id')
+          .eq('device_id', req.user.id)
+          .eq('load_id', loadId)
           .maybeSingle();
-        isAuthorized = order?.driver_id === req.user.id;
+        isAuthorized = !!assignment;
+      } else {
+        isAuthorized = load.customer_id === req.user.id;
+        if (!isAuthorized && load.order_display_id) {
+          const { data: order } = await supabaseAdmin
+            .from('orders')
+            .select('driver_id')
+            .eq('order_display_id', load.order_display_id)
+            .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered'])
+            .maybeSingle();
+          isAuthorized = order?.driver_id === req.user.id;
+        }
       }
+
       if (!isAuthorized) {
         return res.status(403).json({ error: 'Access denied for this load' });
       }
+    }
+
+    // Check if out of range
+    const isOutOfRange = (load.target_temperature_min !== null && temperature < load.target_temperature_min) ||
+                         (load.target_temperature_max !== null && temperature > load.target_temperature_max);
+
+    // Resolve the previous (pre-insert) frame BEFORE writing the current one,
+    // so the transition check compares the new reading against the true prior
+    // reading rather than the row we are about to insert. Otherwise the
+    // previous-frame lookup returns the just-inserted row and the alert never
+    // fires on the out-of-range transition.
+    let prevOutOfRange = false;
+    let prevErr = null;
+    if (isOutOfRange) {
+      logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
+
+      const { data: prevTelemetry, error: pErr } = await supabaseAdmin
+        .from('temperature_telemetry')
+        .select('temperature')
+        .eq('load_id', loadId)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      prevErr = pErr;
+
+      const prevTemp = prevTelemetry?.temperature;
+      prevOutOfRange = prevTemp !== undefined && prevTemp !== null &&
+        ((load.target_temperature_min !== null && prevTemp < load.target_temperature_min) ||
+         (load.target_temperature_max !== null && prevTemp > load.target_temperature_max));
     }
 
     // Insert telemetry (service-role client: RLS only permits service_role to
@@ -89,21 +135,15 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       });
 
     if (insertErr) {
-      logger.error('Failed to insert telemetry:', insertErr);
+      logger.error({ event: 'IOT_TELEMETRY_INSERT_ERROR', requestId: req.requestId || req.id, loadId, error: insertErr && (insertErr.message || String(insertErr)) }, 'Failed to insert telemetry');
       return res.status(500).json({ error: 'Database error' });
     }
 
-    // Check if out of range
-    const isOutOfRange = (load.target_temperature_min !== null && temperature < load.target_temperature_min) ||
-                         (load.target_temperature_max !== null && temperature > load.target_temperature_max);
-
-    if (isOutOfRange) {
-      logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
-      
-      // In a full implementation, we might check if it's been out of range for 15 mins.
-      // For MVP, we'll insert a notification immediately if it's not already spammed.
-      // We can use the existing notifications table or system if one exists, but for now we'll just log.
-      
+    // Notify only on the out-of-range transition: the previous frame was in
+    // range (or absent) and the new frame is out of range. Continuing
+    // out-of-range frames are skipped, so a single excursion produces one
+    // notification instead of one per frame.
+    if (isOutOfRange && !prevErr && !prevOutOfRange) {
       await supabaseAdmin.from('notifications').insert({
         user_id: load.customer_id,
         title: 'Temperature Alert',
@@ -115,12 +155,12 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
           target_temperature_min: load.target_temperature_min,
           target_temperature_max: load.target_temperature_max
         }
-      }).catch(err => logger.error('Failed to send notification:', err));
+      }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
     }
 
     return res.status(201).json({ success: true, message: 'Telemetry recorded' });
   } catch (err) {
-    logger.error('Internal server error in IoT telemetry route:', err);
+    logger.error({ event: 'IOT_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Internal server error in IoT telemetry route');
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -140,7 +180,7 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
       .maybeSingle();
 
     if (loadErr) {
-      logger.error('Failed to fetch load for telemetry authorization:', loadErr);
+      logger.error({ event: 'IOT_AUTH_LOAD_FETCH_ERROR', requestId: req.requestId || req.id, loadId, error: loadErr && (loadErr.message || String(loadErr)) }, 'Failed to fetch load for telemetry authorization');
       return res.status(500).json({ error: 'Database error' });
     }
 

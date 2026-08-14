@@ -22,7 +22,7 @@ class TestCPABE(unittest.TestCase):
         doc_data = b"CONFIDENTIAL_BILL_OF_LADING"
 
         enc = self.cipher.encrypt_document(doc_data, policy)
-        wrong_attrs = {"Role: Driver", "TripID: TRIP_9999"} // Wrong trip ID
+        wrong_attrs = {"Role: Driver", "TripID: TRIP_9999"}  # Wrong trip ID
 
         with self.assertRaises(PermissionError):
             self.cipher.decrypt_document(enc["ciphertext_b64"], policy, wrong_attrs)

@@ -50,3 +50,15 @@ describe('validatePagination', () => {
     expect(result.error).toBeUndefined();
   });
 });
+
+describe('validatePagination - additional edge cases', () => {
+  it('rejects NaN via Number() coercion', () => {
+    expect(validatePagination({ page: NaN }).error).toBeTruthy();
+    expect(validatePagination({ pageSize: NaN }).error).toBeTruthy();
+  });
+
+  it('rejects Infinity', () => {
+    expect(validatePagination({ page: Infinity }).error).toBeTruthy();
+    expect(validatePagination({ pageSize: Infinity }).error).toBeTruthy();
+  });
+});

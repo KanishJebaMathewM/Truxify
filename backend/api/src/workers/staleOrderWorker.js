@@ -5,6 +5,7 @@ import { sendPushNotification } from '../services/notificationService.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
+import { submitEscrowRefund } from '../services/escrow.js';
 
 let staleOrderWorkerTask = null;
 let staleOrderRunning = false;
@@ -189,14 +190,34 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
       logger.warn(`[StaleOrderWorker] Failed to cancel load offer for order ${orderDisplayId}: ${offerErr.message}`);
     });
 
+    // For escrow-backed orders, actually submit the on-chain refund before
+    // telling the customer their funds are being returned. Only claim a refund
+    // is in progress once a transaction hash is obtained.
+    let refundSubmitted = false;
+    if (requiresRefund) {
+      try {
+        const refundResult = await submitEscrowRefund(orderDisplayId);
+        refundSubmitted = Boolean(refundResult && refundResult.txHash);
+        if (!refundSubmitted) {
+          logger.warn(
+            `[StaleOrderWorker] Escrow refund for order ${orderDisplayId} was not submitted (${refundResult && refundResult.error ? refundResult.error : 'no txHash'}); customer will be told a refund will be processed.`
+          );
+        }
+      } catch (refundErr) {
+        logger.error(`[StaleOrderWorker] Failed to submit escrow refund for order ${orderDisplayId}: ${refundErr.message}`);
+      }
+    }
+
     // Send a notification to the customer
     try {
       await sendPushNotification(
         order.customer_id,
         'Order Cancelled',
-        requiresRefund
+        requiresRefund && refundSubmitted
           ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. Any escrowed funds are being refunded.`
-          : 'Your order was cancelled because it received no accepted bids within 24 hours. Please try posting again.',
+          : requiresRefund
+            ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. We will process your refund shortly.`
+            : 'Your order was cancelled because it received no accepted bids within 24 hours. Please try posting again.',
         'order_update',
         { orderId: order.id, orderDisplayId }
       );

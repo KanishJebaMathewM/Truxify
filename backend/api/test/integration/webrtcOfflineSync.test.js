@@ -54,16 +54,21 @@ describe('WebRTC offline sync route', () => {
     signalingMock.canUserAccessPeer.mockReturnValue(true);
     signalingMock.syncOfflineData.mockResolvedValue();
 
-    const res = await request(buildApp()).post('/api/webrtc/sync/peer-1');
+    const res = await request(buildApp())
+      .post('/api/webrtc/sync/peer-1')
+      .send({ ackedIds: ['row-1', 'row-2'] });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    // The requesting user is forwarded so the service can re-check access:
-    // syncOfflineData is a no-op for a peer the caller cannot reach, which is
-    // the last line of defence behind the route's own 403.
-    expect(signalingMock.syncOfflineData).toHaveBeenCalledWith(
-      'peer-1',
-      expect.objectContaining({ id: 'user-1' }),
-    );
+    expect(signalingMock.syncOfflineData).toHaveBeenCalledWith('peer-1', ['row-1', 'row-2'], { id: 'user-1', role: 'driver' });
+  });
+
+  it('rejects sync without acknowledged row ids', async () => {
+    signalingMock.canUserAccessPeer.mockReturnValue(true);
+
+    const res = await request(buildApp()).post('/api/webrtc/sync/peer-1');
+
+    expect(res.status).toBe(400);
+    expect(signalingMock.syncOfflineData).not.toHaveBeenCalled();
   });
 });

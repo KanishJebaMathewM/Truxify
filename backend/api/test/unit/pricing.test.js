@@ -250,4 +250,26 @@ describe('guardNonNegative', () => {
   it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });
   it('rejects NaN', () => { expect(() => guardNonNegative(NaN, 'x')).toThrow(TypeError); });
 });
+describe('parsePositiveFloat (from __testing)', () => {
+  it('returns parsed value for valid positive numbers', () => {
+    const { __testing } = require('../../src/lib/pricing.js');
+    expect(__testing.parsePositiveFloat(5, 1)).toBe(5);
+    expect(__testing.parsePositiveFloat('10.5', 1)).toBe(10.5);
+  });
+
+  it('returns fallback for zero', () => {
+    const { __testing } = require('../../src/lib/pricing.js');
+    expect(__testing.parsePositiveFloat(0, 1)).toBe(1);
+  });
+
+  it('returns fallback for negative numbers', () => {
+    const { __testing } = require('../../src/lib/pricing.js');
+    expect(__testing.parsePositiveFloat(-5, 1)).toBe(1);
+  });
+
+  it('returns fallback for NaN', () => {
+    const { __testing } = require('../../src/lib/pricing.js');
+    expect(__testing.parsePositiveFloat(NaN, 1)).toBe(1);
+  });
+});
 

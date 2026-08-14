@@ -58,6 +58,7 @@ export class CircuitBreaker {
     this.reset();
   }
 
+  // Timer is declared at function scope so the finally block can safely clear it even if fn() throws synchronously.
   async execute(fn, ...args) {
     if (typeof fn !== 'function') {
       throw new TypeError('circuitBreaker execute: fn must be a function');

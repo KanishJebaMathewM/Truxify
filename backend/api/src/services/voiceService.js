@@ -1,7 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { supabase, supabaseAdmin } from '../config/db.js';
-const voiceDb = supabaseAdmin || supabase;
+const voiceDb = (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
 import logger from '../middleware/logger.js';
 
 const MAX_CACHE_SIZE = 100;

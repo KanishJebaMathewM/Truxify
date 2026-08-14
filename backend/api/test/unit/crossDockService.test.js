@@ -227,6 +227,21 @@ describe('crossDockService', () => {
       const result = await svc.verifyHandoff({ transferId: 't1', driverId: 'd2', handoffCode: '123456' });
       expect(result.status).toBe('verified');
     });
+
+    it('reassigns order custody to the receiving driver on a matching code', async () => {
+      const { verifyOtpHash } = await import('../../src/lib/otpHashing.js');
+      verifyOtpHash.mockReturnValueOnce(true);
+      supabaseState.cross_dock_transfers = {
+        maybeSingle: { data: { id: 't1', from_driver_id: 'd1', to_driver_id: 'd2', status: 'accepted', otp_hash: 'h:s', expires_at: new Date(Date.now() + 1e9).toISOString(), otp_attempts: 0 }, error: null },
+        single: { data: { id: 't1', status: 'verified', from_driver_id: 'd1', to_driver_id: 'd2', order_id: 'o1', verified_at: '2026-01-01T00:00:00.000Z' }, error: null },
+      };
+      await svc.verifyHandoff({ transferId: 't1', driverId: 'd2', handoffCode: '123456' });
+
+      const ordersCallIdx = fromMock.mock.calls.findIndex((c) => c[0] === 'orders');
+      expect(ordersCallIdx).toBeGreaterThanOrEqual(0);
+      const ordersChain = fromMock.mock.results[ordersCallIdx].value;
+      expect(ordersChain.update).toHaveBeenCalledWith({ driver_id: 'd2' });
+    });
   });
 
   describe('acceptTransferRequest', () => {

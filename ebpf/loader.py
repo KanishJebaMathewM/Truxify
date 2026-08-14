@@ -48,21 +48,19 @@ class eBPFLoader:
     def load_program(self, object_file: str) -> bool:
         """Load eBPF program into kernel"""
         try:
-            # Use bpftool to load program
-            cmd = ["sudo", "bpftool", "prog", "load", object_file, "/sys/fs/bpf/truxify"]
-            subprocess.run(cmd, check=True, capture_output=True)
-            
-            # Pin program to BPF filesystem
+            # Use bpftool to load and pin the program at a unique path.
+            # `bpftool prog load <obj> <pin>` already pins the program, so a
+            # separate `prog pin id` step is redundant (and requires a numeric
+            # id, not a program name). A per-program pin path avoids collisions.
             program_name = os.path.basename(object_file).replace('.o', '')
             pin_path = f"/sys/fs/bpf/truxify_{program_name}"
-            
-            cmd = ["sudo", "bpftool", "prog", "pin", "id", program_name, pin_path]
+            cmd = ["sudo", "bpftool", "prog", "load", object_file, pin_path]
             subprocess.run(cmd, check=True, capture_output=True)
-            
+
             self.loaded_programs.append(program_name)
             logger.info(f"✅ Loaded: {program_name}")
             return True
-            
+
         except subprocess.CalledProcessError as e:
             logger.error(f"Loading failed: {e.stderr}")
             return False

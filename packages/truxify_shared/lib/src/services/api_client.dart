@@ -121,7 +121,7 @@ class ApiClient {
     if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
     
     if (kIsWeb) return 'http://localhost:5000';
-    if (Platform.isAndroid) return 'http://10.0.2.2:5000';
+    if (defaultTargetPlatform == TargetPlatform.android) return 'http://10.0.2.2:5000';
     return 'http://localhost:5000';
   }
 

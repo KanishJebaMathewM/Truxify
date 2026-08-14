@@ -23,6 +23,9 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     if (pickupLat == null || pickupLng == null) {
       return 1.0;
     }
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+      return 1.0;
+    }
 
     const apiKey = process.env.TOMTOM_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
 
@@ -35,7 +38,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
         if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
         const data = await response.json();
         const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
-        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
+        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, speedDiff / 100)));
       } else {
         const origin = `${pickupLat},${pickupLng}`;
         const destination = `${pickupLat + 0.01},${pickupLng + 0.01}`;

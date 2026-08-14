@@ -110,3 +110,20 @@ describe('priceRounding', () => {
     });
   });
 });
+
+describe('priceRounding - additional edge cases', () => {
+  it('toPaisa handles fractional paisa rounding', () => {
+    // 1.005 INR should round to 101 paisa (100.5 rounds up)
+    expect(toPaisa(1.005)).toBe(101);
+  });
+
+  it('toInr handles fractional paisa', () => {
+    expect(toInr(1)).toBe(0.01);
+    expect(toInr(150)).toBe(1.5);
+  });
+
+  it('roundPrice handles negative values', () => {
+    expect(roundPrice(-1.5)).toBe(-2); // rounds away from zero
+    expect(roundPrice(-1.234, 1)).toBe(-1.2);
+  });
+});

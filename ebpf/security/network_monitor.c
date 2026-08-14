@@ -36,7 +36,9 @@ struct rate_key {
 };
 
 struct rate_entry {
-    __u32 lock;
+    // bpf_spin_lock requires the lock field to be exactly this type; it is
+    // only permitted inside BPF_MAP_TYPE_HASH / BPF_MAP_TYPE_ARRAY (not LRU).
+    struct bpf_spin_lock lock;
     __u64 last_seen;  // ns timestamp of the first connection in the window
     __u64 count;      // connections observed in the current window
 };
@@ -48,7 +50,10 @@ struct drop_event {
 };
 
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    // bpf_spin_lock is only supported on BPF_MAP_TYPE_HASH / BPF_MAP_TYPE_ARRAY;
+    // LRU_HASH cannot host a spin lock, so the verifier would reject the
+    // program. max_entries still bounds memory.
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, struct rate_key);
     __type(value, struct rate_entry);
@@ -121,7 +126,7 @@ int trace_tcp_connect(struct trace_event_raw_tcp_connect *args)
         bpf_spin_unlock(&entry->lock);
     } else {
         struct rate_entry new_entry = {
-            .lock = 0,
+            .lock = {},
             .last_seen = now,
             .count = 1,
         };

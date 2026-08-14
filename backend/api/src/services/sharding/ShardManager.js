@@ -165,6 +165,12 @@ class ShardManager {
     if (typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
       return process.env.DEFAULT_SHARD_STATE || 'delhi';
     }
+    // Deterministic metro pins so major cities always resolve to their
+    // canonical state regardless of centroid proximity (issue #12029). The
+    // boxes are narrow and non-overlapping; they only act as early returns.
+    if (lat > 18.5 && lat < 20.0 && lng > 72.0 && lng < 73.5) return 'maharashtra'; // Mumbai
+    if (lat > 12.5 && lat < 13.5 && lng > 79.5 && lng < 81.0) return 'tamilnadu'; // Chennai
+
     let bestState = process.env.DEFAULT_SHARD_STATE || 'delhi';
     let bestDist = Infinity;
     for (const [state, centroid] of STATE_CENTROIDS) {

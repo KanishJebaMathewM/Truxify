@@ -33,13 +33,13 @@ class EventBus extends EventEmitter {
 
   registerAdapter(name, adapter) {
     this._adapters.set(name, adapter);
-    logger.info(`[EventBus] Adapter registered: ${name}`);
+    logger.info({ adapter: name }, '[EventBus] Adapter registered');
     return this;
   }
 
   removeAdapter(name) {
     this._adapters.delete(name);
-    logger.info(`[EventBus] Adapter removed: ${name}`);
+    logger.info({ adapter: name }, '[EventBus] Adapter removed');
     return this;
   }
 
@@ -48,10 +48,10 @@ class EventBus extends EventEmitter {
       try {
         if (typeof adapter.connect === 'function') {
           await adapter.connect();
-          logger.info(`[EventBus] Adapter connected: ${name}`);
+          logger.info({ adapter: name }, '[EventBus] Adapter connected');
         }
       } catch (err) {
-        logger.error(`[EventBus] Failed to connect adapter "${name}":`, err.message);
+        logger.error({ adapter: name, err: err.message }, '[EventBus] Failed to connect adapter');
       }
     }
   }
@@ -61,10 +61,10 @@ class EventBus extends EventEmitter {
       try {
         if (typeof adapter.disconnect === 'function') {
           await adapter.disconnect();
-          logger.info(`[EventBus] Adapter disconnected: ${name}`);
+          logger.info({ adapter: name }, '[EventBus] Adapter disconnected');
         }
       } catch (err) {
-        logger.error(`[EventBus] Failed to disconnect adapter "${name}":`, err.message);
+        logger.error({ adapter: name, err: err.message }, '[EventBus] Failed to disconnect adapter');
       }
     }
   }
@@ -104,13 +104,13 @@ class EventBus extends EventEmitter {
     if (this._registry.isValid(eventType)) {
       const validation = this._registry.validate(eventType, event.payload);
       if (!validation.valid) {
-        logger.warn(`[EventBus] Event validation failed for "${eventType}": ${validation.error}`);
+        logger.warn({ eventType, error: validation.error }, '[EventBus] Event validation failed');
       }
     }
 
     if (options.deduplicate !== false && this._isDuplicate(event)) {
       this._metrics.deduplicated++;
-      logger.debug(`[EventBus] Duplicate event suppressed: ${event.metadata?.eventId}`);
+      logger.debug({ eventId: event.metadata?.eventId }, '[EventBus] Duplicate event suppressed');
       return this;
     }
 
@@ -150,13 +150,13 @@ class EventBus extends EventEmitter {
         if (result && typeof result.then === 'function') {
           // Capture the async listener's rejection but do not block other listeners.
           const p = result.catch(err => {
-            logger.error(`[EventBus] Unhandled async listener error for "${event}":`, err);
+            logger.error({ event, err }, '[EventBus] Unhandled async listener error');
             this._metrics.errors++;
           });
           promises.push(p);
         }
       } catch (err) {
-        logger.error(`[EventBus] Sync listener error for "${event}":`, err);
+        logger.error({ event, err }, '[EventBus] Sync listener error');
         this._metrics.errors++;
       }
     }
@@ -287,13 +287,13 @@ class EventBus extends EventEmitter {
     if (this._registry.isValid(eventType)) {
       const validation = this._registry.validate(eventType, event.payload);
       if (!validation.valid) {
-        logger.warn(`[EventBus] Event validation failed for "${eventType}": ${validation.error}`);
+        logger.warn({ eventType, error: validation.error }, '[EventBus] Event validation failed');
       }
     }
 
     if (options.deduplicate !== false && this._isDuplicate(event)) {
       this._metrics.deduplicated++;
-      logger.debug(`[EventBus] Duplicate event suppressed: ${event.metadata?.eventId}`);
+      logger.debug({ eventId: event.metadata?.eventId }, '[EventBus] Duplicate event suppressed');
       return {
         published: false,
         deduplicated: true,
@@ -328,7 +328,7 @@ class EventBus extends EventEmitter {
       } catch (err) {
         adapterFailures++;
         adapterErrors.push(`${name}: ${err.message}`);
-        logger.error(`[EventBus] Adapter "${name}" publish failed for "${eventType}":`, err.message);
+        logger.error({ adapter: name, eventType, err: err.message }, '[EventBus] Adapter publish failed');
         this._metrics.errors++;
       }
     }
@@ -385,7 +385,7 @@ class EventBus extends EventEmitter {
           await adapter.publish(event);
         }
       } catch (err) {
-        logger.error(`[EventBus] Adapter "${name}" publish failed for "${eventType}":`, err.message);
+        logger.error({ adapter: name, eventType, err: err.message }, '[EventBus] Adapter publish failed');
         this._metrics.errors++;
       }
     }

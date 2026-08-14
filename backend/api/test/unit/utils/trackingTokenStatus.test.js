@@ -1,49 +1,53 @@
 import { describe, it, expect } from 'vitest';
-import {
-  TRACKING_TOKEN_STATUS_MESSAGES,
-  trackingTokenInvalidResponse,
-} from '../../../src/utils/trackingTokenStatus.js';
+import { trackingTokenInvalidResponse, TRACKING_TOKEN_STATUS_MESSAGES } from '../../../src/utils/trackingTokenStatus.js';
 
-describe('trackingTokenStatus.js', () => {
-  describe('TRACKING_TOKEN_STATUS_MESSAGES', () => {
-    it('has not_found mapping to 404', () => {
-      expect(TRACKING_TOKEN_STATUS_MESSAGES.not_found.status).toBe(404);
-      expect(TRACKING_TOKEN_STATUS_MESSAGES.not_found.message).toBeTruthy();
-    });
-
-    it('has revoked mapping to 410', () => {
-      expect(TRACKING_TOKEN_STATUS_MESSAGES.revoked.status).toBe(410);
-    });
-
-    it('has expired mapping to 410', () => {
-      expect(TRACKING_TOKEN_STATUS_MESSAGES.expired.status).toBe(410);
-    });
+describe('TRACKING_TOKEN_STATUS_MESSAGES', () => {
+  it('has correct status for not_found', () => {
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.not_found.status).toBe(404);
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.not_found.message).toContain('not found');
   });
 
-  describe('trackingTokenInvalidResponse', () => {
-    it('returns 404 for not_found reason', () => {
-      const result = trackingTokenInvalidResponse({ reason: 'not_found' });
-      expect(result.status).toBe(404);
-    });
+  it('has correct status for revoked', () => {
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.revoked.status).toBe(410);
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.revoked.message).toContain('revoked');
+  });
 
-    it('returns 410 for revoked reason', () => {
-      const result = trackingTokenInvalidResponse({ reason: 'revoked' });
-      expect(result.status).toBe(410);
-    });
+  it('has correct status for expired', () => {
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.expired.status).toBe(410);
+    expect(TRACKING_TOKEN_STATUS_MESSAGES.expired.message).toContain('expired');
+  });
+});
 
-    it('returns 410 for expired reason', () => {
-      const result = trackingTokenInvalidResponse({ reason: 'expired' });
-      expect(result.status).toBe(410);
-    });
+describe('trackingTokenInvalidResponse', () => {
+  it('returns not_found for null/empty validation', () => {
+    expect(trackingTokenInvalidResponse(null)).toEqual(TRACKING_TOKEN_STATUS_MESSAGES.not_found);
+    expect(trackingTokenInvalidResponse(undefined)).toEqual(TRACKING_TOKEN_STATUS_MESSAGES.not_found);
+  });
 
-    it('falls back to 404 for unknown reason', () => {
-      const result = trackingTokenInvalidResponse({ reason: 'unknown_reason' });
-      expect(result.status).toBe(404);
-    });
+  it('returns revoked response for revoked reason', () => {
+    const result = trackingTokenInvalidResponse({ reason: 'revoked' });
+    expect(result.status).toBe(410);
+    expect(result.message).toContain('revoked');
+  });
 
-    it('falls back to 404 when no reason is provided', () => {
-      const result = trackingTokenInvalidResponse({});
-      expect(result.status).toBe(404);
-    });
+  it('returns expired response for expired reason', () => {
+    const result = trackingTokenInvalidResponse({ reason: 'expired' });
+    expect(result.status).toBe(410);
+    expect(result.message).toContain('expired');
+  });
+
+  it('returns not_found for unknown reason', () => {
+    const result = trackingTokenInvalidResponse({ reason: 'unknown' });
+    expect(result.status).toBe(404);
+  });
+
+  it('returns not_found when reason is missing', () => {
+    const result = trackingTokenInvalidResponse({});
+    expect(result.status).toBe(404);
+  });
+
+  it('handles validation with extra fields', () => {
+    const result = trackingTokenInvalidResponse({ reason: 'revoked', tokenId: 'tok-123', extra: 'data' });
+    expect(result.status).toBe(410);
   });
 });

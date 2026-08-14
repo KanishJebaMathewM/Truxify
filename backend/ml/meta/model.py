@@ -9,6 +9,34 @@ import copy
 
 logger = logging.getLogger(__name__)
 
+try:
+    from torch.func import functional_call as _functional_call
+except AttributeError:  # older torch
+    from torch.nn.utils.stateless import functional_call as _functional_call
+
+
+class _AdaptedModel:
+    """Thin wrapper holding graph-tracking adapted parameters.
+
+    Forwarding goes through ``functional_call`` so the computation graph
+    stays connected back to the original (meta) model parameters, allowing
+    second-order gradients to flow into ``self.model`` during meta-updates.
+    """
+
+    def __init__(self, base_model: nn.Module, params: Dict[str, torch.Tensor]):
+        self.base_model = base_model
+        self.params = params
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        return _functional_call(self.base_model, self.params, (x,))
+
+    def eval(self) -> "_AdaptedModel":
+        return self
+
+    def train(self, mode: bool = True) -> "_AdaptedModel":
+        return self
+
+
 class MAMLModel(nn.Module):
     """Model-Agnostic Meta-Learning (MAML)"""
     
@@ -82,23 +110,26 @@ class MAML:
         
         logger.info(f"✅ MAML initialized on {self.device}")
     
-    def inner_update(self, model: MAMLModel, support_x: torch.Tensor, support_y: torch.Tensor) -> MAMLModel:
-        """Perform inner loop update (task-specific adaptation)"""
-        # Clone model for inner update
-        adapted_model = model.clone()
-        
-        # Compute gradients on support set
-        pred = adapted_model(support_x)
+    def inner_update(self, model: MAMLModel, support_x: torch.Tensor, support_y: torch.Tensor) -> _AdaptedModel:
+        """Perform inner loop update (task-specific adaptation).
+
+        Uses differentiable (graph-preserving) parameter updates so that the
+        query loss computed through the adapted parameters back-propagates
+        through the inner step into ``self.model`` parameters.
+        """
+        adapted = {name: p.clone() for name, p in model.named_parameters()}
+
+        pred = _functional_call(model, adapted, (support_x,))
         loss = self.criterion(pred, support_y)
-        
-        # Compute gradients
-        grads = torch.autograd.grad(loss, adapted_model.parameters(), create_graph=True)
-        
-        # Update parameters
-        for param, grad in zip(adapted_model.parameters(), grads):
-            param.data -= self.inner_lr * grad
-        
-        return adapted_model
+
+        grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
+
+        adapted = {
+            name: param - self.inner_lr * grad
+            for (name, param), grad in zip(adapted.items(), grads)
+        }
+
+        return _AdaptedModel(model, adapted)
     
     def outer_update(self, meta_loss: torch.Tensor):
         """Perform outer loop update (meta-optimization)"""
@@ -118,8 +149,8 @@ class MAML:
         for support_x, support_y, query_x, query_y in tasks:
             # Inner adaptation on support set
             adapted_model = self.inner_update(self.model, support_x, support_y)
-            
-            # Compute loss on query set
+
+            # Compute loss on query set (graph flows back into self.model)
             pred = adapted_model(query_x)
             task_loss = self.criterion(pred, query_y)
             meta_loss += task_loss
@@ -158,20 +189,22 @@ class MAML:
             'final_loss': losses[-1]
         }
     
-    def adapt(self, support_x: torch.Tensor, support_y: torch.Tensor, steps: int = 5) -> MAMLModel:
-        """Adapt model to new task"""
-        adapted_model = self.model.clone()
-        
+    def adapt(self, support_x: torch.Tensor, support_y: torch.Tensor, steps: int = 5) -> _AdaptedModel:
+        """Adapt model to new task using graph-preserving inner updates."""
+        adapted = {name: p.clone() for name, p in self.model.named_parameters()}
+
         for _ in range(steps):
-            pred = adapted_model(support_x)
+            pred = _functional_call(self.model, adapted, (support_x,))
             loss = self.criterion(pred, support_y)
-            
-            grads = torch.autograd.grad(loss, adapted_model.parameters(), create_graph=True)
-            
-            for param, grad in zip(adapted_model.parameters(), grads):
-                param.data -= self.inner_lr * grad
-        
-        return adapted_model
+
+            grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
+
+            adapted = {
+                name: param - self.inner_lr * grad
+                for (name, param), grad in zip(adapted.items(), grads)
+            }
+
+        return _AdaptedModel(self.model, adapted)
     
     def predict(self, model: MAMLModel, x: torch.Tensor) -> torch.Tensor:
         """Make prediction with adapted model"""

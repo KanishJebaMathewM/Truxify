@@ -37,6 +37,25 @@ spec:
           value: truxify_north
         ports:
         - containerPort: 5432
+        startupProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources:
           requests:
             memory: "1Gi"
@@ -47,6 +66,7 @@ spec:
         volumeMounts:
         - name: shard-north-storage
           mountPath: /var/lib/postgresql/data
+      terminationGracePeriodSeconds: 120
       volumes:
       - name: shard-north-storage
         persistentVolumeClaim:
@@ -91,6 +111,25 @@ spec:
           value: truxify_south
         ports:
         - containerPort: 5432
+        startupProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources:
           requests:
             memory: "1Gi"
@@ -101,6 +140,7 @@ spec:
         volumeMounts:
         - name: shard-south-storage
           mountPath: /var/lib/postgresql/data
+      terminationGracePeriodSeconds: 120
       volumes:
       - name: shard-south-storage
         persistentVolumeClaim:
@@ -145,6 +185,25 @@ spec:
           value: truxify_east
         ports:
         - containerPort: 5432
+        startupProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources:
           requests:
             memory: "1Gi"
@@ -155,6 +214,7 @@ spec:
         volumeMounts:
         - name: shard-east-storage
           mountPath: /var/lib/postgresql/data
+      terminationGracePeriodSeconds: 120
       volumes:
       - name: shard-east-storage
         persistentVolumeClaim:
@@ -199,6 +259,25 @@ spec:
           value: truxify_west
         ports:
         - containerPort: 5432
+        startupProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres"]
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources:
           requests:
             memory: "1Gi"
@@ -209,6 +288,7 @@ spec:
         volumeMounts:
         - name: shard-west-storage
           mountPath: /var/lib/postgresql/data
+      terminationGracePeriodSeconds: 120
       volumes:
       - name: shard-west-storage
         persistentVolumeClaim:

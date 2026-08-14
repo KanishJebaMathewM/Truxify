@@ -404,7 +404,7 @@ export class DeliveryVerificationService {
    *                       409 no/invalid/stale/out-of-range telemetry.
    */
   async assertDriverAtDropoff(order, radiusM) {
-    if (!order.drop_lat || !order.drop_lng) {
+    if (order.drop_lat == null || order.drop_lng == null) {
       throw new DomainError(400, {
         error: "Order is missing drop-off coordinates.",
       });
@@ -507,46 +507,16 @@ export class DeliveryVerificationService {
           order.escrow_status === "release_failed"
         ) {
           // Payout defense-in-depth: resolve the authoritative escrow amount
-          // and verify it is consistent with the payout figure (total_amount)
-          // BEFORE any on-chain release. The actual on-chain booking amount is
-          // then enforced by escrowReleaseFn against the same expected figure,
-          // so a booking funded with Y ≠ X can never be released while the app
-          // pays the driver X from its own funds.
+          // (the value deposited at bid acceptance, escrow_amount_wei) and use
+          // it directly for the on-chain release. The actual on-chain booking
+          // amount is then enforced by escrowReleaseFn against this same figure,
+          // so the driver is always paid out exactly what was escrowed. We must
+          // NOT compare against total_amount here, since that includes the
+          // platform fee + toll and differs from the escrowed bid amount.
           let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;
-            if (order.total_amount != null) {
-              const fromTotal = paisaToMaticWei(order.total_amount);
-              if (!weiWithinTolerance(expectedAmountWei, fromTotal)) {
-                const details = `escrow_amount_wei=${expectedAmountWei} wei vs total_amount=${order.total_amount} paisa (${fromTotal} wei)`;
-                logger.error(
-                  "[escrow] Escrow amount mismatch before release for order",
-                  orderId,
-                  ":",
-                  details,
-                );
-                await this._writeRepository
-                  .updateOrder(orderId, {
-                    escrow_status: "release_failed",
-                    escrow_release_error: `ESCROW_AMOUNT_MISMATCH: ${details}`,
-                    updated_at: new Date().toISOString(),
-                  })
-                  .catch((err) =>
-                    logger.warn(
-                      "[escrow] Failed to record amount mismatch:",
-                      err.message,
-                    ),
-                  );
-                throw new DomainError(409, {
-                  error:
-                    "Escrow amount mismatch detected. Payment cannot be released.",
-                  code: "ESCROW_AMOUNT_MISMATCH",
-                  details,
-                  retryable: false,
-                });
-              }
-            }
           } else {
             if (order.total_amount != null) {
               expectedAmountWei = paisaToMaticWei(order.total_amount);

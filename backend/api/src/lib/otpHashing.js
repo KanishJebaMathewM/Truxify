@@ -51,6 +51,7 @@ export function verifyOtpHash(otp, otpRecord) {
 export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
+  if (a.length === 0 && b.length === 0) return true;
   // Buffer.from(value, 'hex') does not reject invalid hex: it truncates at the
   // first invalid character and drops a trailing odd nibble. Two identical
   // invalid inputs would decode to equal short buffers and compare "equal",

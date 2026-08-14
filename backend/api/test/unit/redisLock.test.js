@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { LockState } from '../../src/lib/redisLock.js';
 
 // Mock the db module before importing redisLock
 vi.mock('../config/db.js', () => ({

@@ -149,6 +149,46 @@ export async function waitForMongoDb() {
   await _mongoDbReady;
 }
 
+/**
+ * TTL (seconds) for the `telemetry` collection, configurable via
+ * TELEMETRY_TTL_SECONDS. Defaults to 604800 (7 days). Read at call time so
+ * tests can override it after import.
+ */
+export function getTelemetryTtlSeconds() {
+  const parsed = parseInt(process.env.TELEMETRY_TTL_SECONDS, 10);
+  return Number.isNaN(parsed) ? 604800 : parsed;
+}
+
+/**
+ * Creates the required indexes on the `telemetry` collection:
+ *  - TTL index on `timestamp` (expireAfterSeconds), so GPS points are
+ *    automatically purged after the retention window.
+ *  - Compound index for the per-order "last known position" reads
+ *    (orderRoutes, deliveryVerificationService).
+ *  - 2dsphere index for the geo `$near` searches (truckRoutes).
+ *
+ * createIndex is a no-op when an equivalent index already exists, so this is
+ * idempotent across restarts. Failures are logged, not thrown.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {{ ttlSeconds?: number }} [options]
+ */
+export function createTelemetryCollectionIndexes(db, { ttlSeconds } = {}) {
+  const ttl = ttlSeconds ?? getTelemetryTtlSeconds();
+  db.collection('telemetry').createIndex(
+    { timestamp: 1 },
+    { expireAfterSeconds: ttl }
+  ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
+
+  db.collection('telemetry').createIndex(
+    { driver_id: 1, order_id: 1, timestamp: -1 }
+  ).catch(err => logger.error({ err }, 'Failed to create compound index on telemetry'));
+
+  db.collection('telemetry').createIndex(
+    { location: '2dsphere' }
+  ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
+}
+
 // Wrap in async IIFE so mongoClient.connect() can use await instead of .then()
 // This ensures the module properly waits for the connection before reporting readiness
 (async () => {
@@ -159,19 +199,9 @@ export async function waitForMongoDb() {
       mongoDb = mongoClient.db(mongoDbName);
       logger.info({ db: mongoDbName }, 'Connected to MongoDB');
 
-      // Create indexes on telemetry collection
-      mongoDb.collection('telemetry').createIndex(
-        { timestamp: 1 },
-        { expireAfterSeconds: 604800 }
-      ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
-
-      mongoDb.collection('telemetry').createIndex(
-        { driver_id: 1, order_id: 1, timestamp: -1 }
-      ).catch(err => logger.error({ err }, 'Failed to create compound index on telemetry'));
-
-      mongoDb.collection('telemetry').createIndex(
-        { location: '2dsphere' }
-      ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
+      // Create indexes on telemetry collection (TTL retention, per-order reads,
+      // and geo searches). Idempotent; failures are logged inside the helper.
+      createTelemetryCollectionIndexes(mongoDb);
       if (_mongoDbResolve) _mongoDbResolve();
     } catch (err) {
       logger.error({ err }, 'Failed to connect to MongoDB server');

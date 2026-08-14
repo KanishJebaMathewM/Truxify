@@ -99,13 +99,12 @@ class TripEarningRow {
     final drop = json['drop_address'] as String?;
     final route = json['route'] as String? ??
         (pickup != null && drop != null ? '$pickup → $drop' : json['route_label'] as String?);
+    final tripDateRaw = json['trip_date'] ?? json['pickup_date'];
 
     return TripEarningRow(
       tripId: json['trip_id']?.toString() ?? json['id']?.toString(),
       displayId: json['display_id']?.toString() ?? json['order_display_id']?.toString(),
-      tripDate: (json['trip_date'] ?? json['pickup_date']) != null
-          ? DateTime.tryParse((json['trip_date'] ?? json['pickup_date']).toString())
-          : null,
+      tripDate: tripDateRaw is String ? DateTime.tryParse(tripDateRaw) : null,
       route: route,
       customerName: json['customer_name'] as String? ??
           json['customer_display_name'] as String?,

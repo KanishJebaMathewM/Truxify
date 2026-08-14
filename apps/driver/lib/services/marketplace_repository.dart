@@ -145,7 +145,11 @@ class MarketplaceRepository {
         },
       ) as Map<String, dynamic>;
       
-      return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
+      final bid = decoded['bid'];
+      if (bid is! Map) {
+        throw StateError('Malformed bid response: expected a bid object');
+      }
+      return DriverBid.fromJson(Map<String, dynamic>.from(bid));
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
       rethrow;

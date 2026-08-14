@@ -426,7 +426,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { incr, expire, ttl },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), incr, expire, ttl },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -452,7 +452,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { incr, expire, ttl },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), incr, expire, ttl },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -475,7 +475,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { incr, expire, ttl },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), incr, expire, ttl },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -504,7 +504,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { incr, expire, ttl },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), incr, expire, ttl },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -531,7 +531,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { incr, expire, ttl },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), incr, expire, ttl },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -553,7 +553,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: {
+      redisClient: { publish: vi.fn().mockResolvedValue(1),
         incr: vi.fn().mockRejectedValue(new Error('redis down')),
         expire: vi.fn(),
         ttl: vi.fn(),
@@ -628,6 +628,8 @@ describe('handleLocationPing - main telemetry flow', () => {
       latitude: 12.9, longitude: 77.5,
     });
 
+    expect(sentMessages[0].error).toContain('Forbidden: Driver role required to publish location updates');
+    expect(sentMessages[0].error).toContain('Driver role required to publish location updates');
     expect(sentMessages[0].error).toContain('Missing authenticated WebSocket identity');
   });
 
@@ -1185,7 +1187,7 @@ describe('tracker Redis subscription metadata', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: {
+      redisClient: { publish: vi.fn().mockResolvedValue(1),
         sadd,
         smembers: vi.fn().mockResolvedValue([]),
         srem: vi.fn(),
@@ -1225,7 +1227,7 @@ describe('tracker Redis subscription metadata', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: { sadd, srem, smembers, expire, persist },
+      redisClient: { publish: vi.fn().mockResolvedValue(1), sadd, srem, smembers, expire, persist },
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -1262,7 +1264,7 @@ describe('tracker Redis subscription metadata', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: {
+      redisClient: { publish: vi.fn().mockResolvedValue(1),
         sadd: vi.fn(),
         smembers,
         srem: vi.fn(),
@@ -1295,7 +1297,7 @@ describe('tracker Redis subscription metadata', () => {
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
-      redisClient: {
+      redisClient: { publish: vi.fn().mockResolvedValue(1),
         sadd: vi.fn(),
         smembers,
         srem,
@@ -1375,6 +1377,8 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -1402,6 +1406,8 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -1436,6 +1442,8 @@ describe('handleLocationPing - Redis sequence gate', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: vi.fn() },
+      redisClient: { get: redisGet, set: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: vi.fn() },
       firebaseAdmin: null,
       supabase: null,
@@ -1469,6 +1477,8 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet, del: redisDel },
       firebaseAdmin: null,
       supabase: null,
@@ -1503,6 +1513,8 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet, del: redisDel },
       firebaseAdmin: null,
       supabase: null,
@@ -1537,6 +1549,8 @@ describe('handleLocationPing - circuit breaker', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet, del: redisDel },
       firebaseAdmin: null,
       supabase: null,
@@ -1568,6 +1582,8 @@ describe('handleLocationPing - server timestamp handling', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -1602,6 +1618,8 @@ describe('handleLocationPing - server timestamp handling', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -1891,6 +1909,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
         firebaseAdmin: null,
         supabase: { from: supabaseFrom, channel: vi.fn().mockReturnValue(mockChannel) },
@@ -1931,6 +1951,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
         firebaseAdmin: null,
         supabase: {
@@ -1986,7 +2008,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { del: redisDel, expire, get: vi.fn(), set: vi.fn(), sadd: vi.fn(), smembers: vi.fn() },
+        redisClient: { publish: vi.fn().mockResolvedValue(1), del: redisDel, expire, get: vi.fn(), set: vi.fn(), sadd: vi.fn(), smembers: vi.fn() },
         firebaseAdmin: null,
         supabase: null,
       }));
@@ -2011,6 +2033,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: vi.fn(), del: vi.fn() },
+        redisClient: { get: redisGet, set: vi.fn(), del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: vi.fn(), del: vi.fn() },
         firebaseAdmin: null,
         supabase: null,
@@ -2035,6 +2059,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
         firebaseAdmin: null,
         supabase: null,
@@ -2062,6 +2088,9 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: vi.fn() },
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
         firebaseAdmin: null,
         supabase: null,
@@ -2136,7 +2165,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       expect(buffer[0].driver_id).toBe('driver-old-1');
       expect(buffer[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('[TRUXIFY BUFFER CRITICAL] Buffer at 100% capacity')
+        expect.stringContaining('[TRUXIFY BUFFER DROP] Dropped 1 oldest record(s) due to capacity')
       );
     });
   });
@@ -2189,6 +2218,8 @@ describe('consecutiveDropCount - driver state TTL cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2216,6 +2247,8 @@ describe('consecutiveDropCount - driver state TTL cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2255,6 +2288,8 @@ describe('consecutiveDropCount - TTL sweep', () => {
       const redisSet = vi.fn().mockResolvedValue('OK');
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
+        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+        redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet },
         firebaseAdmin: null,
         supabase: null,
@@ -2295,6 +2330,8 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2330,6 +2367,8 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2370,6 +2409,8 @@ describe('consecutiveDropCount - TTL sweep', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2424,6 +2465,8 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2489,6 +2532,8 @@ describe('consecutiveDropCount - disconnect cleanup', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2563,6 +2608,8 @@ describe('consecutiveDropCount - circuit breaker behaviour unchanged', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: redisDel },
+      redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet, del: redisDel },
       firebaseAdmin: null,
       supabase: null,
@@ -2593,6 +2640,8 @@ describe('consecutiveDropCount - circuit breaker behaviour unchanged', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2632,6 +2681,8 @@ describe('consecutiveDropCount - multiple simultaneous drivers', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2667,6 +2718,8 @@ describe('consecutiveDropCount - multiple simultaneous drivers', () => {
 
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,
@@ -2714,6 +2767,8 @@ describe('consecutiveDropCount - long-running server simulation', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
+      redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet },
+      redisClient: { get: redisGet, set: redisSet, publish: vi.fn().mockResolvedValue(0) },
       redisClient: { get: redisGet, set: redisSet },
       firebaseAdmin: null,
       supabase: null,

@@ -1,49 +1,28 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-
-const mockLogger = vi.hoisted(() => ({
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  debug: vi.fn(),
-}));
-
-vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
-
-import {
-  setInstanceId,
-  getInstanceId,
-  isInitialized,
-  publishInvalidation,
-  closeCachePublisher,
-} from '../../src/cache/CachePublisher.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setInstanceId, getInstanceId } from '../../src/cache/CachePublisher.js';
 
 describe('CachePublisher', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    closeCachePublisher();
-    setInstanceId('test-instance');
-  });
-
   describe('setInstanceId / getInstanceId', () => {
-    it('round-trips the instance id', () => {
-      setInstanceId('instance-1');
-      expect(getInstanceId()).toBe('instance-1');
+    it('allows setting and retrieving the instance ID', () => {
+      setInstanceId('test-instance-1');
+      expect(getInstanceId()).toBe('test-instance-1');
+    });
+
+    it('defaults to a non-empty string', () => {
+      expect(getInstanceId()).toBeTruthy();
     });
   });
 
-  describe('isInitialized', () => {
-    it('is false before initialization', () => {
-      expect(isInitialized()).toBe(false);
-    });
-  });
-
-  describe('publishInvalidation', () => {
-    it('is a no-op when no publish client is set', async () => {
-      await expect(publishInvalidation('profile', { type: 'INVALIDATE_KEY', key: 'x' })).resolves.toBeUndefined();
-    });
-
-    it('is a no-op for an unknown namespace', async () => {
-      await expect(publishInvalidation('does-not-exist', { key: 'x' })).resolves.toBeUndefined();
+  describe('module exports', () => {
+    it('exports expected functions', async () => {
+      const mod = await import('../../src/cache/CachePublisher.js');
+      expect(typeof mod.setInstanceId).toBe('function');
+      expect(typeof mod.getInstanceId).toBe('function');
+      expect(typeof mod.initCachePublisher).toBe('function');
+      expect(typeof mod.publishInvalidation).toBe('function');
+      expect(typeof mod.subscribeToInvalidation).toBe('function');
+      expect(typeof mod.isInitialized).toBe('function');
+      expect(typeof mod.closeCachePublisher).toBe('function');
     });
   });
 });

@@ -5,6 +5,13 @@ const failures = new Map();
 const DEFAULT_THRESHOLD = 5;
 const DEFAULT_WINDOW_MS = 60_000;
 
+function parseEnvNumber(raw, fallback, { min } = {}) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  if (min !== undefined && n < min) return fallback;
+  return n;
+}
+
 export default function authFailureMonitor(req, res, next) {
   if (
     process.env.NODE_ENV === 'production' &&
@@ -18,12 +25,16 @@ export default function authFailureMonitor(req, res, next) {
       return;
     }
 
-    const threshold = Number(
-      process.env.AUTH_FAILURE_THRESHOLD || DEFAULT_THRESHOLD
+    const threshold = parseEnvNumber(
+      process.env.AUTH_FAILURE_THRESHOLD,
+      DEFAULT_THRESHOLD,
+      { min: 1 }
     );
 
-    const windowMs = Number(
-      process.env.AUTH_FAILURE_WINDOW_MS || DEFAULT_WINDOW_MS
+    const windowMs = parseEnvNumber(
+      process.env.AUTH_FAILURE_WINDOW_MS,
+      DEFAULT_WINDOW_MS,
+      { min: 1000 }
     );
 
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';

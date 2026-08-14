@@ -53,8 +53,11 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
       pipeline.zcard(key);
       const results = await pipeline.exec();
 
-      // Validate ZCARD result tuple [error, value].
-      const zcardTuple = results[1];
+      // Validate ZCARD result tuple [error, value]. pipeline.exec can also
+      // resolve to null when Redis is unreachable — treat that like a failed
+      // ZCARD so the limiter fails open (or closed, per failClosed) instead
+      // of crashing on a null dereference.
+      const zcardTuple = results ? results[1] : null;
       if (!zcardTuple || zcardTuple[0]) {
         if (failClosed) {
           logger.error({ routeKey, err: zcardTuple?.[0] }, '[RateLimiter] ZCARD failed — failing closed');

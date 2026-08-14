@@ -6,19 +6,7 @@ const { mockFrom, mockRedisGet, mockRedisSetex } = vi.hoisted(() => ({
   mockRedisSetex: vi.fn(),
 }));
 
-vi.mock('../../config/db.js', () => ({
-  supabase: { from: mockFrom },
-  supabaseAdmin: { from: mockFrom },
-  redisClient: {
-    get: mockRedisGet,
-    setex: mockRedisSetex,
-  },
-}));
- = vi.fn();
-const mockRedisGet = vi.fn();
-const mockRedisSetex = vi.fn();
-
-vi.mock('../../config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: { from: mockFrom },
   supabaseAdmin: { from: mockFrom },
   redisClient: {
@@ -50,7 +38,6 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
     vi.resetAllMocks();
     vi.resetModules();
     FraudDetectionService = (await import('../../src/services/fraud/FraudDetectionService.js')).default;
-    // Stop the background intervals so they don't flush/clear state mid-test.
     clearInterval(FraudDetectionService._flushInterval);
     clearInterval(FraudDetectionService._cleanupInterval);
   });
@@ -70,13 +57,10 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('retains pending risk-score updates when the DB upsert fails', async () => {
     await trackOneUser('user-flush');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
-
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockResolvedValue({ error: { message: 'db unavailable' } }),
     }));
-
     await FraudDetectionService._flushPendingUpserts();
-
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
     expect(FraudDetectionService.pendingUpserts.has('user-flush')).toBe(true);
   });
@@ -84,13 +68,10 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('retains pending risk-score updates when the DB upsert throws', async () => {
     await trackOneUser('user-throw');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
-
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockRejectedValue(new Error('network down')),
     }));
-
     await FraudDetectionService._flushPendingUpserts();
-
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
     expect(FraudDetectionService.pendingUpserts.has('user-throw')).toBe(true);
   });
@@ -98,13 +79,10 @@ describe('FraudDetectionService._flushPendingUpserts', () => {
   it('clears pending updates only after a successful DB upsert', async () => {
     await trackOneUser('user-ok');
     expect(FraudDetectionService.pendingUpserts.size).toBe(1);
-
     mockFrom.mockReturnValue(chain({
       upsert: vi.fn().mockResolvedValue({ error: null }),
     }));
-
     await FraudDetectionService._flushPendingUpserts();
-
     expect(FraudDetectionService.pendingUpserts.size).toBe(0);
   });
 });

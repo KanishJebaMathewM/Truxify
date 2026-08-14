@@ -225,40 +225,38 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
 
     // `public` rather than `external`: processSTARKTransaction calls this
     // internally, and Solidity cannot resolve an external function by plain
-    // name. The external ABI entry is unchanged.
+    // name.
     function verifySTARK(
-        bytes calldata proof,
-        bytes calldata publicInputs
+        uint[2] memory a,
+        uint[2][2] memory b,
+        uint[2] memory c,
+        uint[] memory publicInputs
     ) public view returns (bool) {
-        require(proof.length > 0, "ZKPrivacy: Empty proof");
-        require(publicInputs.length > 0, "ZKPrivacy: Empty publicInputs");
         require(verifier != address(0), "ZKPrivacy: Verifier not set");
-        uint[] memory input = new uint[](2);
-        input[0] = uint(keccak256(abi.encodePacked(proof)));
-        input[1] = uint(keccak256(abi.encodePacked(publicInputs)));
-        return IVerifier(verifier).verifyProof(
-            [uint(0), uint(0)],
-            [[uint(0), uint(0)], [uint(0), uint(0)]],
-            [uint(0), uint(0)],
-            input
-        );
+        return IVerifier(verifier).verifyProof(a, b, c, publicInputs);
     }
 
     function processSTARKTransaction(
-        bytes calldata proof,
-        bytes calldata publicInputs,
+        uint[2] memory a,
+        uint[2][2] memory b,
+        uint[2] memory c,
+        uint[] memory publicInputs,
         address recipient,
         uint256 amount
     ) external nonReentrant whenNotPaused {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
+        require(publicInputs.length >= 2, "Invalid proof public inputs length");
+        require(publicInputs[0] == uint256(uint160(recipient)), "Recipient mismatch in proof input");
+        require(publicInputs[1] == amount, "Amount mismatch in proof input");
 
         // Verify zk-STARK proof
-        bool isValid = verifySTARK(proof, publicInputs);
+        bool isValid = verifySTARK(a, b, c, publicInputs);
         require(isValid, "Invalid STARK proof");
 
-        // Process transaction
-        // In production: implement actual transaction logic
+        // Transfer payout to recipient
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Transfer failed");
 
         emit TransactionProcessed(bytes32(0), recipient, amount);
     }

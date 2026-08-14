@@ -41,6 +41,8 @@ describe("DAO Quadratic Voting", function () {
     await token.transfer(voter.address, 1_000_000);
     await token.connect(voter).approve(await dao.getAddress(), 1_000_000);
 
+    await dao.registerVoter(ethers.id("identity:voter"));
+
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
   });
 
@@ -98,5 +100,26 @@ describe("DAO Quadratic Voting", function () {
 
   it("reverts when voting zero votes", async function () {
     await expectRevert(dao.connect(voter).voteQuadratic(0, 0), "Votes must be > 0");
+  });
+
+  it("reverts when an unregistered address tries to vote", async function () {
+    const [, , attacker] = await ethers.getSigners();
+
+    await token.transfer(attacker.address, 1_000_000);
+    await token.connect(attacker).approve(await dao.getAddress(), 1_000_000);
+
+    await expectRevert(
+      dao.connect(attacker).voteQuadratic(0, 1),
+      "Voter not registered"
+    );
+  });
+
+  it("rejects registering the same identity on a second address", async function () {
+    const [, , other] = await ethers.getSigners();
+
+    await expectRevert(
+      dao.connect(other).registerVoter(ethers.id("identity:voter")),
+      "Identity already registered"
+    );
   });
 });

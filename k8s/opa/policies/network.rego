@@ -13,9 +13,25 @@ deny[msg] {
     msg = "Host network is not allowed."
 }
 
-# Deny if no network policy
+# Deny if no network policy (controllers: spec.template.metadata.annotations)
 deny[msg] {
-    not input.review.object.spec.template.metadata.annotations."networking.kubernetes.io/network-policy"
+    pod_spec := object.get(input.review.object, "spec", {})
+    tmpl := object.get(pod_spec, "template", {})
+    count(tmpl) > 0
+    tmpl_meta := object.get(tmpl, "metadata", {})
+    annotations := object.get(tmpl_meta, "annotations", {})
+    not annotations["networking.kubernetes.io/network-policy"]
+    msg = "Network policy must be specified."
+}
+
+# Deny if no network policy (bare Pods: metadata.annotations)
+deny[msg] {
+    pod_spec := object.get(input.review.object, "spec", {})
+    tmpl := object.get(pod_spec, "template", {})
+    count(tmpl) == 0
+    obj_meta := object.get(input.review.object, "metadata", {})
+    annotations := object.get(obj_meta, "annotations", {})
+    not annotations["networking.kubernetes.io/network-policy"]
     msg = "Network policy must be specified."
 }
 

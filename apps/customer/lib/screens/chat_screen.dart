@@ -62,13 +62,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
+    final msg = <String, dynamic>{'text': text, 'isMe': true, 'sender': 'Me'};
+
     setState(() {
       _isSending = true;
-      _messages.insert(0, {
-        'text': text,
-        'isMe': true,
-        'sender': 'Me',
-      });
+      _messages.insert(0, msg);
     });
 
     _controller.clear();
@@ -84,6 +82,12 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } catch (e) {
       debugPrint('Error sending message: $e');
+      if (mounted) {
+        setState(() => msg['failed'] = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Message failed to send.')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -129,11 +133,37 @@ class _ChatScreenState extends State<ChatScreen> {
                         )
                       ],
                     ),
-                    child: Text(
-                      msg['text'],
-                      style: TextStyle(
-                        color: isMe ? Colors.white : Theme.of(context).textTheme.bodyMedium?.color,
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          msg['text'],
+                          style: TextStyle(
+                            color: isMe ? Colors.white : Theme.of(context).textTheme.bodyMedium?.color,
+                          ),
+                        ),
+                        if (msg['failed'] == true)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.error_outline,
+                                    size: 14,
+                                    color: Theme.of(context).colorScheme.error),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Failed to send',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 );

@@ -115,3 +115,16 @@ describe('checkContentLength', () => {
   });
 });
 
+
+describe('sanitizeUploadFilename - additional edge cases', () => {
+  it('handles whitespace-only string as fallback', () => {
+    expect(sanitizeUploadFilename('   ', 'doc')).toBe('doc');
+  });
+
+  it('preserves file extension when collapsing characters', () => {
+    const result = sanitizeUploadFilename('my<>file.pdf');
+    expect(result.endsWith('.pdf')).toBe(true);
+    expect(result).not.toContain('<');
+    expect(result).not.toContain('>');
+  });
+});

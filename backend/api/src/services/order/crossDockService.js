@@ -17,6 +17,7 @@
  * to the from_driver once at request time so they can share it out-of-band.
  */
 
+import crypto from 'crypto';
 import { supabaseAdmin } from '../../config/db.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
@@ -49,12 +50,15 @@ const HANDOFF_WINDOW_MINUTES = parseInt(process.env.CROSS_DOCK_HANDOFF_WINDOW_MI
 const OTP_TTL_MINUTES = parseInt(process.env.CROSS_DOCK_OTP_TTL_MINUTES || '30', 10);
 const MAX_OTP_ATTEMPTS = parseInt(process.env.CROSS_DOCK_OTP_MAX_ATTEMPTS || '5', 10);
 const SEARCH_RADIUS_KM = parseFloat(process.env.CROSS_DOCK_SEARCH_RADIUS_KM || '50');
+// How recent a relay driver's location must be to count as "active".
+const DRIVER_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.CROSS_DOCK_LOCATION_FRESHNESS_SECONDS || '900', 10);
 
 const TABLE = 'cross_dock_transfers';
 
 function generateHandoffCode() {
   // 6 numeric digits — shareable verbally / over the phone.
-  const n = Math.floor(100000 + Math.random() * 900000);
+  // Use a CSPRNG so the code is unpredictable and not brute-forceable.
+  const n = crypto.randomInt(100000, 1000000);
   return String(n);
 }
 
@@ -117,18 +121,21 @@ export async function findHandoffCandidates({
 
     // Reuse the nearby-drivers RPC if the DB exposes one; fall back to a
     // client-side filter otherwise. The RPC is the production path.
+    // Note: the RPC returns a set of rows (an array), so we must NOT call
+    // .maybeSingle() on it — that would treat the array as a single object and
+    // throw, silently forcing the fallback path. We read the array directly.
     const { data: rpcDrivers, error: rpcError } = await supabaseAdmin.rpc('get_nearby_active_drivers', {
-      p_lat: crossDockLat,
-      p_lng: crossDockLng,
-      p_radius_km: radiusKm,
-      p_limit: limit,
-    }).maybeSingle();
+      origin_lat: crossDockLat,
+      origin_lng: crossDockLng,
+      radius_meters: radiusKm * 1000,
+      freshness_seconds: DRIVER_LOCATION_FRESHNESS_SECONDS,
+    });
 
     let drivers = [];
     if (!rpcError && Array.isArray(rpcDrivers)) {
       drivers = rpcDrivers;
     } else if (rpcError) {
-      logger.debug?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
+      logger.error?.({ err: rpcError.message }, '[cross-dock] nearby-drivers RPC unavailable, using fallback');
     }
 
     if (drivers.length === 0) {
@@ -148,7 +155,7 @@ export async function findHandoffCandidates({
           lng: Number(d.lng),
           last_seen_at: d.last_seen_at,
         }))
-        .filter((d) => d.from_driver !== fromDriverId && d.driver_id !== fromDriverId)
+        .filter((d) => d.driver_id !== fromDriverId)
         .map((d) => ({
           driver_id: d.driver_id,
           name: d.name,
@@ -183,6 +190,23 @@ export async function createTransferRequest({
   return measureExecution('CrossDockService.createTransferRequest', async () => {
     if (fromDriverId === toDriverId) {
       throw new DomainError(400, { error: 'Cannot request a cross-dock handoff to yourself.' });
+    }
+
+    // Ensure the proposed handoff driver is a real, active driver. Prevents
+    // dispatching a load to a non-existent or invalid recipient.
+    const { data: toDriver, error: toErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role')
+      .eq('id', toDriverId)
+      .maybeSingle();
+    if (toErr) {
+      throw new DomainError(500, { error: 'Failed to verify handoff driver.', details: toErr.message });
+    }
+    if (!toDriver) {
+      throw new DomainError(400, { error: 'Proposed handoff driver does not exist.' });
+    }
+    if (toDriver.role !== 'driver') {
+      throw new DomainError(400, { error: 'A cross-dock handoff can only target a driver.' });
     }
 
     const { data: order, error: orderErr } = await supabaseAdmin
@@ -255,6 +279,9 @@ export async function createTransferRequest({
       .single();
 
     if (insertErr) {
+      if (insertErr.code === '23505') {
+        throw new DomainError(409, { error: 'An active cross-dock transfer already exists for this load.' });
+      }
       throw new DomainError(500, { error: 'Failed to create cross-dock transfer.', details: insertErr.message });
     }
 
@@ -432,6 +459,13 @@ export async function verifyHandoff({ transferId, driverId, handoffCode }) {
       throw new DomainError(409, { error: 'No handoff code is associated with this transfer.' });
     }
 
+    // Explicit defence-in-depth: reject a stale handoff code even if the
+    // transfer's overall window has not yet elapsed.
+    const otpExpiresAt = transfer.otp_expires_at ? Date.parse(transfer.otp_expires_at) : NaN;
+    if (!Number.isNaN(otpExpiresAt) && Date.now() > otpExpiresAt) {
+      throw new DomainError(410, { error: 'The handoff code for this transfer has expired.' });
+    }
+
     const [hash, salt] = String(transfer.otp_hash).split(':');
     const matches = verifyOtpHash(handoffCode, { otp_hash: hash, otp_salt: salt });
     const attempts = (transfer.otp_attempts || 0) + 1;
@@ -469,6 +503,18 @@ export async function verifyHandoff({ transferId, driverId, handoffCode }) {
 
     if (updErr || !verified) {
       throw new DomainError(409, { error: 'Transfer was modified concurrently; please retry.' });
+    }
+
+    // Reassign order custody to the receiving driver now that handoff is verified.
+    if (verified.order_id) {
+      const { error: orderErr } = await supabaseAdmin
+        .from('orders')
+        .update({ driver_id: verified.to_driver_id })
+        .eq('id', verified.order_id)
+        .eq('driver_id', verified.from_driver_id); // Only update if still assigned to from_driver
+      if (orderErr) {
+        logger.warn?.({ err: orderErr.message, orderId: verified.order_id, toDriverId: verified.to_driver_id }, '[cross-dock] failed to reassign order custody');
+      }
     }
 
     try {

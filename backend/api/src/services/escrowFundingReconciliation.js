@@ -1,7 +1,7 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
-import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { acquireLock, renewLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status
@@ -117,6 +117,7 @@ async function finalizeOrRevert(order, orderRepository) {
       }
 
       await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_status: 'funded',
         escrow_funding_attempts: 0,
         escrow_funding_error: null,
         escrow_funding_last_attempt_at: null,
@@ -226,17 +227,19 @@ export async function reconcileStaleFunding(orderRepository) {
   if (!orderRepository) throw new Error('reconcileStaleFunding requires an OrderRepository instance');
   if (fundingRunning) return;
   fundingRunning = true;
-  let globalLockAcquired = false;
+  let globalLockValue = null;
 
   try {
     if (redisClient) {
       try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+        // Use a unique owner token (UUID) instead of the PID so the lock is
+        // safe across hosts and can only be released/extended by its owner.
+        globalLockValue = await acquireLock(LOCK_KEY, LOCK_TTL_SECONDS * 1000);
       } catch (err) {
         logger.error('[escrow-funding] Failed to acquire Redis global lock, skipping batch:', err.message);
         return;
       }
-      if (!globalLockAcquired) {
+      if (!globalLockValue) {
         logger.info('[escrow-funding] Global lock held by another instance, skipping batch.');
         return;
       }
@@ -263,11 +266,11 @@ export async function reconcileStaleFunding(orderRepository) {
           continue;
         }
         if (!dueForRetry(order)) continue;
-        if (globalLockAcquired && redisClient) {
+        if (globalLockValue) {
           try {
-            await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+            await renewLock(LOCK_KEY, globalLockValue, LOCK_TTL_SECONDS * 1000);
           } catch (err) {
-            logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+            logger.warn('[escrow-funding] Failed to refresh global lock:', err.message);
           }
         }
         await finalizeOrRevert(order, orderRepository);
@@ -276,9 +279,9 @@ export async function reconcileStaleFunding(orderRepository) {
       if (staleOrders.length < STALE_FUNDING_PAGE_SIZE) break;
     }
   } finally {
-    if (globalLockAcquired && redisClient) {
+    if (globalLockValue) {
       try {
-        await redisClient.del(LOCK_KEY);
+        await releaseLock(LOCK_KEY, globalLockValue);
       } catch (err) {
         logger.warn('[escrow-funding] Failed to release global lock:', err.message);
       }

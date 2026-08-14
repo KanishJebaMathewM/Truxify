@@ -14,16 +14,19 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
   requirePolicy: () => (_req, _res, next) => next(),
 }));
 
-const { dbMock, mlMock } = vi.hoisted(() => ({
-  dbMock: { supabase: { from: vi.fn() } },
-  mlMock: { predictDemand: vi.fn() },
-}));
+const { userClientMock, mlMock } = vi.hoisted(() => {
+  const fromFn = vi.fn();
+  const userClient = { from: fromFn };
+  return { userClientMock: { from: fromFn, userClient }, mlMock: { predictDemand: vi.fn() } };
+});
 
 vi.mock('../../src/config/db.js', () => ({
-  get supabase() { return dbMock.supabase; },
+  createUserClient: vi.fn(() => userClientMock.userClient),
 }));
 
-vi.mock('../../src/services/ml.js', () => mlMock);
+vi.mock('../../src/services/ml.js', () => ({
+  predictDemand: mlMock,
+}));
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
@@ -45,9 +48,14 @@ describe('demandRoutes', () => {
 
   describe('GET /', () => {
     it('returns a heatmap payload on success', async () => {
-      dbMock.supabase.from.mockReturnValue({
-        select: vi.fn(() => ({ in: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: [{ pickup_address: 'A', pickup_lat: 10, pickup_lng: 20, status: 'available' }], error: null }) })) })),
+      const limitFn = vi.fn().mockResolvedValue({
+        data: [{ pickup_address: 'A', pickup_lat: 10, pickup_lng: 20, status: 'available' }],
+        error: null
       });
+      const inFn = vi.fn().mockReturnValue({ limit: limitFn });
+      const selectFn = vi.fn().mockReturnValue({ in: inFn });
+      userClientMock.from.mockReturnValueOnce({ select: selectFn });
+
       const res = await request(makeApp()).get('/');
       expect(res.status).toBe(200);
       expect(res.body.type).toBe('FeatureCollection');
@@ -56,9 +64,14 @@ describe('demandRoutes', () => {
     });
 
     it('returns 500 when the loads query errors', async () => {
-      dbMock.supabase.from.mockReturnValue({
-        select: vi.fn(() => ({ in: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: null, error: { message: 'db down' } }) })) })),
+      const limitFn = vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: 'db down' }
       });
+      const inFn = vi.fn().mockReturnValue({ limit: limitFn });
+      const selectFn = vi.fn().mockReturnValue({ in: inFn });
+      userClientMock.from.mockReturnValueOnce({ select: selectFn });
+
       const res = await request(makeApp()).get('/');
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to fetch heatmap data.');

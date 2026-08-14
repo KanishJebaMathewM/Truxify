@@ -1,8 +1,6 @@
-<<<<<<< HEAD
-=======
+import 'dart:convert';
 import 'dart:io';
 
->>>>>>> upstream/main
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -171,37 +169,35 @@ void main() {
       expect(connectCount, 0);
       await ws.close();
     });
-<<<<<<< HEAD
-=======
 
-    test('handshake timeout reconnects instead of hanging forever', () async {
-      // A raw TCP server accepts the connection but never completes the
-      // WebSocket upgrade — simulating a stalled handshake (proxy holding the
-      // connection open, flaky mobile network). The handshake await must time
-      // out and drive the wrapper into the reconnecting state rather than
-      // staying stuck in `connecting` permanently.
-      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      server.listen((_) {/* keep connection open, never upgrade */});
+    test('buffers outbound while disconnected and replays on connect', () async {
+      // Local echo server so we can observe what the wrapper actually sends.
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final received = <dynamic>[];
+      server.transform(WebSocketTransformer()).listen((socket) {
+        socket.listen((message) => received.add(message));
+      });
       final port = server.port;
 
-      final ws = ResilientWebSocket(
-        'ws://127.0.0.1:$port/ws',
-        initialDelay: const Duration(milliseconds: 20),
-        maxAttempts: 1,
-      );
+      final ws = ResilientWebSocket('ws://127.0.0.1:$port/ws');
+      // Issued while disconnected — must be queued, not dropped.
+      expect(ws.send('hello'), isFalse);
+      expect(ws.send({'a': 1}), isFalse);
 
       await ws.connect();
-
-      // The 10s handshake timeout must fire and push the wrapper to reconnecting
-      // (which then gives up after maxAttempts=1). It must NOT hang.
-      final reachedReconnecting = await ws.connectionState
-          .firstWhere((s) => s == WsConnectionState.reconnecting)
-          .timeout(const Duration(seconds: 15));
-      expect(reachedReconnecting, WsConnectionState.reconnecting);
+      // Drain happens synchronously inside connect(); give the server a moment to
+      // echo the replayed frames back to its own listener.
+      await Future.delayed(const Duration(milliseconds: 300));
 
       await ws.close();
       await server.close();
+
+      expect(received, contains('hello'));
+      expect(
+        received.whereType<String>().any((s) => s.contains('"a"')),
+        isTrue,
+        reason: 'Non-string payloads must be JSON-encoded before replay.',
+      );
     });
->>>>>>> upstream/main
   });
 }

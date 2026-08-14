@@ -1,33 +1,19 @@
 ## Problem
 
-`backend/ml/marl/mappo_fleet.py` computes the stochastic policy with a numerically unstable softmax:
-
-```python
-probs = np.exp(action_logits) / np.sum(np.exp(action_logits))
-```
-
-`action_logits` is an unbounded dot product of `state × actor_weights`, so `np.exp(logits)` overflows to `inf` for moderately large logits. The resulting `inf/inf` (or `inf/sum`) yields `NaN`, and `np.argmax(NaN)` returns `0`. The fleet agent therefore collapses to a fixed action (`agent_id = 0`) regardless of state, and large/negative logits silently distort the distribution.
+`CircuitBreaker.execute()` only rejects when the state is `OPEN`. In `HALF_OPEN` (the recovery probe window) it falls through and runs `fn()` exactly like `CLOSED`, so a burst of concurrent requests during the probe hammers the very dependency trying to recover — a retry storm that can extend the outage into a cascading failure.
 
 ## Fix
 
-Replaced the softmax with a numerically stable version that subtracts the max before exponentiating:
-
-```python
-z = action_logits - np.max(action_logits)
-e = np.exp(z)
-probs = e / np.sum(e)
-```
-
-Added a guard for the degenerate all-`-inf` case (falls back to a uniform distribution) and a unit test asserting finite probabilities, a normalized distribution, and that the selected agent matches the argmax of the raw logits (which fails on the old NaN/argmax=0 path).
+- Added a `_halfOpenProbeInFlight` gate. In `HALF_OPEN`, only the first request is admitted as the trial probe; any additional `HALF_OPEN` request is short-circuited like `OPEN` (returns the fallback or throws).
+- The gate is cleared in `onSuccess()` (probe succeeded → CLOSED) and in `onFailure()` (probe failed → OPEN), so the next recovery window starts fresh.
 
 ## Files changed
 
-- `backend/ml/marl/mappo_fleet.py`
-- `backend/ml/marl/test_mappo.py` (added `test_stable_softmax_large_logits`)
+- backend/api/src/lib/circuitBreaker.js
+- backend/api/test/unit/circuitBreaker.test.js
 
 ## Testing
 
-- `python -c "import ast; ast.parse(...)"` for syntax validation.
-- `pytest backend/ml/marl/test_mappo.py` passes (2 passed). The new test feeds large-magnitude logits and verifies finite, normalized probabilities and a state-dependent selected agent.
+- Added a regression test in `circuitBreaker.test.js` asserting that only one probe runs in `HALF_OPEN` and the extra concurrent request is short-circuited to the fallback (`probeFn` called exactly once).
 
-Closes #11388
+Closes #11398

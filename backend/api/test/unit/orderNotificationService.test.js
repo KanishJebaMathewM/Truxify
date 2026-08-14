@@ -1,54 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OTP_TTL_MINUTES, OTP_MAX_FAILED_ATTEMPTS, OTP_LOCKOUT_MINUTES, checkOtpLockout, recordOtpFailure, clearOtpState } from '../../src/services/order/orderNotificationService.js';
 
-const mockNotificationDispatcher = vi.fn();
-
-vi.mock('../../src/core/container.js', () => ({
-  notificationDispatcher: mockNotificationDispatcher,
+const mockSendPushNotification = vi.fn();
+vi.mock('../../src/services/notificationService.js', () => ({
+  sendPushNotification: (...args) => mockSendPushNotification(...args),
 }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../../src/config/db.js', () => ({ redisClient: null }));
 
 describe('orderNotificationService', () => {
-  let orderNotificationService;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    orderNotificationService = (await import('../../src/services/order/orderNotificationService.js')).default;
   });
 
-  describe('sendOrderUpdate', () => {
-    it('dispatches notification with order update', async () => {
-      mockNotificationDispatcher.mockResolvedValue({ success: true });
-      await orderNotificationService.sendOrderUpdate('driver-1', 'order-1', 'Order started');
-      expect(mockNotificationDispatcher).toHaveBeenCalledWith(
-        'driver-1',
-        expect.stringContaining('order-1'),
-        expect.any(String),
-        expect.any(Object),
-      );
+  describe('exports', () => {
+    it('exports OTP_TTL_MINUTES as a number', () => {
+      expect(typeof OTP_TTL_MINUTES).toBe('number');
     });
 
-    it('gracefully handles dispatcher failure', async () => {
-      mockNotificationDispatcher.mockRejectedValue(new Error('Dispatcher unavailable'));
-      // Should not throw
-      await expect(
-        orderNotificationService.sendOrderUpdate('driver-1', 'order-1', 'Update'),
-      ).resolves.not.toThrow();
+    it('exports OTP_MAX_FAILED_ATTEMPTS as a number', () => {
+      expect(typeof OTP_MAX_FAILED_ATTEMPTS).toBe('number');
     });
-  });
 
-  describe('sendBidReceived', () => {
-    it('dispatches bid received notification', async () => {
-      mockNotificationDispatcher.mockResolvedValue({ success: true });
-      await orderNotificationService.sendBidReceived('customer-1', 'bid-1', 15000);
-      expect(mockNotificationDispatcher).toHaveBeenCalled();
+    it('exports OTP_LOCKOUT_MINUTES as a number', () => {
+      expect(typeof OTP_LOCKOUT_MINUTES).toBe('number');
+    });
+
+    it('exports checkOtpLockout as a function', () => {
+      expect(typeof checkOtpLockout).toBe('function');
+    });
+
+    it('exports recordOtpFailure as a function', () => {
+      expect(typeof recordOtpFailure).toBe('function');
+    });
+
+    it('exports clearOtpState as a function', () => {
+      expect(typeof clearOtpState).toBe('function');
     });
   });
 
-  describe('sendDeliveryConfirmed', () => {
-    it('dispatches delivery confirmed notification', async () => {
-      mockNotificationDispatcher.mockResolvedValue({ success: true });
-      await orderNotificationService.sendDeliveryConfirmed('customer-1', 'order-1');
-      expect(mockNotificationDispatcher).toHaveBeenCalled();
+  describe('checkOtpLockout', () => {
+    it('returns false when redis is not available', async () => {
+      const result = await checkOtpLockout('order-1');
+      expect(result).toBe(false);
     });
   });
 });

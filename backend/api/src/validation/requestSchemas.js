@@ -103,6 +103,29 @@ export const driverIdParamSchema = z.object({
   driverId: uuidSchema
 });
 
+// Cross-docking synchronization engine (#6181)
+export const crossDockParamSchema = z.object({
+  id: uuidSchema,
+});
+
+export const crossDockCandidateSchema = z.object({
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  radius_km: coerceNumber(z.number().min(1).max(500)).optional(),
+  limit: coerceNumber(z.number().int().min(1).max(50)).optional(),
+});
+
+export const createCrossDockSchema = z.object({
+  to_driver_id: uuidSchema,
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  cross_dock_note: z.string().max(500).optional(),
+});
+
+export const verifyHandoffSchema = z.object({
+  handoff_code: z.string().regex(/^\d{6}$/, "Handoff code must be 6 digits"),
+});
+
 export const submitBidSchema = z.object({
   bid_amount: z
     .number()
@@ -412,16 +435,8 @@ export const reportGripDataSchema = z.object({
   ).optional().default(0),
 }).strict();
 
-
 /**
- * Schema for POST /api/driver/weigh-stations/sync-weight
+ * Schema for POST /api/driver/weigh-stations/sync-weight.
+ * NOTE: defined once above (truck_id + string axle position); the driver
+ * route reads truck_id/axles from req.body, so keep this single export.
  */
-export const syncWeightSchema = z.object({
-  vehicleId: z.string().min(1, 'vehicleId is required'),
-  truckId: z.string().min(1, 'truckId is required'),
-  axles: z.array(z.object({
-    position: z.number().int().min(0),
-    pressure_psi: z.number().positive('pressure_psi must be a positive number'),
-  })).min(1, 'At least one axle is required'),
-  timestamp: z.string().datetime({ message: 'timestamp must be ISO 8601' }).optional(),
-});

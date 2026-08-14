@@ -222,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // The API returns snake_case statuses; humanize before comparing so the
     // in-transit styling/live badge actually triggers.
     final status = _formatStatus(order['status']?.toString() ?? 'pending');
-    final eta = order['estimated_arrival']?.toString() ?? 'Pending';
+    final eta = order['eta']?.toString() ?? 'Pending';
 
     return ShipmentCardData(
       route: route,

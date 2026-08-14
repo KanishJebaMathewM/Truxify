@@ -41,6 +41,23 @@ class TestComputePhysicsResidual:
         uphill = self.loss.compute_physics_residual(60.0, 0.3, 10000.0, 0.0)
         assert uphill > base
 
+    def test_slope_interpreted_as_degrees_matches_radian_analytic_value(self):
+        """Regression (issue #11667): slope is a degree angle, so the force
+        term must use sin(radians(slope)). Compare against the analytic value
+        computed with math.sin(math.radians(deg))."""
+        speed, slope_deg, mass = 60.0, 5.0, 10000.0
+        force = mass * (speed * 0.05) + mass * 9.81 * math.sin(math.radians(slope_deg))
+        expected_min_wear = max(0.0, force * 1e-6)
+        residual = self.loss.compute_physics_residual(speed, slope_deg, mass, expected_min_wear)
+        assert residual == 0.0
+
+        # If the slope were wrongly treated as radians, the residual would be
+        # non-zero for this already-correct wear prediction.
+        bogus_force = mass * (speed * 0.05) + mass * 9.81 * math.sin(slope_deg)
+        bogus_min_wear = max(0.0, bogus_force * 1e-6)
+        assert expected_min_wear != bogus_min_wear
+        assert bogus_min_wear ** 2 > 0.0
+
 
 class TestTotalLoss:
     """Tests for the composite loss."""

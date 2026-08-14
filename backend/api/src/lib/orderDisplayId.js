@@ -39,3 +39,17 @@ export function isValidOrderDisplayId(displayId) {
   if (typeof displayId !== 'string') return false;
   return /^#FF\d{8}[A-Z0-9]{12}$/.test(displayId);
 }
+
+export function parseDisplayId(displayId) {
+  if (displayId == null) {
+    return { valid: false, error: 'null input' };
+  }
+  if (typeof displayId !== 'string') {
+    return { valid: false, error: `expected string, got ${typeof displayId}` };
+  }
+  const valid = /^#FF\d{8}[A-Z0-9]{12}$/.test(displayId);
+  if (!valid) {
+    return { valid: false, error: 'Invalid order display id format' };
+  }
+  return { valid: true, displayId };
+}

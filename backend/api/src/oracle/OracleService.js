@@ -50,17 +50,37 @@ class OracleService {
 
   async _verifyOTP(orderId, otp) {
     try {
+      // Confirm directly when the order is already flagged otp_verified, or
+      // when the delivery_otps record is itself marked verified.
+      const { data: order, error: orderErr } = await this.supabase
+        .from('orders')
+        .select('otp_verified')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      if (orderErr) {
+        logger.warn('[OracleService] OTP verification DB error:', orderErr.message);
+        return { confirmed: false, provider: 'OTPVerifier', error: orderErr.message, timestamp: new Date().toISOString() };
+      }
+
+      if (!order) {
+        return { confirmed: false, provider: 'OTPVerifier', reason: 'Order not found', timestamp: new Date().toISOString() };
+      }
+
       const { data: otpRecord, error: otpErr } = await this.supabase
         .from('delivery_otps')
-        .select('id, otp_hash, otp_salt, expires_at')
+        .select('id, otp_hash, otp_salt, expires_at, verified')
         .eq('order_id', orderId)
-        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (otpErr) {
         logger.warn('[OracleService] OTP verification DB error:', otpErr.message);
         return { confirmed: false, provider: 'OTPVerifier', error: otpErr.message, timestamp: new Date().toISOString() };
+      }
+
+      if (order.otp_verified === true || otpRecord?.verified === true) {
+        return { confirmed: true, provider: 'OTPVerifier', timestamp: new Date().toISOString() };
       }
 
       if (!otpRecord) {

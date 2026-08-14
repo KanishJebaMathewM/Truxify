@@ -1,36 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OrderMilestoneService } from '../../src/services/order/orderMilestoneService.js';
 
 const mockOrderRepository = {
   findOrderById: vi.fn(),
   addMilestone: vi.fn(),
   completeMilestone: vi.fn(),
 };
+const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-vi.mock('../../src/core/container.js', () => ({
-  orderRepository: mockOrderRepository,
-}));
+vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
 describe('orderMilestoneService', () => {
   let orderMilestoneService;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    orderMilestoneService = (await import('../../src/services/order/orderMilestoneService.js')).default;
+    orderMilestoneService = new OrderMilestoneService({ orderRepository: mockOrderRepository, logger: mockLogger });
   });
 
   describe('addMilestone', () => {
     it('adds a milestone to an order', async () => {
       const milestone = { id: 'm1', order_id: 'order-1', type: 'pickup', status: 'pending' };
-      mockOrderRepository.findOrderById.mockResolvedValue({ id: 'order-1', status: 'pending' });
-      mockOrderRepository.addMilestone.mockResolvedValue(milestone);
+      mockOrderRepository.findOrderById.mockResolvedValue({ data: { id: 'order-1', status: 'pending' }, error: null });
+      mockOrderRepository.addMilestone.mockResolvedValue({ data: milestone, error: null });
 
-      const result = await orderMilestoneService.addMilestone('order-1', { type: 'pickup', description: 'Picked up cargo' });
+      await orderMilestoneService.addMilestone('order-1', { type: 'pickup', description: 'Picked up cargo' });
       expect(mockOrderRepository.addMilestone).toHaveBeenCalled();
     });
 
     it('throws when order not found', async () => {
-      mockOrderRepository.findOrderById.mockResolvedValue(null);
+      mockOrderRepository.findOrderById.mockResolvedValue({ data: null, error: null });
       await expect(
         orderMilestoneService.addMilestone('order-nonexistent', { type: 'pickup' }),
       ).rejects.toThrow();

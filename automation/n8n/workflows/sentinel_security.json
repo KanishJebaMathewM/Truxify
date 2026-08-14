@@ -3,19 +3,19 @@
   "nodes": [
     {
       "parameters": {
-        "url": "={{ $credentials.polygonAlchemyWs.url }}",
-        "options": {}
+        "mode": "client",
+        "url": "={{ $env.ALCHEMY_WS_URL }}",
+        "options": {
+          "jsonBody": true,
+          "reconnect": true,
+          "maxReconnectAttempts": 10,
+          "reconnectInterval": 1000
+        }
       },
       "name": "Polygon Mempool WebSocket",
-      "type": "@n8n/n8n-nodes-langchain.websocket",
+      "type": "n8n-nodes-base.webSocket",
       "typeVersion": 1,
-      "position": [250, 300],
-      "credentials": {
-        "polygonAlchemyWs": {
-          "id": "polygonAlchemyWs",
-          "name": "Polygon Alchemy WebSocket"
-        }
-      }
+      "position": [250, 300]
     },
     {
       "parameters": {

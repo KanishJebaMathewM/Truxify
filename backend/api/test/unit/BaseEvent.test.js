@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BaseEvent } from "../../../src/core/events/BaseEvent.js";
+import { BaseEvent } from "../../src/core/events/BaseEvent.js";
 
 describe("BaseEvent", () => {
   it("rejects non-string eventType", () => {

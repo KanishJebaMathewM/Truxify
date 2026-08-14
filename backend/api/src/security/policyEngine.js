@@ -92,6 +92,9 @@ const POLICIES = {
   'truck:register':            { roles: [ROLES.DRIVER] },
   'truck:list-own':            { roles: [ROLES.DRIVER] },
 
+  'wim:request-bypass':        { roles: [ROLES.DRIVER] },
+  'wim:verify-bypass':         { roles: [ROLES.DRIVER, ROLES.ADMIN] },
+
   'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
 
   'ticket:create':             {},
@@ -105,6 +108,7 @@ const POLICIES = {
   'admin:view-dashboard':      { roles: [ROLES.ADMIN] },
   'admin:invalidate-cache':    { roles: [ROLES.ADMIN] },
   'admin:view-audit-logs':     { roles: [ROLES.ADMIN] },
+  'admin:view-metrics':        { roles: [ROLES.ADMIN] },
 
   'shard:view':                { roles: [ROLES.ADMIN] },
   'shard:query-orders':        { roles: [ROLES.ADMIN] },
@@ -136,6 +140,20 @@ const POLICIES = {
   'ebpf:manage':               { roles: [ROLES.ADMIN] },
   'snyk:manage':               { roles: [ROLES.ADMIN] },
   'wasi:manage':               { roles: [ROLES.ADMIN] },
+  'wasm:manage':               { roles: [ROLES.ADMIN] },
+
+  // Cross-docking synchronization engine (#6181)
+  // All actions restricted to drivers (and admins via role escalation path);
+  // resource-level ownership is enforced in the service using transfer
+  // participants, so these policies are intentionally permissive on role.
+  'crossdock:list-candidates':  {},
+  'crossdock:create':           {},
+  'crossdock:accept':           {},
+  'crossdock:decline':          {},
+  'crossdock:cancel':           {},
+  'crossdock:verify':           {},
+  'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
+  'crossdock:list':             {},
 };
 
 export class PolicyEngine {
@@ -159,6 +177,18 @@ export class PolicyEngine {
       const reason = `Role '${user.role}' is not authorized for action '${action}'.`;
       logAuthDenial({ user, action, resource, reason, requestId: opts.requestId, durationMs: Date.now() - startTime });
       throw new PolicyError(403, 'Forbidden: Insufficient privileges.');
+    }
+    // Fail closed: an ownership-only policy (no role restriction) requires a
+    // resolved resource. Without one, the ownership predicate cannot be
+    // evaluated and the check would otherwise be silently skipped, letting any
+    // authenticated user pass (IDOR). Role-gated policies are unaffected: when
+    // invoked without a resource they are still gated by their role rules and
+    // their handlers enforce ownership themselves.
+    const isOwnershipOnly = !!policy.ownership && (!policy.roles || policy.roles.length === 0);
+    if (isOwnershipOnly && resource === undefined) {
+      const reason = `Action '${action}' requires a resource for its ownership check.`;
+      logAuthDenial({ user, action, resource, reason, requestId: opts.requestId, durationMs: Date.now() - startTime });
+      throw new PolicyError(403, 'Forbidden: Resource context is required to evaluate ownership.');
     }
     if (resource !== undefined && policy.ownership && !policy.ownership(user, resource)) {
       const reason = `Resource ownership check failed for action '${action}'.`;

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -45,7 +46,8 @@ class CacheManager {
   dynamic _safeDecode(String json) {
     try {
       return jsonDecode(json);
-    } catch (_) {
+    } catch (e) {
+      developer.log('CacheManager: failed to JSON-decode cached value: $e');
       return null;
     }
   }

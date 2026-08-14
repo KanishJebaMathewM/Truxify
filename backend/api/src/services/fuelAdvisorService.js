@@ -28,6 +28,15 @@ export class FuelAdvisorService {
 
     // 2. Get weather forecast for destination
     const weather = await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    if (!weather || !Number.isFinite(weather.temperature_c)) {
+      this.logger?.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data — using safe default B20.');
+      return {
+        recommended_blend: 'B20',
+        reasoning: 'Weather forecast unavailable. B20 is recommended as the safest default blend for all conditions.',
+        risk_level: 'LOW',
+        factors: { weather_forecast: null, average_engine_load_percent: Math.round(avgEngineLoad) },
+      };
+    }
     const tempC = weather.temperature_c;
 
     // 3. Compute recommendation

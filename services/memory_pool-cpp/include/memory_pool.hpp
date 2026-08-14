@@ -4,95 +4,85 @@
 #include <atomic>
 #include <vector>
 #include <cstddef>
-#include <cstdint>
 #include <stdexcept>
 
 namespace TruxifyMemory {
 
-// Pack a free-list index (low 32 bits) and an ABA-defeating version tag
-// (high 32 bits) into a single 64-bit word so a compare-and-swap can observe
-// both the pointer and how many times it has been recycled.
-inline constexpr uint64_t pack_ptr(uint32_t index, uint32_t tag) {
-    return (static_cast<uint64_t>(tag) << 32) | static_cast<uint64_t>(index);
-}
-inline constexpr uint32_t unpack_index(uint64_t p) {
-    return static_cast<uint32_t>(p & 0xFFFFFFFFu);
-}
-inline constexpr uint32_t unpack_tag(uint64_t p) {
-    return static_cast<uint32_t>(p >> 32);
-}
+// Free-list head is packed as (tag << kIndexBits) | index to defeat the ABA
+// problem: a node can be popped, recycled and pushed back with a stale `next`
+// pointer. Incrementing the tag on every push/pop makes the CAS fail if the
+// head was reused in between, even when the index matches.
+static constexpr size_t kIndexBits = 32;
+static constexpr size_t kIndexMask = (size_t(1) << kIndexBits) - 1;
+static constexpr size_t kTagIncrement = size_t(1) << kIndexBits;
 
 template <typename T, size_t BlockCount>
 class LockFreeMemoryPool {
 public:
     LockFreeMemoryPool() {
         for (size_t i = 0; i < BlockCount; ++i) {
-            // Initially node i points at node i+1 (end flag == BlockCount).
-            nodes_[i].next.store(pack_ptr(static_cast<uint32_t>(i + 1), 0),
-                                 std::memory_order_relaxed);
+            nodes_[i].next.store(i + 1, std::memory_order_relaxed);
         }
-        free_head_.store(pack_ptr(0, 0), std::memory_order_relaxed);
+        nodes_[BlockCount - 1].next.store(BlockCount, std::memory_order_relaxed); // End flag
+        // Publish the initial free-list head with release so the packed layout
+        // is visible to the first consumer.
+        free_head_.store(pack(0, 0), std::memory_order_release);
     }
 
     T* allocate() {
-        uint64_t head = free_head_.load(std::memory_order_acquire);
+        size_t packed = free_head_.load(std::memory_order_acquire);
         while (true) {
-            uint32_t idx = unpack_index(head);
-            if (idx == BlockCount) {
+            size_t head = unpack_index(packed);
+            if (head == BlockCount) {
                 return nullptr; // Out of memory blocks
             }
-            // Acquire the next link so the release store performed by a prior
-            // deallocate synchronizes-with this load: any payload written into
-            // the block before it was freed becomes visible to the caller.
-            uint64_t next_packed = nodes_[idx].next.load(std::memory_order_acquire);
-            uint32_t next_idx = unpack_index(next_packed);
-            uint32_t next_tag = unpack_tag(next_packed);
-            // Bump the version tag on every successful pop so a recycled block
-            // cannot satisfy the CAS via the classic ABA pattern.
-            uint64_t new_head = pack_ptr(next_idx, next_tag + 1);
-            if (free_head_.compare_exchange_weak(head, new_head,
-                                                 std::memory_order_acq_rel,
-                                                 std::memory_order_acquire)) {
-                return &nodes_[idx].data;
+            // Acquire: ensure the node's `next` is visible before we trust it.
+            size_t next_free = nodes_[head].next.load(std::memory_order_acquire);
+            size_t desired = pack(unpack_tag(packed) + 1, next_free);
+            // Acq_rel on success: publish the new head and synchronize with the
+            // matching release store in deallocate. Acquire on failure keeps the
+            // reloaded head consistent for the next loop iteration.
+            if (free_head_.compare_exchange_weak(packed, desired,
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
+                return &nodes_[head].data;
             }
         }
     }
 
     void deallocate(T* ptr) {
-        size_t block_index = (reinterpret_cast<uintptr_t>(ptr) -
-                              reinterpret_cast<uintptr_t>(&nodes_[0].data)) /
-                             sizeof(Node);
+        size_t block_index = (reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(&nodes_[0].data)) / sizeof(Node);
         if (block_index >= BlockCount) {
             throw std::invalid_argument("Pointer does not belong to Memory Pool allocation boundaries");
         }
 
-        uint64_t head = free_head_.load(std::memory_order_acquire);
+        size_t packed = free_head_.load(std::memory_order_acquire);
         while (true) {
-            uint32_t head_idx = unpack_index(head);
-            uint32_t head_tag = unpack_tag(head);
-            uint32_t new_tag = head_tag + 1;
-            // Release-store the current head into this node's next link so a
-            // later acquire load in allocate() publishes the payload.
-            nodes_[block_index].next.store(pack_ptr(head_idx, new_tag),
-                                            std::memory_order_release);
-            uint64_t new_head = pack_ptr(static_cast<uint32_t>(block_index), new_tag);
-            if (free_head_.compare_exchange_weak(head, new_head,
-                                                 std::memory_order_acq_rel,
-                                                 std::memory_order_acquire)) {
+            size_t head = unpack_index(packed);
+            // Release: make the stored `next` (and the returned block's data)
+            // visible to the consumer that publishes this node as head.
+            nodes_[block_index].next.store(head, std::memory_order_release);
+            size_t desired = pack(unpack_tag(packed) + 1, block_index);
+            if (free_head_.compare_exchange_weak(packed, desired,
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
                 break;
             }
         }
     }
 
 private:
+    static size_t pack(size_t tag, size_t index) {
+        return (tag << kIndexBits) | (index & kIndexMask);
+    }
+    static size_t unpack_tag(size_t packed) { return packed >> kIndexBits; }
+    static size_t unpack_index(size_t packed) { return packed & kIndexMask; }
+
     struct Node {
-        // Free-list link: packed (index:low32 | tag:high32).
-        std::atomic<uint64_t> next;
+        std::atomic<size_t> next;
         T data;
     };
 
     alignas(64) Node nodes_[BlockCount];
-    alignas(64) std::atomic<uint64_t> free_head_;
+    alignas(64) std::atomic<size_t> free_head_;
 };
 
 } // namespace TruxifyMemory

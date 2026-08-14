@@ -279,14 +279,21 @@ func (rn *RaftNode) startElection() {
 		// Per-follower replication state (Raft §5.3): the leader seeds
 		// nextIndex = lastLogIndex+1 and learns each follower's true match
 		// index from AppendEntries acknowledgements, backing off on rejection.
-		// matchIndex and liveAck are never seeded optimistically: a leader
-		// without a reachable quorum must not accept new entries.
+		// matchIndex starts empty and is learned from AppendEntries acks, while
+		// liveAck is seeded optimistically below because winning the election
+		// already proves a reachable quorum (issue #13975).
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.liveAck = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
 			rn.matchIndex[url] = 0
+			// Winning the election proves a quorum of peers is reachable: they
+			// responded to RequestVote. Seed liveAck optimistically so a fresh
+			// leader can accept client commits immediately instead of waiting
+			// for a heartbeat round that, on a log mismatch, would otherwise
+			// leave liveAck empty and reject every commit (issue #13975).
+			rn.liveAck[url] = true
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -459,9 +466,12 @@ func (rn *RaftNode) sendHeartbeats() {
 				rn.nextIndex[res.url] = next
 			}
 		} else {
-			// Peer rejected the append (log mismatch or down): it must not
-			// count toward the live quorum until a fresh success response.
-			rn.liveAck[res.url] = false
+			// Peer rejected the append (log mismatch): it still responded, so
+			// it is reachable and counts toward the live quorum. Reachability
+			// is proven by any AppendEntries reply (success or rejection); only
+			// an unreachable peer (res.err != nil above) is dropped. The leader
+			// converges the follower's log via the nextIndex back-off below.
+			rn.liveAck[res.url] = true
 			if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
 				// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
 				rn.nextIndex[res.url]--

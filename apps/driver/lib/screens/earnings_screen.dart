@@ -533,7 +533,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
     double maxVal = 1000.0;
 
     for (int i = 0; i < chartData.length; i++) {
-      final item = chartData[i] as Map;
+      final item = chartData[i] as Map?;
+      if (item == null) continue;
       final earningsVal = ((item['earnings'] ?? 0) / 100.0).toDouble();
       if (earningsVal > maxVal) maxVal = earningsVal;
 
@@ -585,7 +586,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   touchTooltipData: BarTouchTooltipData(
                     tooltipBgColor: TruxifyColors.accentDark,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final item = chartData[group.x] as Map;
+                      final item = chartData[group.x] as Map?;
+                      if (item == null) return null;
                       return BarTooltipItem(
                         '${item['day']}\n₹${rod.toY.toStringAsFixed(0)}',
                         const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
@@ -601,7 +603,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       getTitlesWidget: (value, meta) {
                         final index = value.toInt();
                         if (index < 0 || index >= chartData.length) return const SizedBox.shrink();
-                        final item = chartData[index] as Map;
+                        final item = chartData[index] as Map?;
+                        if (item == null) return const SizedBox.shrink();
                         return Padding(
                           padding: const EdgeInsets.only(top: 8.0),
                           child: Text(
@@ -809,7 +812,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildEmptyMessage('No completed trips found in this period.')
           else
             ...trips.map((item) {
-              final trip = item as Map;
+              final trip = item as Map?;
+              if (trip == null) return const SizedBox.shrink();
               final route = trip['route_label'] ?? 'Route Unavailable';
               final gross = (trip['gross_earnings'] ?? 0) / 100.0;
               final fuel = (trip['estimated_fuel_cost'] ?? 0) / 100.0;

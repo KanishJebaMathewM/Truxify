@@ -53,6 +53,7 @@ describe('FraudDetectionService', () => {
         user_id: 'user-1',
         fraud_score: 0.1,
         risk_level: 'low',
+        events: [],
         patterns: { typingSpeed: [], locationHistory: [], transactionPatterns: [] },
       };
       mockFrom.mockReturnValue({
@@ -71,6 +72,7 @@ describe('FraudDetectionService', () => {
         user_id: 'user-suspicious',
         fraud_score: 0.9,
         risk_level: 'high',
+        events: [],
         patterns: { typingSpeed: [], locationHistory: [], transactionPatterns: [] },
       };
       mockFrom.mockReturnValue({

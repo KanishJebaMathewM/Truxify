@@ -5,6 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "dispute-trigger",
+        "authentication": "headerAuth",
         "options": {}
       },
       "id": "1d8ea83e-d9a4-4db2-a9b0-30f16f5c5315",
@@ -14,12 +15,20 @@
       "position": [
         250,
         300
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.BACKEND_API_URL}}/api/payments/freeze",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "bodyParametersUi": {
           "parameter": [
@@ -39,6 +48,12 @@
         450,
         300
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -276,6 +291,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "admin-resolution",
+        "authentication": "headerAuth",
         "options": {}
       },
       "id": "5b23dca9-48cf-4ef2-ba2e-ffbc8601dd77",
@@ -285,22 +301,26 @@
       "position": [
         250,
         600
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.BACKEND_API_URL}}/api/payments/release",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "bodyParametersUi": {
           "parameter": [
             {
               "name": "bookingId",
               "value": "={{$json.body.bookingId}}"
-            },
-            {
-              "name": "recipient",
-              "value": "={{$json.body.recipient}}"
             }
           ]
         },
@@ -314,6 +334,12 @@
         500,
         600
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -531,5 +557,11 @@
     }
   },
   "active": true,
-  "settings": {}
+  "settings": {},
+  "credentials": {
+    "httpHeaderAuth": {
+      "name": "Truxify Internal API Key",
+      "id": ""
+    }
+  }
 }

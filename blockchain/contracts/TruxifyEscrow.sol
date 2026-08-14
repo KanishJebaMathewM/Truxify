@@ -417,7 +417,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *      refunding the remaining escrow to the customer. The backend chooses
      *      the penalty only after validating the off-chain trip state.
      */
-    function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
+        function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
         external
         onlyOwner
         nonReentrant
@@ -430,7 +430,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
-        require(!booking.started, "TruxifyEscrow: Trip already started");
+        require(booking.started, "TruxifyEscrow: Trip not started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
         require(driverFee <= booking.amount, "TruxifyEscrow: Penalty exceeds escrow");
 

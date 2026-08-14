@@ -102,11 +102,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
     _orderService = widget.orderService ?? OrderService();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(() {
-      if (!_tabController.indexIsChanging) {
-        _controller?.setOrdersTab(_tabController.index);
-      }
-    });
+    _tabController.addListener(_onTabChanged);
     _loadOrders();
     _subscribeToOrdersListUpdates();
   }
@@ -343,8 +339,15 @@ class _OrdersScreenState extends State<OrdersScreen>
         .subscribe();
   }
 
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging) {
+      _controller?.setOrdersTab(_tabController.index);
+    }
+  }
+
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
     if (SupabaseConfig.isConfigured && _ordersChannel != null) {

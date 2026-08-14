@@ -6,25 +6,17 @@ console.log('Testing Ring Signature Service...');
 const kp1 = ringSignatureService.generateRingKeyPair();
 const kp2 = ringSignatureService.generateRingKeyPair();
 const kp3 = ringSignatureService.generateRingKeyPair();
-<<<<<<< HEAD
-
-const ring = [kp1.publicKey, kp2.publicKey, kp3.publicKey];
-const signature = ringSignatureService.signRingMessage('FREIGHT_COMMITMENT_100_TONS', ring, kp1.privateKey);
-=======
 const attacker = ringSignatureService.generateRingKeyPair();
 
 const ring = [kp1.publicKey, kp2.publicKey, kp3.publicKey];
 const message = 'FREIGHT_COMMITMENT_100_TONS';
 const signature = ringSignatureService.signRingMessage(message, ring, kp1.privateKey);
->>>>>>> upstream/main
 
 assert.strictEqual(signature.pubKeys.length, 3);
 assert.strictEqual(signature.c.length, 3);
 assert.strictEqual(signature.r.length, 3);
 assert.strictEqual(typeof signature.keyImage, 'string');
 
-<<<<<<< HEAD
-=======
 assert.strictEqual(
   ringSignatureService.verifyRingSignature(message, ring, signature),
   true,
@@ -84,5 +76,4 @@ try {
 }
 assert.strictEqual(signerNotInRingThrew, true, 'signer not in ring must throw');
 
->>>>>>> upstream/main
 console.log('✅ Ring Signature tests passed successfully.');

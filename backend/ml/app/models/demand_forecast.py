@@ -159,7 +159,7 @@ def train_demand_forecast_model() -> dict:
 
     if promoted:
         training_meta = {
-            "source": "synthetic",
+            "source": "module_trained",
             "training_timestamp": time.time(),
             "feature_hash": str(hash(tuple(FEATURE_NAMES))),
         }

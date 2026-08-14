@@ -1,13 +1,39 @@
-import { supabase } from '../../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 import eventRepository from '../repositories/event.repository.js';
 
 class OrderReadModel {
-  constructor() {
+  constructor(client = supabaseAdmin) {
+    this.client = client;
     this.cache = new Map();
     this.cacheTTL = 300000; // 5 minutes
     this.maxLimit = 100;
     this.maxOffset = 10000;
+  }
+
+  /**
+   * Apply a domain event to the order read model atomically via the
+   * `apply_order_event` RPC. Returns true when the event was applied, false
+   * when the projection chose to skip it (e.g. a duplicate/replayed event).
+   */
+  async applyEvent({ topic, eventId, orderId, eventType, payload, version }) {
+    if (!orderId) throw new Error('applyEvent: missing orderId');
+    if (!eventId) throw new Error('applyEvent: missing eventId');
+
+    const { data, error } = await this.client.rpc('apply_order_event', {
+      p_topic: topic,
+      p_event_id: eventId,
+      p_order_id: orderId,
+      p_event_type: eventType,
+      p_version: version,
+      p_payload: payload,
+    });
+
+    if (error) throw error;
+    if (data && data.applied === false) return false;
+
+    this.clearCache(orderId);
+    return true;
   }
 
   parsePaginationValue(value, { field, min, max }) {

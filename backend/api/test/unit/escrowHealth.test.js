@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { HealthStatus } from "../../../src/core/health/HealthCheck.js";
+import { HealthStatus } from "../../src/core/health/HealthCheck.js";
 
 vi.mock("../../../src/services/escrow.js", () => ({
   checkEscrowHealth: vi.fn(),

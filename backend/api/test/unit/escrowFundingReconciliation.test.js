@@ -35,12 +35,13 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 vi.mock('../../src/services/escrow.js', () => ({
-  escrowRefund: vi.fn(),
+  submitEscrowRefund: vi.fn(),
   getEscrowBooking: vi.fn(),
 }));
 
 vi.mock('../../src/lib/redisLock.js', () => ({
   acquireLock: vi.fn(),
+  renewLock: vi.fn(),
   releaseLock: vi.fn(),
 }));
 
@@ -69,7 +70,8 @@ describe('escrowFundingReconciliation', () => {
     });
 
     it('skips batch when global Redis lock is not acquired', async () => {
-      mockRedisClient.set.mockResolvedValue(null); // lock not acquired
+      const { acquireLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce(null); // lock not acquired
 
       await reconcileStaleFunding(mockOrderRepository);
 
@@ -77,7 +79,9 @@ describe('escrowFundingReconciliation', () => {
     });
 
     it('acquires Redis lock and processes orders when lock is acquired', async () => {
-      mockRedisClient.set.mockResolvedValue('locked');
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValue('lock-value');
+      releaseLock.mockResolvedValue(undefined);
 
       const mockOrders = [
         {
@@ -92,28 +96,36 @@ describe('escrowFundingReconciliation', () => {
       ];
       mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: mockOrders, error: null });
 
-      // Mock the lock acquisition for finalizeOrRevert
-      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
-      acquireLock.mockResolvedValueOnce('lock-value');
-      releaseLock.mockResolvedValueOnce(undefined);
-
-      const { getEscrowBooking } = await import('../../src/services/escrow.js');
+      const { getEscrowBooking, submitEscrowRefund } = await import('../../src/services/escrow.js');
       getEscrowBooking.mockResolvedValueOnce({ paid: false });
+      submitEscrowRefund.mockResolvedValueOnce({ txHash: null, error: 'refund not submitted' });
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValueOnce({ error: null });
 
       await reconcileStaleFunding(mockOrderRepository);
 
-      expect(mockRedisClient.set).toHaveBeenCalledWith(
+      expect(acquireLock).toHaveBeenCalledWith(
         expect.stringContaining('escrow:funding:reconciliation:lock'),
-        expect.any(String),
-        'NX',
-        'EX',
         expect.any(Number)
       );
       expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenCalled();
+      // Refund not confirmed, so the funding state must be cleared through the
+      // guarded write scoped to the order while it is still in 'funding'.
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalledWith(
+        'order-1',
+        expect.objectContaining({ escrow_funding_error: 'refund pending: refund not submitted' }),
+        [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: 'order-1' },
+        ],
+        'id'
+      );
     });
 
     it('returns early on DB error when fetching stale orders', async () => {
-      mockRedisClient.set.mockResolvedValue('locked');
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
+
       mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: null, error: { message: 'DB error' } });
 
       await reconcileStaleFunding(mockOrderRepository);
@@ -124,8 +136,61 @@ describe('escrowFundingReconciliation', () => {
       );
     });
 
+    it('heals a funded deposit to escrow_status "funded" so it is not re-selected (regression #12152)', async () => {
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
+
+      const healedOrder = {
+        id: 'order-heal',
+        order_display_id: 'DIS-HEAL',
+        escrow_status: 'funding',
+        escrow_booking_id: 'booking-heal',
+        escrow_amount_wei: '1000000000000000000',
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        customer_id: 'cust-1',
+        pending_bid_acceptance: {
+          bid_id: 'bid-1',
+          load_id: 'load-1',
+          driver_id: 'driver-1',
+          truck_id: 'truck-1',
+          driver_name: 'D',
+          driver_rating: 5,
+          truck_number: 'TN',
+          bid_amount: 100,
+          order_display_id: 'DIS-HEAL',
+          version: 1,
+        },
+      };
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [healedOrder], error: null });
+
+      const { getEscrowBooking } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+      mockOrderRepository.executeRpc.mockResolvedValueOnce({ error: null });
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValueOnce({ error: null });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(mockOrderRepository.executeRpc).toHaveBeenCalledWith(
+        'accept_bid_tx',
+        expect.objectContaining({ p_order_id: 'order-heal' }),
+        expect.any(Object)
+      );
+      // The heal path MUST transition the order to 'funded' (scoped to its
+      // current 'funding' status) so the next sweep no longer sees it as stale.
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalledWith(
+        'order-heal',
+        expect.objectContaining({ escrow_status: 'funded', escrow_funding_error: null }),
+        [{ op: 'eq', column: 'escrow_status', value: 'funding' }],
+        'id'
+      );
+    });
+
     it('pages through the stale set in bounded chunks until a short page', async () => {
-      mockRedisClient.set.mockResolvedValue('locked');
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
 
       const fullPage = Array.from({ length: 1000 }, (_, i) => ({
         id: `order-${i}`,

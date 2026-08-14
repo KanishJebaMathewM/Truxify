@@ -130,17 +130,22 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
   }
 
   Widget _buildWalletHeader() {
+    final totalBalance = _contracts
+        .where((c) => c.status == 'Settled' || c.status == 'Settling')
+        .fold<double>(0.0, (sum, c) => sum + c.amountUsd);
+    final formattedBalance = '\$${totalBalance.toStringAsFixed(2)}';
+    final formattedUsdc = '${totalBalance.toStringAsFixed(2)} USDC';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(32),
       color: Colors.indigo[900],
-      child: const Column(
+      child: Column(
         children: [
-          Text('Available Balance', style: TextStyle(color: Colors.white70, fontSize: 16)),
-          SizedBox(height: 8),
-          Text('\$8,450.00', style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
-          SizedBox(height: 8),
-          Text('8450.00 USDC', style: TextStyle(color: Colors.white54, fontSize: 14)),
+          const Text('Available Balance', style: TextStyle(color: Colors.white70, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(formattedBalance, style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(formattedUsdc, style: const TextStyle(color: Colors.white54, fontSize: 14)),
         ],
       ),
     );

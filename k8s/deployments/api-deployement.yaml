@@ -21,8 +21,8 @@ spec:
       serviceAccountName: api-service-account
       containers:
       - name: api
-        image: truxify/api:latest
-        imagePullPolicy: Always
+        image: truxify/api:1.0.0
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 5000
         envFrom:

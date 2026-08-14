@@ -13,6 +13,7 @@ class _SettlementWalletScreenState extends State<SettlementWalletScreen> {
   final SmartContractService _contractService = SmartContractService();
   List<FreightSmartContract> _contracts = [];
   bool _isLoading = true;
+  bool _isProcessing = false;
   double _walletBalance = 4250.00; // Mock current balance
 
   @override
@@ -32,6 +33,7 @@ class _SettlementWalletScreenState extends State<SettlementWalletScreen> {
   }
 
   Future<void> _processPayout(FreightSmartContract contract) async {
+    if (_isProcessing) return;
     if (contract.status == 'RELEASED') return;
     if (!contract.isGeofenceConfirmed || !contract.isPodUploaded) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -40,32 +42,37 @@ class _SettlementWalletScreenState extends State<SettlementWalletScreen> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Verifying conditions and executing smart contract...')),
-    );
-
-    final success = await _contractService.triggerPayout(contract.contractId);
-    if (success && mounted) {
-      setState(() {
-        _walletBalance += contract.payoutAmount;
-        // Update local state to reflect released contract
-        final index = _contracts.indexOf(contract);
-        _contracts[index] = FreightSmartContract(
-          contractId: contract.contractId,
-          loadId: contract.loadId,
-          brokerName: contract.brokerName,
-          payoutAmount: contract.payoutAmount,
-          isGeofenceConfirmed: true,
-          isPodUploaded: true,
-          status: 'RELEASED',
-          walletAddress: contract.walletAddress,
-          createdAt: contract.createdAt,
-          settledAt: DateTime.now(),
-        );
-      });
+    _isProcessing = true;
+    try {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('\$${contract.payoutAmount} released to wallet instantly!')),
+        const SnackBar(content: Text('Verifying conditions and executing smart contract...')),
       );
+
+      final success = await _contractService.triggerPayout(contract.contractId);
+      if (success && mounted) {
+        setState(() {
+          _walletBalance += contract.payoutAmount;
+          // Update local state to reflect released contract
+          final index = _contracts.indexOf(contract);
+          _contracts[index] = FreightSmartContract(
+            contractId: contract.contractId,
+            loadId: contract.loadId,
+            brokerName: contract.brokerName,
+            payoutAmount: contract.payoutAmount,
+            isGeofenceConfirmed: true,
+            isPodUploaded: true,
+            status: 'RELEASED',
+            walletAddress: contract.walletAddress,
+            createdAt: contract.createdAt,
+            settledAt: DateTime.now(),
+          );
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('\$${contract.payoutAmount} released to wallet instantly!')),
+        );
+      }
+    } finally {
+      _isProcessing = false;
     }
   }
 

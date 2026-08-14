@@ -14,6 +14,9 @@
  *         platform:
  *           type: string
  *           enum: [ios, android, web]
+ *         deviceId:
+ *           type: string
+ *           description: Stable installation/device identifier used for FCM token rotation (optional)
  *     DeviceRegisterResponse:
  *       type: object
  *       properties:

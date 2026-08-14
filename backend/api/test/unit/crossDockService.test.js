@@ -36,9 +36,10 @@ function chainable(key, terminalKey = 'maybeSingle') {
 }
 
 const fromMock = vi.fn((table) => chainable(table));
+const rpcMock = vi.fn((name, args) => chainable('rpc:' + name));
 
 vi.mock('../../src/config/db.js', () => ({
-  supabaseAdmin: { from: fromMock, rpc: (name, args) => chainable('rpc:' + name) },
+  supabaseAdmin: { from: fromMock, rpc: rpcMock },
   isSupabaseConnected: () => true,
 }));
 
@@ -87,6 +88,17 @@ describe('crossDockService', () => {
       await expect(
         svc.findHandoffCandidates({ orderId: 'o1', crossDockLat: 999, crossDockLng: 0 }),
       ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('calls the get_nearby_active_drivers RPC with the DDL param contract', async () => {
+      await svc.findHandoffCandidates({ orderId: 'o1', crossDockLat: 19.076, crossDockLng: 72.8777, radiusKm: 50, limit: 20 });
+
+      expect(rpcMock).toHaveBeenCalledWith('get_nearby_active_drivers', {
+        origin_lat: 19.076,
+        origin_lng: 72.8777,
+        radius_meters: 50000,
+        freshness_seconds: expect.any(Number),
+      });
     });
   });
 
@@ -214,6 +226,21 @@ describe('crossDockService', () => {
       };
       const result = await svc.verifyHandoff({ transferId: 't1', driverId: 'd2', handoffCode: '123456' });
       expect(result.status).toBe('verified');
+    });
+
+    it('reassigns order custody to the receiving driver on a matching code', async () => {
+      const { verifyOtpHash } = await import('../../src/lib/otpHashing.js');
+      verifyOtpHash.mockReturnValueOnce(true);
+      supabaseState.cross_dock_transfers = {
+        maybeSingle: { data: { id: 't1', from_driver_id: 'd1', to_driver_id: 'd2', status: 'accepted', otp_hash: 'h:s', expires_at: new Date(Date.now() + 1e9).toISOString(), otp_attempts: 0 }, error: null },
+        single: { data: { id: 't1', status: 'verified', from_driver_id: 'd1', to_driver_id: 'd2', order_id: 'o1', verified_at: '2026-01-01T00:00:00.000Z' }, error: null },
+      };
+      await svc.verifyHandoff({ transferId: 't1', driverId: 'd2', handoffCode: '123456' });
+
+      const ordersCallIdx = fromMock.mock.calls.findIndex((c) => c[0] === 'orders');
+      expect(ordersCallIdx).toBeGreaterThanOrEqual(0);
+      const ordersChain = fromMock.mock.results[ordersCallIdx].value;
+      expect(ordersChain.update).toHaveBeenCalledWith({ driver_id: 'd2' });
     });
   });
 

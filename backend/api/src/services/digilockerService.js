@@ -12,26 +12,76 @@ class DigilockerService {
     this.clientSecret = process.env.DIGILOCKER_CLIENT_SECRET;
     this.redirectUri = process.env.DIGILOCKER_REDIRECT_URI;
     
-    // Polygon contract integration
+    // Polygon contract integration: the document hash write and the document
+    // registration live in two separate deployed contracts (DocumentRegistry
+    // and KYCVerifier). Each contract must be bound to its own address and a
+    // matching ABI — bundling functions from both into one ABI attached to a
+    // single address guarantees one of the calls reverts (see #12140).
     const rpcUrl = process.env.POLYGON_RPC_URL;
     const privateKey = process.env.RELAYER_WALLET_PRIVATE_KEY || process.env.PRIVATE_KEY;
-    const contractAddress = process.env.DOCUMENT_REGISTRY_CONTRACT || process.env.KYC_VERIFIER_CONTRACT_ADDRESS;
+    const documentRegistryAddress = process.env.DOCUMENT_REGISTRY_CONTRACT;
+    const kycVerifierAddress = process.env.KYC_VERIFIER_CONTRACT_ADDRESS;
 
-    if (rpcUrl && privateKey && contractAddress) {
+    if (rpcUrl && privateKey && (documentRegistryAddress || kycVerifierAddress)) {
       try {
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
         this.wallet = new ethers.Wallet(privateKey, this.provider);
-        this.contractABI = [
-          'function registerDocument(address driver, string memory documentType, bytes32 docHash, bool isVerified) external',
-          'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)',
-          'function hashDocument(bytes32 documentHash, address user) public'
-        ];
-        this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
+        if (documentRegistryAddress) {
+          this.documentRegistry = new ethers.Contract(
+            documentRegistryAddress,
+            [
+              'function registerDocument(address driver, string memory documentType, bytes32 docHash, bool isVerified) external',
+              'function getDocument(address driver, string memory documentType) external view returns (bytes32, string memory, uint256, bool)'
+            ],
+            this.wallet
+          );
+        }
+        if (kycVerifierAddress) {
+          this.kycVerifier = new ethers.Contract(
+            kycVerifierAddress,
+            [
+              'function hashDocument(bytes32 documentHash, address user) public',
+              'function isVerified(address user) external view returns (bool)'
+            ],
+            this.wallet
+          );
+        }
       } catch (err) {
         logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
       }
     } else {
       logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
+    }
+  }
+
+  /**
+   * Returns true when every configured contract is deployed at its configured
+   * address and answers an ABI probe, so a typo'd or cross-contract address is
+   * caught at startup instead of silently skipping the on-chain write.
+   */
+  async validateSetup() {
+    if (!this.provider || (!this.documentRegistry && !this.kycVerifier)) {
+      return false;
+    }
+    try {
+      if (this.documentRegistry) {
+        const registryCode = await this.provider.getCode(this.documentRegistry.target);
+        if (!registryCode || registryCode === '0x') return false;
+        await this.documentRegistry.getDocument(
+          '0x0000000000000000000000000000000000000000',
+          ''
+        );
+      }
+      if (this.kycVerifier) {
+        const verifierCode = await this.provider.getCode(this.kycVerifier.target);
+        if (!verifierCode || verifierCode === '0x') return false;
+        await this.kycVerifier.isVerified(
+          '0x0000000000000000000000000000000000000000'
+        );
+      }
+      return true;
+    } catch (err) {
+      return false;
     }
   }
 
@@ -46,7 +96,7 @@ class DigilockerService {
 
   async exchangeCode(code) {
     if (!this.isMock) {
-      if (!this.clientId || !this.clientSecret || !code) {
+      if (!this.clientId || !this.clientSecret || !code || !code.trim()) {
         logger.warn('[DigilockerService] DigiLocker integration missing credentials or code; refusing mock fallback');
         return { success: false, error: 'DigiLocker verification is not configured' };
       }
@@ -81,6 +131,10 @@ class DigilockerService {
   }
 
   async verifyDocuments(userId, accessToken) {
+    if (!accessToken) {
+      logger.warn('[DigilockerService] verifyDocuments called with null/undefined accessToken');
+      return { success: false, error: 'Access token is required', is_digilocker_verified: false };
+    }
     if (!this.isMock) {
       logger.warn('[DigilockerService] DigiLocker integration not configured; refusing auto-approval');
       return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };
@@ -123,17 +177,18 @@ class DigilockerService {
 
     const walletAddress = profile?.polygon_wallet_address || '0x0000000000000000000000000000000000000000';
 
-    if (this.contract) {
+    if (this.kycVerifier) {
       try {
         logger.info(`[DigilockerService] Submitting document hash on-chain: ${documentHash} for user address: ${walletAddress}`);
-        const tx = await this.contract.hashDocument(documentHash, walletAddress);
+        const tx = await this.kycVerifier.hashDocument(documentHash, walletAddress);
         await tx.wait();
         logger.info(`[DigilockerService] Smart contract write succeeded. TX hash: ${tx.hash}`);
       } catch (err) {
-        logger.warn(`[DigilockerService] Smart contract write failed: ${err.message}. Fallback to DB update.`);
+        logger.error({ err }, '[DigilockerService] Smart contract write failed');
+        throw new Error(`On-chain document hash write failed: ${err.message}`);
       }
     } else {
-      logger.info(`[DigilockerService] Smart contract verification address/private key not set. Mocking on-chain hash submission.`);
+      logger.info(`[DigilockerService] KYC verifier contract address/private key not set. Mocking on-chain hash submission.`);
     }
 
     const { error: updateError } = await supabase
@@ -244,11 +299,14 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
+      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+        logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
+      }
       let txHash = null;
 
-      if (this.contract && walletAddress) {
+      if (this.documentRegistry && walletAddress) {
         try {
-          const tx = await this.contract.registerDocument(walletAddress, doc.type, docHash, true);
+          const tx = await this.documentRegistry.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();
           txHash = tx.hash;
         } catch (err) {

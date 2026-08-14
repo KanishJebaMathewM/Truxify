@@ -9,7 +9,7 @@ import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisL
  * Must be long enough to cover proof generation + blockchain tx confirmation.
  * Configurable via ZKP_LOCK_TTL_MS env var.
  */
-const ZKP_LOCK_TTL_MS = Number(process.env.ZKP_LOCK_TTL_MS) || 120_000;
+const ZKP_LOCK_TTL_MS = Number(process.env.ZKP_LOCK_TTL_MS) || 600_000;
 
 class ZKPService {
   constructor() {
@@ -205,13 +205,11 @@ class ZKPService {
     if (data.kyc_status !== 'Verified') {
       return { ok: false, error: `KYC is not server-verified (status: ${data.kyc_status || 'Unverified'}). Complete document verification (OCR/DigiLocker) before requesting a ZK proof.` };
     }
-    if (data.kyc_doc_number) {
-      const normalize = (value) => String(value || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      const serverDocNumber = normalize(data.kyc_doc_number);
-      const claimedLicenseNumber = normalize(driverData.licenseNumber);
-      if (!serverDocNumber || claimedLicenseNumber !== serverDocNumber) {
-        return { ok: false, error: 'License number does not match the server-verified document. Proofs are generated only over verified document data.' };
-      }
+    const normalize = (value) => String(value || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const serverDocNumber = normalize(data.kyc_doc_number);
+    const claimedLicenseNumber = normalize(driverData.licenseNumber);
+    if (!serverDocNumber || claimedLicenseNumber !== serverDocNumber) {
+      return { ok: false, error: 'License number does not match the server-verified document. Proofs are generated only over verified document data.' };
     }
     return { ok: true };
   }

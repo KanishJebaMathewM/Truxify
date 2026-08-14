@@ -156,13 +156,16 @@ type RaftNode struct {
 	// liveAck records which peers have acknowledged at least one successful
 	// AppendEntries round in the current leadership term. It is reset whenever
 	// a new leader is elected and drives the /commit admission gate so a leader
-	// never accepts new entries without evidence of a reachable quorum.
+	// never accepts new entries without evidence of a reachable quorum. A peer
+	// is also dropped from liveAck whenever a heartbeat fails or is rejected, so
+	// liveness reflects recent contact instead of a once-set flag.
 	liveAck            map[string]bool
 	httpClient         *http.Client
+	// rng is this node's own source of randomness for election timeouts. It is
+	// only accessed while holding mu, so a per-node Rand is safe for concurrent
+	// use across election goroutines of different nodes.
+	rng *rand.Rand
 }
-
-// rng is a source of randomness for election timeouts.
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 	heartbeatMs := envInt("RAFT_HEARTBEAT_MS", 100)
@@ -189,6 +192,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		matchIndex:         make(map[string]uint64),
 		liveAck:            make(map[string]bool),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
+		rng:                rand.New(rand.NewSource(rand.Int63())),
 	}
 }
 
@@ -210,7 +214,7 @@ func (rn *RaftNode) quorum() int {
 func (rn *RaftNode) randomElectionTimeout() time.Duration {
 	minMs := int(rn.electionTimeoutMin / time.Millisecond)
 	maxMs := int(rn.electionTimeoutMax / time.Millisecond)
-	return time.Duration(minMs+rng.Intn(maxMs-minMs+1)) * time.Millisecond
+	return time.Duration(minMs+rn.rng.Intn(maxMs-minMs+1)) * time.Millisecond
 }
 
 // stepDownLocked resets the node to follower when a higher term is observed.
@@ -429,6 +433,9 @@ func (rn *RaftNode) sendHeartbeats() {
 
 	for _, res := range results {
 		if res.err != nil {
+			// Peer unreachable: drop it from the live quorum so a stale ack
+			// cannot count toward a phantom majority.
+			rn.liveAck[res.url] = false
 			continue
 		}
 		if res.resp.Term > rn.CurrentTerm {
@@ -451,9 +458,14 @@ func (rn *RaftNode) sendHeartbeats() {
 			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
 				rn.nextIndex[res.url] = next
 			}
-		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
-			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
-			rn.nextIndex[res.url]--
+		} else {
+			// Peer rejected the append (log mismatch or down): it must not
+			// count toward the live quorum until a fresh success response.
+			rn.liveAck[res.url] = false
+			if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
+				// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
+				rn.nextIndex[res.url]--
+			}
 		}
 	}
 
@@ -710,6 +722,18 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	return true
 }
 
+// writeCommitSuccess writes the success payload for a committed order entry.
+func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"raft_index":   entry.Index,
+		"term":         entry.Term,
+		"order_id":     entry.OrderID,
+		"committed_at": entry.Timestamp.Format(time.RFC3339),
+	})
+}
+
 // HandleCommitOrder accepts a committed order entry on the leader.
 func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -765,17 +789,43 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry := LogEntry{
-		Index:     uint64(len(rn.Log) + 1),
-		Term:      rn.CurrentTerm,
-		Command:   req.Command,
-		OrderID:   req.OrderID,
-		Timestamp: time.Now(),
+	// Idempotency: an identical (order_id, command) already present in the log
+	// is never appended again. When it is already committed the retry is
+	// answered with the existing entry's index; when it is still pending
+	// replication the flow below simply waits for it to commit.
+	entryIndex := rn.findEntryLocked(req.OrderID, req.Command, uint64(len(rn.Log)))
+	if entryIndex == 0 {
+		// State-transition validation: the command must follow the order's
+		// recorded lifecycle history.
+		last := rn.orderStatesLocked(uint64(len(rn.Log)))[req.OrderID]
+		if !canTransition(last, req.Command) {
+			rn.mu.Unlock()
+			http.Error(w, "invalid state transition for order", http.StatusBadRequest)
+			return
+		}
+
+		entry := LogEntry{
+			Index:     uint64(len(rn.Log) + 1),
+			Term:      rn.CurrentTerm,
+			Command:   req.Command,
+			OrderID:   req.OrderID,
+			Timestamp: time.Now(),
+		}
+
+		// Append to the local log first. CommitIndex is NOT advanced here: the
+		// entry must first be replicated to a quorum of followers (Raft §5.3).
+		rn.Log = append(rn.Log, entry)
+		entryIndex = entry.Index
 	}
 
-	// Append to the local log first. CommitIndex is NOT advanced here: the entry
-	// must first be replicated to a quorum of followers (Raft §5.3).
-	rn.Log = append(rn.Log, entry)
+	if entryIndex <= rn.CommitIndex {
+		// Already committed in a previous round — answer the retry idempotently.
+		e := rn.Log[entryIndex-1]
+		rn.mu.Unlock()
+		rn.writeCommitSuccess(w, e)
+		return
+	}
+
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before
@@ -794,7 +844,8 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	committed := rn.CommitIndex >= entry.Index
+	committed := rn.CommitIndex >= entryIndex
+	entry := rn.Log[entryIndex-1]
 	rn.mu.Unlock()
 
 	if !committed {
@@ -815,7 +866,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":    false,
 			"error":      "entry not yet committed to a quorum of followers",
-			"raft_index": entry.Index,
+			"raft_index": entryIndex,
 		})
 		return
 	}
@@ -824,17 +875,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	// before the client observes success.
 	rn.sendHeartbeats()
 
-	rn.mu.Lock()
-	defer rn.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"raft_index":   entry.Index,
-		"term":         entry.Term,
-		"order_id":     entry.OrderID,
-		"committed_at": entry.Timestamp.Format(time.RFC3339),
-	})
+	rn.writeCommitSuccess(w, entry)
 }
 
 func envInt(key string, def int) int {

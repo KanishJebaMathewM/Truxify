@@ -53,6 +53,7 @@ class UserKeyRequest(BaseModel):
 class MultiAuthorityRequest(BaseModel):
     authorities: List[str]
     policy: PolicyRequest
+    plaintext: str
 
 
 class AddAuthorityRequest(BaseModel):
@@ -167,10 +168,7 @@ async def kp_abe_decrypt(request: DecryptRequest):
     try:
         policy = AccessPolicy(
             expression=request.encrypted_data.get("policy", ""),
-            attributes=[
-                attr["name"]
-                for attr in request.user_attributes
-            ],
+            attributes=request.encrypted_data.get("attributes", []),
         )
 
         result = kp_abe.decrypt(
@@ -229,7 +227,7 @@ async def dabe_encrypt(request: MultiAuthorityRequest):
         )
 
         result = dabe.encrypt(
-            plaintext="test_data",
+            plaintext=request.plaintext,
             policy=policy,
             authorities=request.authorities,
         )

@@ -5,6 +5,7 @@
  */
 
 import { Buffer } from 'buffer';
+import logger from '../middleware/logger.js';
 
 /**
  * Encode opaque cursor data into a URL-safe base64 string.
@@ -25,8 +26,11 @@ export function decodeCursor(cursor) {
   if (!cursor || typeof cursor !== 'string') return null;
   try {
     const json = Buffer.from(cursor, 'base64url').toString('utf8');
-    return JSON.parse(json);
-  } catch {
+    const result = JSON.parse(json);
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+    return result;
+  } catch (err) {
+    logger.warn('[cursorPagination] Failed to decode cursor:', err?.message);
     return null;
   }
 }

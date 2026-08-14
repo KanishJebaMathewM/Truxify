@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getCacheStats,
   resetCacheStats,
+  isValidProfile,
 } from '../../src/lib/profileCache.js';
 
 describe('profileCache stats', () => {
@@ -37,7 +38,6 @@ describe('profileCache stats', () => {
 
 
 // === Spec 8 test ===
-import { describe, it, expect } from 'vitest';
 import { isValidProfile } from '../../src/lib/profileCache.js';
 describe('isValidProfile', () => {
   it('accepts valid profile with required fields', () => {

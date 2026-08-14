@@ -20,7 +20,10 @@ const SURGE_PEAK_AMPLITUDE = 1.3;
  */
 export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   try {
-    if (!pickupLat || !pickupLng) {
+    if (pickupLat == null || pickupLng == null) {
+      return 1.0;
+    }
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
       return 1.0;
     }
 

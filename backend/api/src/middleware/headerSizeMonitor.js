@@ -7,6 +7,11 @@ export default function headerSizeMonitor(req, res, next) {
   const parsedLimit = Number(rawLimit);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_LIMIT;
 
+  // Guard: req.headers must be defined before iterating over it.
+  if (req.headers == null) {
+    return next();
+  }
+
   let totalSize = 0;
 
   for (const [name, value] of Object.entries(req.headers)) {

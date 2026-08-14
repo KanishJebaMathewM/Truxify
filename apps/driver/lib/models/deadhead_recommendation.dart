@@ -27,7 +27,14 @@ class DeadheadRecommendation {
   final String deadline;
 
   factory DeadheadRecommendation.fromJson(Map<String, dynamic> json) {
-    num _n(String key, [num fallback = 0]) => (json[key] as num?) ?? fallback;
+    // The ML API may emit numeric fields as JSON numbers or as numeric
+    // strings ('12.5'); accept both instead of crashing on a strict cast.
+    num _n(String key, [num fallback = 0]) {
+      final value = json[key];
+      if (value is num) return value;
+      if (value is String) return num.tryParse(value) ?? fallback;
+      return fallback;
+    }
     return DeadheadRecommendation(
       loadId: (json['load_id'] ?? '').toString(),
       distanceToPickupKm: _n('distance_to_pickup_km').toDouble(),

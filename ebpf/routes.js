@@ -206,8 +206,11 @@ router.post('/ebpf/load', authenticate, requirePolicy('ebpf:manage'), ebpfAction
             });
         }
 
-        // Execute with sanitized input
-        const result = await execAsync(`sudo bpftool prog load "${process.env.EBPF_PROGRAMS_PATH || path.join(process.cwd(), "ebpf", "programs")}/${program}.o /sys/fs/bpf/truxify_${program}`);
+        // Execute with sanitized input. `bpftool prog load` requires the
+        // object file and the pin path as two separate positional arguments.
+        const programsPath = process.env.EBPF_PROGRAMS_PATH || path.join(process.cwd(), "ebpf", "programs");
+        const objPath = path.join(programsPath, `${program}.o`);
+        const result = await execAsync(`sudo bpftool prog load "${objPath}" "/sys/fs/bpf/truxify_${program}"`);
         
         res.json({
             success: true,

@@ -75,6 +75,7 @@ const profileCacheRef = vi.hoisted(() => ({
   setCachedCustomerStats: vi.fn().mockResolvedValue(undefined),
   getCachedDriverDetails: vi.fn().mockResolvedValue(null),
   setCachedDriverDetails: vi.fn().mockResolvedValue(undefined),
+  isValidCachedProfile: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock('../../src/config/db.js', () => ({

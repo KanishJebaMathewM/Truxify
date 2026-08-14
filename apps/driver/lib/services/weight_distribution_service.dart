@@ -21,9 +21,13 @@ class WeightDistributionService {
   }
 
   void updatePalletPosition(String id, double newX) {
-    final pallet = _pallets.firstWhere((p) => p.id == id);
-    pallet.positionX = newX.clamp(0.0, 1.0);
-    _calculatePhysics();
+    for (final pallet in _pallets) {
+      if (pallet.id == id) {
+        pallet.positionX = newX.clamp(0.0, 1.0);
+        _calculatePhysics();
+        return;
+      }
+    }
   }
 
   void _calculatePhysics() {

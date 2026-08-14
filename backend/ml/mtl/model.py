@@ -254,15 +254,34 @@ class MultiTaskTrainer:
         total_loss = self.loss.compute_weighted_loss(losses, self.task_weights)
         
         # Backward pass
-        total_loss.backward()
-        
-        # Gradient surgery
         if self.gradient_method == 'pcgrad':
-            grads = [p.grad for p in self.model.parameters() if p.grad is not None]
-            processed_grads = self.gradient_surgery.pcgrad(grads)
-            for p, g in zip([p for p in self.model.parameters() if p.grad is not None], processed_grads):
-                p.grad = g
-        
+            # PCGrad operates on per-task gradients, not the summed gradient.
+            # Backpropagate each task loss separately to collect one gradient
+            # vector per task, then resolve conflicts across tasks.
+            task_names = list(losses.keys())
+            grad_params = [p for p in self.model.parameters() if p.requires_grad]
+            task_vecs = []
+            for t in task_names:
+                self.model.zero_grad()
+                losses[t].backward(retain_graph=True)
+                task_vecs.append(
+                    torch.cat([p.grad.detach().flatten() for p in grad_params if p.grad is not None])
+                )
+            processed = self.gradient_surgery.pcgrad(task_vecs)
+            # Sum the resolved per-task gradients back into the parameters.
+            final_grad = torch.zeros_like(task_vecs[0])
+            for v in processed:
+                final_grad = final_grad + v
+            offset = 0
+            for p in grad_params:
+                n = p.numel()
+                if p.grad is None:
+                    p.grad = torch.zeros_like(p)
+                p.grad = final_grad[offset:offset + n].view(p.shape).clone()
+                offset += n
+        else:
+            total_loss.backward()
+
         self.optimizer.step()
         
         return {

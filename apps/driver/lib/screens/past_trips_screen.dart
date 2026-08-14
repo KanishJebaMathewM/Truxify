@@ -168,7 +168,8 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
         if (data is Map<String, dynamic>) {
           setState(() {
             _platformRating = (data['supabaseRating'] as num?)?.toDouble() ?? 0.0;
-            _onChainScore = data['onChainScore'] != null ? (data['onChainScore'] as num).toInt() : null;
+            final s = data['onChainScore'];
+            _onChainScore = s is num ? s.toInt() : int.tryParse(s?.toString() ?? '');
             _walletAddress = data['walletAddress']?.toString() ?? '';
             _isLoadingReputation = false;
           });

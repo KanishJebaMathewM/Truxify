@@ -127,7 +127,8 @@ class SyncEngine {
     final SyncUploadOutcome uploadOutcome;
     try {
       uploadOutcome = await _uploadBatch(resolved);
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Unexpected error during batch upload: $e');
       // An unexpected error during upload must never leave events stuck in the
       // transient `syncing` state; fall through to failure handling below so
       // they are re-queued on a later sync pass.
@@ -196,7 +197,16 @@ class SyncEngine {
         if (retry.statusCode == 200 || retry.statusCode == 202) {
           return SyncUploadOutcome.success;
         }
-        return SyncUploadOutcome.permanentFailure;
+        // A refreshed token means the auth problem is solved; any remaining
+        // failure is a transport issue, not a permanent rejection. Only 4xx
+        // conflict/validation errors are terminal — everything else (429/5xx)
+        // must be re-queued so queued trip events are never silently lost.
+        if (retry.statusCode == 409 ||
+            retry.statusCode == 422 ||
+            retry.statusCode == 400) {
+          return SyncUploadOutcome.permanentFailure;
+        }
+        return SyncUploadOutcome.retryableFailure;
       }
 
       if (response.statusCode == 409 || response.statusCode == 422 || response.statusCode == 400) {
@@ -209,7 +219,8 @@ class SyncEngine {
       }
 
       return SyncUploadOutcome.retryableFailure;
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Batch upload threw: $e');
       await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
       return SyncUploadOutcome.retryableFailure;
     }

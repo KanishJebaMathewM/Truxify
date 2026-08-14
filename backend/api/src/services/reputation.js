@@ -61,7 +61,7 @@ export function initReputationContract() {
         REPUTATION_ABI,
         relayer,
       );
-      logger.info("✅ Polygon Reputation contract client initialised.");
+      logger.info("Polygon Reputation contract client initialised.");
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: err && (err.message || String(err)) },
@@ -220,7 +220,8 @@ export async function getDriverReputation(walletAddress) {
         }),
       ]);
       clearTimeout(timeoutId);
-      return Number(score);
+      const n = Number(score);
+      return Number.isFinite(n) ? n : null;
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_FETCH_ERROR', walletAddress, error: err && (err.message || String(err)) },

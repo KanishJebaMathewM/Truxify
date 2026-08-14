@@ -2,7 +2,7 @@
  * Unit tests for backend/api/src/lib/requestContext.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { requestContext, getRequestCache } from '../../src/lib/requestContext.js';
+import { requestContext, getRequestCache, safeJsonParseWithFallback } from '../../src/lib/requestContext.js';
 import { RequestCache } from '../../src/lib/requestCache.js';
 
 describe('requestContext', () => {
@@ -72,7 +72,6 @@ describe('requestContext', () => {
 
 
 // === Spec 1 test ===
-import { describe, it, expect } from 'vitest';
 import { safeJsonParseWithFallback } from '../../src/lib/requestContext.js';
 describe('safeJsonParseWithFallback', () => {
   it('returns parsed object for valid JSON', () => { expect(safeJsonParseWithFallback('{"a":1}', {})).toEqual({ a: 1 }); });
@@ -81,3 +80,36 @@ describe('safeJsonParseWithFallback', () => {
   it('returns fallback for arrays', () => { expect(safeJsonParseWithFallback('[1,2]', { z: 3 })).toEqual({ z: 3 }); });
 });
 
+
+describe('safeJsonParseWithFallback', () => {
+  it('parses valid JSON objects', () => {
+    expect(safeJsonParseWithFallback('{"key":"value"}', {})).toEqual({ key: 'value' });
+    expect(safeJsonParseWithFallback('{"a":1,"b":2}', {})).toEqual({ a: 1, b: 2 });
+  });
+
+  it('returns fallback for null', () => {
+    expect(safeJsonParseWithFallback(null, { default: true })).toEqual({ default: true });
+    expect(safeJsonParseWithFallback(undefined, { fallback: 'x' })).toEqual({ fallback: 'x' });
+  });
+
+  it('returns fallback for invalid JSON', () => {
+    expect(safeJsonParseWithFallback('not json', { ok: false })).toEqual({ ok: false });
+    expect(safeJsonParseWithFallback('{ broken }', {})).toEqual({});
+  });
+
+  it('returns fallback for JSON arrays (only plain objects allowed)', () => {
+    expect(safeJsonParseWithFallback('[1,2,3]', [])).toEqual([]);
+    expect(safeJsonParseWithFallback('["a","b"]', null)).toBeNull();
+  });
+
+  it('returns fallback for JSON primitives', () => {
+    expect(safeJsonParseWithFallback('"just a string"', null)).toBeNull();
+    expect(safeJsonParseWithFallback('123', null)).toBeNull();
+    expect(safeJsonParseWithFallback('true', null)).toBeNull();
+  });
+
+  it('uses custom fallback', () => {
+    const custom = { custom: true };
+    expect(safeJsonParseWithFallback('not valid', custom)).toBe(custom);
+  });
+});

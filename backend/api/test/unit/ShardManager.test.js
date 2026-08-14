@@ -69,4 +69,16 @@ describe('ShardManager', () => {
       expect(conn).toBeDefined();
     });
   });
+
+  describe('getOrderLocation', () => {
+    it('does not throw on a corrupt cached location and falls back (issue #12031)', async () => {
+      // A corrupt (non-JSON) cache value must not propagate a parse error;
+      // the manager must fall back to the authoritative/default location so
+      // the request succeeds instead of 500-ing.
+      ShardManager.redis.get = vi.fn().mockResolvedValue('%%%not-valid-json%%%');
+      const loc = await ShardManager.getOrderLocation('order-corrupt-12031');
+      expect(loc).toBeDefined();
+      expect(typeof loc.state).toBe('string');
+    });
+  });
 });

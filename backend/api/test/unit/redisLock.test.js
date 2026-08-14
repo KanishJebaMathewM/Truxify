@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { LockState } from '../../src/lib/redisLock.js';
 
 // Mock the db module before importing redisLock
 vi.mock('../config/db.js', () => ({
@@ -23,7 +24,6 @@ describe('redisLock', () => {
 
 
 // === Spec 15 test ===
-import { describe, it, expect } from 'vitest';
 import { LockState } from '../../src/lib/redisLock.js';
 describe('LockState', () => {
   it('acquires once', () => { const l = new LockState(); expect(l.acquire()).toBe(true); expect(l.acquire()).toBe(false); });

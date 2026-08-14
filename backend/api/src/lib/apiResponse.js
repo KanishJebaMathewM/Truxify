@@ -30,6 +30,16 @@ export function error(message = 'An error occurred', statusCode = 500, errors = 
 export function paginated(data = [], page = 1, limit = 10, total = 0, message = 'Success') {
   const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
   const rawLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : 10;
+  // Guard: reject non-positive limit with explicit error in response metadata
+  if (rawLimit <= 0) {
+    return {
+      success: false,
+      statusCode: 400,
+      message: 'limit must be a positive integer',
+      data,
+      pagination: null,
+    };
+  }
   const safeLimit = Math.min(rawLimit, MAX_PAGE_SIZE);
   const safeTotal = Number.isFinite(Number(total)) ? Math.max(0, Number(total)) : 0;
   const totalPages = Math.ceil(safeTotal / safeLimit) || 0;

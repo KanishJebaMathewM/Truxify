@@ -200,9 +200,21 @@
     {
       "parameters": {
         "conditions": {
+          "combinator": "or",
           "string": [
             {
               "value1": "={{$json.status}}",
+              "operation": "equals",
+              "value2": "disputed"
+            },
+            {
+              "value1": "={{$json.data.status}}",
+              "operation": "equals",
+              "value2": "disputed"
+            },
+            {
+              "value1": "={{$json.order.status}}",
+              "operation": "equals",
               "value2": "disputed"
             }
           ]

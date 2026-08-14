@@ -1635,6 +1635,18 @@ class _TripsScreenState extends State<TripsScreen> {
       );
     }).toList();
 
+    if (points.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: TruxifyColors.subtleBorder,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: Icon(Icons.map_outlined, color: Colors.grey),
+        ),
+      );
+    }
+
     return RepaintBoundary(
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),

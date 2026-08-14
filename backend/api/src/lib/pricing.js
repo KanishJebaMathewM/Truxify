@@ -25,8 +25,6 @@ export function sanitizePrice(value) {
 const EARTH_RADIUS_KM = 6371.0088;
 
 // Pricing constants (all amounts in paisa unless noted)
-const MIN_FREIGHT_PAISa = 0;
-const MAX_FREIGHT_PAISa = 10_000_000_00; // 1 crore in paisa
 const TOLL_ESCALATION_HOURS = 6;
 const DEFAULT_RATE_PER_TONNE_KM = 50; // paisa per tonne-km
 

@@ -747,19 +747,19 @@ class MLService {
     try {
       data = await response.json();
     } catch (_) {
-      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
+      throw new Error(`[ML] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
     }
 
     if (response.status === 401) {
-      throw new Error(`[MLService] Authentication failed: ${method} ${url} (${response.status})`);
+      throw new Error(`[ML] Authentication failed: ${method} ${url} (${response.status})`);
     }
 
     if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden: ${method} ${url} (${response.status})`);
+      throw new Error(`[ML] Forbidden: ${method} ${url} (${response.status})`);
     }
 
     if (!response.ok) {
-      throw new Error(`[MLService] Request failed: ${method} ${url} ${response.status}`);
+      throw new Error(`[ML] Request failed: ${method} ${url} ${response.status}`);
     }
 
     return data;

@@ -26,13 +26,14 @@ describe('FraudDetectionService', () => {
 
   describe('getFraudStats', () => {
     it('returns an object', async () => {
-      mockFrom.mockResolvedValue({
-        data: [],
-        error: null,
-        select: vi.fn().mockReturnThis(),
-        count: vi.fn().mockResolvedValue({ count: 0 }),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        range: vi.fn().mockResolvedValue({ data: [], error: null }),
+      // getFraudStats calls supabaseAdmin.from().select().count().order().range()
+      mockFrom.mockImplementation((table) => {
+        const chain = {};
+        chain.select = vi.fn().mockReturnValue(chain);
+        chain.count = vi.fn().mockResolvedValue({ count: 0 });
+        chain.order = vi.fn().mockReturnValue(chain);
+        chain.range = vi.fn().mockResolvedValue({ data: [], error: null });
+        return chain;
       });
 
       const stats = await FraudDetectionService.getFraudStats();
@@ -40,13 +41,13 @@ describe('FraudDetectionService', () => {
     });
 
     it('returns zero counts when no fraud records exist', async () => {
-      mockFrom.mockResolvedValue({
-        data: [],
-        error: null,
-        select: vi.fn().mockReturnThis(),
-        count: vi.fn().mockResolvedValue({ count: 0 }),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-        range: vi.fn().mockResolvedValue({ data: [], error: null }),
+      mockFrom.mockImplementation((table) => {
+        const chain = {};
+        chain.select = vi.fn().mockReturnValue(chain);
+        chain.count = vi.fn().mockResolvedValue({ count: 0 });
+        chain.order = vi.fn().mockReturnValue(chain);
+        chain.range = vi.fn().mockResolvedValue({ data: [], error: null });
+        return chain;
       });
 
       const stats = await FraudDetectionService.getFraudStats();

@@ -70,6 +70,15 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
 
   static const _geofenceRadius = 500.0; // metres
 
+  /// Normalises the `amount_inr` value returned by the confirm-otp endpoint
+  /// into a displayable string. The API sends a number (rupees), but older
+  /// responses may carry a string. Returns null when the API omits the field.
+  static String? _amountInr(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toStringAsFixed(value % 1 == 0 ? 0 : 2);
+    return value.toString();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -182,7 +191,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
         body: {'otp': _otp},
       );
 
-      final amount = body is Map ? (body['amount_inr'] as String?) : null;
+      final amount = body is Map ? _amountInr(body['amount_inr']) : null;
       final reconciliationRequired =
           body is Map && body['reconciliation_required'] == true;
       if (reconciliationRequired) {

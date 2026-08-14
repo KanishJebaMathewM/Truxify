@@ -23,6 +23,9 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     if (pickupLat == null || pickupLng == null) {
       return 1.0;
     }
+    if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+      return 1.0;
+    }
 
     const apiKey = process.env.TOMTOM_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
 

@@ -80,11 +80,15 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         address _driver,
         uint8 _stars,
         bytes32 _nullifierHash,
-        bytes32 _zkProof
+        Proof memory proof
     ) external {
         require(_stars >= 1 && _stars <= 5, "Invalid rating stars (1-5)");
         require(!usedNullifiers[_nullifierHash], "Nullifier already used for trip rating");
-        require(_zkProof != bytes32(0), "Invalid ZK proof");
+        require(proof.input.length >= 3, "Invalid proof public inputs length");
+        require(proof.input[0] == uint256(_nullifierHash), "Nullifier mismatch in proof input");
+        require(proof.input[1] == uint256(uint160(_driver)), "Driver mismatch in proof input");
+        require(proof.input[2] == _stars, "Stars mismatch in proof input");
+        require(IVerifier(verifier).verifyProof(proof.a, proof.b, proof.c, proof.input), "Invalid ZK proof");
 
         usedNullifiers[_nullifierHash] = true;
         driverRatings[_driver].totalStars += _stars;

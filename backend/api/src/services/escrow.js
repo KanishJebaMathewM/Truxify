@@ -401,8 +401,8 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     const network = await escrowContract.runner.provider.getNetwork()
     const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
     const commitment = ethers.solidityPackedKeccak256(
-      ['uint256', 'address', 'address', 'uint256', 'uint256'],
-      [network.chainId, contractAddress, customerWalletAddress, bookingId, nonce]
+      ['uint256', 'address', 'address', 'uint256', 'address', 'uint256', 'uint256'],
+      [network.chainId, contractAddress, customerWalletAddress, bookingId, driverWalletAddress, amountWei, nonce]
     )
     const signature = await relayerWallet.signMessage(ethers.getBytes(commitment))
 

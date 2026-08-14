@@ -241,6 +241,31 @@ describe('processEscrowWebhookEvent — idempotency (crash-after-side-effect / d
     expect(updatePayloads().filter(p => p.escrow_status === 'refunded')).toHaveLength(0);
   });
 
+  it('reconciles the wallet ledger exactly once for a duplicate release (no infinite DLQ re-entry, #12154)', async () => {
+    // Released-before-reconcile ordering: a release Webhook re-delivered after
+    // the order is already 'released' must NOT re-apply the order effect and
+    // must NOT issue a second wallet credit, otherwise the reconciliation loop
+    // re-selects the released order forever.
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD8',
+      driver_id: 'driver-8',
+      escrow_status: 'released',
+      release_tx_hash: '0xabc',
+      refund_tx_hash: null,
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: '0xabc' })
+    ).resolves.toEqual({ received: true });
+
+    // Exactly one wallet ledger confirm, and never a second 'released' write.
+    const walletConfirms = updatePayloads().filter(p => p.status === 'confirmed');
+    expect(walletConfirms).toHaveLength(1);
+    expect(updatePayloads().filter(p => p.escrow_status === 'released')).toHaveLength(0);
+  });
+
   it('ignores a duplicate WithdrawalReady when the order is already released', async () => {
     const order = {
       id: 'order-uuid',

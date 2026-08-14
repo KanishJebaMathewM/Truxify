@@ -13,11 +13,13 @@ spec:
   - port: 443
     targetPort: 5000
     name: https
-  - port: 80
-    targetPort: 5000
-    name: http
+  # Only the API tier is reachable through the public edge. A broad selector
+  # (app: truxify) would also route internet traffic to ml/redis/shard pods,
+  # and the removed port 80 listener previously served plaintext HTTP
+  # straight to the API, bypassing the nginx edge (TLS, rate-limit, HSTS).
   selector:
     app: truxify
+    component: api
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -29,6 +31,8 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # The edge LB now only exposes TLS; speak HTTPS to it.
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
 spec:
   ingressClassName: nginx
   tls:
@@ -46,4 +50,4 @@ spec:
           service:
             name: global-lb
             port:
-              number: 80
+              number: 443

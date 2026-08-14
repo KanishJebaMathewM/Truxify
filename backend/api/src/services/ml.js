@@ -92,7 +92,7 @@ async function handleResponse(response, url = '', method = 'GET') {
         throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
+        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
     }
 
     try {

@@ -324,6 +324,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             booking.status == BookingStatus.Active,
             "TruxifyEscrow: Booking not active"
         );
+        require(booking.started, "TruxifyEscrow: Trip not started");
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to release");
 

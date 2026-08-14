@@ -277,10 +277,7 @@ export const earningsSummarySchema = z.object({
   period: z.enum(['weekly', 'monthly']).optional(),
 }).strict();
 
-export const updateDocumentStatusSchema = z.object({
-  status: z.enum(['Approved', 'Rejected', 'Pending']),
-  rejection_reason: z.string().optional()
-});
+
 
 export const syncWeightSchema = z.object({
   truck_id: z.string().min(1, "Truck ID is required"),
@@ -294,11 +291,7 @@ export const syncWeightSchema = z.object({
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
 
-export const otpSendSchema = z.object({
-  phone: z.string().trim().min(10).max(20).refine(isValidPhone, {
-    message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)',
-  }),
-}).strict();
+
 
 export const registerTruckSchema = z.object({
   name: z.string()

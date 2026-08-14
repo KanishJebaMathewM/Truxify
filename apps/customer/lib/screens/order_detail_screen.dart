@@ -174,7 +174,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
           final parsedTimeline = timelineList.map((step) {
             final completed = step['completed'] == true;
-            final updatedAt = step['updated_at']?.toString() ?? '';
+            final updatedAt = step['milestone_time']?.toString() ?? '';
             String timeStr = '';
             if (updatedAt.isNotEmpty) {
               final parsedDate = DateTime.tryParse(updatedAt);

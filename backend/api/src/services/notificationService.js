@@ -66,6 +66,18 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY = 500;
 const RETRY_MAX_DELAY = 5000;
 
+const REDIS_NOTIF_CHANNEL = 'truxify:notifications';
+async function publishNotificationEvent(userId, event) {
+  const { redisClient } = await import('../config/db.js');
+  if (!redisClient) return;
+  try {
+    const payload = JSON.stringify({ userId, event, timestamp: new Date().toISOString() });
+    await redisClient.publish(REDIS_NOTIF_CHANNEL, payload);
+  } catch (err) {
+    logger.error({ event: 'REDIS_NOTIF_PUBLISH_ERROR', userId, err: err?.message }, '[NotificationService] Failed to publish notification event to Redis');
+  }
+}
+
 function calculateRetryBackoff(attempt) {
   const delay = Math.min(RETRY_BASE_DELAY * Math.pow(2, attempt), RETRY_MAX_DELAY);
   return delay + Math.floor(Math.random() * 200);

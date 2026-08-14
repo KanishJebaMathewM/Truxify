@@ -77,7 +77,7 @@ export const loadCredential = async (req, res, next) => {
 
         throw new AppError('Failed to issue credential', 500);
     } catch (error) {
-        logger.error('Error in loadCredential:', error);
+        logger.error({ err: error }, 'Error in loadCredential');
         next(error);
     }
 };
@@ -146,7 +146,7 @@ export const handshake = async (req, res, next) => {
             convoy: complianceStatus
         });
     } catch (error) {
-        logger.error('Error in handshake:', error);
+        logger.error({ err: error }, 'Error in handshake');
         next(error);
     }
 };

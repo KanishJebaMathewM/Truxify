@@ -136,6 +136,57 @@ describe('escrowFundingReconciliation', () => {
       );
     });
 
+    it('heals a funded deposit to escrow_status "funded" so it is not re-selected (regression #12152)', async () => {
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
+
+      const healedOrder = {
+        id: 'order-heal',
+        order_display_id: 'DIS-HEAL',
+        escrow_status: 'funding',
+        escrow_booking_id: 'booking-heal',
+        escrow_amount_wei: '1000000000000000000',
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        customer_id: 'cust-1',
+        pending_bid_acceptance: {
+          bid_id: 'bid-1',
+          load_id: 'load-1',
+          driver_id: 'driver-1',
+          truck_id: 'truck-1',
+          driver_name: 'D',
+          driver_rating: 5,
+          truck_number: 'TN',
+          bid_amount: 100,
+          order_display_id: 'DIS-HEAL',
+          version: 1,
+        },
+      };
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [healedOrder], error: null });
+
+      const { getEscrowBooking } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+      mockOrderRepository.executeRpc.mockResolvedValueOnce({ error: null });
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValueOnce({ error: null });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(mockOrderRepository.executeRpc).toHaveBeenCalledWith(
+        'accept_bid_tx',
+        expect.objectContaining({ p_order_id: 'order-heal' }),
+        expect.any(Object)
+      );
+      // The heal path MUST transition the order to 'funded' (scoped to its
+      // current 'funding' status) so the next sweep no longer sees it as stale.
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalledWith(
+        'order-heal',
+        expect.objectContaining({ escrow_status: 'funded', escrow_funding_error: null }),
+        [{ op: 'eq', column: 'escrow_status', value: 'funding' }],
+        'id'
+      );
+    });
+
     it('pages through the stale set in bounded chunks until a short page', async () => {
       const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
       acquireLock.mockResolvedValueOnce('lock-value');

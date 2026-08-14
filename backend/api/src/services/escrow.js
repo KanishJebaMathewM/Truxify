@@ -49,7 +49,7 @@ import { supabaseAdmin } from '../config/db.js'
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
-  'function commitmentNonces(address customer) external view returns (uint256)',
+  'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
@@ -399,7 +399,7 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     // rejects createBooking, so a third party cannot front-run the slot
     // (issue #7734).
     const network = await escrowContract.runner.provider.getNetwork()
-    const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
+    const nonce = await escrowContract.commitmentNonces(customerWalletAddress, bookingId)
     const commitment = ethers.solidityPackedKeccak256(
       ['uint256', 'address', 'address', 'uint256', 'address', 'uint256', 'uint256'],
       [network.chainId, contractAddress, customerWalletAddress, bookingId, driverWalletAddress, amountWei, nonce]

@@ -50,11 +50,15 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
 
-    // Backend-issued commitment nonce per customer wallet. A valid createBooking
-    // requires an owner-signed EIP-191 commitment over (chain, this, customer,
-    // bookingId, nonce). The nonce is burned on success so a commitment cannot
-    // be replayed by anyone who observes a submitted deposit transaction.
-    mapping(address => uint256) public commitmentNonces;
+    // Backend-issued commitment nonce, tracked PER (customer, bookingId). A
+    // valid createBooking requires an owner-signed EIP-191 commitment over
+    // (chain, this, customer, bookingId, driver, amount, nonce). Tracking the
+    // nonce per bookingId means a customer funding several distinct bookings in
+    // quick succession each carries a distinct, currently-valid nonce — reading
+    // the nonce once no longer bricks concurrent deposits (issue #13119). The
+    // nonce is burned on success so a commitment cannot be replayed after a slot
+    // is reused (e.g. cancel + recreate the same bookingId).
+    mapping(address => mapping(uint256 => uint256)) public commitmentNonces;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
     uint256 public constant DISPUTE_TIMEOUT = 7 days;
     address public trustedRelayer;
@@ -143,7 +147,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev Verify the owner's EIP-191 signature over the create commitment:
      *      keccak256(chainId, this, customer, bookingId, driver, amount,
-     *      commitmentNonces[customer]). Pinning driver and amount prevents a
+     *      commitmentNonces[customer][bookingId]). Pinning driver and amount
      *      customer from reusing a valid commitment to create a booking whose
      *      driver/amount diverge from what the backend authorised (issue #11393).
      *      Only the contract owner (the backend relayer) can authorise a slot.
@@ -165,7 +169,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
                 bookingId,
                 driver,
                 amount,
-                commitmentNonces[customer]
+                commitmentNonces[customer][bookingId]
             )
         );
         bytes32 signedHash = keccak256(
@@ -225,7 +229,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         );
 
         // Burn the nonce so the same commitment can never be replayed.
-        commitmentNonces[msg.sender]++;
+        commitmentNonces[msg.sender][bookingId]++;
 
         bookings[bookingId] = Booking({
             customer:  payable(msg.sender),

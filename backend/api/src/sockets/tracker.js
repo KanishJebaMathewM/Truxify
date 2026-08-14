@@ -1003,7 +1003,7 @@ export async function handleLocationPing(ws, data, req) {
     driverId: driver_id,
     timestamp: device_timestamp ? Date.parse(device_timestamp) || Date.now() : Date.now(),
     speed: typeof speed === 'number' ? speed : undefined,
-    heading: typeof bearing === 'number' ? bearing : undefined,
+    bearing: typeof bearing === 'number' ? bearing : undefined,
   };
 
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);

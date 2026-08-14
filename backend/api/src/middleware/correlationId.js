@@ -32,3 +32,19 @@ export function correlationIdMiddleware(req, res, next) {
   const store = { correlationId };
   correlationContext.run(store, next);
 }
+
+/**
+ * Run a function inside a correlation-id context, exposing the id to any
+ * nested getCorrelationStore()/correlationContext.getStore() callers.
+ */
+export function runWithCorrelationId(correlationId, fn) {
+  return correlationContext.run({ correlationId }, fn);
+}
+
+/**
+ * Return the correlation store for the current execution context, or an empty
+ * object when no correlation id has been set.
+ */
+export function getCorrelationStore() {
+  return correlationContext.getStore() ?? {};
+}

@@ -368,7 +368,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       if (order != null) {
         await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
         if (order['id'] != null) {
-          _subscribeToSupabaseRealtime(order['id'] as String);
+          _subscribeToSupabaseRealtime(order['id']?.toString() ?? '');
           _fetchInitialDriverLocation();
         }
       }

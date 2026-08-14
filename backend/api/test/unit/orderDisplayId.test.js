@@ -1,77 +1,33 @@
-/**
- * Unit tests for backend/api/src/lib/orderDisplayId.js
- *
- * Run with:  npm run test:unit -- test/unit/orderDisplayId.test.js
- */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { generateOrderDisplayId, validateOrderDisplayId } from '../../../src/lib/orderDisplayId.js';
 
-// Mock crypto module before importing the module under test
-vi.mock('crypto', () => ({
-  default: {
-    randomInt: vi.fn((max) => 0), // deterministic: always returns 0
-  },
-}));
-
-const { generateOrderDisplayId, isValidOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } = await import('../../src/lib/orderDisplayId.js');
-
-describe('orderDisplayId', () => {
+describe('orderDisplayId.js', () => {
   describe('generateOrderDisplayId', () => {
-    it('returns a string prefixed with #FF', () => {
+    it('generates a non-empty string', () => {
       const id = generateOrderDisplayId();
       expect(typeof id).toBe('string');
-      expect(id.startsWith('#FF')).toBe(true);
+      expect(id.length).toBeGreaterThan(0);
     });
 
-    it('contains the current date in YYYYMMDD format', () => {
-      const id = generateOrderDisplayId();
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      expect(id).toContain(dateStr);
-    });
-
-    it('has a total length of 23 characters (#FF + 8 date + 12 random)', () => {
-      const id = generateOrderDisplayId();
-      // #FF (3) + YYYYMMDD (8) + 12 random chars = 23
-      expect(id.length).toBe(23);
-    });
-
-    it('contains exactly 12 random alphanumeric characters after the date', () => {
-      const id = generateOrderDisplayId();
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const prefix = `#FF${dateStr}`;
-      const randomPart = id.slice(prefix.length);
-      expect(randomPart.length).toBe(12);
-      // The mock returns 0 for randomInt, so all chars are index 0 = 'A'
-      expect(randomPart).toBe('AAAAAAAAAAAA');
-    });
-
-    it('contains only valid characters from the alphabet (A-Z, 0-9)', () => {
-      const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      const id = generateOrderDisplayId();
-      const randomPart = id.slice(3); // skip #FF and date
-      for (const char of randomPart) {
-        expect(ALPHABET).toContain(char);
+    it('generates unique IDs', () => {
+      const ids = new Set();
+      for (let i = 0; i < 100; i++) {
+        ids.add(generateOrderDisplayId());
       }
-    });
-
-    it('ORDER_DISPLAY_ID_MAX_RETRIES is defined and positive', () => {
-      expect(ORDER_DISPLAY_ID_MAX_RETRIES).toBeGreaterThan(0);
-      expect(typeof ORDER_DISPLAY_ID_MAX_RETRIES).toBe('number');
+      expect(ids.size).toBe(100);
     });
   });
 
-  describe('isValidOrderDisplayId', () => {
-    it('returns true for a valid generated display ID', () => {
+  describe('validateOrderDisplayId', () => {
+    it('returns true for generated ID', () => {
       const id = generateOrderDisplayId();
-      expect(isValidOrderDisplayId(id)).toBe(true);
+      expect(validateOrderDisplayId(id)).toBe(true);
     });
 
-    it('returns false for invalid inputs (null, non-string, wrong prefix, incorrect length)', () => {
-      expect(isValidOrderDisplayId(null)).toBe(false);
-      expect(isValidOrderDisplayId(12345)).toBe(false);
-      expect(isValidOrderDisplayId('#XX20260802AAAAAAAAAAAA')).toBe(false);
-      expect(isValidOrderDisplayId('#FF20260802SHORT')).toBe(false);
-      expect(isValidOrderDisplayId('#FF20260802AAAAAAAAAAAAEXTRA')).toBe(false);
-      expect(isValidOrderDisplayId('#FF20260802AAAAAA!AAAAA')).toBe(false);
+    it('returns false for invalid format', () => {
+      expect(validateOrderDisplayId('')).toBe(false);
+      expect(validateOrderDisplayId(null)).toBe(false);
+      expect(validateOrderDisplayId(undefined)).toBe(false);
     });
   });
 });

@@ -13,8 +13,8 @@ struct {
     __type(value, __u64); // Entry timestamp nanoseconds
 } enter_timestamp_map SEC(".maps");
 
-SEC("kprobe/sys_enter_epoll_wait")
-int kprobe_sys_enter_epoll_wait(struct pt_regs *ctx) {
+SEC("tracepoint/syscalls/sys_enter_epoll_wait")
+int kprobe_sys_enter_epoll_wait(struct trace_event_raw_sys_enter *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     __u64 ts = bpf_ktime_get_ns();
@@ -23,8 +23,8 @@ int kprobe_sys_enter_epoll_wait(struct pt_regs *ctx) {
     return 0;
 }
 
-SEC("kretprobe/sys_exit_epoll_wait")
-int kretprobe_sys_exit_epoll_wait(struct pt_regs *ctx) {
+SEC("tracepoint/syscalls/sys_exit_epoll_wait")
+int kretprobe_sys_exit_epoll_wait(struct trace_event_raw_sys_exit *ctx) {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     __u32 pid = pid_tgid >> 32;
     __u64 exit_ts = bpf_ktime_get_ns();

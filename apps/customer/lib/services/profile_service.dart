@@ -21,7 +21,8 @@ class ProfileService {
     try {
       final decoded = jsonDecode(cached);
       if (decoded is Map<String, dynamic>) return decoded;
-    } catch (_) {
+    } catch (e) {
+      developer.log('Discarding corrupt cached profile: $e');
       // Invalid cache entries are cleared so future fallbacks do not crash.
     }
     await _secureStorage.delete(key: _profileCacheKey);
@@ -89,14 +90,19 @@ class ProfileService {
     );
   }
 
-  Future<void> logout() async {
+  /// Logs the user out of the backend and locally. Returns `false` if the
+  /// backend logout call failed, so callers can decide whether to keep the
+  /// user signed in (issue #12531).
+  Future<bool> logout() async {
     final userId = FirebaseAuth.instance.currentUser?.uid ?? SupabaseService.client.auth.currentUser?.id;
 
+    var backendOk = true;
     if (userId != null) {
       try {
         await _apiClient.post('/api/auth/logout');
       } catch (e) {
         developer.log('Backend logout failed: $e');
+        backendOk = false;
       }
     }
 
@@ -117,6 +123,8 @@ class ProfileService {
       _safeSignOut(() => FirebaseAuth.instance.signOut(), 'Firebase'),
       _safeSignOut(() => SupabaseService.client.auth.signOut(), 'Supabase'),
     ]);
+
+    return backendOk;
   }
 
   Future<void> _safeSignOut(

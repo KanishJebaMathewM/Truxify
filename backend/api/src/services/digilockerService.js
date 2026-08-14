@@ -96,7 +96,7 @@ class DigilockerService {
 
   async exchangeCode(code) {
     if (!this.isMock) {
-      if (!this.clientId || !this.clientSecret || !code) {
+      if (!this.clientId || !this.clientSecret || !code || !code.trim()) {
         logger.warn('[DigilockerService] DigiLocker integration missing credentials or code; refusing mock fallback');
         return { success: false, error: 'DigiLocker verification is not configured' };
       }
@@ -131,6 +131,10 @@ class DigilockerService {
   }
 
   async verifyDocuments(userId, accessToken) {
+    if (!accessToken) {
+      logger.warn('[DigilockerService] verifyDocuments called with null/undefined accessToken');
+      return { success: false, error: 'Access token is required', is_digilocker_verified: false };
+    }
     if (!this.isMock) {
       logger.warn('[DigilockerService] DigiLocker integration not configured; refusing auto-approval');
       return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };
@@ -295,6 +299,9 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
+      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+        logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
+      }
       let txHash = null;
 
       if (this.documentRegistry && walletAddress) {

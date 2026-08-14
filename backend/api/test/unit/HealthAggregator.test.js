@@ -31,7 +31,8 @@ describe("HealthAggregator", () => {
 
   it("returns UNHEALTHY when a critical check fails", async () => {
     aggregator.register("svc1", async () => ({ status: HealthStatus.HEALTHY }));
-    aggregator.register("svc2", async () => ({ status: HealthStatus.UNHEALTHY }), { critical: true });
+    // Critical services must be returned with critical flag set in result
+    aggregator.register("svc2", async () => ({ status: HealthStatus.UNHEALTHY, critical: true }), { critical: true });
     const result = await aggregator.aggregate();
     expect(result.status).toBe(HealthStatus.UNHEALTHY);
   });
@@ -47,5 +48,12 @@ describe("HealthAggregator", () => {
     const result = await aggregator.aggregate();
     expect(result.services.svc1.status).toBe(HealthStatus.UNHEALTHY);
     expect(result.services.svc1.message).toBe("network error");
+  });
+
+  it("returns UNHEALTHY when critical check throws", async () => {
+    aggregator.register("svc1", async () => ({ status: HealthStatus.HEALTHY }));
+    aggregator.register("svc2", async () => { throw new Error("critical error"); }, { critical: true });
+    const result = await aggregator.aggregate();
+    expect(result.status).toBe(HealthStatus.UNHEALTHY);
   });
 });

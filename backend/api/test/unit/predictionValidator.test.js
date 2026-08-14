@@ -225,3 +225,31 @@ describe('predictionValidator', () => {
     });
   });
 });
+
+describe('predictionValidator - additional edge cases', () => {
+  it('rejects predictedPrice above MAX_PRICE_INR', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 600000,
+      currency: 'INR',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.ABOVE_MAX);
+  });
+
+  it('rejects predictedPrice below MIN_PRICE_INR', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 50,
+      currency: 'INR',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.BELOW_MIN);
+  });
+
+  it('rejects missing currency', () => {
+    const result = validatePricePrediction({
+      predictedPrice: 5000,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe(RejectionReason.INVALID_CURRENCY);
+  });
+});

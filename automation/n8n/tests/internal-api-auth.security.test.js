@@ -27,6 +27,7 @@ const HTTP_TYPE = "n8n-nodes-base.httpRequest";
 const INTERNAL_PREFIX = "/api/internal";
 const EXPECTED_CREDENTIAL = "Truxify Internal API Key";
 
+/** @returns {{file: string, workflow: object}[]} every workflow JSON in the repo. */
 function loadWorkflows() {
   return fs
     .readdirSync(WORKFLOW_DIR)
@@ -50,6 +51,14 @@ function internalApiNodes() {
 }
 
 let failures = 0;
+
+/**
+ * Runs one assertion block, recording rather than throwing on failure so a
+ * single run reports every violation instead of stopping at the first.
+ *
+ * @param {string} title
+ * @param {() => void} fn
+ */
 function test(title, fn) {
   try {
     fn();

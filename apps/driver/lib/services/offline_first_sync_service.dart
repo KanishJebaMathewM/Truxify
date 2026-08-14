@@ -33,6 +33,14 @@ class OfflineFirstSyncService {
   static const String statePending = 'pending';
   static const String stateDeadLetter = 'dead_letter';
 
+  /// Outcome of a single sync attempt.
+  /// - [success]: delivered (2xx / idempotent 409 / 208) — drop the row.
+  /// - [retriable]: transient (401/429/5xx/network) — retry, dead-letter only
+  ///   after [maxRetries].
+  /// - [permanent]: non-retryable 4xx (validation/404) — dead-letter now.
+  /// - [unauthorized]: internal marker for a 401, handled by token refresh.
+  enum _SyncOutcome { success, retriable, permanent, unauthorized }
+
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<List<OfflineSyncEvent>> get databaseStream => _dbController.stream;
 
@@ -214,45 +222,74 @@ class OfflineFirstSyncService {
     }
   }
 
-  Future<bool> _syncSingleEvent(OfflineSyncEvent event) async {
+  Future<_SyncOutcome> _syncSingleEvent(OfflineSyncEvent event) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
-      final token = await user.getIdToken();
+      if (user == null) return _SyncOutcome.retriable;
 
-      final tripId = event.payload['trip_id'];
-
-      final requestBody = {
-        'idempotencyKey': event.eventId,
-        'events': [
-          {
-            'id': event.eventId,
-            'type': event.eventType,
-            'trip_id': tripId,
-            'payload': event.payload,
-            'occurred_at': event.queuedAt.toUtc().toIso8601String(),
-          },
-        ],
-      };
-
-      // POST /api/v1/trips/events/batch — the same endpoint SyncEngine.attemptSync
-      // uses. Only a real 2xx response counts as success so the local queue is
-      // never marked synced (and never dropped) without reaching the backend.
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/api/v1/trips/events/batch'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(requestBody),
-      );
-
-      return response.statusCode == 200 || response.statusCode == 202;
+      _SyncOutcome outcome = await _postEvent(event, user, false);
+      if (outcome == _SyncOutcome.unauthorized) {
+        // 401: the session token merely expired. Force-refresh it (as the
+        // customer SyncEngine does) and retry the request exactly once.
+        outcome = await _postEvent(event, user, true);
+        if (outcome == _SyncOutcome.unauthorized) {
+          outcome = _SyncOutcome.retriable;
+        }
+      }
+      return outcome;
     } catch (e) {
       debugPrint('[OfflineFirstSyncService] Sync failed for event '
           '${event.eventId} (${event.eventType}): $e');
-      return false;
+      return _SyncOutcome.retriable;
     }
+  }
+
+  Future<_SyncOutcome> _postEvent(
+    OfflineSyncEvent event,
+    User user,
+    bool forceRefresh,
+  ) async {
+    final token = await user.getIdToken(forceRefresh);
+
+    final tripId = event.payload['trip_id'];
+
+    final requestBody = {
+      'idempotencyKey': event.eventId,
+      'events': [
+        {
+          'id': event.eventId,
+          'type': event.eventType,
+          'trip_id': tripId,
+          'payload': event.payload,
+          'occurred_at': event.queuedAt.toUtc().toIso8601String(),
+        },
+      ],
+    };
+
+    // POST /api/v1/trips/events/batch — the same endpoint SyncEngine.attemptSync
+    // uses. Carries idempotencyKey=event.eventId, so the server returns 409
+    // (already present) for a replay; that must count as delivered.
+    final response = await http.post(
+      Uri.parse('$_apiBaseUrl/api/v1/trips/events/batch'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(requestBody),
+    );
+
+    final code = response.statusCode;
+    if (code == 200 || code == 202 || code == 208 || code == 409) {
+      return _SyncOutcome.success;
+    }
+    if (code == 401) {
+      return _SyncOutcome.unauthorized;
+    }
+    if (code == 429 || (code >= 500 && code <= 599)) {
+      return _SyncOutcome.retriable;
+    }
+    // Any other 4xx (validation/404/etc.) is non-retryable.
+    return _SyncOutcome.permanent;
   }
 
   /// Runs at most one sync pass at a time, coalescing triggers that arrive
@@ -324,13 +361,14 @@ class OfflineFirstSyncService {
 
       for (int j = 0; j < parsed.length; j++) {
         final entry = parsed[j];
-        if (results[j]) {
-          // Successfully synced: remove the row so the local store does not
-          // grow without bound (is_synced alone kept every historical row).
+        final outcome = results[j];
+        if (outcome == _SyncOutcome.success) {
+          // Successfully synced (incl. idempotent 409/208 replay): remove the
+          // row so the local store does not grow without bound.
           await db.delete('sync_events', where: 'event_id = ?', whereArgs: [entry.eventId]);
-        } else if (entry.retryCount + 1 >= maxRetries) {
-          // Retry ceiling reached: dead-letter the event so it is never
-          // re-POSTed on every connectivity change forever.
+        } else if (outcome == _SyncOutcome.permanent) {
+          // Non-retryable 4xx: dead-letter immediately rather than burning
+          // retries on a request the server will never accept.
           await db.update(
             'sync_events',
             {'state': stateDeadLetter},
@@ -338,12 +376,23 @@ class OfflineFirstSyncService {
             whereArgs: [entry.eventId],
           );
         } else {
-          await db.update(
-            'sync_events',
-            {'retry_count': entry.retryCount + 1},
-            where: 'event_id = ?',
-            whereArgs: [entry.eventId],
-          );
+          // Retriable (401/429/5xx/network): keep retrying, dead-letter only
+          // once the retry ceiling is reached.
+          if (entry.retryCount + 1 >= maxRetries) {
+            await db.update(
+              'sync_events',
+              {'state': stateDeadLetter},
+              where: 'event_id = ?',
+              whereArgs: [entry.eventId],
+            );
+          } else {
+            await db.update(
+              'sync_events',
+              {'retry_count': entry.retryCount + 1},
+              where: 'event_id = ?',
+              whereArgs: [entry.eventId],
+            );
+          }
         }
       }
     }

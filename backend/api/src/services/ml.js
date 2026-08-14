@@ -739,6 +739,7 @@ export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
+  parseWeightKg,
 };
 
 class MLService {

@@ -15,7 +15,11 @@ spec:
     spec:
       containers:
       - name: api
-        image: truxify/api:latest
+<<<<<<< HEAD
+        image: truxify/api:1.0.0
+=======
+        image: ghcr.io/kanishjebamathewm/truxify-api:1.0.0
+>>>>>>> upstream/main
   strategy:
     canary:
       steps:

@@ -12,6 +12,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: null,
   firebaseAdmin: null,
   get redisClient() { return null; },
   mongoDb: null,

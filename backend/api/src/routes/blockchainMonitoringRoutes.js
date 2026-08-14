@@ -1,8 +1,22 @@
 import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import logger from '../middleware/logger.js';
+import { supabase } from '../config/db.js';
+import { BlockchainMetrics, EscalationHandler } from '../services/blockchain/index.js';
 
 const router = express.Router();
+
+// Shared service instances. The handlers rely on these being present on the
+// request; nothing else attaches them, so wire them here instead of leaving
+// the endpoints dependent on request properties no middleware sets.
+const blockchainMetrics = new BlockchainMetrics();
+const escalationHandler = new EscalationHandler();
+
+router.use((req, _res, next) => {
+  req.blockchainMetrics = blockchainMetrics;
+  req.escalationHandler = escalationHandler;
+  next();
+});
 
 /**
  * Get current blockchain metrics
@@ -10,12 +24,8 @@ const router = express.Router();
  */
 router.get('/metrics', authenticate, requireRole(['admin', 'support']), async (req, res) => {
   try {
-    const { data: metrics, error } = await req.blockchainMetrics.getMetrics();
-
-    if (error) {
-      logger.error('Failed to fetch blockchain metrics:', error);
-      return res.status(500).json({ error: 'Failed to fetch metrics' });
-    }
+    // getMetrics() returns the metrics object directly (no { data, error }).
+    const metrics = req.blockchainMetrics.getMetrics();
 
     res.json({
       timestamp: new Date().toISOString(),
@@ -108,7 +118,7 @@ router.get('/events', authenticate, requireRole(['admin', 'support']), async (re
       return res.status(400).json({ error: 'Invalid severity level' });
     }
 
-    let query = req.supabase
+    let query = supabase
       .from('blockchain_monitoring_events')
       .select('*')
       .order('created_at', { ascending: false })
@@ -153,7 +163,7 @@ router.get('/escalations/:alertId', authenticate, requireRole(['admin', 'support
       return res.status(400).json({ error: 'Invalid alert ID format' });
     }
 
-    const { data: escalation, error } = await req.supabase
+    const { data: escalation, error } = await supabase
       .from('blockchain_escalations')
       .select('*')
       .eq('alert_id', alertId)

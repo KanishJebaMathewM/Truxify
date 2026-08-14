@@ -62,16 +62,17 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
 
     const result = await processVoiceQuery(req.user.id, bookingId, file.buffer, safeFilename);
     
-    // Prefix the audio_url with host if relative path
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const host = req.headers.host;
+    // Prefix the audio_url with host if relative path.
+    // SECURITY: when PUBLIC_BASE_URL is not set, fall back to a hardcoded default
+    // rather than req.headers.host, which is attacker-controlled.
     if (result.audio_url && result.audio_url.startsWith('/')) {
-      result.audio_url = `${protocol}://${host}${result.audio_url}`;
+      const baseUrl = process.env.PUBLIC_BASE_URL || 'https://truxify.app';
+      result.audio_url = `${baseUrl}${result.audio_url}`;
     }
     
     res.json(result);
   } catch (err) {
-    logger.error('Voice AI query failed:', err);
+    logger.error({ requestId: req.requestId, query: req.body?.query }, 'Voice AI query failed:', err);
     res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 });

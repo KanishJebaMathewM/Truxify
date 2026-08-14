@@ -50,6 +50,8 @@ class _VehicleHealthScreenState extends State<VehicleHealthScreen> {
                 _buildTelemetryRow('Engine Temp', data.engineTemperature != null ? '${data.engineTemperature!.toStringAsFixed(1)} °F' : 'N/A', (data.engineTemperature ?? 0) > 205 ? Colors.red : Colors.green),
                 _buildTelemetryRow('Oil Level', data.oilLevel != null ? '${data.oilLevel!.toStringAsFixed(1)} %' : 'N/A', Colors.blue),
                 _buildTelemetryRow('Tire Pressure', data.tirePressureAvg != null ? '${data.tirePressureAvg!.toStringAsFixed(1)} PSI' : 'N/A', Colors.green),
+                _buildTelemetryRow('DEF Urea Concentration', data.defUreaConcentration != null ? '${data.defUreaConcentration!.toStringAsFixed(1)} %' : 'N/A', (data.defUreaConcentration ?? 32.5) < 30.0 ? Colors.red : Colors.green),
+                _buildTelemetryRow('NOx Level', data.noxLevel != null ? '${data.noxLevel!.toStringAsFixed(1)} ppm' : 'N/A', Colors.orange),
                 const SizedBox(height: 20),
                 if (data.warnings.isNotEmpty) ...[
                   const Text(

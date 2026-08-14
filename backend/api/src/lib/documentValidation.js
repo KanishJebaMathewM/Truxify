@@ -38,6 +38,7 @@ function matchesSignature(buffer, signature) {
  * regardless of what extension or Content-Type the client supplied.
  */
 export function detectDocumentMimeType(buffer) {
+  // Guard: null, undefined, or non-buffer input returns null gracefully
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return null;
   }
@@ -52,6 +53,9 @@ export function detectDocumentMimeType(buffer) {
  * message on failure; returns the verified MIME type on success.
  */
 export function validateDocumentBuffer(buffer, declaredMimeType) {
+  if (buffer == null) {
+    throw new DocumentValidationError('Document buffer is null or undefined.');
+  }
   const detected = detectDocumentMimeType(buffer);
 
   if (!detected || !ALLOWED_DOCUMENT_MIME_TYPES.includes(detected)) {
@@ -75,3 +79,22 @@ export class DocumentValidationError extends Error {
     this.name = 'DocumentValidationError';
   }
 }
+
+
+// === Spec 7: ===
+// === Spec 7: strict MIME signature validation ===
+const SIGS = {
+  'image/png': [0x89, 0x50, 0x4E, 0x47],
+  'image/jpeg': [0xFF, 0xD8, 0xFF],
+  'application/pdf': [0x25, 0x50, 0x44, 0x46],
+  'image/gif': [0x47, 0x49, 0x46, 0x38],
+};
+export function matchesMimeSignature(buffer, mimeType) {
+  // Guard: null/non-buffer input returns false safely
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+  const exp = SIGS[mimeType];
+  if (!exp) return true;
+  for (let i = 0; i < exp.length; i++) if (buffer[i] !== exp[i]) return false;
+  return true;
+}
+

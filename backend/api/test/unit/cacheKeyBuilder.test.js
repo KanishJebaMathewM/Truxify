@@ -1,12 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CacheKeyBuilder } from '../../src/cache/CacheKeyBuilder.js';
 import { CacheNamespace } from '../../src/cache/CacheNamespace.js';
+
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
 
 describe('CacheKeyBuilder', () => {
   beforeEach(() => {
     CacheNamespace.clear();
     CacheNamespace.register('profile', { defaultTtl: 900 });
     CacheNamespace.register('order', { defaultTtl: 300 });
+  });
+
+  afterEach(() => {
+    CacheKeyBuilder._setRedisClient(null);
   });
 
   describe('build()', () => {
@@ -48,40 +57,110 @@ describe('CacheKeyBuilder', () => {
   });
 
   describe('buildVersioned()', () => {
-    it('includes version v1 by default', () => {
-      const key = CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+    it('includes version v1 by default', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
       expect(key).toBe('profile:v1:sb:abc123');
     });
 
-    it('uses custom version when provided', () => {
-      const key = CacheKeyBuilder.buildVersioned('profile', 'sb:abc123', undefined, 5);
+    it('uses custom version when provided', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123', undefined, 5);
       expect(key).toBe('profile:v5:sb:abc123');
     });
 
-    it('uses custom prefix with version', () => {
+    it('uses custom prefix with version', async () => {
       CacheNamespace.register('custom', { prefix: 'c:v2' });
-      const key = CacheKeyBuilder.buildVersioned('custom', 'entity-1', undefined, 3);
+      const key = await CacheKeyBuilder.buildVersioned('custom', 'entity-1', undefined, 3);
       expect(key).toBe('c:v2:v3:entity-1');
     });
 
-    it('appends subKey after entityId', () => {
-      const key = CacheKeyBuilder.buildVersioned('order', 'order-42', 'items', 2);
+    it('appends subKey after entityId', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('order', 'order-42', 'items', 2);
       expect(key).toBe('order:v2:order-42:items');
     });
 
-    it('defaults to v1 for unknown namespace', () => {
-      const key = CacheKeyBuilder.buildVersioned('unknown', 'id-1');
+    it('defaults to v1 for unknown namespace', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('unknown', 'id-1');
       expect(key).toBe('unknown:v1:id-1');
     });
 
-    it('uses version 0 when explicitly passed', () => {
-      const key = CacheKeyBuilder.buildVersioned('profile', 'id-1', undefined, 0);
+    it('uses version 0 when explicitly passed', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'id-1', undefined, 0);
       expect(key).toBe('profile:v0:id-1');
     });
 
-    it('handles subKey without explicit version', () => {
-      const key = CacheKeyBuilder.buildVersioned('profile', 'sb:abc123', 'driver');
+    it('handles subKey without explicit version', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123', 'driver');
       expect(key).toBe('profile:v1:sb:abc123:driver');
+    });
+
+    it('reads the live version from Redis and appends it to the key', async () => {
+      const mockClient = { get: vi.fn().mockResolvedValue('7') };
+      CacheKeyBuilder._setRedisClient(mockClient);
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(mockClient.get).toHaveBeenCalledWith('profile:version:sb:abc123');
+      expect(key).toBe('profile:v7:sb:abc123');
+    });
+
+    it('produces a different key after a version bump', async () => {
+      let version = 1;
+      const mockClient = {
+        get: vi.fn(() => Promise.resolve(String(version))),
+        incr: vi.fn(() => {
+          version += 1;
+          return Promise.resolve(version);
+        }),
+      };
+      CacheKeyBuilder._setRedisClient(mockClient);
+
+      const keyBefore = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(keyBefore).toBe('profile:v1:sb:abc123');
+
+      await mockClient.incr('profile:version:sb:abc123');
+
+      const keyAfter = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(keyAfter).toBe('profile:v2:sb:abc123');
+    });
+
+    it('respects a custom versionKey', async () => {
+      const mockClient = { get: vi.fn().mockResolvedValue('3') };
+      CacheKeyBuilder._setRedisClient(mockClient);
+      const key = await CacheKeyBuilder.buildVersioned(
+        'profile',
+        'sb:abc123',
+        undefined,
+        undefined,
+        { versionKey: 'cache:version:profile' }
+      );
+      expect(mockClient.get).toHaveBeenCalledWith('cache:version:profile');
+      expect(key).toBe('profile:v3:sb:abc123');
+    });
+
+    it('defaults to v1 when no Redis client is configured', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(key).toBe('profile:v1:sb:abc123');
+    });
+
+    it('falls back to v1 when the version read fails', async () => {
+      const mockClient = { get: vi.fn().mockRejectedValue(new Error('redis down')) };
+      CacheKeyBuilder._setRedisClient(mockClient);
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(key).toBe('profile:v1:sb:abc123');
+    });
+
+    it('falls back to v1 when the version read times out', async () => {
+      const mockClient = {
+        get: vi.fn(() => new Promise(() => {})),
+      };
+      CacheKeyBuilder._setRedisClient(mockClient);
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123', undefined, undefined, { timeoutMs: 20 });
+      expect(key).toBe('profile:v1:sb:abc123');
+    });
+
+    it('treats a non-numeric stored version as v1', async () => {
+      const mockClient = { get: vi.fn().mockResolvedValue('not-a-number') };
+      CacheKeyBuilder._setRedisClient(mockClient);
+      const key = await CacheKeyBuilder.buildVersioned('profile', 'sb:abc123');
+      expect(key).toBe('profile:v1:sb:abc123');
     });
   });
 
@@ -109,9 +188,17 @@ describe('CacheKeyBuilder', () => {
   });
 
   describe('pattern()', () => {
-    it('creates SCAN glob matching all versions for an entity', () => {
+    it('creates SCAN glob matching the unversioned keys build() writes', () => {
       const pat = CacheKeyBuilder.pattern('profile', 'sb:abc123');
-      expect(pat).toBe('profile:*:sb:abc123*');
+      expect(pat).toBe('profile:sb:abc123*');
+    });
+
+    it('pattern() matches the key produced by build() (round-trip)', () => {
+      const key = CacheKeyBuilder.build('profile', 'sb:abc123', 'stats');
+      const pat = CacheKeyBuilder.pattern('profile', 'sb:abc123');
+      const regex = globToRegExp(pat);
+      expect(regex.test(key)).toBe(true);
+      expect(regex.test(CacheKeyBuilder.build('profile', 'sb:abc123'))).toBe(true);
     });
 
     it('matches entire namespace when entityId is omitted', () => {
@@ -132,12 +219,12 @@ describe('CacheKeyBuilder', () => {
     it('uses custom prefix in pattern', () => {
       CacheNamespace.register('custom', { prefix: 'c:v2' });
       const pat = CacheKeyBuilder.pattern('custom', 'entity-1');
-      expect(pat).toBe('c:v2:*:entity-1*');
+      expect(pat).toBe('c:v2:entity-1*');
     });
 
     it('falls back for unknown namespace', () => {
       const pat = CacheKeyBuilder.pattern('unknown', 'id-1');
-      expect(pat).toBe('unknown:*:id-1*');
+      expect(pat).toBe('unknown:id-1*');
     });
 
     it('falls back for unknown namespace without entityId', () => {
@@ -243,8 +330,8 @@ describe('CacheKeyBuilder', () => {
       });
     });
 
-    it('round-trips buildVersioned output correctly', () => {
-      const key = CacheKeyBuilder.buildVersioned('order', 'order-42', 'items', 4);
+    it('round-trips buildVersioned output correctly', async () => {
+      const key = await CacheKeyBuilder.buildVersioned('order', 'order-42', 'items', 4);
       const parsed = CacheKeyBuilder.parse(key);
       expect(parsed).toEqual({
         namespace: 'order',

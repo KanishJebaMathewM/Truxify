@@ -1,16 +1,20 @@
 import axios from 'axios';
 import logger from '../middleware/logger.js';
 
+import { predictWorkZoneDelays, generateBypassWaypoint } from './workZoneService.js';
+
 /**
  * Optimizes the order of waypoints for a route using the OSRM Trip API.
+ * Integrates predictive work-zone delay logic to dynamically reroute.
  * @param {Object} start - { lat, lng, address }
  * @param {Object} end - { lat, lng, address }
  * @param {Array} waypoints - Array of { lat, lng, address }
- * @returns {Promise<Array>} The optimized array of waypoints
+ * @param {string} [departureDate] - YYYY-MM-DD
+ * @param {string} [departureTime] - HH:MM
+ * @returns {Promise<Array>} The optimized array of waypoints (including any bypass waypoints)
  */
-export async function optimizeWaypoints(start, end, waypoints) {
-  if (!waypoints || waypoints.length === 0) return [];
-  if (waypoints.length === 1) return waypoints; // Nothing to reorder
+export async function optimizeWaypoints(start, end, waypoints, departureDate, departureTime) {
+  let effectiveWaypoints = Array.isArray(waypoints) ? [...waypoints] : [];
 
   try {
     const normalizeCoordinatePoint = (point, label) => {
@@ -25,12 +29,34 @@ export async function optimizeWaypoints(start, end, waypoints) {
         throw new Error(`Invalid longitude for ${label}`);
       }
 
-      return { lat, lng };
+      return { lat, lng, address: point.address || 'Unknown' };
     };
 
     const normalizedStart = normalizeCoordinatePoint(start, 'start');
     const normalizedEnd = normalizeCoordinatePoint(end, 'end');
-    const normalizedWaypoints = waypoints.map((wp, index) =>
+    
+    // Check for predictive work-zone delays
+    if (departureDate && departureTime) {
+      const { hasSevereDelay, problematicPoint } = await predictWorkZoneDelays(
+        normalizedStart,
+        normalizedEnd,
+        effectiveWaypoints,
+        departureDate,
+        departureTime
+      );
+
+      if (hasSevereDelay && problematicPoint) {
+        const bypassWaypoint = generateBypassWaypoint(problematicPoint);
+        if (bypassWaypoint) {
+          effectiveWaypoints.push(bypassWaypoint);
+        }
+      }
+    }
+
+    if (effectiveWaypoints.length === 0) return [];
+    if (effectiveWaypoints.length === 1) return effectiveWaypoints; // Nothing to reorder (except if it was just the bypass)
+
+    const normalizedWaypoints = effectiveWaypoints.map((wp, index) =>
       normalizeCoordinatePoint(wp, `waypoint ${index + 1}`)
     );
 
@@ -50,35 +76,36 @@ export async function optimizeWaypoints(start, end, waypoints) {
     
     if (response.data.code !== 'Ok') {
       logger.warn(`OSRM Trip API failed with code: ${response.data.code}`);
-      return waypoints; // Fallback to original order
+      return effectiveWaypoints; // Fallback to original order
     }
 
     const waypointsResult = response.data.waypoints;
     if (!waypointsResult || waypointsResult.length === 0) {
-      return waypoints;
+      return effectiveWaypoints;
     }
 
     // OSRM returns waypoints in the order they were provided, but with a `waypoint_index` 
     // indicating their optimal position in the trip.
     // Index 0 is the start, Index N is the end.
     
-    const optimizedWaypoints = new Array(waypoints.length);
+    const optimizedWaypoints = new Array(effectiveWaypoints.length);
 
     // waypointsResult is in input order: [Start, WP1, WP2, ..., End].
     // Each waypoint's `waypoint_index` is its position in the optimized trip
-    // (0 = start, waypoints.length + 1 = end), so subtract 1 for the middle stops.
-    for (let i = 1; i <= waypoints.length; i++) {
+    // (0 = start, effectiveWaypoints.length + 1 = end), so subtract 1 for the middle stops.
+    for (let i = 1; i <= effectiveWaypoints.length; i++) {
       const osrmWp = waypointsResult[i];
       const optimizedIndex = osrmWp.waypoint_index - 1;
-      if (optimizedIndex >= 0 && optimizedIndex < waypoints.length) {
-        optimizedWaypoints[optimizedIndex] = waypoints[i - 1];
+      if (optimizedIndex >= 0 && optimizedIndex < effectiveWaypoints.length) {
+        optimizedWaypoints[optimizedIndex] = effectiveWaypoints[i - 1];
       }
     }
 
-    return optimizedWaypoints;
+    // Filter out any undefined slots just in case
+    return optimizedWaypoints.filter(Boolean);
   } catch (err) {
     logger.error('Failed to optimize route with OSRM:', err.message);
-    return waypoints; // Fallback to original order on failure
+    return effectiveWaypoints; // Fallback to original order on failure
   }
 }
 

@@ -37,6 +37,11 @@ async def process_voice(
         # Read audio
         if audio:
             audio_data = await audio.read()
+            if not audio_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Audio file cannot be empty"
+                    )
         else:
             raise HTTPException(status_code=400, detail="Audio data required")
         
@@ -86,6 +91,11 @@ async def transcribe_speech(
     """Transcribe speech with dialect support"""
     try:
         audio_data = await audio.read()
+        if not audio_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Audio file cannot be empty"
+                 )
         result = await voice_service.transcribe_speech(audio_data, language_code)
         return {
             'success': True,

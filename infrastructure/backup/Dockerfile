@@ -1,6 +1,6 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache bash postgresql-client mongodb-tools tar aws-cli
+RUN apk add --no-cache bash postgresql-client mongodb-tools tar aws-cli openssl coreutils
 
 COPY backup.sh /usr/local/bin/backup.sh
 RUN chmod +x /usr/local/bin/backup.sh

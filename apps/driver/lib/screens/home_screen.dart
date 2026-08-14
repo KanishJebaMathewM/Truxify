@@ -706,8 +706,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final trips = await _tripService.fetchTrips(status: 'active');
       if (trips.isNotEmpty) {
         final activeTrip = trips.first;
-        final tripId = activeTrip['trip_display_id'] as String;
-        final stops = await _tripService.fetchTripStops(tripId);
+        final tripId = activeTrip['trip_display_id'] as String? ?? '';
+        final stops = tripId.isNotEmpty
+            ? await _tripService.fetchTripStops(tripId)
+            : <Map<String, dynamic>>[];
         if (!mounted) return;
 
         final truckPlate = (activeTrip['truck_plate'] as String?) ?? '';

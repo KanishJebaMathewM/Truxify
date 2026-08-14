@@ -1292,12 +1292,7 @@ export async function handleLocationPing(ws, data, req) {
     });
     redisClient.publish(TRACKER_CHANNELS.LOCATION, pubSubMessage).catch((err) => {
       logger.error({ err }, '[Tracker] Redis publish error for location update');
-      if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-      if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
     });
-  } else {
-    if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-    if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
   }
 
   // Publish to Supabase Realtime channel driver-location:{orderId}

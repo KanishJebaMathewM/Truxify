@@ -658,9 +658,6 @@ app.get('/api/fraud/health', (req, res) => {
 // ============================================================================
 app.use('/api/zkp', zkpRoutes)
 
-// 🆕 BLOCKCHAIN MONITORING ROUTES
-app.use('/api/blockchain', blockchainMonitoringRoutes)
-
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
   res.json({

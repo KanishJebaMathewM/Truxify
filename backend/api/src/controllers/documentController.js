@@ -139,7 +139,7 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Check if driver already has an existing document record for this documentType
-    const { data: existingDoc, error: checkError } = await client
+    const { data: existingDocForUpdate, error: checkError } = await client
       .from('driver_documents')
       .select('id, storage_path')
       .eq('driver_id', driverId)
@@ -175,7 +175,7 @@ export async function uploadDriverDocument(req, res) {
     let record;
     let dbError;
 
-    if (existingDoc) {
+    if (existingDocForUpdate) {
       // Update existing record (Supersede)
       const { data: updatedRecord, error: updateErr } = await client
         .from('driver_documents')
@@ -185,7 +185,7 @@ export async function uploadDriverDocument(req, res) {
           status: 'pending_review',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existingDoc.id)
+        .eq('id', existingDocForUpdate.id)
         .select('id, document_type, status, created_at')
         .single();
 
@@ -226,16 +226,16 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Clean up old file from storage to prevent orphaned files
-    if (existingDoc?.storage_path) {
+    if (existingDocForUpdate?.storage_path) {
       await client.storage
         .from('driver-documents')
-        .remove([existingDoc.storage_path])
+        .remove([existingDocForUpdate.storage_path])
         .catch((cleanupErr) => {
           logger.warn('[DocumentController] Failed to delete superseded storage file:', cleanupErr.message);
         });
     }
 
-    return res.status(existingDoc ? 200 : 201).json({
+    return res.status(existingDocForUpdate ? 200 : 201).json({
       success: true,
       document: record,
     });

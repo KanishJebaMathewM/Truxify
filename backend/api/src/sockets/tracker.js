@@ -1,5 +1,4 @@
 import { WebSocketServer } from 'ws';
-import { redisClient, firebaseAdmin, supabase } from '../config/db.js';
 import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';

@@ -1,4 +1,3 @@
-import { supabaseAdmin } from '../config/db.js';
 import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { errorResponse } from '../utils/apiResponse.js';

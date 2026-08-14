@@ -64,7 +64,7 @@ export async function verifyAuthToken(token) {
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone, is_active")
+      .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -141,37 +141,9 @@ export async function verifyAuthToken(token) {
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone, is_active")
+      .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
       .eq("firebase_uid", firebaseUid)
       .maybeSingle();
-
-      const userClient = createUserClient?.(token) || supabase;
-      const { data: profile, error } = await userClient
-        .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone")
-        .eq("firebase_uid", firebaseUid)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (error) {
-        throw new Error("Database query failed verification: " + error.message);
-      }
-      userProfile = profile;
-
-      if (userProfile) {
-        // Clamp the cached profile TTL to the token's remaining lifetime so a
-        // cached profile can never outlive the access token that authorised it.
-        const cacheTtl = Math.max(1, Math.min(TTL_SECONDS, tokenRemaining));
-        await setCachedProfile(firebaseUid, {
-          id: userProfile.id,
-          uid: userProfile.firebase_uid,
-          role: userProfile.role,
-          fullName: userProfile.full_name,
-          phone: userProfile.phone,
-          isActive: true,
-        }, cacheTtl);
-      }
-    }
 
     if (!profile) {
       await setCachedProfile(
@@ -347,6 +319,7 @@ export async function authenticate(req, res, next) {
       }
 
       // Redis cache lookup
+      try {
       const cachedProfile = await getCachedSupabaseProfile(user.id);
       if (cachedProfile) {
         if (!isValidCachedSupabaseProfile(user.id, cachedProfile)) {
@@ -362,6 +335,7 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      }
       } catch (err) {
         logger.error({ err }, "Supabase cache check failed");
       }
@@ -370,7 +344,7 @@ export async function authenticate(req, res, next) {
       const userClient = createUserClient?.(token) || supabase;
       const { data: profile, error } = await userClient
         .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone, is_active")
+        .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -441,6 +415,7 @@ export async function authenticate(req, res, next) {
       const firebaseUid = decodedToken.uid;
 
       // Redis Cache Check
+      try {
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
         if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
@@ -456,6 +431,7 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      }
       } catch (err) {
         logger.error({ err }, "Firebase cache check failed");
       }
@@ -470,7 +446,7 @@ export async function authenticate(req, res, next) {
       const userClient = createUserClient?.(token) || supabase;
       const { data: profile, error } = await userClient
         .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone, is_active")
+        .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
         .eq("firebase_uid", firebaseUid)
         .maybeSingle();
 
@@ -500,7 +476,9 @@ export async function authenticate(req, res, next) {
           { isActive: false },
           TOMBSTONE_TTL_SECONDS,
         ).catch((err) => logger.error({ err }, "Cache set failed"));
+      }
 
+      const profileIsDeactivated = profile?.deactivated_at != null;
       if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
@@ -522,6 +500,7 @@ export async function authenticate(req, res, next) {
       );
 
       return next();
+    }
     }
   } catch (error) {
     logger.error(

@@ -271,7 +271,7 @@ async function sendBatchWithRetry(chunkTokens, message, userId, chunkIndex) {
       lastError = err;
       const code = err?.code ?? 'unknown';
       logger.error(
-        `[FCM] Batch ${chunkIndex} delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${code}`
+        `[FCM] Batch ${chunkIndex} delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${code}`,
         { err, userId, attempt: attempt + 1, maxRetries: MAX_RETRIES },
         '[FCM] Delivery failed for user'
       );

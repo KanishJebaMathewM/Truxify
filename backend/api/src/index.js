@@ -752,7 +752,6 @@ server.listen(PORT, () => {
   startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
-  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   startOutboxRelayWorker()
 
   // Register worker states for health aggregation
@@ -796,7 +795,6 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
-  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

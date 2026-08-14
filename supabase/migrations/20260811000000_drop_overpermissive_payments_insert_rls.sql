@@ -1,0 +1,26 @@
+-- ============================================================================
+-- Fix over-permissive payments INSERT RLS (issue #13961)
+-- ============================================================================
+-- `payments` is a financial ledger. Rows must only ever be created server-side:
+-- the backend API writes via the service_role key
+-- (backend/api/src/routes/paymentRoutes.js) and escrow deposits are recorded by
+-- recordDepositTx; the GraphQL layer only reads
+-- (backend/graphql/services/order.service.js). Nothing inserts client-side.
+--
+-- The prior policy was over-permissive:
+--
+--   create policy payments_owner_insert_policy on payments
+--     for insert to authenticated
+--     with check (user_id = get_profile_id());
+--
+-- WITH CHECK only validated `user_id`, so ANY authenticated caller could INSERT
+-- rows and freely set `amount_paisa`, `status` (e.g. directly 'captured' /
+-- 'released') and `order_id` (any order) — forging ledger entries and bypassing
+-- the payment / escrow flow. That is broken write authorization on a financial
+-- table.
+--
+-- Drop the direct client INSERT capability. service_role keeps full write
+-- access, so legitimate server-side payment creation is unaffected; SELECT for
+-- the owning user is unchanged.
+
+drop policy if exists payments_owner_insert_policy on payments;

@@ -319,6 +319,7 @@ export async function authenticate(req, res, next) {
       }
 
       // Redis cache lookup
+      try {
       const cachedProfile = await getCachedSupabaseProfile(user.id);
       if (cachedProfile) {
         if (!isValidCachedSupabaseProfile(user.id, cachedProfile)) {
@@ -334,6 +335,7 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      }
       } catch (err) {
         logger.error({ err }, "Supabase cache check failed");
       }
@@ -413,6 +415,7 @@ export async function authenticate(req, res, next) {
       const firebaseUid = decodedToken.uid;
 
       // Redis Cache Check
+      try {
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
         if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
@@ -428,6 +431,7 @@ export async function authenticate(req, res, next) {
           req.user = cachedProfile;
           return next();
         }
+      }
       } catch (err) {
         logger.error({ err }, "Firebase cache check failed");
       }
@@ -494,6 +498,7 @@ export async function authenticate(req, res, next) {
       );
 
       return next();
+    }
     }
   } catch (error) {
     logger.error(

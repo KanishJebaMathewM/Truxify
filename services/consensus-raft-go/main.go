@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,12 +161,95 @@ type RaftNode struct {
 	// is also dropped from liveAck whenever a heartbeat fails or is rejected, so
 	// liveness reflects recent contact instead of a once-set flag.
 	liveAck            map[string]bool
+	persister          *persister
 	httpClient         *http.Client
 	// rng is this node's own source of randomness for election timeouts. It is
 	// only accessed while holding mu, so a per-node Rand is safe for concurrent
 	// use across election goroutines of different nodes.
-	rng *rand.Rand
+		rng *rand.Rand
 }
+
+// persister durably stores the Raft stable state (currentTerm, votedFor, and
+// the log) so a restarted node does not lose committed entries or re-vote in a
+// term it already voted in (Raft §5.1 / §5.4.2). State is written atomically to
+// a JSON file on every mutation ("persist then respond"): SaveState is called
+// when the term or vote changes, and SaveLog when the log changes. load() is
+// invoked at startup so CurrentTerm/VotedFor/Log survive restarts.
+type persister struct {
+	path     string
+	mu       sync.Mutex
+	term     uint64
+	votedFor string
+	log      []LogEntry
+}
+
+func newPersister(id string) *persister {
+	dir := os.Getenv("RAFT_STATE_DIR")
+	if dir == "" {
+		dir = "."
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	return &persister{path: filepath.Join(dir, "raft-state-"+id+".json")}
+}
+
+// load reads the persisted snapshot. It returns zero values if no state file
+// exists or it is unreadable, so a first boot starts from a clean slate.
+func (p *persister) load() (uint64, string, []LogEntry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	data, err := os.ReadFile(p.path)
+	if err != nil {
+		return 0, "", nil
+	}
+	var s struct {
+		Term     uint64     `json:"current_term"`
+		VotedFor string     `json:"voted_for"`
+		Log      []LogEntry `json:"log"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return 0, "", nil
+	}
+	p.term = s.Term
+	p.votedFor = s.VotedFor
+	p.log = s.Log
+	return s.Term, s.VotedFor, s.Log
+}
+
+func (p *persister) write() error {
+	s := struct {
+		Term     uint64     `json:"current_term"`
+		VotedFor string     `json:"voted_for"`
+		Log      []LogEntry `json:"log"`
+	}{p.term, p.votedFor, p.log}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	tmp := p.path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p.path)
+}
+
+// SaveState persists the current term and the candidate this node voted for.
+func (p *persister) SaveState(term uint64, votedFor string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.term = term
+	p.votedFor = votedFor
+	return p.write()
+}
+
+// SaveLog persists the full replicated log after it is mutated.
+func (p *persister) SaveLog(log []LogEntry) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.log = make([]LogEntry, len(log))
+	copy(p.log, log)
+	return p.write()
+}
+
 
 func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 	heartbeatMs := envInt("RAFT_HEARTBEAT_MS", 100)
@@ -175,11 +259,16 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionMaxMs = electionMinMs
 	}
 
+	p := newPersister(id)
+	term, votedFor, log := p.load()
+
 	return &RaftNode{
 		NodeID:             id,
-		CurrentTerm:        0,
+		CurrentTerm:        term,
+		VotedFor:           votedFor,
 		Role:               Follower,
-		Log:                make([]LogEntry, 0),
+		Log:                log,
+		persister:          p,
 		Peers:              peers,
 		PeerURLs:           peerURLs,
 		LeaderID:           "",
@@ -224,6 +313,11 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 	}
 	rn.CurrentTerm = term
 	rn.VotedFor = ""
+	// Durably record the higher term before any response so a restart cannot
+	// re-enter a term it already observed (Raft §5.1).
+	if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
+		log.Printf("raft persist error: %v", err)
+	}
 	rn.LeaderID = ""
 	if rn.Role != Follower {
 		rn.Role = Follower
@@ -239,6 +333,11 @@ func (rn *RaftNode) startElection() {
 	rn.CurrentTerm++
 	term := rn.CurrentTerm
 	rn.VotedFor = rn.NodeID
+	// Persist the new term and self-vote before soliciting votes (Raft §5.1: a
+	// candidate must durably record its term before sending RequestVote).
+	if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
+		log.Printf("raft persist error: %v", err)
+	}
 	rn.LeaderID = ""
 	rn.electionStarted = time.Now()
 	rn.electionTimeout = rn.randomElectionTimeout()
@@ -279,14 +378,21 @@ func (rn *RaftNode) startElection() {
 		// Per-follower replication state (Raft §5.3): the leader seeds
 		// nextIndex = lastLogIndex+1 and learns each follower's true match
 		// index from AppendEntries acknowledgements, backing off on rejection.
-		// matchIndex and liveAck are never seeded optimistically: a leader
-		// without a reachable quorum must not accept new entries.
+		// matchIndex starts empty and is learned from AppendEntries acks, while
+		// liveAck is seeded optimistically below because winning the election
+		// already proves a reachable quorum (issue #13975).
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.liveAck = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
 			rn.matchIndex[url] = 0
+			// Winning the election proves a quorum of peers is reachable: they
+			// responded to RequestVote. Seed liveAck optimistically so a fresh
+			// leader can accept client commits immediately instead of waiting
+			// for a heartbeat round that, on a log mismatch, would otherwise
+			// leave liveAck empty and reject every commit (issue #13975).
+			rn.liveAck[url] = true
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -459,9 +565,12 @@ func (rn *RaftNode) sendHeartbeats() {
 				rn.nextIndex[res.url] = next
 			}
 		} else {
-			// Peer rejected the append (log mismatch or down): it must not
-			// count toward the live quorum until a fresh success response.
-			rn.liveAck[res.url] = false
+			// Peer rejected the append (log mismatch): it still responded, so
+			// it is reachable and counts toward the live quorum. Reachability
+			// is proven by any AppendEntries reply (success or rejection); only
+			// an unreachable peer (res.err != nil above) is dropped. The leader
+			// converges the follower's log via the nextIndex back-off below.
+			rn.liveAck[res.url] = true
 			if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
 				// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
 				rn.nextIndex[res.url]--
@@ -616,6 +725,9 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		(rn.VotedFor == "" || rn.VotedFor == req.CandidateID) &&
 		rn.isLogUpToDate(req.LastLogIndex, req.LastLogTerm) {
 		rn.VotedFor = req.CandidateID
+		if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
+			log.Printf("raft persist error: %v", err)
+		}
 		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
 	}
@@ -666,6 +778,9 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 		if rn.VotedFor == "" || rn.VotedFor == req.LeaderID {
 			rn.VotedFor = req.LeaderID
 		}
+		if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
+			log.Printf("raft persist error: %v", err)
+		}
 		rn.lastLeaderSeen = time.Now()
 
 		if rn.appendLogFromLeaderLocked(req) {
@@ -712,10 +827,16 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 			if rn.Log[idx-1].Term != e.Term {
 				rn.Log = rn.Log[:idx-1]
 				rn.Log = append(rn.Log, req.Entries[i:]...)
+				if err := rn.persister.SaveLog(rn.Log); err != nil {
+					log.Printf("raft persist error: %v", err)
+				}
 				return true
 			}
 		} else {
 			rn.Log = append(rn.Log, req.Entries[i:]...)
+			if err := rn.persister.SaveLog(rn.Log); err != nil {
+				log.Printf("raft persist error: %v", err)
+			}
 			return true
 		}
 	}
@@ -732,6 +853,48 @@ func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry) {
 		"order_id":     entry.OrderID,
 		"committed_at": entry.Timestamp.Format(time.RFC3339),
 	})
+}
+
+// commitRetryTimeout bounds how long HandleCommitOrder waits for a single
+// entry to replicate to a quorum before answering 503. It is short on purpose:
+// the entry is already durable in the leader's log and will commit on a later
+// background heartbeat, so we only retry local replication rather than forcing
+// the client to retry (which, without trusting the idempotency guard, could
+// append a duplicate entry for the same OrderID).
+const commitRetryTimeout = 2 * time.Second
+
+// commitRetryInterval is the delay between replication rounds while waiting for
+// an entry to commit.
+const commitRetryInterval = 25 * time.Millisecond
+
+// waitForCommit drives background heartbeats for the entry at entryIndex and
+// returns once it is committed to a quorum, the node steps down, or the bounded
+// retry window elapses. Replication is looped (not a single round) so a slow
+// follower that misses the first heartbeat does not cause a spurious 503 and
+// does not force the client to retry-and-duplicate.
+func (rn *RaftNode) waitForCommit(entryIndex uint64) (committed bool, steppedDown bool, entry LogEntry) {
+	deadline := time.Now().Add(commitRetryTimeout)
+	for {
+		rn.sendHeartbeats()
+
+		rn.mu.Lock()
+		if rn.Role != Leader {
+			entry = rn.Log[entryIndex-1]
+			rn.mu.Unlock()
+			return false, true, entry
+		}
+		committed = rn.CommitIndex >= entryIndex
+		entry = rn.Log[entryIndex-1]
+		rn.mu.Unlock()
+
+		if committed {
+			return true, false, entry
+		}
+		if time.Now().After(deadline) {
+			return false, false, entry
+		}
+		time.Sleep(commitRetryInterval)
+	}
 }
 
 // HandleCommitOrder accepts a committed order entry on the leader.
@@ -815,6 +978,9 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		// Append to the local log first. CommitIndex is NOT advanced here: the
 		// entry must first be replicated to a quorum of followers (Raft §5.3).
 		rn.Log = append(rn.Log, entry)
+		if err := rn.persister.SaveLog(rn.Log); err != nil {
+			log.Printf("raft persist error: %v", err)
+		}
 		entryIndex = entry.Index
 	}
 
@@ -828,13 +994,15 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 
 	rn.mu.Unlock()
 
-	// Replicate to followers and wait for a quorum acknowledgement before
-	// treating the entry as committed.
-	rn.sendHeartbeats()
+	// Replicate to followers and wait (bounded) for a quorum acknowledgement
+	// before treating the entry as committed. A single heartbeat round can miss
+	// slow followers even though the entry is durable in the leader's log, so we
+	// loop for a short bounded window instead of answering 503 after one round.
+	// The idempotency guard above (findEntryLocked) means a client that still
+	// retries never appends a duplicate entry for the same OrderID.
+	committed, steppedDown, entry := rn.waitForCommit(entryIndex)
 
-	rn.mu.Lock()
-	if rn.Role != Leader {
-		rn.mu.Unlock()
+	if steppedDown {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -844,23 +1012,8 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	committed := rn.CommitIndex >= entryIndex
-	entry := rn.Log[entryIndex-1]
-	rn.mu.Unlock()
 
 	if !committed {
-		rn.mu.Lock()
-		defer rn.mu.Unlock()
-		if rn.Role != Leader {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success":   false,
-				"error":     "stepped down while replicating entry",
-				"leader_id": rn.LeaderID,
-			})
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{

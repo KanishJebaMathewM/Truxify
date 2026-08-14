@@ -25,6 +25,12 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
 
     uint256 public constant REFUND_WINDOW = 5760;
 
+    /// @dev MEV protection window: releases via the private relayer are gated
+    /// until this many blocks after the deposit is created, so a release can
+    /// never succeed in the same block as the deposit (thwarts same-block
+    /// front-running / sandwich attacks).
+    uint256 public constant RELEASE_DELAY_BLOCKS = 20;
+
     event DepositCreated(uint256 indexed depositId, address indexed shipper, address indexed driver, uint256 amount);
     event DepositReleasedMEV(uint256 indexed depositId, address indexed driver, uint256 amount);
     event DepositRefunded(uint256 indexed depositId, address indexed shipper, uint256 amount);
@@ -61,7 +67,7 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
             driver: _driver,
             amount: msg.value,
             released: false,
-            blockMin: block.number,
+            blockMin: block.number + RELEASE_DELAY_BLOCKS,
             secretHash: _secretHash
         });
 

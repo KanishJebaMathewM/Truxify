@@ -21,7 +21,10 @@ vi.mock('../../src/middleware/validate.js', () => ({
 }));
 
 vi.mock('multer', () => {
-  const single = () => (req, _res, next) => { req.file = req.file || undefined; next(); };
+  const single = () => (req, _res, next) => {
+    req.file = req.file || { buffer: Buffer.from('fake-image'), mimetype: 'image/jpeg', originalname: 'doc.jpg' };
+    next();
+  };
   const multerFn = () => ({ single });
   multerFn.memoryStorage = () => ({});
   multerFn.MemoryStorage = class {};
@@ -102,6 +105,56 @@ describe('verificationRoutes', () => {
       expect(res.status).toBe(200);
       expect(dbMock.createUserClient).toHaveBeenCalled();
       expect(dbMock.supabase.from).toHaveBeenCalledWith('orders');
+    });
+  });
+
+  describe('POST /verification/kyc/upload', () => {
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      delete process.env.ML_API_URL;
+      delete process.env.ML_API_KEY;
+    });
+
+    function mockOcr(jsonBody) {
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => jsonBody,
+      }));
+    }
+
+    it('does NOT mark KYC Verified on OCR verified:true without government attestation', async () => {
+      const updateMock = vi.fn(() => ({ eq: vi.fn(() => Promise.resolve({ error: null })) }));
+      dbMock.supabaseAdmin.from.mockReturnValue({ update: updateMock });
+      process.env.ML_API_URL = 'http://ml';
+      process.env.ML_API_KEY = 'key';
+      mockOcr({ verified: true, extracted_number: 'AB1234567' });
+
+      const res = await request(makeApp()).post('/verification/kyc/upload').send({});
+
+      expect(res.status).toBe(200);
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ kyc_status: 'Rejected' }),
+      );
+      expect(updateMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kyc_status: 'Verified' }),
+      );
+    });
+
+    it('marks KYC Verified only when OCR verified AND government attested', async () => {
+      const updateMock = vi.fn(() => ({ eq: vi.fn(() => Promise.resolve({ error: null })) }));
+      dbMock.supabaseAdmin.from.mockReturnValue({ update: updateMock });
+      process.env.ML_API_URL = 'http://ml';
+      process.env.ML_API_KEY = 'key';
+      mockOcr({ verified: true, attested: true, extracted_number: 'AB 123 4567' });
+
+      const res = await request(makeApp()).post('/verification/kyc/upload').send({});
+
+      expect(res.status).toBe(200);
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ kyc_status: 'Verified', kyc_doc_number: 'AB1234567' }),
+      );
     });
   });
 });

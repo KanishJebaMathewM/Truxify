@@ -14,7 +14,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 80
+          number: 5000
       weight: 100
     retries:
       attempts: 3
@@ -36,7 +36,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 80
+          number: 5000
       weight: 100
   - match:
     - uri:
@@ -45,4 +45,4 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 80
+          number: 5000

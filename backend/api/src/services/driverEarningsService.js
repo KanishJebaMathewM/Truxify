@@ -91,7 +91,11 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
     weekly_chart: weeklyChart,
     cumulative_stats: {
       total_km: totalKm,
-      avg_earning_per_km: (Number.isFinite(totalKm) && totalKm > 0 && Number.isFinite(totalNetEarnings)) ? (totalNetEarnings / 100.0) / totalKm : 0,
+      // Unit: paisa/km. This matches `gross_earnings`/`net_earnings`, which are
+      // sums of the paisa-valued `trip.total_earnings`/`trip.net_earnings`
+      // columns. Dropping the `/100` keeps every earnings field in paisa so the
+      // aggregation is uniformly unit-consistent (do not convert to INR here).
+      avg_earning_per_km: (Number.isFinite(totalKm) && totalKm > 0 && Number.isFinite(totalNetEarnings)) ? totalNetEarnings / totalKm : 0,
       lifetime_trips: lifetimeTrips !== null ? lifetimeTrips : null
     },
     deadhead_trips_saved: deadheadTripsSaved

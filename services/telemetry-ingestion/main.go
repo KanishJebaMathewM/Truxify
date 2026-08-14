@@ -530,6 +530,16 @@ func allowPing(driverID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	// Re-check that this entry is still the one mapped to the driver. The
+	// reference count held by acquireRateEntry (inUse) already prevents the
+	// background sweeper from evicting an in-flight entry, so this is a
+	// belt-and-suspenders guard: if the entry were ever replaced or retired
+	// out from under us, mutating it would be lost and the ping would not be
+	// counted, letting the driver burst past maxPingsPerSec.
+	if cur, ok := pingRateLimit.Load(driverID); !ok || cur.(*rateEntry) != e {
+		return false
+	}
+
 	cutoff := time.Now().Add(-time.Second)
 	kept := e.stamps[:0]
 	for _, t := range e.stamps {

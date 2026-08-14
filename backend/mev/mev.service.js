@@ -214,8 +214,9 @@ class MEVService {
         try {
             const relayer = getMevRelayer();
             const targetBlock = (await this.provider.getBlockNumber()) + 1;
+            const signedTxs = await this.signTransactions(transactions);
             const result = await relayer.sendPrivateBundle({
-                signedBundle: transactions,
+                signedBundle: signedTxs,
                 targetBlock
             });
             await this.storeBundle({

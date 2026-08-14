@@ -9,6 +9,10 @@ use tokio::net::{TcpListener, TcpStream};
 /// Address the verification microservice listens on (matches `EXPOSE 8087`).
 const BIND_ADDR: &str = "0.0.0.0:8087";
 
+/// Hard cap on the request body length, mirroring the ~1 MiB header cap.
+/// An attacker-controlled `Content-Length` larger than this is rejected.
+const MAX_BODY: usize = 1 * 1024 * 1024;
+
 /// Dev-only Ed25519 verifying public key (hex-encoded).
 ///
 /// A verification key is public material: it is safe to ship inside the
@@ -191,8 +195,18 @@ async fn handle_connection(mut stream: TcpStream) {
     let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
     let content_length = parse_content_length(&head);
 
+    // Reject unreasonably large or overflowing body lengths from an untrusted
+    // Content-Length header before performing any pointer arithmetic.
+    if content_length > MAX_BODY {
+        return;
+    }
+    let body_end = match header_end.checked_add(content_length) {
+        Some(end) => end,
+        None => return,
+    };
+
     // Read the remaining body bytes.
-    while buf.len() < header_end + content_length {
+    while buf.len() < body_end {
         let n = match stream.read(&mut chunk).await {
             Ok(0) => return,
             Ok(n) => n,
@@ -203,7 +217,7 @@ async fn handle_connection(mut stream: TcpStream) {
 
     let (method, path) = parse_request_line(&head);
     let body =
-        String::from_utf8_lossy(&buf[header_end..header_end + content_length]).to_string();
+        String::from_utf8_lossy(&buf[header_end..body_end]).to_string();
     let (status, payload) = route(&method, &path, &body);
 
     let _ = stream.write_all(&http_response(status, &payload)).await;

@@ -101,9 +101,43 @@ describe('clampRiskScore', () => {
   it('50 passes', () => { expect(clampRiskScore(50)).toBe(50); });
   it('150 → 100', () => { expect(clampRiskScore(150)).toBe(100); });
   it('NaN → 0', () => { expect(clampRiskScore(NaN)).toBe(0); });
+  it('negative values clamp to 0', () => {
+    expect(clampRiskScore(-10)).toBe(0);
+    expect(clampRiskScore(-0.5)).toBe(0);
+  });
+  it('boundary values are preserved', () => {
+    expect(clampRiskScore(0)).toBe(0);
+    expect(clampRiskScore(100)).toBe(100);
+  });
+  it('handles Infinity gracefully (returns 0 for non-finite)', () => {
+    // Number.isFinite(Infinity) === false, so returns 0
+    expect(clampRiskScore(Infinity)).toBe(0);
+    expect(clampRiskScore(-Infinity)).toBe(0);
+  });
+  it('handles non-numeric strings', () => {
+    expect(clampRiskScore('high')).toBe(0);
+  });
 });
 describe('accumulateRisk', () => {
-  it('sums', () => { expect(accumulateRisk([10, 20, 30])).toBe(60); });
-  it('clamps', () => { expect(accumulateRisk([60, 50, 40])).toBe(100); });
+  it('sums finite weights', () => { expect(accumulateRisk([10, 20, 30])).toBe(60); });
+  it('clamps sum to 100 when exceeds max', () => {
+    expect(accumulateRisk([60, 50, 40])).toBe(100);
+  });
+  it('returns 0 for empty array', () => {
+    expect(accumulateRisk([])).toBe(0);
+  });
+  it('ignores non-finite weights', () => {
+    expect(accumulateRisk([10, NaN, 20])).toBe(30);
+    expect(accumulateRisk([10, Infinity, 20])).toBe(30);
+    expect(accumulateRisk([10, undefined, 20])).toBe(30);
+  });
+  it('returns 0 for non-array input', () => {
+    expect(accumulateRisk(null)).toBe(0);
+    expect(accumulateRisk('string')).toBe(0);
+    expect(accumulateRisk({})).toBe(0);
+  });
+  it('clamps accumulated result to 100', () => {
+    expect(accumulateRisk([200, 500])).toBe(100);
+  });
 });
 

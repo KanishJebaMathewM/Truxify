@@ -39,9 +39,11 @@ export default function securityHeaders(req, res, next) {
   // Enforce HTTPS for sensitive headers
   if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
     if (!res.getHeader('Strict-Transport-Security')) {
+      const hstsPreload =
+        process.env.SECURE_HSTS_PRELOAD === 'true' || process.env.SECURE_HSTS_PRELOAD === '1';
       res.setHeader(
         'Strict-Transport-Security',
-        `max-age=${resolveHstsMaxAge()}; includeSubDomains`
+        `max-age=${resolveHstsMaxAge()}; includeSubDomains${hstsPreload ? '; preload' : ''}`
       );
     }
   }

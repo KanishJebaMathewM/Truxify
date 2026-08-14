@@ -402,6 +402,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
       if (!mounted) return;
 
+      if (json is! Map<String, dynamic>) {
+        _showSnackBar('Unable to load statement', TruxifyColors.error);
+        return;
+      }
+
       final statement = EarningsStatementModel.fromJson(
         json as Map<String, dynamic>,
       );

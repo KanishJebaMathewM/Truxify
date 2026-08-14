@@ -61,6 +61,8 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
       // resolve to null when Redis is unreachable — treat that like a failed
       // ZCARD so the limiter fails open (or closed, per failClosed) instead
       // of crashing on a null dereference.
+      // Guard: pipeline.exec() returns null when Redis is unreachable.
+      // Treat null as a failed request rather than crashing on a null dereference.
       const zcardTuple = results ? results[1] : null;
       if (!zcardTuple || zcardTuple[0]) {
         if (failClosed) {

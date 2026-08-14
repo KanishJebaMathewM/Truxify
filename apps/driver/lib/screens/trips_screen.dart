@@ -324,7 +324,7 @@ class _TripsScreenState extends State<TripsScreen> {
         fuelDeducted: '₹0',
         tollDeducted: '₹0',
         platformFee: '₹0',
-        netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        netEarnings: '₹${((row['net_earnings'] is num ? row['net_earnings'] as num : 0) / 100).toStringAsFixed(0)}',
       ),
       tripItems: tripItems,
       escrowStatus: row['escrow_status']?.toString(),
@@ -458,8 +458,8 @@ class _TripsScreenState extends State<TripsScreen> {
         final routePoints = tripId != null ? (_routePointsByTripId[tripId] ?? []) : [];
         if (routePoints.isNotEmpty) {
           final lastPoint = routePoints.last;
-          currentLat = (lastPoint['latitude'] as num?)?.toDouble();
-          currentLng = (lastPoint['longitude'] as num?)?.toDouble();
+          currentLat = lastPoint['latitude'] is num ? (lastPoint['latitude'] as num).toDouble() : null;
+          currentLng = lastPoint['longitude'] is num ? (lastPoint['longitude'] as num).toDouble() : null;
         }
       }
 

@@ -138,6 +138,12 @@ const locationChannels = new Map();
 // subscriber for a display ID disconnects.
 const displayIdToLocationChannelKeys = new Map();
 
+// Reverse index from driverId to the set of orderUUID keys it is actively
+// publishing location channels for. Used to tear down channels when the
+// publishing driver disconnects, so driver-only / unsubscribed orders do not
+// leak a Supabase Realtime channel for the process lifetime.
+const driverToLocationChannels = new Map();
+
 // Redis Pub/Sub fan-out bus that distributes location events across API
 // replicas so a driver connected to Replica A reaches a customer connected to
 // Replica B. Local subscribers are still stored only in `trackingSubscriptions`;
@@ -737,6 +743,7 @@ export function initWebSocketServer(server, orderRepository) {
       logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
+        if (ws.driverId) await removeDriverLocationChannels(ws.driverId);
       })();
     });
 
@@ -744,6 +751,7 @@ export function initWebSocketServer(server, orderRepository) {
       logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
+        if (ws.driverId) await removeDriverLocationChannels(ws.driverId);
       })();
     });
 
@@ -813,7 +821,7 @@ export function initWebSocketServer(server, orderRepository) {
 
   // Periodically purge expired per-IP WebSocket upgrade-limit entries, so the
   // in-memory fallback map does not leak during Redis outages.
-  wsUpgradeLimitsCleanupInterval = setInterval(() => {
+  let wsUpgradeLimitsCleanupInterval = setInterval(() => {
     sweepWsUpgradeMemoryLimits();
   }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
 
@@ -1299,6 +1307,12 @@ export async function handleLocationPing(ws, data, req) {
       const channel = supabase.channel(`driver-location:${orderUUID}`);
       channel.subscribe();
       locationChannels.set(orderUUID, channel);
+      if (driver_id) {
+        if (!driverToLocationChannels.has(driver_id)) {
+          driverToLocationChannels.set(driver_id, new Set());
+        }
+        driverToLocationChannels.get(driver_id).add(orderUUID);
+      }
       if (orderDisplayId) {
         if (!displayIdToLocationChannelKeys.has(orderDisplayId)) {
           displayIdToLocationChannelKeys.set(orderDisplayId, new Set());
@@ -1448,7 +1462,14 @@ async function loadRecoveryFile() {
     if (fs.existsSync(RECOVERY_FILE_PATH)) {
       const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
       if (content) {
-        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
+        const records = [];
+        for (const line of content.split('\n').filter(Boolean)) {
+          try {
+            records.push(JSON.parse(line));
+          } catch (err) {
+            logger.error('[TRUXIFY RECOVERY] Skipping malformed recovery line:', err.message);
+          }
+        }
         if (records.length > 0) {
           await telemetryWriteBuffer.prepend(records);
           logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
@@ -1795,6 +1816,28 @@ async function removeClientFromAllSubscriptions(ws) {
       }
     }
   }
+}
+
+async function removeDriverLocationChannels(driverId) {
+  if (!driverId) return;
+  const channelKeys = driverToLocationChannels.get(driverId);
+  if (!channelKeys) return;
+  for (const uuidKey of channelKeys) {
+    const channel = locationChannels.get(uuidKey);
+    if (channel) {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+      locationChannels.delete(uuidKey);
+    }
+    // Also drop the orderUUID from the displayId reverse index.
+    displayIdToLocationChannelKeys.forEach((set, displayId) => {
+      if (set.delete(uuidKey) && set.size === 0) {
+        displayIdToLocationChannelKeys.delete(displayId);
+      }
+    });
+  }
+  driverToLocationChannels.delete(driverId);
 }
 
 async function restoreSubscriptions(ws) {

@@ -166,10 +166,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken, userId: bodyUserId } = req.body;
-    const userId = req.user?.id || bodyUserId;
+    const { accessToken } = req.body;
+    const userId = req.user.id;
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID is required' });
+      return res.status(401).json({ success: false, error: 'Authentication required' });
     }
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
@@ -242,11 +242,11 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
     formData.append('file', blob, req.file.originalname);
 
-    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '');
-    const mlApiKey = process.env.ML_API_KEY;
+    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '').trim();
+    const mlApiKey = (process.env.ML_API_KEY || '').trim();
 
     if (!mlBaseUrl || !mlApiKey) {
-      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED' }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
+      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED', ip: req.ip }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
       return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
     }
 

@@ -134,6 +134,11 @@ export function normalizeIp(rawIp) {
 
 /**
  * Generates a rate-limit key from the proxy-resolved IP address.
+ *
+ * When trust proxy is enabled, req.ip is derived from X-Forwarded-For which
+ * can be spoofed. We prefer req.ips[0] (the client IP before any proxy hops)
+ * as the most trustworthy source, falling back to the socket address only
+ * when the forwarded header is suspicious or unavailable.
  */
 export function safeIpKeyGenerator(req) {
   const forwarded = req.headers?.["x-forwarded-for"];
@@ -147,9 +152,15 @@ export function safeIpKeyGenerator(req) {
       },
       "Suspicious X-Forwarded-For header detected",
     );
+    // Use socket address instead of the spoofed header value.
+    const socketIp = req.socket?.remoteAddress || req.connection?.remoteAddress || "unknown";
+    return normalizeIp(socketIp);
   }
 
+  // req.ips[0] is the client IP before any proxy hops (set by trust proxy).
+  // This is preferred over req.ip because req.ip may use the full header.
   const rawIp =
+    (req.ips && req.ips.length > 0 ? req.ips[0] : null) ||
     req.ip ||
     req.headers?.["x-forwarded-for"] ||
     req.socket?.remoteAddress ||

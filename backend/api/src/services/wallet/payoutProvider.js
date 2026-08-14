@@ -66,7 +66,7 @@ export async function dispatchPayout({ driverId, withdrawal }) {
       // failure so the caller keeps its existing fail-safe handling rather
       // than hanging the settlement worker forever.
       if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-        throw new Error(`Payout webhook did not respond within ${timeoutMs}ms.`);
+        throw new Error(`Payout webhook did not respond within ${timeoutMs}ms.`, { cause: err });
       }
       throw err;
     }

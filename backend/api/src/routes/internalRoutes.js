@@ -34,7 +34,7 @@ function intFromEnv(raw, fallback) {
 }
 
 function getDbClient() {
-  return supabaseAdmin || supabase;
+  return supabaseAdmin;
 }
 
 /**

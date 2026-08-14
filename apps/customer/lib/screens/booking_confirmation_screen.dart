@@ -321,6 +321,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     });
     _controller.forward(from: 0).then((_) async {
       await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
       _exitToBookings();
     });
   }

@@ -159,9 +159,13 @@ export async function sendPushNotification(userId, title, body, notifType = 'ord
     fcmResult = await sendFcmNotification(userId, { title, body }, data);
   } catch (err) {
     logger.error({ err }, '[NotificationService] Unexpected sendFcmNotification error');
+    fcmResult = { success: false, error: err?.message ?? 'Unexpected sendFcmNotification error' };
   }
 
-  return { success: dbSuccess || Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
+  // `success` reflects the actual push (FCM) delivery, not the DB
+  // persistence side-effect. Reporting DB persistence as push success masked
+  // FCM delivery failures (see issue #11212).
+  return { success: Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
 }
 
 export const hashDeliveryOtp = hashOtp;
@@ -310,7 +314,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
-        notif_type: 'order_update',
+        notif_type: 'delivery_otp',
         // No OTP or OTP-derived value is persisted here: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }
@@ -332,7 +336,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp',  }
+      { orderDisplayId, notifType: 'delivery_otp', otp }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

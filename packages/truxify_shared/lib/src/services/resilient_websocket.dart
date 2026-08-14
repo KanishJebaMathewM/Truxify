@@ -135,10 +135,6 @@ class ResilientWebSocket {
     try {
       final targetUrl = urlFactory != null ? urlFactory!() : url;
       _channel = WebSocketChannel.connect(Uri.parse(targetUrl));
-<<<<<<< HEAD
-      // Wait for the TCP/TLS handshake to complete before proceeding.
-      await _channel!.ready;
-=======
       // Wait for the TCP/TLS handshake to complete before proceeding. Bound the
       // wait so a stalled upgrade (proxy silently holds the connection open,
       // flaky mobile network) cannot hang the wrapper in `connecting` forever —
@@ -147,7 +143,6 @@ class ResilientWebSocket {
         const Duration(seconds: 10),
         onTimeout: () => throw TimeoutException('WS handshake timed out'),
       );
->>>>>>> upstream/main
       _subscription = _channel!.stream.listen(
         (message) {
           _controller.add(message);

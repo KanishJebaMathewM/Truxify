@@ -154,7 +154,7 @@ class _DroneTrailerLocatorScreenState extends State<DroneTrailerLocatorScreen> {
 
   Widget _buildPinCard(TrailerLocation t) {
     return Card(
-      color: Colors.grey[850],
+      color: Colors.grey[800],
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),

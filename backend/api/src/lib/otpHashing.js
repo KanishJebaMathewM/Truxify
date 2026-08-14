@@ -47,11 +47,15 @@ export function verifyOtpHash(otp, otpRecord) {
 }
 
 
-// === Spec 12: ===
 // === Spec 12: constant-time hex compare ===
 export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
+  // Buffer.from(value, 'hex') does not reject invalid hex: it truncates at the
+  // first invalid character and drops a trailing odd nibble. Two identical
+  // invalid inputs would decode to equal short buffers and compare "equal",
+  // so reject anything that is not well-formed hex first.
+  if (!/^[0-9a-fA-F]+$/.test(a) || !/^[0-9a-fA-F]+$/.test(b)) return false;
   try { return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex')); }
   catch (_) { return false; }
 }

@@ -10,6 +10,9 @@ export const TRACKING_TOKEN_STATUS_MESSAGES = {
 };
 
 export function trackingTokenInvalidResponse(validation) {
+  if (!validation) {
+    return TRACKING_TOKEN_STATUS_MESSAGES['not_found'];
+  }
   const { status, message } =
     TRACKING_TOKEN_STATUS_MESSAGES[validation.reason] ||
     TRACKING_TOKEN_STATUS_MESSAGES.not_found;

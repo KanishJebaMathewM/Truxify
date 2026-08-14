@@ -4,6 +4,23 @@
 
 namespace TruxifyCuda {
 
+namespace {
+// Great-circle (haversine) distance in meters. `lat`/`lng` are degrees.
+// `Location.x` is longitude and `Location.y` is latitude, matching the test
+// reference (`refHaversine`) and the regression test for #11549. Using a
+// local PI constant avoids any dependency on `M_PI` portability.
+double haversineMeters(double lat1, double lng1, double lat2, double lng2) {
+    const double kPi = 3.14159265358979323846;
+    const double R = 6371000.0;
+    double dLat = (lat2 - lat1) * kPi / 180.0;
+    double dLng = (lng2 - lng1) * kPi / 180.0;
+    double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
+               std::cos(lat1 * kPi / 180.0) * std::cos(lat2 * kPi / 180.0) *
+                   std::sin(dLng / 2.0) * std::sin(dLng / 2.0);
+    return 2.0 * R * std::asin(std::sqrt(a));
+}
+} // namespace
+
 VrpSolution CudaVrpSolver::solveParallelVRP(
     const Location& depot,
     const std::vector<Location>& stops,
@@ -17,16 +34,12 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
     Location prev = depot;
 
     for (const auto& stop : stops) {
-        float dx = stop.x - prev.x;
-        float dy = stop.y - prev.y;
-        distance += std::sqrt(dx * dx + dy * dy);
+        distance += static_cast<float>(haversineMeters(prev.y, prev.x, stop.y, stop.x));
         prev = stop;
     }
 
     // Return to depot
-    float dx = depot.x - prev.x;
-    float dy = depot.y - prev.y;
-    distance += std::sqrt(dx * dx + dy * dy);
+    distance += static_cast<float>(haversineMeters(prev.y, prev.x, depot.y, depot.x));
 
     size_t routesNeeded = (stops.size() + vehicleCapacity - 1) / vehicleCapacity;
 

@@ -325,8 +325,10 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
 
-        // Always extend the timeout to protect newly released funds
-        // releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT; // Removed post-release withdrawal lock
+        // Always extend the timeout to protect newly released funds so the
+        // owner's emergency-recovery safety valve also applies to released
+        // driver payouts (matching the cancel/penalty/dispute paths).
+        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
         emit PaymentReleased(bookingId, driver, paymentAmount);
@@ -632,7 +634,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
 
         pendingWithdrawals[recipient] -= amount;
-        releaseTimestamps[recipient] = 0;
+        // Only clear the release timestamp once the pending bucket is fully
+        // drained, so repeated partial recoveries remain possible.
+        if (pendingWithdrawals[recipient] == 0) {
+            releaseTimestamps[recipient] = 0;
+        }
 
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Emergency transfer failed");

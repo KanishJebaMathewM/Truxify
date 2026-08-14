@@ -395,23 +395,6 @@ export const podUploadLimiter = rateLimit({
   },
 });
 
-const adminWindowMs =
-  Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
-const adminMaxRequests =
-  Number(process.env.ADMIN_RATE_LIMIT_MAX_REQUESTS) || 50;
-
-export const adminRateLimiter = rateLimit({
-  windowMs: adminWindowMs,
-  max: adminMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  store: createStore("rl:admin:"),
-  message: {
-    error: "Rate limit exceeded",
-    retryAfter: Math.ceil(adminWindowMs / 1000),
-  },
-});
 
 const VERIFY_DELIVERY_WINDOW_MS =
   Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;

@@ -566,6 +566,7 @@ app.use('/api/blockchain', (req, _res, next) => {
 // Auth-gated internal endpoints consumed by automation/n8n workflows:
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
+//   POST /api/internal/defensive-pause
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 

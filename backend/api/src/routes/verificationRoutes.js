@@ -184,7 +184,9 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
       error: error.message
     });
   }
-}); = ['image/jpeg', 'image/png'];
+});
+
+const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 

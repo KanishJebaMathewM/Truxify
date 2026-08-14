@@ -205,9 +205,9 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       );
       if (body is Map<String, dynamic>) {
         setState(() {
-          _upiDeepLink = body['deep_link'] as String?;
-          _amountInr = body['amount_inr'] as String?;
-          _createdOrderDisplayId = body['order_ref'] as String?;
+          _upiDeepLink = body['deep_link']?.toString();
+          _amountInr = body['amount_inr']?.toString();
+          _createdOrderDisplayId = body['order_ref']?.toString();
           _isAwaitingUpi = true;
         });
       }

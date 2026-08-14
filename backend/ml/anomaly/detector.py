@@ -195,12 +195,22 @@ class AnomalyDetector:
         try:
             # Extract features
             features = self._extract_transaction_features(transaction)
-            
-            # Detect anomaly (window keyed per transaction)
+
+            # Detect anomaly (window keyed per stable entity, NOT the unique
+            # transaction_id). Keying per transaction_id created a fresh 1-element
+            # buffer for every tx that was front-padded into a constant sequence,
+            # so the anomaly score could never cross the threshold (issue #13900).
+            entity_id = (
+                transaction.get('account_id')
+                or transaction.get('customer_id')
+                or transaction.get('card_id')
+                or transaction.get('user_id')
+                or transaction.get('transaction_id')
+            )
             result = self.detect_anomaly(
                 'transactions',
                 features,
-                entity_key=str(transaction.get('transaction_id') or '')
+                entity_key=str(entity_id or '')
             )
             
             # Add transaction-specific info

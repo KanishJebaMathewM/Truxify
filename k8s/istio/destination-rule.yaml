@@ -31,7 +31,8 @@ spec:
       version: v2
     trafficPolicy:
       loadBalancer:
-        simple: RANDOM---
+        simple: RANDOM
+---
 apiVersion: networking.istio.io/v1beta1
 kind: DestinationRule
 metadata:
@@ -50,7 +51,8 @@ spec:
       consecutive5xxErrors: 3
       interval: 20s
       baseEjectionTime: 20s
-      maxEjectionPercent: 30---
+      maxEjectionPercent: 30
+---
 apiVersion: networking.istio.io/v1beta1
 kind: DestinationRule
 metadata:

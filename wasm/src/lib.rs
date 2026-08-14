@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
+mod sig_verifier;
+
 #[derive(Serialize, Deserialize)]
 pub struct Coordinate {
     pub lat: f64,

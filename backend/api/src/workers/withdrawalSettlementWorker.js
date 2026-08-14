@@ -15,6 +15,23 @@ let intervalId = null;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Classifies a dispatchPayout failure as "ambiguous": the payout may already
+ * have been committed at the gateway before the request timed out/errored, so
+ * it is unsafe to assume nothing left the platform. These errors must NOT lead
+ * to restoring reserved funds (which would double-pay the driver).
+ */
+function isAmbiguousDispatchError(err) {
+  const msg = String((err && err.message) || "").toLowerCase();
+  return (
+    /timeout|timed out|etimedout|econnreset|econnrefused|enotfound|network|socket|eai_again/.test(
+      msg,
+    ) ||
+    /[^0-9]5\d\d\b/.test(msg) ||
+    /unknown error/.test(msg)
+  );
+}
+
+/**
  * Atomically claims a pending withdrawal for this worker BEFORE the payout is
  * dispatched. The update is conditioned on payout_attempted_at IS NULL, so at
  * most one concurrent sweep can win the claim; losers skip the row entirely.
@@ -40,20 +57,37 @@ async function claimWithdrawal(withdrawalId) {
 /**
  * Records the dispatch outcome on the already-claimed row so a crash between
  * dispatch and the completion RPC is detected and re-settled (not failed) on
- * the next sweep. Best-effort: failure to record only delays detection.
+ * the next sweep.
+ *
+ * Persisting `settlement_ref` is what lets the NEXT sweep settle a withdrawal
+ * whose payout already left the platform: without it the row stays 'pending'
+ * with `payout_attempted_at` set and the refuse-to-settle guard would freeze
+ * the driver's funds forever. We therefore retry with backoff on transient
+ * errors instead of silently dropping the write.
  */
 async function recordDispatchOutcome(withdrawalId, settlementRef) {
-  const { error } = await supabaseAdmin
-    .from("wallet_transactions")
-    .update({ settlement_ref: settlementRef })
-    .eq("id", withdrawalId)
-    .is("settlement_ref", null);
+  let lastError = null;
+  for (let attempt = 1; attempt <= SETTLE_RETRY_ATTEMPTS; attempt += 1) {
+    const { error } = await supabaseAdmin
+      .from("wallet_transactions")
+      .update({ settlement_ref: settlementRef })
+      .eq("id", withdrawalId)
+      .is("settlement_ref", null);
 
-  if (error) {
-    logger.warn(
-      `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId}: ${error.message}`,
-    );
+    if (!error) {
+      return;
+    }
+    lastError = error;
+    if (attempt < SETTLE_RETRY_ATTEMPTS) {
+      await sleep(SETTLE_RETRY_DELAYS_MS[attempt - 1]);
+    }
   }
+  // Even after retries the outcome could not be persisted. The in-memory
+  // settlementRef is still used to settle this sweep, so we surface the error
+  // to the caller rather than silently losing the reference.
+  throw new Error(
+    `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId} after ${SETTLE_RETRY_ATTEMPTS} attempts: ${lastError?.message}`,
+  );
 }
 
 /**
@@ -61,6 +95,15 @@ async function recordDispatchOutcome(withdrawalId, settlementRef) {
  * settle_withdrawal_tx is idempotent and only matches rows still in 'pending'.
  */
 async function settleWithRetry(withdrawalId, settlementRef) {
+  // settle_withdrawal_tx happily marks a withdrawal 'completed' and releases
+  // the reserved wallet_pending balance even when p_settlement_ref is NULL.
+  // Never settle without an actual payout reference: the row may have been
+  // claimed but the payout never confirmed dispatched (crash window).
+  if (!settlementRef) {
+    throw new Error(
+      `Refusing to settle withdrawal ${withdrawalId}: no payout settlement reference recorded.`,
+    );
+  }
   let lastError = null;
   for (let attempt = 1; attempt <= SETTLE_RETRY_ATTEMPTS; attempt += 1) {
     const { error } = await supabaseAdmin.rpc("settle_withdrawal_tx", {
@@ -155,8 +198,31 @@ export async function settlePendingWithdrawals() {
 
         // 2. Persist the dispatch outcome BEFORE the completion RPC so a crash
         //    in between is detected and settled (not failed) on the next sweep.
-        await recordDispatchOutcome(withdrawal.id, settlementRef);
+        //    The payout has ALREADY left the platform here, so a failure to
+        //    persist the settlement reference must NOT fall through to the
+        //    dispatch-failure handler below (which would restore funds and
+        //    double-pay the driver). We log, keep the in-memory settlementRef
+        //    for this sweep's settle call, and let the next sweep retry the
+        //    write.
+        try {
+          await recordDispatchOutcome(withdrawal.id, settlementRef);
+        } catch (recordErr) {
+          logger.error(
+            `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} payout dispatched but settlement_ref could not be persisted: ${recordErr.message}`,
+          );
+        }
       } catch (err) {
+        if (isAmbiguousDispatchError(err)) {
+          // The payout may already have been committed at the gateway before
+          // the request errored (timeout/network/5xx/unknown). Restoring the
+          // reserved funds here would double-pay the driver, so leave the
+          // withdrawal pending for manual reconciliation / the next sweep.
+          logger.error(
+            `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} dispatch returned ambiguous error — leaving pending for reconciliation: ${err.message}`,
+          );
+          continue;
+        }
+
         // The payout never left the platform — safe to restore the reserved
         // funds to wallet_confirmed.
         logger.error(
@@ -180,9 +246,20 @@ export async function settlePendingWithdrawals() {
       }
     }
 
-    // The payout has already been dispatched. Never call fail_withdrawal_tx
-    // here — restoring wallet_confirmed would double-pay the driver. Keep the
-    // row 'pending' and let the next sweep retry the idempotent settle call.
+    // The payout has already been dispatched (payout_attempted_at is set), so
+    // never call fail_withdrawal_tx here — restoring wallet_confirmed would
+    // double-pay the driver. Keep the row 'pending' and let the next sweep
+    // retry the idempotent settle call. If the settlement reference is still
+    // missing, the row may have been claimed but the dispatch never produced a
+    // payout reference (crash window) — refuse to settle so the withdrawal is
+    // not falsely marked completed with no payout having left the platform.
+    if (!settlementRef) {
+      logger.warn(
+        `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} was claimed but no payout settlement reference was recorded - refusing to settle, keeping funds reserved.`,
+      );
+      continue;
+    }
+
     try {
       await settleWithRetry(withdrawal.id, settlementRef);
       logger.info(

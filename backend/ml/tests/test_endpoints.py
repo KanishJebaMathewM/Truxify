@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from main import app
 from app.models.base import MODEL_STORAGE_DIR
+from app.models import demand_forecast as df
 from app.models import price_prediction as pp
 
 client = TestClient(app, headers={'X-API-Key': 'test_key'})
@@ -33,8 +34,8 @@ def test_health():
         "trust_scorer",
         "collaborative_filter",
         "eta_predictor",
-        "traffic_eta",
     }
+    assert data["model_artifact_origin"]["demand_forecast"] in {"real", "synthetic", None}
 
 
 def _auth_payload():
@@ -81,7 +82,11 @@ def test_health_no_auth_required(monkeypatch):
     assert response.json()["service"] == "ml-engine"
 
 
-def test_train_demand():
+def test_train_demand(tmp_path, monkeypatch):
+    import app.models.base as base
+    # Train into a scratch storage dir with no existing production model so
+    # the first run is promoted and its provenance metadata is persisted.
+    monkeypatch.setattr(base, "MODEL_STORAGE_DIR", str(tmp_path))
     response = client.post("/train/demand")
     assert response.status_code == 200
     data = response.json()
@@ -90,6 +95,8 @@ def test_train_demand():
     assert "r2" in data["metrics"]
     assert "mae" in data["metrics"]
     assert "rmse" in data["metrics"]
+    meta = df.get_model_meta("demand_forecast") or {}
+    assert meta.get("training_meta", {}).get("source") == "synthetic"
 
 
 def test_list_models():
@@ -103,7 +110,13 @@ def test_list_models():
     assert "demand_forecast" in model_names
 
 
-def test_predict_demand_valid():
+def test_predict_demand_valid(monkeypatch):
+    """A model artifact trained on real data serves predictions normally."""
+    df.reset_model_cache()
+    monkeypatch.setattr(
+        df, "get_model_meta",
+        lambda name: {"training_meta": {"source": "real"}},
+    )
     payload = {
         "hour": 15.5,
         "day_of_week": 4.0,
@@ -119,6 +132,27 @@ def test_predict_demand_valid():
     assert isinstance(data["predicted_demand"], float)
     assert data["predicted_demand"] >= 0
     assert data["model_version"] == "1.0.0"
+
+
+def test_predict_demand_refuses_synthetic(monkeypatch):
+    """A synthetic-trained artifact must be refused, not silently served."""
+    df.reset_model_cache()
+    monkeypatch.setattr(
+        df, "get_model_meta",
+        lambda name: {"training_meta": {"source": "synthetic"}},
+    )
+    response = client.post("/predict/demand", json=_auth_payload())
+    assert response.status_code == 500
+    assert "Prediction failed" in response.json()["detail"]
+
+
+def test_predict_demand_missing_artifact(monkeypatch):
+    """A missing artifact must fail loudly instead of auto-training."""
+    df.reset_model_cache()
+    monkeypatch.setattr(df, "model_exists", lambda name: False)
+    response = client.post("/predict/demand", json=_auth_payload())
+    assert response.status_code == 500
+    assert "Prediction failed" in response.json()["detail"]
 
 
 def test_predict_price_valid(monkeypatch):

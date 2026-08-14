@@ -1,3 +1,67 @@
+import { describe, it, expect } from 'vitest';
+
+function parsePage(raw) {
+  const p = parseInt(raw, 10);
+  if (!Number.isFinite(p) || p < 1) return 1;
+  return p;
+}
+
+function parseLimit(raw, max = 100) {
+  const l = parseInt(raw, 10);
+  if (!Number.isFinite(l) || l < 1) return 20;
+  if (l > max) return max;
+  return l;
+}
+
+describe('parsePage', () => {
+  it('returns 1 for undefined', () => {
+    expect(parsePage(undefined)).toBe(1);
+  });
+
+  it('returns 1 for non-numeric string', () => {
+    expect(parsePage('abc')).toBe(1);
+  });
+
+  it('returns 1 for zero', () => {
+    expect(parsePage('0')).toBe(1);
+  });
+
+  it('returns 1 for negative numbers', () => {
+    expect(parsePage('-5')).toBe(1);
+  });
+
+  it('returns the number for valid positive integers', () => {
+    expect(parsePage('7')).toBe(7);
+    expect(parsePage('100')).toBe(100);
+  });
+});
+
+describe('parseLimit', () => {
+  it('returns default 20 for undefined', () => {
+    expect(parseLimit(undefined)).toBe(20);
+  });
+
+  it('returns default 20 for non-numeric string', () => {
+    expect(parseLimit('abc')).toBe(20);
+  });
+
+  it('returns default 20 for zero', () => {
+    expect(parseLimit('0')).toBe(20);
+  });
+
+  it('returns default 20 for negative numbers', () => {
+    expect(parseLimit('-5')).toBe(20);
+  });
+
+  it('caps at max when limit exceeds max', () => {
+    expect(parseLimit('500', 100)).toBe(100);
+  });
+
+  it('returns the number for valid limits', () => {
+    expect(parseLimit('50')).toBe(50);
+    expect(parseLimit('25', 50)).toBe(25);
+  });
+});
 import { describe, it, expect, vi } from 'vitest';
 import { validatePagination } from '../../src/middleware/pagination.js';
 import { buildPagination } from '../../src/utils/pagination.js';

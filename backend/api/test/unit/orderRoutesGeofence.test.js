@@ -24,6 +24,12 @@ vi.mock('../../src/core/container.js', () => ({
   confirmEscrowRefund: vi.fn(),
 }));
 
+vi.mock('../../src/middleware/auth.js', () => ({
+  authenticate: (req, res, next) => next(),
+  requireRole: () => (req, res, next) => next(),
+  requirePolicy: () => (req, res, next) => next(),
+}));
+
 import { orderValidationService, orderLifecycleService } from '../../src/core/container.js';
 
 const app = express();

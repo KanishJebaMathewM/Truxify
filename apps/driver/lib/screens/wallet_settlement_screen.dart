@@ -3,16 +3,25 @@ import '../models/smart_contract_payment_model.dart';
 import '../services/smart_contract_payment_service.dart';
 
 class WalletSettlementScreen extends StatefulWidget {
-  const WalletSettlementScreen({super.key});
+  const WalletSettlementScreen({super.key, this.paymentService});
+
+  /// Injection seam for tests. Defaults to the real blockchain-backed service.
+  final SmartContractPaymentService? paymentService;
 
   @override
   State<WalletSettlementScreen> createState() => _WalletSettlementScreenState();
 }
 
 class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
-  final SmartContractPaymentService _paymentService = SmartContractPaymentService();
+  late final SmartContractPaymentService _paymentService =
+      widget.paymentService ?? SmartContractPaymentService();
   List<SmartContractPayment> _contracts = [];
   bool _isLoading = true;
+
+  /// Contracts with a settlement call currently in flight. Guards against a
+  /// double tap landing two `executeSmartContract` calls on the same escrow
+  /// before the modal barrier is mounted.
+  final Set<String> _settlingContractIds = {};
 
   @override
   void initState() {
@@ -31,6 +40,14 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
   }
 
   Future<void> _signBolAndSettle(SmartContractPayment contract) async {
+    // Idempotent entry: an already-settled escrow has nothing left to release,
+    // and a contract mid-settlement must not be executed twice. Re-entry is a
+    // no-op rather than a second on-chain payout.
+    if (contract.status == 'Settled' ||
+        !_settlingContractIds.add(contract.contractId)) {
+      return;
+    }
+
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -75,6 +92,8 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
         ),
       );
     } finally {
+      // Released on every exit path so a failed settlement stays retryable.
+      _settlingContractIds.remove(contract.contractId);
       // Always close the non-dismissible dialog, even when the call throws,
       // so the driver is never stuck on a permanently spinning barrier.
       if (mounted) {
@@ -129,7 +148,11 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
 
   Widget _buildContractCard(SmartContractPayment contract) {
     final isSettled = contract.status == 'Settled';
-    final canSettle = contract.geoFenceBreached && !contract.bolSigned;
+    // Delivery is proven by the geo-fence breach; funds stay releasable until
+    // the escrow actually settles. Keying this off `!contract.bolSigned` left a
+    // contract whose BOL was signed elsewhere with no badge and no button, so
+    // the driver could never trigger a payout that was already earned.
+    final canSettle = contract.geoFenceBreached && !isSettled;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -167,8 +190,10 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () => _signBolAndSettle(contract),
-                  icon: const Icon(Icons.draw),
-                  label: const Text('SIGN BOL & RELEASE FUNDS'),
+                  icon: Icon(contract.bolSigned ? Icons.lock_open : Icons.draw),
+                  label: Text(contract.bolSigned
+                      ? 'RELEASE FUNDS'
+                      : 'SIGN BOL & RELEASE FUNDS'),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo[900], foregroundColor: Colors.white),
                 ),
               )

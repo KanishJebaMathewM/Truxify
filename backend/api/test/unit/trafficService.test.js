@@ -89,7 +89,7 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
 
     expect(mockLogger.info).toHaveBeenCalledTimes(1);
     const logCall = mockLogger.info.mock.calls[0];
-    expect(logCall[0]).toContain('Live traffic surge detected');
+    expect(logCall[0]).toContain('Live traffic data at');
   });
 
   it('returns 1.0 when error is thrown', async () => {

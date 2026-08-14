@@ -1,5 +1,5 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
 
 describe("DAO Quadratic Voting", function () {
   it("Should calculate quadratic cost = votes^2 correctly", async function () {
@@ -13,6 +13,8 @@ describe("DAO Quadratic Voting", function () {
 
     await token.transfer(voter.address, 100);
     await token.connect(voter).approve(await dao.getAddress(), 100);
+
+    await dao.registerVoter(ethers.id("identity:alice"));
 
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
 

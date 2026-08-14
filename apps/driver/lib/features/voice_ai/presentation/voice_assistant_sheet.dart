@@ -40,10 +40,12 @@ class _VoiceAssistantSheetState extends State<VoiceAssistantSheet> {
           const RecordConfig(encoder: AudioEncoder.aacLc),
           path: path,
         );
-        setState(() {
-          _isRecording = true;
-          _recordedFilePath = path;
-        });
+        if (mounted) {
+          setState(() {
+            _isRecording = true;
+            _recordedFilePath = path;
+          });
+        }
       }
     } catch (e) {
       debugPrint("Recording Error: $e");
@@ -53,17 +55,21 @@ class _VoiceAssistantSheetState extends State<VoiceAssistantSheet> {
   Future<void> _stopRecordingAndSend() async {
     try {
       final path = await _record.stop();
-      setState(() {
-        _isRecording = false;
-        _isLoading = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _isLoading = true;
+        });
+      }
 
       if (path != null) {
         await _sendAudioToBackend(path);
       }
     } catch (e) {
       debugPrint("Stop Recording Error: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -100,9 +106,11 @@ class _VoiceAssistantSheetState extends State<VoiceAssistantSheet> {
     } catch (e) {
       debugPrint("Network Error: $e");
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 

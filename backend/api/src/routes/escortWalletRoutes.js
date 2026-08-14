@@ -1,10 +1,12 @@
 import express from 'express';
-import { loadCredential, handshake } from '../controllers/escortWalletController.js';
+import { loadCredential, resolveCredentialSubject, handshake } from '../controllers/escortWalletController.js';
 import { authenticate } from '../middleware/auth.js';
+import { requireRole } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 
 const router = express.Router();
 
-const SUBJECT_RE = /^0x[a-fA-F0-9]{40}$/;
+const SUBJECT_RE = /^0x[a-fA-F0-9]+$/;
 
 // Only truck drivers/managers may perform a convoy compliance handshake
 const allowRoles = (...roles) => (req, res, next) => {
@@ -37,6 +39,10 @@ router.post(
 
         next();
     },
+    // Only the escort driver themselves (for their own wallet address) or an
+    // administrator may issue a credential — never any authenticated user for
+    // an arbitrary subject.
+    requirePolicy('escort:issue-credential', resolveCredentialSubject),
     loadCredential
 );
 

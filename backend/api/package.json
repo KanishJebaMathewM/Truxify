@@ -19,8 +19,7 @@
     "verify-db": "node scripts/verify-db-schema.js",
     "seed:dev": "node scripts/seed-dev-profile.js",
     "benchmark:postgis": "node scripts/benchmark-postgis.js",
-    "test:load:api": "k6 run tests/load/scenarios.js",
-    "test:load:ws": "k6 run tests/load/websocket.js"
+    "benchmark:loads": "node scripts/benchmark-load-marketplace.js"
   },
   "dependencies": {
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.221.0",

@@ -58,6 +58,12 @@ describe('WebRTC offline sync route', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(signalingMock.syncOfflineData).toHaveBeenCalledWith('peer-1');
+    // The requesting user is forwarded so the service can re-check access:
+    // syncOfflineData is a no-op for a peer the caller cannot reach, which is
+    // the last line of defence behind the route's own 403.
+    expect(signalingMock.syncOfflineData).toHaveBeenCalledWith(
+      'peer-1',
+      expect.objectContaining({ id: 'user-1' }),
+    );
   });
 });

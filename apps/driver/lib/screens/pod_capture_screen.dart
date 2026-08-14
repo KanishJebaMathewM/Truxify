@@ -7,6 +7,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/pod_storage_service.dart';
 import '../services/background_sync_service.dart';
 import '../services/sync_service.dart';
+import '../services/image_compression_service.dart';
 
 class PodCaptureScreen extends StatefulWidget {
   final String orderId;
@@ -32,8 +33,10 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
   Future<void> _takePhoto() async {
     final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
     if (photo != null) {
+      final File rawImage = File(photo.path);
+      final File compressedImage = await ImageCompressionService.compressImage(rawImage) ?? rawImage;
       setState(() {
-        _photoPath = photo.path;
+        _photoPath = compressedImage.path;
       });
     }
   }
@@ -205,8 +208,15 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  if (_photoPath != null)
+                  if (_photoPath != null) ...[
                     Image.file(File(_photoPath!), height: 200, fit: BoxFit.cover),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Uploading ${ImageCompressionService.getFileSize(File(_photoPath!))}...',
+                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   ElevatedButton.icon(
                     onPressed: _takePhoto,
                     icon: const Icon(Icons.camera_alt),

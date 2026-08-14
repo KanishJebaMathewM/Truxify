@@ -1,136 +1,160 @@
 import 'package:flutter/material.dart';
-import '../models/lumper_escrow_model.dart';
-import '../services/lumper_escrow_service.dart';
+import 'package:intl/intl.dart';
+import '../models/lumper_fee_model.dart';
+import '../services/lumper_fee_service.dart';
 
 class LumperFeeScreen extends StatefulWidget {
-  final String loadId;
-  const LumperFeeScreen({super.key, required this.loadId});
+  const LumperFeeScreen({super.key});
 
   @override
   State<LumperFeeScreen> createState() => _LumperFeeScreenState();
 }
 
 class _LumperFeeScreenState extends State<LumperFeeScreen> {
-  final LumperEscrowService _contractService = LumperEscrowService();
-  LumperEscrowContract? _contract;
-  bool _isLoading = true;
-  bool _isProcessingReceipt = false;
-  bool _isFundsReleased = false;
+  final LumperFeeService _service = LumperFeeService();
+  LumperFeeSession? _session;
 
   @override
   void initState() {
     super.initState();
-    _loadContract();
-  }
-
-  void _loadContract() async {
-    final contract = await _contractService.getActiveContract(widget.loadId);
-    if (mounted) {
-      setState(() {
-        _contract = contract;
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _uploadReceipt() async {
-    setState(() {
-      _isProcessingReceipt = true;
+    _service.lumperStream.listen((data) {
+      if (mounted) setState(() => _session = data);
     });
+    _service.initializeScanner();
+  }
 
-    final success = await _contractService.processReceiptAndReleaseFunds('mock_receipt.jpg');
-
-    if (mounted) {
-      setState(() {
-        _isProcessingReceipt = false;
-        _isFundsReleased = success;
-        if (success) {
-           _contract = LumperEscrowContract(
-              contractAddress: _contract!.contractAddress,
-              loadId: _contract!.loadId,
-              brokerName: _contract!.brokerName,
-              facilityName: _contract!.facilityName,
-              escrowedAmount: _contract!.escrowedAmount,
-              status: 'Released',
-            );
-        }
-      });
-    }
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lumper Fee Escrow'),
-        backgroundColor: Colors.purple[800],
+        title: const Text('Lumper Fee Reimbursement'),
+        backgroundColor: Colors.blueGrey[900],
       ),
       backgroundColor: Colors.grey[200],
-      body: _isLoading
+      body: _session == null
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  _buildContractDetails(),
-                  const SizedBox(height: 24),
-                  if (!_isFundsReleased) _buildUploadSection() else _buildSuccessSection(),
-                ],
-              ),
-            ),
+          : _buildDashboard(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: (_session?.isProcessing == true || _session?.activeTicket != null)
+            ? null 
+            : () => _service.processReceiptUpload(),
+        backgroundColor: Colors.indigo,
+        icon: const Icon(Icons.camera_alt),
+        label: const Text('Scan Lumper Receipt'),
+      ),
     );
   }
 
-  Widget _buildContractDetails() {
-    final c = _contract!;
+  Widget _buildDashboard() {
+    final s = _session!;
+
+    return Column(
+      children: [
+        _buildStatusHeader(s),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (s.scannedReceipt != null) ...[
+                _buildOCRCard(s.scannedReceipt!),
+                const SizedBox(height: 16),
+              ],
+              if (s.activeTicket != null) ...[
+                _buildTicketCard(s.activeTicket!),
+              ] else if (s.scannedReceipt == null) ...[
+                _buildInstructionCard(),
+              ],
+              const SizedBox(height: 80), // Padding for FAB
+            ],
+          ),
+        )
+      ],
+    );
+  }
+
+  Widget _buildStatusHeader(LumperFeeSession s) {
+    bool isComplete = s.activeTicket != null;
+    
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      color: s.isProcessing ? Colors.indigo[600] : (isComplete ? Colors.green[700] : Colors.blueGrey[800]),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              s.isProcessing 
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                : Icon(isComplete ? Icons.check_circle : Icons.receipt_long, color: Colors.white, size: 36),
+              const SizedBox(width: 12),
+              const Text('ACCOUNTS RECEIVABLE ENGINE', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(s.status.toUpperCase(), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInstructionCard() {
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 1,
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            const Icon(Icons.upload_file, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('Automated B2B Reimbursement', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(height: 16),
+            const Text(
+              'Tap below to scan your warehouse lumper receipt. The system will OCR the total amount, generate a formal PDF invoice, and instantly fire a webhook to the broker\'s accounting department.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOCRCard(LumperReceipt receipt) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.grey[300]!)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Smart Contract', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: c.status == 'Locked' ? Colors.orange[100] : Colors.green[100],
-                    borderRadius: BorderRadius.circular(12)
-                  ),
-                  child: Text(
-                    c.status.toUpperCase(),
-                    style: TextStyle(
-                      color: c.status == 'Locked' ? Colors.orange[800] : Colors.green[800],
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12
-                    )
-                  ),
-                )
+                const Text('OCR EXTRACTION RESULTS', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('Confidence: ${receipt.ocrConfidence}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(c.contractAddress, style: const TextStyle(fontFamily: 'monospace', fontSize: 16)),
-            const Divider(height: 32),
+            const Divider(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Broker Escrow', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    Text('\$${c.escrowedAmount.toStringAsFixed(2)}', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.purple[800])),
+                    Text(receipt.warehouseName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text('Load ID: ${receipt.loadId}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text('Facility', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    Text(c.facilityName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  ],
-                )
+                Text('\$${receipt.amountPaid.toStringAsFixed(2)}', style: TextStyle(color: Colors.indigo[900], fontWeight: FontWeight.bold, fontSize: 24)),
               ],
             )
           ],
@@ -139,69 +163,57 @@ class _LumperFeeScreenState extends State<LumperFeeScreen> {
     );
   }
 
-  Widget _buildUploadSection() {
-    if (_isProcessingReceipt) {
-      return Container(
-        padding: const EdgeInsets.all(32),
-        width: double.infinity,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+  Widget _buildTicketCard(ReimbursementTicket ticket) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Colors.indigo, width: 2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const CircularProgressIndicator(color: Colors.purple),
-            const SizedBox(height: 24),
-            Text('AI Verifying Lumper Receipt...', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple[800])),
-            const SizedBox(height: 8),
-            const Text('Executing Smart Contract...', style: TextStyle(color: Colors.grey)),
+            const Row(
+              children: [
+                Icon(Icons.send, color: Colors.indigo),
+                SizedBox(width: 12),
+                Text('WEBHOOK SUCCESSFULLY FIRED', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.indigo)),
+              ],
+            ),
+            const Divider(height: 32),
+            _buildTicketRow('A/R Ticket ID', ticket.ticketId),
+            const SizedBox(height: 12),
+            _buildTicketRow('Broker API Endpoint', ticket.brokerApiEndpoint),
+            const SizedBox(height: 12),
+            _buildTicketRow('Timestamp', DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.parse(ticket.timestamp))),
+            const Divider(height: 32),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.orange[50], borderRadius: BorderRadius.circular(8)),
+              child: Row(
+                children: [
+                  const Icon(Icons.pending_actions, color: Colors.orange),
+                  const SizedBox(width: 12),
+                  Text('STATUS: ${ticket.status.toUpperCase()}', style: TextStyle(color: Colors.orange[900], fontWeight: FontWeight.bold)),
+                ],
+              ),
+            )
           ],
         ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(24),
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.purple[200]!, width: 2, style: BorderStyle.solid) // Mock dashed border
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.receipt_long, size: 64, color: Colors.purple[300]),
-          const SizedBox(height: 16),
-          const Text('Upload Lumper Receipt', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text('AI will parse the amount and instantly release the funds from escrow to your wallet.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              onPressed: _uploadReceipt,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('SCAN RECEIPT', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple[800], foregroundColor: Colors.white),
-            ),
-          )
-        ],
       ),
     );
   }
 
-  Widget _buildSuccessSection() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      width: double.infinity,
-      decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.green[200]!)),
-      child: Column(
-        children: [
-          const Icon(Icons.check_circle, size: 80, color: Colors.green),
-          const SizedBox(height: 16),
-          Text('Funds Released!', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green[800])),
-          const SizedBox(height: 8),
-          const Text('The smart contract has verified the receipt and transferred \$350.00 to your wallet.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-        ],
-      ),
+  Widget _buildTicketRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+      ],
     );
   }
 }

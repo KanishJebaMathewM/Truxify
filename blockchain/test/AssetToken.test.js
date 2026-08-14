@@ -587,4 +587,30 @@ describe("AssetToken", function () {
     assert.equal(order.isActive, false);
     assert.equal(order.buyer, buyer2.address);
   });
+
+  it("should keep buy/sell rounding symmetric so a round-trip is value-neutral (no contract leakage)", async function () {
+    const { assetToken, owner, buyer1 } = await deployAssetToken();
+    // totalTokens=3, totalValue=100 ETH => tokenPrice = 100/3 ETH (non-integer),
+    // so any rounding asymmetry would leak a whole token to the contract.
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("3"),
+      "ipfs://..."
+    );
+
+    const amount = ethers.parseEther("1");
+    // Buy 1 token. Cost = floor(1 * 100/3) = 33 ETH.
+    await assetToken.connect(buyer1).purchaseFraction(1, amount, {
+      value: ethers.parseEther("34")
+    });
+    // Sell the same 1 token back. Payout = floor(1 * 100/3) = 33 ETH (== cost).
+    await assetToken.connect(buyer1).sellFraction(1, amount);
+    await assetToken.connect(buyer1).claimPayout();
+
+    // Round-trip is value-neutral: the contract cannot skim a fractional token.
+    assert.equal(await ethers.provider.getBalance(assetToken.target), 0n);
+  });
 });

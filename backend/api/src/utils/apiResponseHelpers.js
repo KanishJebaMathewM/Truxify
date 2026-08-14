@@ -26,12 +26,12 @@ export function success(data, meta) {
  * @returns {{ success: false, error: string, code?: string, details?: unknown }}
  */
 export function error(message, code, details) {
-  const response = { success: false, error: message };
+  const response = { success: false, error: { message } };
   if (code !== undefined) {
-    response.code = code;
+    response.error.code = code;
   }
   if (details !== undefined) {
-    response.details = details;
+    response.error.details = details;
   }
   return response;
 }

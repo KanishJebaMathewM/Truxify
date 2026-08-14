@@ -49,43 +49,52 @@ class OfflineFirstSyncService {
   }
 
   OfflineFirstSyncService() {
-    _initDatabase();
+    // The DB opens lazily; failures are captured inside _initDatabase so this
+    // fire-and-forget call never surfaces as an unhandled async error.
+    unawaited(_initDatabase());
   }
 
   Future<void> _initDatabase() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final dbPath = p.join(dir.path, 'offline_sync.db');
-    _db = await openDatabase(
-      dbPath,
-      version: 3,
-      onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE sync_events (
-            event_id TEXT PRIMARY KEY,
-            event_type TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            queued_at INTEGER NOT NULL,
-            is_synced INTEGER NOT NULL DEFAULT 0,
-            synced_at INTEGER,
-            retry_count INTEGER NOT NULL DEFAULT 0,
-            state TEXT NOT NULL DEFAULT 'pending'
-          )
-        ''');
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await db.execute(
-            'ALTER TABLE sync_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0',
-          );
-        }
-        if (oldVersion < 3) {
-          await db.execute(
-            "ALTER TABLE sync_events ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
-          );
-        }
-      },
-    );
-    _emitDbSnapshot();
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final dbPath = p.join(dir.path, 'offline_sync.db');
+      _db = await openDatabase(
+        dbPath,
+        version: 3,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE sync_events (
+              event_id TEXT PRIMARY KEY,
+              event_type TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              queued_at INTEGER NOT NULL,
+              is_synced INTEGER NOT NULL DEFAULT 0,
+              synced_at INTEGER,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              state TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) {
+            await db.execute(
+              'ALTER TABLE sync_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0',
+            );
+          }
+          if (oldVersion < 3) {
+            await db.execute(
+              "ALTER TABLE sync_events ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
+            );
+          }
+        },
+      );
+      await _emitDbSnapshot();
+    } catch (err, st) {
+      // A failed open (e.g. a corrupt DB file on disk) must not crash the app
+      // or surface as an unhandled async error; sync simply stays dormant and
+      // a later trigger can retry.
+      debugPrint('OfflineFirstSyncService: DB init failed: $err\n$st');
+    }
   }
 
   String _generateId() {
@@ -130,26 +139,79 @@ class OfflineFirstSyncService {
     }
   }
 
+  /// Decodes one DB row into an event, or returns null when the row is corrupt
+  /// (non-JSON payload, missing/wrong-typed columns). A corrupt row must never
+  /// crash a sync pass or the snapshot stream (issue #12138); callers flag it
+  /// dead_letter so it stops blocking the queue and remains visible for
+  /// diagnostics.
+  OfflineSyncEvent? _parseRow(Map<String, dynamic> row) {
+    final eventId = row['event_id'];
+    final eventType = row['event_type'];
+    final payloadRaw = row['payload'];
+    final queuedAtRaw = row['queued_at'];
+    if (eventId is! String ||
+        eventType is! String ||
+        payloadRaw is! String ||
+        queuedAtRaw is! int) {
+      return null;
+    }
+
+    Map<String, dynamic>? payload;
+    try {
+      final decoded = jsonDecode(payloadRaw);
+      if (decoded is Map<String, dynamic>) {
+        payload = decoded;
+      }
+    } catch (_) {
+      payload = null;
+    }
+    if (payload == null) return null;
+
+    return OfflineSyncEvent(
+      eventId: eventId,
+      eventType: eventType,
+      payload: payload,
+      queuedAt: DateTime.fromMillisecondsSinceEpoch(queuedAtRaw),
+      isSynced: row['is_synced'] is int && (row['is_synced'] as int) == 1,
+      syncedAt: row['synced_at'] is int
+          ? DateTime.fromMillisecondsSinceEpoch(row['synced_at'] as int)
+          : null,
+    );
+  }
+
   Future<List<OfflineSyncEvent>> _loadAllEvents() async {
     final db = _db;
     if (db == null) return [];
 
     final rows = await db.query('sync_events', orderBy: 'queued_at ASC');
-    return rows.map((row) => OfflineSyncEvent(
-      eventId: row['event_id'] as String,
-      eventType: row['event_type'] as String,
-      payload: jsonDecode(row['payload'] as String) as Map<String, dynamic>,
-      queuedAt: DateTime.fromMillisecondsSinceEpoch(row['queued_at'] as int),
-      isSynced: (row['is_synced'] as int) == 1,
-      syncedAt: row['synced_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(row['synced_at'] as int)
-          : null,
-    )).toList();
+    final events = <OfflineSyncEvent>[];
+    for (final row in rows) {
+      final event = _parseRow(row);
+      if (event != null) {
+        events.add(event);
+        continue;
+      }
+      final eventId = row['event_id'];
+      if (eventId is String) {
+        await db.update(
+          'sync_events',
+          {'state': stateDeadLetter},
+          where: 'event_id = ?',
+          whereArgs: [eventId],
+        );
+      }
+    }
+    return events;
   }
 
   Future<void> _emitDbSnapshot() async {
-    final events = await _loadAllEvents();
-    _dbController.add(events);
+    try {
+      final events = await _loadAllEvents();
+      _dbController.add(events);
+    } catch (err, st) {
+      // Never leak a snapshot failure into the caller's async context.
+      debugPrint('OfflineFirstSyncService: snapshot emit failed: $err\n$st');
+    }
   }
 
   Future<bool> _syncSingleEvent(OfflineSyncEvent event) async {
@@ -186,7 +248,9 @@ class OfflineFirstSyncService {
       );
 
       return response.statusCode == 200 || response.statusCode == 202;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[OfflineFirstSyncService] Sync failed for event '
+          '${event.eventId} (${event.eventType}): $e');
       return false;
     }
   }
@@ -203,7 +267,13 @@ class OfflineFirstSyncService {
     try {
       do {
         _syncQueued = false;
-        await _runSyncPass();
+        try {
+          await _runSyncPass();
+        } catch (err, st) {
+          // A storage failure in one pass must not escape as an unhandled
+          // async error; the guard resets so the next trigger retries.
+          debugPrint('OfflineFirstSyncService: sync pass failed: $err\n$st');
+        }
       } while (_syncQueued);
     } finally {
       _isSyncing = false;
@@ -226,40 +296,54 @@ class OfflineFirstSyncService {
     final batchSize = 10;
     for (int i = 0; i < unsynced.length; i += batchSize) {
       final batch = unsynced.skip(i).take(batchSize).toList();
-      final results = await Future.wait(
-        batch.map((row) => _syncSingleEvent(OfflineSyncEvent(
-          eventId: row['event_id'] as String,
-          eventType: row['event_type'] as String,
-          payload: jsonDecode(row['payload'] as String) as Map<String, dynamic>,
-          queuedAt: DateTime.fromMillisecondsSinceEpoch(row['queued_at'] as int),
-        ))),
-      );
 
-      for (int j = 0; j < batch.length; j++) {
-        final eventId = batch[j]['event_id'] as String;
+      // Parse the batch up-front: a corrupt pending row is dead-lettered here
+      // instead of throwing out of Future.wait and aborting the whole pass.
+      final parsed = <({String eventId, OfflineSyncEvent event, int retryCount})>[];
+      for (final row in batch) {
+        final eventId = row['event_id'];
+        if (eventId is! String) continue;
+        final event = _parseRow(row);
+        if (event == null) {
+          await db.update(
+            'sync_events',
+            {'state': stateDeadLetter},
+            where: 'event_id = ?',
+            whereArgs: [eventId],
+          );
+          continue;
+        }
+        parsed.add((
+          eventId: eventId,
+          event: event,
+          retryCount: row['retry_count'] is int ? row['retry_count'] as int : 0,
+        ));
+      }
+
+      final results = await Future.wait(parsed.map((e) => _syncSingleEvent(e.event)));
+
+      for (int j = 0; j < parsed.length; j++) {
+        final entry = parsed[j];
         if (results[j]) {
           // Successfully synced: remove the row so the local store does not
           // grow without bound (is_synced alone kept every historical row).
-          await db.delete('sync_events', where: 'event_id = ?', whereArgs: [eventId]);
+          await db.delete('sync_events', where: 'event_id = ?', whereArgs: [entry.eventId]);
+        } else if (entry.retryCount + 1 >= maxRetries) {
+          // Retry ceiling reached: dead-letter the event so it is never
+          // re-POSTed on every connectivity change forever.
+          await db.update(
+            'sync_events',
+            {'state': stateDeadLetter},
+            where: 'event_id = ?',
+            whereArgs: [entry.eventId],
+          );
         } else {
-          final retries = batch[j]['retry_count'] as int? ?? 0;
-          if (retries + 1 >= maxRetries) {
-            // Retry ceiling reached: dead-letter the event so it is never
-            // re-POSTed on every connectivity change forever.
-            await db.update(
-              'sync_events',
-              {'state': stateDeadLetter},
-              where: 'event_id = ?',
-              whereArgs: [eventId],
-            );
-          } else {
-            await db.update(
-              'sync_events',
-              {'retry_count': retries + 1},
-              where: 'event_id = ?',
-              whereArgs: [eventId],
-            );
-          }
+          await db.update(
+            'sync_events',
+            {'retry_count': entry.retryCount + 1},
+            where: 'event_id = ?',
+            whereArgs: [entry.eventId],
+          );
         }
       }
     }

@@ -19,7 +19,12 @@ export default function securityHeaderDuplicates(req, res, next) {
   const originalSetHeader = res.setHeader.bind(res);
 
   res.setHeader = (name, value) => {
-    const header = String(name).toLowerCase();
+    // Guard against non-string header names (e.g. undefined from a proxy
+    // layer) so no TypeError escapes the override; those are passed through.
+    if (typeof name !== 'string') {
+      return originalSetHeader(name, value);
+    }
+    const header = name.toLowerCase();
 
     if (MONITORED_HEADERS.has(header)) {
       const warnDuplicate = () => {

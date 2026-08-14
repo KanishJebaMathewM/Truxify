@@ -57,8 +57,6 @@ enum NotificationTarget {
   unknown,
 }
 
-<<<<<<< HEAD
-=======
 /// Single source of truth mapping a notification type to the in-app
 /// [NotificationTarget] used for badge/consumption tracking.
 ///
@@ -82,7 +80,6 @@ const Map<String, NotificationTarget> _targetByType = {
   'general_notification': NotificationTarget.notifications,
 };
 
->>>>>>> upstream/main
 /// Signature for the app-specific navigation callback.
 ///
 /// The callback receives the resolved [target] and the raw [data] map so it
@@ -143,18 +140,9 @@ class NotificationRouter {
         return const NavigateToNotificationsList();
 
       case 'payment_released':
-<<<<<<< HEAD
-        switch (appType) {
-          case NotificationAppType.customer:
-            return const NavigateToWallet();
-          case NotificationAppType.driver:
-            return const NavigateToEarnings();
-        }
-=======
         return appType == NotificationAppType.customer
             ? const NavigateToWallet()
             : const NavigateToEarnings();
->>>>>>> upstream/main
 
       case 'support_ticket':
         if (payload.supportTicketId != null) {
@@ -193,30 +181,6 @@ class NotificationRouter {
 
   /// Resolves the [NotificationTarget] from a raw data map (FCM data payload
   /// or [NotificationItem.metadata]).
-<<<<<<< HEAD
-  static NotificationTarget resolveTarget(Map<String, dynamic> data) {
-    final type = _extractNotifType(data);
-    switch (type) {
-      case 'order_update':
-      case 'delivery_otp':
-        return NotificationTarget.orderDetail;
-      case 'trip_update':
-      case 'trip_completed':
-        return NotificationTarget.tripDetail;
-      case 'payment':
-      case 'payment_released':
-        return NotificationTarget.earnings;
-      case 'load_offer':
-        return NotificationTarget.loadDetail;
-      case 'system':
-      case 'document':
-        return NotificationTarget.notifications;
-      case 'document_expiry':
-        return NotificationTarget.documents;
-      default:
-        return NotificationTarget.unknown;
-    }
-=======
   ///
   /// The mapping is centralized in [_targetByType] so it stays in sync with the
   /// deep-link route produced by [resolve].
@@ -244,7 +208,6 @@ class NotificationRouter {
       return NotificationTarget.notifications;
     }
     return NotificationTarget.unknown;
->>>>>>> upstream/main
   }
 
   /// Extracts the order display ID from the data map.

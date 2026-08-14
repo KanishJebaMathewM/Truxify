@@ -96,6 +96,19 @@ export function getActiveDriverCount() {
   return activeDrivers.size;
 }
 
+/**
+ * Parses a client-supplied GPS timestamp defensively.
+ *
+ * Falls back to the current time when the value is missing or unparseable so
+ * that a single malformed telemetry frame (e.g. `"abc"` or a bad epoch)
+ * cannot turn into an Invalid Date whose `toISOString()` throws and kills the
+ * driver's live location broadcast.
+ */
+export function parseGpsTimestamp(timestamp) {
+  const parsed = timestamp ? new Date(timestamp) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
 // ─── Server init ─────────────────────────────────────────────────────────────
 
 /**
@@ -221,6 +234,7 @@ export function initLocationServer(httpServer) {
       }
 
       const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
+        const gpsTimestamp = parseGpsTimestamp(timestamp);
 
       // 1. Buffer GPS point into the shared telemetry pipeline. Synchronous and
       //    fail-open — a slow or unavailable MongoDB must never delay the

@@ -1,8 +1,25 @@
 import { ethers } from 'ethers';
-import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 import { getMevRelayer } from './flashbots_relayer.js';
+
+/**
+ * Derives the exact 32-byte preimage that is revealed on-chain.
+ *
+ * releaseDepositPrivate re-hashes the revealed bytes32 as
+ * `keccak256(abi.encodePacked(bytes32))`, so the secretHash committed via
+ * createProtectedDeposit must be `keccak256(preimage)` for exactly those 32
+ * bytes. Hashing the caller-supplied secret down to a fixed 32-byte value keeps
+ * creation and release consistent for secrets of any length/content (a plain
+ * string passed straight into the bytes32 slot would be zero-padded on-chain,
+ * producing a digest that can never match the commitment).
+ */
+export function toPreimageBytes32(secret) {
+    if (typeof secret === 'string' && secret.startsWith('0x') && secret.length === 66) {
+        return secret;
+    }
+    return ethers.keccak256(ethers.toUtf8Bytes(String(secret)));
+}
 
 class MEVService {
     constructor() {
@@ -25,7 +42,7 @@ class MEVService {
         // Flashbots endpoint
         this.flashbotsEndpoint = process.env.FLASHBOTS_ENDPOINT || 'https://relay.flashbots.net';
         
-        logger.info('✅ MEV Protection Service initialized');
+        logger.info('Γ£à MEV Protection Service initialized');
     }
 
     get provider() {
@@ -79,7 +96,7 @@ class MEVService {
                 txHash: null
             });
             
-            logger.info(`✅ Commitment created for user ${userId}`);
+            logger.info(`Γ£à Commitment created for user ${userId}`);
             return {
                 success: true,
                 secretHash,
@@ -129,7 +146,7 @@ class MEVService {
                 txHash: receipt.hash
             });
             
-            logger.info(`✅ MEV Protected Escrow created: ${escrowId}`);
+            logger.info(`Γ£à MEV Protected Escrow created: ${escrowId}`);
             return {
                 success: true,
                 escrowId,
@@ -170,7 +187,7 @@ class MEVService {
             
             await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
             
-            logger.info(`✅ Escrow ${escrowId} released with MEV protection`);
+            logger.info(`Γ£à Escrow ${escrowId} released with MEV protection`);
             return {
                 success: true,
                 txHash: receipt.hash
@@ -183,47 +200,6 @@ class MEVService {
 
     // ============ Flashbots Integration ============
 
-    async submitFlashbotsBundle(escrowId, transactions) {
-        try {
-            // Sign transactions
-            const signedTxs = await this.signTransactions(transactions);
-            
-            // Get current block number
-            const blockNumber = await this.provider.getBlockNumber();
-            const targetBlock = blockNumber + 1;
-            
-            // Submit to Flashbots
-            const response = await axios.post(
-                `${this.flashbotsEndpoint}/eth/v1/bundle`,
-                {
-                    jsonrpc: "2.0",
-                    method: "eth_sendBundle",
-                    params: [{
-                        txs: signedTxs,
-                        blockNumber: `0x${targetBlock.toString(16)}`
-                    }],
-                    id: 1
-                }
-            );
-            
-            // Store bundle
-            await this.storeBundle({
-                escrowId,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            });
-            
-            logger.info(`✅ Flashbots bundle submitted for escrow ${escrowId}`);
-            return {
-                success: true,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            };
-        } catch (error) {
-            logger.error('Flashbots bundle submission failed:', error);
-            throw error;
-        }
-    }
 
     async signTransactions(transactions) {
         const signedTxs = [];
@@ -357,13 +333,17 @@ class MEVService {
     // ============ Statistics ============
 
     async getMEVStats() {
-        const { data: escrows } = await supabase
+        const { data: escrows, error: escrowsError } = await supabaseAdmin
             .from('mev_escrows')
             .select('*');
-        
-        const { data: bundles } = await supabase
+
+        if (escrowsError) throw escrowsError;
+
+        const { data: bundles, error: bundlesError } = await supabaseAdmin
             .from('flashbots_bundles')
             .select('*');
+
+        if (bundlesError) throw bundlesError;
 
         return {
             totalEscrows: escrows?.length || 0,

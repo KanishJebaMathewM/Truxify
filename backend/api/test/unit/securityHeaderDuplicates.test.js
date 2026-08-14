@@ -7,6 +7,10 @@
  *   - Warning when the same monitored header is assigned more than once
  *   - No false-positive duplicate warning for repeated Set-Cookie arrays
  *   - Warning when the exact same cookie value is repeated
+ *   - Non-string header names (e.g. undefined) are passed through to the
+ *     original setHeader without raising a TypeError
+ *   - Monitored string headers are still normalized and duplicate-checked
+ *   - next() is always invoked
  *
  * Run with: npx vitest run test/unit/securityHeaderDuplicates.test.js
  */
@@ -32,10 +36,13 @@ function makeReq() {
 }
 
 function makeRes() {
-  return {
-    setHeader: vi.fn(),
+  const originalSetHeader = vi.fn();
+  const res = {
+    originalSetHeader,
+    setHeader: originalSetHeader,
     on: vi.fn(),
   };
+  return res;
 }
 
 describe('securityHeaderDuplicates', () => {
@@ -129,5 +136,48 @@ describe('securityHeaderDuplicates', () => {
     securityHeaderDuplicates(req, res, next);
     res.setHeader('Set-Cookie', ['session=abc; Path=/', 'session=abc; Path=/']);
     expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('securityHeaderDuplicates setHeader guard', () => {
+  it('passes through undefined header names without throwing', () => {
+    const req = makeReq();
+    const res = makeRes();
+    const next = vi.fn();
+    securityHeaderDuplicates(req, res, next);
+    expect(() => res.setHeader(undefined, 'value')).not.toThrow();
+    expect(res.originalSetHeader).toHaveBeenCalledWith(undefined, 'value');
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('passes through null and non-string header names without throwing', () => {
+    const req = makeReq();
+    const res = makeRes();
+    const next = vi.fn();
+    securityHeaderDuplicates(req, res, next);
+    expect(() => res.setHeader(null, 'value')).not.toThrow();
+    expect(() => res.setHeader(123, 'value')).not.toThrow();
+    expect(res.originalSetHeader).toHaveBeenNthCalledWith(1, null, 'value');
+    expect(res.originalSetHeader).toHaveBeenNthCalledWith(2, 123, 'value');
+  });
+
+  it('still normalizes and duplicate-checks string header names', () => {
+    const req = makeReq();
+    const res = makeRes();
+    const next = vi.fn();
+    securityHeaderDuplicates(req, res, next);
+    res.setHeader('x-frame-options', 'SAMEORIGIN');
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(res.originalSetHeader).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not warn for non-string names even when repeated', () => {
+    const req = makeReq();
+    const res = makeRes();
+    const next = vi.fn();
+    securityHeaderDuplicates(req, res, next);
+    res.setHeader(undefined, 'a');
+    res.setHeader(undefined, 'b');
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });

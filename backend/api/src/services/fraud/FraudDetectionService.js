@@ -33,11 +33,12 @@ class FraudDetectionService {
       transaction: null
     };
     
-    logger.info('✅ Fraud Detection Service initialized');
+    logger.info('Fraud Detection Service initialized');
   }
 
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
+    if (!userId) return null;
     try {
       if (!supabaseAdmin) return null;
       const profile = await this.getOrCreateProfile(userId);
@@ -104,7 +105,13 @@ class FraudDetectionService {
     // Check Redis cache
     const cached = this.redis ? await this.redis.get(`behavior:${userId}`) : null;
     if (cached) {
-      return JSON.parse(cached);
+      try {
+        return JSON.parse(cached);
+      } catch (err) {
+        // Corrupt cache entry — log and fall through to the in-memory / DB
+        // paths so a single bad entry cannot 500 the fraud check.
+        logger.error(`[FraudDetection] Corrupt cached behavior profile for user ${userId}: ${err.message}`);
+      }
     }
 
     // Check in-memory cache (written by trackBehavior during Redis outages)
@@ -249,7 +256,8 @@ class FraudDetectionService {
           locations[i].lat, locations[i].lng
         );
         const hours = (locations[i].timestamp - locations[i-1].timestamp) / 3_600_000;
-        const speedKmh = hours > 0 ? dist / hours : Infinity;
+        if (hours <= 0) continue;
+        const speedKmh = dist / hours;
         if (speedKmh > maxSpeedKmh) {
           maxSpeedKmh = speedKmh;
         }
@@ -333,7 +341,7 @@ class FraudDetectionService {
     // Get all connections (orders, trips, shared routes)
     const connections = new Set();
     let offset = 0;
-    let page = [];
+    let page;
     do {
       const { data: orders, error } = await supabaseAdmin
         .from('orders')
@@ -380,7 +388,7 @@ class FraudDetectionService {
       // Each batch's row set is paged too, since a single prolific user can
       // still push one batch past PostgREST's 1000-row response cap.
       let offset = 0;
-      let page = [];
+      let page;
       do {
         const { data: batchOrders, error } = await supabaseAdmin
           .from('orders')

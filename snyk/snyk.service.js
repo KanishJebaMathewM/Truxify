@@ -32,6 +32,39 @@ class SnykService {
         return sanitized;
     }
 
+    // The snyk CLI can emit non-JSON lines (progress/spinner frames, warnings,
+    // plain-text summaries) around the JSON payload. Never let a bare
+    // JSON.parse turn that into a hard scan failure: try the full output, then
+    // the last JSON document found within it, and otherwise return null so the
+    // caller can report a structured failure with the raw output logged.
+    _parseJsonOutput(stdout) {
+        try {
+            return JSON.parse(stdout);
+        } catch {
+            // fall through to scan-for-JSON below
+        }
+        for (const pair of [['{', '}'], ['[', ']']]) {
+            const [open, close] = pair;
+            const start = stdout.indexOf(open);
+            if (start === -1) continue;
+            let end = -1;
+            for (let i = stdout.length - 1; i >= start; i--) {
+                if (stdout[i] === close) {
+                    end = i;
+                    break;
+                }
+            }
+            if (end === -1) continue;
+            try {
+                return JSON.parse(stdout.slice(start, end + 1));
+            } catch {
+                // keep scanning
+            }
+        }
+        logger.error('Snyk produced non-JSON output:', stdout);
+        return null;
+    }
+
     async scanDependencies(projectPath = '.') {
         try {
             const safePath = this._sanitizePath(projectPath);
@@ -43,7 +76,10 @@ class SnykService {
                 return { success: false, error: stderr };
             }
             
-            const results = JSON.parse(stdout);
+            const results = this._parseJsonOutput(stdout);
+            if (results === null) {
+                return { success: false, error: 'Snyk dependency scan produced non-JSON output (see logs)' };
+            }
             this.scanResults.push({
                 type: 'dependencies',
                 timestamp: new Date().toISOString(),
@@ -72,7 +108,10 @@ class SnykService {
                 return { success: false, error: stderr };
             }
             
-            const results = JSON.parse(stdout);
+            const results = this._parseJsonOutput(stdout);
+            if (results === null) {
+                return { success: false, error: 'Snyk container scan produced non-JSON output (see logs)' };
+            }
             this.scanResults.push({
                 type: 'container',
                 image: safeImage,
@@ -102,7 +141,10 @@ class SnykService {
                 return { success: false, error: stderr };
             }
             
-            const results = JSON.parse(stdout);
+            const results = this._parseJsonOutput(stdout);
+            if (results === null) {
+                return { success: false, error: 'Snyk IaC scan produced non-JSON output (see logs)' };
+            }
             this.scanResults.push({
                 type: 'iac',
                 path: safePath,
@@ -132,7 +174,10 @@ class SnykService {
                 return { success: false, error: stderr };
             }
             
-            const results = JSON.parse(stdout);
+            const results = this._parseJsonOutput(stdout);
+            if (results === null) {
+                return { success: false, error: 'Snyk code scan produced non-JSON output (see logs)' };
+            }
             this.scanResults.push({
                 type: 'code',
                 path: safePath,

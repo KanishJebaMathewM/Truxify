@@ -57,7 +57,7 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
 

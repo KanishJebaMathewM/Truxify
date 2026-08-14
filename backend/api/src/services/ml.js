@@ -747,8 +747,8 @@ class MLService {
     let data;
     try {
       data = await response.json();
-    } catch (_) {
-      throw new Error(`[ML] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
+    } catch (err) {
+      throw new Error(`[ML] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`, { cause: err });
     }
 
     if (response.status === 401) {

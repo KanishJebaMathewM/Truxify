@@ -481,6 +481,7 @@ export function createSupabaseMock(initialStore = {}) {
         if (profile && profile.fcm_token === token) {
           profile.fcm_token = nextActive?.fcm_token ?? null;
           profile.fcm_token_updated_at = nowIso;
+        }
       // Simulate the append_maintenance_photos PL/pgSQL RPC (see
       // migrations/20260811000000_create_append_maintenance_photos.sql)
       if (fnName === 'append_maintenance_photos' && args?.p_ticket_id) {

@@ -64,7 +64,7 @@ export async function verifyAuthToken(token) {
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone, is_active")
+      .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -141,7 +141,7 @@ export async function verifyAuthToken(token) {
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone, is_active")
+      .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
       .eq("firebase_uid", firebaseUid)
       .maybeSingle();
 
@@ -344,7 +344,7 @@ export async function authenticate(req, res, next) {
       const userClient = createUserClient?.(token) || supabase;
       const { data: profile, error } = await userClient
         .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone, is_active")
+        .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -446,7 +446,7 @@ export async function authenticate(req, res, next) {
       const userClient = createUserClient?.(token) || supabase;
       const { data: profile, error } = await userClient
         .from("profiles")
-        .select("id, firebase_uid, role, full_name, phone, is_active")
+        .select("id, firebase_uid, role, full_name, phone, is_active, deactivated_at")
         .eq("firebase_uid", firebaseUid)
         .maybeSingle();
 
@@ -476,7 +476,10 @@ export async function authenticate(req, res, next) {
           { isActive: false },
           TOMBSTONE_TTL_SECONDS,
         ).catch((err) => logger.error({ err }, "Cache set failed"));
+      }
 
+      // Check if profile was deactivated (separate check from is_active=false)
+      const profileIsDeactivated = profile?.deactivated_at != null;
       if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",

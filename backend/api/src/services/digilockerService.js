@@ -185,7 +185,7 @@ class DigilockerService {
         logger.info(`[DigilockerService] Smart contract write succeeded. TX hash: ${tx.hash}`);
       } catch (err) {
         logger.error({ err }, '[DigilockerService] Smart contract write failed');
-        throw new Error(`On-chain document hash write failed: ${err.message}`);
+        throw new Error(`On-chain document hash write failed: ${err.message}`, { cause: err });
       }
     } else {
       logger.info(`[DigilockerService] KYC verifier contract address/private key not set. Mocking on-chain hash submission.`);

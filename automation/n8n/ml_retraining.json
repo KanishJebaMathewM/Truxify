@@ -82,6 +82,26 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$node[\"Trigger Demand Model Retraining\"].json.metrics.promoted}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        -100
+      ],
+      "id": "was-promoted-check",
+      "name": "Was New Model Promoted?"
+    },
+    {
+      "parameters": {
         "toEmail": "ml-alerts@truxify.org",
         "subject": "ML Retraining Report: Demand Model Updated",
         "htmlFormat": true,
@@ -91,11 +111,28 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
       "position": [
-        800,
-        -100
+        1000,
+        -200
       ],
       "id": "send-success-email",
       "name": "Send Training Performance Report"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "ML Retraining Report: Model Not Promoted",
+        "htmlFormat": true,
+        "message": "<h3>ML Model Retraining Report</h3><p>Status: <strong>Model trained but not promoted — did not improve enough over production</strong></p><p><strong>Reason:</strong> {{$node[\"Trigger Demand Model Retraining\"].json.metrics.promotion_reason}}</p><p><strong>New Model MAE:</strong> {{$node[\"Trigger Demand Model Retraining\"].json.metrics.mae}}</p><p>Existing production model remains active.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        1000,
+        0
+      ],
+      "id": "send-not-promoted-email",
+      "name": "Notify Model Not Promoted"
     },
     {
       "parameters": {
@@ -160,7 +197,27 @@
       "main": [
         [
           {
+            "node": "was-promoted-check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "was-promoted-check": {
+      "main": [
+        [
+          {
             "node": "send-success-email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-not-promoted-email",
+
+
             "type": "main",
             "index": 0
           }

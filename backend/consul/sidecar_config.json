@@ -1,0 +1,27 @@
+{
+  "service": {
+    "name": "truxify-api",
+    "port": 5000,
+    "connect": {
+      "sidecar_service": {
+        "proxy": {
+          "upstreams": [
+            {
+              "destination_name": "truxify-ml-engine",
+              "local_bind_port": 8001
+            }
+          ]
+        }
+      }
+    },
+    "checks": [
+      {
+        "id": "api-health",
+        "name": "Node.js API HTTP Health Check",
+        "http": "http://localhost:5000/api/health/live",
+        "interval": "10s",
+        "timeout": "2s"
+      }
+    ]
+  }
+}

@@ -17,10 +17,27 @@ VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
     size_t packed = 0;
 
     for (const auto& box : cargoBoxes) {
-        // Dimension check: box must fit within bed dimensions in at least one orientation
-        bool fitsOrientation = (box.length <= truckBed.length && box.width <= truckBed.width && box.height <= truckBed.height) ||
-                               (box.length <= truckBed.width && box.width <= truckBed.length && box.height <= truckBed.height) ||
-                               (box.length <= truckBed.height && box.width <= truckBed.width && box.height <= truckBed.length);
+        // Dimension check: a box fits if any of the 6 axis permutations of its
+        // (length, width, height) fits within the bed's (length, width, height).
+        // Checking only (L,W,H), (W,L,H) and (H,W,L) wrongly rejected boxes
+        // that fit only in the (L,H,W), (W,H,L) or (H,L,W) orientations.
+        const float boxDims[3] = { box.length, box.width, box.height };
+        const int permutations[6][3] = {
+            {0, 1, 2}, // (L, W, H)
+            {1, 0, 2}, // (W, L, H)
+            {0, 2, 1}, // (L, H, W)
+            {2, 1, 0}, // (H, W, L)
+            {1, 2, 0}, // (W, H, L)
+            {2, 0, 1}, // (H, L, W)
+        };
+
+        bool fitsOrientation = false;
+        for (int i = 0; i < 6 && !fitsOrientation; ++i) {
+            fitsOrientation =
+                boxDims[permutations[i][0]] <= truckBed.length &&
+                boxDims[permutations[i][1]] <= truckBed.width &&
+                boxDims[permutations[i][2]] <= truckBed.height;
+        }
 
         if (fitsOrientation && (totalCargoVolume + box.volume() <= totalTruckVolume)) {
             totalCargoVolume += box.volume();

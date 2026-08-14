@@ -16,23 +16,27 @@ async function main() {
     await orderConsumer.initialize();
 
     orderConsumer.registerHandler('order.created', async (message) => {
-      logger.info('📥 Order created event received', { orderId: message.orderId });
-      await orderReadModel.buildReadModel(message.orderId);
+      const orderId = message?.orderId || message?.payload?.orderId;
+      logger.info('📥 Order created event received', { orderId });
+      await orderReadModel.buildReadModel(orderId);
     });
 
     orderConsumer.registerHandler('order.updated', async (message) => {
-      logger.info('📥 Order updated event received', { orderId: message.orderId });
-      await orderReadModel.buildReadModel(message.orderId);
+      const orderId = message?.orderId || message?.payload?.orderId;
+      logger.info('📥 Order updated event received', { orderId });
+      await orderReadModel.buildReadModel(orderId);
     });
 
     orderConsumer.registerHandler('driver.assigned', async (message) => {
-      logger.info('📥 Driver assigned event received', { orderId: message.orderId });
-      await orderReadModel.buildReadModel(message.orderId);
+      const orderId = message?.orderId || message?.payload?.orderId;
+      logger.info('📥 Driver assigned event received', { orderId });
+      await orderReadModel.buildReadModel(orderId);
     });
 
     orderConsumer.registerHandler('payment.confirmed', async (message) => {
-      logger.info('📥 Payment confirmed event received', { orderId: message.orderId });
-      await orderReadModel.buildReadModel(message.orderId);
+      const orderId = message?.orderId || message?.payload?.orderId;
+      logger.info('📥 Payment confirmed event received', { orderId });
+      await orderReadModel.buildReadModel(orderId);
     });
 
     await orderConsumer.startAllConsumers();

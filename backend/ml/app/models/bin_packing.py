@@ -93,7 +93,7 @@ class _Shelf:
         if self.cursor_x + l <= self.max_length and self.cursor_y + w <= self.max_width:
             pos = {"x": self.cursor_x, "y": self.cursor_y, "z": self.z_bottom}
             self.cursor_x += l
-            self.row_height = max(self.row_height, h)
+            self.row_height = max(self.row_height, w)
             self.shelf_height = max(self.shelf_height, h)
             self.items.append({"pos": pos, "rotated": rotated})
             return {**pos, "rotated": rotated}
@@ -103,7 +103,7 @@ class _Shelf:
         if new_y + w <= self.max_width and l <= self.max_length:
             self.cursor_x = l
             self.cursor_y = new_y
-            self.row_height = h
+            self.row_height = w
             self.shelf_height = max(self.shelf_height, h)
             pos = {"x": 0.0, "y": new_y, "z": self.z_bottom}
             self.items.append({"pos": pos, "rotated": rotated})

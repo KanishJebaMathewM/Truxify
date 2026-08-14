@@ -1,0 +1,11 @@
+{
+  "Kind": "service-intentions",
+  "Name": "truxify-ml-engine",
+  "Sources": [
+    {
+      "Name": "truxify-api",
+      "Action": "allow",
+      "Description": "Allow Node.js API to call FastAPI ML Engine over encrypted mTLS sidecar proxy"
+    }
+  ]
+}

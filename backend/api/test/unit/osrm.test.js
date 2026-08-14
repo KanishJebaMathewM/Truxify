@@ -311,3 +311,129 @@ describe('osrm - getRouteEstimate', () => {
     expect(mockRedis.set).not.toHaveBeenCalled();
   });
 });
+
+describe('osrm - getRouteEstimate edge cases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns null for null input', async () => {
+    const result = await getRouteEstimate(null);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for undefined input', async () => {
+    const result = await getRouteEstimate(undefined);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when pickupLat is not finite', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: NaN,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when dropLat is Infinity', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: Infinity,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('uses cached result when Redis returns a hit', async () => {
+    const cachedResult = { distanceKm: 100, durationSeconds: 3600 };
+    mockRedis.get.mockResolvedValue(JSON.stringify(cachedResult));
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    expect(result).toEqual(cachedResult);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null when Redis cache returns invalid JSON', async () => {
+    mockRedis.get.mockResolvedValue('not valid json');
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ routes: [{ distance: 50000, duration: 1800 }] }),
+    });
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    // Redis get failed (invalid JSON), fetch was called as fallback
+    expect(fetch).toHaveBeenCalled();
+  });
+});
+
+// === Spec 22 test ===
+import { routeWithFailover } from '../../src/services/osrm.js';
+describe('routeWithFailover', () => {
+  it('uses primary', async () => {
+    const p = vi.fn().mockResolvedValue({ distance: 100, source: 'osrm' });
+    expect((await routeWithFailover(p, null, [[[0,0],[0,1]]])).source).toBe('osrm');
+  });
+});
+
+
+describe('routeWithFailover edge cases', () => {
+  let osrm;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    osrm = await import('../../src/services/osrm.js');
+  });
+
+  it('returns distance 0 when coords are null', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      null,
+      null
+    );
+    expect(result).toEqual({ distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' });
+  });
+
+  it('returns distance 0 when coords array is empty', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [],
+      null
+    );
+    expect(result.distance).toBe(0);
+    expect(result.source).toBe('haversine-fallback');
+  });
+
+  it('returns distance 0 when only one coord pair is provided', async () => {
+    const result = await osrm.routeWithFailover(
+      async () => { throw new Error('OSRM down'); },
+      [[0, 0]],
+      null
+    );
+    expect(result.distance).toBe(0);
+  });
+
+  it('returns primary result when primary succeeds', async () => {
+    const primaryResult = { distance: 50, source: 'osrm' };
+    const result = await osrm.routeWithFailover(
+      async () => primaryResult,
+      null,
+      [[0, 0], [1, 1]]
+    );
+    expect(result).toEqual(primaryResult);
+  });
+});

@@ -52,6 +52,7 @@ BEGIN
   FOREACH v_col IN ARRAY ARRAY[
     'status',
     'escrow_status',
+    'escrow_disabled',
     'escrow_booking_id',
     'escrow_driver_wallet',
     'pending_bid_acceptance',

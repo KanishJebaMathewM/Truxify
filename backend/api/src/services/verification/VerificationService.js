@@ -4,9 +4,15 @@ import logger from '../../middleware/logger.js';
 
 const REQUIRED_DOCUMENT_TYPES = ['rc_book', 'driving_licence'];
 
+// Statuses that represent an in-progress delivery. This must mirror the
+// OracleService's DELIVERY_IN_PROGRESS_STATUSES: confirmDelivery runs BEFORE
+// the order is marked 'delivered'/'payment_released', so requiring a terminal
+// status here would make deliveryVerified unreachable even when the oracle
+// reaches 2-of-3 provider consensus.
 const ACTIVE_DELIVERY_STATUSES = new Set([
-  'delivered',
-  'payment_released',
+  'picked_up',
+  'in_transit',
+  'arriving',
 ]);
 
 class VerificationService {
@@ -26,11 +32,7 @@ class VerificationService {
       const [oracleResult, crossChainResult, documentIntegrity, driverVerification] = await Promise.all([
         this.oracleService.confirmDelivery({
           orderId,
-          gpsCoordinates: order.drop_lat != null && order.drop_lng != null
-            ? { lat: order.drop_lat, lng: order.drop_lng }
-            : order.pickup_lat != null && order.pickup_lng != null
-              ? { lat: order.pickup_lat, lng: order.pickup_lng }
-              : null,
+          gpsCoordinates: null,
         }),
         order.blockchain_tx_hash
           ? this.oracleService.verifyCrossChain(orderId, order.blockchain_tx_hash)

@@ -17,7 +17,7 @@ contract IdentityWallet is Ownable {
     // Mapping
     mapping(address => Wallet) public wallets;
     mapping(address => bool) public hasWallet;
-    mapping(bytes32 => bool) public credentialInWallet;
+    mapping(bytes32 => mapping(address => bool)) public credentialInWallet;
     
     uint256 public totalWallets;
 
@@ -49,10 +49,10 @@ contract IdentityWallet is Ownable {
 
     function addCredential(bytes32 credentialId) external {
         require(hasWallet[msg.sender], "Wallet not found");
-        require(!credentialInWallet[credentialId], "Credential already in wallet");
+        require(!credentialInWallet[credentialId][msg.sender], "Credential already in wallet");
 
         wallets[msg.sender].credentials.push(credentialId);
-        credentialInWallet[credentialId] = true;
+        credentialInWallet[credentialId][msg.sender] = true;
         wallets[msg.sender].updatedAt = block.timestamp;
 
         emit CredentialAdded(msg.sender, credentialId);
@@ -60,7 +60,7 @@ contract IdentityWallet is Ownable {
 
     function removeCredential(bytes32 credentialId) external {
         require(hasWallet[msg.sender], "Wallet not found");
-        require(credentialInWallet[credentialId], "Credential not in wallet");
+        require(credentialInWallet[credentialId][msg.sender], "Credential not in wallet");
 
         Wallet storage wallet = wallets[msg.sender];
         for (uint256 i = 0; i < wallet.credentials.length; i++) {
@@ -71,7 +71,7 @@ contract IdentityWallet is Ownable {
             }
         }
 
-        credentialInWallet[credentialId] = false;
+        credentialInWallet[credentialId][msg.sender] = false;
         wallet.updatedAt = block.timestamp;
 
         emit CredentialRemoved(msg.sender, credentialId);
@@ -101,7 +101,7 @@ contract IdentityWallet is Ownable {
     }
 
     function hasCredential(address owner, bytes32 credentialId) external view returns (bool) {
-        return credentialInWallet[credentialId];
+        return credentialInWallet[credentialId][owner];
     }
 
     function isWalletActive(address owner) external view returns (bool) {

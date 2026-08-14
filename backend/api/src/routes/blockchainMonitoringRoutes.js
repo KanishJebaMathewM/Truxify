@@ -10,12 +10,7 @@ const router = express.Router();
  */
 router.get('/metrics', authenticate, requireRole(['admin', 'support']), async (req, res) => {
   try {
-    const { data: metrics, error } = await req.blockchainMetrics.getMetrics();
-
-    if (error) {
-      logger.error('Failed to fetch blockchain metrics:', error);
-      return res.status(500).json({ error: 'Failed to fetch metrics' });
-    }
+    const metrics = req.blockchainMetrics.getMetrics();
 
     res.json({
       timestamp: new Date().toISOString(),

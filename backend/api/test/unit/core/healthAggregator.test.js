@@ -220,6 +220,43 @@ describe('HealthAggregator', () => {
       expect(result.status).toBe('degraded');
     });
 
+    it('applies registered timeoutMs and marks timed-out checks unhealthy', async () => {
+      aggregator.register('slow', () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(makeHealthyResult('slow')), 200)
+        ),
+        { timeoutMs: 30 }
+      );
+
+      const result = await aggregator.aggregate();
+      expect(result.services.slow.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.services.slow.message).toMatch(/timeout/);
+    });
+
+    it('does not time out checks without a registered timeoutMs', async () => {
+      aggregator.register('slow', () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(makeHealthyResult('slow')), 50)
+        )
+      );
+
+      const result = await aggregator.aggregate();
+      expect(result.services.slow.status).toBe(HealthStatus.HEALTHY);
+    });
+
+    it('treats a timed-out critical check as critical in overall status', async () => {
+      aggregator.register('db', () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(makeHealthyResult('db')), 200)
+        ),
+        { timeoutMs: 30, critical: true }
+      );
+
+      const result = await aggregator.aggregate();
+      expect(result.services.db.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.status).toBe('unhealthy');
+    });
+
     it('marks individual response times per service', async () => {
       aggregator.register('svc', () => makeHealthyResult('svc'));
 

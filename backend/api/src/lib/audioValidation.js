@@ -73,6 +73,7 @@ function matchesAt(buffer, bytes, offset) {
  * @returns {string|null}
  */
 export function detectAudioMimeType(buffer) {
+  // Guard: null/non-buffer/empty input returns null gracefully
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return null;
   }
@@ -111,6 +112,7 @@ export function detectAudioMimeType(buffer) {
  * @throws {AudioValidationError} When the content is not a supported audio type.
  */
 export function validateAudioBuffer(buffer) {
+  // Guard: null/non-buffer/empty input throws a clear error
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new AudioValidationError('Audio file is empty or unreadable.');
   }

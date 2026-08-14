@@ -1412,7 +1412,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy(
 router.post('/:id/ratings', authenticate, userLimiter, validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
     const { stars, comment } = req.body;
-    const result = await orderLifecycleService.submitRating(req.params.id, req.user.id, stars, comment, createUserClient(req.user.id));
+    const result = await orderLifecycleService.submitRating(req.params.id, req.user.id, stars, comment, createUserClient(req.token));
     return res.json(result);
   } catch (err) {
     if (err instanceof DomainError) {

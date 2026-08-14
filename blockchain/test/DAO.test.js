@@ -14,6 +14,8 @@ describe("DAO Quadratic Voting", function () {
     await token.transfer(voter.address, 100);
     await token.connect(voter).approve(await dao.getAddress(), 100);
 
+    await dao.registerVoter(ethers.id("identity:alice"));
+
     await dao.createProposal("Reduce Corridor Tariff by 5%", 3600);
 
     // Vote 3 votes -> Cost = 3^2 = 9 tokens

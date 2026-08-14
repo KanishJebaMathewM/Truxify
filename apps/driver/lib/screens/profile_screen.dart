@@ -147,10 +147,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (data is Map<String, dynamic>) {
           setState(() {
-            _platformRating = (data['supabaseRating'] as num?)?.toDouble() ?? 0.0;
-            _onChainScore = data['onChainScore'] != null
-                ? (data['onChainScore'] as num).toInt()
-                : null;
+            _platformRating = _parseDouble(data['supabaseRating']) ?? 0.0;
+            _onChainScore = _parseInt(data['onChainScore']);
             _walletAddress = data['walletAddress']?.toString() ?? '';
             _isLoadingReputation = false;
           });
@@ -171,6 +169,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       }
     }
+  }
+
+  int? _parseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? double.tryParse(value)?.toInt();
+    return null;
+  }
+
+  double? _parseDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
 

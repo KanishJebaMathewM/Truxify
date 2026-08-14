@@ -155,7 +155,7 @@ const consecutiveDropCount = new Map();
 // DRIVER STATE TTL & LAZY CLEANUP
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 300000; // default 5 min
+const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 60000; // default 1 min
 let lastDriverStateSweep = 0;
 
 function sweepStaleDriverState(now) {
@@ -281,6 +281,7 @@ let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
+let driverStateSweepInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
 
 // Observability counters
@@ -816,6 +817,12 @@ export function initWebSocketServer(server, orderRepository) {
     sweepWsUpgradeMemoryLimits();
   }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
 
+  // Periodically purge stale circuit-breaker state for drivers, regardless of
+  // the total number of active drivers (fixes unbounded growth under < 50 drivers).
+  driverStateSweepInterval = setInterval(() => {
+    sweepStaleDriverState(Date.now());
+  }, DRIVER_STATE_SWEEP_INTERVAL_MS);
+
   if (!isSchedulerActive) {
     initTelemetryScheduler();
   }
@@ -1092,23 +1099,30 @@ export async function handleLocationPing(ws, data, req) {
         const idToLookup = orderUUID || orderDisplayId;
         const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
         if (order) {
-          // Verify the authenticated driver is assigned to this order
-          if (order.driver_id !== driver_id) {
-            logger.warn({
-              event: 'UNAUTHORIZED_ORDER_TRACKING',
-              driverId: driver_id,
-              orderId: order.id,
-              orderDisplayId: order.order_display_id,
-              assignedDriverId: order.driver_id,
-            }, 'Driver attempted to submit location for order they are not assigned to');
-            return ws.send(JSON.stringify({
-              error: 'Not authorized to track this order',
-              orderId: orderDisplayId || orderUUID,
-            }));
-          }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
           await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+        }
+      }
+
+      // ── Authorization check (runs regardless of cache hit or miss) ─
+      // The authorization guard must always execute so that a stale cache entry
+      // for a previously-assigned driver cannot authorize a reassigned driver.
+      if (orderUUID && orderDisplayId) {
+        const idToLookup = orderUUID || orderDisplayId;
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        if (order && order.driver_id !== driver_id) {
+          logger.warn({
+            event: 'UNAUTHORIZED_ORDER_TRACKING',
+            driverId: driver_id,
+            orderId: order.id,
+            orderDisplayId: order.order_display_id,
+            assignedDriverId: order.driver_id,
+          }, 'Driver attempted to submit location for order they are not assigned to');
+          return ws.send(JSON.stringify({
+            error: 'Not authorized to track this order',
+            orderId: orderDisplayId || orderUUID,
+          }));
         }
       }
     } catch (err) {
@@ -1480,6 +1494,11 @@ export async function closeWebSocketServer() {
     wsUpgradeLimitsCleanupInterval = null;
   }
 
+  if (driverStateSweepInterval) {
+    clearInterval(driverStateSweepInterval);
+    driverStateSweepInterval = null;
+  }
+
   // Wait for MongoDB to be available before final flush
   const parsedWait = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS, 10);
   const mongoMaxWaitMs = Number.isNaN(parsedWait) ? 10000 : parsedWait;
@@ -1686,6 +1705,27 @@ async function handleUnsubscribe(ws, data) {
         }
       } catch (err) {
         logger.error('Redis subscription cleanup error:', err.message);
+      }
+    }
+
+    // Clean up Supabase Realtime channel when the last subscriber for this
+    // display ID disconnects. Without this, channels for driver-only orders
+    // (where only the driver subscribes) are never removed, leaking channels.
+    if (trackingSubscriptions.get(targetId).size === 0) {
+      trackingSubscriptions.delete(targetId);
+      const channelKeys = displayIdToLocationChannelKeys.get(targetId);
+      if (channelKeys) {
+        for (const uuidKey of channelKeys) {
+          if (locationChannels.has(uuidKey)) {
+            const channel = locationChannels.get(uuidKey);
+            if (supabase) {
+              supabase.removeChannel(channel);
+            }
+            locationChannels.delete(uuidKey);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber unsubscribe');
+          }
+        }
+        displayIdToLocationChannelKeys.delete(targetId);
       }
     }
 

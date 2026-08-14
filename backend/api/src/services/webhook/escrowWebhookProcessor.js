@@ -114,9 +114,10 @@ async function verifyPolygonTransactionReceipt(txHash) {
 }
 
 async function handlePaymentReleased(payload) {
-  if (payload.txHash) {
-    await verifyPolygonTransactionReceipt(payload.txHash);
+  if (!payload.txHash) {
+    throw new Error('Missing txHash in escrow release webhook payload — release requires on-chain proof');
   }
+  await verifyPolygonTransactionReceipt(payload.txHash);
   const order = await findOrderByIdOrDisplayId(payload.orderId);
   const now = new Date().toISOString();
 

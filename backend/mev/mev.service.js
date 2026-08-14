@@ -378,6 +378,7 @@ class MEVService {
         const { data: escrows, error: escrowsError } = await supabaseAdmin
             .from('mev_escrows')
             .select('*');
+
         if (escrowsError) throw escrowsError;
 
         const { data: bundles, error: bundlesError } = await supabaseAdmin

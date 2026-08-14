@@ -200,7 +200,7 @@ const getOrderResource = async (req) => {
 };
 
 
-router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
@@ -719,6 +719,12 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
         }
 
         // Refund confirmed on-chain — safe to release the escrow booking reference.
+        // Also clear pending_bid_acceptance so the order can accept a new bid.
+        await orderRepository.updateOrder(orderId, {
+          pending_bid_acceptance: null,
+        }).catch((clearErr) => {
+          logger.error('[confirm-deposit] Failed to clear pending_bid_acceptance:', clearErr.message);
+        });
         await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
           logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
         });

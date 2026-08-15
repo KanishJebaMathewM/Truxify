@@ -1,7 +1,7 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking, weiWithinTolerance } from './escrow.js';
-import { acquireLock, renewLock, releaseLock } from '../lib/redisLock.js';
+import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status

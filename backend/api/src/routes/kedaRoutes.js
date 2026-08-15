@@ -11,7 +11,7 @@ router.get('/keda/metrics/requests', async (_req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Requests error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -22,7 +22,7 @@ router.get('/keda/metrics/latency', async (_req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Latency error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -40,7 +40,7 @@ router.get('/keda/metrics/cpu', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('CPU error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -58,7 +58,7 @@ router.get('/keda/metrics/memory', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Memory error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -78,7 +78,7 @@ router.get('/keda/metrics/kafka-lag', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Kafka lag error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -98,7 +98,7 @@ router.get('/keda/metrics/autoscale', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Autoscale metrics error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -118,7 +118,7 @@ router.get('/keda/scale/recommend', async (req, res) => {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Scale recommendation error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 
@@ -128,7 +128,7 @@ router.get('/keda/stats', async (_req, res) => {
         res.json({ success: true, data: stats });
     } catch (error) {
         logger.error('Stats error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ success: false, error: error?.message ?? String(error) });
     }
 });
 

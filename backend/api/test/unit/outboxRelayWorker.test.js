@@ -14,7 +14,8 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const mockOutboxService = vi.hoisted(() => ({
   deadLetterExhaustedEvents: vi.fn(),
   requeueFailedEvents: vi.fn(),
-  fetchPendingEvents: vi.fn(),
+  reclaimExpiredClaims: vi.fn(),
+  claimBatch: vi.fn(),
   markPublished: vi.fn(),
   markFailed: vi.fn(),
 }));
@@ -51,14 +52,14 @@ describe('outboxRelayWorker', () => {
   });
 
   it('starts and stops the worker without throwing', () => {
-    mockOutboxService.fetchPendingEvents.mockResolvedValue([]);
+    mockOutboxService.claimBatch.mockResolvedValue([]);
     worker.startOutboxRelayWorker();
     worker.stopOutboxRelayWorker();
     expect(mockLogger.info).toHaveBeenCalled();
   });
 
-  it('publishes pending events and marks them published', async () => {
-    mockOutboxService.fetchPendingEvents.mockResolvedValue([
+  it('publishes claimed events and marks them published', async () => {
+    mockOutboxService.claimBatch.mockResolvedValue([
       {
         id: 'evt-1',
         event_type: 'order.created',
@@ -68,6 +69,7 @@ describe('outboxRelayWorker', () => {
         created_at: '2026-08-11T00:00:00.000Z',
       },
     ]);
+    mockOutboxService.markPublished.mockResolvedValue(true);
 
     worker.startOutboxRelayWorker();
     await vi.waitFor(() => {
@@ -75,12 +77,12 @@ describe('outboxRelayWorker', () => {
     });
 
     expect(mockEventBus.publishAndReport).toHaveBeenCalledWith(expect.any(Object), undefined, { adapters: ['kafka'] });
-    expect(mockOutboxService.markPublished).toHaveBeenCalledWith('evt-1');
+    expect(mockOutboxService.markPublished).toHaveBeenCalledWith('evt-1', expect.any(String));
     worker.stopOutboxRelayWorker();
   });
 
   it('marks an event failed when publish throws', async () => {
-    mockOutboxService.fetchPendingEvents.mockResolvedValue([
+    mockOutboxService.claimBatch.mockResolvedValue([
       {
         id: 'evt-2',
         event_type: 'order.cancelled',
@@ -99,12 +101,12 @@ describe('outboxRelayWorker', () => {
       expect(mockOutboxService.markFailed).toHaveBeenCalled();
     });
 
-    expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-2', expect.stringContaining('bus down'));
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-2', expect.any(String), expect.stringContaining('bus down'));
     worker.stopOutboxRelayWorker();
   });
 
   it('does NOT mark an event published when no adapter handled it (regression #11209)', async () => {
-    mockOutboxService.fetchPendingEvents.mockResolvedValue([
+    mockOutboxService.claimBatch.mockResolvedValue([
       {
         id: 'evt-3',
         event_type: 'order.created',
@@ -130,8 +132,8 @@ describe('outboxRelayWorker', () => {
       expect(mockOutboxService.markFailed).toHaveBeenCalled();
     });
 
-    expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-3', expect.stringContaining('No event consumer'));
-    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith('evt-3');
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-3', expect.any(String), expect.stringContaining('No event consumer'));
+    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith('evt-3', expect.any(String));
     worker.stopOutboxRelayWorker();
   });
 });

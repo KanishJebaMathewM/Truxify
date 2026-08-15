@@ -3,12 +3,16 @@ import { eventBus } from '../core/events/index.js';
 import { BaseEvent } from '../core/events/BaseEvent.js';
 import { EVENT_SOURCES, EVENT_CATEGORIES } from '../core/events/EventMetadata.js';
 import logger from '../middleware/logger.js';
+import { getWorkerId } from '../services/webhook/dlqService.js';
 
 const RELAY_INTERVAL_MS = parseInt(process.env.OUTBOX_RELAY_INTERVAL_MS, 10) || 5000;
 const MAX_RETRIES = parseInt(process.env.OUTBOX_MAX_RETRIES, 10) || 5;
+const CLAIM_BATCH_SIZE = parseInt(process.env.OUTBOX_CLAIM_BATCH_SIZE, 10) || 50;
+const CLAIM_LEASE_MS = parseInt(process.env.OUTBOX_CLAIM_LEASE_MS, 10) || 5 * 60 * 1000;
 
 let _relayTimer = null;
 let _running = false;
+let _workerId = null;
 
 async function relayOnce() {
   if (_running) return;
@@ -17,7 +21,16 @@ async function relayOnce() {
   try {
     await outboxService.deadLetterExhaustedEvents(MAX_RETRIES);
     await outboxService.requeueFailedEvents(MAX_RETRIES);
-    const events = await outboxService.fetchPendingEvents(50);
+
+    // Atomically claim a batch for THIS replica only. claim_outbox_batch uses
+    // SELECT ... FOR UPDATE SKIP LOCKED, so two replicas can never claim the
+    // same row. This is the cross-process claim lock that prevents each event
+    // from being published more than once to Kafka across replicas (#14680).
+    const events = await outboxService.claimBatch({
+      workerId: _workerId,
+      batchSize: CLAIM_BATCH_SIZE,
+      leaseMs: CLAIM_LEASE_MS,
+    });
 
     for (const event of events) {
       try {
@@ -78,7 +91,8 @@ async function relayOnce() {
 
 export function startOutboxRelayWorker() {
   if (_relayTimer) return;
-  logger.info('[OutboxRelay] Starting outbox relay worker');
+  _workerId = getWorkerId();
+  logger.info('[OutboxRelay] Starting outbox relay worker', { workerId: _workerId });
   _relayTimer = setInterval(relayOnce, RELAY_INTERVAL_MS);
   // Run immediately on start
   relayOnce();

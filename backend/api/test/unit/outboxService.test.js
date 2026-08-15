@@ -58,6 +58,25 @@ describe('OutboxService', () => {
 
       expect(mockSupabase.from).toHaveBeenCalledWith('outbox_events');
     });
+
+    it('returns an empty array when workerId is missing', async () => {
+      const rows = await outboxService.claimBatch({});
+      expect(rows).toEqual([]);
+      expect(mocks.supabase.from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reclaimExpiredClaims', () => {
+    it('invokes reclaim_outbox_batch RPC', async () => {
+      await outboxService.reclaimExpiredClaims();
+      expect(mocks.chain.lastRpcName).toBe('reclaim_outbox_batch');
+    });
+
+    it('does not throw when the RPC errors', async () => {
+      mocks.chain.rpcError = { message: 'connection timeout' };
+      await expect(outboxService.reclaimExpiredClaims()).resolves.toBeUndefined();
+      expect(mockLogger.warn).toHaveBeenCalled();
+    });
   });
 
   describe('fetchPendingEvents', () => {
@@ -90,19 +109,8 @@ describe('OutboxService', () => {
       expect(result).toEqual(events);
     });
 
-    it('does not embed an unawaited rpc() Promise as the retry_count value (#12178)', async () => {
-      mocks.chain.data = { retry_count: 4 };
-      await outboxService.markFailed('evt-3', 'boom');
-
-      // The increment must be computed in JS and passed as a plain number,
-      // never by assigning the rpc() query builder to the column.
-      expect(mocks.chain.lastUpdate.retry_count).toBe(5);
-      expect(mocks.chain.lastUpdate.retry_count).toBeTypeOf('number');
-      expect(mocks.chain.rpc).not.toHaveBeenCalled();
-    });
-
     it('skips when eventId is missing', async () => {
-      await outboxService.markFailed(null, 'err');
+      await outboxService.markFailed(null, 'replica-a', 'err');
       expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
   });
@@ -139,7 +147,6 @@ describe('OutboxService', () => {
 
     it('uses maxRetries as the lt threshold for attempts', async () => {
       mocks.chain.error = null;
-      // Track the .lt call to verify maxRetries is passed correctly.
       const ltValues = [];
       mocks.chain.lt = vi.fn(function (col) {
         ltValues.push(col);

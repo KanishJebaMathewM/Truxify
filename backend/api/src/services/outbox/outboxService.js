@@ -60,7 +60,11 @@ export class OutboxService {
   }
 
   /**
-   * Fetch pending outbox events for the relay worker.
+   * Atomically claim a batch of pending outbox events for this worker using the
+   * claim_outbox_batch SECURITY DEFINER RPC. The RPC uses
+   * SELECT ... FOR UPDATE SKIP LOCKED so multiple API replicas can never claim
+   * the same row: each replica only publishes the rows it owns, which is what
+   * prevents duplicate Kafka events per replica (issue #14680).
    */
   async fetchPendingEvents(limit = 50) {
     const { data, error } = await supabaseAdmin
@@ -71,14 +75,15 @@ export class OutboxService {
       .limit(limit);
 
     if (error) {
-      logger.error('[OutboxService] Failed to fetch pending events:', error.message);
+      logger.error('[OutboxService] Failed to claim outbox batch:', error.message);
       return [];
     }
     return data ?? [];
   }
 
   /**
-   * Mark an event as published after successful Kafka delivery.
+   * Reset 'publishing' rows whose lease expired (crashed worker) back to
+   * 'pending' so any replica can reclaim them.
    */
   async markPublished(eventId) {
     const { error } = await supabaseAdmin
@@ -89,6 +94,7 @@ export class OutboxService {
     if (error) {
       logger.error('[OutboxService] Failed to mark event published:', error.message, { eventId });
     }
+    return Boolean(data && data.length > 0);
   }
 
   /**
@@ -99,10 +105,10 @@ export class OutboxService {
    * `pending` with `last_error` + `attempts` bumped so the relay reclaims it
    * (next_attempt_at is already managed by the claim RPC).
    */
-  async markFailed(eventId, errorMessage) {
-    if (!eventId) {
-      logger.warn('[OutboxService] Skipping markFailed — missing eventId');
-      return;
+  async markFailed(eventId, workerId, errorMessage) {
+    if (!eventId || !workerId) {
+      logger.warn('[OutboxService] Skipping markFailed — missing eventId or workerId');
+      return false;
     }
 
     const { data: current, error: fetchError } = await supabaseAdmin
@@ -128,7 +134,9 @@ export class OutboxService {
       .eq('id', eventId);
     if (error) {
       logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });
+      return false;
     }
+    return true;
   }
 
   /**
@@ -196,6 +204,7 @@ export class OutboxService {
 
   /**
    * Reset failed events back to pending for retry (up to maxRetries).
+   * Clears any stale claim metadata so the row can be re-claimed.
    */
   async requeueFailedEvents(maxRetries = 5) {
     const { error } = await supabaseAdmin

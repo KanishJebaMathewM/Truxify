@@ -127,7 +127,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     constructor() Ownable(msg.sender) {}
 
-    receive() external payable {
+    receive() external payable whenNotPaused {
         pendingWithdrawals[msg.sender] += msg.value;
     }
     fallback() external {
@@ -216,7 +216,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 bookingId,
         address payable driver,
         bytes calldata signature
-    ) external payable {
+    ) external payable whenNotPaused {
         require(msg.value > 0, "TruxifyEscrow: Payment required");
         require(driver != address(0), "TruxifyEscrow: Invalid driver address");
         require(
@@ -257,7 +257,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 bookingId,
         address payable customer,
         address payable driver
-    ) external payable onlyOwner {
+    ) external payable onlyOwner whenNotPaused {
         require(msg.value > 0, "TruxifyEscrow: Payment required");
         require(customer != address(0), "TruxifyEscrow: Invalid customer address");
         require(driver != address(0), "TruxifyEscrow: Invalid driver address");

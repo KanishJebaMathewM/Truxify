@@ -3,8 +3,11 @@ import eventStore from './event-store.js';
 import { supabase } from '../api/src/config/db.js';
 import logger from '../api/src/middleware/logger.js';
 import { EventStoreError } from './errors.js';
+import { authenticate, requireRole } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
+
+const REBUILD_BATCH_SIZE = 1000;
 
 /**
  * Controlled error response: typed event-store errors are translated to their
@@ -28,7 +31,7 @@ function sendEventStoreError(res, error, fallbackMessage) {
 }
 
 // Handle command
-router.post('/eventsourcing/command', async (req, res) => {
+router.post('/eventsourcing/command', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const { type, aggregateId, payload } = req.body;
         if (!type) {
@@ -52,7 +55,7 @@ router.post('/eventsourcing/command', async (req, res) => {
 });
 
 // Get order read model
-router.get('/eventsourcing/order/:orderId', async (req, res) => {
+router.get('/eventsourcing/order/:orderId', authenticate, async (req, res) => {
     try {
         const { orderId } = req.params;
         const order = await eventStore.getOrderReadModel(orderId);
@@ -67,7 +70,7 @@ router.get('/eventsourcing/order/:orderId', async (req, res) => {
 });
 
 // Get order list
-router.get('/eventsourcing/orders', async (req, res) => {
+router.get('/eventsourcing/orders', authenticate, async (req, res) => {
     try {
         const { status, customerId, limit } = req.query;
         const orders = await eventStore.getOrderList({
@@ -87,7 +90,7 @@ router.get('/eventsourcing/orders', async (req, res) => {
 });
 
 // Get event stream
-router.get('/eventsourcing/stream/:aggregateId', async (req, res) => {
+router.get('/eventsourcing/stream/:aggregateId', authenticate, async (req, res) => {
     try {
         const { aggregateId } = req.params;
         const events = await eventStore.getEventStream(aggregateId);
@@ -103,7 +106,7 @@ router.get('/eventsourcing/stream/:aggregateId', async (req, res) => {
 });
 
 // Get aggregate state
-router.get('/eventsourcing/state/:aggregateId', async (req, res) => {
+router.get('/eventsourcing/state/:aggregateId', authenticate, async (req, res) => {
     try {
         const { aggregateId } = req.params;
         const state = await eventStore.getAggregateState(aggregateId);
@@ -118,7 +121,7 @@ router.get('/eventsourcing/state/:aggregateId', async (req, res) => {
 });
 
 // Get stats
-router.get('/eventsourcing/stats', async (req, res) => {
+router.get('/eventsourcing/stats', authenticate, requireRole(['admin']), async (req, res) => {
     try {
         const stats = await eventStore.getEventStoreStats();
         res.json({
@@ -132,26 +135,37 @@ router.get('/eventsourcing/stats', async (req, res) => {
 });
 
 // Rebuild projections
-// Loads every persisted event, groups by aggregate, and reconstructs each
-// aggregate from its latest valid snapshot plus only the newer events (see
+// Loads every persisted event in batches, groups by aggregate, and reconstructs
+// each aggregate from its latest valid snapshot plus only the newer events (see
 // EventStoreCore.rebuildFromRows). Read models therefore match live aggregates.
-router.post('/eventsourcing/rebuild', async (req, res) => {
+router.post('/eventsourcing/rebuild', authenticate, requireRole(['admin']), async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('event_store')
-            .select('*')
-            .order('timestamp', { ascending: true });
+        const allRows = [];
+        let offset = 0;
 
-        if (error) {
-            logger.error('Rebuild error:', error);
-            return res.status(500).json({
-                success: false,
-                error: 'Projection rebuild failed',
-                code: 'EVENT_STORE_INTERNAL_ERROR',
-            });
+        while (true) {
+            const { data, error } = await supabase
+                .from('event_store')
+                .select('*')
+                .order('timestamp', { ascending: true })
+                .range(offset, offset + REBUILD_BATCH_SIZE - 1);
+
+            if (error) {
+                logger.error('Rebuild error:', error);
+                return res.status(500).json({
+                    success: false,
+                    error: 'Projection rebuild failed',
+                    code: 'EVENT_STORE_INTERNAL_ERROR',
+                });
+            }
+
+            if (!data || data.length === 0) break;
+            allRows.push(...data);
+            if (data.length < REBUILD_BATCH_SIZE) break;
+            offset += REBUILD_BATCH_SIZE;
         }
 
-        const result = await eventStore.rebuildProjections(data || []);
+        const result = await eventStore.rebuildProjections(allRows);
 
         res.json({
             success: true,

@@ -30,7 +30,7 @@ console.log('✅ Divergence Detector tests passed successfully.');
 
 // === Spec 36 test ===
 import { describe, it, expect } from 'vitest';
-import { sortBySequence } from '../../event-store.js';
+import { sortBySequence } from './event-store.js';
 describe('sortBySequence', () => {
   it('asc', () => { expect(sortBySequence([{sequenceNr:3},{sequenceNr:1}]).map(e=>e.sequenceNr)).toEqual([1,3]); });
 });

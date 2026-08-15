@@ -493,7 +493,7 @@ class RenderScheduler extends EventEmitter {
             queued: this.getQueueLength(),
             maxConcurrent: this.maxConcurrent,
             queues: this.getQueueStats(),
-            uptime: Date.now() - this.stats.startTime || 0
+            uptime: Math.max(0, Date.now() - this.stats.startTime)
         };
     }
     

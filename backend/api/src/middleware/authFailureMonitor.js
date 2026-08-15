@@ -41,12 +41,12 @@ function getThresholdForPath(path) {
   for (const [route, limit] of ROUTE_THRESHOLDS.entries()) {
     if (path.startsWith(route)) return limit;
   }
-  return Number(process.env.AUTH_FAILURE_THRESHOLD || DEFAULT_THRESHOLD);
+  return parseEnvNumber(process.env.AUTH_FAILURE_THRESHOLD, DEFAULT_THRESHOLD);
 }
 
 function cleanExpiredRecords() {
   const now = Date.now();
-  const windowMs = Number(process.env.AUTH_FAILURE_WINDOW_MS || DEFAULT_WINDOW_MS);
+  const windowMs = parseEnvNumber(process.env.AUTH_FAILURE_WINDOW_MS, DEFAULT_WINDOW_MS);
 
   // Sweep failures
   for (const [ip, record] of failures.entries()) {
@@ -154,8 +154,8 @@ export default function authFailureMonitor(req, res, next) {
       return;
     }
 
-    const windowMs = Number(process.env.AUTH_FAILURE_WINDOW_MS || DEFAULT_WINDOW_MS);
-    const banDurationMs = Number(process.env.AUTH_BAN_DURATION_MS || DEFAULT_BAN_DURATION_MS);
+    const windowMs = parseEnvNumber(process.env.AUTH_FAILURE_WINDOW_MS, DEFAULT_WINDOW_MS);
+    const banDurationMs = parseEnvNumber(process.env.AUTH_BAN_DURATION_MS, DEFAULT_BAN_DURATION_MS);
     const threshold = getThresholdForPath(req.originalUrl);
 
     const existing = failures.get(ip);

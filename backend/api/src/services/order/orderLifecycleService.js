@@ -1023,36 +1023,3 @@ export class OrderLifecycleService {
     });
   }
 }
-
-
-/**
- * Creates an order, timeline entry, and load offer in a single durable database transaction.
- */
-async function createOrderTransactional({ idempotencyKey, orderData, timelineData, loadOfferData }) {
-  if (!idempotencyKey) {
-    throw new Error('Idempotency key is required for transactional order creation.');
-  }
-
-  try {
-    const { data, error } = await supabaseAdmin.rpc('create_order_tx', {
-      p_idempotency_key: idempotencyKey,
-      p_order_data: orderData,
-      p_timeline_data: timelineData || { status: 'created', details: { note: 'Order initialized' } },
-      p_load_offer_data: loadOfferData || null
-    });
-
-    if (error) {
-      if (error.code === 'P0001' || error.message.includes('ORDER_CREATION_IN_PROGRESS')) {
-        const inProgressErr = new Error('Order creation is currently in progress for this key.');
-        inProgressErr.status = 409;
-        throw inProgressErr;
-      }
-      throw error;
-    }
-
-    return data;
-  } catch (err) {
-    logger.error({ err: err.message, key: idempotencyKey }, 'TRANSACTIONAL_ORDER_ERROR');
-    throw err;
-  }
-}

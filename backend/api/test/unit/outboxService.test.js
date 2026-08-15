@@ -16,8 +16,12 @@ function buildSupabaseMock() {
   const chain = {
     data: null,
     error: null,
+    rpcData: null,
+    rpcError: null,
     lastUpdate: null,
     lastEq: null,
+    lastRpcName: null,
+    lastRpcParams: null,
     select: vi.fn(function (cols) {
       this.lastSelect = cols;
       return this;
@@ -41,8 +45,6 @@ function buildSupabaseMock() {
       return this;
     }),
     limit: vi.fn(function () {
-      // fetchPendingEvents() ends its chain with .limit() and awaits the
-      // result, so this must resolve to { data, error }.
       return Promise.resolve({ data: this.data, error: this.error });
     }),
     maybeSingle: vi.fn(function () {
@@ -51,10 +53,10 @@ function buildSupabaseMock() {
     single: vi.fn(function () {
       return Promise.resolve({ data: this.data, error: this.error });
     }),
-    rpc: vi.fn(function () {
-      // The old buggy code called rpc() as a column value; this mock must
-      // never be reached by a correct implementation.
-      return { invalid: true };
+    rpc: vi.fn(function (name, params) {
+      this.lastRpcName = name;
+      this.lastRpcParams = params;
+      return Promise.resolve({ data: this.rpcData ?? null, error: this.rpcError ?? null });
     }),
   };
   return { chain, supabase: { from: vi.fn(() => chain) } };
@@ -72,6 +74,8 @@ describe('OutboxService', () => {
     vi.clearAllMocks();
     mocks.chain.data = null;
     mocks.chain.error = null;
+    mocks.chain.rpcData = null;
+    mocks.chain.rpcError = null;
   });
 
   describe('writeEvent', () => {
@@ -109,69 +113,96 @@ describe('OutboxService', () => {
     });
   });
 
-  describe('fetchPendingEvents', () => {
-    it('returns rows ordered by created_at ascending', async () => {
-      mocks.chain.data = [{ id: 'evt-1' }, { id: 'evt-2' }];
-      const rows = await outboxService.fetchPendingEvents(10);
+  describe('claimBatch', () => {
+    it('claims a batch via the claim_outbox_batch RPC with workerId', async () => {
+      mocks.chain.rpcData = [{ id: 'evt-1' }, { id: 'evt-2' }];
+      const rows = await outboxService.claimBatch({ workerId: 'replica-a', batchSize: 10 });
 
       expect(rows).toHaveLength(2);
-      expect(mocks.chain.lastEq).toEqual(['status', 'pending']);
+      expect(mocks.chain.lastRpcName).toBe('claim_outbox_batch');
+      expect(mocks.chain.lastRpcParams).toMatchObject({
+        p_worker_id: 'replica-a',
+        p_batch_size: 10,
+      });
     });
 
-    it('returns an empty array on error', async () => {
-      mocks.chain.error = { message: 'db down' };
-      const rows = await outboxService.fetchPendingEvents();
+    it('returns an empty array when the RPC errors', async () => {
+      mocks.chain.rpcError = { message: 'db down' };
+      const rows = await outboxService.claimBatch({ workerId: 'replica-a' });
       expect(rows).toEqual([]);
+    });
+
+    it('returns an empty array when workerId is missing', async () => {
+      const rows = await outboxService.claimBatch({});
+      expect(rows).toEqual([]);
+      expect(mocks.supabase.from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reclaimExpiredClaims', () => {
+    it('invokes reclaim_outbox_batch RPC', async () => {
+      await outboxService.reclaimExpiredClaims();
+      expect(mocks.chain.lastRpcName).toBe('reclaim_outbox_batch');
+    });
+
+    it('does not throw when the RPC errors', async () => {
+      mocks.chain.rpcError = { message: 'connection timeout' };
+      await expect(outboxService.reclaimExpiredClaims()).resolves.toBeUndefined();
+      expect(mockLogger.warn).toHaveBeenCalled();
     });
   });
 
   describe('markFailed', () => {
-    it('fetches the current retry_count and increments it in the update', async () => {
+    it('fetches the current retry_count and increments it in the update (ownership-fenced)', async () => {
       mocks.chain.data = { retry_count: 2 };
-      await outboxService.markFailed('evt-1', 'boom');
+      await outboxService.markFailed('evt-1', 'replica-a', 'boom');
 
       expect(mocks.chain.lastUpdate).toMatchObject({
         status: 'failed',
         last_error: 'boom',
         retry_count: 3,
       });
-      // The buggy implementation embedded a query builder here; verify we
-      // pass a plain number instead.
+      // Ownership fence: the update must be scoped to the claiming worker.
+      expect(mocks.chain.lastEq).toEqual(['claimed_by', 'replica-a']);
       expect(mocks.chain.lastUpdate.retry_count).toBeTypeOf('number');
       expect(mocks.supabase.from).toHaveBeenCalledTimes(2);
     });
 
     it('defaults retry_count to 1 when the row has no retry_count', async () => {
       mocks.chain.data = null;
-      await outboxService.markFailed('evt-2', 'err');
+      await outboxService.markFailed('evt-2', 'replica-a', 'err');
 
       expect(mocks.chain.lastUpdate.retry_count).toBe(1);
     });
 
-    it('does not embed an unawaited rpc() Promise as the retry_count value (#12178)', async () => {
-      mocks.chain.data = { retry_count: 4 };
-      await outboxService.markFailed('evt-3', 'boom');
-
-      // The increment must be computed in JS and passed as a plain number,
-      // never by assigning the rpc() query builder to the column.
-      expect(mocks.chain.lastUpdate.retry_count).toBe(5);
-      expect(mocks.chain.lastUpdate.retry_count).toBeTypeOf('number');
-      expect(mocks.chain.rpc).not.toHaveBeenCalled();
-    });
-
     it('skips when eventId is missing', async () => {
-      await outboxService.markFailed(null, 'err');
+      await outboxService.markFailed(null, 'replica-a', 'err');
       expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
   });
 
   describe('markPublished', () => {
-    it('marks the event as published', async () => {
+    it('marks the event published and returns true when the owner matches', async () => {
       mocks.chain.error = null;
-      await outboxService.markPublished('evt-1');
+      mocks.chain.data = [{ id: 'evt-1' }];
+      const owned = await outboxService.markPublished('evt-1', 'replica-a');
 
+      expect(owned).toBe(true);
       expect(mocks.chain.lastUpdate).toMatchObject({ status: 'published' });
-      expect(mocks.chain.lastEq).toEqual(['id', 'evt-1']);
+      // Ownership fence so a reclaimed row is not double-resolved.
+      expect(mocks.chain.lastEq).toEqual(['claimed_by', 'replica-a']);
+    });
+
+    it('returns false when no row matched (lost ownership)', async () => {
+      mocks.chain.data = [];
+      const owned = await outboxService.markPublished('evt-1', 'replica-a');
+      expect(owned).toBe(false);
+    });
+
+    it('skips when workerId is missing', async () => {
+      const owned = await outboxService.markPublished('evt-1');
+      expect(owned).toBe(false);
+      expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
   });
 
@@ -193,7 +224,6 @@ describe('OutboxService', () => {
 
     it('uses maxRetries as the lt threshold for retry_count', async () => {
       mocks.chain.error = null;
-      // Track the .lt call to verify maxRetries is passed correctly.
       const ltValues = [];
       mocks.chain.lt = vi.fn(function (col) {
         ltValues.push(col);

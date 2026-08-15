@@ -46,36 +46,75 @@ export class OutboxService {
   }
 
   /**
-   * Fetch pending outbox events for the relay worker.
+   * Atomically claim a batch of pending outbox events for this worker using the
+   * claim_outbox_batch SECURITY DEFINER RPC. The RPC uses
+   * SELECT ... FOR UPDATE SKIP LOCKED so multiple API replicas can never claim
+   * the same row: each replica only publishes the rows it owns, which is what
+   * prevents duplicate Kafka events per replica (issue #14680).
    */
-  async fetchPendingEvents(limit = 50) {
-    const { data, error } = await supabaseAdmin
-      .from('outbox_events')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(limit);
+  async claimBatch({ workerId, batchSize = 50, leaseMs = 5 * 60 * 1000 } = {}) {
+    if (!workerId) {
+      logger.warn('[OutboxService] Skipping claim — missing workerId');
+      return [];
+    }
+
+    const { data, error } = await supabaseAdmin.rpc('claim_outbox_batch', {
+      p_worker_id: workerId,
+      p_batch_size: batchSize,
+      p_lease_seconds: Math.max(1, Math.floor(leaseMs / 1000)),
+    });
 
     if (error) {
-      logger.error('[OutboxService] Failed to fetch pending events:', error.message);
+      logger.error('[OutboxService] Failed to claim outbox batch:', error.message);
       return [];
     }
     return data ?? [];
   }
 
   /**
-   * Mark an event as published after successful Kafka delivery.
+   * Reset 'publishing' rows whose lease expired (crashed worker) back to
+   * 'pending' so any replica can reclaim them.
    */
-  async markPublished(eventId) {
-    const { error } = await supabaseAdmin
+  async reclaimExpiredClaims({ leaseBufferMs = 60 * 1000, batchSize = 100 } = {}) {
+    const { error } = await supabaseAdmin.rpc('reclaim_outbox_batch', {
+      p_lease_buffer_seconds: Math.max(0, Math.floor(leaseBufferMs / 1000)),
+      p_batch_size: batchSize,
+    });
+
+    if (error) {
+      logger.warn('[OutboxService] Failed to reclaim expired outbox claims:', error.message);
+    }
+  }
+
+  /**
+   * Mark a claimed event as published after successful Kafka delivery.
+   *
+   * Fenced on ownership: only the worker that currently owns the 'publishing'
+   * row (matching claimed_by) may resolve it. If another replica reclaimed the
+   * row after lease expiry, the update matches zero rows and we report loss of
+   * ownership so the worker does not double-count the delivery.
+   *
+   * @returns {Promise<boolean>} true if the row was marked published by this worker
+   */
+  async markPublished(eventId, workerId) {
+    if (!eventId || !workerId) {
+      logger.warn('[OutboxService] Skipping markPublished — missing eventId or workerId');
+      return false;
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('outbox_events')
       .update({ status: 'published', published_at: new Date().toISOString() })
-      .eq('id', eventId);
+      .eq('id', eventId)
+      .eq('status', 'publishing')
+      .eq('claimed_by', workerId)
+      .select('id');
 
     if (error) {
       logger.error('[OutboxService] Failed to mark event published:', error.message, { eventId });
       throw error;
     }
+    return Boolean(data && data.length > 0);
   }
 
   /**
@@ -85,20 +124,22 @@ export class OutboxService {
    * assigned an unawaited `supabase.rpc('increment', ...)` Promise to the
    * column, so the counter never advanced and dead-lettering never triggered.
    */
-  async markFailed(eventId, errorMessage) {
-    if (!eventId) {
-      logger.warn('[OutboxService] Skipping markFailed — missing eventId');
-      return;
+  async markFailed(eventId, workerId, errorMessage) {
+    if (!eventId || !workerId) {
+      logger.warn('[OutboxService] Skipping markFailed — missing eventId or workerId');
+      return false;
     }
 
     const { data: current, error: fetchError } = await supabaseAdmin
       .from('outbox_events')
       .select('retry_count')
       .eq('id', eventId)
+      .eq('status', 'publishing')
+      .eq('claimed_by', workerId)
       .single();
 
     if (fetchError) {
-      logger.warn('[OutboxService] Failed to read retry_count:', fetchError.message, { eventId });
+      logger.warn('[OutboxService] Failed to read retry_count (or lost claim ownership):', fetchError.message, { eventId });
     }
 
     const currentRetryCount = Number.isFinite(current?.retry_count) ? current.retry_count : 0;
@@ -111,20 +152,30 @@ export class OutboxService {
         retry_count: currentRetryCount + 1,
         last_attempted_at: new Date().toISOString(),
       })
-      .eq('id', eventId);
+      .eq('id', eventId)
+      .eq('status', 'publishing')
+      .eq('claimed_by', workerId);
 
     if (error) {
       logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });
+      return false;
     }
+    return true;
   }
 
   /**
    * Reset failed events back to pending for retry (up to maxRetries).
+   * Clears any stale claim metadata so the row can be re-claimed.
    */
   async requeueFailedEvents(maxRetries = 5) {
     const { error } = await supabaseAdmin
       .from('outbox_events')
-      .update({ status: 'pending' })
+      .update({
+        status: 'pending',
+        claimed_by: null,
+        claimed_at: null,
+        lease_expires_at: null,
+      })
       .eq('status', 'failed')
       .lt('retry_count', maxRetries);
 

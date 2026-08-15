@@ -22,6 +22,24 @@ const dbState = vi.hoisted(() => ({
   updateError: null,
 }));
 
+const mockGetTransactionReceipt = vi.hoisted(() => vi.fn());
+
+vi.mock('ethers', async (importOriginal) => {
+  const actual = await importOriginal();
+  class MockJsonRpcProvider {
+    getTransaction(...args) {
+      return mockGetTransactionReceipt(...args);
+    }
+    getTransactionReceipt(...args) {
+      return mockGetTransactionReceipt(...args);
+    }
+    getBlockNumber() {
+      return 195;
+    }
+  }
+  return { ...actual, ethers: { ...actual.ethers, JsonRpcProvider: MockJsonRpcProvider } };
+});
+
 vi.mock('../../src/services/webhook/escrowVerification.js', () => ({
   EscrowVerificationError: class EscrowVerificationError extends Error {
     constructor(code, message, options = {}) {
@@ -133,6 +151,10 @@ function resetDbState() {
   dbState.walletResult = { data: null, error: null };
   dbState.replayResult = { data: null, error: null };
   dbState.updateError = null;
+}
+
+function updatePayloads() {
+  return dbState.updates.map((u) => u.payload);
 }
 
 beforeEach(() => {
@@ -428,6 +450,7 @@ describe('processEscrowWebhookEvent — WithdrawalReady / Withdrawn', () => {
 
   it('rejects a withdrawal webhook without a well-formed transaction hash (permanent)', async () => {
     dbState.orderResult = { data: makeOrder({ order_display_id: '#OD6' }), error: null };
+  });
   it('reconciles the wallet ledger exactly once for a duplicate release (no infinite DLQ re-entry, #12154)', async () => {
     // Released-before-reconcile ordering: a release Webhook re-delivered after
     // the order is already 'released' must NOT re-apply the order effect and

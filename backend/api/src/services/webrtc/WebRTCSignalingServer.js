@@ -50,7 +50,13 @@ class WebRTCSignalingServer {
       }
 
       const peerId = this.generatePeerId();
-      const meshId = url.searchParams.get('meshId') || this.getOrCreateMesh();
+      const rawMeshId = url.searchParams.get('meshId');
+      const MAX_MESH_ID_LENGTH = 64;
+      if (rawMeshId != null && rawMeshId.length > MAX_MESH_ID_LENGTH) {
+        ws.close(4001, 'meshId exceeds maximum length');
+        return;
+      }
+      const meshId = rawMeshId || this.getOrCreateMesh();
 
       // Store peer with authenticated user info
       this.peers.set(peerId, {

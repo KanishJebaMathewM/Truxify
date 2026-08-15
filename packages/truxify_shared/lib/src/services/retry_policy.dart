@@ -16,18 +16,17 @@ class RateLimitException implements Exception {
 
 /// Controls how [ApiClient._execute] retries failed requests.
 ///
-/// Two retry triggers are supported:
+/// One retry trigger is supported:
 ///   - **HTTP 429** (Too Many Requests): honours the `Retry-After` response
 ///     header, waits, then retries once. If the retry also returns 429,
 ///     throws [RateLimitException] so the UI can show a meaningful message.
-///   - **HTTP 5xx** with exponential backoff (opt-in, disabled by default).
 ///
-/// Example — default behaviour (retry on 429, no 5xx retry):
+/// Example — default behaviour (retry on 429):
 /// ```dart
 /// final client = ApiClient(); // uses RetryPolicy.defaultPolicy
 /// ```
 ///
-/// Example — disable automatic retry (e.g. for idempotent-sensitive callers):
+/// Example — disable automatic retry:
 /// ```dart
 /// final client = ApiClient(retryPolicy: RetryPolicy.noRetry);
 /// ```
@@ -35,9 +34,6 @@ class RetryPolicy {
   const RetryPolicy({
     this.retryOnRateLimit = true,
     this.maxRetryAfterSeconds = 60,
-    this.retryOn5xx = false,
-    this.maxAttempts = 3,
-    this.baseBackoffMs = 500,
   });
 
   /// Whether to automatically wait and retry on HTTP 429.
@@ -46,15 +42,6 @@ class RetryPolicy {
   /// Cap the `Retry-After` wait to this many seconds so we never block a
   /// request for e.g. a full hour (some servers return very large values).
   final int maxRetryAfterSeconds;
-
-  /// Whether to retry on HTTP 5xx responses with exponential backoff.
-  final bool retryOn5xx;
-
-  /// Maximum total attempts including the initial one.
-  final int maxAttempts;
-
-  /// Base delay for exponential backoff in milliseconds.
-  final int baseBackoffMs;
 
   // ── Retry-After parsing ─────────────────────────────────────────────────
 
@@ -81,25 +68,13 @@ class RetryPolicy {
     }
   }
 
-  // ── Backoff ─────────────────────────────────────────────────────────────
-
-  /// Exponential backoff duration for the given attempt number (1-indexed),
-  /// capped at 30 seconds.
-  Duration backoffFor(int attempt) {
-    final ms = (baseBackoffMs * math.pow(2, attempt - 1)).toInt();
-    return Duration(milliseconds: math.min(ms, 30000));
-  }
-
   // ── Presets ─────────────────────────────────────────────────────────────
 
   /// Default policy: retry once on 429 (honour Retry-After, cap at 60s).
   static const RetryPolicy defaultPolicy = RetryPolicy();
 
   /// No automatic retries of any kind.
-  static const RetryPolicy noRetry = RetryPolicy(
-    retryOnRateLimit: false,
-    retryOn5xx: false,
-  );
+  static const RetryPolicy noRetry = RetryPolicy(retryOnRateLimit: false);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +94,6 @@ class HttpDate {
   static DateTime parse(String value) {
     // e.g. "Wed, 05 Aug 2026 10:00:00 GMT"
     final parts = value.split(RegExp(r'[\s,]+'));
-    // parts: [Wed, 05, Aug, 2026, 10:00:00, GMT]  (day-of-week may be absent)
     final filtered = parts.where((p) => p.isNotEmpty).toList();
 
     // Strip optional day-of-week

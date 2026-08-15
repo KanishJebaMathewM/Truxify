@@ -95,9 +95,9 @@ create table if not exists driver_details (
   total_trips       int not null default 0,
   completion_rate   numeric(5,2) not null default 100.00,     -- percentage
   is_online         boolean not null default false,
-  wallet_confirmed  int not null default 0 check (wallet_confirmed >= 0),   -- paisa
-  wallet_pending    int not null default 0 check (wallet_pending >= 0),
-  wallet_total      int not null default 0,
+  wallet_confirmed  numeric(20,0) not null default 0 check (wallet_confirmed >= 0),   -- paisa
+  wallet_pending    numeric(20,0) not null default 0 check (wallet_pending >= 0),
+  wallet_total      numeric(20,0) not null default 0,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );

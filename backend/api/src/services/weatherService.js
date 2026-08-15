@@ -35,6 +35,15 @@ export class WeatherService {
     // latitude would silently fall through to the warm default. Guard it
     // explicitly so the intent is clear.
     const validLat = Number.isFinite(numLat);
+    const validLng = Number.isFinite(Number(lng));
+
+    if (!validLat || !validLng) {
+      return {
+        temperature_c: tempC,
+        condition,
+        forecast_time: new Date().toISOString()
+      };
+    }
 
     if (validLat && (numLat > 40 || numLat < -40)) {
       tempC = -5;

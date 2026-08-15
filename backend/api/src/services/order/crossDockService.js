@@ -140,9 +140,9 @@ export async function findHandoffCandidates({
 
     if (drivers.length === 0) {
       const { data: onlineDrivers, error: qErr } = await supabaseAdmin
-        .from('driver_location')
-        .select('driver_id, lat, lng, last_seen_at, profiles:driver_id (full_name)')
-        .eq('is_online', true)
+        .from('driver_locations')
+        .select('driver_id, latitude, longitude, last_updated_at, profiles:driver_id (full_name)')
+        .eq('is_active', true)
         .limit(limit * 4);
       if (qErr) {
         throw new DomainError(503, { error: 'Failed to query nearby drivers.', details: qErr.message });
@@ -151,9 +151,9 @@ export async function findHandoffCandidates({
         .map((d) => ({
           driver_id: d.driver_id,
           name: d.profiles?.full_name,
-          lat: Number(d.lat),
-          lng: Number(d.lng),
-          last_seen_at: d.last_seen_at,
+          lat: Number(d.latitude),
+          lng: Number(d.longitude),
+          last_seen_at: d.last_updated_at,
         }))
         .filter((d) => d.driver_id !== fromDriverId)
         .map((d) => ({

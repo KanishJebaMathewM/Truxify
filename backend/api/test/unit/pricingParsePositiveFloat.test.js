@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { __testing } from '../../../src/lib/pricing.js';
+import { __testing } from '../../src/lib/pricing.js';
 
 const { parsePositiveFloat } = __testing;
 

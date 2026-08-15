@@ -81,6 +81,27 @@ class TokenizationService {
         logger.info('✅ Tokenization Service initialized');
     }
 
+    /**
+     * Return the server relayer signer for broadcasting a *user-authorized*
+     * transaction.
+     *
+     * This is intentionally only callable after the caller has been
+     * authenticated and the operation signature has been verified against
+     * `verifiedAddress` (see backend/tokenization/routes.js). The previous code
+     * silently fell back to `this.wallet` whenever a `signer` was omitted, which
+     * let any unauthenticated caller make the server wallet pay. That fallback
+     * is gone: the signer must now be obtained through this gated path.
+     *
+     * @param {string} verifiedAddress the user's verified wallet address
+     * @returns {ethers.Wallet} the relayer signer
+     */
+    getRelayerSigner(verifiedAddress) {
+        if (!verifiedAddress || !ethers.isAddress(verifiedAddress)) {
+            throw new Error('Cannot obtain a relayer signer without a verified user address.');
+        }
+        return this.wallet;
+    }
+
     // ============ Asset Management ============
 
     async createAsset(assetData) {
@@ -128,7 +149,10 @@ class TokenizationService {
             }
             const totalCost = parseFloat(asset.tokenPrice) * amount;
 
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
+            if (!signer) {
+                throw new Error('A verified user signer is required to purchase fractions.');
+            }
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
             const tx = await userContract.purchaseFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
@@ -164,7 +188,10 @@ class TokenizationService {
 
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
+            if (!signer) {
+                throw new Error('A verified user signer is required to sell fractions.');
+            }
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
@@ -258,7 +285,7 @@ class TokenizationService {
         }
 }
 
-    async executeTradeOrder(assetId, orderIndex, buyerAddress) {
+    async executeTradeOrder(assetId, orderIndex, buyerAddress, signer) {
         try {
             const order = await this.getTradeOrder(assetId, orderIndex);
 
@@ -268,7 +295,11 @@ class TokenizationService {
 
             const totalCost = parseFloat(order.price) * parseFloat(order.amount);
 
-            const tx = await this.token.executeTradeOrder(
+            if (!signer) {
+                throw new Error('A verified user signer is required to execute trade orders.');
+            }
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const tx = await userContract.executeTradeOrder(
                 assetId,
                 orderIndex,
                 {

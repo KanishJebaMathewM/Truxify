@@ -154,6 +154,16 @@ const POLICIES = {
   'crossdock:verify':           {},
   'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
   'crossdock:list':             {},
+
+  // Tokenization subsystem (#14672): every mutating action must be performed by
+  // an authenticated, signature-authorized user. Role list is intentionally left
+  // open so any verified user may trade; ownership/spoofing is prevented in the
+  // route layer by deriving the wallet address from the verified session.
+  'token:create-asset':        {},
+  'token:purchase-fraction':   {},
+  'token:sell-fraction':       {},
+  'token:create-trade':        {},
+  'token:execute-trade':       {},
 };
 
 export class PolicyEngine {

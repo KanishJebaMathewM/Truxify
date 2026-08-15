@@ -163,36 +163,6 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
     });
   }
 
-    if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
-      throw new DomainError(400, { error: 'Missing required routing or cargo specification fields.' });
-    }
-
-    let pricing;
-    try {
-      const routeEstimate = await getRouteEstimate({
-        pickupLat: Number(pickup_lat),
-        pickupLng: Number(pickup_lng),
-        dropLat: Number(drop_lat),
-        dropLng: Number(drop_lng),
-      });
-      pricing = computeOrderPricing({
-        pickupLat: Number(pickup_lat),
-        pickupLng: Number(pickup_lng),
-        dropLat: Number(drop_lat),
-        dropLng: Number(drop_lng),
-        weightTonnes: Number(weight_tonnes),
-        roadDistanceKm: routeEstimate?.distanceKm,
-        isFragile: Boolean(is_fragile),
-        isStackable: Boolean(is_stackable),
-      });
-    } catch (pricingErr) {
-      logger.error('Pricing computation error:', pricingErr.message);
-      throw new DomainError(400, {
-        error: 'Unable to compute freight pricing for the given route/cargo.',
-        details: pricingErr.message,
-      });
-    }
-
     let estimatedPrice = null;
     try {
       const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);

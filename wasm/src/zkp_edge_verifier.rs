@@ -35,7 +35,7 @@ pub fn verify_zkp_edge_wasm(proof_bytes_hex: &str, public_inputs_hex: &str) -> b
     }
 
     // Structural sanity: the proof must be presented in a known ZKP envelope.
-    if !proof_bytes_hex.starts_with("0xzk") && !proof_bytes_hex.starts_with("0xbproof_") {
+    if !proof_bytes_hex.starts_with("0xzk_") && !proof_bytes_hex.starts_with("0xbproof_") {
         return false;
     }
 
@@ -69,4 +69,35 @@ pub fn verify_zkp_edge_wasm(proof_bytes_hex: &str, public_inputs_hex: &str) -> b
 #[wasm_bindgen]
 pub fn get_wasm_edge_verifier_version() -> String {
     "Truxify_WASM_ZKP_v1.0.0".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_empty_inputs() {
+        assert!(!verify_zkp_edge_wasm("", "00"));
+        assert!(!verify_zkp_edge_wasm("0xzk_00", ""));
+    }
+
+    #[test]
+    fn rejects_unknown_envelope() {
+        assert!(!verify_zkp_edge_wasm("0xother_00", "00"));
+    }
+
+    #[test]
+    fn rejects_envelope_without_payload() {
+        assert!(!verify_zkp_edge_wasm("0xzk_", "00"));
+        assert!(!verify_zkp_edge_wasm("0xbproof_", "00"));
+    }
+
+    #[test]
+    fn accepts_known_envelope_prefixes() {
+        // Payloads are not valid Ed25519 sigs, but they must reach decode
+        // (i.e. not be rejected at the envelope/prefix stage).
+        let zxzk = verify_zkp_edge_wasm("0xzk_00", "00");
+        let bproof = verify_zkp_edge_wasm("0xbproof_00", "00");
+        assert!(!zxzk && !bproof);
+    }
 }

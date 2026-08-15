@@ -66,7 +66,7 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Retrieve existing document of the same type for this driver (pre-flight check)
-    const { data: existingDocPreflight, error: checkErrorPreflight } = await supabaseAdmin
+    const { data: existingDoc, error: checkErrorPreflight } = await supabaseAdmin
       .from('driver_documents')
       .select('id, storage_path')
       .eq('driver_id', driverId)

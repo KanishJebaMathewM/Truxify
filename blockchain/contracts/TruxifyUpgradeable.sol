@@ -183,6 +183,13 @@ contract TruxifyUpgradeable is
     ///         there is deliberately no unweighted fallback.
     function setGovernanceToken(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(token != address(0), "Invalid token");
+        // vote() casts governanceToken to IVotes and calls getPastVotes. A plain
+        // ERC20 has no such selector, so every vote() would revert. Reject tokens
+        // that do not implement IVotes at configuration time.
+        (bool success, ) = token.staticcall(
+            abi.encodeWithSelector(IVotes.getPastVotes.selector, address(this), block.number)
+        );
+        require(success, "Governance token must implement IVotes");
         governanceToken = IERC20(token);
         emit GovernanceTokenUpdated(token);
     }

@@ -158,7 +158,10 @@ class CacheManager {
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
     for (final item in orders) {
-      final id = _stableId(item, const ['id', 'orderId', 'order_id']);
+      final id = _stableId(
+        item,
+        const ['id', 'orderId', 'order_id', 'order_display_id'],
+      );
       if (id == null) {
         continue;
       }

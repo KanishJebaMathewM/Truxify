@@ -7,6 +7,7 @@ const { mockFrom } = vi.hoisted(() => {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: mockFrom },
+  supabaseAdmin: { from: mockFrom },
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

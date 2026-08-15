@@ -1,7 +1,7 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { AppError } from '../utils/errors.js';
-import { supabase } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 
 /**
  * Resolve the resource for the 'escort:issue-credential' ownership check:
@@ -11,7 +11,8 @@ import { supabase } from '../config/db.js';
  * wallet address/DID.
  */
 export const resolveCredentialSubject = async (req) => {
-    const { data: profile, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: profile, error } = await userClient
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', req.user.id)

@@ -18,8 +18,11 @@ export async function optimizeWaypoints(start, end, waypoints, departureDate, de
 
   try {
     const normalizeCoordinatePoint = (point, label) => {
-      const lat = Number(point?.lat);
-      const lng = Number(point?.lng);
+      if (point == null) {
+        throw new Error(`${label} point is null or undefined`);
+      }
+      const lat = Number(point.lat);
+      const lng = Number(point.lng);
 
       if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
         throw new Error(`Invalid latitude for ${label}`);

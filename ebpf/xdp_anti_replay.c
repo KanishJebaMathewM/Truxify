@@ -14,8 +14,9 @@
 #define REPLAY_WINDOW_SIZE 64
 
 struct anti_replay_entry {
-    __u32 last_seq; // Highest payload sequence number seen for this flow
-    __u64 window;   // Bitmap of recently seen sequence numbers below last_seq
+    __u32 last_seq;            // Highest payload sequence number seen for this flow
+    __u64 window;              // Bitmap of recently seen sequence numbers below last_seq
+    struct bpf_spin_lock lock; // Serializes read-modify-write of last_seq/window across CPUs
 };
 
 struct {
@@ -64,17 +65,24 @@ int xdp_anti_replay_filter(struct xdp_md *ctx) {
         struct anti_replay_entry new_entry = {
             .last_seq = seq,
             .window = 1,
+            .lock = {},
         };
         bpf_map_update_elem(&seq_tracking_map, &flow_key, &new_entry, BPF_ANY);
         return XDP_PASS;
     }
 
+    bpf_spin_lock(&entry->lock);
+
     if (seq <= entry->last_seq) {
         __u32 diff = entry->last_seq - seq;
-        if (diff >= REPLAY_WINDOW_SIZE)
+        if (diff >= REPLAY_WINDOW_SIZE) {
+            bpf_spin_unlock(&entry->lock);
             return XDP_DROP; // Stale: outside the replay window
-        if (entry->window & (1ULL << diff))
+        }
+        if (entry->window & (1ULL << diff)) {
+            bpf_spin_unlock(&entry->lock);
             return XDP_DROP; // Duplicate: sequence already seen
+        }
         entry->window |= (1ULL << diff); // Out-of-order but in-window: accept
     } else {
         __u64 shift = (__u64)(seq - entry->last_seq);
@@ -85,6 +93,8 @@ int xdp_anti_replay_filter(struct xdp_md *ctx) {
         entry->window |= 1ULL;
         entry->last_seq = seq;
     }
+
+    bpf_spin_unlock(&entry->lock);
 
     return XDP_PASS;
 }

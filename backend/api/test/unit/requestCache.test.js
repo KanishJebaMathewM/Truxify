@@ -63,7 +63,6 @@ describe('RequestCache', () => {
 
 
 // === Spec 25 test ===
-import { EventEmitter } from 'node:events';
 describe('attachResponseCleanup', () => {
   it('returns a cleanup function', () => {
     const { EventEmitter } = require('node:events');

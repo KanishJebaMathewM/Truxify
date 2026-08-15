@@ -73,7 +73,7 @@ describe('outboxRelayWorker', () => {
       expect(mockEventBus.publishAndReport).toHaveBeenCalled();
     });
 
-    expect(mockEventBus.publishAndReport).toHaveBeenCalledWith(expect.any(Object), { adapters: ['kafka'] });
+    expect(mockEventBus.publishAndReport).toHaveBeenCalledWith(expect.any(Object), undefined, { adapters: ['kafka'] });
     expect(mockOutboxService.markPublished).toHaveBeenCalledWith('evt-1');
     worker.stopOutboxRelayWorker();
   });

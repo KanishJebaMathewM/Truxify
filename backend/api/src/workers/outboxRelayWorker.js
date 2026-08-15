@@ -34,7 +34,7 @@ async function relayOnce() {
           source: EVENT_SOURCES.INTERNAL,
           category: EVENT_CATEGORIES.DOMAIN,
         });
-        const outcome = await eventBus.publishAndReport(baseEvent, { adapters: ['kafka'] });
+        const outcome = await eventBus.publishAndReport(baseEvent, undefined, { adapters: ['kafka'] });
 
         // Guard explanation:
         // outcome.published       — EventBus successfully received the event

@@ -213,8 +213,8 @@ export class OutboxService {
       .eq('status', 'publishing')
       .lt('attempts', maxRetries);
 
-    if (result?.error) {
-      logger.error('[OutboxService] Failed to requeue failed events:', result.error.message);
+    if (error) {
+      logger.error('[OutboxService] Failed to requeue failed events:', error.message);
     }
   }
 

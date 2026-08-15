@@ -75,7 +75,7 @@ class EdgeRuntime {
                             return selected;
                         },
                         calculate_eta: (distance, speed, trafficFactor) =>
-                            distance / (speed * Math.max(1.0 - (trafficFactor || 0), 0.1)),
+                            distance / (Math.max(speed, 1e-6) * Math.max(1.0 - (trafficFactor || 0), 0.1)),
                         filter_drivers: (drivers, minRating) =>
                             (drivers || []).filter((d) => d.status !== 'offline' && d.rating >= (minRating || 0)),
                         aggregate_prices: (prices) =>

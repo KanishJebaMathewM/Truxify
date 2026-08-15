@@ -103,7 +103,8 @@ pub fn optimize_loads(loads: &[f64], capacity: f64) -> Vec<usize> {
 #[wasm_bindgen]
 pub fn calculate_eta(distance: f64, speed: f64, traffic_factor: f64) -> f64 {
     // Fast ETA calculation at edge
-    let effective_speed = speed * (1.0 - traffic_factor);
+    let factor = (1.0 - traffic_factor).max(0.1);
+    let effective_speed = speed.max(1e-6) * factor;
     distance / effective_speed
 }
 
@@ -125,6 +126,9 @@ pub fn filter_drivers(drivers: Vec<DriverData>, min_rating: f64) -> Vec<DriverDa
 
 #[wasm_bindgen]
 pub fn aggregate_prices(prices: Vec<f64>) -> f64 {
+    if prices.is_empty() {
+        return 0.0;
+    }
     prices.iter().sum::<f64>() / prices.len() as f64
 }
 

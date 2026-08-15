@@ -22,7 +22,7 @@ vi.mock('../../../../../src/core/health/HealthCheck.js', () => ({
   }),
 }));
 
-import kafkaHealth from '../../src/core/health/checks/kafkaHealth.js';
+import kafkaHealth from '../../../../../src/core/health/checks/kafkaHealth.js';
 
 describe('kafkaHealth', () => {
   const ORIGINAL_ENV = process.env;

@@ -144,7 +144,7 @@ import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
 import { verifyJWT } from './middleware/auth.js'
-import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
+import { initSentry, flushSentry, sentryErrorHandler, sentryRequestHandler, captureException } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,
   stopEscrowRefundReconciliation

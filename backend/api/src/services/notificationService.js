@@ -684,7 +684,11 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
-        notif_type: 'delivery_otp',
+        // `delivery_otp` is not in the notifications.notif_type CHECK constraint
+        // (see supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql),
+        // so use an allowed type or the insert always fails and the OTP
+        // notification is never persisted.
+        notif_type: 'order_update',
         // No OTP or OTP-derived value is persisted here: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }

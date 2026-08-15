@@ -184,6 +184,9 @@ export async function verifyAuthToken(token) {
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
 export async function authenticate(req, res, next) {
+  if (req.user) {
+    return next();
+  }
   const bypassAuth = process.env.BYPASS_AUTH === "true";
   const testAuthEnabled = process.env.ENABLE_TEST_AUTH === "true";
 

@@ -205,6 +205,10 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         ShipmentStatus currentStatus = _currentStatus(shipmentId);
         ShipmentStatus newStatus = _parseStatus(status);
         require(_isValidTransition(currentStatus, newStatus), "Invalid transition");
+        require(
+            _isAuthorizedActor(s, currentStatus, newStatus),
+            "Not authorized for this transition"
+        );
 
         s.status = status;
         s.location = location;
@@ -248,6 +252,29 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         }
         // Otherwise the status must advance exactly one step forward.
         return uint256(next) == uint256(current) + 1;
+    }
+
+    /**
+     * @dev Gate each lifecycle transition to the correct actor. The owner may
+     *      perform any transition for administrative corrections. Otherwise:
+     *      - the sender drives forward steps (InTransit, Arrived);
+     *      - only the receiver may confirm final delivery (Delivered);
+     *      - only the sender (or owner) may cancel a created shipment.
+     */
+    function _isAuthorizedActor(
+        Shipment storage s,
+        ShipmentStatus current,
+        ShipmentStatus next
+    ) internal view returns (bool) {
+        if (msg.sender == owner()) return true;
+
+        if (next == ShipmentStatus.Cancelled) {
+            return msg.sender == s.sender;
+        }
+        if (next == ShipmentStatus.Delivered) {
+            return msg.sender == s.receiver;
+        }
+        return msg.sender == s.sender;
     }
 
     function _currentStatus(uint256 shipmentId) internal view returns (ShipmentStatus) {

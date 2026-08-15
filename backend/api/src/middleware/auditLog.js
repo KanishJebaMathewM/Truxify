@@ -63,7 +63,7 @@ const ACTION_RESOURCE_MAP = Object.freeze({
 /**
  * Recursively sanitizes sensitive parameters, arrays, and nested structures.
  */
-export function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
+function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
   if (data === null || data === undefined) return data;
   if (currentDepth > maxDepth) return '[Max Depth Exceeded]';
 

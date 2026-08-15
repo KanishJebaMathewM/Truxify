@@ -37,6 +37,7 @@ contract FreightAMM is Ownable, ReentrancyGuard {
         returns (uint256 amountOut)
     {
         require(_amountIn > 0, "Swap amount must be > 0");
+        require(reserveCredit > 0 && reserveStable > 0, "Pool not seeded");
 
         // Fee is charged on the input amount and kept in the pool reserve so
         // it is collected rather than truncated away.
@@ -47,7 +48,7 @@ contract FreightAMM is Ownable, ReentrancyGuard {
             require(creditToken.transferFrom(msg.sender, address(this), _amountIn), "Transfer failed");
             
             // Constant product equation evaluation: dy = (y * dx) / (x + dx)
-            amountOut = (reserveStable * amountInNet) / (reserveCredit + amountInNet);
+            amountOut = (reserveStable * amountInNet) / (reserveCredit + _amountIn);
             require(amountOut >= _minAmountOut, "Swap output below minAmountOut");
 
             reserveCredit += _amountIn;
@@ -57,7 +58,7 @@ contract FreightAMM is Ownable, ReentrancyGuard {
         } else {
             require(stablecoinToken.transferFrom(msg.sender, address(this), _amountIn), "Transfer failed");
             
-            amountOut = (reserveCredit * amountInNet) / (reserveStable + amountInNet);
+            amountOut = (reserveCredit * amountInNet) / (reserveStable + _amountIn);
             require(amountOut >= _minAmountOut, "Swap output below minAmountOut");
 
             reserveStable += _amountIn;

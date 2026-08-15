@@ -132,6 +132,8 @@ const OP_REGISTRY = {
 };
 
 // Execute transaction
+const CUSTOM_OP_REGISTRY = {};
+
 router.post('/store/transaction', async (req, res) => {
     try {
         const { operations } = req.body;

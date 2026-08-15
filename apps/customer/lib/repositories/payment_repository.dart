@@ -1,3 +1,5 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/payment_method.dart';
 import '../services/supabase_service.dart';
 
@@ -18,6 +20,11 @@ class PaymentRepository {
   Future<PaymentMethod> add(PaymentMethod method) async {
     final userId = SupabaseService.requireUserId();
     final payload = method.toMap()..['user_id'] = userId;
+    // Always insert as non-default. The default flag is owned exclusively by
+    // set_default_payment_method, which clears any existing default and sets
+    // this one in a single transaction. Inserting is_default: true here would
+    // violate the per-user unique index when a default already exists.
+    payload['is_default'] = false;
     final row = await SupabaseService.client
         .from(_table)
         .insert(payload)
@@ -25,30 +32,32 @@ class PaymentRepository {
         .single();
     final savedMethod = PaymentMethod.fromMap(row);
     if (method.isDefault) {
-      await _clearDefaults(userId, exceptId: savedMethod.id);
+      await _setDefaultRpc(userId, savedMethod.id);
+      return savedMethod.copyWith(isDefault: true);
     }
     return savedMethod;
   }
 
   Future<void> setDefault(String methodId) async {
     final userId = SupabaseService.requireUserId();
-    final existing = await SupabaseService.client
-        .from(_table)
-        .select('id')
-        .eq('id', methodId)
-        .eq('user_id', userId)
-        .maybeSingle();
+    await _setDefaultRpc(userId, methodId);
+  }
 
-    if (existing == null) {
-      throw StateError('Payment method not found.');
+  Future<void> _setDefaultRpc(String userId, String methodId) async {
+    try {
+      await SupabaseService.client.rpc(
+        'set_default_payment_method',
+        params: {
+          'p_user_id': userId,
+          'p_method_id': methodId,
+        },
+      );
+    } on PostgrestException catch (e) {
+      if (e.message.contains('Payment method not found')) {
+        throw StateError('Payment method not found.');
+      }
+      rethrow;
     }
-
-    await _clearDefaults(userId, exceptId: methodId);
-    await SupabaseService.client
-        .from(_table)
-        .update({'is_default': true})
-        .eq('id', methodId)
-        .eq('user_id', userId);
   }
 
   Future<void> delete(String methodId) async {
@@ -88,16 +97,5 @@ class PaymentRepository {
         .update({'is_default': true})
         .eq('id', replacementId)
         .eq('user_id', userId);
-  }
-
-  Future<void> _clearDefaults(String userId, {String? exceptId}) async {
-    var query = SupabaseService.client
-        .from(_table)
-        .update({'is_default': false})
-        .eq('user_id', userId);
-    if (exceptId != null) {
-      query = query.neq('id', exceptId);
-    }
-    await query;
   }
 }

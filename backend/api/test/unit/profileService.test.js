@@ -82,8 +82,9 @@ vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
-  // No service-role key in tests — the service falls back to the anon mock.
-  supabaseAdmin: undefined,
+  get supabaseAdmin() {
+    return supabaseRef.current;
+  },
 }));
 
 vi.mock('../../src/lib/profileCache.js', () => profileCacheRef);

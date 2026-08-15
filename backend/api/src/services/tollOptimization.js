@@ -2,10 +2,10 @@
  * Default economic baseline parameters for Class 8 / 5-Axle commercial trucks.
  */
 const DEFAULT_CONFIG = {
-    fuelPricePerGallon: 4.10,     # USD / gallon
-    avgMpg: 6.5,                  # Average Miles Per Gallon for 5-axle heavy truck
-    driverHourlyRate: 30.00,      # USD / hour (driver time value)
-    axleMultiplier: 2.5           # Class 8 multi-axle toll multiplier relative to consumer cars
+    fuelPricePerGallon: 4.10,     // USD / gallon
+    avgMpg: 6.5,                  // Average Miles Per Gallon for 5-axle heavy truck
+    driverHourlyRate: 30.00,      // USD / hour (driver time value)
+    axleMultiplier: 2.5           // Class 8 multi-axle toll multiplier relative to consumer cars
 };
 
 /**

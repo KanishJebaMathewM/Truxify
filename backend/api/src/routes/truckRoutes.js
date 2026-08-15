@@ -91,6 +91,8 @@ import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
 import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
+import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
+import { getTruckSearchVersion } from '../utils/cacheInvalidation.js';
 import logger from '../middleware/logger.js';
 import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
@@ -282,10 +284,18 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
       }
     }
 
+    const minCapacity = parseCapacityFilter(min_capacity, 'min_capacity');
+    if (minCapacity.error) {
+      return res.status(400).json({ error: minCapacity.error });
+    }
     if (minCapacity.value !== undefined) {
       query = query.gte('max_capacity_tons', minCapacity.value);
     }
 
+    const maxCapacity = parseCapacityFilter(max_capacity, 'max_capacity');
+    if (maxCapacity.error) {
+      return res.status(400).json({ error: maxCapacity.error });
+    }
     if (maxCapacity.value !== undefined) {
       query = query.lte('max_capacity_tons', maxCapacity.value);
     }
@@ -629,7 +639,7 @@ router.get(
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabaseAdmin.from('trucks').select('id, driver_id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('trucks').select('id, driver_id, name, truck_type, number_plate, max_capacity_tons, supported_cargo_types').in('id', truckIds),
       supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
@@ -650,7 +660,7 @@ router.get(
       ? Math.round(routeEstimate.durationSeconds / 60)
       : null;
 
-    const results = await Promise.all(drivers.map(async (d) => {
+    let results = await Promise.all(drivers.map(async (d) => {
       const profile = profileMap[d.user_id] || {};
       const truck = truckMap[d.truck_id] || {};
       let truckNumber = '';
@@ -667,7 +677,7 @@ router.get(
         capacity: truck.max_capacity_tons ? `${truck.max_capacity_tons} tonnes` : '',
         capacityTons: truck.max_capacity_tons || 0,
         truckType: truck.truck_type || 'Open Body',
-        supportedCargoTypes: supportedCargo,
+        supportedCargoTypes: truck.supported_cargo_types || [],
         price: finalTotalAmount,
         baseFreight: finalBaseFreight,
         tollEstimate: finalTollEstimate,

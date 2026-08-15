@@ -961,7 +961,6 @@ export class OrderLifecycleService {
       try {
         const { data: order, error: fetchErr } = await this.orderRepository.findOrderById(
           orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
-          orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
         );
 
         if (fetchErr || !order) throw new DomainError(404, { error: 'Order not found' });
@@ -1021,13 +1020,14 @@ export class OrderLifecycleService {
           escrow_status: 'funded',
         });
 
-        if (updateErr) {
-          logger.error('[confirm-deposit] DB update failed:', updateErr.message);
-          throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
-        }
+      if (updateErr) {
+        logger.error('[confirm-deposit] DB update failed:', updateErr.message);
+        throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
+      }
+    }
 
-        // Two-phase acceptance (#5724): finalize the driver assignment now that
-        // the escrow deposit is confirmed.
+    // Two-phase acceptance (#5724): finalize the driver assignment now that
+    // the escrow deposit is confirmed.
         const pending = order.pending_bid_acceptance;
         if (pending) {
           const { error: acceptErr } = await this.orderRepository.executeRpc('accept_bid_tx', {

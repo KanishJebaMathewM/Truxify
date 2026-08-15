@@ -382,7 +382,6 @@ describe('osrm - getRouteEstimate edge cases', () => {
 });
 
 // === Spec 22 test ===
-import { routeWithFailover } from '../../src/services/osrm.js';
 describe('routeWithFailover', () => {
   it('uses primary', async () => {
     const p = vi.fn().mockResolvedValue({ distance: 100, source: 'osrm' });

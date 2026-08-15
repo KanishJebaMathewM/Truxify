@@ -754,7 +754,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
 
     return res.json({ success: true, message: `Cache invalidated for user ${profile.id}.` });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to invalidate profile cache.', details: err.message });
+    return res.status(500).json({ error: 'Failed to invalidate profile cache.', details: err?.message });
   }
 });
 

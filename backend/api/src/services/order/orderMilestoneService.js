@@ -81,7 +81,6 @@ export class OrderMilestoneService {
       }
 
       const status = milestoneMap[milestone];
-      const updates = { status, updated_at: new Date().toISOString() };
       let generatedOtp = null;
 
       if (milestone === 'In Transit') {
@@ -99,14 +98,26 @@ export class OrderMilestoneService {
 
       await this.orderTimelineService.completeMilestone(order.order_display_id, milestone);
 
-      const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(orderId, updates);
-      if (updateErr) {
+      const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
+        'update_order_status_tx',
+        {
+          p_order_id: orderId,
+          p_status: status,
+          p_event_type: 'ORDER_UPDATED',
+          p_payload_extra: { milestone, order_display_id: order.order_display_id },
+        },
+        supabaseAdmin
+      );
+
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
         await this.orderTimelineService.resetMilestone(order.order_display_id, milestone);
         throw new DomainError(500, {
           error: 'Failed to update order.',
-          details: updateErr.message
+          details: updateErr?.message ?? 'Order status guard rejected the milestone update.'
         });
       }
+
+      const updatedOrder = updatedRows[0];
 
       // Once the goods are loaded, the trip has started on-chain. Mark the
       // booking so cancelBooking / cancelWithPenalty revert for a full refund.

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
+    "relay": "node relay/outboxRelay.js",
     "init": "node scripts/init-kafka.js",
     "test": "vitest run",
     "dev": "nodemon index.js"

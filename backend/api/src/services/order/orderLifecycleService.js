@@ -474,7 +474,6 @@ export class OrderLifecycleService {
           error: `Milestone "${milestone}" does not map to an order status. Use the delivery verification endpoint instead.`,
         });
       }
-      const updates = { status, updated_at: new Date().toISOString() };
       let generatedOtp = null;
 
       if (milestone === 'In Transit') {
@@ -485,11 +484,26 @@ export class OrderLifecycleService {
       const { error: timelineErr } = await this.orderTimelineService.markMilestoneCompleted(order.order_display_id, milestone);
       if (timelineErr) throw new DomainError(500, { error: 'Failed to update order timeline.', details: timelineErr.message });
 
-      const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(orderId, updates);
-      if (updateErr) {
+      const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
+        'update_order_status_tx',
+        {
+          p_order_id: orderId,
+          p_status: status,
+          p_event_type: 'ORDER_UPDATED',
+          p_payload_extra: { milestone, order_display_id: order.order_display_id },
+        },
+        supabaseAdmin
+      );
+
+      if (updateErr || !updatedRows || updatedRows.length === 0) {
         await this.orderTimelineService.rollbackMilestone(order.order_display_id, milestone);
-        throw new DomainError(500, { error: 'Failed to update order.', details: updateErr.message });
+        throw new DomainError(500, {
+          error: 'Failed to update order.',
+          details: updateErr?.message ?? 'Order status guard rejected the milestone update.',
+        });
       }
+
+      const updatedOrder = updatedRows[0];
 
       if (generatedOtp) {
         await this.deliveryVerification.sendOtpNotification({
@@ -733,31 +747,37 @@ export class OrderLifecycleService {
 
         if (requiresRefund && (currentOrder.status !== 'cancelled' || currentOrder.escrow_status !== 'refund_pending')) {
           const attemptAt = new Date().toISOString();
-          const { data: pendingOrder, error: pendingErr } = await this.orderRepository.updateOrderGuardStatus(
-            currentOrder.id,
+          const { data: pendingRows, error: pendingErr } = await this.orderRepository.executeRpc(
+            'update_order_status_tx',
             {
-              status: 'cancelled',
-              cancellation_reason: reason ?? currentOrder.cancellation_reason,
-              cancellation_fee: cancellationFee,
-              escrow_status: 'refund_pending',
-              escrow_refund_error: null,
-              escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
-              escrow_refund_last_attempt_at: attemptAt,
-              updated_at: attemptAt,
+              p_order_id: currentOrder.id,
+              p_status: 'cancelled',
+              p_not_statuses: ['delivered', 'payment_released'],
+              p_cancellation_reason: reason ?? currentOrder.cancellation_reason,
+              p_cancellation_fee: cancellationFee,
+              p_escrow_status: 'refund_pending',
+              p_escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
+              p_escrow_refund_last_attempt_at: attemptAt,
+              p_clear_escrow_refund_error: true,
+              p_event_type: 'ORDER_CANCELLED',
+              p_payload_extra: {
+                cancellation_reason: reason ?? currentOrder.cancellation_reason,
+                cancellation_fee: cancellationFee,
+              },
             },
-            ['delivered', 'payment_released']
+            supabaseAdmin
           );
 
           if (pendingErr) {
-            if (pendingErr.code === 'PGRST116') {
-              throw new DomainError(409, { error: 'Order was already delivered or payment released. Cannot cancel.' });
-            }
             throw new DomainError(500, {
               error: 'Failed to place the order into refund reconciliation.',
               details: pendingErr.message,
             });
           }
-          workingOrder = pendingOrder;
+          if (!pendingRows || pendingRows.length === 0) {
+            throw new DomainError(409, { error: 'Order was already delivered or payment released. Cannot cancel.' });
+          }
+          workingOrder = pendingRows[0];
         }
 
         if (requiresRefund) {
@@ -788,24 +808,35 @@ export class OrderLifecycleService {
             }
 
             const refundedAt = new Date().toISOString();
-            const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrderWithFilter(
-              currentOrder.id,
+            const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
+              'update_order_status_tx',
               {
-                status: 'cancelled',
-                cancellation_reason: reason ?? workingOrder.cancellation_reason,
-                cancellation_fee: cancellationFee,
-                escrow_status: 'refunded',
-                refund_tx_hash: receipt.hash ?? refundTxHash,
-                escrow_refunded_at: refundedAt,
-                escrow_refund_error: null,
-                updated_at: refundedAt,
+                p_order_id: currentOrder.id,
+                p_status: 'cancelled',
+                p_escrow_in_statuses: ['refund_pending', 'refund_failed'],
+                p_cancellation_reason: reason ?? workingOrder.cancellation_reason,
+                p_cancellation_fee: cancellationFee,
+                p_escrow_status: 'refunded',
+                p_refund_tx_hash: receipt.hash ?? refundTxHash,
+                p_escrow_refunded_at: refundedAt,
+                p_clear_escrow_refund_error: true,
+                p_event_type: 'ORDER_UPDATED',
+                p_payload_extra: {
+                  escrow_status: 'refunded',
+                  refund_tx_hash: receipt.hash ?? refundTxHash,
+                  escrow_refunded_at: refundedAt,
+                },
               },
-              [{ op: 'in', column: 'escrow_status', value: ['refund_pending', 'refund_failed'] }],
-              'cancellation_fee, order_display_id, status, cancellation_reason, escrow_status, refund_tx_hash'
+              supabaseAdmin
             );
 
-            if (updateErr) {
-              logger.error('[escrow] Refund confirmed but final order update failed for', orderId, ':', updateErr.message);
+            if (updateErr || !updatedRows || updatedRows.length === 0) {
+              logger.error(
+                '[escrow] Refund confirmed but final order update failed for',
+                orderId,
+                ':',
+                updateErr?.message ?? 'escrow-status guard rejected the update'
+              );
               return {
                 status: 202,
                 body: {
@@ -816,6 +847,8 @@ export class OrderLifecycleService {
                 },
               };
             }
+
+            const updatedOrder = updatedRows[0];
 
             await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
             await expireDeliveryOtps(currentOrder.id);
@@ -833,6 +866,25 @@ export class OrderLifecycleService {
             logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
             const failedAt = new Date().toISOString();
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
+            await this.orderRepository.executeRpc(
+              'update_order_status_tx',
+              {
+                p_order_id: currentOrder.id,
+                p_status: 'cancelled',
+                p_cancellation_fee: cancellationFee,
+                p_escrow_status: nextEscrowStatus,
+                p_refund_tx_hash: refundTxHash,
+                p_escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
+                p_escrow_refund_last_attempt_at: failedAt,
+                p_event_type: 'ORDER_UPDATED',
+                p_payload_extra: {
+                  escrow_status: nextEscrowStatus,
+                  escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
+                  retryable: true,
+                },
+              },
+              supabaseAdmin
+            );
             await this.orderRepository.updateOrder(currentOrder.id, {
               status: 'cancelled',
               cancellation_fee: cancellationFee,
@@ -857,25 +909,30 @@ export class OrderLifecycleService {
           logger.info(`[escrow] Escrow not funded (status: ${currentOrder.escrow_status}) - skipping on-chain refund.`);
         }
 
-        const updatePayload = {
-          status: 'cancelled',
-          cancellation_reason: reason,
-          cancellation_fee: cancellationFee,
-          updated_at: new Date().toISOString(),
-        };
-
-        const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrderGuardStatus(
-          currentOrder.id,
-          updatePayload,
-          ['delivered', 'payment_released', 'cancelled']
+        const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
+          'update_order_status_tx',
+          {
+            p_order_id: currentOrder.id,
+            p_status: 'cancelled',
+            p_not_statuses: ['delivered', 'payment_released', 'cancelled'],
+            p_cancellation_reason: reason,
+            p_cancellation_fee: cancellationFee,
+            p_event_type: 'ORDER_CANCELLED',
+            p_payload_extra: {
+              cancellation_reason: reason,
+              cancellation_fee: cancellationFee,
+            },
+          },
+          supabaseAdmin
         );
 
         if (updateErr) {
-          if (updateErr.code === 'PGRST116') {
-            throw new DomainError(409, { error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
-          }
           throw new DomainError(500, { error: 'Failed to cancel order.', details: updateErr.message });
         }
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new DomainError(409, { error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
+        }
+        const updatedOrder = updatedRows[0];
 
         const persistedCancellationFee = updatedOrder?.cancellation_fee ?? cancellationFee;
 
@@ -903,6 +960,7 @@ export class OrderLifecycleService {
 
       try {
         const { data: order, error: fetchErr } = await this.orderRepository.findOrderById(
+          orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
           orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance'
         );
 
@@ -938,6 +996,27 @@ export class OrderLifecycleService {
 
         if (result.error) throw new DomainError(422, { error: result.error, code: result.code });
 
+        const { data: fundedRows, error: updateErr } = await this.orderRepository.executeRpc(
+          'update_order_status_tx',
+          {
+            p_order_id: orderId,
+            p_status: order.status,
+            p_escrow_in_statuses: ['funding'],
+            p_escrow_status: 'funded',
+            p_event_type: 'PAYMENT_CONFIRMED',
+            p_payload_extra: {
+              tx_hash: txHash,
+              escrow_booking_id: bookingId,
+            },
+          },
+          supabaseAdmin
+        );
+
+        if (updateErr || !fundedRows || fundedRows.length === 0) {
+          logger.error(
+            '[confirm-deposit] DB update failed:',
+            updateErr?.message ?? 'escrow-status guard rejected the update'
+          );
         const { error: updateErr } = await this.orderRepository.updateOrder(orderId, {
           escrow_status: 'funded',
         });

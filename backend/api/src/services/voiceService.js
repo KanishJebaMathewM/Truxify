@@ -64,13 +64,13 @@ async function getBookingContext(bookingId, userId) {
 
     const { data: order, error } = await orderQuery.maybeSingle();
     if (error) {
-      logger.warn('Orders table check failed in voiceService:', error.message);
+      logger.warn('Orders table check failed in voiceService:', error?.message ?? String(error));
       return null;
     }
 
     return order;
   } catch (err) {
-    logger.warn('Orders table check failed in voiceService:', err.message);
+    logger.warn('Orders table check failed in voiceService:', err?.message ?? String(err));
   }
   return null;
 }
@@ -138,8 +138,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-    logger.error('Whisper transcription failed:', err.message);
-    throw new Error('Transcription failed: ' + err.message, { cause: err });
+    logger.error('Whisper transcription failed:', err?.message ?? String(err));
+    throw new Error('Transcription failed: ' + err?.message ?? String(err), { cause: err });
   }
 
   // Production LLM call
@@ -162,8 +162,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
-    logger.error('LLM completion failed:', err.message);
-    throw new Error('LLM failed: ' + err.message, { cause: err });
+    logger.error('LLM completion failed:', err?.message ?? String(err));
+    throw new Error('LLM failed: ' + err?.message ?? String(err), { cause: err });
   }
 
   // Production ElevenLabs TTS call
@@ -190,8 +190,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
-    logger.error('ElevenLabs TTS failed:', err.message);
-    throw new Error('TTS failed: ' + err.message, { cause: err });
+    logger.error('ElevenLabs TTS failed:', err?.message ?? String(err));
+    throw new Error('TTS failed: ' + err?.message ?? String(err), { cause: err });
   }
 
   return {

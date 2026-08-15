@@ -25,6 +25,12 @@ import { policy, PolicyError } from '../security/policyEngine.js';
  *   resource from req. Called as `getResource(req)` and its return value is
  *   passed to the ownership check. When omitted, the ownership check is
  *   skipped (backward-compatible with existing call sites).
+ *
+ * A policy that is gated by ownership *alone* (no role restriction) cannot be
+ * evaluated without a resource, so omitting `getResource` for such a policy is
+ * a misconfiguration. Instead of silently skipping the check (latent IDOR) or
+ * always denying (broken endpoint), the middleware fails closed with a clear
+ * 500 so the misconfiguration is caught during development.
  */
 export function requirePolicy(action, getResource) {
   return (req, res, next) => {
@@ -33,6 +39,12 @@ export function requirePolicy(action, getResource) {
     }
 
     const requestId = req.requestId || req.id;
+
+    if (policy.isOwnershipOnlyPolicy(action) && !getResource) {
+      const message = `Misconfigured policy '${action}': ownership-only policies require a getResource resolver.`;
+      console.error(`[requirePolicy] ${message}`);
+      return res.status(500).json({ error: message });
+    }
 
     if (getResource) {
       Promise.resolve(getResource(req)).then((resource) => {

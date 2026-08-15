@@ -219,6 +219,18 @@ export class PolicyEngine {
   }
 
   /**
+   * Returns true when the named action is gated by ownership alone (no role
+   * restriction). Such policies MUST be given a resolved resource, otherwise
+   * the ownership predicate cannot be evaluated.
+   * @param {string} action
+   * @returns {boolean}
+   */
+  isOwnershipOnlyPolicy(action) {
+    const def = POLICIES[action];
+    return !!(def && typeof def.ownership === 'function' && (!def.roles || def.roles.length === 0));
+  }
+
+  /**
    * Returns a snapshot of all policies for admin introspection.
    * @returns {object}
    */

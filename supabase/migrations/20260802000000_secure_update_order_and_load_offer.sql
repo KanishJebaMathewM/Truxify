@@ -37,9 +37,10 @@ AS $$
 DECLARE
   v_updated_order JSONB;
   v_customer_id   UUID;
+  v_display_id    TEXT;
 BEGIN
   -- Resolve the owning customer of the order for the ownership guard.
-  SELECT customer_id INTO v_customer_id
+  SELECT customer_id, order_display_id INTO v_customer_id, v_display_id
   FROM orders
   WHERE id = p_order_id;
 
@@ -75,7 +76,7 @@ BEGIN
       drop_lng         = COALESCE((p_offer_updates->>'drop_lng')::NUMERIC, drop_lng),
       route_label      = COALESCE(p_offer_updates->>'route_label', route_label),
       extra_distance_km = COALESCE((p_offer_updates->>'extra_distance_km')::NUMERIC, extra_distance_km)
-    WHERE order_display_id = p_order_display_id;
+    WHERE order_display_id = v_display_id;
   ELSE
     UPDATE orders
     SET
@@ -101,7 +102,7 @@ BEGIN
       toll_cost         = COALESCE((p_offer_updates->>'toll_cost')::NUMERIC, toll_cost),
       net_profit        = COALESCE((p_offer_updates->>'net_profit')::NUMERIC, net_profit),
       extra_distance_km = COALESCE((p_offer_updates->>'extra_distance_km')::NUMERIC, extra_distance_km)
-    WHERE order_display_id = p_order_display_id;
+    WHERE order_display_id = v_display_id;
   END IF;
 
   RETURN v_updated_order;

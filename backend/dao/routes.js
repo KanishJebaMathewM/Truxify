@@ -1,17 +1,44 @@
 import express from 'express';
+import { ethers } from 'ethers';
 import daoService from './dao.service.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
-// Join DAO
-router.post('/dao/join', async (req, res) => {
+// Build a canonical, human-readable message that must be signed by the
+// wallet that owns the DAO action. The server recovers the signer and
+// rejects any request whose recovered address does not match the claimed
+// address, preventing spoofing of membership or votes.
+function buildDaoMessage(action, payload) {
+    return `Truxify DAO\nAction: ${action}\n${payload}`;
+}
+
+function recoverSigner(message, signature) {
     try {
-        const { userAddress } = req.body;
-        if (!userAddress) {
+        return ethers.verifyMessage(message, signature);
+    } catch {
+        return null;
+    }
+}
+
+// Join DAO — authenticated + wallet-signed to prevent membership spoofing.
+router.post('/dao/join', authenticate, async (req, res) => {
+    try {
+        const { userAddress, signature } = req.body;
+        if (!userAddress || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'userAddress required'
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('join', `userAddress: ${userAddress}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 
@@ -23,14 +50,23 @@ router.post('/dao/join', async (req, res) => {
     }
 });
 
-// Leave DAO
-router.post('/dao/leave', async (req, res) => {
+// Leave DAO — authenticated + wallet-signed to prevent membership spoofing.
+router.post('/dao/leave', authenticate, async (req, res) => {
     try {
-        const { userAddress } = req.body;
-        if (!userAddress) {
+        const { userAddress, signature } = req.body;
+        if (!userAddress || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'userAddress required'
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('leave', `userAddress: ${userAddress}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 
@@ -42,14 +78,30 @@ router.post('/dao/leave', async (req, res) => {
     }
 });
 
-// Create proposal
-router.post('/dao/proposal/create', async (req, res) => {
+// Create proposal — authenticated + wallet-signed; actor bound to the
+// recovered signer so the proposer cannot be spoofed via the request body.
+router.post('/dao/proposal/create', authenticate, async (req, res) => {
     try {
-        const { title, description, callData, target, value, proposalType, proposer } = req.body;
+        const { title, description, callData, target, value, proposalType, userAddress, signature } = req.body;
         if (!title || !description) {
             return res.status(400).json({
                 success: false,
                 error: 'title and description required'
+            });
+        }
+        if (!userAddress || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('proposal', `title: ${title}\ndescription: ${description}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 
@@ -60,7 +112,7 @@ router.post('/dao/proposal/create', async (req, res) => {
             target,
             value,
             proposalType,
-            proposer
+            proposer: userAddress
         });
         res.json({ success: true, data: result });
     } catch (error) {
@@ -69,18 +121,28 @@ router.post('/dao/proposal/create', async (req, res) => {
     }
 });
 
-// Cast vote
-router.post('/dao/vote/cast', async (req, res) => {
+// Cast vote — authenticated + wallet-signed; voting power is derived
+// server-side from the voter's on-chain governance-token balance.
+router.post('/dao/vote/cast', authenticate, async (req, res) => {
     try {
-        const { proposalId, votingPower, voterAddress } = req.body;
-        if (!proposalId || !votingPower) {
+        const { proposalId, voterAddress, signature } = req.body;
+        if (!proposalId || !voterAddress || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'proposalId and votingPower required'
+                error: 'proposalId, voterAddress and signature required'
             });
         }
 
-        const result = await daoService.castVote(proposalId, votingPower, voterAddress);
+        const message = buildDaoMessage('vote', `proposalId: ${proposalId}\nvoterAddress: ${voterAddress}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== voterAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid vote signature: signer does not match voterAddress'
+            });
+        }
+
+        const result = await daoService.castVote(proposalId, voterAddress);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Vote casting error:', error);
@@ -88,14 +150,30 @@ router.post('/dao/vote/cast', async (req, res) => {
     }
 });
 
-// Execute proposal
-router.post('/dao/proposal/execute', async (req, res) => {
+// Execute proposal — authenticated + wallet-signed; only the verified
+// signer may trigger execution, preventing spoofed execution requests.
+router.post('/dao/proposal/execute', authenticate, async (req, res) => {
     try {
-        const { proposalId } = req.body;
+        const { proposalId, userAddress, signature } = req.body;
         if (!proposalId) {
             return res.status(400).json({
                 success: false,
                 error: 'proposalId required'
+            });
+        }
+        if (!userAddress || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('execute', `proposalId: ${proposalId}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 

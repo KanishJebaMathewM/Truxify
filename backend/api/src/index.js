@@ -168,7 +168,6 @@ import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -657,9 +656,6 @@ app.get('/api/fraud/health', (req, res) => {
 // 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
 // ============================================================================
 app.use('/api/zkp', zkpRoutes)
-
-// 🆕 BLOCKCHAIN MONITORING ROUTES
-app.use('/api/blockchain', blockchainMonitoringRoutes)
 
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {

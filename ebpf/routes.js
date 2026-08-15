@@ -39,7 +39,7 @@ const ebpfMetricsLimiter = rateLimit({
 // ============ System Metrics ============
 
 // System metrics
-router.get('/ebpf/metrics', ebpfMetricsLimiter, async (req, res) => {
+router.get('/ebpf/metrics', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: get metrics from eBPF
         const metrics = {
@@ -77,7 +77,7 @@ router.get('/ebpf/metrics', ebpfMetricsLimiter, async (req, res) => {
 });
 
 // System calls
-router.get('/ebpf/syscalls', ebpfMetricsLimiter, async (req, res) => {
+router.get('/ebpf/syscalls', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: read from BPF map
         const syscalls = {
@@ -102,7 +102,7 @@ router.get('/ebpf/syscalls', ebpfMetricsLimiter, async (req, res) => {
 });
 
 // Network stats
-router.get('/ebpf/network', ebpfMetricsLimiter, async (req, res) => {
+router.get('/ebpf/network', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: read from BPF map
         const network = {
@@ -124,7 +124,7 @@ router.get('/ebpf/network', ebpfMetricsLimiter, async (req, res) => {
 });
 
 // Security events
-router.get('/ebpf/security', ebpfMetricsLimiter, async (req, res) => {
+router.get('/ebpf/security', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         const events = [
             {
@@ -154,7 +154,7 @@ router.get('/ebpf/security', ebpfMetricsLimiter, async (req, res) => {
 });
 
 // Performance profile
-router.get('/ebpf/profile', ebpfMetricsLimiter, async (req, res) => {
+router.get('/ebpf/profile', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         const profile = {
             syscalls: {

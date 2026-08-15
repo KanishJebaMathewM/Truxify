@@ -1,6 +1,8 @@
 import express from 'express';
 import edgeRuntime from './edge-runtime.js';
 import logger from '../backend/api/src/middleware/logger.js';
+import { authenticate } from '../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
 
@@ -124,7 +126,7 @@ router.post('/wasm/eta', async (req, res) => {
 // against a stored, hashed OTP — never a client-supplied reference.
 
 // Get stats
-router.get('/wasm/stats', async (req, res) => {
+router.get('/wasm/stats', authenticate, requirePolicy('wasm:manage'), async (req, res) => {
     try {
         const stats = await edgeRuntime.getFunctionStats();
         res.json({

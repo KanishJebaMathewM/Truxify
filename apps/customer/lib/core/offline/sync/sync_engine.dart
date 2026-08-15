@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:io';
 import '../../config.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
@@ -13,6 +14,10 @@ enum SyncUploadOutcome {
   success,
   retryableFailure,
   permanentFailure,
+  /// The batch could not be uploaded because the device is offline or the
+  /// network is unreachable. This must NOT consume the application-level retry
+  /// budget: events stay queued and are re-attempted once connectivity returns.
+  networkUnavailable,
 }
 
 class SyncEngine {
@@ -148,6 +153,15 @@ class SyncEngine {
       return 0;
     }
 
+    if (uploadOutcome == SyncUploadOutcome.networkUnavailable) {
+      // Re-queue without incrementing retryCount so the offline writes are not
+      // permanently discarded and are retried once the network is reachable.
+      for (final event in resolved) {
+        await db.markFailed(event.id, retryCount: event.retryCount);
+      }
+      return 0;
+    }
+
     for (final event in resolved) {
       await db.markFailed(event.id, retryCount: event.retryCount + 1);
     }
@@ -165,6 +179,15 @@ class SyncEngine {
       'events': events.map((event) => event.toJson()).toList(),
       'idempotencyKey': _idempotencyKeyFor(events),
     });
+
+    // Gate uploads on connectivity. When the device reports `none` we skip the
+    // HTTP attempt entirely so frequent offline GPS pings never burn the retry
+    // budget (issue #14734).
+    final connectivity = await _connectivity.checkConnectivity();
+    if (connectivity.contains(ConnectivityResult.none)) {
+      developer.log('[SyncEngine] No connectivity; skipping batch upload to preserve retry budget.');
+      return SyncUploadOutcome.networkUnavailable;
+    }
 
     try {
       // 🚀 AUTH EXTRACTION (Issue #361/#362 Fix)
@@ -190,8 +213,8 @@ class SyncEngine {
         developer.log('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized). Refreshing token and retrying.');
         final newToken = await refreshAuthToken();
         if (newToken == null) {
-          developer.log('[SyncEngine] ❌ Token refresh failed; marking batch as permanently failed.');
-          return SyncUploadOutcome.permanentFailure;
+          developer.log('[SyncEngine] ❌ Token refresh failed; re-queuing batch as retryable (preserve data).');
+          return SyncUploadOutcome.retryableFailure;
         }
         final retry = await _postBatch(body, newToken);
         if (retry.statusCode == 200 || retry.statusCode == 202) {
@@ -219,6 +242,11 @@ class SyncEngine {
       }
 
       return SyncUploadOutcome.retryableFailure;
+    } on SocketException catch (e) {
+      // A network transport failure (offline / captive portal) is not an
+      // application-level rejection, so it must not consume the retry budget.
+      developer.log('[SyncEngine] Network unreachable during batch upload: $e');
+      return SyncUploadOutcome.networkUnavailable;
     } catch (e) {
       developer.log('[SyncEngine] Batch upload threw: $e');
       await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));

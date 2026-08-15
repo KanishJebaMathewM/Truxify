@@ -84,7 +84,7 @@ void main() {
         .called(2);
   });
 
-  test('401 with failed refresh yields permanentFailure, not infinite retry (issue #11487)', () async {
+  test('401 with failed refresh re-queues as retryable, not rejected (issue #14734)', () async {
     final db = FakeOfflineEventDb();
     db.pending.add(event('evt-1', retryCount: 0));
 
@@ -104,18 +104,18 @@ void main() {
     final uploaded = await engine.syncPending();
 
     expect(uploaded, 0);
-    expect(db.rejected, [
-      {
-        'id': 'evt-1',
-        'reason': 'Server rejected this offline event batch as non-retryable.',
-      },
+    // A brief refresh blip must preserve the queued data and be retried later
+    // instead of permanently discarding it.
+    expect(db.rejected, isEmpty);
+    expect(db.failed, [
+      {'id': 'evt-1', 'retryCount': 0},
     ]);
     // Refresh failed: the engine must not keep retrying the dead token.
     verify(() => client.post(any(), headers: any(named: 'headers'), body: any(named: 'body')))
         .called(1);
   });
 
-  test('401 after refresh still 401 marks batch permanently failed (issue #11487)', () async {
+  test('401 after refresh still 401 re-queues as retryable, not rejected (issue #14734)', () async {
     final db = FakeOfflineEventDb();
     db.pending.add(event('evt-1', retryCount: 0));
 
@@ -135,11 +135,11 @@ void main() {
     final uploaded = await engine.syncPending();
 
     expect(uploaded, 0);
-    expect(db.rejected, [
-      {
-        'id': 'evt-1',
-        'reason': 'Server rejected this offline event batch as non-retryable.',
-      },
+    // With a refreshed token the auth problem is solved; a subsequent 401 is
+    // treated as a retryable transport issue, never a permanent discard.
+    expect(db.rejected, isEmpty);
+    expect(db.failed, [
+      {'id': 'evt-1', 'retryCount': 0},
     ]);
     verify(() => client.post(any(), headers: any(named: 'headers'), body: any(named: 'body')))
         .called(2);

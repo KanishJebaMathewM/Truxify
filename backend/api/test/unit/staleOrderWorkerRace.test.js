@@ -158,6 +158,20 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
     expect(confirmEscrowRefund).not.toHaveBeenCalled();
   });
 
+  it('does not re-submit an on-chain refund for an order already in refund_failed', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({
+      data: [cancelledRow({ escrow_status: 'refund_failed' })],
+      error: null,
+    });
+
+    await reconcileStaleOrders(orderRepository);
+
+    expect(sendPushNotificationMock).toHaveBeenCalledTimes(1);
+    const { submitEscrowRefund } = await import('../../src/services/escrow.js');
+    expect(submitEscrowRefund).not.toHaveBeenCalled();
+  });
+
   it('records an error and skips side effects when the claim RPC errors', async () => {
     orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
     orderRepository.cancelStaleOrder.mockResolvedValue({ data: null, error: { message: 'rpc boom' } });

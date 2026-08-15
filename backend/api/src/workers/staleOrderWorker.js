@@ -182,7 +182,12 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
 
     const order = Array.isArray(cancelled) ? cancelled[0] : cancelled;
     const orderDisplayId = order.order_display_id ?? staleOrder.order_display_id;
+    // Orders whose escrow has funds to refund (for customer messaging), but an
+    // on-chain refund must ONLY be submitted when the escrow is still 'funded'.
+    // Orders in 'refund_pending' / 'refund_failed' are already being handled by
+    // the reconciliation worker; re-submitting here would double-refund.
     const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status ?? 'pending');
+    const canSubmitRefund = (order.escrow_status ?? 'pending') === 'funded';
 
     // Cancel associated load offers (guarded on nothing — the order is now
     // cancelled, so its offers can never be fulfilled).
@@ -194,7 +199,7 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
     // telling the customer their funds are being returned. Only claim a refund
     // is in progress once a transaction hash is obtained.
     let refundSubmitted = false;
-    if (requiresRefund) {
+    if (canSubmitRefund) {
       try {
         const refundResult = await submitEscrowRefund(orderDisplayId);
         refundSubmitted = Boolean(refundResult && refundResult.txHash);

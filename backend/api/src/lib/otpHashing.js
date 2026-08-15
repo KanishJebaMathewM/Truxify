@@ -50,13 +50,16 @@ export function verifyOtpHash(otp, otpRecord) {
 // === Spec 12: constant-time hex compare ===
 export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
-  if (a.length !== b.length) return false;
-  if (a.length === 0 && b.length === 0) return true;
-  // Buffer.from(value, 'hex') does not reject invalid hex: it truncates at the
-  // first invalid character and drops a trailing odd nibble. Two identical
-  // invalid inputs would decode to equal short buffers and compare "equal",
-  // so reject anything that is not well-formed hex first.
+  // Reject non-hex input before any comparison to preserve the timing
+  // guarantee for valid inputs.  Buffer.from with hex encoding silently
+  // truncates at the first invalid char, so we validate upfront.
   if (!/^[0-9a-fA-F]+$/.test(a) || !/^[0-9a-fA-F]+$/.test(b)) return false;
-  try { return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex')); }
+  // Pad the shorter string with null bytes so both buffers are the same length.
+  // This keeps the crypto.timingSafeEqual call constant-time regardless of
+  // whether the inputs differ in length.
+  const maxLen = Math.max(a.length, b.length);
+  const bufA = Buffer.from(a.padEnd(maxLen, '\0'), 'ascii');
+  const bufB = Buffer.from(b.padEnd(maxLen, '\0'), 'ascii');
+  try { return crypto.timingSafeEqual(bufA, bufB) && a.length === b.length; }
   catch (_) { return false; }
 }

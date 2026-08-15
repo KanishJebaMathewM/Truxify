@@ -4,7 +4,6 @@ import {
   getCachedSupabaseProfile, setCachedSupabaseProfile, isValidCachedProfile,
   getCachedCustomerStats, setCachedCustomerStats,
   getCachedDriverDetails, setCachedDriverDetails,
-  isValidCachedProfile,
 } from '../lib/profileCache.js';
 import logger from '../middleware/logger.js';
 

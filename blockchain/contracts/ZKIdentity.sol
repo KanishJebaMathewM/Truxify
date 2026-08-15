@@ -35,9 +35,9 @@ contract ZKIdentity is Ownable {
         emit DIDRegistered(msg.sender, _didURI, _merkleRoot);
     }
 
-    function revokeCredential(bytes32 _credentialHash) external onlyOwner {
-        revokedCredentials[_credentialHash] = true;
-        emit CredentialRevoked(_credentialHash);
+    function revokeCredential(bytes32 _nullifierHash) external onlyOwner {
+        revokedCredentials[_nullifierHash] = true;
+        emit CredentialRevoked(_nullifierHash);
     }
 
     function verifyZkProof(

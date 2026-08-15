@@ -38,9 +38,12 @@ class KeyRotationService {
 
         const rotationId = await this.createRotationRecord(userId, walletAddress, reason);
 
-        await this.archiveCurrentKey(userId, walletAddress, reason);
-
+        // Store the new key first so a failure in storeNewKey never leaves the
+        // wallet with zero active keys (the old one is only retired after this
+        // succeeds inside the guarded transaction below).
         const newKeyId = await this.storeNewKey(userId, walletAddress, newPrivateKey);
+
+        await this.archiveCurrentKey(userId, walletAddress, reason);
 
         await this.updateRotationRecord(rotationId, {
           status: 'completed',
@@ -171,11 +174,15 @@ class KeyRotationService {
         const newWalletAddress = new ethers.Wallet(newPrivateKey).address;
 
         // Verify contract interface expects (address, uint256) — never pass raw key.
+        // Use a cryptographically secure random nonce instead of wall-clock time
+        // so concurrent rotations can never collide or be replayed.
+        const nonce = ethers.toBigInt('0x' + crypto.randomBytes(32).toString('hex'));
+
         const tx = await oldWallet.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
             newWalletAddress,  // public address only — never the private key
-            Date.now(),
+            nonce,
           ]),
         });
 

@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
 import telemetryBuffer from './telemetryBuffer.js';
+import GpsLog from '../models/GpsLog.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -178,6 +179,7 @@ let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
 let driverStateSweepInterval = null;
 let wsUpgradeLimitsCleanupInterval = null;
+let messageRateTrackerCleanupInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
 
 const WS_UPGRADE_RATE_LIMIT = 5;

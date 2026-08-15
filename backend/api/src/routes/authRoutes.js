@@ -41,6 +41,7 @@
  */
 
 import express from "express";
+import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { authenticate } from "../middleware/auth.js";
 import {

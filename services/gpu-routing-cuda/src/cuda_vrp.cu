@@ -36,15 +36,17 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
     }
 
     float distance = 0.0f;
-    Location prev = depot;
 
-    for (const auto& stop : stops) {
-        distance += static_cast<float>(haversineMeters(prev.y, prev.x, stop.y, stop.x));
-        prev = stop;
+    for (size_t rs = 0; rs < stops.size(); rs += vehicleCapacity) {
+        size_t re = std::min(rs + vehicleCapacity, stops.size());
+        Location prev = depot;
+        for (size_t i = rs; i < re; ++i) {
+            distance += static_cast<float>(haversineMeters(prev.y, prev.x, stops[i].y, stops[i].x));
+            prev = stops[i];
+        }
+        // Return to depot for this route.
+        distance += static_cast<float>(haversineMeters(prev.y, prev.x, depot.y, depot.x));
     }
-
-    // Return to depot
-    distance += static_cast<float>(haversineMeters(prev.y, prev.x, depot.y, depot.x));
 
     size_t routesNeeded = (stops.size() + vehicleCapacity - 1) / vehicleCapacity;
 

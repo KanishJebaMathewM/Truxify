@@ -72,7 +72,7 @@ if (gcTimer.unref) gcTimer.unref();
 // 3. ADMIN MANAGEMENT API
 // ==========================================
 
-export const SecurityAdmin = {
+const SecurityAdmin = {
   blockIP(ip, durationMs = DEFAULT_BAN_DURATION_MS) {
     blockedIPs.set(ip, Date.now() + durationMs);
     failures.delete(ip);

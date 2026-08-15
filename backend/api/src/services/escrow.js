@@ -291,8 +291,8 @@ export async function checkEscrowHealth() {
       chainId: Number(network.chainId),
     };
   } catch (err) {
-    logger.error('[escrow] Health check failed:', err.message);
-    return { status: 'failed', error: err.message };
+    logger.error('[escrow] Health check failed:', err?.message ?? String(err));
+    return { status: 'failed', error: err?.message ?? String(err) };
   }
   });
 }
@@ -331,7 +331,7 @@ export async function getEscrowBooking(escrowBookingId) {
     const booking = await escrowContract.bookings(escrowBookingId);
     return booking;
   } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err.message}`);
+    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
     return null;
   }
 }
@@ -393,8 +393,8 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
       }
     )
   } catch (err) {
-    logger.error(`[escrow] Failed to build deposit tx for booking ${orderDisplayId}: ${err.message}`)
-    return { txData: null, bookingId, error: err.message }
+    logger.error(`[escrow] Failed to build deposit tx for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    return { txData: null, bookingId, error: err?.message ?? String(err) }
   }
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`)
   return { txData, bookingId }
@@ -467,7 +467,7 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       return { txHash, bookingId, alreadyFunded: true }
     }
   } catch (err) {
-    logger.warn(`[escrow] Failed to check existing escrow status for ${bookingId}: ${err.message}, proceeding.`)
+    logger.warn(`[escrow] Failed to check existing escrow status for ${bookingId}: ${err?.message ?? String(err)}, proceeding.`)
   }
 
   const provider = escrowContract.runner.provider
@@ -580,8 +580,8 @@ export async function markEscrowBookingStarted (orderDisplayId) {
       },
     }
   } catch (err) {
-    logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err.message}`)
-    return { txHash: null, bookingId, error: err.message }
+    logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
   });
 }
@@ -651,11 +651,11 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       }
     }
   } catch (err) {
-    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}`)
+    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err?.message ?? String(err)}`)
     return {
       txHash: null,
       bookingId,
-      error: err.message,
+      error: err?.message ?? String(err),
       code: 'ESCROW_STATUS_UNAVAILABLE',
     }
   }
@@ -671,8 +671,8 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
     logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
     return { txHash: receipt.hash, bookingId }
   } catch (err) {
-    logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err.message}`)
-    return { txHash: null, bookingId, error: err.message }
+    logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
   });
 }
@@ -700,8 +700,8 @@ export async function submitEscrowRefund (orderDisplayId) {
     tx = await escrowContract.cancelBooking(bookingId)
     logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
   } catch (err) {
-    logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`)
-    return { txHash: null, bookingId, error: err.message }
+    logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
   return {
     txHash: tx.hash,
@@ -775,8 +775,8 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
       logger.info(`[escrow] lockPayment confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
       return { txHash: receipt.hash, bookingId };
     } catch (err) {
-      logger.error(`[escrow] lockPayment failed for booking ${orderDisplayId}: ${err.message}`);
-      return { txHash: null, bookingId, error: err.message };
+      logger.error(`[escrow] lockPayment failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`);
+      return { txHash: null, bookingId, error: err?.message ?? String(err) };
     }
   });
 }
@@ -818,8 +818,8 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
         },
       }
     } catch (err) {
-      logger.error(`[escrow] cancelWithPenalty failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
+      logger.error(`[escrow] cancelWithPenalty failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+      return { txHash: null, bookingId, error: err?.message ?? String(err) }
     }
   })
 }
@@ -848,8 +848,8 @@ export async function submitEscrowRaiseDispute (orderDisplayId) {
       tx = await escrowContract.raiseDispute(bookingId)
       logger.info(`[escrow] raiseDispute tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     } catch (err) {
-      logger.error(`[escrow] raiseDispute failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
+      logger.error(`[escrow] raiseDispute failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+      return { txHash: null, bookingId, error: err?.message ?? String(err) }
     }
     return {
       txHash: tx.hash,
@@ -893,8 +893,8 @@ export async function submitEscrowResolveDispute (orderDisplayId, driverAmountWe
       tx = await escrowContract.resolveDispute(bookingId, driverAmountWei)
       logger.info(`[escrow] resolveDispute tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     } catch (err) {
-      logger.error(`[escrow] resolveDispute failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
+      logger.error(`[escrow] resolveDispute failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+      return { txHash: null, bookingId, error: err?.message ?? String(err) }
     }
     return {
       txHash: tx.hash,
@@ -934,8 +934,8 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
       tx = await escrowContract.resolveDisputeTimeout(bookingId)
       logger.info(`[escrow] resolveDisputeTimeout tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     } catch (err) {
-      logger.error(`[escrow] resolveDisputeTimeout failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
+      logger.error(`[escrow] resolveDisputeTimeout failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+      return { txHash: null, bookingId, error: err?.message ?? String(err) }
     }
     return {
       txHash: tx.hash,

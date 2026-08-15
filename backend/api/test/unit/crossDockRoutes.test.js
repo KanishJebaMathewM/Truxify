@@ -19,7 +19,6 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
 // Pull in real Zod-backed validate middleware so schema validation runs
 const { validateBody: realValidateBody, validateParams: realValidateParams } = vi.hoisted(
   () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const m = require('../../src/middleware/validate.js');
     return { validateBody: m.validateBody, validateParams: m.validateParams };
   }

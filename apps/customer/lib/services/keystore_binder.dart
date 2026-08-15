@@ -1,165 +1,112 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
 import 'package:pointycastle/export.dart';
 
-/// Hardware KeyStore & Secure Enclave Signature Binder Service.
+/// Hardware KeyStore Signature Binder Service.
 ///
-/// Generates an asymmetric keypair persisted in the OS-backed secure storage
-/// (Android Keystore / iOS Keychain via `flutter_secure_storage`) and produces
-/// real ECDSA (secp256r1, SHA-256) signatures over transaction payloads. The
-/// resulting signatures are non-deterministic and can only be produced by
-/// someone holding the stored private key, and are verifiable against the
+/// Generates an asymmetric keypair inside the OS-backed hardware keystore
+/// (Android Keystore) and produces real ECDSA (secp256r1, SHA-256) signatures
+/// over transaction payloads. The private key is generated *inside* the
+/// hardware keystore and is non-exportable: it never leaves the secure
+/// hardware and is never materialized as plaintext in the Dart process or in
+/// application storage. Signing is performed by the OS keystore itself, so a
+/// signature can only be produced by the hardware holding the key. The
+/// resulting signatures are non-deterministic and are verifiable against the
 /// returned public key.
 class HardwareKeyStoreBinder {
   static final HardwareKeyStoreBinder _instance = HardwareKeyStoreBinder._internal();
   factory HardwareKeyStoreBinder() => _instance;
   HardwareKeyStoreBinder._internal();
 
-  static const String _storageKeyPrivate = 'truxify_hw_keypair_private';
-  static const String _storageKeyPublic = 'truxify_hw_keypair_public';
-  static const int _keySizeBytes = 32;
+  static const MethodChannel _channel = MethodChannel('com.truxify.customer/native');
 
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  /// Fixed alias under which the hardware keystore holds the non-exportable key.
+  static const String _keyAlias = 'truxify_hw_keypair';
 
-  /// Loads the persisted keypair or generates and stores a new EC keypair in
-  /// the OS-backed secure storage, returning the hex-encoded public key.
+  /// Ensures an EC keypair exists inside the hardware keystore and returns the
+  /// hex-encoded (uncompressed, 0x04|x|y) public key. The private key is
+  /// generated and stored inside the hardware keystore and is never returned.
   Future<String> generateHardwareKeypair() async {
-    final storedPublic = await _secureStorage.read(key: _storageKeyPublic);
-    if (storedPublic != null) {
-      return storedPublic;
+    final publicKey = await _channel.invokeMethod<String>(
+      'hwGenerateKeyPair',
+      {'alias': _keyAlias},
+    );
+    if (publicKey == null) {
+      throw StateError('Hardware KeyStore unavailable: failed to generate keypair');
     }
-
-    print('[Hardware KeyStore] Creating asymmetric keypair inside Secure Enclave/KeyStore...');
-    final domain = ECCurve_secp256r1();
-    final keyGen = ECKeyGenerator()
-      ..init(ParametersWithRandom(
-        ECKeyGeneratorParameters(domain),
-        _secureRandom(),
-      ));
-
-    final pair = keyGen.generateKeyPair();
-    final privateKey = pair.privateKey as ECPrivateKey;
-    final publicKey = pair.publicKey as ECPublicKey;
-
-    final privateHex = _bytesToHex(_bigIntToBytes(privateKey.d!, _keySizeBytes));
-    final publicHex = _bytesToHex(publicKey.Q!.getEncoded(false));
-
-    await _secureStorage.write(key: _storageKeyPrivate, value: privateHex);
-    await _secureStorage.write(key: _storageKeyPublic, value: publicHex);
-
-    return publicHex;
+    return publicKey;
   }
 
   /// Returns the stored public key hex, generating the keypair if missing.
   Future<String> getPublicKey() => generateHardwareKeypair();
 
-  /// Digitally signs a transaction payload using the stored private key,
-  /// returning a hex-encoded ECDSA (secp256r1 / SHA-256) signature.
+  /// Digitally signs a transaction payload using the hardware keystore private
+  /// key, returning a hex-encoded ECDSA (secp256r1 / SHA-256) signature.
   ///
-  /// The produced signature is randomized (non-deterministic) and proves
-  /// possession of the private key held in secure storage.
+  /// The actual signing happens inside the OS hardware keystore; the private
+  /// key material is never exposed to Dart. The produced signature is
+  /// randomized (non-deterministic).
   Future<String> signPayload(String payload) async {
     if (payload.isEmpty) {
       throw ArgumentError("Payload cannot be empty");
     }
 
-    print('[Hardware KeyStore] Authorizing hardware enclave signature...');
-    final privateKey = await _loadPrivateKey();
-    final signer = ECDSASigner(SHA256Digest())
-      ..init(true, PrivateKeyParameter<ECPrivateKey>(privateKey));
-
-    final message = Uint8List.fromList(utf8.encode(payload));
-    final signature = signer.generateSignature(message) as ECSignature;
-
-    final out = _bigIntToBytes(signature.r, _keySizeBytes) +
-        _bigIntToBytes(signature.s, _keySizeBytes);
-    return '0x${_bytesToHex(out)}';
+    final signature = await _channel.invokeMethod<String>(
+      'hwSign',
+      {'alias': _keyAlias, 'payload': payload},
+    );
+    if (signature == null) {
+      throw StateError('Hardware KeyStore signing failed');
+    }
+    return '0x$signature';
   }
 
   /// Verifies a hex-encoded ECDSA signature produced by [signPayload] against
-  /// the persisted public key and the given payload.
+  /// the persisted public key and the given payload. Verification uses only
+  /// the public key (which is not secret), so it is performed in Dart.
   Future<bool> verifySignature(String payload, String signatureHex) async {
     if (payload.isEmpty || signatureHex.isEmpty) {
       return false;
     }
 
-    final publicKey = await _loadPublicKey();
-    final verifier = ECDSASigner(SHA256Digest())
-      ..init(false, PublicKeyParameter<ECPublicKey>(publicKey));
+    try {
+      final publicKeyHex = await getPublicKey();
+      final domain = ECCurve_secp256r1();
+      final point = domain.curve.decodePoint(_hexToBytes(publicKeyHex))!;
+      final publicKey = ECPublicKey(point, domain);
 
-    final signature = _signatureFromHex(signatureHex);
-    final message = Uint8List.fromList(utf8.encode(payload));
-    return verifier.verifySignature(message, signature);
+      final verifier = ECDSASigner(SHA256Digest())
+        ..init(false, PublicKeyParameter<ECPublicKey>(publicKey));
+
+      final signature = _signatureFromDer(signatureHex);
+      final message = Uint8List.fromList(utf8.encode(payload));
+      return verifier.verifySignature(message, signature);
+    } catch (_) {
+      return false;
+    }
   }
 
-  /// Removes the persisted keypair from secure storage.
+  /// Removes the hardware keystore entry for the keypair.
   Future<void> clearKeyPair() async {
-    await _secureStorage.delete(key: _storageKeyPrivate);
-    await _secureStorage.delete(key: _storageKeyPublic);
+    await _channel.invokeMethod<void>(
+      'hwClearKeyPair',
+      {'alias': _keyAlias},
+    );
   }
 
-  Future<ECPrivateKey> _loadPrivateKey() async {
-    final stored = await _secureStorage.read(key: _storageKeyPrivate);
-    if (stored == null) {
-      await generateHardwareKeypair();
-      return _loadPrivateKey();
-    }
-    final domain = ECCurve_secp256r1();
-    return ECPrivateKey(BigInt.parse(stored, radix: 16), domain);
-  }
-
-  Future<ECPublicKey> _loadPublicKey() async {
-    final stored = await _secureStorage.read(key: _storageKeyPublic);
-    if (stored == null) {
-      await generateHardwareKeypair();
-      return _loadPublicKey();
-    }
-    final domain = ECCurve_secp256r1();
-    final point = domain.curve.decodePoint(_hexToBytes(stored))!;
-    return ECPublicKey(point, domain);
-  }
-
-  ECSignature _signatureFromHex(String signatureHex) {
+  /// Parses a DER-encoded ECDSA signature (as produced by the Android
+  /// Keystore's `SHA256withECDSA` signer) into an [ECSignature].
+  ECSignature _signatureFromDer(String signatureHex) {
     final hex = signatureHex.startsWith('0x')
         ? signatureHex.substring(2)
         : signatureHex;
-    final bytes = _hexToBytes(hex);
-    final r = BigInt.parse(
-      _bytesToHex(bytes.sublist(0, _keySizeBytes)),
-      radix: 16,
-    );
-    final s = BigInt.parse(
-      _bytesToHex(bytes.sublist(_keySizeBytes)),
-      radix: 16,
-    );
+    final der = _hexToBytes(hex);
+    final sequence = ASN1Parser(der).nextObject() as ASN1Sequence;
+    final r = (sequence.elements[0] as ASN1Integer).integer!;
+    final s = (sequence.elements[1] as ASN1Integer).integer!;
     return ECSignature(r, s);
-  }
-
-  SecureRandom _secureRandom() {
-    final secureRandom = SecureRandom('Fortuna');
-    final seed = Uint8List(_keySizeBytes);
-    final rng = Random.secure();
-    for (var i = 0; i < seed.length; i++) {
-      seed[i] = rng.nextInt(256);
-    }
-    secureRandom.seed(KeyParameter(seed));
-    return secureRandom;
-  }
-
-  Uint8List _bigIntToBytes(BigInt value, int length) {
-    var bytes = <int>[];
-    var v = value;
-    while (v > BigInt.zero) {
-      bytes.insert(0, (v & BigInt.from(0xff)).toInt());
-      v >>= 8;
-    }
-    while (bytes.length < length) {
-      bytes.insert(0, 0);
-    }
-    return Uint8List.fromList(bytes);
   }
 
   Uint8List _hexToBytes(String hex) {
@@ -169,13 +116,5 @@ class HardwareKeyStoreBinder {
       result[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
     }
     return result;
-  }
-
-  String _bytesToHex(Uint8List bytes) {
-    final buffer = StringBuffer();
-    for (final b in bytes) {
-      buffer.write(b.toRadixString(16).padLeft(2, '0'));
-    }
-    return buffer.toString();
   }
 }

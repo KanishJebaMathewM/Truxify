@@ -105,14 +105,27 @@ begin
   end if;
 
   -- Fail closed (restored from 20260802130000_complete_trip_tx_require_funded_escrow.sql):
-  -- credit the driver wallet ONLY when the escrow was actually funded and released
-  -- on-chain (`escrow_status = 'released'` or a release tx hash is supplied), or
-  -- when the order is explicitly marked `escrow_disabled`. Any ambiguous/unfunded
-  -- state raises instead of crediting.
-  if not v_order.escrow_disabled
-     and coalesce(v_order.escrow_status, '') <> 'released'
-     and p_release_tx_hash is null then
-    raise exception 'Blockchain escrow release must complete before crediting driver wallet';
+  -- credit the driver wallet ONLY when the escrow was actually released on-chain
+  -- AND the caller-supplied release hash matches the recorded settlement. A
+  -- non-null hash is no longer sufficient — service_role (or any caller) cannot
+  -- credit the wallet with a forged or stale hash. (Fixes #13099.)
+  if not v_order.escrow_disabled then
+    if v_order.escrow_status = 'released' then
+      -- Escrow already marked released: the supplied hash must match the
+      -- on-chain settlement recorded by the deposit/verify path.
+      if p_release_tx_hash is null
+         or p_release_tx_hash is distinct from coalesce(v_order.release_tx_hash, v_order.blockchain_tx_hash) then
+        raise exception 'Blockchain escrow release hash does not match the recorded settlement';
+      end if;
+    else
+      -- Escrow not yet released: no wallet credit without a genuine release hash.
+      if p_release_tx_hash is null then
+        raise exception 'Blockchain escrow release must complete before crediting driver wallet';
+      end if;
+      if p_release_tx_hash is distinct from coalesce(v_order.release_tx_hash, v_order.blockchain_tx_hash) then
+        raise exception 'Blockchain escrow release hash does not match the recorded settlement';
+      end if;
+    end if;
   end if;
 
   -- Finalize the active trip that actually served THIS order (restored from
@@ -223,7 +236,7 @@ begin
   -- Update daily earnings summary, accumulating hours_driven alongside the
   -- payout amount (canonical form from docs/supabase_setup.sql)
   insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
-  values (v_order.driver_id, current_date, coalesce(v_order.bid_amount, v_order.total_amount), 1, p_hours_driven)
+  values (v_order.driver_id, (now() AT TIME ZONE 'UTC')::date, coalesce(v_order.bid_amount, v_order.total_amount), 1, p_hours_driven)
   on conflict (driver_id, day_date)
   do update set
     amount = earnings_daily.amount + excluded.amount,

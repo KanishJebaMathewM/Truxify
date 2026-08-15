@@ -1,16 +1,23 @@
 #include "../include/cuda_vrp.cuh"
-#include <algorithm>
 #include <cmath>
 #include <numeric>
 
 namespace TruxifyCuda {
 
 namespace {
-// Euclidean distance between two locations.
-float distance(const Location& a, const Location& b) {
-    float dx = b.x - a.x;
-    float dy = b.y - a.y;
-    return std::sqrt(dx * dx + dy * dy);
+// Great-circle (haversine) distance in meters. `lat`/`lng` are degrees.
+// `Location.x` is longitude and `Location.y` is latitude, matching the test
+// reference (`refHaversine`) and the regression test for #11549. Using a
+// local PI constant avoids any dependency on `M_PI` portability.
+double haversineMeters(double lat1, double lng1, double lat2, double lng2) {
+    const double kPi = 3.14159265358979323846;
+    const double R = 6371000.0;
+    double dLat = (lat2 - lat1) * kPi / 180.0;
+    double dLng = (lng2 - lng1) * kPi / 180.0;
+    double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
+               std::cos(lat1 * kPi / 180.0) * std::cos(lat2 * kPi / 180.0) *
+                   std::sin(dLng / 2.0) * std::sin(dLng / 2.0);
+    return 2.0 * R * std::asin(std::sqrt(a));
 }
 } // namespace
 
@@ -19,36 +26,29 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
     const std::vector<Location>& stops,
     size_t vehicleCapacity
 ) {
-    // vehicleCapacity == 0 is degenerate caller input: the ceil division
-    // below would underflow/wrap and divide by zero, crashing the process.
-    // Reject it up front instead.
+    if (stops.empty()) {
+        return { 0.0f, 0, true };
+    }
+    // Reject zero capacity before the division below, which would otherwise be
+    // a division-by-zero (UB / SIGFPE) on this reachable, non-empty input.
     if (vehicleCapacity == 0) {
         return { 0.0f, 0, false };
     }
 
-    if (stops.empty()) {
-        return { 0.0f, 0, true };
+    float distance = 0.0f;
+    Location prev = depot;
+
+    for (const auto& stop : stops) {
+        distance += static_cast<float>(haversineMeters(prev.y, prev.x, stop.y, stop.x));
+        prev = stop;
     }
+
+    // Return to depot
+    distance += static_cast<float>(haversineMeters(prev.y, prev.x, depot.y, depot.x));
 
     size_t routesNeeded = (stops.size() + vehicleCapacity - 1) / vehicleCapacity;
 
-    // Partition the stops into capacity-bounded route sequences. Each route
-    // leaves from the depot, visits at most `vehicleCapacity` stops, and
-    // returns to the depot, so the returned distance is the actual sum of the
-    // per-route tour distances reported by `routesNeeded`.
-    float totalDistance = 0.0f;
-    for (size_t routeStart = 0; routeStart < stops.size(); routeStart += vehicleCapacity) {
-        size_t routeEnd = std::min(routeStart + vehicleCapacity, stops.size());
-
-        Location prev = depot;
-        for (size_t i = routeStart; i < routeEnd; ++i) {
-            totalDistance += distance(prev, stops[i]);
-            prev = stops[i];
-        }
-        totalDistance += distance(prev, depot);
-    }
-
-    return { totalDistance, routesNeeded, true };
+    return { distance, routesNeeded, true };
 }
 
 } // namespace TruxifyCuda

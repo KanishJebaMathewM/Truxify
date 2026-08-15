@@ -42,6 +42,10 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
     }
 
     const userId = req.user?.id ?? req.ip;
+    if (!routeKey || !userId) {
+      logger.warn({ routeKey, userId }, '[RateLimiter] Skipping - missing routeKey or userId');
+      return next();
+    }
     const key = `rl:${routeKey}:${userId}`;
     const now = Date.now();
     const windowStart = now - windowMs;
@@ -53,21 +57,13 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
       pipeline.zcard(key);
       const results = await pipeline.exec();
 
-      // Validate ZCARD result tuple [error, value]. pipeline.exec() resolves
-      // to an array of [err, result] tuples; a null/empty result set means the
-      // pipeline failed wholesale and must not be read past.
-      if (!Array.isArray(results) || results.length < 2) {
-        if (failClosed) {
-          logger.error({ routeKey, err: 'empty pipeline result' }, '[RateLimiter] ZCARD failed — failing closed');
-          return res.status(503).json({
-            success: false,
-            error: 'Service temporarily unavailable. Please try again shortly.',
-          });
-        }
-        logger.warn({ routeKey, err: 'empty pipeline result' }, '[RateLimiter] ZCARD failed — failing open');
-        return next();
-      }
-      const zcardTuple = results[1];
+      // Validate ZCARD result tuple [error, value]. pipeline.exec can also
+      // resolve to null when Redis is unreachable — treat that like a failed
+      // ZCARD so the limiter fails open (or closed, per failClosed) instead
+      // of crashing on a null dereference.
+      // Guard: pipeline.exec() returns null when Redis is unreachable.
+  // Treat null as a failed request rather than crashing on a null dereference.
+  const zcardTuple = results ? results[1] : null;
       if (!zcardTuple || zcardTuple[0]) {
         if (failClosed) {
           logger.error({ routeKey, err: zcardTuple?.[0] }, '[RateLimiter] ZCARD failed — failing closed');
@@ -117,3 +113,29 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
     }
   };
 }
+
+
+// === Spec 2: ===
+// === Spec 2: atomic Lua sliding window rate limiter ===
+const SLIDING_WINDOW_LUA = `
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - windowMs)
+local count = redis.call('ZCARD', key)
+if count >= limit then return {0, count} end
+redis.call('ZADD', key, now, member)
+redis.call('PEXPIRE', key, windowMs)
+return {1, count + 1}
+`;
+
+export async function checkSlidingWindow(redis, key, nowMs, windowMs, limit, member) {
+  if (!key || typeof key !== 'string') {
+    throw new Error('[RateLimiter] checkSlidingWindow: key must be a non-empty string');
+  }
+  const result = await redis.eval(SLIDING_WINDOW_LUA, 1, key, nowMs, windowMs, limit, member);
+  return { allowed: result[0] === 1, count: result[1] };
+}
+

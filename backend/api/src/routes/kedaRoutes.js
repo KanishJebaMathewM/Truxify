@@ -1,15 +1,8 @@
 import express from 'express';
 import kedaService from '../services/kedaService.js';
 import logger from '../middleware/logger.js';
-import { authenticate } from '../middleware/auth.js';
-import { requirePolicy } from '../middleware/requirePolicy.js';
-import { healthLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
-
-router.use(authenticate);
-router.use(healthLimiter);
-router.use(requirePolicy('admin:view-metrics'));
 
 router.get('/keda/metrics/requests', async (_req, res) => {
     try {

@@ -209,6 +209,7 @@ DECLARE
   v_bid_amount       int;
   v_order_display_id text;
   v_load_status      text;
+  v_bid_status       text;
   v_order_status     text;
   v_current_version  int;
   v_driver_name      text;
@@ -223,17 +224,24 @@ BEGIN
   -- p_driver_name/p_driver_rating/p_truck_id/p_truck_number/p_bid_amount are
   -- intentionally NOT used anywhere below.
   SELECT b.load_id, b.driver_id, b.bid_amount,
-         lo.order_display_id, lo.status
+         lo.order_display_id, lo.status, b.status AS bid_status
     INTO v_load_id, v_driver_id, v_bid_amount,
-         v_order_display_id, v_load_status
+         v_order_display_id, v_load_status, v_bid_status
     FROM load_bids b
     JOIN load_offers lo ON lo.id = b.load_id
    WHERE b.id = p_bid_id
-     AND b.status = 'pending'
      FOR UPDATE OF b, lo;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Bid not found or no longer pending';
+    RAISE EXCEPTION 'Bid not found';
+  END IF;
+
+  IF v_bid_status = 'accepted' THEN
+    SELECT status INTO v_order_status FROM orders WHERE order_display_id = v_order_display_id;
+    IF v_order_status = 'truck_assigned' THEN RETURN; END IF;
+  END IF;
+  IF v_bid_status <> 'pending' THEN
+    RAISE EXCEPTION 'Bid is not pending';
   END IF;
 
   IF v_load_status IS NULL OR v_load_status <> 'available' THEN

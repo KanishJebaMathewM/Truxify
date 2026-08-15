@@ -44,10 +44,14 @@ function parseWeightKg(weight) {
 }
 
 function parseWeightKgSafe(weight) {
+  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
+    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
+    return null;
+  }
   const result = parseWeightKg(weight);
   if (Number.isNaN(result)) {
     logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return 0;
+    return null;
   }
   return result;
 }
@@ -85,20 +89,20 @@ function getHeaders() {
 /**
  * Utility: handle ML engine responses consistently
  */
-async function handleResponse(response) {
+async function handleResponse(response, url = '', method = 'GET') {
     const text = await response.text();
 
     if (response.status === 401 || response.status === 403) {
-        throw new Error(`[ML] Authentication failed (${response.status}): ${text}`);
+        throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed (${response.status}): ${text}`);
+        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
     }
 
     try {
         return JSON.parse(text);
     } catch (err) {
-        logger.error({ status: response ? response.status : undefined, bodyPreview: text.slice(0, 200) }, 'ML service request failed');
+        logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }
@@ -134,7 +138,7 @@ export async function predictDemand(features = {}) {
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
   demandCache.set(cacheKey, result);
   return result;
 }
@@ -186,7 +190,7 @@ export async function predictPrice({
       signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const raw = await handleResponse(response);
+  const raw = await handleResponse(response, url, 'POST');
 
   const initialValidation = validatePricePrediction(raw);
   if (!initialValidation.ok) {
@@ -199,11 +203,13 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
+  // Only forward min_price/max_price keys when the raw response actually
+  // carried them — injecting undefined values trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
-      min_price: typeof raw?.min_price === 'number' ? raw.min_price * safeMultiplier : undefined,
-      max_price: typeof raw?.max_price === 'number' ? raw.max_price * safeMultiplier : undefined,
+      ...(typeof raw?.min_price === 'number' ? { min_price: raw.min_price * safeMultiplier } : {}),
+      ...(typeof raw?.max_price === 'number' ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
@@ -266,7 +272,7 @@ export async function predictEta({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
 
   if (
     result == null ||
@@ -280,31 +286,6 @@ export async function predictEta({
     eta_minutes: result.eta_minutes,
     confidence_interval: result.confidence_interval ?? { lower: 0, upper: 0 },
   };
-}
-
-/**
- * Matches shipments for bilateral load consolidation.
- *
- * @param {object} params
- * @param {Array}  params.loads   - Array of load objects with origin/dest lat/lng, dimensions, deadline
- * @param {Array}  params.drivers - Array of driver objects with current location, capacity, rating
- * @returns {Promise<{assignments: Array, unmatched_loads: Array, unmatched_drivers: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-export async function matchBilateral({ loads, drivers }) {
-  guardMlApiKey();
-  const url = `${getBaseUrl()}/match/bilateral`;
-
-  const payload = { loads, drivers };
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
-  });
-
-  return handleResponse(response);
 }
 
 /**
@@ -347,7 +328,7 @@ export async function predictDriverProfit({
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
-  const result = await handleResponse(response);
+  const result = await handleResponse(response, url, 'POST');
 
   if (
     result == null ||
@@ -369,36 +350,6 @@ export async function predictDriverProfit({
     },
     currency: 'INR',
   };
-}
-
-/**
- * Optimises packing of packages into a truck with delivery routing.
- *
- * @param {object} params
- * @param {Array<{length: number, width: number, height: number, weight: number}>} params.packages - Packages to pack
- * @param {{length: number, width: number, height: number, max_weight: number}} params.truck - Truck dimensions
- * @param {Array<{lat: number, lng: number}>} params.deliveryAddresses - Delivery stop coordinates
- * @returns {Promise<{packing_arrangement: Array, unpacked_packages: Array, stop_sequence: Array, utilization_pct: number}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-export async function optimisePacking({ packages, truck, deliveryAddresses }) {
-  guardMlApiKey();
-  const url = `${getBaseUrl()}/optimise/packing`;
-
-  const payload = {
-    packages,
-    truck,
-    delivery_addresses: deliveryAddresses,
-  };
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
-  });
-
-  return handleResponse(response);
 }
 
 /**
@@ -466,40 +417,6 @@ export async function recommendTrucks({ userId, bookingHistory = [], ratedLoads 
 }
 
 /**
- * Computes a trust score for a driver or customer based on behavioral metrics.
- *
- * @param {object} params
- * @param {number} params.cancellationRate - Cancellation rate (0-1)
- * @param {number} params.onTimePct        - On-time delivery percentage (0-100)
- * @param {number} params.avgRating        - Average rating (1-5)
- * @param {number} params.disputeCount     - Number of disputes (>= 0)
- * @param {boolean} params.isVerified      - Whether the user is verified
- * @returns {Promise<{trust_score: number, risk_category: string}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-export async function scoreTrust({ cancellationRate, onTimePct, avgRating, disputeCount, isVerified }) {
-  guardMlApiKey();
-  const url = `${getBaseUrl()}/score/trust`;
-
-  const payload = {
-    cancellation_rate: cancellationRate,
-    on_time_pct: onTimePct,
-    avg_rating: avgRating,
-    dispute_count: disputeCount,
-    is_verified: isVerified,
-  };
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
-  });
-
-  return handleResponse(response);
-}
-
-/**
  * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
  * @param {object} params
  * @param {object} params.driverDestination - { lat, lng }
@@ -522,76 +439,6 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
       available_loads: availableLoads,
     }),
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
-  });
-  return handleResponse(response);
-}
-
-/**
- * Optimises a mid-trip route based on real-time conditions.
- * @param {object} routeData - { current_location, destination, fuel_level, hours_driven }
- * @returns {Promise<{adjustments: Array, fuel_saving: number}>}
- */
-export async function optimiseMidTrip(routeData) {
-  guardMlApiKey();
-  const baseUrl = getBaseUrl();
-  const url = `${baseUrl}/optimise/mid-trip`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(routeData),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
-  });
-  return handleResponse(response);
-}
-
-/**
- * Triggers retraining of the demand prediction model.
- * @param {boolean} [force=false] - Force retrain even if model is current
- * @returns {Promise<{status: string, model_version: string}>}
- */
-export async function trainDemandModel(force = false) {
-  guardMlApiKey();
-  const baseUrl = getBaseUrl();
-  const url = `${baseUrl}/train/demand`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ force }),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_LONG),
-  });
-  return handleResponse(response);
-}
-
-/**
- * Triggers retraining of the price prediction model.
- * @param {boolean} [force=false] - Force retrain even if model is current
- * @returns {Promise<{status: string, model_version: string}>}
- */
-export async function trainPriceModel(force = false) {
-  guardMlApiKey();
-  const baseUrl = getBaseUrl();
-  const url = `${baseUrl}/train/price`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ force }),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_LONG),
-  });
-  return handleResponse(response);
-}
-
-/**
- * Lists all available ML models and their versions.
- * @returns {Promise<{models: Array}>}
- */
-export async function listModels() {
-  guardMlApiKey();
-  const baseUrl = getBaseUrl();
-  const url = `${baseUrl}/models`;
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: getHeaders(),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
   return handleResponse(response);
 }
@@ -734,32 +581,27 @@ export const __testing = {
   priceCache,
   _haversineKm,
   parseWeightKg,
-  parseWeightKgSafe,
-  parseDimensions,
 };
 
 class MLService {
   async handleResponse(response, url = '', method = 'GET') {
-    if (!response) {
-      throw new Error(`[MLService] Invalid response object for ${method} ${url}`);
-    }
     let data;
     try {
       data = await response.json();
-    } catch (e) {
-      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status || 'unknown'})`);
+    } catch (err) {
+      throw new Error(`[ML] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`, { cause: err });
     }
 
     if (response.status === 401) {
-      throw new Error(`[MLService] Unauthorized (401) for ${method} ${url}`);
+      throw new Error(`[ML] Authentication failed: ${method} ${url} (${response.status})`);
     }
 
     if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden (403) for ${method} ${url}`);
+      throw new Error(`[ML] Forbidden: ${method} ${url} (${response.status})`);
     }
 
     if (!response.ok) {
-      throw new Error(`[MLService] Request failed with status ${response.status} for ${method} ${url}`);
+      throw new Error(`[ML] Request failed: ${method} ${url} ${response.status}`);
     }
 
     return data;

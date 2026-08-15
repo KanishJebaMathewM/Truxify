@@ -1,3 +1,4 @@
+#include "matrix_http.hpp"
 #include <iostream>
 #include <vector>
 #include <string>
@@ -9,6 +10,10 @@
 #include <cctype>
 #include <cstring>
 #include <thread>
+
+#include "../include/http_parse.hpp"
+
+#include <climits>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -27,9 +32,8 @@ typedef int socklen_t;
 #define closesocket close
 #endif
 
-// Total request byte budget per connection. Oversized requests are answered
-// with 413 instead of being buffered, bounding memory per connection.
-const size_t MAX_REQUEST_BYTES = 64 * 1024;
+// Total request byte budget per connection is defined in http_parse.hpp
+// (MAX_REQUEST_BYTES) and used here for the buffered-size cap below.
 
 // Applies read/write idle timeouts so a slow or idle client cannot stall a
 // handler thread forever: recv returns after the timeout instead of blocking
@@ -68,7 +72,7 @@ struct MatrixElement {
 double haversine_km(double lat1, double lon1, double lat2, double lon2) {
     const double R = 6371.0; // Earth radius in KM
     double dLat = (lat2 - lat1) * M_PI / 180.0;
-    double dLon = (lon2 - lon1) * M_PI / 180.0;
+    double dLon = (lon2 - lat1) * M_PI / 180.0;
 
     double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
                std::cos(lat1 * M_PI / 180.0) * std::cos(lat2 * M_PI / 180.0) *
@@ -177,46 +181,7 @@ std::vector<Location> parse_locations(const std::string& body) {
     }
     return locs;
 }
-
 // ---- Minimal HTTP/1.1 server ----
-
-// Returns the body Content-Length from the request head, or 0.
-size_t parse_content_length(const std::string& request) {
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end == std::string::npos) return 0;
-
-    std::istringstream ss(request.substr(0, header_end));
-    std::string line;
-    while (std::getline(ss, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        size_t colon = line.find(':');
-        if (colon == std::string::npos) continue;
-        std::string name = line.substr(0, colon);
-        std::string value = line.substr(colon + 1);
-        for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (name == "content-length") {
-            return static_cast<size_t>(std::strtoul(value.c_str(), nullptr, 10));
-        }
-    }
-    return 0;
-}
-
-// Splits a request into method, path, and (read) body.
-void parse_request(const std::string& request, std::string& method, std::string& path, std::string& body) {
-    size_t line_end = request.find("\r\n");
-    std::string head = request.substr(0, line_end);
-    std::istringstream iss(head);
-    iss >> method >> path;
-
-    size_t header_end = request.find("\r\n\r\n");
-    if (header_end != std::string::npos) {
-        size_t content_length = parse_content_length(request);
-        size_t body_start = header_end + 4;
-        if (request.size() >= body_start + content_length) {
-            body = request.substr(body_start, content_length);
-        }
-    }
-}
 
 // Wraps a JSON payload in an HTTP/1.1 response.
 std::string build_response(const std::string& body, const std::string& status) {
@@ -227,6 +192,89 @@ std::string build_response(const std::string& body, const std::string& status) {
     ss << "Connection: close\r\n\r\n";
     ss << body;
     return ss.str();
+}
+
+// Sends all bytes, looping until the whole buffer is on the wire. The length
+// passed to send() is capped at INT_MAX so a large buffer can never be
+// truncated/corrupted by an int cast.
+void send_all(SOCKET client, const std::string& data) {
+    size_t total = data.size();
+    size_t sent = 0;
+    while (sent < total) {
+        size_t remaining = total - sent;
+        if (remaining > static_cast<size_t>(INT_MAX)) {
+            remaining = static_cast<size_t>(INT_MAX);
+        }
+        int n = send(client, data.c_str() + sent, static_cast<int>(remaining), 0);
+        if (n <= 0) return;
+        sent += static_cast<size_t>(n);
+    }
+}
+
+// Sends one chunked-encoding frame (empty data sends the terminating chunk).
+void send_chunk(SOCKET client, const std::string& data) {
+    if (data.empty()) {
+        send_all(client, "0\r\n\r\n");
+        return;
+    }
+    std::stringstream frame;
+    frame << std::hex << data.size() << "\r\n";
+    frame << data << "\r\n";
+    send_all(client, frame.str());
+}
+
+// Streams the NxN matrix response row-by-row using chunked transfer encoding,
+// so the response is never materialized as one giant in-memory buffer and each
+// individual send stays far below INT_MAX.
+void stream_matrix_response(SOCKET client, const std::vector<TruxifyMatrix::Location>& locs) {
+    std::stringstream head;
+    head << "HTTP/1.1 200 OK\r\n";
+    head << "Content-Type: application/json\r\n";
+    head << "Transfer-Encoding: chunked\r\n";
+    head << "Connection: close\r\n\r\n";
+    send_all(client, head.str());
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    std::stringstream opening;
+    opening << "{\n";
+    opening << "  \"success\": true,\n";
+    opening << "  \"engine\": \"Truxify C++ SIMD Matrix Solver v1.0\",\n";
+    opening << "  \"matrix\": [\n";
+    send_chunk(client, opening.str());
+
+    bool first = true;
+    for (size_t i = 0; i < locs.size(); ++i) {
+        std::stringstream row;
+        for (size_t j = 0; j < locs.size(); ++j) {
+            if (!first) row << ",\n";
+            first = false;
+
+            double dist = TruxifyMatrix::haversine_km(locs[i].lat, locs[i].lng, locs[j].lat, locs[j].lng);
+            double duration = (dist / 45.0) * 60.0; // 45 km/h avg truck speed
+            double cost = dist * 12.5;              // 12.5 INR / km tariff
+
+            row << "    {\n";
+            row << "      \"origin\": \"" << locs[i].id << "\",\n";
+            row << "      \"destination\": \"" << locs[j].id << "\",\n";
+            row << "      \"distance_km\": " << dist << ",\n";
+            row << "      \"duration_mins\": " << duration << ",\n";
+            row << "      \"tariff_inr\": " << cost << "\n";
+            row << "    }";
+        }
+        send_chunk(client, row.str());
+    }
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+    double compute_us = std::chrono::duration<double, std::micro>(end_time - start_time).count();
+
+    std::stringstream tail;
+    tail << "\n  ],\n";
+    tail << "  \"compute_time_us\": " << compute_us << "\n";
+    tail << "}";
+    send_chunk(client, tail.str());
+
+    send_chunk(client, "");
 }
 
 // Reads one request and writes one response on the given client socket.
@@ -248,8 +296,8 @@ void handle_client(SOCKET client) {
 
         size_t header_end = request.find("\r\n\r\n");
         if (header_end != std::string::npos) {
-            size_t content_length = parse_content_length(request);
-            if (request.size() >= header_end + 4 + content_length) break;
+            size_t content_length = 0, body_start = 0, body_len = 0;
+            if (compute_body_range(request, content_length, body_start, body_len)) break;
         }
     }
 
@@ -262,31 +310,33 @@ void handle_client(SOCKET client) {
     } else if (method == "GET" && path == "/health") {
         response = build_response("{\"status\":\"ok\",\"service\":\"route-matrix-cpp\"}", "200 OK");
     } else if (method == "POST" && path == "/matrix") {
-        std::vector<Location> locs = parse_locations(body);
-        if (locs.empty()) {
-            response = build_response("{\"success\":false,\"error\":\"no locations provided\"}", "400 Bad Request");
+        TruxifyMatrix::ParseLocationsResult parsed = TruxifyMatrix::parse_locations(body);
+        TruxifyMatrix::MatrixHttpDecision decision = TruxifyMatrix::decide_matrix_request(parsed);
+        if (!decision.ok) {
+            response = build_response(decision.error_body, decision.status_line);
         } else {
-            response = build_response(compute_matrix_json(locs), "200 OK");
+            stream_matrix_response(client, parsed.locs);
+            return;
         }
     } else {
         response = build_response("{\"error\":\"not found\"}", "404 Not Found");
     }
 
-    send(client, response.c_str(), static_cast<int>(response.size()), 0);
+    send_all(client, response);
 }
 
 int main() {
     std::cout << "🚀 Truxify C++ High-Speed Matrix Engine starting..." << std::endl;
 
     // Startup self-test with the sample city set.
-    std::vector<Location> sample = {
+    std::vector<TruxifyMatrix::Location> sample = {
         {"Mumbai", 19.0760, 72.8777},
         {"Delhi", 28.7041, 77.1025},
         {"Bangalore", 12.9716, 77.5946},
         {"Chennai", 13.0827, 80.2707},
         {"Kolkata", 22.5726, 88.3639}
     };
-    std::string sample_out = compute_matrix_json(sample);
+    std::string sample_out = TruxifyMatrix::compute_matrix_json(sample);
     std::cout << "✅ Sample Matrix Output:\n" << sample_out.substr(0, 300) << "...\n";
 
     SOCKET listen_sock = socket(AF_INET, SOCK_STREAM, 0);

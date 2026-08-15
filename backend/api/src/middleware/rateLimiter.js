@@ -71,29 +71,15 @@ class DeferredRedisStore {
   }
 
   increment(key) {
-    try {
-      return this.activeStore().increment(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis increment failed, continuing without rate limit');
-      return 1;
-    }
+    return this.activeStore().increment(key);
   }
 
   decrement(key) {
-    try {
-      return this.activeStore().decrement(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis decrement failed, continuing without rate limit');
-      return 0;
-    }
+    return this.activeStore().decrement(key);
   }
 
   resetKey(key) {
-    try {
-      return this.activeStore().resetKey(key);
-    } catch (err) {
-      logger.warn({ err, key }, 'Redis resetKey failed, continuing without rate limit');
-    }
+    return this.activeStore().resetKey(key);
   }
 
   resetAll() {
@@ -103,6 +89,28 @@ class DeferredRedisStore {
   get(key) {
     return this.activeStore().get?.(key);
   }
+}
+
+/**
+ * Expands an IPv6 address into its 8 text groups, resolving the "::"
+ * shorthand to the correct number of zero groups.
+ *
+ * The previous /64 masking split on ":" and took the first four tokens, which
+ * mis-split compressed forms like `2001:db8::a:b` and produced non-canonical,
+ * bypassable bucket keys. Returns null when the input cannot be a full IPv6
+ * address.
+ */
+function expandIpv6Groups(ip) {
+  if (ip.includes("::")) {
+    const [left, right] = ip.split("::");
+    const leftGroups = left ? left.split(":") : [];
+    const rightGroups = right ? right.split(":") : [];
+    const missing = 8 - leftGroups.length - rightGroups.length;
+    if (missing < 1) return null;
+    return [...leftGroups, ...Array(missing).fill("0"), ...rightGroups];
+  }
+  const groups = ip.split(":");
+  return groups.length === 8 ? groups : null;
 }
 
 /**
@@ -116,9 +124,9 @@ export function normalizeIp(rawIp) {
   if (ip === "::1") return "127.0.0.1";
 
   if (ip.includes(":")) {
-    const parts = ip.split(":");
-    if (parts.length >= 4) {
-      return `${parts.slice(0, 4).join(":")}::/64`;
+    const groups = expandIpv6Groups(ip);
+    if (groups) {
+      return `${groups.slice(0, 4).join(":").toLowerCase()}::/64`;
     }
   }
   return ip;
@@ -126,6 +134,11 @@ export function normalizeIp(rawIp) {
 
 /**
  * Generates a rate-limit key from the proxy-resolved IP address.
+ *
+ * When trust proxy is enabled, req.ip is derived from X-Forwarded-For which
+ * can be spoofed. We prefer req.ips[0] (the client IP before any proxy hops)
+ * as the most trustworthy source, falling back to the socket address only
+ * when the forwarded header is suspicious or unavailable.
  */
 export function safeIpKeyGenerator(req) {
   const forwarded = req.headers?.["x-forwarded-for"];
@@ -139,9 +152,15 @@ export function safeIpKeyGenerator(req) {
       },
       "Suspicious X-Forwarded-For header detected",
     );
+    // Use socket address instead of the spoofed header value.
+    const socketIp = req.socket?.remoteAddress || req.connection?.remoteAddress || "unknown";
+    return normalizeIp(socketIp);
   }
 
+  // req.ips[0] is the client IP before any proxy hops (set by trust proxy).
+  // This is preferred over req.ip because req.ip may use the full header.
   const rawIp =
+    (req.ips && req.ips.length > 0 ? req.ips[0] : null) ||
     req.ip ||
     req.headers?.["x-forwarded-for"] ||
     req.socket?.remoteAddress ||
@@ -164,7 +183,7 @@ export function userKeyGenerator(req) {
  * Returns a rate-limit handler that logs to Sentry and responds with 429.
  */
 function sentryAlertHandler(limiterName) {
-  return (req, res) => {
+  return (req, res, next, options) => {
     logger.warn(
       {
         requestId: req.requestId,
@@ -176,9 +195,10 @@ function sentryAlertHandler(limiterName) {
       `Rate limit exceeded (${limiterName})`,
     );
     Sentry.captureMessage(`Rate limit exceeded: ${limiterName}`, "warning");
+    const retryAfter = options?.message?.retryAfter ?? 60;
     res.status(429).json({
       error: "Rate limit exceeded",
-      retryAfter: 60,
+      retryAfter,
     });
   };
 }
@@ -375,23 +395,6 @@ export const podUploadLimiter = rateLimit({
   },
 });
 
-const adminWindowMs =
-  Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
-const adminMaxRequests =
-  Number(process.env.ADMIN_RATE_LIMIT_MAX_REQUESTS) || 50;
-
-export const adminRateLimiter = rateLimit({
-  windowMs: adminWindowMs,
-  max: adminMaxRequests,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  store: createStore("rl:admin:"),
-  message: {
-    error: "Rate limit exceeded",
-    retryAfter: Math.ceil(adminWindowMs / 1000),
-  },
-});
 
 const VERIFY_DELIVERY_WINDOW_MS =
   Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;

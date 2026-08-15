@@ -42,6 +42,7 @@
           "number": [
             {
               "value1": "={{$json.new_booking_count}}",
+              "operator": "largerEqual",
               "value2": 100
             }
           ]

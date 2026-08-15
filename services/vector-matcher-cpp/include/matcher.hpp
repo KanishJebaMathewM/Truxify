@@ -14,10 +14,18 @@ struct Box3D {
     float volume() const { return length * width * height; }
 };
 
+struct PlacedBox {
+    Box3D box;
+    float x;
+    float y;
+    float z;
+};
+
 struct VectorMatchResult {
     bool fits;
     float utilizationPercentage;
     size_t packedCount;
+    std::vector<PlacedBox> placementMap;
 };
 
 class VectorMatcherEngine {

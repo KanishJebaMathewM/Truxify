@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { ethers } from 'ethers';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 // Generic field validation helpers
@@ -104,6 +103,29 @@ export const driverIdParamSchema = z.object({
   driverId: uuidSchema
 });
 
+// Cross-docking synchronization engine (#6181)
+export const crossDockParamSchema = z.object({
+  id: uuidSchema,
+});
+
+export const crossDockCandidateSchema = z.object({
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  radius_km: coerceNumber(z.number().min(1).max(500)).optional(),
+  limit: coerceNumber(z.number().int().min(1).max(50)).optional(),
+});
+
+export const createCrossDockSchema = z.object({
+  to_driver_id: uuidSchema,
+  cross_dock_lat: latitudeSchema,
+  cross_dock_lng: longitudeSchema,
+  cross_dock_note: z.string().max(500).optional(),
+});
+
+export const verifyHandoffSchema = z.object({
+  handoff_code: z.string().regex(/^\d{6}$/, "Handoff code must be 6 digits"),
+});
+
 export const submitBidSchema = z.object({
   bid_amount: z
     .number()
@@ -180,16 +202,6 @@ export const updateWalletSchema = z.object({
   wallet_address: z.string().regex(
     /^0x[a-fA-F0-9]{40}$/,
     'Must be a valid 0x-prefixed 42-character wallet address'
-  ).refine(
-    (address) => {
-      try {
-        ethers.getAddress(address);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: 'Wallet address has an invalid EIP-55 checksum' }
   ),
 }).strict();
 
@@ -200,6 +212,11 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+  deviceId: z.string()
+    .min(3, { message: 'deviceId must be at least 3 characters' })
+    .max(128, { message: 'deviceId is too long' })
+    .regex(/^[a-zA-Z0-9\-_.:]+$/, { message: 'deviceId contains invalid characters' })
+    .optional(),
   metadata: z.record(z.any()).optional(),
 }).strict();
 
@@ -260,20 +277,21 @@ export const earningsSummarySchema = z.object({
   period: z.enum(['weekly', 'monthly']).optional(),
 }).strict();
 
-export const updateDocumentStatusSchema = z.object({
-  status: z.enum(['Approved', 'Rejected', 'Pending']),
-  rejection_reason: z.string().optional()
-});
+
+
+export const syncWeightSchema = z.object({
+  truck_id: z.string().min(1, "Truck ID is required"),
+  axles: z.array(z.object({
+    position: z.string().min(1, "Axle position is required"),
+    pressure_psi: coerceNumber(z.number().positive("Pressure must be positive"))
+  })).min(1, "At least one axle reading is required")
+}).strict();
 
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
 
-export const otpSendSchema = z.object({
-  phone: z.string().trim().min(10).max(20).refine(isValidPhone, {
-    message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)',
-  }),
-}).strict();
+
 
 export const registerTruckSchema = z.object({
   name: z.string()
@@ -320,12 +338,6 @@ export const oracleVerifyCrosschainSchema = z.object({
     .string()
     .min(1, 'blockchainHash is required')
     .regex(/^0x[a-fA-F0-9]+$/, { message: 'blockchainHash must be a 0x-prefixed hex string' }),
-}).strict();
-
-export const oracleGasPriceSyncSchema = z.object({
-  gasGwei: z.number().positive('gasGwei must be a positive number'),
-  idempotencyKey: z.string().min(1, 'idempotencyKey is required').max(128),
-  timestamp: z.number().optional(),
 }).strict();
 
 export const verifyOrderParamsSchema = z.object({
@@ -421,3 +433,8 @@ export const reportGripDataSchema = z.object({
   ).optional().default(0),
 }).strict();
 
+/**
+ * Schema for POST /api/driver/weigh-stations/sync-weight.
+ * NOTE: defined once above (truck_id + string axle position); the driver
+ * route reads truck_id/axles from req.body, so keep this single export.
+ */

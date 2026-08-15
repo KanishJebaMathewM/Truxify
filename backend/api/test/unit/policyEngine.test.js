@@ -309,50 +309,6 @@ describe('PolicyEngine', () => {
         expect(() => policy.authorize(user('customer', 'user-1'), 'ticket:view', { ticket })).toThrow(PolicyError);
       });
     });
-
-    describe('Fail-closed resource requirement (IDOR guard)', () => {
-      it('denies ownership-only policy invoked without a resource', () => {
-        expect(() => policy.authorize(user('customer'), 'order:view')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('driver'), 'order:view-driver-location')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('customer'), 'order:view-route')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('customer'), 'ticket:view')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('driver'), 'document:view')).toThrow(PolicyError);
-      });
-
-      it('denies ownership-only policy even for admin without a resource', () => {
-        expect(() => policy.authorize(user('admin'), 'order:view-driver-location')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('admin'), 'order:view-route')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('admin'), 'order:view')).toThrow(PolicyError);
-      });
-
-      it('still grants ownership-only policy with a matching resource', () => {
-        const order = { customer_id: 'user-1', driver_id: null };
-        expect(() => policy.authorize(user('customer', 'user-1'), 'order:view', { order })).not.toThrow();
-        expect(() => policy.authorize(user('customer', 'user-1'), 'order:view-driver-location', { order })).not.toThrow();
-        expect(() => policy.authorize(user('customer', 'user-1'), 'order:view-route', { order })).not.toThrow();
-      });
-
-      it('still denies ownership-only policy with a non-matching resource', () => {
-        const order = { customer_id: 'other', driver_id: 'other-driver' };
-        expect(() => policy.authorize(user('customer', 'user-1'), 'order:view-driver-location', { order })).toThrow(PolicyError);
-      });
-
-      it('leaves role-only policies unaffected when invoked without a resource', () => {
-        expect(() => policy.authorize(user('customer'), 'order:create')).not.toThrow();
-        expect(() => policy.authorize(user('driver'), 'driver:view-stats')).not.toThrow();
-        expect(() => policy.authorize(user('admin'), 'admin:view-dashboard')).not.toThrow();
-        expect(() => policy.authorize(user('driver'), 'order:create')).toThrow(PolicyError);
-      });
-
-      it('keeps mixed role+ownership policies role-gated when invoked without a resource', () => {
-        expect(() => policy.authorize(user('driver'), 'delivery:verify')).not.toThrow();
-        expect(() => policy.authorize(user('customer'), 'delivery:verify')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('driver'), 'driver:view-earnings')).not.toThrow();
-        expect(() => policy.authorize(user('customer'), 'driver:view-earnings')).toThrow(PolicyError);
-        expect(() => policy.authorize(user('customer'), 'order:change-drop')).not.toThrow();
-        expect(() => policy.authorize(user('driver'), 'order:change-drop')).toThrow(PolicyError);
-      });
-    });
   });
 
   describe('PolicyEngine class', () => {

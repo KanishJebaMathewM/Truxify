@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePhone } from '../../src/utils/phone.js';
+import { normalizePhone } from '../../utils/phone.js';
 
 describe('normalizePhone', () => {
   it('normalizes E.164 format with + prefix and space', () => {

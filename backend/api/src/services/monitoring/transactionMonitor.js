@@ -23,7 +23,7 @@ class TransactionMonitor {
       dsn,
       environment: process.env.NODE_ENV || 'development',
       release: process.env.APP_VERSION || '1.0.0',
-      tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.1,
+      tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE) ?? 0.1,
       profilesSampleRate: 0.1,
       integrations: [
         new Sentry.Integrations.Http({ tracing: true }),

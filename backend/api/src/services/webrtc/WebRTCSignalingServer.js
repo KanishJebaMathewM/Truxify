@@ -2,12 +2,14 @@ import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
-import { supabase, supabaseAdmin, redisClient, createUserClient } from '../../config/db.js';
+import { supabase, redisClient, createUserClient } from '../../config/db.js';
+
+const OFFLINE_GPS_PAGE_SIZE = 1000;
 
 class WebRTCSignalingServer {
   constructor(server) {
-    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
-    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: MAX_WS_PAYLOAD_BYTES });
+    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10);
+    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: Number.isFinite(MAX_WS_PAYLOAD_BYTES) ? MAX_WS_PAYLOAD_BYTES : 4096 });
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -15,7 +17,7 @@ class WebRTCSignalingServer {
     this.setupWebSocket();
     this.startDiscovery();
     
-    logger.info('✅ WebRTC Signaling Server initialized');
+    logger.info('WebRTC Signaling Server initialized');
   }
 
   setupWebSocket() {
@@ -207,6 +209,9 @@ class WebRTCSignalingServer {
   }
 
   normalizeLocation(location) {
+    if (location == null) {
+      throw new TypeError('normalizeLocation: location must not be null or undefined');
+    }
     return {
       ...location,
       lat: Number(location.lat),
@@ -230,23 +235,14 @@ class WebRTCSignalingServer {
     const userClient = peer.token ? createUserClient(peer.token) : null;
     const gpsClient = userClient || supabase;
 
-    // gps_offline_data is RLS-scoped by `peerId = get_profile_id()::text`, so
-    // rows must be keyed by the authenticated user's profile id (peer.userId),
-    // never the ephemeral WebRTC session id. Fail closed when the owner cannot
-    // be established so an un-owned frame is never written.
-    if (!peer.userId) {
-      logger.warn(`[WebRTC] GPS data dropped for peer ${peerId}: no authenticated user id`);
-      return;
-    }
-
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
     };
 
-    // Store GPS data with offline sync flag, keyed by the owner's profile id
+    // Store GPS data in MongoDB with offline sync flag
     const gpsEntry = {
-      peerId: peer.userId,
+      peerId,
       data: normalizedData,
       timestamp: Date.now(),
       synced: false
@@ -369,6 +365,9 @@ class WebRTCSignalingServer {
   }
 
   async getPeersNearLocation(lat, lng, radius = 10) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new TypeError('getPeersNearLocation: lat and lng must be finite numbers');
+    }
     const nearbyPeers = [];
     for (const [peerId, peer] of this.peers) {
       if (peer.location) {
@@ -389,6 +388,12 @@ class WebRTCSignalingServer {
   }
 
   calculateDistance(lat1, lng1, lat2, lng2) {
+    if (
+      !Number.isFinite(lat1) || !Number.isFinite(lng1) ||
+      !Number.isFinite(lat2) || !Number.isFinite(lng2)
+    ) {
+      throw new TypeError('calculateDistance: all coordinates must be finite numbers');
+    }
     const R = 6371; // Earth's radius in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLng = (lng2 - lng1) * Math.PI / 180;
@@ -415,47 +420,41 @@ class WebRTCSignalingServer {
     if (user?.role === 'admin') return true;
 
     const peer = this.peers.get(peerId);
-    // Both ids must actually be present: `peer.userId === user?.id` is true
-    // when both sides are undefined, which would admit a caller with no id to
-    // any peer registered from a token carrying no `id` claim.
-    return Boolean(
-      peer && peer.userId != null && user?.id != null && peer.userId === user.id,
-    );
+    return Boolean(peer && peer.userId === user?.id);
   }
 
-  async getOfflineGPSData(peerId, since, requestingUser, token) {
+  async getOfflineGPSData(peerId, since, requestingUser) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized offline GPS data access attempt for peer ${peerId}`);
       return [];
     }
-    // Rows are keyed by the owning profile id (matches the `peerId =
-    // get_profile_id()` RLS policy); resolve it from the active peer session
-    // and fall back to the caller's own id.
-    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
-    const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
-    const { data } = await client
+    const { data } = await supabase
       .from('gps_offline_data')
-      .select('*')
-      .eq('peerId', ownerId)
-      .gt('timestamp', since || 0)
-      .order('timestamp', { ascending: true });
+      .select('id, data, timestamp, synced')
+      .eq('peerId', peerId)
+      .gt('timestamp', since)
+      .order('timestamp', { ascending: true })
+      .limit(OFFLINE_GPS_PAGE_SIZE);
 
     return data || [];
   }
 
-  async syncOfflineData(peerId, requestingUser, token) {
+  async syncOfflineData(peerId, ackedIds, requestingUser) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
-    const ownerId = this.peers.get(peerId)?.userId || requestingUser.id;
-    const client = requestingUser.role === 'admin' ? supabaseAdmin : (token ? createUserClient(token) : supabase);
-    // Mark data as synced for this peer
-    await client
+    if (!Array.isArray(ackedIds) || ackedIds.length === 0) {
+      logger.warn(`[WebRTC] Sync for peer ${peerId} skipped: no acknowledged row ids provided`);
+      return;
+    }
+    // Mark only the rows the client actually acknowledged as synced, never
+    // the peer's entire unsynced backlog.
+    await supabase
       .from('gps_offline_data')
       .update({ synced: true })
-      .eq('peerId', ownerId)
-      .eq('synced', false);
+      .eq('peerId', peerId)
+      .in('id', ackedIds);
   }
 }
 

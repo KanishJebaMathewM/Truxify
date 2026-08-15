@@ -1,7 +1,6 @@
 import { ethers } from 'ethers';
-import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
@@ -24,9 +23,11 @@ export function toPreimageBytes32(secret) {
 
 class MEVService {
     constructor() {
-        // Store configuration; wallet and contract are initialized lazily to
-        // avoid crashing the API when PRIVATE_KEY / MEV_ESCROW_ADDRESS are unset.
-        this.escrowAddress = process.env.MEV_ESCROW_ADDRESS;
+        this._provider = null;
+        this._wallet = null;
+        this._escrow = null;
+        this.escrowAddress = process.env.ESCROW_CONTRACT_ADDRESS || process.env.MEV_ESCROW_ADDRESS;
+        
         this.escrowABI = [
             'function createProtectedDeposit(address payable driver, bytes32 secretHash) external payable returns (uint256)',
             'function releaseDepositPrivate(uint256 depositId, bytes32 preimage) external',
@@ -37,45 +38,35 @@ class MEVService {
             'event DepositReleasedMEV(uint256 indexed depositId, address indexed driver, uint256 amount)',
             'event DepositRefunded(uint256 indexed depositId, address indexed shipper, uint256 amount)'
         ];
+
+        // Flashbots endpoint
         this.flashbotsEndpoint = process.env.FLASHBOTS_ENDPOINT || 'https://relay.flashbots.net';
-
-        // Backing fields for lazy initialization.
-        this._provider = null;
-        this._wallet = null;
-        this._escrow = null;
-
-        logger.info('MEV Protection Service initialized (lazy wallet mode)');
+        
+        logger.info('Γ£à MEV Protection Service initialized');
     }
 
-    /** Lazily initializes the JSON-RPC provider. */
     get provider() {
         if (!this._provider) {
-            const rpcUrl = process.env.POLYGON_RPC_URL;
-            if (!rpcUrl) {
-                throw new Error('POLYGON_RPC_URL environment variable is required for MEV operations');
-            }
-            this._provider = new ethers.JsonRpcProvider(rpcUrl);
+            this._provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
         }
         return this._provider;
     }
 
-    /** Lazily initializes the signing wallet. */
     get wallet() {
         if (!this._wallet) {
-            const privateKey = process.env.PRIVATE_KEY;
+            const privateKey = process.env.RELAYER_WALLET_PRIVATE_KEY || process.env.PRIVATE_KEY;
             if (!privateKey) {
-                throw new Error('PRIVATE_KEY environment variable is required for MEV signing operations');
+                throw new Error('RELAYER_WALLET_PRIVATE_KEY / PRIVATE_KEY environment variable is required for MEV operations');
             }
             this._wallet = new ethers.Wallet(privateKey, this.provider);
         }
         return this._wallet;
     }
 
-    /** Lazily initializes the escrow contract. */
     get escrow() {
         if (!this._escrow) {
             if (!this.escrowAddress) {
-                throw new Error('MEV_ESCROW_ADDRESS environment variable is required for escrow operations');
+                throw new Error('ESCROW_CONTRACT_ADDRESS / MEV_ESCROW_ADDRESS environment variable is required for MEV operations');
             }
             this._escrow = new ethers.Contract(
                 this.escrowAddress,
@@ -90,16 +81,22 @@ class MEVService {
 
     async createCommitment(secret, userId) {
         try {
-            const preimage = toPreimageBytes32(secret);
-            const secretHash = ethers.keccak256(preimage);
-
+            // Hash secret (the exact bytes revealed at release time, so the
+            // on-chain keccak(preimage) == secretHash check can pass)
+            const secretHash = ethers.keccak256(
+                ethers.toUtf8Bytes(secret)
+            );
+            
+            // Store commitment. The contract does not expose a commitment
+            // function; the secretHash is embedded in the deposit via
+            // createProtectedDeposit.
             await this.storeCommitment({
                 userId,
                 secretHash,
                 txHash: null
             });
-
-            logger.info(`Commitment created for user ${userId}`);
+            
+            logger.info(`Γ£à Commitment created for user ${userId}`);
             return {
                 success: true,
                 secretHash,
@@ -115,22 +112,30 @@ class MEVService {
 
     async createEscrow(driver, amount, secret, userId) {
         try {
+            // Create commitment first
             const commitment = await this.createCommitment(secret, userId);
-
-            const secretHash = ethers.keccak256(toPreimageBytes32(secret));
-
+            
+            // Hash secret for escrow (same bytes as release reveals: plain secret)
+            const secretHash = ethers.keccak256(
+                ethers.toUtf8Bytes(secret)
+            );
+            
+            // Create MEV-protected deposit. The contract exposes
+            // createProtectedDeposit(address payable driver, bytes32 secretHash);
+            // the secretHash is stored on-chain as the deposit's commit hash.
             const tx = await this.escrow.createProtectedDeposit(
                 driver,
                 secretHash,
-                {
+                { 
                     value: ethers.parseEther(amount.toString()),
                     gasLimit: 200000
                 }
             );
             const receipt = await tx.wait();
-
+            
+            // Get real deposit ID from the emitted DepositCreated event
             const escrowId = this._parseDepositCreated(receipt);
-
+            
             await this.storeEscrow({
                 escrowId,
                 customer: this.wallet.address,
@@ -140,8 +145,8 @@ class MEVService {
                 secretHash,
                 txHash: receipt.hash
             });
-
-            logger.info(`MEV Protected Escrow created: ${escrowId}`);
+            
+            logger.info(`Γ£à MEV Protected Escrow created: ${escrowId}`);
             return {
                 success: true,
                 escrowId,
@@ -173,25 +178,16 @@ class MEVService {
 
     async releaseEscrow(escrowId, secret) {
         try {
-            const preimage = toPreimageBytes32(secret);
-
-            if (process.env.MEV_PRIVATE_RELAY === 'true') {
-                const result = await this.releaseEscrowPrivate(escrowId, preimage);
-                await this.updateEscrowStatus(escrowId, 'released', result.txHash);
-                logger.info(`Escrow ${escrowId} released via private bundle`);
-                return result;
-            }
-
             const tx = await this.escrow.releaseDepositPrivate(
                 escrowId,
-                preimage,
+                secret,
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();
-
+            
             await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
-
-            logger.info(`Escrow ${escrowId} released with MEV protection`);
+            
+            logger.info(`Γ£à Escrow ${escrowId} released with MEV protection`);
             return {
                 success: true,
                 txHash: receipt.hash
@@ -202,43 +198,8 @@ class MEVService {
         }
     }
 
-    /**
-     * Releases an escrow deposit via a Flashbots private bundle.
-     * Submits the releaseDepositPrivate transaction privately so it cannot
-     * be front-run by MEV bots.
-     *
-     * @param {string|number} escrowId - The deposit ID
-     * @param {string} preimage - The 32-byte preimage that unlocks the deposit
-     * @returns {Promise<{success: boolean, txHash: string, bundleHash?: string, targetBlock?: number}>}
-     */
-    async releaseEscrowPrivate(escrowId, preimage) {
-        const relayer = getMevRelayer();
-        const targetBlock = (await this.provider.getBlockNumber()) + 2;
+    // ============ Flashbots Integration ============
 
-        const bundle = await relayer.assemblePrivateBundle(
-            this.escrowAddress,
-            this.escrowABI,
-            'releaseDepositPrivate',
-            [escrowId, preimage],
-            targetBlock
-        );
-
-        const result = await relayer.sendPrivateBundle(bundle);
-
-        logger.info({
-            event: 'ESCROW_RELEASED_PRIVATE',
-            escrowId,
-            bundleHash: result.bundleHash,
-            targetBlock: result.targetBlock
-        }, 'Escrow released via Flashbots private bundle');
-
-        return {
-            success: true,
-            txHash: result.bundleHash,
-            bundleHash: result.bundleHash,
-            targetBlock: result.targetBlock
-        };
-    }
 
     async signTransactions(transactions) {
         const signedTxs = [];
@@ -249,26 +210,23 @@ class MEVService {
         return signedTxs;
     }
 
-    async releaseEscrowPrivate(escrowId, preimage) {
+    async submitFlashbotsBundle(escrowId, transactions) {
         try {
             const relayer = getMevRelayer();
             const targetBlock = (await this.provider.getBlockNumber()) + 1;
-            const bundle = await relayer.assemblePrivateBundle(
-                this.escrowAddress,
-                this.escrowABI,
-                'releaseDepositPrivate',
-                [escrowId, preimage],
+            const signedTxs = await this.signTransactions(transactions);
+            const result = await relayer.sendPrivateBundle({
+                signedBundle: signedTxs,
                 targetBlock
-            );
-            const result = await relayer.sendPrivateBundle(bundle);
-            return {
-                success: true,
-                txHash: result.bundleHash,
-                bundleHash: result.bundleHash,
-                targetBlock: result.targetBlock
-            };
+            });
+            await this.storeBundle({
+                escrowId,
+                bundleId: result.bundleHash,
+                blockNumber: result.targetBlock
+            });
+            return result;
         } catch (error) {
-            logger.error('Private bundle release failed:', error);
+            logger.error('Flashbots bundle submission failed:', error);
             throw error;
         }
     }
@@ -376,13 +334,17 @@ class MEVService {
     // ============ Statistics ============
 
     async getMEVStats() {
-        const { data: escrows } = await supabase
+        const { data: escrows, error: escrowsError } = await supabaseAdmin
             .from('mev_escrows')
             .select('*');
 
-        const { data: bundles } = await supabase
+        if (escrowsError) throw escrowsError;
+
+        const { data: bundles, error: bundlesError } = await supabaseAdmin
             .from('flashbots_bundles')
             .select('*');
+
+        if (bundlesError) throw bundlesError;
 
         return {
             totalEscrows: escrows?.length || 0,
@@ -392,52 +354,13 @@ class MEVService {
             timestamp: new Date().toISOString()
         };
     }
-
-    /**
-     * Submits a Flashbots bundle for an escrow.
-     * Assembles signed transactions targeting the escrow contract and sends
-     * them via the Flashbots relayer for front-running protection.
-     *
-     * @param {string} escrowId - The deposit ID on the escrow contract
-     * @param {string[]} transactions - Array of signed raw transaction hex strings
-     * @returns {Promise<{success: boolean, bundleHash?: string, targetBlock?: number}>}
-     */
-    async submitFlashbotsBundle(escrowId, transactions) {
-        try {
-            if (!Array.isArray(transactions) || transactions.length === 0) {
-                throw new Error('transactions must be a non-empty array of signed transaction hex strings');
-            }
-
-            const relayer = getMevRelayer();
-            const targetBlock = (await this.provider.getBlockNumber()) + 2;
-
-            const bundle = await relayer.assemblePrivateBundle(
-                this.escrowAddress,
-                this.escrowABI,
-                'releaseDepositPrivate',
-                [escrowId, '0x' + '00'.repeat(32)],
-                targetBlock
-            );
-
-            const result = await relayer.sendPrivateBundle(bundle);
-
-            logger.info({
-                event: 'FLASHBOTS_BUNDLE_SUBMITTED',
-                escrowId,
-                bundleHash: result.bundleHash,
-                targetBlock: result.targetBlock
-            }, 'Flashbots bundle submitted successfully');
-
-            return {
-                success: true,
-                bundleHash: result.bundleHash,
-                targetBlock: result.targetBlock
-            };
-        } catch (err) {
-            logger.error({ event: 'FLASHBOTS_BUNDLE_ERROR', escrowId, error: err.message }, 'Failed to submit Flashbots bundle');
-            throw err;
-        }
-    }
 }
 
 export default new MEVService();
+
+// === Spec 41: ===
+// === Spec 41: commit-reveal ===
+import crypto from 'crypto';
+export function commitHash(s, p) { return crypto.createHash('sha256').update(s + ':' + JSON.stringify(p)).digest('hex'); }
+export function verifyReveal(c, s, p) { return commitHash(s, p) === c; }
+

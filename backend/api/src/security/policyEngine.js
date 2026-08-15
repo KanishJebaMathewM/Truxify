@@ -141,6 +141,19 @@ const POLICIES = {
   'snyk:manage':               { roles: [ROLES.ADMIN] },
   'wasi:manage':               { roles: [ROLES.ADMIN] },
   'wasm:manage':               { roles: [ROLES.ADMIN] },
+
+  // Cross-docking synchronization engine (#6181)
+  // All actions restricted to drivers (and admins via role escalation path);
+  // resource-level ownership is enforced in the service using transfer
+  // participants, so these policies are intentionally permissive on role.
+  'crossdock:list-candidates':  {},
+  'crossdock:create':           {},
+  'crossdock:accept':           {},
+  'crossdock:decline':          {},
+  'crossdock:cancel':           {},
+  'crossdock:verify':           {},
+  'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
+  'crossdock:list':             {},
 };
 
 export class PolicyEngine {

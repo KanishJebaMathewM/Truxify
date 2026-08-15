@@ -4,6 +4,7 @@ import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
 
 const DISPATCH_ROLES = new Set(['ADMIN', 'admin', 'DISPATCHER', 'dispatcher']);
 
@@ -108,9 +109,7 @@ const resolvers = {
             let query = supabase.from('drivers').select('*');
             
             if (available !== undefined) {
-                query = available
-                    ? query.eq('status', 'AVAILABLE')
-                    : query.neq('status', 'AVAILABLE');
+                query = query.eq('status', available ? 'AVAILABLE' : 'BUSY');
             }
             
             if (location) {
@@ -146,7 +145,6 @@ const resolvers = {
                 .from('drivers')
                 .update({
                     status: input.status,
-                    availability: input.availability,
                     current_location: input.currentLocation,
                     truck_type: input.truckType || undefined,
                     truck_number: input.truckNumber || undefined,
@@ -169,23 +167,10 @@ const resolvers = {
                 throw new Error('Dispatcher role required');
             }
 
-            // orders.driver_id is a uuid FK to profiles(id), but the Driver.id
-            // exposed by the `drivers` view is the numeric driver_details.id.
-            // Resolve the driver's profile UUID before writing the assignment.
-            const { data: driver, error: driverError } = await supabase
-                .from('drivers')
-                .select('user_id')
-                .eq('id', driverId)
-                .single();
-
-            if (driverError || !driver?.user_id) {
-                throw new Error(`Driver ${driverId} not found`);
-            }
-
             const { data, error } = await supabase
                 .from('orders')
                 .update({
-                    driver_id: driver.user_id,
+                    driver_id: driverId,
                     status: 'truck_assigned',
                     updated_at: new Date().toISOString()
                 })
@@ -194,7 +179,7 @@ const resolvers = {
                 .single();
             
             if (error) throw error;
-            return { id: data.id, driver: { id: driverId } };
+            return data;
         },
         updateDriverLocation: async (_, { id, location }, { user }) => {
             const currentUser = requireUser(user);
@@ -225,7 +210,13 @@ async function startDriverService() {
     });
 
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4002 }
+        listen: { port: 4002 },
+        context: async ({ req }) => {
+            // Identity is derived only from gateway-signed trusted headers;
+            // forged x-user-id/x-user-role reaching the subgraph directly are
+            // rejected (no IDOR / privilege escalation).
+            return { user: resolveUserFromTrustedHeaders(req.headers) };
+        }
     });
 
     logger.info(`OK Driver GraphQL service running at ${url}`);

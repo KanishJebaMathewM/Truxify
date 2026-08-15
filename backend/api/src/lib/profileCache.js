@@ -32,7 +32,10 @@ async function _publishProfileInvalidation(eventOpts) {
   }
 }
 
-export const TTL_SECONDS = parseInt(process.env.REDIS_CACHE_TTL || "120", 10); // 2 minutes default so role/status changes (suspension, demotion) propagate quickly
+const _parsedTtlSeconds = parseInt(process.env.REDIS_CACHE_TTL, 10);
+export const TTL_SECONDS = Number.isFinite(_parsedTtlSeconds) && _parsedTtlSeconds > 0
+  ? _parsedTtlSeconds
+  : 120; // 2 minutes default so role/status changes (suspension, demotion) propagate quickly
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 
 let cacheHits = 0;
@@ -102,31 +105,19 @@ function getRedisClient() {
  * @param {string} firebaseUid - The expected Firebase UID.
  * @param {object|null} cachedProfile - The cached profile to validate.
  *   Must have: isActive (boolean), uid (string matching firebaseUid), id (string),
- *   role (string). Optional: fullName (string|null), phone (string|null), updatedAt (string|null).
+ *   role (string). Optional: fullName (string|null), phone (string|null).
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedProfile(firebaseUid, cachedProfile) {
-  if (typeof firebaseUid !== 'string' || !firebaseUid.trim()) {
+  if (typeof firebaseUid !== "string" || !firebaseUid.trim()) {
     return false;
   }
   if (
-    !cachedProfile ||
-    typeof cachedProfile !== 'object' ||
+    cachedProfile === null ||
+    typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
     return false;
-  }
-
-  // Reject objects with unexpected fields to enforce strict schema
-  const ALLOWED_FIELDS = new Set([
-    'isActive', 'uid', 'id', 'role',
-    'fullName', 'phone', 'updatedAt',
-  ]);
-  const profileKeys = Object.keys(cachedProfile);
-  for (const key of profileKeys) {
-    if (!ALLOWED_FIELDS.has(key)) {
-      return false;
-    }
   }
   if (typeof cachedProfile.isActive !== "boolean") {
     return false;
@@ -177,7 +168,7 @@ export function isValidCachedSupabaseProfile(userId, cachedProfile) {
     return false;
   }
   if (
-    !cachedProfile ||
+    cachedProfile === null ||
     typeof cachedProfile !== "object" ||
     Array.isArray(cachedProfile)
   ) {
@@ -219,15 +210,18 @@ export async function getCachedProfile(firebaseUid) {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
       const parsed = JSON.parse(raw);
-      // A corrupted payload that parses to a non-object (e.g. "42", "null",
-      // "some string") must not be treated as a valid cached profile.
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        cacheMisses++;
-        await redisClient.del(firebaseProfileKey(firebaseUid)).catch(() => {});
-        return null;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        cacheHits++;
+        return parsed;
       }
-      cacheHits++;
-      return parsed;
+      // Corrupt payload (not a plain object): treat as a miss and purge the key
+      cacheMisses++;
+      try {
+        await redisClient.del(firebaseProfileKey(firebaseUid));
+      } catch (delErr) {
+        // Ignore failures on background cleanup deletion
+      }
+      return null;
     }
     cacheMisses++;
     return null;
@@ -258,10 +252,7 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
-  // Clamp the TTL the same way the Supabase setters do: a non-positive TTL
-  // would immediately expire the key, and an unbounded TTL could pin a
-  // stale (e.g. deactivated) profile in cache for a very long time.
-  if (!Number.isFinite(Number(ttlSeconds)) || ttlSeconds < 1) ttlSeconds = 1;
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds < 1) ttlSeconds = 1;
   if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
@@ -393,7 +384,9 @@ export async function getCachedCustomerStats(userId) {
     logCacheError("getCachedCustomerStats", err);
     try {
       await redisClient.del(customerStatsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedCustomerStats.del", delErr);
+    }
     return null;
   }
 }
@@ -443,7 +436,9 @@ export async function getCachedDriverDetails(userId) {
     logCacheError("getCachedDriverDetails", err);
     try {
       await redisClient.del(driverDetailsKey(userId));
-    } catch (_) {}
+    } catch (delErr) {
+      logCacheError("getCachedDriverDetails.del", delErr);
+    }
     return null;
   }
 }
@@ -503,3 +498,16 @@ export async function invalidateCachedSupabaseProfileAll(userId) {
     logCacheError("invalidateCachedSupabaseProfileAll", err);
   }
 }
+
+
+// === Spec 8: ===
+// === Spec 8: profile cache schema validation ===
+export function isValidProfile(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return false;
+  if (typeof value.id !== 'string' || value.id.length === 0) return false;
+  if (typeof value.createdAt !== 'string') return false;
+  if (Number.isNaN(Date.parse(value.createdAt))) return false;
+  return true;
+}
+

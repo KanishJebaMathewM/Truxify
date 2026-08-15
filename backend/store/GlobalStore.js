@@ -21,6 +21,7 @@ class StoreTransaction {
         
         this.snapshot = this.store.createSnapshot();
         this.isActive = true;
+        this.txStartIndex = this.store.historyIndex;
         this.startTime = Date.now();
         this.store.emit('transactionStarted', { id: this.id });
         logger.debug(`Transaction ${this.id} started`);
@@ -60,7 +61,13 @@ class StoreTransaction {
         
         this.endTime = Date.now();
         this.isActive = false;
-        
+
+        // Record the transaction's net effect as a single undo entry so that
+        // one undo reverts the whole transaction, not an intermediate step.
+        if (JSON.stringify(this.snapshot.state) !== JSON.stringify(this.store.state)) {
+            this.store.saveHistory();
+        }
+
         this.store.emit('transactionCommitted', {
             id: this.id,
             duration: this.endTime - this.startTime,
@@ -83,6 +90,12 @@ class StoreTransaction {
         
         if (this.snapshot) {
             this.store.restoreSnapshot(this.snapshot);
+        }
+        
+        // Restore the undo history cursor to the pre-transaction point so the
+        // pointer does not diverge from the restored state.
+        if (this.txStartIndex !== undefined && this.txStartIndex !== null) {
+            this.store.historyIndex = this.txStartIndex;
         }
         
         this.endTime = Date.now();
@@ -135,8 +148,11 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
-        // Save history for undo
-        this.saveHistory();
+        // Save history for undo (skip while a transaction is active so that
+        // intermediate mutations do not pollute the undo history).
+        if (!this.activeTransaction) {
+            this.saveHistory();
+        }
         
         const oldValue = this.state[key];
         this.state[key] = value;
@@ -153,7 +169,11 @@ class GlobalStore extends EventEmitter {
             return;
         }
         
-        this.saveHistory();
+        // Skip while a transaction is active so intermediate mutations do not
+        // pollute the undo history.
+        if (!this.activeTransaction) {
+            this.saveHistory();
+        }
         const oldState = { ...this.state };
         Object.assign(this.state, updates);
         
@@ -256,7 +276,7 @@ class GlobalStore extends EventEmitter {
     
     createSnapshot() {
         return {
-            state: { ...this.state },
+            state: structuredClone(this.state),
             timestamp: Date.now(),
             id: `snapshot_${Date.now()}`
         };
@@ -268,7 +288,7 @@ class GlobalStore extends EventEmitter {
         }
         
         const oldState = { ...this.state };
-        this.state = { ...snapshot.state };
+        this.state = structuredClone(snapshot.state);
         
         this.notifyStateDiff(oldState, this.state);
         this.emit('snapshotRestored', { oldState, newState: this.state });

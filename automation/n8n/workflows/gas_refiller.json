@@ -20,13 +20,25 @@
     {
       "parameters": {
         "url": "http://api:5000/api/internal/relayer-balance",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "GET",
         "options": {}
       },
       "name": "Fetch Relayer Balance",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [450, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetween": 2000,
+      "retryMode": "exponential",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     },
     {
       "parameters": {
@@ -48,13 +60,25 @@
     {
       "parameters": {
         "url": "http://api:5000/api/internal/refill-gas-tank",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "POST",
         "options": {}
       },
       "name": "Trigger Admin Vault Gas Refill",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [850, 200]
+      "position": [850, 200],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetween": 2000,
+      "retryMode": "exponential",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     }
   ],
   "connections": {

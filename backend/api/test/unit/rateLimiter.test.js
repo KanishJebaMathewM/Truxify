@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeIp, safeIpKeyGenerator, userKeyGenerator } from '../../src/middleware/rateLimiter.js';
+import { normalizeIp, safeIpKeyGenerator, userKeyGenerator, isSuspiciousForwardedHeader } from '../../src/middleware/rateLimiter.js';
 
 describe('rateLimiter - normalizeIp & IPv6 Subnet Masking', () => {
   it('returns unknown for invalid or missing IP', () => {
@@ -68,24 +68,32 @@ describe('rateLimiter - normalizeIp & IPv6 Subnet Masking', () => {
     expect(keyA).not.toBe(safeIpKeyGenerator({ ip: '10.0.0.1' }));
   });
 
-  it('takes the first address from a comma-separated X-Forwarded-For chain', () => {
+  it('prefers the trusted client hop (req.ips[0]) over req.ip when trust proxy is enabled', () => {
+    // With `trust proxy` on, req.ip is derived from X-Forwarded-For and can be
+    // attacker-controlled. The key generator must bind to the client hop that
+    // the trusted proxy chain resolves (req.ips[0]), not an arbitrary header value.
     const req = {
-      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1, 192.168.1.1' },
-      socket: { remoteAddress: '10.0.0.1' },
+      ips: ['203.0.113.5', '10.0.0.1'],
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.5, 10.0.0.1' },
+      socket: { remoteAddress: '172.16.0.1' },
     };
-    expect(safeIpKeyGenerator(req)).toBe('203.0.113.9');
+
+    expect(safeIpKeyGenerator(req)).toBe('203.0.113.5');
   });
 
-  it('normalizes an IPv6-mapped IPv4 from the X-Forwarded-For header', () => {
+  it('falls back to the socket peer when X-Forwarded-For is a spoofed/suspicious header', () => {
+    // An obviously spoofed multi-value header (e.g. containing a newline) must
+    // NOT be used as the rate-limit key; the key must collapse to the real peer.
     const req = {
-      headers: { 'x-forwarded-for': '::ffff:192.168.1.100' },
-      socket: { remoteAddress: '10.0.0.1' },
+      ips: ['203.0.113.5\ninjected', '10.0.0.1'],
+      ip: '10.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.5\ninjected' },
+      socket: { remoteAddress: '172.16.0.1' },
+      connection: { remoteAddress: '172.16.0.1' },
     };
-    expect(safeIpKeyGenerator(req)).toBe('192.168.1.100');
-  });
 
-  it('uses the socket remote address when req.ip and XFF are absent', () => {
-    const req = { socket: { remoteAddress: '10.1.2.3' } };
-    expect(safeIpKeyGenerator(req)).toBe('10.1.2.3');
+    expect(isSuspiciousForwardedHeader(req.headers['x-forwarded-for'])).toBe(true);
+    expect(safeIpKeyGenerator(req)).toBe('172.16.0.1');
   });
 });

@@ -93,6 +93,7 @@ describe('TrackingTokenService', () => {
     mockData = createMockSupabase();
     service = new TrackingTokenService({
       supabase: mockData.supabase,
+      supabaseAdmin: mockData.supabase,
       logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
     });
   });
@@ -297,11 +298,12 @@ describe('TrackingTokenService', () => {
     });
 
     it('prefers the service-role client over the anon client', async () => {
-      mockData.store.orders.push({
+      const adminMock = createMockSupabase();
+      adminMock.store.orders = [];
+      adminMock.store.orders.push({
         order_display_id: '#FF20241205',
         driver_id: 'driver-uuid-456',
       });
-      const adminMock = createMockSupabase();
       adminMock.store.driver_locations = [];
       adminMock.store.driver_locations.push({
         driver_id: 'driver-uuid-456',
@@ -323,23 +325,15 @@ describe('TrackingTokenService', () => {
       expect(location.longitude).toBe(56.78);
     });
 
-    it('falls back to the anon client when no admin client is configured', async () => {
-      mockData.store.orders.push({
-        order_display_id: '#FF20241205',
-        driver_id: 'driver-uuid-456',
-      });
-      mockData.store.driver_locations.push({
-        driver_id: 'driver-uuid-456',
-        latitude: 21.21,
-        longitude: 72.88,
-        last_updated_at: new Date().toISOString(),
-        is_active: true,
+    it('throws when no admin client is configured (driver_locations requires service-role)', async () => {
+      const noAdminService = new TrackingTokenService({
+        supabase: mockData.supabase,
+        logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
       });
 
-      const location = await service.getDriverLocation('#FF20241205');
-
-      expect(location.latitude).toBe(21.21);
-      expect(location.longitude).toBe(72.88);
+      await expect(noAdminService.getDriverLocation('#FF20241205')).rejects.toThrow(
+        'Service-role client required for driver location tracking'
+      );
     });
   });
 

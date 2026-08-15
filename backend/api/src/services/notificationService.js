@@ -3,24 +3,18 @@ import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
+import { DomainError } from './order/domainError.js';
 
-const TRANSIENT_ERROR_CODES = new Set([
-  'messaging/too-many-topics',
-  'messaging/internal-error',
-  'messaging/unavailable',
-  'messaging/server-unavailable'
-]);
+// ============================================================================
+// FCM fan-out configuration
+// ============================================================================
 
-const INVALID_TOKEN_CODES = new Set([
-  'messaging/registration-token-not-registered',
-  'messaging/invalid-registration-token',
-  'messaging/invalid-argument'
-]);
+// Firebase Admin SDK v14 caps sendEachForMulticast at FCM_MAX_BATCH_SIZE (500)
+// tokens per request. Tokens are chunked to this bound — never a single
+// unbounded request.
+const FCM_MAX_BATCH_SIZE = 500;
 
-// Mirrors the notifications_notif_type_check CHECK constraint
-// (supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql).
-// Validating here turns a silent server-side constraint rejection into a
-// named error in the logs — the failure mode reported in #7538.
+// Allowlist mirrors the notifications.notif_type CHECK constraint.
 const ALLOWED_NOTIF_TYPES = new Set([
   'order_update',
   'payment',
@@ -34,19 +28,41 @@ const ALLOWED_NOTIF_TYPES = new Set([
   'payment_released',
 ]);
 
-function isAllowedNotifType(notifType) {
-  if (ALLOWED_NOTIF_TYPES.has(notifType)) {
-    return true;
-  }
-  logger.error(
-    { notifType, allowed: [...ALLOWED_NOTIF_TYPES] },
-    '[NotificationService] Refusing to insert notification with a notif_type the database CHECK constraint rejects'
-  );
-  return false;
-}
+// Tokens that can never be delivered again — the device row is deactivated so
+// future notifications stop targeting it. Exact client codes from the installed
+// firebase-admin v14 (MessagingErrorCode).
+const PERMANENT_TOKEN_ERROR_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+  'messaging/installation-id-not-registered',
+  'messaging/invalid-package-name',
+  'messaging/mismatched-credential',
+]);
+
+// Provider-side / rate-limit failures. The device stays active and remains
+// eligible for future delivery. These are never grounds for deactivation.
+const TRANSIENT_ERROR_CODES = new Set([
+  'messaging/too-many-topics',
+  'messaging/internal-error',
+  'messaging/unavailable',
+  'messaging/server-unavailable',
+  'messaging/device-message-rate-exceeded',
+  'messaging/topics-message-rate-exceeded',
+  'messaging/message-rate-exceeded',
+]);
+
+// Malformed payload / request errors. Reported as failures but NOT treated as
+// device invalidity — the device stays active.
+const INVALID_PAYLOAD_ERROR_CODES = new Set([
+  'messaging/invalid-argument',
+  'messaging/invalid-recipient',
+  'messaging/invalid-payload',
+  'messaging/invalid-data-payload-key',
+  'messaging/payload-size-limit-exceeded',
+  'messaging/invalid-options',
+]);
 
 const MAX_RETRIES = 3;
-const RETRY_DELAYS = [1000, 2000, 4000];
 const RETRY_BASE_DELAY = 500;
 const RETRY_MAX_DELAY = 5000;
 
@@ -55,10 +71,53 @@ function calculateRetryBackoff(attempt) {
   return delay + Math.floor(Math.random() * 200);
 }
 
-async function getUserFcmToken(userId) {
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * One-way digest used when a token identity must appear in logs.
+ */
+function tokenFingerprint(token) {
+  if (!token || typeof token !== 'string') return 'none';
+  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 16);
+}
+
+/**
+ * Load all ACTIVE device records belonging to the user. user_devices is the
+ * primary source of FCM tokens for fan-out.
+ */
+async function loadActiveDevices(userId) {
+  if (!supabaseAdmin) return [];
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('user_devices')
+      .select('id, fcm_token, platform, device_id')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+    if (error) {
+      logger.error(`[FCM] Failed to load active devices for user ${userId}: ${error.message}`);
+      return [];
+    }
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    logger.error(`[FCM] Failed to load active devices for user ${userId}: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Backward-compatibility source: the single profile-level token. Only used as a
+ * controlled fallback when the user has no active device records.
+ */
+async function getProfileFcmToken(userId) {
   if (!supabaseAdmin) return null;
   try {
-    const { data, error } = await supabaseAdmin.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('fcm_token')
+      .eq('id', userId)
+      .maybeSingle();
     if (error || !data?.fcm_token) return null;
     return data.fcm_token;
   } catch (err) {
@@ -67,134 +126,312 @@ async function getUserFcmToken(userId) {
   }
 }
 
-async function clearInvalidToken(userId) {
-  if (!supabaseAdmin) return;
+/**
+ * Deduplicate FCM tokens BEFORE sending so the same physical token is never
+ * targeted more than once, even if multiple device records reference it.
+ *
+ * Returns a Map of token → { deviceIds: string[] }.
+ */
+function dedupeTokens(devices) {
+  const byToken = new Map();
+  for (const device of devices || []) {
+    const token = device?.fcm_token;
+    if (!token || typeof token !== 'string') continue;
+    const entry = byToken.get(token);
+    if (entry) {
+      entry.deviceIds.push(device.id);
+    } else {
+      byToken.set(token, { deviceIds: device.id ? [device.id] : [] });
+    }
+  }
+  return byToken;
+}
+
+/**
+ * Split tokens into SDK-bounded chunks.
+ */
+function chunkTokens(tokens) {
+  const chunks = [];
+  for (let i = 0; i < tokens.length; i += FCM_MAX_BATCH_SIZE) {
+    chunks.push(tokens.slice(i, i + FCM_MAX_BATCH_SIZE));
+  }
+  return chunks;
+}
+
+/**
+ * Classify an FCM error code into a delivery category.
+ */
+function classifyError(code) {
+  if (PERMANENT_TOKEN_ERROR_CODES.has(code)) return 'permanent';
+  if (TRANSIENT_ERROR_CODES.has(code)) return 'transient';
+  if (INVALID_PAYLOAD_ERROR_CODES.has(code)) return 'invalid-payload';
+  return 'unknown';
+}
+
+/**
+ * Deactivate permanently-invalid devices and clear the profile fallback token
+ * if it pointed at one of the invalidated tokens.
+ */
+async function deactivateInvalidDevices(deviceIds, userId, invalidatedTokens) {
+  if (!supabaseAdmin) return 0;
+  if (deviceIds.length === 0 && invalidatedTokens.length === 0) return 0;
+
+  let deactivated = 0;
+  if (deviceIds.length > 0) {
+    try {
+      const { error } = await supabaseAdmin
+        .from('user_devices')
+        .update({
+          is_active: false,
+          deactivated_at: new Date().toISOString(),
+        })
+        .in('id', deviceIds);
+      if (error) {
+        logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${error.message}`);
+      } else {
+        deactivated = deviceIds.length;
+        logger.info(`[FCM] Deactivated ${deactivated} invalid device(s) for user ${userId}.`);
+      }
+    } catch (dbErr) {
+      logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${dbErr.message}`);
+    }
+  }
+
+  if (invalidatedTokens.length > 0) {
+    try {
+      await supabaseAdmin
+        .from('profiles')
+        .update({
+          fcm_token: null,
+          fcm_token_updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId)
+        .in('fcm_token', invalidatedTokens);
+    } catch (dbErr) {
+      logger.error(`[FCM] Failed to clear invalid profile FCM token for user ${userId}: ${dbErr.message}`);
+    }
+  }
+
+  return deactivated;
+}
+
+/**
+ * Record successful delivery as a last-seen touchpoint so active devices are
+ * never swept by the stale-device policy.
+ */
+async function touchDevicesLastSeen(deviceIds) {
+  if (!supabaseAdmin || deviceIds.length === 0) return;
   try {
     await supabaseAdmin
-      .from('profiles')
-      .update({
-        fcm_token: null,
-        fcm_token_updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
+      .from('user_devices')
+      .update({ last_seen: new Date().toISOString() })
+      .in('id', deviceIds);
   } catch (dbErr) {
-    logger.error({ err: dbErr, userId }, '[FCM] Failed to clear invalid FCM token');
+    logger.warn(`[FCM] Failed to update device last_seen: ${dbErr.message}`);
   }
 }
 
-function isTransientError(code) {
-  return TRANSIENT_ERROR_CODES.has(code);
-}
-
-function isInvalidTokenError(code) {
-  return INVALID_TOKEN_CODES.has(code);
-}
-
-export async function sendFcmNotification(userId, notification, data = {}) {
-  if (!firebaseAdmin || !firebaseAdmin.messaging) {
-    logger.warn('[FCM] Firebase not configured — skipping push notification');
-    return { success: false, error: 'Firebase not configured' };
-  }
-
-  const fcmToken = await getUserFcmToken(userId);
-  if (!fcmToken) {
-    logger.warn(`[FCM] No FCM token for user ${userId} — skipping push notification`);
-    return { success: false, error: 'No FCM token' };
-  }
-
-  const stringData = Object.fromEntries(
-    Object.entries(data).map(([k, v]) => [k, typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)])
-  );
-
+/**
+ * Send one chunk with retries limited to provider-side transient failures.
+ * Per-device permanent errors surface in BatchResponse.responses and are
+ * handled by the caller; this only retries whole-chunk transport failures.
+ */
+async function sendBatchWithRetry(chunkTokens, message, userId, chunkIndex) {
   let lastError = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const messageId = await firebaseAdmin.messaging().send({
-        token: fcmToken,
-        notification: {
-          title: notification.title,
-          body: notification.body
-        },
-        data: stringData
+      const batchResponse = await firebaseAdmin.messaging().sendEachForMulticast({
+        tokens: chunkTokens,
+        notification: message.notification,
+        ...(message.data ? { data: message.data } : {}),
       });
-
-      logger.info(`[FCM] Push notification sent to user ${userId} — messageId: ${messageId}`);
-      return { success: true, messageId };
+      return { rejected: false, batchResponse };
     } catch (err) {
       lastError = err;
+      const code = err?.code ?? 'unknown';
       logger.error(
+        `[FCM] Batch ${chunkIndex} delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${code}`,
         { err, userId, attempt: attempt + 1, maxRetries: MAX_RETRIES },
         '[FCM] Delivery failed for user'
       );
-
-      if (isInvalidTokenError(err.code)) {
-        logger.warn(`[FCM] Clearing invalid FCM token for user ${userId} due to error: ${err.code}`);
-        await clearInvalidToken(userId);
-        return { success: false, error: err.message, errorCode: err.code };
-      }
-
-      if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
+      const category = classifyError(code);
+      if (category === 'transient' && attempt < MAX_RETRIES - 1) {
         const delay = calculateRetryBackoff(attempt);
-        logger.info(`[FCM] Retrying after ${delay}ms for user ${userId}`);
+        logger.info(`[FCM] Retrying batch ${chunkIndex} after ${delay}ms for user ${userId}`);
         await new Promise(resolve => setTimeout(resolve, delay));
-      } else if (!isTransientError(err.code)) {
-        logger.warn(`[FCM] Non-retryable error for user ${userId}: ${err.code}`);
-        return { success: false, error: err.message, errorCode: err.code };
-      }
-    }
-  }
-
-  return {
-    success: false,
-    error: lastError?.message || 'Unknown error',
-    errorCode: lastError?.code
-  };
-}
-
-export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
-  if (!userId || !title || !body) {
-    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
-    return { success: false, error: 'Missing required fields' };
-  }
-
-  let dbSuccess = false;
-  try {
-    if (!supabaseAdmin) {
-      logger.error({}, '[NotificationService] Service-role client not configured — cannot persist notification.');
-      dbSuccess = false;
-    } else if (!isAllowedNotifType(notifType)) {
-      // Logged inside isAllowedNotifType; skip the insert rather than let the
-      // database CHECK constraint reject it silently.
-    } else {
-      const { error } = await supabaseAdmin.from('notifications').insert({
-        user_id: userId,
-        title,
-        body,
-        notif_type: notifType,
-        metadata: data
-      });
-
-      if (error) {
-        logger.error({ err: error }, '[NotificationService] Database insert failed');
       } else {
-        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
-        dbSuccess = true;
+        return { rejected: true, error: err };
       }
     }
-  } catch (dbErr) {
-    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
   }
-
-  let fcmResult;
-  try {
-    fcmResult = await sendFcmNotification(userId, { title, body }, data);
-  } catch (err) {
-    logger.error({ err }, '[NotificationService] Unexpected sendFcmNotification error');
-  }
-
-  return { success: dbSuccess || Boolean(fcmResult?.success), persisted: dbSuccess, fcm: fcmResult };
+  return { rejected: true, error: lastError };
 }
 
+/**
+ * Fan out one push notification to every ACTIVE device belonging to the user.
+ *
+ *   Notification Request
+ *        ↓
+ *   Load Active Devices (user_devices)
+ *        ↓
+ *   Deduplicate FCM Tokens
+ *        ↓
+ *   Chunk → sendEachForMulticast
+ *        ↓
+ *   Per-Device Result → Success / Failure
+ *        ↓
+ *   Deactivate Permanent Invalid Tokens
+ *
+ * A failure on one device NEVER prevents delivery to the user's other devices.
+ */
+export async function sendFcmNotification(userId, notification, data = {}) {
+  return measureExecution('NotificationService.sendFcmNotification', async () => {
+    if (!firebaseAdmin || !firebaseAdmin.messaging) {
+      logger.warn('[FCM] Firebase not configured — skipping push notification');
+      return { success: false, error: 'Firebase not configured', errorCode: 'FCM_NOT_CONFIGURED' };
+    }
+
+    const stringData = Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)])
+    );
+    const message = {
+      notification: {
+        title: notification?.title,
+        body: notification?.body,
+      },
+      ...(Object.keys(stringData).length > 0 ? { data: stringData } : {}),
+    };
+
+    const activeDevices = await loadActiveDevices(userId);
+    const tokenMap = dedupeTokens(activeDevices);
+    const tokens = [...tokenMap.keys()];
+
+    // Controlled backward-compat fallback: only when the user has NO active
+    // device records. Deduplication (Map) prevents double-sending if the same
+    // token exists both in user_devices and profiles.
+    if (tokens.length === 0) {
+      const profileToken = await getProfileFcmToken(userId);
+      if (profileToken) {
+        tokens.push(profileToken);
+        tokenMap.set(profileToken, { deviceIds: [], fromProfile: true });
+      }
+    }
+
+    if (tokens.length === 0) {
+      logger.warn(`[FCM] No active devices or FCM token for user ${userId} — skipping push notification`);
+      return { success: false, error: 'No FCM token', errorCode: 'NO_FCM_TOKEN' };
+    }
+
+    const summary = {
+      devicesFound: activeDevices.length,
+      uniqueTokens: tokens.length,
+      batches: 0,
+      delivered: 0,
+      permanent: 0,
+      transient: 0,
+      invalidPayload: 0,
+      unknown: 0,
+      deactivated: 0,
+    };
+
+    const messageIds = [];
+    let lastError = null;
+    let lastErrorCode = null;
+
+    const chunks = chunkTokens(tokens);
+    summary.batches = chunks.length;
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const sent = await sendBatchWithRetry(chunk, message, userId, i + 1);
+
+      if (sent.rejected) {
+        const code = sent.error?.code ?? 'unknown';
+        const category = classifyError(code);
+        if (category === 'transient') summary.transient += chunk.length;
+        else if (category === 'invalid-payload') summary.invalidPayload += chunk.length;
+        else summary.unknown += chunk.length;
+        lastError = sent.error;
+        lastErrorCode = code;
+        continue;
+      }
+
+      const responses = sent.batchResponse?.responses ?? [];
+      const invalidDeviceIds = [];
+      const invalidTokens = [];
+      const touchedDeviceIds = [];
+
+      for (let j = 0; j < responses.length; j++) {
+        const resp = responses[j];
+        const token = chunk[j];
+        const entry = tokenMap.get(token);
+        const deviceIds = entry?.deviceIds ?? [];
+
+        if (resp?.success) {
+          summary.delivered += 1;
+          if (resp.messageId) messageIds.push(resp.messageId);
+          touchedDeviceIds.push(...deviceIds);
+          continue;
+        }
+
+        const code = resp?.error?.code ?? 'unknown';
+        const category = classifyError(code);
+        if (category === 'permanent') {
+          summary.permanent += 1;
+          invalidDeviceIds.push(...deviceIds);
+          invalidTokens.push(token);
+          logger.warn(
+            `[FCM] Permanent token error for user ${userId} — deactivating device (code: ${code}, token fp: ${tokenFingerprint(token)})`
+          );
+        } else if (category === 'transient') {
+          summary.transient += 1;
+          logger.warn(`[FCM] Temporary FCM failure for user ${userId} — device kept active (code: ${code})`);
+        } else if (category === 'invalid-payload') {
+          summary.invalidPayload += 1;
+          logger.warn(`[FCM] Invalid payload for user ${userId} — device kept active (code: ${code})`);
+        } else {
+          summary.unknown += 1;
+          logger.warn(`[FCM] Unknown FCM error for user ${userId} — device kept active (code: ${code})`);
+        }
+
+        if (!lastError) {
+          lastError = resp?.error ?? new Error(`Delivery failed: ${code}`);
+          lastErrorCode = code;
+        }
+      }
+
+      if (touchedDeviceIds.length > 0) {
+        await touchDevicesLastSeen([...new Set(touchedDeviceIds)]);
+      }
+      if (invalidDeviceIds.length > 0 || invalidTokens.length > 0) {
+        summary.deactivated += await deactivateInvalidDevices(
+          [...new Set(invalidDeviceIds)],
+          userId,
+          [...new Set(invalidTokens)]
+        );
+      }
+    }
+
+    const success = summary.delivered > 0;
+    const result = {
+      success,
+      ...(success && messageIds.length > 0 ? { messageId: messageIds[0] } : {}),
+      ...(!success ? { error: lastError?.message ?? 'Delivery failed', errorCode: lastErrorCode ?? 'UNKNOWN_ERROR' } : {}),
+      summary,
+    };
+
+    logger.info(
+      `[FCM] Fan-out complete for user ${userId}: delivered=${summary.delivered}/${summary.uniqueTokens} ` +
+      `batches=${summary.batches} permanent=${summary.permanent} transient=${summary.transient} ` +
+      `invalidPayload=${summary.invalidPayload} unknown=${summary.unknown} deactivated=${summary.deactivated}`
+    );
+    return result;
+  });
+}
+
+// ============================================================================
+// Delivery-OTP subsystem (unchanged)
+// ============================================================================
 export const hashDeliveryOtp = hashOtp;
 export const verifyDeliveryOtpHash = verifyOtpHash;
 
@@ -204,6 +441,21 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
       logger.error({}, '[NotificationService] Service-role client not configured — cannot store OTP.');
       return null;
     }
+
+    // Invalidate all existing unverified OTPs for this order so that only one
+    // active OTP can ever exist per order within the TTL window. This prevents
+    // an attacker who obtained an older OTP from using it after a new one is
+    // issued (see issue #11205).
+    const { error: invalidateError } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({ expires_at: new Date().toISOString(), verified: true })
+      .eq('order_id', orderId)
+      .eq('verified', false);
+
+    if (invalidateError) {
+      logger.error({ err: invalidateError }, '[NotificationService] Failed to invalidate existing OTPs');
+    }
+
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 
@@ -310,6 +562,75 @@ export async function expireDeliveryOtps(orderId) {
   });
 }
 
+// ============================================================================
+// Orchestration entry points
+// ============================================================================
+
+/**
+ * Persist a notification row with notif_type allowlist validation.
+ * Kept as a reusable primitive; sendPushNotification uses it internally.
+ */
+export async function insertNotification(notificationData) {
+  const notifType = notificationData?.notif_type;
+  if (notifType && !ALLOWED_NOTIF_TYPES.has(notifType)) {
+    throw new DomainError(400, { error: `Invalid notif_type: ${notifType}` });
+  }
+  if (!supabaseAdmin) {
+    logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    return null;
+  }
+  const { data, error } = await supabaseAdmin
+    .from('notifications')
+    .insert(notificationData)
+    .select()
+    .single();
+  if (error) {
+    logger.error('[NotificationService] Database insert failed:', error.message);
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Existing push entry point used by order lifecycle, payments, escrow and
+ * document flows. Persists to the notifications table, then fans the push out
+ * to every active device via sendFcmNotification.
+ */
+export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
+  return measureExecution('NotificationService.sendPushNotification', async () => {
+    if (notifType && !ALLOWED_NOTIF_TYPES.has(notifType)) {
+      throw new DomainError(400, { error: `Invalid notif_type: ${notifType}` });
+    }
+
+    if (supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin.from('notifications').insert({
+          user_id: userId,
+          title,
+          body,
+          notif_type: notifType,
+          metadata,
+        });
+
+        if (error) {
+          logger.error(`[NotificationService] Database insert failed: ${error.message}`);
+        }
+      } catch (dbErr) {
+        logger.error(`[NotificationService] Database error: ${dbErr.message}`);
+      }
+    }
+
+    let fcmResult;
+    try {
+      fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
+    } catch (err) {
+      logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+      fcmResult = { success: false, error: err?.message ?? String(err) };
+    }
+    return { success: fcmResult?.success, fcm: fcmResult };
+  });
+}
+
 export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
@@ -326,6 +647,10 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
+        // `delivery_otp` is not in the notifications.notif_type CHECK constraint
+        // (see supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql),
+        // so use an allowed type or the insert always fails and the OTP
+        // notification is never persisted.
         notif_type: 'order_update',
         // No OTP or OTP-derived value is persisted here: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
@@ -348,23 +673,11 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp',  }
+      { orderDisplayId, notifType: 'delivery_otp' }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-    // Return the actual push-delivery result so callers can branch on it.
-    // The notification row is persisted independently of push delivery, so
-    // overall success is driven by the FCM outcome.
-    const fcmOk = Boolean(fcmResult?.success);
-    return {
-      success: fcmOk,
-      dbSuccess,
-      fcm: {
-        success: fcmOk,
-        messageId: fcmResult?.messageId ?? null,
-        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
-      },
-    };
-  }
+  return { success: dbSuccess || fcmResult?.success, fcm: fcmResult };
+}

@@ -9,7 +9,16 @@ import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../core/api_client.dart';
+import '../utils/upi_link_validator.dart';
 
+/// Payment pipeline:
+///   1. createOrder()  → orderId returned
+///   2. GET /api/payments/:orderId/status  → confirm escrow state
+///   3. POST /api/payments/upi-intent      → get UPI deep-link
+///   4. url_launcher opens UPI app         → user completes payment
+///   5. POST /api/payments/lock { tx_hash } → backend verifies on-chain
+///   6. Show "Payment Locked in Escrow 🔒" confirmation
 class BookingConfirmationScreen extends StatefulWidget {
   const BookingConfirmationScreen({
     super.key,
@@ -228,9 +237,9 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       );
       if (body is Map<String, dynamic>) {
         setState(() {
-          _upiDeepLink = body['deep_link'] as String?;
-          _amountInr = body['amount_inr'] as String?;
-          _createdOrderDisplayId = body['order_ref'] as String?;
+          _upiDeepLink = body['deep_link']?.toString();
+          _amountInr = body['amount_inr']?.toString();
+          _createdOrderDisplayId = body['order_ref']?.toString();
           _isAwaitingUpi = true;
         });
       }
@@ -261,7 +270,21 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   // ── Step 3: Open UPI deep-link ────────────────────────────────────────────
   Future<void> _launchUpi() async {
     if (_upiDeepLink == null) return;
-    final uri = Uri.parse(_upiDeepLink!);
+    final uri = Uri.tryParse(_upiDeepLink!);
+    // Never launch a server-controlled deep link without validation: a
+    // malicious/compromised backend could return an attacker payee, a
+    // mismatched amount, or an entirely different scheme (tel:, sms:, http).
+    if (uri == null ||
+        !UpiLinkValidator.isSafe(_upiDeepLink, expectedAmount: _amountInr)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'This payment link is invalid or unsafe and was not opened.'),
+        ),
+      );
+      return;
+    }
     try {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -344,6 +367,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     });
     _controller.forward(from: 0).then((_) async {
       await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
       _exitToBookings();
     });
   }

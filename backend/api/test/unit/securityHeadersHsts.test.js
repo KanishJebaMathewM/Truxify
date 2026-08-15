@@ -63,4 +63,13 @@ describe('securityHeaders HSTS max-age', () => {
     securityHeaders(req, res, next);
     expect(res._headers['strict-transport-security']).toBeUndefined();
   });
+
+  it('includes preload flag when SECURE_HSTS_PRELOAD is true', () => {
+    process.env.SECURE_HSTS_PRELOAD = 'true';
+    const { req, res, next } = makeMocks();
+    securityHeaders(req, res, next);
+    expect(res._headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains; preload');
+    delete process.env.SECURE_HSTS_PRELOAD;
+  });
 });
+

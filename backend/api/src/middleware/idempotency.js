@@ -1,8 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
-const CACHEABLE_STATUS = new Set([200, 201, 202, 204]);
-
 const inMemoryStore = new Map();
 const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
@@ -49,10 +47,6 @@ function setInMemory(key, data, ttlMs) {
     }
   }
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
-}
-
-function isCacheable(statusCode) {
-  return CACHEABLE_STATUS.has(statusCode);
 }
 
 function cacheKey(req, idempotencyKey) {
@@ -103,6 +97,8 @@ export function requireIdempotency(ttlSeconds = 3600) {
         logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
         return res.status(cached.statusCode).json(cached.body);
       }
+
+      let pendingCache = null;
 
       if (redisClient) {
         const lockKey = `${key}:lock`;
@@ -158,9 +154,26 @@ export function requireIdempotency(ttlSeconds = 3600) {
           });
         };
 
+        // Ensure the success response is cached BEFORE the lock is released, so
+        // a duplicate arriving after 'finish' finds the cached entry and
+        // short-circuits instead of re-acquiring the lock and re-entering the
+        // handler.
+        const finalize = async () => {
+          if (pendingCache) {
+            const cachePromise = pendingCache;
+            pendingCache = null;
+            try {
+              await cachePromise;
+            } catch (err) {
+              /* error already logged by the cache write's own .catch */
+            }
+          }
+          releaseLock();
+        };
+
         // Ensure lock is reliably released when response terminates
-        res.once('finish', releaseLock);
-        res.once('close', releaseLock);
+        res.once('finish', finalize);
+        res.once('close', finalize);
       } else {
         // Memory-only mode: use in-memory lock to prevent concurrent handler execution
         if (inFlightRequests.has(key)) {
@@ -186,6 +199,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
         res.once('close', releaseMemoryLock);
       }
 
+      let pendingCache = null;
       let responded = false;
 
       const originalJson = res.json.bind(res);
@@ -197,7 +211,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
           const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
 
           if (redisClient) {
-            redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
+            pendingCache = redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
               logger.error({ event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message }, '[Idempotency] Failed to cache response');
             });
           } else {

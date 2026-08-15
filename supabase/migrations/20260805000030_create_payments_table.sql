@@ -8,7 +8,7 @@ create table if not exists payments (
   id              uuid primary key default gen_random_uuid(),
   order_id        uuid not null,
   user_id         uuid not null,
-  amount_paisa    int  not null default 0,
+  amount_paisa    numeric(20,0) not null default 0 check (amount_paisa >= 0),
   status          text not null default 'pending'
                   check (status in ('pending', 'initiated', 'captured', 'released', 'refunded', 'failed', 'cancelled')),
   payment_method  text not null default 'upi'

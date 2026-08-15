@@ -139,6 +139,18 @@ describe('mlRoutes GET /eta', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a tripId containing PostgREST filter-breaking characters', async () => {
+    const res = await request(makeApp()).get(
+      '/api/ml/eta?tripId=00000000-0000-0000-0000-000000000000).neq.id',
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a tripId containing commas or quotes', async () => {
+    const res = await request(makeApp()).get('/api/ml/eta?tripId=abc,def');
+    expect(res.status).toBe(400);
+  });
+
   it('denies non-owners with 404', async () => {
     supabaseChain.maybeSingle
       .mockResolvedValueOnce({ data: { id: 't1', order_id: 'o1' }, error: null })

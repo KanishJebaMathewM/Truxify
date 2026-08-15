@@ -3,13 +3,41 @@
   "nodes": [
     {
       "parameters": {
-        "url": "wss://polygon-mempool.g.alchemy.com/v2/your-api-key",
-        "options": {}
+        "mode": "client",
+        "url": "={{ $env.ALCHEMY_WS_URL }}",
+        "options": {
+          "jsonBody": true,
+          "reconnect": true,
+          "maxReconnectAttempts": 10,
+          "reconnectInterval": 1000
+        }
       },
       "name": "Polygon Mempool WebSocket",
-      "type": "n8n-nodes-base.webhook",
+      "type": "n8n-nodes-base.webSocket",
       "typeVersion": 1,
       "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.method }}",
+              "operation": "exists"
+            }
+          ],
+          "boolean": [
+            {
+              "value1": "={{ $json.params !== undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Validate Stream Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
     },
     {
       "parameters": {
@@ -25,22 +53,54 @@
       "name": "Is Flash Loan Pattern?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [650, 300]
     },
     {
       "parameters": {
         "url": "http://api:5000/api/internal/defensive-pause",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "POST",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "reason",
+              "value": "=flash-loan/frontrun heuristic matched: gasPrice={{ $json.gasPrice }} wei (threshold 500 gwei)"
+            },
+            {
+              "name": "txHash",
+              "value": "={{ $json.hash || ($json.params && $json.params.result ? $json.params.result.hash : '') }}"
+            }
+          ]
+        },
         "options": {}
       },
       "name": "Trigger Frontrun Defensive Pause",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [650, 200]
+      "position": [850, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     }
   ],
   "connections": {
     "Polygon Mempool WebSocket": {
+      "main": [
+        [
+          {
+            "node": "Validate Stream Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Stream Payload": {
       "main": [
         [
           {

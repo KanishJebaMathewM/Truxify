@@ -53,7 +53,7 @@ from app.models.trust_scorer import trust_scorer
 from app.models.deadhead_eliminator import find_return_loads
 from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.ocr_verifier import ocr_verifier
-from app.models.base import model_exists
+from app.models.base import model_exists, get_model_meta
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
 from routes import register_ml_routers, verify_api_key
@@ -412,11 +412,15 @@ async def health():
     }
     non_optional = {k: v for k, v in models.items() if k != 'eta_predictor'}
     all_ready = all(non_optional.values())
+    demand_meta = (get_model_meta(DEMAND_MODEL_NAME) or {}).get("training_meta", {})
     return {
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",
         "models": models,
         "models_loaded": len(loaded_models),
+        "model_artifact_origin": {
+            "demand_forecast": demand_meta.get("source"),
+        },
     }
 
 

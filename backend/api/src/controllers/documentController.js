@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabaseAdmin, supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -65,16 +65,16 @@ export async function uploadDriverDocument(req, res) {
       });
     }
 
-    // Retrieve existing document of the same type for this driver
-    const { data: existingDoc, error: checkError } = await supabase
+    // Retrieve existing document of the same type for this driver (pre-flight check)
+    const { data: existingDoc, error: checkErrorPreflight } = await supabaseAdmin
       .from('driver_documents')
       .select('id, storage_path')
       .eq('driver_id', driverId)
       .eq('document_type', documentType)
       .maybeSingle();
 
-    if (checkError) {
-      logger.error('[DocumentController] Failed to query existing document:', checkError.message);
+    if (checkErrorPreflight) {
+      logger.error('[DocumentController] Failed to query existing document:', checkErrorPreflight.message);
       return res.status(500).json({ error: 'Failed to verify existing documents' });
     }
 
@@ -138,19 +138,6 @@ export async function uploadDriverDocument(req, res) {
       clearTimeout(timeoutId);
     }
 
-    // Check if driver already has an existing document record for this documentType
-    const { data: existingDoc2, error: checkError2 } = await client
-      .from('driver_documents')
-      .select('id, storage_path')
-      .eq('driver_id', driverId)
-      .eq('document_type', documentType)
-      .maybeSingle();
-
-    if (checkError2) {
-      logger.error('[DocumentController] Failed to check for existing document:', checkError2.message);
-      return res.status(500).json({ error: 'Failed to process document' });
-    }
-
     const extension = MIME_EXTENSION_MAP[verifiedMimeType];
     if (!extension) {
       return res.status(422).json({
@@ -175,7 +162,8 @@ export async function uploadDriverDocument(req, res) {
     let record;
     let dbError;
 
-    if (existingDoc2) {
+    const existingDoc = existingDocPreflight;
+    if (existingDoc) {
       // Update existing record (Supersede)
       const { data: updatedRecord, error: updateErr } = await client
         .from('driver_documents')
@@ -185,7 +173,7 @@ export async function uploadDriverDocument(req, res) {
           status: 'pending_review',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existingDoc2.id)
+        .eq('id', existingDoc.id)
         .select('id, document_type, status, created_at')
         .single();
 
@@ -226,16 +214,16 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Clean up old file from storage to prevent orphaned files
-    if (existingDoc2?.storage_path) {
+    if (existingDoc?.storage_path) {
       await client.storage
         .from('driver-documents')
-        .remove([existingDoc2.storage_path])
+        .remove([existingDoc.storage_path])
         .catch((cleanupErr) => {
           logger.warn('[DocumentController] Failed to delete superseded storage file:', cleanupErr.message);
         });
     }
 
-    return res.status(existingDoc2 ? 200 : 201).json({
+    return res.status(existingDoc ? 200 : 201).json({
       success: true,
       document: record,
     });

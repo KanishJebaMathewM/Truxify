@@ -88,6 +88,18 @@ export async function reconcileFailedReputationUpdates() {
 
         const { error: deleteError } = await supabaseAdmin.from('reputation_failures').delete().eq('id', row.id);
         if (deleteError) {
+          // The award already succeeded but the pending row could not be removed.
+          // Bump retry_count so the row is eventually excluded from selection and is
+          // not re-awarded indefinitely if the delete keeps failing (issue #12332).
+          const newRetryCount = (row.retry_count ?? 0) + 1;
+          await supabaseAdmin.from('reputation_failures').upsert({
+            id: row.id,
+            driver_wallet: row.driver_wallet,
+            stars: row.stars,
+            retry_count: newRetryCount,
+            last_error: `delete-failed: ${deleteError.message}`,
+            last_attempt_at: new Date().toISOString(),
+          });
           logger.warn(`[reputation-reconciliation] Award succeeded but failed to remove pending row ${row.id}: ${deleteError.message}`);
         }
       } catch (err) {

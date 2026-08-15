@@ -1,30 +1,56 @@
-import { describe, it, expect, vi } from 'vitest'
-import { getRoot, notFound } from '../../src/controllers/rootController.js'
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+import { getRoot, notFound } from '../../src/controllers/rootController.js';
+
+function makeMockRes() {
+  const res = {};
+  res.status = vi.fn(() => res);
+  res.json = vi.fn(() => res);
+  res.send = vi.fn(() => res);
+  return res;
+}
 
 describe('rootController', () => {
-  it('getRoot returns an HTML status page including the websocket URL', () => {
-    const res = { send: vi.fn() }
-    getRoot({ hostname: 'api.example.com' }, res)
-    expect(res.send).toHaveBeenCalledWith(expect.stringContaining('ws://api.example.com'))
-  })
+  describe('getRoot', () => {
+    it('returns HTML with API status message', () => {
+      const req = { hostname: 'localhost' };
+      const res = makeMockRes();
 
-  it('getRoot defaults the port from the PORT environment variable', () => {
-    const original = process.env.PORT
-    process.env.PORT = '8080'
-    const res = { send: vi.fn() }
-    getRoot({ hostname: 'localhost' }, res)
-    expect(res.send).toHaveBeenCalledWith(expect.stringContaining(':8080/ws/tracking'))
-    if (original === undefined) delete process.env.PORT
-    else process.env.PORT = original
-  })
+      getRoot(req, res);
 
-  it('notFound returns a 404 JSON error', () => {
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn(),
-    }
-    notFound({}, res)
-    expect(res.status).toHaveBeenCalledWith(404)
-    expect(res.json).toHaveBeenCalledWith({ error: 'Endpoint resource not found.' })
-  })
-})
+      expect(res.send).toHaveBeenCalled();
+      const html = res.send.mock.calls[0][0];
+      expect(html).toContain('Truxify Backend API is running');
+      expect(html).toContain('WebSockets');
+    });
+
+    it('uses request hostname when available', () => {
+      const req = { hostname: 'api.truxify.example.com' };
+      const res = makeMockRes();
+
+      getRoot(req, res);
+
+      expect(res.send).toHaveBeenCalled();
+      const html = res.send.mock.calls[0][0];
+      expect(html).toContain('api.truxify.example.com');
+    });
+  });
+
+  describe('notFound', () => {
+    it('returns 404 with error message', () => {
+      const req = {};
+      const res = makeMockRes();
+
+      notFound(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Endpoint resource not found.'
+      });
+    });
+  });
+});

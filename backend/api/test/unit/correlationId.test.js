@@ -128,7 +128,6 @@ describe('correlationIdMiddleware', () => {
 
 
 // === Spec 14 test ===
-import { correlationContext } from '../../src/middleware/correlationId.js';
 describe('correlationId context', () => {
   it('stores in run()', () => {
     correlationContext.run({ correlationId: 'cid-1' }, () => {
@@ -138,7 +137,6 @@ describe('correlationId context', () => {
   it('empty outside', () => {
     expect(correlationContext.getStore()?.correlationId).toBeUndefined();
   });
-});
 
   it('multiple nested calls maintain separate contexts', () => {
     let outerId = null;

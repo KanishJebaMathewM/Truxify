@@ -63,19 +63,6 @@ import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
-
-// Sanitize load filter query params to prevent injection attacks
-function sanitizeLoadFilters(query) {
-  const allowed = ['min_price', 'max_price', 'distance', 'goods_type', 'weight', 'origin', 'destination', 'page', 'limit'];
-  const sanitized = {};
-  for (const key of Object.keys(query)) {
-    if (allowed.includes(key)) {
-      sanitized[key] = query[key];
-    }
-  }
-  return sanitized;
-}
-
 // ============================================================================
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
 // GET /api/loads

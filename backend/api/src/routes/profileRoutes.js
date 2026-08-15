@@ -857,7 +857,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
     });
   } catch (err) {
     logger.error(err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    res.status(500).json({ error: 'Internal Server Error', details: err?.message });
   }
 });
 

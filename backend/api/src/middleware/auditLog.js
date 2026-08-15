@@ -63,7 +63,7 @@ const ACTION_RESOURCE_MAP = Object.freeze({
 /**
  * Recursively sanitizes sensitive parameters, arrays, and nested structures.
  */
-export function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
+function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
   if (data === null || data === undefined) return data;
   if (currentDepth > maxDepth) return '[Max Depth Exceeded]';
 
@@ -122,7 +122,7 @@ export function computeStateDiff(before, after) {
 /**
  * Resolves the resource type from policy action or URI pattern.
  */
-export function resolveResourceType(action, req) {
+function resolveResourceType(action, req) {
   const mapping = ACTION_RESOURCE_MAP[action];
   if (mapping) return mapping.resourceType;
 
@@ -137,7 +137,7 @@ export function resolveResourceType(action, req) {
 /**
  * Resolves the target resource identifier from request params or body.
  */
-export function resolveResourceId(req) {
+function resolveResourceId(req) {
   return (
     req.params?.id ||
     req.params?.orderId ||

@@ -406,7 +406,9 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
         require(address(governanceToken) != address(0), "Governance token not configured");
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        uint256 requiredQuorum = (governanceToken.totalSupply() * daoQuorumBps) / 10000;
+        require(totalVotes > 0, "No votes cast");
+        uint256 snapSupply = IVotes(address(governanceToken)).getPastTotalSupply(proposal.snapshotBlock);
+        uint256 requiredQuorum = (snapSupply * daoQuorumBps) / 10000;
         require(totalVotes >= requiredQuorum, "Quorum not reached");
 
         bool passed = (proposal.votesFor * 100) / totalVotes >= daoThreshold;

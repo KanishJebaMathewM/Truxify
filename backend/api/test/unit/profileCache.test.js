@@ -38,7 +38,6 @@ describe('profileCache stats', () => {
 
 
 // === Spec 8 test ===
-import { isValidProfile } from '../../src/lib/profileCache.js';
 describe('isValidProfile', () => {
   it('accepts valid profile with required fields', () => {
     expect(isValidProfile({ id: 'a', createdAt: '2026-01-01T00:00:00Z' })).toBe(true);

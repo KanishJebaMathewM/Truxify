@@ -37,6 +37,7 @@ import {
   submitEscrowRefund,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
+import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
 
 const router = express.Router();
 

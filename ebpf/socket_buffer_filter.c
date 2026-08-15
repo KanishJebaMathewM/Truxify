@@ -15,11 +15,22 @@ struct {
 } telemetry_ringbuf SEC(".maps");
 
 // Rate-limit map: key = connection tuple hash, value = entries in current window
+#define RATE_LIMIT_WINDOW_NS 1000000000ULL // 1 second in nanoseconds
+#define RATE_LIMIT_MAX_PER_WINDOW 1000     // Max 1000 entries per window per connection
+
+struct rate_limit_entry {
+    // bpf_spin_lock guards the read-modify-write on the shared value so
+    // concurrent CPUs cannot both read the same count and lose increments.
+    struct bpf_spin_lock lock;
+    __u64 last_time_ns;
+    __u32 packet_count;
+};
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
-    __type(value, __u32);
+    __type(value, struct rate_limit_entry);
 } rate_limit_map SEC(".maps");
 
 // Trusted telemetry port (configurable via bpftool map update)
@@ -61,14 +72,29 @@ int socket_telemetry_filter(struct __sk_buff *skb) {
 
     // Rate limiting: hash connection tuple (src_ip ^ dst_ip ^ dst_port)
     __u64 rate_key = (__u64)ip.saddr ^ ((__u64)ip.daddr << 32) ^ tcp.dest;
-    __u32 *count = bpf_map_lookup_elem(&rate_limit_map, &rate_key);
-    if (count) {
-        if (*count >= 1000) // Max 1000 entries per window per connection
-            return 0;
-        (*count)++;
+    __u64 now = bpf_ktime_get_ns();
+    struct rate_limit_entry *entry = bpf_map_lookup_elem(&rate_limit_map, &rate_key);
+    if (entry) {
+        bpf_spin_lock(&entry->lock);
+        if (now - entry->last_time_ns < RATE_LIMIT_WINDOW_NS) {
+            if (entry->packet_count >= RATE_LIMIT_MAX_PER_WINDOW) {
+                bpf_spin_unlock(&entry->lock);
+                return 0; // Max 1000 entries per window per connection
+            }
+            entry->packet_count++;
+        } else {
+            // Window elapsed: reset the per-window counter (lifetime cap -> windowed).
+            entry->last_time_ns = now;
+            entry->packet_count = 1;
+        }
+        bpf_spin_unlock(&entry->lock);
     } else {
-        __u32 one = 1;
-        bpf_map_update_elem(&rate_limit_map, &rate_key, &one, BPF_ANY);
+        struct rate_limit_entry new_entry = {
+            .lock = {},
+            .last_time_ns = now,
+            .packet_count = 1
+        };
+        bpf_map_update_elem(&rate_limit_map, &rate_key, &new_entry, BPF_ANY);
     }
 
     // Guard against short/truncated packets: subtracting the L2/L3/L4 header

@@ -91,3 +91,51 @@ export async function dispatchPayout({ driverId, withdrawal }) {
   logger.error(`[PayoutProvider] Provider "${provider}" is not wired up. Configure WITHDRAWAL_PAYOUT_WEBHOOK_URL.`);
   throw new Error(`Withdrawal payout provider "${provider}" is not supported yet.`);
 }
+
+/**
+ * Best-effort recovery of a payout's settlement reference from the provider.
+ *
+ * A withdraw can be left with `payout_attempted_at` set but `settlement_ref`
+ * NULL in the database when the persist between dispatch and completion fails
+ * (Issue #14686). As long as the payout actually left the platform we must be
+ * able to re-derive the reference rather than orphaning the driver's funds.
+ *
+ * Providers that support status lookup opt in via WITHDRAWAL_PAYOUT_STATUS_URL;
+ * the platform previously sent `reference: "w<withdrawalId>"` to the dispatch
+ * webhook, which the status endpoint can resolve back to a settlement_ref.
+ * When no status endpoint is configured (or the lookup fails) we return null so
+ * the caller can flag the row for manual reconciliation instead of guessing.
+ */
+export async function recoverSettlementRef({ withdrawalId }) {
+  const statusUrl = process.env.WITHDRAWAL_PAYOUT_STATUS_URL;
+  if (!statusUrl) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `${statusUrl}${statusUrl.includes('?') ? '&' : '?'}reference=w${withdrawalId}`,
+      {
+        method: 'GET',
+        headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(payoutTimeoutMs()),
+      },
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = await response.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return null;
+    }
+
+    return body.settlement_ref || body.reference || null;
+  } catch (err) {
+    logger.error(
+      `[PayoutProvider] Failed to recover settlement ref for withdrawal ${withdrawalId}: ${err.message}`,
+    );
+    return null;
+  }
+}

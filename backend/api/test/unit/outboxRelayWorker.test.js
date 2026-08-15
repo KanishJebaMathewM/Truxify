@@ -23,7 +23,14 @@ vi.mock('../../src/services/outbox/outboxService.js', () => ({
 }));
 
 const mockEventBus = vi.hoisted(() => ({
-  emitSafe: vi.fn(),
+  publishAndReport: vi.fn().mockResolvedValue({
+    published: true,
+    deduplicated: false,
+    consumed: true,
+    adapterAttempted: 1,
+    adapterFailures: 0,
+    adapterErrors: [],
+  }),
 }));
 
 vi.mock('../../src/core/events/index.js', () => ({
@@ -50,7 +57,6 @@ describe('outboxRelayWorker', () => {
   });
 
   it('publishes pending events and marks them published', async () => {
-    // Trigger a relay cycle by starting the worker, then await the immediate run.
     mockOutboxService.fetchPendingEvents.mockResolvedValue([
       {
         id: 'evt-1',
@@ -63,16 +69,11 @@ describe('outboxRelayWorker', () => {
     ]);
 
     worker.startOutboxRelayWorker();
-    // Wait for the immediate relayOnce() to finish.
     await vi.waitFor(() => {
-      expect(mockEventBus.emitSafe).toHaveBeenCalled();
+      expect(mockEventBus.publishAndReport).toHaveBeenCalled();
     });
 
-    expect(mockEventBus.emitSafe).toHaveBeenCalledWith('order.created', expect.objectContaining({
-      eventId: 'evt-1',
-      aggregateId: 'order-1',
-      payload: { a: 1 },
-    }));
+    expect(mockEventBus.publishAndReport).toHaveBeenCalledWith(expect.any(Object), undefined, { adapters: ['kafka'] });
     expect(mockOutboxService.markPublished).toHaveBeenCalledWith('evt-1');
     worker.stopOutboxRelayWorker();
   });
@@ -88,7 +89,7 @@ describe('outboxRelayWorker', () => {
         created_at: '2026-08-11T00:00:00.000Z',
       },
     ]);
-    mockEventBus.emitSafe.mockImplementation(() => {
+    mockEventBus.publishAndReport.mockImplementation(() => {
       throw new Error('bus down');
     });
 
@@ -98,6 +99,38 @@ describe('outboxRelayWorker', () => {
     });
 
     expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-2', expect.stringContaining('bus down'));
+    worker.stopOutboxRelayWorker();
+  });
+
+  it('does NOT mark an event published when no adapter handled it (regression #11209)', async () => {
+    mockOutboxService.fetchPendingEvents.mockResolvedValue([
+      {
+        id: 'evt-3',
+        event_type: 'order.created',
+        aggregate_id: 'order-3',
+        aggregate_type: 'order',
+        payload: { a: 1 },
+        created_at: '2026-08-11T00:00:00.000Z',
+      },
+    ]);
+    // Simulate the case where the kafka adapter is not registered / no consumer
+    // handled the event: adapterAttempted as 0 and no failures.
+    mockEventBus.publishAndReport.mockResolvedValue({
+      published: true,
+      deduplicated: false,
+      consumed: false,
+      adapterAttempted: 0,
+      adapterFailures: 0,
+      adapterErrors: [],
+    });
+
+    worker.startOutboxRelayWorker();
+    await vi.waitFor(() => {
+      expect(mockOutboxService.markFailed).toHaveBeenCalled();
+    });
+
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith('evt-3', expect.stringContaining('No event consumer'));
+    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith('evt-3');
     worker.stopOutboxRelayWorker();
   });
 });

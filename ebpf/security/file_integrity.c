@@ -6,6 +6,25 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+// Substring match helper over a bounded stack buffer (replaces libc strstr,
+// which is unavailable to the BPF verifier).
+static __always_inline int str_contains(const char *str, int str_len, const char *sub, int sub_len)
+{
+    for (int i = 0; i <= str_len - sub_len; i++) {
+        int match = 1;
+        for (int j = 0; j < sub_len; j++) {
+            if (str[i + j] != sub[j]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Map for file integrity
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -26,17 +45,25 @@ struct {
 SEC("tracepoint/syscalls/sys_enter_open")
 int trace_file_open(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     
     // Check for suspicious file extensions
-    const char *suspicious_extensions[] = {
-        ".exe", ".bat", ".sh", ".py",
-        ".js", ".vbs", ".ps1", ".cmd",
-        ".jar", ".dll", ".so", ".php"
+    struct {
+        const char *ext;
+        int len;
+    } suspicious_extensions[] = {
+        { ".exe", 4 }, { ".bat", 4 }, { ".sh", 3 }, { ".py", 3 },
+        { ".js", 3 }, { ".vbs", 4 }, { ".ps1", 4 }, { ".cmd", 4 },
+        { ".jar", 4 }, { ".dll", 4 }, { ".so", 3 }, { ".php", 4 }
     };
     
     for (int i = 0; i < 12; i++) {
-        if (strstr(filename, suspicious_extensions[i]) != NULL) {
+        if (str_contains(filename, sizeof(filename), suspicious_extensions[i].ext, suspicious_extensions[i].len)) {
             bpf_printk("Suspicious file opened: %s\n", filename);
         }
     }
@@ -64,7 +91,12 @@ int trace_file_write(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_unlink")
 int trace_file_delete(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     bpf_printk("File deleted: %s\n", filename);
     
     return 0;
@@ -74,7 +106,12 @@ int trace_file_delete(struct trace_event_raw_sys_enter *args)
 SEC("tracepoint/syscalls/sys_enter_chmod")
 int trace_file_chmod(struct trace_event_raw_sys_enter *args)
 {
-    const char *filename = (const char *)args->args[0];
+    char filename[256];
+    // args->args[0] is a userspace pointer to the filename; it cannot be
+    // dereferenced from kernel context. Probe it into a bounded stack buffer.
+    if (bpf_probe_read_user_str(filename, sizeof(filename), (void *)(long)args->args[0]) < 0) {
+        return 0;
+    }
     __u32 mode = (__u32)args->args[1];
     
     bpf_printk("File permissions changed: %s (mode: %d)\n", filename, mode);

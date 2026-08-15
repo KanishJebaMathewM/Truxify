@@ -1,7 +1,16 @@
 import shardManager from '../services/sharding/ShardManager.js';
 import logger from './logger.js';
+import { validateCoordinateRange } from '../utils/coordinates.js';
 
 function firstDefined(...values) {
+  const result = values.find(value => value !== undefined && value !== null && value !== '');
+  if (result === undefined && values.length > 0) {
+    logger.warn('[shardMiddleware] firstDefined: all arguments were null/undefined/empty', { values });
+  }
+  return result;
+}
+
+function __OLD_firstDefined(...values) {
   return values.find(value => value !== undefined && value !== null && value !== '');
 }
 
@@ -13,19 +22,13 @@ function parseCoordinate(value) {
   return { value: parsed };
 }
 
-function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
-  return null;
-}
-
 export const shardMiddleware = async (req, res, next) => {
   try {
     // Extract location from request
     const rawLat = firstDefined(req.query.lat, req.body?.lat);
     const rawLng = firstDefined(req.query.lng, req.body?.lng);
 
-    if (rawLat !== undefined || rawLng !== undefined) {
+    if (rawLat !== undefined && rawLat !== null || rawLng !== undefined && rawLng !== null) {
       const parsedLat = parseCoordinate(rawLat);
       const parsedLng = parseCoordinate(rawLng);
 

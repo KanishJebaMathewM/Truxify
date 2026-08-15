@@ -5,6 +5,7 @@ import { InMemoryLRUCache } from '@apollo/utils.keyvaluecache';
 import logger from '../../api/src/middleware/logger.js';
 import { supabase } from '../../api/src/config/db.js';
 import { resolveUserContext, DEFAULT_ROLE } from './authContext.js';
+import { computeTrustedSignature } from '../shared/trustedIdentity.js';
 
 class GraphQLGateway {
     constructor() {
@@ -49,10 +50,19 @@ class GraphQLGateway {
                         // forged x-user-id/x-user-role on the raw client request.
                         request.http.headers.delete('x-user-id');
                         request.http.headers.delete('x-user-role');
+                        request.http.headers.delete('x-gateway-signature');
 
                         if (context?.user?.id) {
-                            request.http.headers.set('x-user-id', context.user.id);
-                            request.http.headers.set('x-user-role', context.user.role || DEFAULT_ROLE);
+                            const userId = context.user.id;
+                            const role = context.user.role || DEFAULT_ROLE;
+                            request.http.headers.set('x-user-id', userId);
+                            request.http.headers.set('x-user-role', role);
+                            // Sign the trusted identity so subgraphs can verify it
+                            // originated from the gateway and was not forged.
+                            request.http.headers.set(
+                                'x-gateway-signature',
+                                computeTrustedSignature(userId, role)
+                            );
                         }
 
                         logger.debug(`GraphQL ${name} request sent`);

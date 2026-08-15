@@ -1,47 +1,64 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { formatError } from '../../src/utils/errorFormatter.js'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { formatError } from '../../src/utils/errorFormatter.js';
 
-describe('formatError', () => {
-  const originalEnv = process.env.NODE_ENV
+describe('errorFormatter', () => {
+  let env;
 
   beforeEach(() => {
-    process.env.NODE_ENV = 'development'
-  })
+    env = process.env.NODE_ENV;
+  });
 
   afterEach(() => {
-    process.env.NODE_ENV = originalEnv
-  })
+    process.env.NODE_ENV = env;
+  });
 
-  it('returns a formatted error with code and message', () => {
-    const err = formatError(401, 'Unauthorized')
-    expect(err.success).toBe(false)
-    expect(err.error.code).toBe(401)
-    expect(err.error.message).toBe('Unauthorized')
-  })
+  describe('formatError', () => {
+    it('returns correct structure with code and message', () => {
+      const result = formatError('ERR_CODE', 'Something went wrong');
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: 'ERR_CODE',
+          message: 'Something went wrong',
+        },
+      });
+    });
 
-  it('includes details in non-production when provided', () => {
-    const err = formatError(400, 'Invalid', { field: 'email' })
-    expect(err.error.details).toEqual({ field: 'email' })
-  })
+    it('returns correct structure without details in production', () => {
+      process.env.NODE_ENV = 'production';
+      const result = formatError('ERR_CODE', 'Error message', { extra: 'data' });
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: 'ERR_CODE',
+          message: 'Error message',
+        },
+      });
+    });
 
-  it('omits details in production', () => {
-    process.env.NODE_ENV = 'production'
-    const err = formatError(400, 'Invalid', { field: 'email' })
-    expect(err.error.details).toBeUndefined()
-  })
+    it('includes details in non-production environments', () => {
+      process.env.NODE_ENV = 'development';
+      const details = { field: 'email', issue: 'invalid' };
+      const result = formatError('VALIDATION_ERROR', 'Validation failed', details);
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Validation failed',
+          details,
+        },
+      });
+    });
 
-  it('omits falsy details even outside production', () => {
-    const err = formatError(400, 'Invalid', null)
-    expect(err.error.details).toBeUndefined()
-  })
+    it('omits details when not provided', () => {
+      process.env.NODE_ENV = 'development';
+      const result = formatError('ERR', 'Error');
+      expect(result.error).not.toHaveProperty('details');
+    });
 
-  it('preserves a string error code', () => {
-    const err = formatError('NOT_FOUND', 'Resource not found')
-    expect(err.error.code).toBe('NOT_FOUND')
-  })
-
-  it('always marks the envelope as unsuccessful', () => {
-    const err = formatError('BAD_REQUEST', 'Nope')
-    expect(err.success).toBe(false)
-  })
-})
+    it('handles undefined details', () => {
+      const result = formatError('ERR', 'Error', undefined);
+      expect(result.error).not.toHaveProperty('details');
+    });
+  });
+});

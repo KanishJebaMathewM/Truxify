@@ -15,8 +15,16 @@ struct {
 
 SEC("sk_msg")
 int sockmap_proxy_redirection(struct sk_msg_md *msg) {
-    __u32 key = 0; // Ingress mapping key
-    
+    // Derive the redirect key from the connection's real peer (remote
+    // address/port) so each destination is steered to its own backend socket
+    // instead of always colliding on slot 0.
+    __u32 key = msg->remote_ip4 ^ ((__u32)msg->remote_port << 16);
+
+    // Only redirect when a backend is actually registered for this peer;
+    // otherwise let the packet pass through normally.
+    if (!bpf_map_lookup_elem(&sock_map, &key))
+        return SK_PASS;
+
     // Redirect TCP payload stream directly to the target socket in kernel space
     // bypassing user-space copy operations
     bpf_msg_redirect_map(msg, &sock_map, &key, 0);

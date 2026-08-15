@@ -1,11 +1,43 @@
-import unittest
+import ast
 import hashlib
+import os
+import unittest
 
 from kyber_relayer import Kyber1024Relayer
+
+KYBER_RELAYER_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "kyber_relayer.py")
+)
+
+CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
+
 
 class TestKyber1024Relayer(unittest.TestCase):
     def setUp(self):
         self.relayer = Kyber1024Relayer()
+
+    def test_module_has_no_merge_conflict_markers(self):
+        with open(KYBER_RELAYER_PATH, "r", encoding="utf-8") as fh:
+            source = fh.read()
+
+        for marker in CONFLICT_MARKERS:
+            self.assertNotIn(marker, source)
+
+    def test_module_uses_genuine_ml_kem_not_broken_hash_construction(self):
+        with open(KYBER_RELAYER_PATH, "r", encoding="utf-8") as fh:
+            source = fh.read()
+
+        # Must parse cleanly (no leftover conflict markers / syntax breakage).
+        ast.parse(source)
+
+        # Genuine ML-KEM-1024 implementation must be present.
+        self.assertIn("ML_KEM", source)
+
+        # The broken hash-based KEM must be gone: the public key must not be a
+        # pure function of a seed, and the ciphertext must not be a simple XOR
+        # keystream derived solely from the public key.
+        self.assertNotIn('"KYBER_PK_TAG"', source)
+        self.assertNotIn("'KYBER_PK_TAG'", source)
 
     def test_keypair_generation(self):
         pk, sk = self.relayer.generate_keypair()

@@ -2,13 +2,10 @@ import { WebSocketServer } from 'ws';
 import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
-import os from 'os';
-import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
-import { GpsLog } from '../models/GpsLog.js';
 import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
+import telemetryBuffer from './telemetryBuffer.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -66,13 +63,7 @@ function sanitizeTelemetryData(data) {
   return sanitized;
 }
 
-let mongoDbOverride = null;
-const getMongoDb = () => mongoDbOverride || mongoDb;
-
 let _orderRepository = null;
-
-let telemetryDropCounter = 0;
-const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
 // In-memory mapping of active client subscriptions (process-local by design;
 // distributed fan-out across replicas is handled by the locationEventBus).
@@ -138,6 +129,12 @@ const locationChannels = new Map();
 // subscriber for a display ID disconnects.
 const displayIdToLocationChannelKeys = new Map();
 
+// Reverse index from driverId to the set of orderUUID keys it is actively
+// publishing location channels for. Used to tear down channels when the
+// publishing driver disconnects, so driver-only / unsubscribed orders do not
+// leak a Supabase Realtime channel for the process lifetime.
+const driverToLocationChannels = new Map();
+
 // Redis Pub/Sub fan-out bus that distributes location events across API
 // replicas so a driver connected to Replica A reaches a customer connected to
 // Replica B. Local subscribers are still stored only in `trackingSubscriptions`;
@@ -155,12 +152,12 @@ const consecutiveDropCount = new Map();
 // DRIVER STATE TTL & LAZY CLEANUP
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_THRESHOLD = 50;
-const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000;
+const DRIVER_STATE_SWEEP_INTERVAL_MS = parseInt(process.env.DRIVER_STATE_SWEEP_INTERVAL_MS, 10) || 60000; // default 1 min
 let lastDriverStateSweep = 0;
 
 function sweepStaleDriverState(now) {
-  if (consecutiveDropCount.size < DRIVER_STATE_SWEEP_THRESHOLD) return;
+  // Clean up stale driver state periodically regardless of Map size to
+  // prevent unbounded memory growth from drivers who stop sending telemetry.
   if (now - lastDriverStateSweep < DRIVER_STATE_SWEEP_INTERVAL_MS) return;
   lastDriverStateSweep = now;
   for (const [driverId, entry] of consecutiveDropCount) {
@@ -171,123 +168,17 @@ function sweepStaleDriverState(now) {
 }
 
 // =====================================================================
-// EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
+// Telemetry persistence is delegated to the shared telemetryBuffer module
+// (./telemetryBuffer.js). Live broadcasting never waits on MongoDB.
 // =====================================================================
-class TelemetryRingBuffer {
-  constructor(capacity) {
-    this.capacity = capacity;
-    this.buffer = new Array(capacity);
-    this.head = 0;
-    this.tail = 0;
-    this.size = 0;
-    this._lock = false;
-    this._queue = [];
-  }
-
-  async _acquire() {
-    if (!this._lock) {
-      this._lock = true;
-      return;
-    }
-    return new Promise(resolve => {
-      this._queue.push(resolve);
-    });
-  }
-
-  _release() {
-    if (this._queue.length > 0) {
-      const next = this._queue.shift();
-      next();
-    } else {
-      this._lock = false;
-    }
-  }
-
-  async push(item) {
-    await this._acquire();
-    try {
-      this.buffer[this.tail] = item;
-      this.tail = (this.tail + 1) % this.capacity;
-      if (this.size < this.capacity) {
-        this.size++;
-      } else {
-        this.head = (this.head + 1) % this.capacity;
-      }
-    } finally {
-      this._release();
-    }
-  }
-
-  async toArray() {
-    await this._acquire();
-    try {
-      if (this.size === 0) return [];
-      const result = new Array(this.size);
-      for (let i = 0; i < this.size; i++) {
-        result[i] = this.buffer[(this.head + i) % this.capacity];
-      }
-      return result;
-    } finally {
-      this._release();
-    }
-  }
-
-  async prepend(items) {
-    if (!items || items.length === 0) return 0;
-    await this._acquire();
-    try {
-      const available = this.capacity - this.size;
-      const toInsert = items.length > available ? items.slice(items.length - available) : items;
-      const dropped = items.length > available ? items.length - available : 0;
-      for (let i = toInsert.length - 1; i >= 0; i--) {
-        this.head = (this.head - 1 + this.capacity) % this.capacity;
-        this.buffer[this.head] = toInsert[i];
-        this.size++;
-      }
-      return dropped;
-    } finally {
-      this._release();
-    }
-  }
-
-  async clear() {
-    await this._acquire();
-    try {
-      this.head = 0;
-      this.tail = 0;
-      this.size = 0;
-    } finally {
-      this._release();
-    }
-  }
-
-  get length() {
-    return this.size;
-  }
-}
-
-const MAX_BUFFER_SIZE = 5000;
-const BUFFER_WARN_THRESHOLD = 0.5;
-const BUFFER_CRIT_THRESHOLD = 0.8;
-const BUFFER_MONITOR_INTERVAL_MS = 30000;
-const telemetryWriteBuffer = new TelemetryRingBuffer(MAX_BUFFER_SIZE);
-let telemetryFlushBuffer = [];
-let currentFlushPromise = null;
-let flushMutex = false;
-const BUFFER_FLUSH_INTERVAL_MS = 20000;
-let flushBackoffMs = 1000;
 let isSchedulerActive = false;
 let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
+let driverStateSweepInterval = null;
+let wsUpgradeLimitsCleanupInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
-
-// Observability counters
-let telemetryTotalFlushed = 0;
-let telemetryTotalDropped = 0;
-let telemetryRaceDropped = 0;
-let telemetryOverflowDropped = 0;
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
@@ -304,13 +195,6 @@ const WS_AUTH_TIMEOUT_MS = 10000;
 // =====================================================================
 const DRIVER_ORDER_CACHE_TTL_SECONDS = 60;
 const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
-
-// Orders in these statuses no longer keep a driver pinned to an active trip.
-// A cached `driver:active-order:` mapping for one of them is stale and must be
-// invalidated — otherwise mid-trip cache hits skip driver-assignment
-// re-verification and telemetry/geofence provenance keeps binding to the
-// previous trip (issue #10676).
-const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_released']);
 
 /**
  * Retrieve the cached active order mapping for a driver.
@@ -336,7 +220,6 @@ async function getCachedDriverOrder(driverId) {
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
   if (!driverId) return;
   if (!redisClient || !orderId) return;
-  if (!orderDisplayId) return;
   try {
     await redisClient.set(
       `${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`,
@@ -361,7 +244,6 @@ async function invalidateDriverOrderCache(driverId) {
     logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
-export { invalidateDriverOrderCache };
 
 function getClientIp(request) {
   // Trust only the TCP peer address. The X-Forwarded-For header is
@@ -391,6 +273,17 @@ function enforceWsUpgradeMemoryLimit(ipAddress) {
     }
   }
   return entry.count <= WS_UPGRADE_RATE_LIMIT;
+}
+
+const WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS = 30000;
+
+// Periodically purge expired per-IP upgrade-limit entries so the in-memory
+// fallback map does not grow unbounded during a Redis outage.
+function sweepWsUpgradeMemoryLimits() {
+  const now = Date.now();
+  for (const [key, e] of wsUpgradeMemoryLimits) {
+    if (now >= e.resetAt) wsUpgradeMemoryLimits.delete(key);
+  }
 }
 
 export async function isWebSocketUpgradeAllowed(request) {
@@ -734,6 +627,7 @@ export function initWebSocketServer(server, orderRepository) {
       logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
+        if (ws.driverId) await removeDriverLocationChannels(ws.driverId);
       })();
     });
 
@@ -741,6 +635,7 @@ export function initWebSocketServer(server, orderRepository) {
       logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
+        if (ws.driverId) await removeDriverLocationChannels(ws.driverId);
       })();
     });
 
@@ -808,8 +703,20 @@ export function initWebSocketServer(server, orderRepository) {
     }
   });
 
+  // Periodically purge expired per-IP WebSocket upgrade-limit entries, so the
+  // in-memory fallback map does not leak during Redis outages.
+  wsUpgradeLimitsCleanupInterval = setInterval(() => {
+    sweepWsUpgradeMemoryLimits();
+  }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
+
+  // Periodically purge stale circuit-breaker state for drivers, regardless of
+  // the total number of active drivers (fixes unbounded growth under < 50 drivers).
+  driverStateSweepInterval = setInterval(() => {
+    sweepStaleDriverState(Date.now());
+  }, DRIVER_STATE_SWEEP_INTERVAL_MS);
+
   if (!isSchedulerActive) {
-    initTelemetryScheduler();
+    telemetryBuffer.start();
   }
 
   logger.info('🚀 WebSocket tracking router initialized.');
@@ -967,6 +874,9 @@ export async function handleLocationPing(ws, data, req) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
 
+  // Canonicalise `latitude`/`longitude` into `lat`/`lng` so the schema
+  // validation, sanitisation and the buffered telemetry record all operate on
+  // one canonical coordinate pair regardless of which naming the client used.
   // Normalize the alternate latitude/longitude names into the canonical
   // lat/lng keys so schema validation, sanitization and persistence
   // downstream all operate on the resolved coordinates.
@@ -980,7 +890,7 @@ export async function handleLocationPing(ws, data, req) {
     driverId: driver_id,
     timestamp: device_timestamp ? Date.parse(device_timestamp) || Date.now() : Date.now(),
     speed: typeof speed === 'number' ? speed : undefined,
-    heading: typeof bearing === 'number' ? bearing : undefined,
+    bearing: typeof bearing === 'number' ? bearing : undefined,
   };
 
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
@@ -1013,7 +923,8 @@ export async function handleLocationPing(ws, data, req) {
     return;
   }
 
-  // Fix 1: Always use server time for sequence comparison
+  // Fix 1: Server receive time, used as the monotonic order key fallback
+  // when the device does not supply a device_timestamp (issue #11671).
   const serverNow = Date.now();
 
   // Fix 4: IDEMPOTENCY GATE & OUT-OF-ORDER SEQUENCER + Circuit breaker
@@ -1021,33 +932,45 @@ export async function handleLocationPing(ws, data, req) {
     try {
       const seqKey = `driver:sequence:${driver_id}`;
       const lastRecordedEpochStr = await redisClient.get(seqKey);
+      const lastRecordedEpoch = Number.parseInt(lastRecordedEpochStr, 10);
 
-      if (lastRecordedEpochStr) {
-        const lastRecordedEpoch = parseInt(lastRecordedEpochStr, 10);
+      // Strictly-increasing gate: compare with `<` (not `<=`) and use the
+      // device-supplied timestamp when available so two legitimate updates
+      // that share a server-side millisecond are never dropped as "out of
+      // order" (issue #11671). Genuinely stale updates whose order key has
+      // already advanced past the current receive time are still discarded.
+      const orderKey = deviceTime ? deviceTime.getTime() : serverNow;
+      if (!Number.isNaN(lastRecordedEpoch) && orderKey < lastRecordedEpoch) {
+        logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
 
-        if (serverNow <= lastRecordedEpoch) {
-          logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
-
-          // Circuit breaker: if too many consecutive drops, reset the sequence
-          const prevEntry = consecutiveDropCount.get(driver_id);
-          const currentCount = (prevEntry ? prevEntry.count : 0) + 1;
-          consecutiveDropCount.set(driver_id, { count: currentCount, lastUpdated: serverNow });
-          sweepStaleDriverState(serverNow);
-          if (currentCount >= MAX_CONSECUTIVE_DROPS) {
-            logger.warn(
-              `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
-              `(${MAX_CONSECUTIVE_DROPS}). Resetting sequence.`
-            );
-            await redisClient.del(seqKey);
-            consecutiveDropCount.delete(driver_id);
-          }
-          return;
+        // Circuit breaker: if too many consecutive drops, reset the sequence
+        const prevEntry = consecutiveDropCount.get(driver_id);
+        const currentCount = (prevEntry ? prevEntry.count : 0) + 1;
+        consecutiveDropCount.set(driver_id, { count: currentCount, lastUpdated: serverNow });
+        sweepStaleDriverState(serverNow);
+        if (currentCount >= MAX_CONSECUTIVE_DROPS) {
+          logger.warn(
+            `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
+            `(${MAX_CONSECUTIVE_DROPS}). Resetting sequence.`
+          );
+          await redisClient.del(seqKey);
+          consecutiveDropCount.delete(driver_id);
         }
+        return;
       }
 
       // Reset circuit breaker on successful sequence advancement
       consecutiveDropCount.delete(driver_id);
-      await redisClient.set(seqKey, serverNow.toString(), 'EX', 86400);
+
+      // Advance a strictly-increasing monotonic counter: when the update
+      // shares a timestamp with the previous accepted one, bump the stored
+      // sequence by 1 instead of rewriting the same value so the gate keeps
+      // moving forward.
+      const nextSequence =
+        Number.isNaN(lastRecordedEpoch) || orderKey > lastRecordedEpoch
+          ? orderKey
+          : lastRecordedEpoch + 1;
+      await redisClient.set(seqKey, nextSequence.toString(), 'EX', 86400);
     } catch (err) {
       logger.error('Redis sequence verification cache error:', err.message);
     }
@@ -1064,65 +987,48 @@ export async function handleLocationPing(ws, data, req) {
       // database.  This avoids repeated Supabase queries for the same
       // driver during an active trip.
       const cached = await getCachedDriverOrder(driver_id);
-      let cacheVerified = false;
       if (cached) {
-        // A cached mapping can outlive the trip (it is only invalidated on
-        // disconnect or an order transition), so re-verify it still points at
-        // the driver's current, non-terminal order before trusting it — a bare
-        // cache hit previously skipped driver-assignment re-verification
-        // entirely (issue #10676).
-        const { data: activeOrder } = await _orderRepository.findOrderByAnyId(
-          cached.orderId,
-          'id, order_display_id, driver_id, status'
-        );
-        if (
-          activeOrder
-          && activeOrder.driver_id === driver_id
-          && !TERMINAL_ORDER_STATUSES.has(activeOrder.status)
-        ) {
-          orderUUID = cached.orderId;
-          orderDisplayId = cached.orderDisplayId || activeOrder.order_display_id;
-          cacheVerified = true;
-        } else {
-          // Stale entry (delivered/cancelled/reassigned) — drop it so the
-          // authoritative lookup below resolves the current assignment.
-          await invalidateDriverOrderCache(driver_id);
+        orderUUID = cached.orderId;
+        orderDisplayId = cached.orderDisplayId;
+      } else {
+        const idToLookup = orderUUID || orderDisplayId;
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        if (order) {
+          orderUUID = order.id;
+          orderDisplayId = order.order_display_id;
+          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
         }
       }
 
-      if (!cacheVerified) {
+      // ── Authorization check (runs regardless of cache hit or miss) ─
+      // The authorization guard must always execute so that a stale cache entry
+      // for a previously-assigned driver cannot authorize a reassigned driver.
+      if (orderUUID && orderDisplayId) {
         const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id, status');
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        if (order && order.driver_id !== driver_id) {
+          logger.warn({
+            event: 'UNAUTHORIZED_ORDER_TRACKING',
+            driverId: driver_id,
+            orderId: order.id,
+            orderDisplayId: order.order_display_id,
+            assignedDriverId: order.driver_id,
+          }, 'Driver attempted to submit location for order they are not assigned to');
+          // Drop the stale cache entry so a reassignment can never be silently
+          // reused to authorize a driver that is no longer assigned to this order.
+          await invalidateDriverOrderCache(driver_id);
+          return ws.send(JSON.stringify({
+            error: 'Not authorized to track this order',
+            orderId: orderDisplayId || orderUUID,
+          }));
+        }
+        // Keep the cache in sync with the authoritative assignment. If the order
+        // was reassigned (or the cached mapping went stale), this overwrites it
+        // with the current driver→order binding on every authorized ping.
         if (order) {
-          // Verify the authenticated driver is assigned to this order
-          if (order.driver_id !== driver_id) {
-            await invalidateDriverOrderCache(driver_id);
-            logger.warn({
-              event: 'UNAUTHORIZED_ORDER_TRACKING',
-              driverId: driver_id,
-              orderId: order.id,
-              orderDisplayId: order.order_display_id,
-              assignedDriverId: order.driver_id,
-            }, 'Driver attempted to submit location for order they are not assigned to');
-            return ws.send(JSON.stringify({
-              error: 'Not authorized to track this order',
-              orderId: orderDisplayId || orderUUID,
-            }));
-          }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
-          if (TERMINAL_ORDER_STATUSES.has(order.status)) {
-            // Order has ended — drop any cached mapping and do not re-bind
-            // telemetry/geofence provenance to the finished order.
-            orderUUID = null;
-            orderDisplayId = null;
-            await invalidateDriverOrderCache(driver_id);
-          } else if (orderDisplayId) {
-            await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
-          }
-        } else if (cached) {
-          // Cached order no longer exists — drop the stale mapping.
-          await invalidateDriverOrderCache(driver_id);
+          await setCachedDriverOrder(driver_id, order.id, order.order_display_id);
         }
       }
     } catch (err) {
@@ -1130,36 +1036,25 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
-  // Buffer write with capacity limit (always push to active buffer)
-  if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
-    telemetryTotalDropped++;
-    telemetryOverflowDropped++;
-  }
-  await telemetryWriteBuffer.push({
-  driver_id,
-  order_id: orderUUID || null,
-  order_display_id: orderDisplayId || null,
-  lat: sanitized.lat,
-  lng: sanitized.lng,
-  location: {
-    type: 'Point',
-    coordinates: [sanitized.lng, sanitized.lat]
-  },
-  speed_kmh: sanitized.speed ?? 0,
-  bearing_deg: sanitized.bearing ?? 0,
+  // Buffer write with capacity limit. Synchronous, non-blocking enqueue into
+  // the shared telemetry pipeline — the broadcast path never waits on MongoDB.
+  telemetryBuffer.enqueue({
+    driver_id,
+    order_id: orderUUID || null,
+    order_display_id: orderDisplayId || null,
+    lat: sanitized.lat,
+    lng: sanitized.lng,
+    location: {
+      type: 'Point',
+      coordinates: [sanitized.lng, sanitized.lat]
+    },
+    speed_kmh: sanitized.speed ?? 0,
+    bearing_deg: sanitized.bearing ?? 0,
     timestamp: deviceTime || new Date(),
     pinged_at: deviceTime || new Date(),
     buffered_at: new Date(),
     server_received_at: new Date(serverNow),
   });
-
-  // Buffer usage monitoring
-  const usagePct = (telemetryWriteBuffer.length / MAX_BUFFER_SIZE) * 100;
-  if (usagePct >= 80) {
-    logger.warn(`[TRUXIFY BUFFER CRITICAL] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
-  } else if (usagePct >= 50 && usagePct < 80) {
-    logger.warn(`[TRUXIFY BUFFER WARN] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
-  }
 
   if (redisClient) {
     try {
@@ -1214,29 +1109,6 @@ export async function handleLocationPing(ws, data, req) {
     })();
   }
 
-  // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
-  // GpsLog mongoose schema. Fire-and-forget — the write must not block the
-  // WebSocket broadcast path. The bulk telemetry flush to the raw `telemetry`
-  // collection continues separately for batch analytics.
-  if (getMongoDb()) {
-    GpsLog.create({
-      bookingId: orderDisplayId || orderUUID || driver_id,
-      driverId: driver_id,
-      lat: sanitized.lat,
-      lng: sanitized.lng,
-      speed: sanitized.speed ?? 0,
-      heading: sanitized.bearing ?? 0,
-      timestamp: deviceTime || new Date(serverNow),
-      metadata: {
-        order_id: orderUUID || null,
-        order_display_id: orderDisplayId || null,
-        server_received_at: new Date(serverNow).toISOString(),
-      },
-    }).catch((err) => {
-      logger.error('[GpsLog] Failed to persist GPS coordinate to MongoDB:', err.message);
-    });
-  }
-
   const timestampIso = new Date(serverNow).toISOString();
   const broadcastPayload = buildClientLocationPayload({
     driverId: driver_id,
@@ -1274,23 +1146,6 @@ export async function handleLocationPing(ws, data, req) {
   // publishing replica's Pub/Sub consumer skips self-originated events, so a
   // client on this replica receives the update exactly once.
   deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
-  initRedisTrackerPubSub();
-
-  if (redisClient) {
-    const pubSubMessage = JSON.stringify({
-      orderDisplayId,
-      driver_id,
-      payload: broadcastPayload,
-    });
-    redisClient.publish(TRACKER_CHANNELS.LOCATION, pubSubMessage).catch((err) => {
-      logger.error({ err }, '[Tracker] Redis publish error for location update');
-      if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-      if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-    });
-  } else {
-    if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-    if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-  }
 
   // Publish to Supabase Realtime channel driver-location:{orderId}
   // Reuse cached channel to avoid creating a new channel per ping.
@@ -1299,6 +1154,12 @@ export async function handleLocationPing(ws, data, req) {
       const channel = supabase.channel(`driver-location:${orderUUID}`);
       channel.subscribe();
       locationChannels.set(orderUUID, channel);
+      if (driver_id) {
+        if (!driverToLocationChannels.has(driver_id)) {
+          driverToLocationChannels.set(driver_id, new Set());
+        }
+        driverToLocationChannels.get(driver_id).add(orderUUID);
+      }
       if (orderDisplayId) {
         if (!displayIdToLocationChannelKeys.has(orderDisplayId)) {
           displayIdToLocationChannelKeys.set(orderDisplayId, new Set());
@@ -1323,154 +1184,6 @@ export async function handleLocationPing(ws, data, req) {
   }
 }
 
-/**
- * Periodically dumps the aggregated batch matrix logs into MongoDB Atlas
- */
-async function flushTelemetryBuffer() {
-  if (currentFlushPromise) {
-    return currentFlushPromise;
-  }
-
-  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
-    flushBackoffMs = 1000;
-    return;
-  }
-
-  if (!getMongoDb()) {
-    logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
-    return;
-  }
-
-  if (flushMutex) return;
-  flushMutex = true;
-
-  // Atomic buffer swap: take everything pending (retry queue first, then the
-  // active buffer) and reset both. Any ping that arrives while the insert is
-  // in flight lands in the fresh active buffer, and on failure the taken
-  // records are prepended back so oldest data retries first. Taking a merged
-  // snapshot (instead of aliasing the active buffer as the flush buffer)
-  // avoids re-queueing the same array twice on transient failures.
-  const recordsToFlush = telemetryFlushBuffer.length > 0
-    ? [...telemetryFlushBuffer, ...(await telemetryWriteBuffer.toArray())]
-    : await telemetryWriteBuffer.toArray();
-  telemetryFlushBuffer = [];
-  await telemetryWriteBuffer.clear();
-
-  if (recordsToFlush.length === 0) {
-    flushMutex = false;
-    return;
-  }
-
-  currentFlushPromise = (async () => {
-    logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
-
-    try {
-      const collection = getMongoDb().collection('telemetry');
-      await collection.insertMany(recordsToFlush, { ordered: false });
-      telemetryTotalFlushed += recordsToFlush.length;
-      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
-      flushBackoffMs = 1000;
-    } catch (err) {
-      const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
-
-      if (isBulkWriteError) {
-        if (err.writeErrors && err.writeErrors.length > 0) {
-          const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
-            `doc ${e.index}: ${e.err?.message || 'unknown'}`
-          ).join('; ');
-          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
-        } else {
-          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
-        }
-        const failed = err.writeErrors
-          ? recordsToFlush.filter((_, i) => err.writeErrors.some(e => e.index === i))
-          : [];
-        if (failed.length > 0) {
-          const overflowDrop = await telemetryWriteBuffer.prepend(failed);
-          if (overflowDrop > 0) {
-            telemetryTotalDropped += overflowDrop;
-            telemetryOverflowDropped += overflowDrop;
-            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
-          }
-        }
-      } else {
-        flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        const overflowDrop = await telemetryWriteBuffer.prepend(recordsToFlush);
-        if (overflowDrop > 0) {
-          telemetryTotalDropped += overflowDrop;
-          telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
-        }
-      }
-    } finally {
-      currentFlushPromise = null;
-      flushMutex = false;
-    }
-  })();
-
-  return currentFlushPromise;
-}
-
-function monitorBufferSize() {
-  const activeLen = telemetryWriteBuffer.length;
-  const flushLen = telemetryFlushBuffer.length;
-  const totalLen = activeLen + flushLen;
-  const usagePct = totalLen / MAX_BUFFER_SIZE;
-  if (usagePct >= BUFFER_CRIT_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  }
-}
-
-function scheduleNextFlush() {
-  if (!isSchedulerActive) return;
-
-  telemetryFlushTimeout = setTimeout(async () => {
-    try {
-      await flushTelemetryBuffer();
-    } finally {
-      scheduleNextFlush();
-    }
-  }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
-}
-
-async function loadRecoveryFile() {
-  try {
-    if (fs.existsSync(RECOVERY_FILE_PATH)) {
-      const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
-      if (content) {
-        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
-        if (records.length > 0) {
-          await telemetryWriteBuffer.prepend(records);
-          logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
-        }
-      }
-      fs.unlinkSync(RECOVERY_FILE_PATH);
-    }
-  } catch (err) {
-    logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
-    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (unlinkErr) { logger.warn('[TRUXIFY RECOVERY] Failed to unlink recovery file:', unlinkErr.message); }
-  }
-}
-
-async function initTelemetryScheduler() {
-  await loadRecoveryFile();
-  isSchedulerActive = true;
-  scheduleNextFlush();
-  
-  telemetryMonitorInterval = setInterval(() => {
-    monitorBufferSize();
-  }, BUFFER_MONITOR_INTERVAL_MS);
-}
 
 export async function closeWebSocketServer() {
   if (telemetryFlushTimeout) {
@@ -1489,45 +1202,19 @@ export async function closeWebSocketServer() {
     wsHeartbeatInterval = null;
   }
 
-  // Wait for MongoDB to be available before final flush
-  const parsedWait = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS, 10);
-  const mongoMaxWaitMs = Number.isNaN(parsedWait) ? 10000 : parsedWait;
-  if (mongoMaxWaitMs > 0) {
-    const mongoPollIntervalMs = Math.min(500, mongoMaxWaitMs);
-    const mongoWaitStart = Date.now();
-    while (!getMongoDb() && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
-      await new Promise(r => setTimeout(r, mongoPollIntervalMs));
-    }
-    if (!getMongoDb()) {
-      const allPending = [
-        ...telemetryFlushBuffer,
-        ...(await telemetryWriteBuffer.toArray())
-      ];
-      if (allPending.length > 0) {
-        try {
-          const lines = allPending.map(r => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${allPending.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
-        } catch (fileErr) {
-          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${allPending.length} records lost.`);
-        }
-      }
-    }
+  // Stop the telemetry scheduler, wait for MongoDB (MONGODB_SHUTDOWN_WAIT_MS
+  // is read at call time), and perform the final flush. When MongoDB is
+  // unavailable the pending records are written to the recovery file AND
+  // retained in the buffer so nothing is silently lost.
+  await telemetryBuffer.shutdown();
+  if (wsUpgradeLimitsCleanupInterval) {
+    clearInterval(wsUpgradeLimitsCleanupInterval);
+    wsUpgradeLimitsCleanupInterval = null;
   }
 
-  // Wait for any in-flight flush to complete
-  if (currentFlushPromise) {
-    try {
-      await currentFlushPromise;
-    } catch (err) {
-      // Ignore errors; final flush retry will handle them
-    }
-  }
-
-  try {
-    await flushTelemetryBuffer();
-  } catch (err) {
-    logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
+  if (driverStateSweepInterval) {
+    clearInterval(driverStateSweepInterval);
+    driverStateSweepInterval = null;
   }
 
   // Close the distributed location fan-out: unsubscribe and release the
@@ -1698,6 +1385,27 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
+    // Clean up Supabase Realtime channel when the last subscriber for this
+    // display ID disconnects. Without this, channels for driver-only orders
+    // (where only the driver subscribes) are never removed, leaking channels.
+    if (trackingSubscriptions.get(targetId).size === 0) {
+      trackingSubscriptions.delete(targetId);
+      const channelKeys = displayIdToLocationChannelKeys.get(targetId);
+      if (channelKeys) {
+        for (const uuidKey of channelKeys) {
+          if (locationChannels.has(uuidKey)) {
+            const channel = locationChannels.get(uuidKey);
+            if (supabase) {
+              supabase.removeChannel(channel);
+            }
+            locationChannels.delete(uuidKey);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber unsubscribe');
+          }
+        }
+        displayIdToLocationChannelKeys.delete(targetId);
+      }
+    }
+
     logger.info({ targetId }, 'Client unsubscribed from updates');
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
@@ -1766,6 +1474,28 @@ async function removeClientFromAllSubscriptions(ws) {
   }
 }
 
+async function removeDriverLocationChannels(driverId) {
+  if (!driverId) return;
+  const channelKeys = driverToLocationChannels.get(driverId);
+  if (!channelKeys) return;
+  for (const uuidKey of channelKeys) {
+    const channel = locationChannels.get(uuidKey);
+    if (channel) {
+      if (supabase) {
+        supabase.removeChannel(channel);
+      }
+      locationChannels.delete(uuidKey);
+    }
+    // Also drop the orderUUID from the displayId reverse index.
+    displayIdToLocationChannelKeys.forEach((set, displayId) => {
+      if (set.delete(uuidKey) && set.size === 0) {
+        displayIdToLocationChannelKeys.delete(displayId);
+      }
+    });
+  }
+  driverToLocationChannels.delete(driverId);
+}
+
 async function restoreSubscriptions(ws) {
   const subscriberId = ws.user?.id || ws.driverId;
   if (!redisClient || !subscriberId) return;
@@ -1830,33 +1560,33 @@ export const __testing = {
   getLocationEventBusMetrics() {
     return locationEventBus ? locationEventBus.getMetrics() : null;
   },
-  flushTelemetryBuffer,
+  flushTelemetryBuffer() {
+    return telemetryBuffer._test.flush();
+  },
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
-    return telemetryWriteBuffer;
+    return telemetryBuffer._test.getBuffer();
   },
   getTelemetryFlushBuffer() {
-    return telemetryFlushBuffer;
+    return telemetryBuffer._test.getRetryQueue();
   },
   async setTelemetryWriteBuffer(records) {
-    await telemetryWriteBuffer.clear();
-    if (records) await telemetryWriteBuffer.prepend(records);
+    await telemetryBuffer._test.setBuffer(records);
   },
   setTelemetryFlushBuffer(records) {
-    telemetryFlushBuffer = records;
+    telemetryBuffer._test.setRetryQueue(records);
   },
   async pushToTelemetryWriteBuffer(records) {
-    if (Array.isArray(records)) {
-      for (const r of records) await telemetryWriteBuffer.push(r);
-    } else {
-      await telemetryWriteBuffer.push(records);
-    }
+    await telemetryBuffer._test.push(records);
   },
   async clearTelemetryWriteBuffer() {
-    await telemetryWriteBuffer.clear();
+    await telemetryBuffer._test.clearBuffer();
   },
   clearTelemetryFlushBuffer() {
-    telemetryFlushBuffer = [];
+    telemetryBuffer._test.setRetryQueue([]);
+  },
+  getTelemetryBufferMetrics() {
+    return telemetryBuffer.getMetrics();
   },
   getShutdownState() {
     const state = {
@@ -1883,7 +1613,7 @@ export const __testing = {
     isSchedulerActive = Boolean(telemetryInterval);
   },
   setMongoDbOverride(val) {
-    mongoDbOverride = val;
+    telemetryBuffer._test.setMongoDbOverride(val);
   },
   getConsecutiveDropCount(driverId) {
     const entry = consecutiveDropCount.get(driverId);

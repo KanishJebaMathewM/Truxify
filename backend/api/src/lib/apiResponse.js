@@ -2,6 +2,8 @@
  * Standard API Response Helpers
  */
 
+const MAX_PAGE_SIZE = 1000;
+
 export function success(data = null, message = 'Success', statusCode = 200) {
   return {
     success: true,
@@ -26,12 +28,10 @@ export function error(message = 'An error occurred', statusCode = 500, errors = 
 }
 
 export function paginated(data = [], page = 1, limit = 10, total = 0, message = 'Success') {
-  // Guard against a non-positive or non-finite limit so the pagination
-  // envelope never contains Infinity (e.g. limit=0 would otherwise make
-  // totalPages = Math.ceil(total/0) = Infinity).
-  const safeLimit = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 1;
-  const safePage = Number.isFinite(Number(page)) ? Number(page) : 1;
-  const safeTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
+  const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
+  const rawLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : 10;
+  const safeLimit = Math.min(rawLimit, MAX_PAGE_SIZE);
+  const safeTotal = Number.isFinite(Number(total)) ? Math.max(0, Number(total)) : 0;
   const totalPages = Math.ceil(safeTotal / safeLimit) || 0;
   return {
     success: true,
@@ -40,6 +40,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
     data,
     pagination: {
       page: safePage,
+      pageSize: safeLimit,
       limit: safeLimit,
       total: safeTotal,
       totalPages,

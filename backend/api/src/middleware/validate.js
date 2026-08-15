@@ -1,22 +1,5 @@
 import logger from './logger.js';
 
-/**
- * Format a Zod validation error into a flat array of field+message objects
- * suitable for returning as an HTTP 400 body.
- *
- * @param {object} error - A Zod error object with an `issues` array.
- *   Each issue has at least { path: string[], message: string }.
- * @returns {Array<{field: string, message: string}>} Formatted issues with
- *   `field` set to the dot-joined path or "body" if empty, and
- *   `message` set to the issue message.
- *
- * @example
- * // Given a Zod error for missing "email" in the request body:
- * const formatted = formatValidationIssues(error);
- * // => [{ field: "body.email", message: "Required" }]
- *
- * @since 1.0.0
- */
 export function formatValidationIssues(error) {
   return error.issues.map((issue) => ({
     field: issue.path.length > 0 ? issue.path.join(".") : "body",
@@ -47,12 +30,14 @@ export function validateArray(schema) {
 
 export function validateBody(schema) {
   return (req, res, next) => {
-    // A request without a body (no content-type / no payload) leaves
-    // req.body undefined; zod's safeParse throws on undefined in some
-    // versions. Normalize to {} so a missing body is validated the same
-    // way an empty JSON object would be.
-    const body = req.body === undefined || req.body === null ? {} : req.body;
-    const result = schema.safeParse(body);
+    // Guard: req.body must be present before schema validation.
+    if (req.body == null) {
+      return res.status(400).json({
+        error: "Request body is required",
+      });
+    }
+
+    const result = schema.safeParse(req.body);
 
     if (!result.success) {
       logger.warn(
@@ -72,6 +57,13 @@ export function validateBody(schema) {
 
 export function validateParams(schema) {
   return (req, res, next) => {
+    // Guard: req.params must be present before schema validation.
+    if (req.params == null) {
+      return res.status(400).json({
+        error: "Request params are required",
+      });
+    }
+
     const result = schema.safeParse(req.params);
 
     if (!result.success) {
@@ -116,22 +108,20 @@ export function validateQuery(schema) {
       });
       return next();
     } catch (err) {
-      // Zod throws on malformed/oversized input (e.g. transform failures).
-      // Treat those as client errors with the same envelope as a failed
-      // safeParse rather than surfacing an internal 500.
-      if (err && (err.name === 'ZodError' || err.issues)) {
-        logger.warn(
-          { event: 'VALIDATION_ERROR', type: 'query', requestId: req.requestId || req.id, details: formatValidationIssues(err) },
-          'Query validation failed',
-        );
-        return res.status(400).json({
-          error: "Validation failed",
-          details: formatValidationIssues(err),
-        });
-      }
-      return res.status(500).json({
-        error: "Internal query validation error",
-        details: err.message,
+      // A malformed query (e.g. a huge nested value that overflows the schema
+      // parser) is a client error, not a server fault: report it as a 400.
+      logger.warn(
+        {
+          event: 'VALIDATION_ERROR',
+          type: 'query',
+          requestId: req.requestId || req.id,
+          error: err.message,
+        },
+        'Query validation threw',
+      );
+      return res.status(400).json({
+        error: "Validation failed",
+        details: [{ field: "query", message: err.message }],
       });
     }
   };

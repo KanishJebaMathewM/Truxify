@@ -201,7 +201,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('admin:view-audit-logs'
     res.json(result);
   } catch (err) {
     logger.error({ requestId: req.requestId }, "[AuditRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: "Failed to fetch audit logs.", details: err?.message || err.message });
+    res.status(500).json({ error: "Failed to fetch audit logs.", details: err?.message || String(err || 'Unknown error') });
   }
 });
 
@@ -253,10 +253,10 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
       return res.status(404).json({ error: 'Audit log entry not found.' });
     }
 
-    res.json(data);
+    return res.json(data);
   } catch (err) {
     logger.error({ requestId: req.requestId, err: err?.message || err }, '[AuditRoutes] Error fetching audit log entry');
-    res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

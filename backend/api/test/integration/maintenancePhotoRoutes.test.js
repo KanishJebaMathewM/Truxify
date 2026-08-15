@@ -5,23 +5,8 @@ import express from 'express';
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
-// The controller calls createUserClient(req.token) unconditionally (the
-// append_maintenance_photos RPC is SECURITY DEFINER and needs the caller's
-// JWT), so the mock must provide it or every request 500s before reaching
-// any route logic.
-const userClientRpc = vi.fn(async (fnName, args) => {
-  if (fnName === 'append_maintenance_photos') {
-    const ticket = m.store.truck_maintenance_tickets.find((t) => t.id === args.p_ticket_id);
-    if (ticket) {
-      ticket.photo_urls = [...(ticket.photo_urls || []), ...args.p_new_paths];
-    }
-  }
-  return { data: null, error: null };
-});
-
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
-  createUserClient: () => ({ rpc: userClientRpc }),
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,

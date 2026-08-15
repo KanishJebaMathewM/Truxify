@@ -4,6 +4,7 @@ import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
 import { generateOrderDisplayId } from '../../api/src/lib/orderDisplayId.js';
 import { createLoaders } from '../gateway/authContext.js';
 
@@ -25,7 +26,6 @@ function mapOrder(row) {
 
     return {
         ...row,
-        status: ORDER_STATUS_FROM_DB[row.status] ?? row.status,
         customerId: row.customerId ?? row.customer_id,
         driverId: row.driverId ?? row.driver_id,
         cargoType: row.cargoType ?? row.goods_type,
@@ -54,20 +54,6 @@ const ORDER_STATUS_TO_DB = {
     COMPLETED: 'delivered',
     CANCELLED: 'cancelled',
     DISPUTED: 'disputed',
-};
-
-const ORDER_STATUS_FROM_DB = {
-    pending: 'PENDING',
-    truck_assigned: 'CONFIRMED',
-    en_route_pickup: 'ASSIGNED',
-    arrived_pickup: 'ASSIGNED',
-    picked_up: 'IN_TRANSIT',
-    in_transit: 'IN_TRANSIT',
-    arriving: 'IN_TRANSIT',
-    delivered: 'COMPLETED',
-    cancelled: 'CANCELLED',
-    payment_released: 'COMPLETED',
-    disputed: 'DISPUTED',
 };
 
 function toDbStatus(status) {
@@ -341,10 +327,13 @@ async function startOrderService() {
     const { url } = await startStandaloneServer(server, {
         listen: { port: 4001 },
         context: async ({ req }) => {
-            const id = req.headers['x-user-id'];
-            const role = req.headers['x-user-role'];
-            const user = id ? { id, role } : null;
-            
+            // Identity is derived only from gateway-signed trusted headers.
+            // Requests that reach the subgraph directly, or with forged
+            // x-user-id/x-user-role not bearing a valid gateway signature,
+            // resolve to an unauthenticated user and are rejected by
+            // requireUser/isAdmin in the resolvers (no IDOR / privilege escalation).
+            const user = resolveUserFromTrustedHeaders(req.headers);
+
             return {
                 user,
                 loaders: createLoaders(supabase)

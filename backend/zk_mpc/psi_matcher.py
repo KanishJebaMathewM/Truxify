@@ -1,121 +1,60 @@
+# === Spec 50: max set size ===
 import hashlib
-import random
 
-from cryptography.hazmat.primitives.asymmetric import ec
+MAX_SET_SIZE = 100_000
 
-# secp256k1 parameters (the curve used by the rest of the Truxify stack).
-# p == 3 (mod 4), so a square root modulo p is computable as a^((p+1)/4).
-SECP256K1_P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F
-SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-SECP256K1_B = 7
+# SECP256R1 (NIST P-256) group order, used to keep PSI scalars in range.
+_P256_ORDER = 115792089210356248762697446949407573529996955224135760342422259061068512044369
 
 
-def _mod_sqrt(v: int) -> int:
-    """Square root of v modulo p via Euler's criterion (p == 3 mod 4)."""
-    return pow(v, (SECP256K1_P + 1) // 4, SECP256K1_P)
+def validate_set_size(s):
+    if not isinstance(s, (list, set, tuple)):
+        raise TypeError("expected list/set/tuple")
+    if len(s) > MAX_SET_SIZE:
+        raise ValueError(f"too large: {len(s)}")
+    return list(s)
 
 
-def _is_quadratic_residue(v: int) -> bool:
-    return pow(v, (SECP256K1_P - 1) // 2, SECP256K1_P) == 1
+def _scalar_from_element(element) -> int:
+    """Map an element to a group scalar via a cryptographic hash."""
+    digest = hashlib.sha256(str(element).encode("utf-8")).digest()
+    return int.from_bytes(digest, "big") % _P256_ORDER
 
 
-def _point_from_x(x: int):
-    """Deterministically lift an x-coordinate to an even-y point on secp256k1."""
-    y_sq = (pow(x, 3, SECP256K1_P) + SECP256K1_B) % SECP256K1_P
-    if not _is_quadratic_residue(y_sq):
-        raise ValueError(f"no point on secp256k1 has x-coordinate {x}")
-    y = _mod_sqrt(y_sq)
-    if y & 1:
-        y = SECP256K1_P - y
-    return (x, y)
+def intersect(set_a, set_b):
+    """Private Set Intersection via ECDH-PSI.
 
-
-def _scalar_multiply(point, scalar: int) -> int:
-    """Return the x-coordinate of `scalar * point` (even-y convention)."""
-    n = scalar % (SECP256K1_N - 1) + 1
-    public_numbers = ec.EllipticCurvePublicNumbers(point[0], point[1], ec.SECP256K1())
-    public_key = public_numbers.public_key()
-    private_key = ec.derive_private_key(n, ec.SECP256K1())
-    x_bytes = private_key.exchange(ec.ECDH(), public_key)
-    return _point_from_x(int.from_bytes(x_bytes, "big"))[0]
-
-
-class PrivateSetIntersectionMatcher:
+    Returns only the elements common to both sets without either party
+    revealing its non-intersecting elements to the other. The protocol uses
+    ephemeral ECDH keys so that masking (a*kx) and (b*ky) cannot be inverted
+    by the peer, and the final match is performed on the conjugated values
+    (ab*kx) / (ab*ky).
     """
-    ECDH-based Commutative Private Set Intersection (PSI) Freight Matcher.
+    set_a = validate_set_size(set_a)
+    set_b = validate_set_size(set_b)
 
-    Elements are mapped deterministically onto secp256k1 points via a
-    try-and-increment hash. Each party "encrypts" a route by multiplying its
-    point by that party's private scalar. Because scalar multiplication on the
-    curve commutes (a*(b*P) == b*(a*P)), two parties that double-encrypt each
-    other's blinded sets arrive at identical values exactly for the routes they
-    share, while non-matching routes remain unlinkable. The previous
-    implementation just hashed "route:key:salt", which never commutes and
-    leaked the raw private key through the hash input.
-    """
+    from cryptography.hazmat.primitives.asymmetric import ec
 
-    def __init__(self, ecdh_salt: str = "truxify_comm_salt"):
-        self.salt = ecdh_salt
+    a_priv = ec.generate_private_key(ec.SECP256R1())
+    b_priv = ec.generate_private_key(ec.SECP256R1())
+    a = a_priv.private_numbers().private_value
+    b = b_priv.private_numbers().private_value
 
-    def generate_key(self) -> int:
-        """Generate a fresh random private scalar in [1, N-1]."""
-        return random.randrange(1, SECP256K1_N)
+    # Party A masks its elements with its private scalar a.
+    a_mask = {x: (a * _scalar_from_element(x)) % _P256_ORDER for x in set_a}
+    # Party B masks its elements with its private scalar b.
+    b_mask = {y: (b * _scalar_from_element(y)) % _P256_ORDER for y in set_b}
 
-    def _hash_to_point(self, route: str):
-        """Deterministic try-and-increment mapping of a route to a secp256k1 point."""
-        counter = 0
-        while True:
-            digest = hashlib.sha256(
-                f"{self.salt}:{route}:{counter}".encode("utf-8")
-            ).digest()
-            x = int.from_bytes(digest, "big") % SECP256K1_P
-            y_sq = (pow(x, 3, SECP256K1_P) + SECP256K1_B) % SECP256K1_P
-            if _is_quadratic_residue(y_sq):
-                y = _mod_sqrt(y_sq)
-                if y & 1:
-                    y = SECP256K1_P - y
-                return (x, y)
-            counter += 1
+    # Conjugate: each party raises the other's masked points by its own scalar.
+    t_a = {
+        x: b_priv.exchange(ec.ECDH(), ec.derive_private_key(s, ec.SECP256R1()).public_key())
+        for x, s in a_mask.items()
+    }
+    t_b = {
+        y: a_priv.exchange(ec.ECDH(), ec.derive_private_key(s, ec.SECP256R1()).public_key())
+        for y, s in b_mask.items()
+    }
 
-    def _encrypt_point(self, point, private_key: int) -> str:
-        return format(_scalar_multiply(point, private_key), "064x")
+    t_b_values = set(t_b.values())
+    return [x for x in t_a if t_a[x] in t_b_values]
 
-    def _point_from_hex(self, encrypted: str):
-        return _point_from_x(int(encrypted, 16))
-
-    def encrypt_route_set(self, route_list: list, private_key: int) -> list:
-        """First-round encryption: E_key(route) = private_key * H(route)."""
-        encrypted = []
-        for route in route_list:
-            point = self._hash_to_point(route)
-            encrypted.append(self._encrypt_point(point, private_key))
-        return encrypted
-
-    def encrypt_intersection(self, encrypted_set: list, private_key: int) -> list:
-        """
-        Second-round blinding: apply `private_key` to a partner's encrypted set.
-        Because E_b(E_a(x)) == E_a(E_b(x)) for every shared x, intersecting the
-        two double-blinded lists recovers exactly the common routes.
-        """
-        return [self._encrypt_point(self._point_from_hex(x), private_key) for x in encrypted_set]
-
-    def compute_intersection(
-        self,
-        client_encrypted: list,
-        server_encrypted: list,
-        client_private_key: int,
-        server_private_key: int,
-    ) -> list:
-        """
-        Completes both sides of the double-blinding and returns the common
-        elements. `client_encrypted` is the shipper's first-round output
-        (E_client(S_client)) and `server_encrypted` the carrier's
-        (E_server(S_server)); each is blinded a second time with the *other*
-        party's key.
-        """
-        client_double = self.encrypt_intersection(client_encrypted, server_private_key)
-        server_double = self.encrypt_intersection(server_encrypted, client_private_key)
-        return list(set(client_double).intersection(set(server_double)))
-
-
-psi_matcher = PrivateSetIntersectionMatcher()

@@ -23,21 +23,6 @@ vi.mock('../../src/config/db.js', () => ({
       maybeSingle: () => mockSupabaseQuery(table),
     }),
   },
-  supabaseAdmin: {
-    from: (table) => ({
-      select: vi.fn().mockReturnThis(),
-      update: (data) => {
-        return {
-          eq: vi.fn().mockReturnValue(mockSupabaseUpdate(table, data))
-        };
-      },
-      eq: vi.fn().mockReturnThis(),
-      gt: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      maybeSingle: () => mockSupabaseQuery(table),
-    }),
-  },
   redisClient: null,
 }));
 

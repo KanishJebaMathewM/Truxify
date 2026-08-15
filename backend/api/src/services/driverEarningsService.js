@@ -6,12 +6,13 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
   // Weekly Chart Aggregation (always shows past 7 days)
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const weeklyChartMap = {};
-  const pad = (n) => String(n).padStart(2, '0');
-  const toDateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  // `trip_date` is stored in UTC (see tripRoutes), so keys are built from UTC
+  // date parts; using local getDate()/getMonth() shifts buckets by the UTC
+  // offset and across DST boundaries.
+  const toDateKey = (date) => date.toISOString().slice(0, 10);
   for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    weeklyChartMap[toDateKey(d)] = { day: daysOfWeek[d.getDay()], earnings: 0 };
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    weeklyChartMap[toDateKey(d)] = { day: daysOfWeek[d.getUTCDay()], earnings: 0 };
   }
 
   let totalKm = 0;
@@ -90,7 +91,11 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
     weekly_chart: weeklyChart,
     cumulative_stats: {
       total_km: totalKm,
-      avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+      // Unit: paisa/km. This matches `gross_earnings`/`net_earnings`, which are
+      // sums of the paisa-valued `trip.total_earnings`/`trip.net_earnings`
+      // columns. Dropping the `/100` keeps every earnings field in paisa so the
+      // aggregation is uniformly unit-consistent (do not convert to INR here).
+      avg_earning_per_km: (Number.isFinite(totalKm) && totalKm > 0 && Number.isFinite(totalNetEarnings)) ? totalNetEarnings / totalKm : 0,
       lifetime_trips: lifetimeTrips !== null ? lifetimeTrips : null
     },
     deadhead_trips_saved: deadheadTripsSaved

@@ -1,0 +1,12 @@
+{
+  "description": "Regression fixtures for oracle_sync 'Compute Idempotency & Format' node (issue #11552). Validates that an invalid/missing JSON-RPC `result` does not emit NaN gasGwei.",
+  "fixtures": [
+    { "name": "valid_hex", "input": { "result": "0x1dcd65000" }, "expect": "valid" },
+    { "name": "valid_zero", "input": { "result": "0x0" }, "expect": "valid" },
+    { "name": "null_result", "input": { "result": null }, "expect": "invalid" },
+    { "name": "undefined_result", "input": {}, "expect": "invalid" },
+    { "name": "empty_string", "input": { "result": "" }, "expect": "invalid" },
+    { "name": "non_hex_string", "input": { "result": "0xZZ" }, "expect": "invalid" },
+    { "name": "object_result", "input": { "result": { "a": 1 } }, "expect": "invalid" }
+  ]
+}

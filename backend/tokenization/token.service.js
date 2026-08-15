@@ -2,6 +2,58 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
+const WEI_UNIT = 10n ** 18n;
+
+/**
+ * Compute the exact wei cost of an amount of tokens at a given price.
+ *
+ * Both inputs are decimal strings (e.g. "0.1" ETH/token and "3" tokens). The
+ * contract multiplies the two wei values and divides by 1e18, so we replicate
+ * that with integer math only — no `parseFloat` — which avoids the float
+ * drift that previously lost wei (e.g. 0.1 * 3 rounded to 0.30000000000000004).
+ *
+ * @param {string|number} price   price per token in ether units
+ * @param {string|number} amount  number of tokens in ether units
+ * @param {boolean} roundUp       match the contract's ceiling (purchase) vs floor (trade)
+ * @returns {bigint} total cost in wei
+ */
+export function tokenCostWei(price, amount, roundUp = true) {
+    const priceWei = ethers.parseEther(price.toString());
+    const amountWei = ethers.parseEther(amount.toString());
+    const product = priceWei * amountWei;
+    return roundUp ? (product + WEI_UNIT - 1n) / WEI_UNIT : product / WEI_UNIT;
+}
+
+/**
+ * Extract an argument from the first matching event in a transaction receipt.
+ *
+ * The on-chain asset/trade IDs are assigned inside the same transaction that
+ * performs the mint/order, so reading them from the emitted event is
+ * race-free. This replaces the previous `getTotalAssets()` / `getTotalTradeOrders()`
+ * counters, which were a TOCTOU: after the tx was mined but before the count
+ * was read, a concurrent create could shift the value and produce a wrong ID.
+ *
+ * @param {object} receipt  ethers v6 transaction receipt with `.logs`
+ * @param {object} contract ethers Contract (or object exposing `.interface`)
+ * @param {string} eventName
+ * @param {number} argIndex
+ * @returns {any} the requested event argument, or null if not found
+ */
+export function extractEventArg(receipt, contract, eventName, argIndex = 0) {
+    if (!receipt || !contract || !contract.interface) return null;
+    for (const log of receipt.logs || []) {
+        try {
+            const parsed = contract.interface.parseLog(log);
+            if (parsed && parsed.name === eventName) {
+                return parsed.args[argIndex];
+            }
+        } catch {
+            // log emitted by a different contract / not decodable here
+        }
+    }
+    return null;
+}
+
 class TokenizationService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -19,7 +71,9 @@ class TokenizationService {
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
             'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
-            'function getTotalTradeOrders() external view returns (uint256)'
+            'function getTotalTradeOrders() external view returns (uint256)',
+            'event AssetCreated(uint256 indexed assetId, string name, address indexed owner)',
+            'event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller)'
         ];
 
         this.token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
@@ -42,19 +96,22 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            // Get asset ID from logs
-            const assetId = await this.token.getTotalAssets();
+            // Get the asset ID from the AssetCreated event args in the receipt
+            // logs, not from getTotalAssets() (a count): the count diverges
+            // from the on-chain ID under concurrent creation, deletions, or
+            // non-contiguous IDs (issue #11674).
+            const assetId = this._extractIdFromLogs(receipt, 'AssetCreated', 'assetId');
 
             await this.storeAsset({
                 ...assetData,
-                assetId: assetId.toString(),
+                assetId: assetId,
                 txHash: receipt.hash
             });
 
             logger.info(`✅ Asset created: ${assetId}`);
             return {
                 success: true,
-                assetId: assetId.toString(),
+                assetId: assetId,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -107,7 +164,7 @@ class TokenizationService {
 
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
@@ -149,11 +206,15 @@ class TokenizationService {
             );
             const receipt = await tx.wait();
 
-            const orderId = await this.token.getTotalTradeOrders();
+            // Get the order ID from the TradeOrderCreated event args in the
+            // receipt logs, not from getTotalTradeOrders() (a count): the
+            // count diverges from the on-chain ID under concurrent creation,
+            // deletions, or non-contiguous IDs (issue #11674).
+            const orderId = this._extractIdFromLogs(receipt, 'TradeOrderCreated', 'orderId');
 
             await this.storeTradeOrder({
                 assetId,
-                orderId: orderId.toString(),
+                orderId: orderId,
                 userAddress,
                 amount,
                 price,
@@ -164,7 +225,7 @@ class TokenizationService {
             logger.info(`✅ Trade order created: ${orderId}`);
             return {
                 success: true,
-                orderId: orderId.toString(),
+                orderId: orderId,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -309,6 +370,23 @@ class TokenizationService {
     }
 
     // ============ Database Operations ============
+
+    _extractIdFromLogs(receipt, eventName, idFieldName) {
+        const tokenAddress = this.tokenAddress.toLowerCase();
+        for (const log of receipt.logs) {
+            if (log.address && log.address.toLowerCase() !== tokenAddress) continue;
+            try {
+                const parsed = this.token.interface.parseLog(log);
+                if (parsed && parsed.name === eventName && parsed.args[idFieldName] !== undefined) {
+                    return parsed.args[idFieldName].toString();
+                }
+            } catch {
+                // Log not described by this contract's ABI — skip (e.g. token
+                // transfers or third-party emits in the same receipt).
+            }
+        }
+        throw new Error(`${eventName} event not found in transaction receipt logs`);
+    }
 
     async storeAsset(data) {
         const { error } = await supabase

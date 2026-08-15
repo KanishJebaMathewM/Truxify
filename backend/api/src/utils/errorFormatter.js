@@ -1,5 +1,5 @@
 export function formatError(code, message, details = undefined) {
-  const error = {
+  const err = {
     success: false,
     error: {
       code,
@@ -8,8 +8,8 @@ export function formatError(code, message, details = undefined) {
   };
 
   if (process.env.NODE_ENV !== "production" && details) {
-    error.error.details = details;
+    err.error = { ...err.error, details };
   }
 
-  return error;
+  return err;
 }

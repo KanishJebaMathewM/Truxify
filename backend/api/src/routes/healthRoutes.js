@@ -94,7 +94,7 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error('[health] Supabase check failed:', err.message);
+    logger.error({ err }, '[health] Supabase check failed');
     return 'failed';
   }
 }
@@ -105,7 +105,7 @@ async function checkMongo() {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error('[health] MongoDB check failed:', err.message);
+    logger.error({ err }, '[health] MongoDB check failed');
     return 'failed';
   }
 }
@@ -116,7 +116,7 @@ async function checkRedis() {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error('[health] Redis check failed:', err.message);
+    logger.error({ err }, '[health] Redis check failed');
     return 'failed';
   }
 }
@@ -128,10 +128,10 @@ function checkFirebase() {
 async function checkEscrow() {
   try {
     const result = await checkEscrowHealth();
-    return result?.status ?? 'unavailable';
+    return result.status;
   } catch (err) {
-    logger.error('[health] Escrow health check failed:', err.message);
-    return 'unavailable';
+    logger.error({ err }, '[Health] checkEscrow failed');
+    return 'failed';
   }
 }
 
@@ -296,11 +296,6 @@ const aggregator = createDefaultAggregator();
 router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
-    // Strip per-service metadata (broker hostnames, ports, pool counts, ML
-    // engine URL, chain ids) so the public surface exposes only status.
-    for (const service of Object.values(result.services || {})) {
-      delete service.metadata;
-    }
     // 200 = system operational (healthy or degraded with non-critical failures)
     // 503 = system not operational (critical services down)
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;

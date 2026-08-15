@@ -172,7 +172,14 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(asset.availableTokens >= amount, "Insufficient tokens");
         require(issuedTokens[assetId] + amount <= asset.totalTokens, "Supply cap exceeded");
 
-        uint256 totalCost = (amount * asset.tokenPrice + 1e18 - 1) / 1e18;
+        // Buy and sell MUST round identically. We use floor (truncation) on
+        // both sides so a round-trip (buy then sell the same amount) is
+        // value-neutral modulo no hidden spread. The previous code rounded
+        // buys UP (ceiling) and sells DOWN (floor) against the same
+        // asset.tokenPrice, silently leaking up to ~1 token of value per trade
+        // into the contract. With symmetric floor rounding the contract can
+        // never extract more than the exact proportional value.
+        uint256 totalCost = (amount * asset.tokenPrice) / 1e18;
         require(msg.value >= totalCost, "Insufficient payment");
 
         // Update asset
@@ -217,6 +224,9 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(ownership.backedTokens >= amount, "Tokens not backed");
 
         Asset storage asset = assets[assetId];
+        // Symmetric floor rounding with purchaseFraction (see above): a
+        // round-trip pays out exactly what was paid in for the same amount,
+        // so there is no hidden spread leaking value to the contract.
         uint256 payout = (amount * asset.tokenPrice) / 1e18;
 
         // Burn tokens
@@ -400,8 +410,13 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
     // ============ Compliance ============
 
+    // Persisted KYC/AML verification status. Only verified users can take
+    // part in compliant P2P transfers of tokenized assets.
+    mapping(address => bool) public isCompliant;
+
     function verifyCompliance(address user) external onlyOwner {
         // KYC/AML check
+        isCompliant[user] = true;
         emit ComplianceCheck(user, true);
     }
 
@@ -416,6 +431,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(assetExists[assetId], "Asset not found");
         require(to != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
+        require(isCompliant[msg.sender], "Sender not compliant");
+        require(isCompliant[to], "Recipient not compliant");
 
         FractionalOwnership storage senderOwnership = fractionalOwnership[assetId][msg.sender];
         require(senderOwnership.amount >= amount, "Insufficient fractional ownership");

@@ -7,7 +7,6 @@ import http from 'http'
 import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -25,16 +24,13 @@ import cookieSecurityValidator from './middleware/cookieSecurityValidator.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
-import { validateWimConfig } from './config/wim.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
 import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import digilockerService from './services/digilockerService.js'
 
 
 import {
@@ -128,6 +124,7 @@ import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 // 🆕 ZK-PROOFS FOR DRIVER KYC
 // ============================================================================
 import zkpRoutes from './routes/zkp.routes.js'
+import crossDockRoutes from './routes/crossDockRoutes.js'
 
 
 // ============================================================================
@@ -163,6 +160,7 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startDevicePruningWorker, stopDevicePruningWorker } from './workers/devicePruningWorker.js'
 import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
@@ -170,12 +168,7 @@ import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import {
-  startOutboxRelayWorker,
-  stopOutboxRelayWorker,
-} from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -242,29 +235,15 @@ if (!process.env.WEBHOOK_SECRET) {
     logger.fatal('WEBHOOK_SECRET is not set. POST /api/webhooks/escrow would fail closed and reject all incoming webhooks. Set WEBHOOK_SECRET and restart.')
     process.exit(1)
   } else {
-    logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
+    logger.warn('WARNING: WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
-}
-
-// ============================================================================
-// 🆕 WIM BYPASS VALIDATION
-// ============================================================================
-// WIM bypass credentials are HMAC-signed with a server secret. Without a
-// properly configured secret the process must fail fast rather than ever
-// issue an unsigned or weakly-signed bypass credential.
-try {
-  validateWimConfig();
-  logger.info('✅ WIM bypass signing configuration is valid.')
-} catch (err) {
-  logger.fatal(err.message)
-  process.exit(1)
 }
 
 // ============================================================================
 // 🆕 OTEL VALIDATION
 // ============================================================================
 if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
-  logger.warn('⚠️ OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
+  logger.warn('WARNING: OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
 }
 
 // ============================================================================
@@ -282,12 +261,12 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 // ============================================================================
 if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
   !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
-  logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
+  logger.warn('WARNING: Shard hosts not fully configured. Using localhost defaults.')
 }
 
 if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
   !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
-  logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
+  logger.warn('WARNING: Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
 
@@ -313,10 +292,10 @@ if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
 // 🆕 ZK-PROOFS VALIDATION
 // ============================================================================
 if (!process.env.KYC_VERIFIER_CONTRACT) {
-  logger.warn('⚠️ KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
+  logger.warn('WARNING: KYC_VERIFIER_CONTRACT not set. ZK proof verification will not work.')
 }
 if (!process.env.PRIVATE_KEY) {
-  logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
+  logger.warn('WARNING: PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
 
 
@@ -325,16 +304,16 @@ if (!process.env.PRIVATE_KEY) {
 // 🆕 MULTI-CLOUD DR VALIDATION
 // ============================================================================
 if (!process.env.AWS_ACCESS_KEY || !process.env.AWS_SECRET_KEY) {
-  logger.warn('⚠️ AWS credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: AWS credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.AZURE_CONNECTION_STRING) {
-  logger.warn('⚠️ Azure connection string not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: Azure connection string not set. Multi-cloud DR may not work.')
 }
 if (!process.env.GCP_PROJECT_ID) {
-  logger.warn('⚠️ GCP credentials not set. Multi-cloud DR may not work.')
+  logger.warn('WARNING: GCP credentials not set. Multi-cloud DR may not work.')
 }
 if (!process.env.ACTIVE_CLOUD) {
-  logger.warn('⚠️ ACTIVE_CLOUD not set. Using default: aws')
+  logger.warn('WARNING: ACTIVE_CLOUD not set. Using default: aws')
 }
 
 
@@ -342,18 +321,9 @@ if (!process.env.ACTIVE_CLOUD) {
 // but don't crash (non-escrow functionality should still work).
 validateEscrowSetup().then((valid) => {
   if (!valid) {
-    logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
+    logger.warn('WARNING: Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
-
-// Validate DocumentRegistry/KYCVerifier contract wiring — a mismatched
-// DOCUMENT_REGISTRY_CONTRACT / KYC_VERIFIER_CONTRACT_ADDRESS must fail loudly
-// instead of silently skipping the DigiLocker on-chain write.
-digilockerService.validateSetup().then((valid) => {
-  if (!valid) {
-    logger.warn('⚠️ DigiLocker contract setup validation failed. On-chain document verification may not work correctly.')
-  }
-}).catch(err => logger.error({ err }, 'DigiLocker contract setup validation failed'))
 
 const app = express()
 const server = http.createServer(app)
@@ -364,7 +334,8 @@ app.use(headerSizeMonitor);
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
 //   - Docker Compose (no proxy)                 → 0
 //   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
-const trustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const _parsedTrustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
+const trustProxy = Number.isFinite(_parsedTrustProxy) ? _parsedTrustProxy : 1
 app.set('trust proxy', trustProxy)
 
 // ============================================================================
@@ -488,9 +459,6 @@ app.use(requestLogger)
 app.use(hppProtection)
 app.use(suspiciousRequests)
 
-// Sanitize all responses to prevent response-header injection before routes run.
-app.use(responseSanitizer)
-
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
 // allowed types match the parsers registered above.
@@ -520,6 +488,9 @@ app.use('/api', requestCacheMiddleware)
 // REST API ROUTING
 // ============================================================================
 app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
+// Cross-docking synchronization engine (#6181): handoff relay lifecycle for
+// long-haul loads. Sits behind authenticate + per-route policy checks.
+app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
@@ -594,6 +565,7 @@ app.use('/api/blockchain', (req, _res, next) => {
 // Auth-gated internal endpoints consumed by automation/n8n workflows:
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
+//   POST /api/internal/defensive-pause
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
@@ -718,6 +690,8 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
+app.use(responseSanitizer)
+
 // Handling 404 Route Not Found
 app.use(notFound)
 // Sentry error handler must come before the generic error handler;
@@ -773,6 +747,7 @@ server.listen(PORT, () => {
   startReputationReconciliation(orderRepository)
   startDlqWorker()
   startStaleOrderWorker(escrowReconciliationOrderRepository)
+  startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
   startOutboxRelayWorker()
@@ -785,6 +760,7 @@ server.listen(PORT, () => {
     reputationReconciliation: true,
     dlqWorker: true,
     staleOrderWorker: true,
+    devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
   }
@@ -816,8 +792,10 @@ async function shutdown(signal) {
   stopReputationReconciliation()
   stopDlqWorker()
   stopDocumentExpiryWorker()
+  stopDevicePruningWorker()
   stopWithdrawalSettlementWorker()
   stopOutboxRelayWorker()
+  stopDevicePruningWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

@@ -33,16 +33,17 @@ describe('getPeriodStart', () => {
     expect(diffDays).toBe(7);
   });
 
-  it('returns the first of the current month for the monthly window', () => {
+  it('returns the first of the current month in UTC for the monthly window', () => {
     const start = getPeriodStart('monthly');
-    expect(start.getDate()).toBe(1);
-    expect(start.getMonth()).toBe(new Date().getMonth());
+    const now = new Date();
+    const monthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    expect(start.toISOString()).toBe(`${monthPrefix}-01T00:00:00.000Z`);
   });
 
   it('defaults to the monthly window for an unrecognised period', () => {
     // Validation rejects these before the handler runs; this is defence in depth.
-    expect(getPeriodStart(undefined).getDate()).toBe(1);
-    expect(getPeriodStart('yearly').getDate()).toBe(1);
+    expect(getPeriodStart(undefined).toISOString().slice(0, 10).endsWith('-01')).toBe(true);
+    expect(getPeriodStart('yearly').toISOString().slice(0, 10).endsWith('-01')).toBe(true);
   });
 });
 

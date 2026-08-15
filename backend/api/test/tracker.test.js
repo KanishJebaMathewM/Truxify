@@ -166,6 +166,7 @@ describe('tracker', () => {
     it('rejects when driver_id is missing', async () => {
       const ws = makeWs({ driverId: null });
       await handleLocationPing(ws, { lat: 19.0, lng: 72.8 });
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Forbidden: Driver role required to publish location updates', code: 4003 }));
       expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
         error: 'Forbidden: Driver role required to publish location updates',
         code: 4003,
@@ -182,12 +183,22 @@ describe('tracker', () => {
     it('rejects invalid coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 'abc', lng: 72.8 });
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"error":"Invalid telemetry payload."'));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+        error: 'Invalid telemetry payload.',
+        details: ['lat must be a valid number'],
+      }));
       expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be a valid number'] }));
     });
 
     it('rejects out-of-range coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 100, lng: 72.8 });
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"error":"Invalid telemetry payload."'));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+        error: 'Invalid telemetry payload.',
+        details: ['lat must be <= 90'],
+      }));
       expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be <= 90'] }));
     });
 

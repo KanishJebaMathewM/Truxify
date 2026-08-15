@@ -1,8 +1,7 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
-import { validationResult } from 'express-validator';
 import { AppError } from '../utils/errors.js';
-import { supabase } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 
 /**
  * Resolve the resource for the 'escort:issue-credential' ownership check:
@@ -12,7 +11,8 @@ import { supabase } from '../config/db.js';
  * wallet address/DID.
  */
 export const resolveCredentialSubject = async (req) => {
-    const { data: profile, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: profile, error } = await userClient
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', req.user.id)
@@ -47,13 +47,8 @@ function isValidFutureValidUntil(validUntil) {
 
 export const loadCredential = async (req, res, next) => {
     try {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-
         const { subject, credentialType, schema, validUntil } = req.body;
-        
+
         // subject is the Escort Driver's address or DID
         // credentialType: e.g., 'EscortCertification', 'Insurance', 'StatePermit'
 
@@ -77,20 +72,15 @@ export const loadCredential = async (req, res, next) => {
 
         throw new AppError('Failed to issue credential', 500);
     } catch (error) {
-        logger.error('Error in loadCredential:', error);
+        logger.error({ err: error }, 'Error in loadCredential');
         next(error);
     }
 };
 
 export const handshake = async (req, res, next) => {
     try {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-
         const { escorts } = req.body;
-        
+
         if (!Array.isArray(escorts) || escorts.length === 0) {
             return res.status(400).json({ error: 'escorts must be a non-empty array of addresses' });
         }
@@ -100,7 +90,7 @@ export const handshake = async (req, res, next) => {
 
         for (const address of escorts) {
             const credentials = await didService.getCredentials(address);
-            
+
             if (!credentials || credentials.length === 0) {
                 complianceStatus.push({
                     address,
@@ -116,7 +106,7 @@ export const handshake = async (req, res, next) => {
 
             for (const cred of credentials) {
                 if (cred.revoked) continue;
-                
+
                 // Verify against registry
                 const verification = await didService.verifyCredential(cred.id);
                 if (verification.isValid) {
@@ -146,7 +136,7 @@ export const handshake = async (req, res, next) => {
             convoy: complianceStatus
         });
     } catch (error) {
-        logger.error('Error in handshake:', error);
+        logger.error({ err: error }, 'Error in handshake');
         next(error);
     }
 };

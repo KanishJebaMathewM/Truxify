@@ -5,6 +5,7 @@ import { shardMiddleware, crossShardQuery } from '../middleware/shardMiddleware.
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { validateCoordinateRange } from '../utils/coordinates.js';
 
 const router = express.Router();
 
@@ -20,12 +21,6 @@ function parseCoordinate(value, field) {
     return { error: `${field} must be a finite number` };
   }
   return { value: parsed };
-}
-
-function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
-  return null;
 }
 
 // Get shard status

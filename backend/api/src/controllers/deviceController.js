@@ -19,8 +19,20 @@ function validatePlatform(platform) {
 }
 
 /**
+ * Stable installation/device identifier used for FCM token rotation. Nullable —
+ * legacy clients that only send an FCM token remain fully supported.
+ */
+function validateDeviceId(deviceId) {
+  if (deviceId === undefined || deviceId === null) return null;
+  if (typeof deviceId !== 'string') return 'deviceId must be a string';
+  if (deviceId.length < 3 || deviceId.length > 128) return 'deviceId length must be between 3 and 128';
+  if (!/^[a-zA-Z0-9\-_.:]+$/.test(deviceId)) return 'deviceId contains invalid characters';
+  return null;
+}
+
+/**
  * Normalizes and validates metadata payload.
- * Returns an explicit result structure so user payload keys (e.g. { error: "..." }) 
+ * Returns an explicit result structure so user payload keys (e.g. { error: "..." })
  * are not confused with validation failures.
  */
 function normalizeMetadata(metadata) {
@@ -38,12 +50,17 @@ function normalizeMetadata(metadata) {
 }
 
 /**
- * Register / update FCM token for a user device
+ * Register / update FCM token for a user device.
+ *
+ * Idempotent: re-registering the same token re-activates/touches the existing
+ * row instead of inserting a duplicate. When a stable `deviceId` is supplied,
+ * token rotation updates the existing device row in place and retires the old
+ * active row, so a rotating token never accumulates duplicate active records.
  */
 export async function registerDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
-    const { fcmToken, platform, metadata } = req.body;
+    const { fcmToken, platform, metadata, deviceId } = req.body;
 
     if (!userId) {
       return next(new UnauthorizedError('User not authenticated'));
@@ -57,6 +74,11 @@ export async function registerDeviceToken(req, res, next) {
     const platErr = validatePlatform(platform);
     if (platErr) {
       return next(new ValidationError(platErr));
+    }
+
+    const deviceIdErr = validateDeviceId(deviceId);
+    if (deviceIdErr) {
+      return next(new ValidationError(deviceIdErr));
     }
 
     const { data: normalizedMetadata, error: metadataErr } = normalizeMetadata(metadata);
@@ -84,6 +106,12 @@ export async function registerDeviceToken(req, res, next) {
 
     const previousUserId = existingDevice?.user_id;
 
+    // All operations (upsert user_devices, rotate/retire superseded device rows,
+    // clear previous owner's profile, sync current user's profile) run inside a
+    // single Postgres transaction via the register_device_token RPC so a partial
+    // failure rolls everything back. Executed with the service-role client: the
+    // RPC is SECURITY DEFINER and only the service role may invoke it, and the
+    // RPC receives the server-verified req.user.id rather than trusting input.
     // All three operations (upsert user_devices, clear previous owner's profile,
     // sync current user's profile) run inside a single Postgres transaction via
     // the register_device_token RPC so a partial failure rolls everything back.
@@ -96,6 +124,8 @@ export async function registerDeviceToken(req, res, next) {
       p_platform:     platform || 'android',
       p_metadata:     normalizedMetadata,
       p_prev_user_id: previousUserId ?? null,
+      p_device_id:    deviceId ?? null,
+      p_last_seen:    new Date().toISOString(),
     });
 
     if (rpcError) {
@@ -115,7 +145,10 @@ export async function registerDeviceToken(req, res, next) {
 
 /**
  * Unregister an FCM token for a user device, e.g. on logout.
- * Updates profiles.fcm_token to fallback to another active device token if available.
+ *
+ * Soft-deactivates ONLY the matching device — the user's other devices stay
+ * active. The row is preserved for audit. The profile-level token falls back to
+ * another active device when available.
  */
 export async function unregisterDeviceToken(req, res, next) {
   try {
@@ -134,20 +167,19 @@ export async function unregisterDeviceToken(req, res, next) {
       });
     }
 
-    const { data: deletedRows, error: deleteError } = await supabase
-      .from('user_devices')
-      .delete()
-      .eq('user_id', userId)
-      .eq('fcm_token', fcmToken)
-      .select('id');
+    const { data: deletedRows, error: rpcError } = await supabaseAdmin.rpc('unregister_device_token', {
+      p_user_id:   userId,
+      p_fcm_token: fcmToken,
+    });
 
-    if (deleteError) {
-      logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
+    if (rpcError) {
+      logger.error('[DeviceController] Failed to unregister device token from database:', rpcError.message);
       return next(new AppError('Failed to unregister device', 500));
     }
 
     // If no rows were deleted, the token was not registered for this user
-    if (!deletedRows || deletedRows.length === 0) {
+    const deletedCount = Array.isArray(deletedRows) ? deletedRows.length : (deletedRows ?? 0);
+    if (deletedCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Device token not found'
@@ -193,17 +225,25 @@ export async function unregisterDeviceToken(req, res, next) {
   }
 }
 
+/**
+ * Deactivate every device belonging to the user (e.g. account wipe).
+ * Rows are soft-deactivated and preserved, never deleted.
+ */
 export async function unregisterAllDeviceTokens(userId) {
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from('user_devices')
-    .delete()
-    .eq('user_id', userId);
+    .update({
+      is_active: false,
+      deactivated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .eq('is_active', true);
   if (error) {
     logger.error('[DeviceController] Failed to unregister device tokens:', error.message);
     throw error;
   }
 
-  const { error: profileError } = await supabase
+  const { error: profileError } = await supabaseAdmin
     .from('profiles')
     .update({
       fcm_token: null,
@@ -220,16 +260,17 @@ export async function unregisterAllDeviceTokens(userId) {
 }
 
 /**
- * Get list of unique registered device platforms
+ * Get list of unique registered device platforms (active devices only).
  */
 export async function getDevicePlatforms(req, res, next) {
   try {
     const checks = await Promise.all(
       VALID_PLATFORMS.map(async (platform) => {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('user_devices')
           .select('platform')
           .eq('platform', platform)
+          .eq('is_active', true)
           .limit(1);
 
         if (error) throw error;

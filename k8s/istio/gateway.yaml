@@ -48,7 +48,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 80
+          number: 5000
   - match:
     - uri:
         prefix: /docs
@@ -56,4 +56,4 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 80
+          number: 5000

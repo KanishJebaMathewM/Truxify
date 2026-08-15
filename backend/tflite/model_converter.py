@@ -170,41 +170,49 @@ class TFLiteInference:
         except Exception as e:
             logger.error(f"Model loading failed: {e}")
             return False
-    
+
     def predict(
         self,
         model_name: str,
         input_data: np.ndarray
     ) -> Dict:
-        """Run inference on edge device"""
+        """Run inference on edge device.
+
+        Validates that input_data.shape matches the model's expected input
+        shape. Rejects mismatches with a clear error instead of silently
+        truncating/repeating data via np.resize.
+        """
         try:
             if model_name not in self.interpreter_cache:
                 if not self.load_model(model_name):
                     return {'success': False, 'error': 'Model not loaded'}
-            
+
             cache = self.interpreter_cache[model_name]
             interpreter = cache['interpreter']
             input_details = cache['input_details']
             output_details = cache['output_details']
-            
-            # Preprocess input
-            input_shape = input_details[0]['shape']
-            if input_data.shape != input_shape:
-                input_data = np.resize(input_data, input_shape)
-            
+
+            # Validate input shape exactly matches expected shape
+            expected_shape = input_details[0]['shape']
+            if input_data.shape != tuple(expected_shape):
+                return {
+                    'success': False,
+                    'error': f"Input shape {input_data.shape} does not match expected shape {tuple(expected_shape)}"
+                }
+
             # Set input
             interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
-            
+
             # Run inference
             start_time = datetime.now()
             interpreter.invoke()
             end_time = datetime.now()
-            
+
             # Get output
             output_data = interpreter.get_tensor(output_details[0]['index'])
-            
+
             inference_time = (end_time - start_time).total_seconds() * 1000  # ms
-            
+
             return {
                 'success': True,
                 'output': output_data.tolist(),
@@ -212,7 +220,7 @@ class TFLiteInference:
                 'model_name': model_name,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
         except Exception as e:
             logger.error(f"Inference failed: {e}")
             return {'success': False, 'error': str(e)}
@@ -268,42 +276,52 @@ class TFLiteInference:
 
 class EdgeAIOptimizer:
     """Optimize models for edge deployment"""
-    
+
     def __init__(self):
         logger.info("✅ Edge AI Optimizer initialized")
-    
+
     def quantize_weights(
         self,
         model: tf.keras.Model,
-        quantization_type: str = 'float16'
-    ) -> tf.keras.Model:
-        """Quantize model weights"""
+        quantization_type: str = 'float16',
+        model_name: str = 'quantized_model'
+    ) -> Dict:
+        """Quantize model weights.
+
+        Returns a result dict with success flag, model path, and size.
+        Never returns the original unquantized model; callers must check
+        result['success'] to know if quantization produced a real artifact.
+        """
         try:
-            # Apply quantization
             converter = tf.lite.TFLiteConverter.from_keras_model(model)
-            
+
             if quantization_type == 'float16':
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 converter.target_spec.supported_types = [tf.float16]
             elif quantization_type == 'int8':
                 converter.optimizations = [tf.lite.Optimize.DEFAULT]
                 converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-            
-            # Convert
+
             tflite_model = converter.convert()
-            
-            # Save quantized model
-            quantized_path = "models/quantized_model.tflite"
+
+            quantized_dir = "models/quantized"
+            os.makedirs(quantized_dir, exist_ok=True)
+            quantized_path = os.path.join(quantized_dir, f"{model_name}.tflite")
             with open(quantized_path, 'wb') as f:
                 f.write(tflite_model)
-            
-            logger.info(f"✅ Model quantized: {quantization_type}")
-            
-            return model
-            
+
+            logger.info(f"✅ Model quantized: {quantization_type} -> {quantized_path}")
+
+            return {
+                'success': True,
+                'model_path': quantized_path,
+                'size_bytes': len(tflite_model),
+                'quantization': quantization_type,
+            }
+
         except Exception as e:
             logger.error(f"Quantization failed: {e}")
-            return model
+            return {'success': False, 'error': str(e)}
     
     def prune_model(
         self,

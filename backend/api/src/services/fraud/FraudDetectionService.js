@@ -10,7 +10,7 @@ class FraudDetectionService {
       logger.warn('[FraudDetection] Redis not configured — behavior tracking will use Supabase only');
     }
     this.behavioralProfiles = new Map();
-    this.fraudThreshold = parseFloat(process.env.FRAUD_THRESHOLD) || 0.7;
+    this.fraudThreshold = parseFloat(process.env.FRAUD_THRESHOLD) ?? 0.7;
     this.riskScores = new Map();
     this._maxRiskScores = 10000;
     this._maxBehavioralProfiles = 5000;
@@ -33,11 +33,12 @@ class FraudDetectionService {
       transaction: null
     };
     
-    logger.info('✅ Fraud Detection Service initialized');
+    logger.info('Fraud Detection Service initialized');
   }
 
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
+    if (!userId) return null;
     try {
       if (!supabaseAdmin) return null;
       const profile = await this.getOrCreateProfile(userId);
@@ -104,7 +105,13 @@ class FraudDetectionService {
     // Check Redis cache
     const cached = this.redis ? await this.redis.get(`behavior:${userId}`) : null;
     if (cached) {
-      return JSON.parse(cached);
+      try {
+        return JSON.parse(cached);
+      } catch (err) {
+        // Corrupt cache entry — log and fall through to the in-memory / DB
+        // paths so a single bad entry cannot 500 the fraud check.
+        logger.error(`[FraudDetection] Corrupt cached behavior profile for user ${userId}: ${err.message}`);
+      }
     }
 
     // Check in-memory cache (written by trackBehavior during Redis outages)
@@ -249,7 +256,8 @@ class FraudDetectionService {
           locations[i].lat, locations[i].lng
         );
         const hours = (locations[i].timestamp - locations[i-1].timestamp) / 3_600_000;
-        const speedKmh = hours > 0 ? dist / hours : Infinity;
+        if (hours <= 0) continue;
+        const speedKmh = dist / hours;
         if (speedKmh > maxSpeedKmh) {
           maxSpeedKmh = speedKmh;
         }

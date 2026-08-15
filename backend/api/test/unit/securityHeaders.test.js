@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-import securityHeaders from '../../src/middleware/securityHeaders.js';
+import securityHeaders, { setHstsHeader } from '../../src/middleware/securityHeaders.js';
 
 function createApp(preset = {}) {
   const app = express();
@@ -55,21 +55,55 @@ describe('securityHeaders', () => {
     );
   });
 
-  it('sends HSTS for a direct secure (TLS) request', () => {
-    const headers = {};
-    const req = { secure: true, headers: {} };
-    const res = {
-      getHeader(name) {
-        return headers[String(name).toLowerCase()];
-      },
-      setHeader(name, value) {
-        headers[String(name).toLowerCase()] = value;
-      },
-    };
-    securityHeaders(req, res, () => {});
-    expect(headers['strict-transport-security']).toBe(
-      'max-age=31536000; includeSubDomains'
-    );
+  it('uses SECURE_HSTS_MAX_AGE when configured', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = '3600';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=3600; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
+  });
+
+  it('falls back to the default max-age for an invalid SECURE_HSTS_MAX_AGE', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = 'not-a-number';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=31536000; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
+  });
+
+  it('falls back to the default max-age for weakening values like 0', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = '0';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=31536000; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
   });
 
   it('preserves headers an earlier layer already set', async () => {
@@ -107,3 +141,18 @@ describe('securityHeaders', () => {
     expect(res.body).toEqual({ ok: true });
   });
 });
+
+
+// === Spec 11 test ===
+import { setHstsHeader } from '../../src/middleware/securityHeaders.js';
+describe('setHstsHeader', () => {
+  it('sets when missing', () => {
+    const r = { _h: {}, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };
+    expect(setHstsHeader(r)).toBe(true);
+  });
+  it('skips when set', () => {
+    const r = { _h: { 'Strict-Transport-Security': 'x' }, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };
+    expect(setHstsHeader(r)).toBe(false);
+  });
+});
+

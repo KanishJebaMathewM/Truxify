@@ -1,4 +1,4 @@
-import { supabase } from '../../config/db.js';
+import { supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import crypto from 'crypto';
 
@@ -19,7 +19,7 @@ export class OutboxService {
     }
 
     const eventId = crypto.randomUUID();
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('outbox_events')
       .insert({
         id: eventId,
@@ -35,9 +35,10 @@ export class OutboxService {
       .single();
 
     if (error) {
-      // Best-effort: log but never throw — the order mutation already committed.
+      // Surface the failure so the caller can decide how to handle a
+      // non-atomic write (the order mutation may already have committed).
       logger.error('[OutboxService] Failed to write outbox event:', error.message, { aggregateId, eventType });
-      return null;
+      throw error;
     }
 
     logger.info('[OutboxService] Outbox event written:', { eventId, aggregateId, eventType });
@@ -48,7 +49,7 @@ export class OutboxService {
    * Fetch pending outbox events for the relay worker.
    */
   async fetchPendingEvents(limit = 50) {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('outbox_events')
       .select('*')
       .eq('status', 'pending')
@@ -66,18 +67,23 @@ export class OutboxService {
    * Mark an event as published after successful Kafka delivery.
    */
   async markPublished(eventId) {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('outbox_events')
       .update({ status: 'published', published_at: new Date().toISOString() })
       .eq('id', eventId);
 
     if (error) {
       logger.error('[OutboxService] Failed to mark event published:', error.message, { eventId });
+      throw error;
     }
   }
 
   /**
    * Mark an event as failed and increment retry_count.
+   *
+   * The new retry_count is computed in JS: the previous implementation
+   * assigned an unawaited `supabase.rpc('increment', ...)` Promise to the
+   * column, so the counter never advanced and dead-lettering never triggered.
    */
   async markFailed(eventId, errorMessage) {
     if (!eventId) {
@@ -85,24 +91,24 @@ export class OutboxService {
       return;
     }
 
-    // Fetch the current retry_count first so the increment is computed in
-    // JavaScript rather than embedding a query builder as a column value
-    // (supabase.rpc() returns a PostgREST builder, not a scalar — using it
-    // inside .update() would write an invalid value).
-    const { data: event } = await supabase
+    const { data: current, error: fetchError } = await supabaseAdmin
       .from('outbox_events')
       .select('retry_count')
       .eq('id', eventId)
-      .maybeSingle();
+      .single();
 
-    const newRetryCount = (event?.retry_count ?? 0) + 1;
+    if (fetchError) {
+      logger.warn('[OutboxService] Failed to read retry_count:', fetchError.message, { eventId });
+    }
 
-    const { error } = await supabase
+    const currentRetryCount = Number.isFinite(current?.retry_count) ? current.retry_count : 0;
+
+    const { error } = await supabaseAdmin
       .from('outbox_events')
       .update({
         status: 'failed',
         last_error: String(errorMessage).slice(0, 1000),
-        retry_count: newRetryCount,
+        retry_count: currentRetryCount + 1,
         last_attempted_at: new Date().toISOString(),
       })
       .eq('id', eventId);
@@ -116,7 +122,7 @@ export class OutboxService {
    * Reset failed events back to pending for retry (up to maxRetries).
    */
   async requeueFailedEvents(maxRetries = 5) {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('outbox_events')
       .update({ status: 'pending' })
       .eq('status', 'failed')

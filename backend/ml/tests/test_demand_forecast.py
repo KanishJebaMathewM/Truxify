@@ -12,14 +12,13 @@ os.environ["ML_API_KEY"] = "test_key"
 class TestModelCacheInvalidation:
     """Tests for _model_cache invalidation after training."""
 
-    def test_predict_demand_returns_float(self, monkeypatch, tmp_path):
-        """Basic smoke test: predict_demand returns a non-negative float."""
+    def test_predict_demand_raises_when_artifact_missing(self, monkeypatch, tmp_path):
+        """predict_demand must fail loudly instead of auto-training synthetic data."""
         monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
         from app.models.demand_forecast import predict_demand
 
-        result = predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
-        assert isinstance(result, float)
-        assert result >= 0
+        with pytest.raises(RuntimeError, match="artifact missing"):
+            predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
 
     def test_reset_model_cache_function_exists(self):
         """reset_model_cache should be importable and callable."""
@@ -51,8 +50,7 @@ class TestModelCacheInvalidation:
         )
 
     def test_predict_after_train_uses_disk_model(self, monkeypatch, tmp_path):
-        """Verify that predict_demand works correctly after train completes,
-        confirming the cache was reset and the new model was loaded."""
+        """After train completes and is promoted, predict serves the model."""
         monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
         import app.models.demand_forecast as df_module
 
@@ -60,12 +58,38 @@ class TestModelCacheInvalidation:
 
         # Train the model
         from app.models.demand_forecast import train_demand_forecast_model, predict_demand
-        train_demand_forecast_model()
+        metrics = train_demand_forecast_model()
 
         # Cache should be None (was invalidated by train)
         assert df_module._model_cache is None
 
-        # Predict should load from disk and work
+        # The freshly trained and promoted model must be servable by predict.
+        assert metrics["promoted"] is True
+        result = predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
+        assert isinstance(result, float)
+        assert result >= 0
+
+    def test_predict_serves_real_artifact(self, monkeypatch, tmp_path):
+        """A verified non-synthetic artifact serves predictions normally."""
+        monkeypatch.setattr("app.models.base.MODEL_STORAGE_DIR", str(tmp_path))
+        from app.models.base import get_meta_path
+        import app.models.demand_forecast as df_module
+
+        monkeypatch.chdir(tmp_path)
+
+        train_demand_forecast_model = df_module.train_demand_forecast_model
+        predict_demand = df_module.predict_demand
+        train_demand_forecast_model()
+
+        # Rewrite the persisted meta to mark this artifact as real-data trained.
+        import json
+        meta_path = get_meta_path(df_module.MODEL_NAME)
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+        meta["training_meta"]["source"] = "real"
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+
         result = predict_demand([12, 3, 0, 25.0, 0.5, 50, 15])
         assert isinstance(result, float)
         assert result >= 0

@@ -44,11 +44,12 @@ import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
+import { supabaseAdmin } from '../config/db.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
-  'function commitmentNonces(address customer) external view returns (uint256)',
+  'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
@@ -128,11 +129,13 @@ export async function validateEscrowSetup () {
         `[escrow] ❌ No contract deployed at ${address}. ` +
         'Check ESCROW_CONTRACT_ADDRESS in your .env.'
       )
+      escrowContract = null
       return false
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
     logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
+    escrowContract = null
     return false
   }
 
@@ -150,6 +153,7 @@ export async function validateEscrowSetup () {
       'Check that ESCROW_CONTRACT_ADDRESS points to the active TruxifyEscrow contract, ' +
       'not the deprecated Escrow.sol.'
     )
+    escrowContract = null
     return false
   }
 
@@ -165,7 +169,7 @@ export async function validateEscrowSetup () {
  * the amount the app records, the amount the customer deposits, and the
  * amount released to the driver can never diverge due to rounding.
  */
-export const PAISA_WEI_SCALE = BigInt(Math.round(ESCROW_MATIC_PER_PAISA * 1e18));
+const PAISA_WEI_SCALE = BigInt(Math.round(ESCROW_MATIC_PER_PAISA * 1e18));
 
 /**
  * Tolerance (in wei) used when comparing amounts that may have been written
@@ -174,7 +178,7 @@ export const PAISA_WEI_SCALE = BigInt(Math.round(ESCROW_MATIC_PER_PAISA * 1e18))
  * by at most ±256 wei for real order sizes (≤ ~250,000 paisa), far below
  * 1 gwei. A tolerance this large can never mask a real under/over-deposit.
  */
-export const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
+const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
 
 /**
  * Convert an amount in paisa to its equivalent MATIC wei value using the
@@ -185,6 +189,9 @@ export const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
  * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
  */
 export function paisaToMaticWei(paisa) {
+  if (paisa == null) {
+    throw new TypeError('paisa argument is required');
+  }
   const numeric = Number(paisa);
   if (!Number.isFinite(numeric) || numeric < 0) {
     throw new RangeError(`Invalid paisa amount: ${paisa}`);
@@ -199,28 +206,6 @@ export function paisaToMaticWei(paisa) {
   return maticWei;
 }
 
-/**
- * Convert an amount in wei back to paisa using the canonical scale.
- * Rounding is floored; intended for audit/display, not for authoritative
- * payout math (which must always derive from the integer paisa amount).
- *
- * @param {string|bigint|number} wei - Amount in wei
- * @returns {bigint} Amount in paisa
- */
-export function maticWeiToPaisa(wei) {
-  return BigInt(wei) / PAISA_WEI_SCALE;
-}
-
-/**
- * Whether |a - b| ≤ toleranceWei (both coerced to BigInt). Used to compare
- * the same monetary figure persisted by different code versions without
- * letting small legacy rounding differences block legit flows.
- *
- * @param {string|bigint|number} a
- * @param {string|bigint|number} b
- * @param {string|bigint|number} [toleranceWei] - default 1 gwei
- * @returns {boolean}
- */
 export function weiWithinTolerance(a, b, toleranceWei = ESCROW_AMOUNT_TOLERANCE_WEI) {
   const aBig = BigInt(a);
   const bBig = BigInt(b);
@@ -392,10 +377,10 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     // rejects createBooking, so a third party cannot front-run the slot
     // (issue #7734).
     const network = await escrowContract.runner.provider.getNetwork()
-    const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
+    const nonce = await escrowContract.commitmentNonces(customerWalletAddress, bookingId)
     const commitment = ethers.solidityPackedKeccak256(
-      ['uint256', 'address', 'address', 'uint256', 'uint256'],
-      [network.chainId, contractAddress, customerWalletAddress, bookingId, nonce]
+      ['uint256', 'address', 'address', 'uint256', 'address', 'uint256', 'uint256'],
+      [network.chainId, contractAddress, customerWalletAddress, bookingId, driverWalletAddress, amountWei, nonce]
     )
     const signature = await relayerWallet.signMessage(ethers.getBytes(commitment))
 
@@ -453,9 +438,28 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       if (expectedDriverAddress && booking.driver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
         return { error: 'Existing booking was created for a different driver than the one assigned to this order' }
       }
-      if (expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+      // Always verify the on-chain booking amount against the authoritative
+      // server figure. When the caller does not supply expectedAmountWei,
+      // resolve it server-side from the order's escrow_amount_wei so a funded
+      // booking is never accepted with zero amount validation.
+      let authoritativeAmountWei = expectedAmountWei
+      if (authoritativeAmountWei === null && supabaseAdmin) {
+        try {
+          const { data: orderRow } = await supabaseAdmin
+            .from('orders')
+            .select('escrow_amount_wei')
+            .eq('escrow_booking_id', bookingId)
+            .maybeSingle()
+          if (orderRow?.escrow_amount_wei != null) {
+            authoritativeAmountWei = orderRow.escrow_amount_wei
+          }
+        } catch (lookupErr) {
+          logger.warn(`[escrow] Failed to resolve escrow_amount_wei for booking ${bookingId}: ${lookupErr.message}`)
+        }
+      }
+      if (authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
         return {
-          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei) of this order`,
+          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei) of this order`,
           code: 'DEPOSIT_AMOUNT_MISMATCH',
         }
       }
@@ -480,6 +484,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   if (!tx.to || tx.to.toLowerCase() !== contractAddress.toLowerCase()) {
     return { error: 'Transaction destination is not the Escrow contract' }
   }
+
+  // Critical Security Check: Verify tx.value (deposit amount). The exact
+  // equality check below (expectedAmountWei !== null) is the authoritative
+  // gate — a redundant less-than guard here would shadow the booking-id,
+  // sender, and driver checks for under-funded deposits.
 
   let decoded
   try {
@@ -611,14 +620,33 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`)
       return { txHash: null, bookingId, alreadyReleased: true }
     }
-    if (booking && expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+    // Always verify the on-chain booking amount against the authoritative
+    // server figure (the order's escrow_amount_wei). When the caller does not
+    // supply expectedAmountWei, resolve it server-side from the order so the
+    // amount guard can never be skipped.
+    let authoritativeAmountWei = expectedAmountWei
+    if (authoritativeAmountWei === null && supabaseAdmin) {
+      try {
+        const { data: orderRow } = await supabaseAdmin
+          .from('orders')
+          .select('escrow_amount_wei')
+          .eq('order_display_id', orderDisplayId)
+          .maybeSingle()
+        if (orderRow?.escrow_amount_wei != null) {
+          authoritativeAmountWei = orderRow.escrow_amount_wei
+        }
+      } catch (lookupErr) {
+        logger.warn(`[escrow] Failed to resolve escrow_amount_wei for ${orderDisplayId}: ${lookupErr.message}`)
+      }
+    }
+    if (booking && authoritativeAmountWei !== null && booking.amount !== BigInt(authoritativeAmountWei)) {
       logger.error(
-        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(expectedAmountWei)} wei — refusing to release.`
+        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(authoritativeAmountWei)} wei — refusing to release.`
       )
       return {
         txHash: null,
         bookingId,
-        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei). Refusing to release payment.`,
+        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(authoritativeAmountWei)} wei). Refusing to release payment.`,
         code: 'DEPOSIT_AMOUNT_MISMATCH',
       }
     }
@@ -924,16 +952,3 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
   })
 }
 export const lockPayment = escrowLockPayment;
-
-
-
-export async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
-  const bookingOnChain = await escrowContract.bookings(bookingId);
-  const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
-  const expectedWeiBN = BigInt(expectedWei);
-  return {
-    valid: onChainAmountBN >= expectedWeiBN,
-    onChainAmount: onChainAmountBN.toString(),
-    expectedAmount: expectedWeiBN.toString()
-  };
-}

@@ -28,20 +28,15 @@ import { auditLog } from '../middleware/auditLog.js';
 import logger from '../middleware/logger.js';
 import { createStore } from '../middleware/rateLimiter.js';
 import { orderRepository, orderValidationService } from '../core/container.js';
-import { supabase, createUserClient } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import {
   recordDepositTx,
   getEscrowBookingId,
-  paisaToMaticWei,
   isEscrowEnabled,
-  escrowLockPayment,
   resolveExpectedDepositAmount,
   submitEscrowRefund,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
-import { invalidateDriverOrderCache } from '../sockets/tracker.js';
-import upiPaymentService from '../services/payment/UpiPaymentService.js';
-import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
 
 const router = express.Router();
 
@@ -401,11 +396,6 @@ router.post(
           });
         }
 
-        // Driver assignment confirmed — drop any stale cached mapping so the
-        // tracker resolves the newly assigned driver on the next ping
-        // (issue #10676).
-        await invalidateDriverOrderCache(pending.driver_id);
-
         sendPushNotification(
           pending.driver_id,
           'Bid Accepted!',
@@ -416,16 +406,15 @@ router.post(
 
         sendPushNotification(
           pending.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
         ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       } else if (order.driver_id) {
-        await invalidateDriverOrderCache(order.driver_id);
         sendPushNotification(
           order.driver_id,
-          '💰 Payment Locked',
+          'Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }

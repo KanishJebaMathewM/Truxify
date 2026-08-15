@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use url::Url;
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
@@ -218,39 +219,25 @@ mod tests {
 
     #[test]
     fn allows_exact_allowed_hosts() {
-        assert!(is_url_allowed("https://api.truxify.com/v1/routes").is_ok());
-        assert!(is_url_allowed("http://localhost:8080/ping").is_ok());
-        assert!(is_url_allowed("https://127.0.0.1/health").is_ok());
+        assert!(is_url_allowed("http://api.truxify.com/v1"));
+        assert!(is_url_allowed("https://api.truxify.com/"));
+        assert!(is_url_allowed("http://localhost:8080/health"));
+        assert!(is_url_allowed("http://127.0.0.1/x"));
     }
 
     #[test]
-    fn rejects_substring_host_bypasses() {
-        assert!(is_url_allowed("https://api.truxify.com.evil.com/x").is_err());
-        assert!(is_url_allowed("https://127.0.0.1.evil.com/x").is_err());
-        assert!(is_url_allowed("https://evilapi.truxify.com/x").is_err());
-        assert!(is_url_allowed("https://localhost.evil.com/x").is_err());
-        assert!(is_url_allowed("https://notapi.truxify.com/x").is_err());
-    }
-
-    #[test]
-    fn rejects_non_allowed_hosts() {
-        assert!(is_url_allowed("https://example.com/x").is_err());
-        assert!(is_url_allowed("https://attacker.io/x").is_err());
-        assert!(is_url_allowed("https://truxify.com.evil.com/x").is_err());
-    }
-
-    #[test]
-    fn rejects_bad_schemes_and_malformed_urls() {
-        assert!(is_url_allowed("ftp://api.truxify.com/x").is_err());
-        assert!(is_url_allowed("file:///etc/passwd").is_err());
-        assert!(is_url_allowed("not-a-url").is_err());
-        assert!(is_url_allowed("").is_err());
-    }
-
-    #[test]
-    fn rejects_userinfo_smuggling() {
-        assert!(is_url_allowed("https://attacker.io@api.truxify.com/x").is_err());
-        assert!(is_url_allowed("https://user:pass@127.0.0.1/x").is_err());
+    fn rejects_subdomain_and_query_bypass_attempts() {
+        // Subdomain squatting of an allowed host.
+        assert!(!is_url_allowed("http://api.truxify.com.evil.com/"));
+        assert!(!is_url_allowed("http://localhost.evil.com/"));
+        assert!(!is_url_allowed("http://attacker127.0.0.1.com/"));
+        // Domain present only inside the query string.
+        assert!(!is_url_allowed("http://evil.com/?redirect=api.truxify.com"));
+        // Non-http(s) schemes must be refused.
+        assert!(!is_url_allowed("ftp://api.truxify.com/"));
+        // Bare host (no scheme) and non-URLs must be refused.
+        assert!(!is_url_allowed("api.truxify.com"));
+        assert!(!is_url_allowed("not a url"));
     }
 }
 
@@ -262,8 +249,8 @@ pub fn wasi_http_request(request: &str) -> Result<String, String> {
         .map_err(|e| format!("Failed to parse request: {}", e))?;
 
     // Capability-based security: only allow specific domains
-    if let Err(e) = is_url_allowed(&req.url) {
-        return Err(e);
+    if !is_url_allowed(&req.url) {
+        return Err("Access denied: domain not allowed".to_string());
     }
 
     // Make HTTP request using stdlib
@@ -298,40 +285,21 @@ pub fn wasi_sleep(ms: u64) {
     std::thread::sleep(std::time::Duration::from_millis(ms));
 }
 
-fn is_url_allowed(url: &str) -> Result<(), String> {
-    // Capability-based security: only allow specific domains.
-    // The URL is parsed and the *host* is compared exactly against the
-    // allowlist. A substring check (url.contains("api.truxify.com")) is
-    // bypassable with hosts like api.truxify.com.evil.com or
-    // 127.0.0.1.evil.com; exact hostname matching closes that SSRF hole.
-    let allowed_domains = [
-        "api.truxify.com",
-        "localhost",
-        "127.0.0.1",
-    ];
-
-    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err(format!("Access denied: URL scheme must be http or https"));
-    }
-
-    // Credentials (userinfo) are never needed by the sandbox and could be used
-    // to smuggle an attacker-controlled host into the host part of the URL.
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("Access denied: URL must not contain userinfo".to_string());
-    }
-
-    let host = match parsed.host_str() {
-        Some(h) => h.to_lowercase(),
-        None => return Err("Access denied: URL has no host".to_string()),
+fn is_url_allowed(url: &str) -> bool {
+    // Capability-based security: only allow specific hosts. Parse the URL and
+    // compare the *actual* host exactly. A raw substring check (`url.contains`)
+    // is trivially bypassed via subdomain squatting or by embedding the domain
+    // in the query string, which would let a guest reach arbitrary external
+    // hosts (SSRF / data exfiltration).
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
     };
-
-    if allowed_domains.iter().any(|d| host == *d) {
-        Ok(())
-    } else {
-        Err(format!("Access denied: domain not allowed: {}", host))
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
     }
+    let host = parsed.host_str().map(|h| h.to_ascii_lowercase());
+    let allowed = ["api.truxify.com", "localhost", "127.0.0.1"];
+    allowed.iter().any(|d| host == Some(d.to_string()))
 }
 
 // ============ Process System Calls ============

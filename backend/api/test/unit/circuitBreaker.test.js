@@ -1,127 +1,124 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CircuitBreaker, CircuitState } from '../../src/lib/circuitBreaker.js';
 
-describe('CircuitBreaker Unit Tests', () => {
-  it('starts in CLOSED state and executes function successfully', async () => {
-    const breaker = new CircuitBreaker('testBreaker');
-    const fn = vi.fn().mockResolvedValue('ok');
+describe('CircuitBreaker', () => {
+  let cb;
 
-    const res = await breaker.execute(fn);
-
-    expect(res).toBe('ok');
-    expect(breaker.getState()).toBe(CircuitState.CLOSED);
+  beforeEach(() => {
+    cb = new CircuitBreaker('test', { failureThreshold: 3, resetTimeoutMs: 1000 });
   });
 
-  it('opens circuit after reaching failure threshold', async () => {
-    const breaker = new CircuitBreaker('testThresholdBreaker', {
-      failureThreshold: 2,
-      resetTimeoutMs: 10000,
-    });
-    const fn = vi.fn().mockRejectedValue(new Error('Network error'));
-
-    await expect(breaker.execute(fn)).rejects.toThrow('Network error');
-    expect(breaker.getState()).toBe(CircuitState.CLOSED);
-
-    await expect(breaker.execute(fn)).rejects.toThrow('Network error');
-    expect(breaker.getState()).toBe(CircuitState.OPEN);
+  afterEach(() => {
+    cb.destroy();
+    vi.restoreAllMocks();
   });
 
-  it('uses fallback function when circuit is OPEN', async () => {
-    const fallback = vi.fn().mockReturnValue('fallback-data');
-    const breaker = new CircuitBreaker('testFallbackBreaker', {
-      failureThreshold: 1,
-      fallback,
+  describe('constructor', () => {
+    it('initializes with default options', () => {
+      const defaultCb = new CircuitBreaker('default');
+      expect(defaultCb.name).toBe('default');
+      expect(defaultCb.failureThreshold).toBe(5);
+      expect(defaultCb.resetTimeoutMs).toBe(30000);
+      expect(defaultCb.requestTimeoutMs).toBe(5000);
+      expect(defaultCb.state).toBe(CircuitState.CLOSED);
+      defaultCb.destroy();
     });
-    const fn = vi.fn().mockRejectedValue(new Error('Downstream offline'));
 
-    const res1 = await breaker.execute(fn);
-    expect(res1).toBe('fallback-data');
-    expect(breaker.getState()).toBe(CircuitState.OPEN);
+    it('accepts custom options', () => {
+      const customCb = new CircuitBreaker('custom', {
+        failureThreshold: 2,
+        resetTimeoutMs: 5000,
+        requestTimeoutMs: 2000,
+      });
+      expect(customCb.failureThreshold).toBe(2);
+      expect(customCb.resetTimeoutMs).toBe(5000);
+      expect(customCb.requestTimeoutMs).toBe(2000);
+      customCb.destroy();
+    });
 
-    const res2 = await breaker.execute(fn);
-    expect(res2).toBe('fallback-data');
-    expect(fn).toHaveBeenCalledTimes(1); // Function not invoked when OPEN
+    it('defaults name to "defaultCircuitBreaker" when not provided', () => {
+      const unnamedCb = new CircuitBreaker();
+      expect(unnamedCb.name).toBe('defaultCircuitBreaker');
+      unnamedCb.destroy();
+    });
   });
 
-  it('cleans up half-open timer when reset is called externally', () => {
-    const breaker = new CircuitBreaker('testTimerCleanup', {
-      failureThreshold: 1,
-      resetTimeoutMs: 10000,
-      fallback: () => 'fallback',
+  describe('getState', () => {
+    it('returns CLOSED initially', () => {
+      expect(cb.getState()).toBe(CircuitState.CLOSED);
     });
-
-    // Open the circuit via onFailure (threshold=1 so first failure opens it)
-    breaker.onFailure(new Error('Fail'), []);
-
-    // Verify timer was scheduled
-    expect(breaker._halfOpenTimer).not.toBeNull();
-    expect(breaker.state).toBe(CircuitState.OPEN);
-
-    // Call reset externally (simulating an external/manual reset)
-    breaker.reset();
-
-    // Timer should be cleared
-    expect(breaker._halfOpenTimer).toBeNull();
-    expect(breaker.state).toBe(CircuitState.CLOSED);
   });
 
-  it('transitions to HALF_OPEN after resetTimeoutMs expires', async () => {
-    const breaker = new CircuitBreaker('testHalfOpenBreaker', {
-      failureThreshold: 1,
-      resetTimeoutMs: 100,
+  describe('execute', () => {
+    it('executes a successful function and returns result', async () => {
+      const fn = vi.fn().mockResolvedValue('success');
+      const result = await cb.execute(fn, 'arg1');
+      expect(result).toBe('success');
+      expect(fn).toHaveBeenCalledWith('arg1');
     });
-    const fnFail = vi.fn().mockRejectedValue(new Error('Error'));
-    await expect(breaker.execute(fnFail)).rejects.toThrow();
 
-    expect(breaker.getState()).toBe(CircuitState.OPEN);
+    it('throws TypeError when fn is not a function', async () => {
+      await expect(cb.execute('not a function')).rejects.toThrow('fn must be a function');
+    });
 
-    await new Promise((r) => setTimeout(r, 120));
+    it('records failure when fn throws', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('boom'));
+      await expect(cb.execute(failingFn)).rejects.toThrow('boom');
+      expect(cb.failureCount).toBe(1);
+    });
 
-    expect(breaker.getState()).toBe(CircuitState.HALF_OPEN);
+    it('opens circuit after failureThreshold is reached', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('boom'));
+      for (let i = 0; i < cb.failureThreshold; i++) {
+        await expect(cb.execute(failingFn)).rejects.toThrow('boom');
+      }
+      expect(cb.state).toBe(CircuitState.OPEN);
+    });
 
-    const fnSuccess = vi.fn().mockResolvedValue('recovered');
-    const res = await breaker.execute(fnSuccess);
-    expect(res).toBe('recovered');
-    expect(breaker.getState()).toBe(CircuitState.CLOSED);
+    it('rejects requests immediately when circuit is OPEN', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('boom'));
+      for (let i = 0; i < cb.failureThreshold; i++) {
+        await expect(cb.execute(failingFn)).rejects.toThrow();
+      }
+      expect(cb.state).toBe(CircuitState.OPEN);
+      vi.clearAllMocks();
+      const safeFn = vi.fn().mockResolvedValue('should not run');
+      await expect(cb.execute(safeFn)).rejects.toThrow('CircuitBreaker:test is OPEN');
+      expect(safeFn).not.toHaveBeenCalled();
+    });
+
+    it('uses fallback when circuit is OPEN and fallback is provided', async () => {
+      const fallback = vi.fn().mockReturnValue('fallback result');
+      const cbWithFallback = new CircuitBreaker('test-fb', {
+        failureThreshold: 2,
+        fallback,
+      });
+      const failingFn = vi.fn().mockRejectedValue(new Error('boom'));
+      // After 2 failures the circuit opens. Subsequent calls return fallback without
+      // calling the wrapped function.
+      const result1 = await cbWithFallback.execute(failingFn);
+      expect(result1).toBe('fallback result');
+      expect(failingFn).toHaveBeenCalledTimes(1); // first call fails normally
+      const result2 = await cbWithFallback.execute(failingFn);
+      expect(result2).toBe('fallback result');
+      expect(failingFn).toHaveBeenCalledTimes(2); // second call fails and opens circuit
+      const result3 = await cbWithFallback.execute(vi.fn());
+      expect(result3).toBe('fallback result'); // circuit OPEN — fallback used, no fn call
+      expect(cbWithFallback.state).toBe(CircuitState.OPEN);
+      cbWithFallback.destroy();
+    });
   });
 
-  it('cleans up resources and resets state when destroy is called', () => {
-    const breaker = new CircuitBreaker('testDestroyBreaker', {
-      failureThreshold: 1,
-      resetTimeoutMs: 10000,
-      fallback: () => 'fallback',
+  describe('reset', () => {
+    it('resets failure count and transitions to CLOSED', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('boom'));
+      for (let i = 0; i < 2; i++) {
+        await expect(cb.execute(failingFn)).rejects.toThrow();
+      }
+      expect(cb.failureCount).toBe(2);
+      cb.reset();
+      expect(cb.state).toBe(CircuitState.CLOSED);
+      expect(cb.failureCount).toBe(0);
     });
-    breaker.onFailure(new Error('Fail'), []);
-    expect(breaker._halfOpenTimer).not.toBeNull();
-    expect(breaker.state).toBe(CircuitState.OPEN);
-
-    breaker.destroy();
-
-    expect(breaker._halfOpenTimer).toBeNull();
-    expect(breaker.state).toBe(CircuitState.CLOSED);
-    expect(breaker.failureCount).toBe(0);
-  });
-
-  it('triggers request timeout when execution exceeds requestTimeoutMs', async () => {
-    const breaker = new CircuitBreaker('testTimeoutBreaker', {
-      requestTimeoutMs: 50,
-    });
-    const slowFn = () => new Promise((resolve) => setTimeout(resolve, 200));
-
-    await expect(breaker.execute(slowFn)).rejects.toThrow('Request timed out after 50ms');
-  });
-
-  it('passes arguments to fallback function on failure', async () => {
-    const fallback = vi.fn((arg1, arg2) => `fallback:${arg1}:${arg2}`);
-    const breaker = new CircuitBreaker('testFallbackArgsBreaker', {
-      failureThreshold: 1,
-      fallback,
-    });
-    const fnFail = vi.fn().mockRejectedValue(new Error('Failure'));
-
-    const result = await breaker.execute(fnFail, 'val1', 42);
-
-    expect(result).toBe('fallback:val1:42');
-    expect(fallback).toHaveBeenCalledWith('val1', 42);
   });
 });

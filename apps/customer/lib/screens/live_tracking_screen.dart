@@ -182,17 +182,32 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         if (mounted) setState(() => _wsConnected = true);
         final session = SupabaseService.client.auth.currentSession;
         final token = session?.accessToken ?? '';
-        _trackingWebSocket?.send({
-          'event': 'auth',
-          'data': {
-            'token': token,
-          },
-        });
+        // (Re)send the auth frame on every (re)connect. The ResilientWebSocket
+        // outbound queue replays anything issued while disconnected, so this is
+        // never lost on a reconnect window.
+        final authSent = _trackingWebSocket?.send({
+              'event': 'auth',
+              'data': {
+                'token': token,
+              },
+            }) ??
+            false;
+        debugPrint('[LiveTracking] auth frame send result: $authSent');
+        // Re-establish the tracking subscription on every (re)connect so a missed
+        // `authenticated` frame cannot silently drop location updates.
+        final subSent = _trackingWebSocket?.send({
+              'event': 'subscribe_tracking',
+              'data': {
+                'order_display_id': widget.orderId,
+              },
+            }) ??
+            false;
+        debugPrint('[LiveTracking] subscribe_tracking frame send result: $subSent');
       },
     );
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
-      debugPrint('Tracking WebSocket message received');
+      debugPrint('Tracking WebSocket message received: $message');
       if (message is! String) return;
       try {
         if (message == 'pong') return;
@@ -218,7 +233,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           }
         } else if (payload['event'] == 'milestone_update') {
           // Refresh timeline whenever the driver hits a new milestone.
-          debugPrint('[LiveTracking] Milestone update received');
+          debugPrint('[LiveTracking] Milestone update received: ${payload['data']}');
           _loadTimeline();
         } else if (payload['event'] == null && payload['error'] != null) {
           debugPrint('[LiveTracking] WS server error: ${payload['error']}');
@@ -286,6 +301,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     try {
       final order = await _orderService.fetchOrderById(widget.orderId);
 
+      debugPrint('ORDER DATA = $order');
+
       if (!mounted) return;
 
       bool isStale = false;
@@ -351,7 +368,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       if (order != null) {
         await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
         if (order['id'] != null) {
-          _subscribeToSupabaseRealtime(order['id'] as String);
+          _subscribeToSupabaseRealtime(order['id']?.toString() ?? '');
           _fetchInitialDriverLocation();
         }
       }
@@ -373,7 +390,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     _supabaseRealtimeChannel!.onBroadcast(
       event: 'location',
       callback: (payload) {
-        debugPrint('Received Supabase Realtime location update');
+        debugPrint('Received Supabase Realtime location update: $payload');
         final lat = (payload['lat'] as num?)?.toDouble();
         final lng = (payload['lng'] as num?)?.toDouble();
         if (lat != null && lng != null && mounted) {
@@ -840,7 +857,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             value: widget.orderId,
           ),
           callback: (payload) {
-            debugPrint('Realtime order update received');
+            debugPrint('Realtime order update: ${payload.newRecord}');
             _loadOrder();
             _loadTimeline();
           },

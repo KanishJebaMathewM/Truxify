@@ -130,7 +130,7 @@ class _AIBrokerNegotiationScreenState extends State<AIBrokerNegotiationScreen> {
                 children: [
                   _buildMetric('Driver Min', '\$${s.driverMinimumUsd.toInt()}'),
                   _buildMetric('Broker Initial', '\$${s.initialBrokerOfferUsd.toInt()}'),
-                  _buildMetric('Current Offer', '\$${s.history.first.offerAmountUsd?.toInt() ?? 0}', color: Colors.deepPurple),
+                  _buildMetric('Current Offer', '\$${s.history.isNotEmpty ? s.history.first.offerAmountUsd?.toInt() ?? 0 : 0}', color: Colors.deepPurple),
                 ],
               )
             ],

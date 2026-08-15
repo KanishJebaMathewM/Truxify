@@ -1,33 +1,37 @@
-class InboundTruck {
+class TruckTelemetry {
   final String truckId;
-  final String origin;
+  final String role; // "Inbound" or "Outbound"
+  final double distanceToDockMiles;
+  final int estimatedArrivalMinutes;
   final double currentSpeedMph;
-  final String eta;
-  final bool isDelayed;
+  final double targetSpeedMph; // The recommended speed for perfect sync
 
-  InboundTruck({
+  TruckTelemetry({
     required this.truckId,
-    required this.origin,
+    required this.role,
+    required this.distanceToDockMiles,
+    required this.estimatedArrivalMinutes,
     required this.currentSpeedMph,
-    required this.eta,
-    required this.isDelayed,
+    required this.targetSpeedMph,
   });
 }
 
 class CrossDockSession {
-  final String status; // "Monitoring Inbound Fleet...", "Synchronizing Network Speeds"
-  final String targetTerminal;
-  final String synchronizedEta;
-  final double recommendedSpeedMph;
-  final bool isSpeedAdjusted;
-  final List<InboundTruck> networkTrucks;
+  final String facilityName;
+  final String facilityLocation;
+  final int syncDeltaMinutes; // Difference in ETA between the two trucks
+  final TruckTelemetry selfTruck;
+  final TruckTelemetry partnerTruck;
+  final String adviceText;
+  final String status; // "Out of Sync", "Synchronizing", "Perfect Sync"
 
   CrossDockSession({
+    required this.facilityName,
+    required this.facilityLocation,
+    required this.syncDeltaMinutes,
+    required this.selfTruck,
+    required this.partnerTruck,
+    required this.adviceText,
     required this.status,
-    required this.targetTerminal,
-    required this.synchronizedEta,
-    required this.recommendedSpeedMph,
-    required this.isSpeedAdjusted,
-    required this.networkTrucks,
   });
 }

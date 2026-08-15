@@ -1,4 +1,4 @@
-import { supabase } from '../../config/db.js';
+import { supabaseAdmin } from '../../config/db.js';
 import OracleService from '../../oracle/OracleService.js';
 import logger from '../../middleware/logger.js';
 
@@ -19,7 +19,7 @@ class VerificationService {
   constructor(deps = {}) {
     this.orderRepository = deps.orderRepository || null;
     this.oracleService = deps.oracleService || new OracleService();
-    this.supabase = deps.supabase || supabase;
+    this.supabase = deps.supabase || supabaseAdmin;
   }
 
   async verifyOrder(orderId) {

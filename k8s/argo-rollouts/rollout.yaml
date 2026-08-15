@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ghcr.io/kanishjebamathewm/truxify-api:latest
+        image: ghcr.io/kanishjebamathewm/truxify-api:1.0.0
         ports:
         - containerPort: 5000
         env:
@@ -33,13 +33,13 @@ spec:
             cpu: "1000m"
         livenessProbe:
           httpGet:
-            path: /health
+            path: /api/health/live
             port: 5000
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /api/health/ready
             port: 5000
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -66,6 +66,7 @@ spec:
       analysis:
         templates:
         - templateName: success-rate
+        - templateName: latency-template
         args:
         - name: service-name
           value: api-service

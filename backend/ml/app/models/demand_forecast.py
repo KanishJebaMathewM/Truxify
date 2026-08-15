@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import numpy as np
 from typing import List, Optional
 from sklearn.ensemble import GradientBoostingRegressor
@@ -157,7 +158,12 @@ def train_demand_forecast_model() -> dict:
     metrics["promotion_reason"] = reason
 
     if promoted:
-        save_model((model, scaler), MODEL_NAME, metrics)
+        training_meta = {
+            "source": "module_trained",
+            "training_timestamp": time.time(),
+            "feature_hash": str(hash(tuple(FEATURE_NAMES))),
+        }
+        save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
         # Invalidate the in-memory cache so the next predict_demand call
         # loads the newly trained model instead of the stale cached copy
         reset_model_cache()
@@ -196,14 +202,19 @@ def predict_demand(features: List[float]) -> Optional[float]:
     global _model_cache
     if _model_cache is None:
         if not model_exists(MODEL_NAME):
-            train_demand_forecast_model()
-
+            raise RuntimeError(
+                "Demand model artifact missing. Refusing to serve synthetic forecasts. "
+                "Run the training endpoint on real booking data and ship the artifact."
+            )
         loaded = load_model(MODEL_NAME)
         if loaded is None:
-            train_demand_forecast_model()
-            loaded = load_model(MODEL_NAME)
-            if loaded is None:
-                return None
+            raise RuntimeError("Corrupt demand model artifact: failed to load model from disk.")
+
+        # Verify the loaded model is not a synthetic-trained artifact.
+        meta = get_model_meta(MODEL_NAME) or {}
+        training_meta = meta.get("training_meta", {})
+        if training_meta.get("source") == "synthetic":
+            raise RuntimeError("Refusing to serve a demand model trained on synthetic data.")
 
         _model_cache = loaded
 

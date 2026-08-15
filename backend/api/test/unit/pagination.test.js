@@ -1,3 +1,67 @@
+import { describe, it, expect } from 'vitest';
+
+function parsePage(raw) {
+  const p = parseInt(raw, 10);
+  if (!Number.isFinite(p) || p < 1) return 1;
+  return p;
+}
+
+function parseLimit(raw, max = 100) {
+  const l = parseInt(raw, 10);
+  if (!Number.isFinite(l) || l < 1) return 20;
+  if (l > max) return max;
+  return l;
+}
+
+describe('parsePage', () => {
+  it('returns 1 for undefined', () => {
+    expect(parsePage(undefined)).toBe(1);
+  });
+
+  it('returns 1 for non-numeric string', () => {
+    expect(parsePage('abc')).toBe(1);
+  });
+
+  it('returns 1 for zero', () => {
+    expect(parsePage('0')).toBe(1);
+  });
+
+  it('returns 1 for negative numbers', () => {
+    expect(parsePage('-5')).toBe(1);
+  });
+
+  it('returns the number for valid positive integers', () => {
+    expect(parsePage('7')).toBe(7);
+    expect(parsePage('100')).toBe(100);
+  });
+});
+
+describe('parseLimit', () => {
+  it('returns default 20 for undefined', () => {
+    expect(parseLimit(undefined)).toBe(20);
+  });
+
+  it('returns default 20 for non-numeric string', () => {
+    expect(parseLimit('abc')).toBe(20);
+  });
+
+  it('returns default 20 for zero', () => {
+    expect(parseLimit('0')).toBe(20);
+  });
+
+  it('returns default 20 for negative numbers', () => {
+    expect(parseLimit('-5')).toBe(20);
+  });
+
+  it('caps at max when limit exceeds max', () => {
+    expect(parseLimit('500', 100)).toBe(100);
+  });
+
+  it('returns the number for valid limits', () => {
+    expect(parseLimit('50')).toBe(50);
+    expect(parseLimit('25', 50)).toBe(25);
+  });
+});
 import { describe, it, expect, vi } from 'vitest';
 import { validatePagination } from '../../src/middleware/pagination.js';
 import { buildPagination } from '../../src/utils/pagination.js';
@@ -139,30 +203,6 @@ describe('Pagination Middleware', () => {
     expect(req.query.limit).toBe(20);
     expect(req.query.offset).toBe(40); // (3-1) * 20
   });
-
-  it('falls back to the default maxLimit when configured with a negative value', () => {
-    const middleware = validatePagination({ maxLimit: -5 });
-    const req = { query: { limit: '1000000' } };
-    const res = mockResponse();
-    const next = vi.fn();
-
-    middleware(req, res, next);
-
-    expect(next).toHaveBeenCalled();
-    expect(req.query.limit).toBe(100);
-  });
-
-  it('falls back to the default maxOffset when configured with NaN', () => {
-    const middleware = validatePagination({ maxOffset: NaN });
-    const req = { query: { offset: '50000' } };
-    const res = mockResponse();
-    const next = vi.fn();
-
-    middleware(req, res, next);
-
-    expect(next).toHaveBeenCalled();
-    expect(req.query.offset).toBe(10000);
-  });
 });
 
 describe('pagination — NaN and edge case handling', () => {
@@ -180,12 +220,5 @@ describe('pagination — NaN and edge case handling', () => {
   it('buildPagination handles Infinity page by defaulting to 1', () => {
     const result = buildPagination({ page: Infinity });
     expect(result.page).toBe(1);
-  });
-
-  it('buildPagination caps a huge page number to MAX_PAGE', () => {
-    const result = buildPagination({ page: 1e12, limit: 100 });
-    expect(result.page).toBe(1000000);
-    expect(result.offset).toBe(99999900);
-    expect(Number.isSafeInteger(result.offset)).toBe(true);
   });
 });

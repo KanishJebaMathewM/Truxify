@@ -23,6 +23,12 @@ class FederatedServer:
         self.round = 0
         self.min_clients = 3
         self.clients_per_round = 5
+        # Clients selected for the current round. Aggregation triggers once a
+        # quorum of these selected clients have responded (see
+        # receive_client_update), so a round can never hang just because fewer
+        # than `clients_per_round` clients exist.
+        self.selected_clients = []
+        self.current_round = None
         self.encryption_key = Fernet.generate_key()
         self.cipher = Fernet(self.encryption_key)
         self.redis.setex('federated:encryption_key', 86400, self.encryption_key)
@@ -62,6 +68,11 @@ class FederatedServer:
         
         # Select clients for this round
         selected_clients = clients[:self.clients_per_round]
+        # Reset round state so a new round starts from a clean slate and the
+        # aggregation threshold below reflects only this round's participants.
+        self.selected_clients = selected_clients
+        self.current_round = self.round
+        self.client_weights.clear()
         
         # Broadcast global model weights
         if self.global_weights is None:
@@ -123,8 +134,14 @@ class FederatedServer:
             
             logger.info(f"📥 Received update from client {client_id}")
             
-            # Check if all clients have responded
-            if len(self.client_weights) >= self.clients_per_round:
+            # Check if a quorum of the SELECTED clients for this round have
+            # responded. Previously this required `clients_per_round` (5)
+            # responses, so with the normal 3-4 available clients the round
+            # hung forever and the global model never advanced. A quorum is
+            # ceil(half the selected set), so a round with 3 clients
+            # aggregates once 2 respond.
+            quorum = max(1, (len(self.selected_clients) + 1) // 2)
+            if len(self.client_weights) >= quorum:
                 self._aggregate_weights()
             
             return {'success': True}

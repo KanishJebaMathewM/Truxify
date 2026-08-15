@@ -95,7 +95,11 @@ class SyncEngine {
       if (user == null) return;
       final token = await user.getIdToken();
 
-      final eventIds = events.map((e) => e['id'] as String).toList()..sort();
+      final eventIds = events
+          .map((e) => (e['id'] as String?) ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList()
+        ..sort();
       final idempotencyKey = eventIds.join(',');
 
       final requestBody = {
@@ -121,14 +125,43 @@ class SyncEngine {
       );
 
       if (response.statusCode == 202) {
-        // Successfully synced, clear the queue
-        final eventIds = events.map((e) => e['id']).toList();
-        await db.delete(
-          'sync_queue',
-          where: 'id IN (${List.filled(eventIds.length, '?').join(',')})',
-          whereArgs: eventIds,
-        );
-        debugPrint('[SyncEngine] Successfully synced ${events.length} events.');
+        // A 202 "Accepted" does not guarantee every batched event was
+        // committed. Only delete events the server acknowledged as applied;
+        // leave the rest in the queue for the next attemptSync() so partial
+        // failures are retried instead of silently dropped.
+        final body = response.body.trim();
+        List<dynamic> syncedIds = const [];
+        if (body.isNotEmpty) {
+          try {
+            final decoded = jsonDecode(body);
+            if (decoded is Map && decoded['syncedIds'] is List) {
+              syncedIds = decoded['syncedIds'] as List<dynamic>;
+            } else if (decoded is List) {
+              syncedIds = decoded;
+            }
+          } catch (_) {
+            // Unparseable body → retain the entire queue rather than risk loss.
+            debugPrint('[SyncEngine] Sync response unparseable; retaining queue.');
+            return;
+          }
+        }
+        if (syncedIds.isEmpty) {
+          // No per-event acknowledgement → retain the queue for retry.
+          debugPrint('[SyncEngine] Sync returned 202 with no acknowledged events; retaining queue.');
+          return;
+        }
+        final ackedIds = events
+            .map((e) => e['id'])
+            .where((id) => syncedIds.contains(id))
+            .toList();
+        if (ackedIds.isNotEmpty) {
+          await db.delete(
+            'sync_queue',
+            where: 'id IN (${List.filled(ackedIds.length, '?').join(',')})',
+            whereArgs: ackedIds,
+          );
+        }
+        debugPrint('[SyncEngine] Synced ${ackedIds.length} of ${events.length} events.');
       } else {
         debugPrint('[SyncEngine] Sync failed with status ${response.statusCode}');
       }

@@ -8,6 +8,7 @@ contract VerificationOracle {
         uint256 timestamp;
         bool verified;
         address verifier;
+        bool exists;
     }
 
     mapping(string => VerificationRecord) public verifications;
@@ -30,18 +31,21 @@ contract VerificationOracle {
      * @dev Creates a verification record. Rejects an orderId that already has
      *      an attestation instead of silently overwriting the prior
      *      ipfsHash/timestamp, preserving the audit trail (issue #11665).
+     *      A newly created record starts unverified; its outcome is set by
+     *      `updateVerification` only after an actual check (issue #14853).
      */
     function createVerification(
         string memory orderId, 
         string memory ipfsHash
     ) public onlyAdmin {
-        require(verifications[orderId].timestamp == 0, "Order already verified");
+        require(!verifications[orderId].exists, "Order already verified");
         verifications[orderId] = VerificationRecord({
             orderId: orderId,
             ipfsHash: ipfsHash,
             timestamp: block.timestamp,
-            verified: true,
-            verifier: msg.sender
+            verified: false,
+            verifier: msg.sender,
+            exists: true
         });
         
         emit VerificationCreated(orderId, ipfsHash, block.timestamp);
@@ -54,15 +58,21 @@ contract VerificationOracle {
      */
     function updateVerification(string memory orderId, bool isValid) public onlyAdmin {
         VerificationRecord storage record = verifications[orderId];
-        require(record.timestamp != 0, "No verification exists for this order");
+        require(record.exists, "No verification exists for this order");
         bool previousVerified = record.verified;
         record.verified = isValid;
         emit VerificationFlagUpdated(orderId, previousVerified, isValid);
         emit VerificationUpdated(orderId, isValid);
     }
     
-    function verifyOrder(string memory orderId) public view returns (bool) {
-        return verifications[orderId].verified;
+    /**
+     * @dev Returns both whether an attestation `exists` and its `verified`
+     *      outcome, so callers can distinguish an order that was never
+     *      attested from one that was explicitly rejected (issue #14853).
+     */
+    function verifyOrder(string memory orderId) public view returns (bool exists, bool verified) {
+        VerificationRecord storage record = verifications[orderId];
+        return (record.exists, record.verified);
     }
     
     function getVerification(string memory orderId) public view returns (

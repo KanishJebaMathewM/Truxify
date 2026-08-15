@@ -91,6 +91,9 @@ pub fn optimize_loads(loads: &[f64], capacity: f64) -> Vec<usize> {
     let mut remaining = capacity;
     
     for (i, &weight) in loads.iter().enumerate() {
+        if !weight.is_finite() || weight < 0.0 {
+            continue;
+        }
         if weight <= remaining {
             selected.push(i);
             remaining -= weight;
@@ -98,6 +101,32 @@ pub fn optimize_loads(loads: &[f64], capacity: f64) -> Vec<usize> {
     }
     
     selected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_negative_weight_to_avoid_capacity_inflate() {
+        let loads = [10.0, -5.0, 5.0];
+        let selected = optimize_loads(&loads, 12.0);
+        assert_eq!(selected, vec![0, 2]);
+    }
+
+    #[test]
+    fn skips_nan_weight_without_dropping_valid_loads() {
+        let loads = [4.0, f64::NAN, 3.0, 2.0];
+        let selected = optimize_loads(&loads, 10.0);
+        assert_eq!(selected, vec![0, 2, 3]);
+    }
+
+    #[test]
+    fn skips_infinite_weight() {
+        let loads = [4.0, f64::INFINITY, 3.0];
+        let selected = optimize_loads(&loads, 10.0);
+        assert_eq!(selected, vec![0, 2]);
+    }
 }
 
 #[wasm_bindgen]

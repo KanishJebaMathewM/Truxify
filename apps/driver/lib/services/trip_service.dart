@@ -1,8 +1,6 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
-import 'sync_engine.dart';
 
 class TripService {
   TripService({
@@ -186,16 +184,6 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
-    final connectivityResults = await Connectivity().checkConnectivity();
-    if (connectivityResults.contains(ConnectivityResult.none)) {
-      await SyncEngine.queueEvent(
-        tripId: tripDisplayId,
-        eventType: 'markStopCompleted',
-        payload: {'stopId': stopId},
-      );
-      return;
-    }
-
     await verifyTripOwnership(tripDisplayId);
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
@@ -237,6 +225,30 @@ class TripService {
         path,
         body: <String, dynamic>{'claimed': claimed},
       );
+    } catch (e) {
+      if (e is ApiException) throw Exception(e.message);
+      rethrow;
+    }
+  }
+
+  /// Confirm delivery OTP and release escrow payment.
+  Future<Map<String, dynamic>> confirmOtp({
+    required String orderId,
+    String? otp,
+    double? latitude,
+    double? longitude,
+  }) async {
+    final path = '/api/deliveries/${_encodePathSegment(orderId)}/confirm-otp';
+    try {
+      final body = await _apiClient.post(
+        path,
+        body: <String, dynamic>{
+          if (otp != null) 'otp': otp,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
+        },
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } catch (e) {
       if (e is ApiException) throw Exception(e.message);
       rethrow;

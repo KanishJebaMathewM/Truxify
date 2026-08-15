@@ -1,24 +1,4 @@
-/**
- * Payment Routes — UPI → Escrow → Release
- *
- * POST /api/payments/lock
- *   Customer calls this after submitting the on-chain createBooking() tx
- *   via their wallet. The backend verifies the tx on Polygon, then marks
- *   the order escrow_status as 'funded'.
- *
- * GET /api/payments/:orderId/status
- *   Lightweight polling endpoint for the Flutter app to check escrow state.
- *
- * POST /api/payments/upi-intent
- *   Returns the UPI payment intent details (amount, UPI ID, order reference)
- *   needed to construct the UPI deep-link in the Flutter app.
- *
- * POST /api/payments/charge-and-lock
- *   Initiates an on-chain lockPayment() call and marks escrow as funded.
- */
-
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -70,22 +50,9 @@ const statusLimiter = rateLimit({
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 
 const lockPaymentSchema = z.object({
-  order_id: z.string().min(1, 'order_id is required'),
-  tx_hash: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{64}$/, 'tx_hash must be a valid 0x-prefixed 32-byte hex transaction hash'),
-  wallet_address: z
-    .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/, 'wallet_address must be a valid Ethereum address')
-    .optional(),
-}).strict();
-
-const upiIntentSchema = z.object({
-  order_id: z.string().min(1, 'order_id is required'),
-}).strict();
-
-const orderIdParamSchema = z.object({
-  orderId: z.string().min(1),
+  bookingId: z.string(), // Order UUID or display ID
+  upiReference: z.string(),
+  amount: z.number().positive(), // Paid amount in paisa
 });
 
 const chargeAndLockSchema = z.object({
@@ -148,24 +115,19 @@ router.post(
       }
       const orderRef = order.order_display_id;
 
-      // Standard UPI deep-link format (works with GPay, PhonePe, Paytm, BHIM)
-      const deepLink =
-        `upi://pay?pa=${encodeURIComponent(platformUpiId)}` +
-        `&pn=Truxify` +
-        `&am=${amountInr}` +
-        `&cu=INR` +
-        `&tn=${encodeURIComponent(`Freight payment for ${orderRef}`)}` +
-        `&tr=${encodeURIComponent(orderRef)}`;
+    const orderData = order.data;
 
-      logger.info(`[payments] UPI intent generated for order ${orderRef}`);
+    // Ensure only the customer who created it or admin can lock it
+    if (orderData.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
 
-      return res.json({
-        upi_id: platformUpiId,
-        amount_inr: amountInr,
-        amount_paisa: amountPaisa,
-        order_ref: orderRef,
-        deep_link: deepLink,
-        escrow_enabled: isEscrowEnabled(),
+    if (orderData.escrow_status === 'funded') {
+      return res.status(200).json({
+        success: true,
+        message: 'Payment is already locked in escrow.',
+        txHash: orderData.deposit_tx_hash,
+        bookingId: orderData.escrow_booking_id
       });
     } catch (err) {
       logger.error(
@@ -421,7 +383,8 @@ router.post(
         ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       }
 
-      logger.info(`[payments] Payment locked for order ${order.order_display_id}`);
+    const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+    const customerWallet = customerProfile?.polygon_wallet_address ?? null;
 
       invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache on payment lock'));
 
@@ -432,66 +395,35 @@ router.post(
         booking_id: bookingId,
         tx_hash,
       });
-
-    } catch (err) {
-      if (err instanceof LockAcquisitionError) {
-        // Redis is down — do NOT proceed with the payment mutation.
-        logger.error('[payments] Redis unavailable — refusing payment lock:', err.message);
-        return res.status(503).json({
-          error: 'Payment service temporarily unavailable. Please retry in a moment.',
-        });
-      }
-      logger.error('[payments] lock error:', err.message);
-      return res.status(500).json({ error: 'Internal Server Error' });
-
-    } finally {
-      if (lockValue) {
-        try {
-          await releaseLock(lockKey, lockValue);
-        } catch (releaseErr) {
-          logger.error(
-            { err: releaseErr, lockKey },
-            'Failed to release payment lock'
-          );
-        }
-      }
     }
-  }
-);
 
-// ─── GET /api/payments/:orderId/status ───────────────────────────────────────
-/**
- * Returns current escrow status for an order.
- * Used by Flutter to poll after submitting the UPI payment.
- */
-router.get(
-  '/:orderId/status',
-  authenticate,
-  statusLimiter,
-  validateParams(orderIdParamSchema),
-  async (req, res) => {
-    try {
-      let order;
-      try {
-        order = await orderValidationService.findOrderByIdOrDisplayId(
-          req.params.orderId,
-          'id, order_display_id, customer_id, driver_id, escrow_status, escrow_booking_id, escrow_deposited_at, escrow_released_at, total_amount, status'
-        );
-      } catch (err) {
-        return res.status(500).json({ error: 'Failed to fetch order.' });
-      }
+    // Convert the paid amount to Matic Wei
+    const amountWei = paisaToMaticWei(amount);
 
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found.' });
-      }
+    // Call the smart contract lockPayment on-chain
+    const result = await lockPayment(
+      orderData.order_display_id,
+      customerWallet,
+      driverWallet,
+      amountWei
+    );
 
-      // Both the customer and assigned driver may poll this
-      const isParticipant =
-        order.customer_id === req.user.id || order.driver_id === req.user.id;
+    if (result.error) {
+      logger.error(`[lock-payment] Blockchain lock failed for order ${orderData.order_display_id}: ${result.error}`);
+      return res.status(502).json({
+        error: 'Failed to lock payment in blockchain escrow.',
+        details: result.error
+      });
+    }
 
-      if (!isParticipant) {
-        return res.status(403).json({ error: 'Access denied.' });
-      }
+    // Update order status in Postgres
+    const { error: updateErr } = await orderRepository.updateOrder(orderData.id, {
+      escrow_status: 'funded',
+      deposit_tx_hash: result.txHash,
+      escrow_deposited_at: new Date().toISOString(),
+      escrow_booking_id: result.bookingId,
+      upi_reference: upiReference, // Save UPI transaction reference
+    });
 
       return res.json({
         order_display_id: order.order_display_id,
@@ -513,30 +445,20 @@ router.get(
       );
       return res.status(500).json({ error: 'Internal Server Error' });
     }
-  }
-);
 
-// ─── POST /api/payments/charge-and-lock ──────────────────────────────────────
-/**
- * Initiates an on-chain lockPayment() call from the backend relayer and marks
- * the escrow as funded.
- *
- * Fix vs. previous version:
- *   - Added Redis lock guard (was entirely missing, allowing concurrent calls
- *     to double-charge and double-lock the same order)
- *   - LockAcquisitionError returns 503; null lock returns 409
- *   - lockValue is passed correctly to releaseLock in finally
- */
-router.post(
-  '/charge-and-lock',
-  authenticate,
-  lockLimiter,
-  validateBody(chargeAndLockSchema),
-  async (req, res) => {
-    return res.status(410).json({
-      error: 'This endpoint has been disabled. Use POST /api/payments/upi-intent to generate a UPI deep-link, then POST /api/payments/lock with the on-chain tx_hash after your wallet confirms the deposit.',
+    return res.json({
+      success: true,
+      message: 'Payment successfully locked in blockchain escrow.',
+      txHash: result.txHash,
+      bookingId: result.bookingId
     });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('[payments/lock] Exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
-);
+});
 
 export default router;

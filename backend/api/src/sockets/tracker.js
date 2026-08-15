@@ -1108,29 +1108,6 @@ export async function handleLocationPing(ws, data, req) {
     })();
   }
 
-  // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
-  // GpsLog mongoose schema. Fire-and-forget — the write must not block the
-  // WebSocket broadcast path. The bulk telemetry flush to the raw `telemetry`
-  // collection continues separately for batch analytics.
-  if (getMongoDb()) {
-    GpsLog.create({
-      bookingId: orderDisplayId || orderUUID || driver_id,
-      driverId: driver_id,
-      lat: sanitized.lat,
-      lng: sanitized.lng,
-      speed: sanitized.speed ?? 0,
-      heading: sanitized.bearing ?? 0,
-      timestamp: deviceTime || new Date(serverNow),
-      metadata: {
-        order_id: orderUUID || null,
-        order_display_id: orderDisplayId || null,
-        server_received_at: new Date(serverNow).toISOString(),
-      },
-    }).catch((err) => {
-      logger.error('[GpsLog] Failed to persist GPS coordinate to MongoDB:', err.message);
-    });
-  }
-
   const timestampIso = new Date(serverNow).toISOString();
   const broadcastPayload = buildClientLocationPayload({
     driverId: driver_id,

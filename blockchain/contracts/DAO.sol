@@ -72,10 +72,14 @@ contract DAO is Ownable {
         require(block.timestamp < proposal.votingDeadline, "Voting period ended");
         require(_votes > 0, "Votes must be > 0");
 
-        uint256 tokenCost = _votes * _votes;
+        uint256 oldVotes = votesCast[_proposalId][msg.sender];
+        uint256 newVotes = oldVotes + _votes;
+        uint256 newCost = newVotes * newVotes;
+        uint256 oldCost = oldVotes * oldVotes;
+        uint256 tokenCost = newCost - oldCost;
         require(governanceToken.transferFrom(msg.sender, address(this), tokenCost), "Token transfer failed");
 
-        votesCast[_proposalId][msg.sender] += _votes;
+        votesCast[_proposalId][msg.sender] = newVotes;
         tokensHeld[_proposalId][msg.sender] += tokenCost;
         proposal.voteCount += _votes;
 
@@ -84,8 +88,9 @@ contract DAO is Ownable {
 
     /**
      * @dev Releases the escrowed governance tokens for a voter on a proposal.
-     * Refunds the exact sum of per-call quadratic costs (tokensHeld), never the
-     * square of the accumulated vote total, so the shared pool cannot be drained.
+     * Refunds the cumulative quadratic cost escrowed across all vote calls for
+     * this (voter, proposal) pair, which equals the square of the final
+     * accumulated vote total, so the shared pool cannot be drained.
      */
     function releaseVotes(uint256 _proposalId) external {
         uint256 held = tokensHeld[_proposalId][msg.sender];

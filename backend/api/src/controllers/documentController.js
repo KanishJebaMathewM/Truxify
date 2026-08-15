@@ -162,6 +162,7 @@ export async function uploadDriverDocument(req, res) {
     let record;
     let dbError;
 
+    const existingDoc = existingDocPreflight;
     if (existingDoc) {
       // Update existing record (Supersede)
       const { data: updatedRecord, error: updateErr } = await client

@@ -4,8 +4,7 @@ import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { orderRepository, orderLifecycleService, logger } from '../core/container.js';
-import { sendFcmNotification } from '../services/notificationService.js';
-import { storeDeliveryOtp } from '../services/notificationService.js';
+import { sendFcmNotification, storeDeliveryOtp } from '../services/notificationService.js';
 import crypto from 'crypto';
 
 const router = express.Router();

@@ -76,7 +76,31 @@ async function getBookingContext(bookingId, userId) {
   return null;
 }
 
-export async function processVoiceQuery(userId, bookingId, audioBuffer, filename) {
+function detectQueryIntent(transcript) {
+  const text = (transcript || '').toLowerCase();
+  if (text.includes('payment') || text.includes('release') || text.includes('paid')) {
+    return 'payment_status';
+  }
+  if (text.includes('arrive') || text.includes('arrival') || text.includes('eta') || text.includes('when')) {
+    return 'eta';
+  }
+  return 'package_status';
+}
+
+function buildResponseForIntent(intent, bookingData, transcript) {
+  const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
+  const status = bookingData?.status || bookingData?.current_status || 'in transit';
+  switch (intent) {
+    case 'payment_status':
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}.`;
+    case 'eta':
+      return `Your shipment for ${orderRef} is ${status} and is on schedule.`;
+    default:
+      return `Your shipment ${orderRef} is currently ${status}.`;
+  }
+}
+
+export async function processVoiceQuery(userId, bookingId, audioBuffer, filename, textQuery = null) {
   const bookingData = await getBookingContext(bookingId, userId);
   
   if (!process.env.OPENAI_API_KEY || !process.env.ELEVENLABS_API_KEY) {
@@ -131,7 +155,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     transcript = whisperResponse.data.text;
   } catch (err) {
     logger.error('Whisper transcription failed:', err?.message ?? String(err));
-    throw new Error('Transcription failed: ' + err?.message ?? String(err), { cause: err });
+    throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
   const intent = detectQueryIntent(transcript);
@@ -157,7 +181,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
     logger.error('LLM completion failed:', err?.message ?? String(err));
-    throw new Error('LLM failed: ' + err?.message ?? String(err), { cause: err });
+    throw new Error('LLM failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
   // Production ElevenLabs TTS call
@@ -185,7 +209,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
     logger.error('ElevenLabs TTS failed:', err?.message ?? String(err));
-    throw new Error('TTS failed: ' + err?.message ?? String(err), { cause: err });
+    throw new Error('TTS failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
   return {

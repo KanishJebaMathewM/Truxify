@@ -62,7 +62,6 @@ describe("AssetProvenance Handoffs", function () {
     const record = await provenance.provenanceTrail(cargoHash, 0);
     expect(record.verified).to.equal(true);
   });
-});
 
   it("Should reject an unauthenticated first handoff from a non-owner", async function () {
     const [owner, stranger] = await ethers.getSigners();

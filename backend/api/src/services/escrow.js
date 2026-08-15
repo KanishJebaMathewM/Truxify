@@ -716,7 +716,7 @@ export async function submitEscrowRefund (orderDisplayId) {
     return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
 
-  const tx = await withTimeout(escrowContract.refundFunds(bookingId));
+  tx = await withTimeout(escrowContract.refundFunds(bookingId));
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   return {
     txHash: tx.hash,

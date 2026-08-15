@@ -24,15 +24,6 @@ import logger from "../middleware/logger.js";
 import { measureExecution } from "../core/performanceMetrics.js";
 
 // Safe math utilities for reputation calculations.
-// Boundary clamping (0–MAX_REPUTATION) is handled by clampReputation.
-
-
-/** @type {number} Must match Reputation.sol MAX_REPUTATION constant */
-const MAX_REPUTATION = 10000;
-
-export function clampReputation(value) {
-  return Math.max(0, Math.min(MAX_REPUTATION, Number(value) || 0));
-}
 
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [

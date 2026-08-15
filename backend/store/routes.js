@@ -120,6 +120,17 @@ router.post('/store/atomic', (req, res) => {
 
 // ============ Transaction Routes ============
 
+// Server-defined, allowlisted custom operations. Clients request a registered
+// `name`; the callable is resolved server-side so a client can never supply
+// executable code from the request body. Unknown names are rejected with 400.
+const OP_REGISTRY = {
+    incrementCounter: (op) => {
+        const key = op.key;
+        const current = store.get(key) || 0;
+        store.set(key, current + (typeof op.amount === 'number' ? op.amount : 1));
+    },
+};
+
 // Execute transaction
 router.post('/store/transaction', async (req, res) => {
     try {
@@ -138,7 +149,13 @@ router.post('/store/transaction', async (req, res) => {
                 } else if (op.type === 'update') {
                     tx.addOperation(() => req.store.update(op.updates));
                 } else if (op.type === 'custom') {
-                    tx.addOperation(op.fn);
+                    const handler = OP_REGISTRY[op.name];
+                    if (!handler) {
+                        return res
+                            .status(400)
+                            .json({ success: false, error: 'unknown custom op' });
+                    }
+                    tx.addOperation(() => handler(op));
                 }
             }
             return tx.execute();

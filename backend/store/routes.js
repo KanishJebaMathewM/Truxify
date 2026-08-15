@@ -121,6 +121,8 @@ router.post('/store/atomic', (req, res) => {
 // ============ Transaction Routes ============
 
 // Execute transaction
+const CUSTOM_OP_REGISTRY = {};
+
 router.post('/store/transaction', async (req, res) => {
     try {
         const { operations } = req.body;
@@ -138,7 +140,11 @@ router.post('/store/transaction', async (req, res) => {
                 } else if (op.type === 'update') {
                     tx.addOperation(() => req.store.update(op.updates));
                 } else if (op.type === 'custom') {
-                    tx.addOperation(op.fn);
+                    const handler = CUSTOM_OP_REGISTRY[op.name];
+                    if (!handler) {
+                        throw Object.assign(new Error('unknown custom op: ' + (op.name || 'unnamed')), { status: 400 });
+                    }
+                    tx.addOperation(() => handler(op, tx));
                 }
             }
             return tx.execute();

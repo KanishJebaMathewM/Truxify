@@ -331,7 +331,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
 
     return res.json({ loads });
   } catch (err) {
-    logger.error('Internal Server Error in GET /api/orders/load-offers/en-route:', err.message);
+    logger.error('Internal Server Error in GET /api/orders/load-offers/en-route:', err?.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -521,7 +521,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
         `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
         'order_update',
         { orderId, orderDisplayId: pending.order_display_id }
-      ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
+      ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err?.message}`));
     };
 
     // Resolve the authoritative expected deposit amount for this order and
@@ -578,7 +578,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
-    logger.error('[confirm-deposit] Exception:', err.message);
+    logger.error('[confirm-deposit] Exception:', err?.message);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
     await releaseLock(lockKey, lockValue);
@@ -619,7 +619,7 @@ router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bid
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
-    logger.error('Failed to fetch bids:', err.message);
+    logger.error('Failed to fetch bids:', err?.message);
     return res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
@@ -668,7 +668,7 @@ router.post('/:id/bids', authenticate, userLimiter, requirePolicy('bid:submit'),
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
-    logger.error('Failed to submit bid:', err.message);
+    logger.error('Failed to submit bid:', err?.message);
     return res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
@@ -881,7 +881,7 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
       uploadTimestamp: updatedOrder.updated_at,
     });
   } catch (err) {
-    logger.error('PoD upload error:', err.message);
+    logger.error('PoD upload error:', err?.message);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

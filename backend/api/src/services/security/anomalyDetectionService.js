@@ -97,16 +97,16 @@ class AnomalyDetectionService {
 
       const amount = parseFloat(transaction.amount || 0);
 
-      if (amount < ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL) {
-        return null;
-      }
-
+      // The statistical z-score check must run for every withdrawal, not only
+      // those above the absolute MATIC ceiling. Gating it behind
+      // LARGE_WITHDRAWAL let fraudsters keep each withdrawal just under 1000
+      // MATIC to fully bypass the anomaly block / account lock (#14859).
       const userAvgWithdrawal = await this.getUserAverageWithdrawal(userId, walletAddress);
       const stdDev = await this.getUserWithdrawalStdDev(userId, walletAddress);
 
       const zScore = (amount - userAvgWithdrawal) / (stdDev || 1);
 
-      if (zScore > 3) {
+      if (zScore > 3 || amount >= ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL) {
         return {
           type: 'LARGE_WITHDRAWAL',
           severity: 'HIGH',

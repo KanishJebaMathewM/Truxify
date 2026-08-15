@@ -407,12 +407,12 @@ export class OrderLifecycleService {
   async updateMilestone(orderId, milestone, driverId) {
     return measureExecution('OrderLifecycleService.updateMilestone', async () => {
       const milestoneMap = {
-        'Arrived at Pickup': 'at_pickup',
+        'Truck Assigned': 'truck_assigned',
+        'En Route to Pickup': 'en_route_pickup',
+        'Arrived at Pickup': 'arrived_pickup',
         'Goods Loaded': 'picked_up',
         'In Transit': 'in_transit',
         'Arriving': 'arriving',
-        'Arrived at Drop-off': 'at_dropoff',
-        'Goods Unloaded': 'at_dropoff',
       };
 
       const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, '*');

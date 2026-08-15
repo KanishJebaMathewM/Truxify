@@ -3,7 +3,6 @@ import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '..
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
-import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
 import telemetryBuffer from './telemetryBuffer.js';
 import GpsLog from '../models/GpsLog.js';

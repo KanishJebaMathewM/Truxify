@@ -23,6 +23,23 @@ function createApp(preset = {}) {
   return app;
 }
 
+const originalEnv = process.env;
+const mockReq = (overrides = {}) => ({
+  secure: overrides.secure ?? false,
+  headers: overrides.headers || {},
+});
+const mockRes = () => {
+  const headers = {};
+  return {
+    headers,
+    getHeader: (name) => headers[name],
+    setHeader: (name, value) => {
+      headers[name] = value;
+    },
+  };
+};
+const mockNext = vi.fn();
+
 describe('securityHeaders', () => {
   it('sets the baseline security headers on a plain request', async () => {
     const res = await request(createApp()).get('/test');
@@ -38,17 +55,6 @@ describe('securityHeaders', () => {
     expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
     expect(res.headers['x-content-security-policy']).toBe("default-src 'self'");
   });
-  const mockRes = () => {
-    const headers = {};
-    return {
-      headers,
-      getHeader: (name) => headers[name],
-      setHeader: (name, value) => {
-        headers[name] = value;
-      },
-    };
-  };
-  const mockNext = vi.fn();
 
   beforeEach(() => {
     vi.resetModules();
@@ -163,31 +169,29 @@ describe('securityHeaders', () => {
     const hsts = res.getHeader('Strict-Transport-Security');
     expect(hsts).toContain('max-age=63072000');
   });
+});
 
 // === Spec 11 test ===
-import { setHstsHeader } from '../../src/middleware/securityHeaders.js';
 describe('setHstsHeader', () => {
   it('sets when missing', () => {
     const r = { _h: {}, getHeader(k){return this._h[k];}, setHeader(k,v){this._h[k]=v;} };
     expect(setHstsHeader(r)).toBe(true);
   });
 
-  describe('setHstsHeader', () => {
-    it('sets preload HSTS header', async () => {
-      const { setHstsHeader } = await import('../../src/middleware/securityHeaders.js');
-      const res = mockRes();
-      const result = setHstsHeader(res);
-      expect(result).toBe(true);
-      expect(res.getHeader('Strict-Transport-Security')).toContain('max-age=63072000');
-      expect(res.getHeader('Strict-Transport-Security')).toContain('preload');
-    });
+  it('sets preload HSTS header', async () => {
+    const { setHstsHeader } = await import('../../src/middleware/securityHeaders.js');
+    const res = mockRes();
+    const result = setHstsHeader(res);
+    expect(result).toBe(true);
+    expect(res.getHeader('Strict-Transport-Security')).toContain('max-age=63072000');
+    expect(res.getHeader('Strict-Transport-Security')).toContain('preload');
+  });
 
-    it('returns false when HSTS header already set', async () => {
-      const { setHstsHeader } = await import('../../src/middleware/securityHeaders.js');
-      const res = mockRes();
-      res.setHeader('Strict-Transport-Security', 'already-set');
-      const result = setHstsHeader(res);
-      expect(result).toBe(false);
-    });
+  it('returns false when HSTS header already set', async () => {
+    const { setHstsHeader } = await import('../../src/middleware/securityHeaders.js');
+    const res = mockRes();
+    res.setHeader('Strict-Transport-Security', 'already-set');
+    const result = setHstsHeader(res);
+    expect(result).toBe(false);
   });
 });

@@ -34,7 +34,7 @@
     "typechain": "^8.3.2"
   },
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky || echo 'husky unavailable — skipping git hook installation'"
   },
   "lint-staged": {
     "backend/**/*.js": [

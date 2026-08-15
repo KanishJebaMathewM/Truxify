@@ -86,7 +86,6 @@ flutter run
 ### 3. Backend API (Node.js & Express)
 
 ```bash
-cd backend/api
 npm install
 npm run lint
 npm test

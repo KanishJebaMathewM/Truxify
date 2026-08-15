@@ -93,7 +93,7 @@ export function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
 /**
  * Computes structural differences between beforeState and afterState.
  */
-export function computeStateDiff(before, after) {
+function computeStateDiff(before, after) {
   if (!before && !after) return null;
   if (!before) return { added: sanitizePayload(after) };
   if (!after) return { removed: sanitizePayload(before) };

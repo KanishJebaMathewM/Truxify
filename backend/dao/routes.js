@@ -78,14 +78,30 @@ router.post('/dao/leave', authenticate, async (req, res) => {
     }
 });
 
-// Create proposal — authenticated (governance-mutating).
+// Create proposal — authenticated + wallet-signed; actor bound to the
+// recovered signer so the proposer cannot be spoofed via the request body.
 router.post('/dao/proposal/create', authenticate, async (req, res) => {
     try {
-        const { title, description, callData, target, value, proposalType, proposer } = req.body;
+        const { title, description, callData, target, value, proposalType, userAddress, signature } = req.body;
         if (!title || !description) {
             return res.status(400).json({
                 success: false,
                 error: 'title and description required'
+            });
+        }
+        if (!userAddress || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('proposal', `title: ${title}\ndescription: ${description}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 
@@ -96,7 +112,7 @@ router.post('/dao/proposal/create', authenticate, async (req, res) => {
             target,
             value,
             proposalType,
-            proposer
+            proposer: userAddress
         });
         res.json({ success: true, data: result });
     } catch (error) {
@@ -134,14 +150,30 @@ router.post('/dao/vote/cast', authenticate, async (req, res) => {
     }
 });
 
-// Execute proposal — authenticated (governance-mutating).
+// Execute proposal — authenticated + wallet-signed; only the verified
+// signer may trigger execution, preventing spoofed execution requests.
 router.post('/dao/proposal/execute', authenticate, async (req, res) => {
     try {
-        const { proposalId } = req.body;
+        const { proposalId, userAddress, signature } = req.body;
         if (!proposalId) {
             return res.status(400).json({
                 success: false,
                 error: 'proposalId required'
+            });
+        }
+        if (!userAddress || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'userAddress and signature required'
+            });
+        }
+
+        const message = buildDaoMessage('execute', `proposalId: ${proposalId}`);
+        const signer = recoverSigner(message, signature);
+        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+            return res.status(401).json({
+                success: false,
+                error: 'invalid signature: signer does not match userAddress'
             });
         }
 

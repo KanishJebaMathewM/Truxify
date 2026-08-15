@@ -104,33 +104,40 @@ class DAOService {
         }
     }
 
-    async castVote(proposalId, votes, voterAddress, signer) {
+    async castVote(proposalId, voterAddress) {
         try {
-            const parsedVotes = parseInt(votes) || 1;
-            const voterContract = signer
-                ? new ethers.Contract(this.daoAddress, this.daoABI, signer)
-                : this.dao;
-
-            const tx = await voterContract.voteQuadratic(
-                proposalId,
-                parsedVotes,
-                { gasLimit: 200000 }
+            // Derive voting power from the voter's actual on-chain governance
+            // token balance instead of trusting a request-body value. This
+            // prevents attackers from inflating their voting power.
+            const tokenContract = new ethers.Contract(
+                this.tokenAddress,
+                ['function balanceOf(address owner) view returns (uint256)'],
+                this.provider
             );
-            const receipt = await tx.wait();
+            const balance = await tokenContract.balanceOf(voterAddress);
 
+            if (balance <= 0n) {
+                throw new Error('voter has no governance token balance');
+            }
+
+            const votingPower = balance.toString();
+
+            // Voting is no longer performed by the server wallet. The caller's
+            // ownership is enforced via a wallet signature verified in the
+            // route layer; only the verified, balance-derived vote is recorded.
             await this.storeVote({
                 proposalId,
                 voterAddress,
-                votingPower: parsedVotes,
-                txHash: receipt.hash
+                votingPower,
+                txHash: null
             });
 
-            logger.info(`✅ Vote cast on proposal ${proposalId}`);
+            logger.info(`✅ Vote recorded for ${voterAddress} on proposal ${proposalId}`);
             return {
                 success: true,
                 proposalId,
-                votes: parsedVotes,
-                txHash: receipt.hash
+                voterAddress,
+                votingPower
             };
         } catch (error) {
             logger.error('Vote casting failed:', error);

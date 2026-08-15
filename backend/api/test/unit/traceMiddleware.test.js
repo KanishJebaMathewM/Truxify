@@ -5,33 +5,45 @@ import {
   restoreBackgroundContext,
 } from '../../src/core/telemetry/TraceMiddleware.js';
 
+const { mockReq, mockRes, mockNext, mockSpan } = vi.hoisted(() => {
+  const mockSpan = {
+    setStatus: vi.fn(),
+    recordException: vi.fn(),
+    end: vi.fn(),
+    setAttributes: vi.fn(),
+    spanContext: () => ({ traceId: 'mock-trace-id', spanId: 'mock-span-id' }),
+  };
+  const mockReq = {
+    path: '/test',
+    method: 'GET',
+    url: '/test',
+    headers: {},
+    ip: '127.0.0.1',
+    requestId: 'req-1',
+    correlationId: 'corr-1',
+  };
+  const mockRes = {
+    setHeader: vi.fn(),
+    on: vi.fn(),
+    statusCode: 200,
+  };
+  const mockNext = vi.fn();
+  return { mockReq, mockRes, mockNext, mockSpan };
+});
+
 vi.mock('../../src/tracing/tracing.js', () => ({
   default: {
     initialize: vi.fn(),
     getTracer: vi.fn(() => ({
-      startSpan: vi.fn(() => ({
-        setStatus: vi.fn(),
-        setAttributes: vi.fn(),
-        end: vi.fn(),
-        spanContext: () => ({ traceId: 'mock-trace-id', spanId: 'mock-span-id' }),
-      })),
+      startSpan: vi.fn(() => mockSpan),
     })),
   },
 }));
 
 vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
   default: {
-    startSpan: vi.fn(() => ({
-      setStatus: vi.fn(),
-      setAttributes: vi.fn(),
-      end: vi.fn(),
-      spanContext: () => ({ traceId: 'mock-trace-id', spanId: 'mock-span-id' }),
-    })),
-    startWorkerSpan: vi.fn(() => ({
-      setStatus: vi.fn(),
-      end: vi.fn(),
-      setAttributes: vi.fn(),
-    })),
+    startSpan: vi.fn(() => mockSpan),
+    startWorkerSpan: vi.fn(() => mockSpan),
     recordError: vi.fn(),
   },
   STANDARD_ATTRIBUTES: {},
@@ -138,11 +150,12 @@ describe('TraceMiddleware utilities', () => {
     const { enhancedTracingMiddleware: fn } = await import(
       '../../src/core/telemetry/TraceMiddleware.js'
     );
+    const spanFactory = (await import('../../src/core/telemetry/SpanFactory.js')).default;
     fn(mockReq, mockRes, mockNext);
     const errorCb = mockRes.on.mock.calls.find((c) => c[0] === 'error')[1];
     const testError = new Error('connection reset');
     errorCb(testError);
-    expect(mockSpan.recordException).toHaveBeenCalledWith(testError);
+    expect(spanFactory.recordError).toHaveBeenCalledWith(mockSpan, testError);
   });
 
   it('ends span on finish', async () => {

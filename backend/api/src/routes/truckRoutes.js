@@ -321,7 +321,7 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
 
     return res.json({ trucks: trucks || [] });
   } catch (err) {
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return res.status(500).json({ error: 'Internal Server Error', details: err?.message });
   }
 });
 

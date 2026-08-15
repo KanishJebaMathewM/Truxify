@@ -117,15 +117,6 @@ function sanitizeNumberPlate(plate) {
 }
 
 
-// Cache control middleware for profile endpoints
-function profileCacheControl(req, res, next) {
-  if (req.method === 'GET') {
-    res.setHeader('Cache-Control', 'private, max-age=30');
-    res.setHeader('Vary', 'Authorization');
-  }
-  next();
-}
-
 /**
  * @openapi
  * /api/profile:

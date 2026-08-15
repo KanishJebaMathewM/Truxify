@@ -157,7 +157,9 @@ export async function settlePendingWithdrawals() {
 
   const { data: withdrawals, error } = await supabaseAdmin
     .from("wallet_transactions")
-    .select("id, driver_id, amount, payout_attempted_at, settlement_ref")
+    .select(
+      "id, driver_id, amount, payout_attempted_at, settlement_ref, settle_attempts",
+    )
     .eq("txn_type", "withdrawal")
     .eq("status", "pending")
     .is("settled_at", null)
@@ -266,9 +268,48 @@ export async function settlePendingWithdrawals() {
         `[WithdrawalSettlementWorker] Settled withdrawal ${withdrawal.id} (ref: ${settlementRef}).`,
       );
     } catch (err) {
-      logger.error(
-        `[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} deferred — payout already dispatched, funds NOT restored: ${err.message}`,
-      );
+      // The payout already left the platform, so funds must NEVER be restored.
+      // Record the settle failure and, once the bounded settle-retry budget is
+      // exhausted, transition the row to the terminal `settlement_failed`
+      // status (record_settle_failure with p_terminal => true) so the sweep
+      // predicate (status='pending') stops selecting it. The migration
+      // increments settle_attempts on every call, so the persisted counter is
+      // the source of truth for how many settle cycles have failed.
+      const attempts = (withdrawal.settle_attempts || 0) + 1;
+      const terminal = attempts >= SETTLE_RETRY_ATTEMPTS;
+      const errorMsg = String(err.message || "Unknown error").slice(0, 1000);
+
+      try {
+        const { error: rpcErr } = await supabaseAdmin.rpc(
+          "record_settle_failure",
+          {
+            p_withdrawal_id: withdrawal.id,
+            p_error: errorMsg,
+            p_terminal: terminal,
+          },
+        );
+        if (rpcErr) {
+          logger.error(
+            `[WithdrawalSettlementWorker] Failed to record settlement failure for ${withdrawal.id}: ${rpcErr.message}`,
+          );
+        }
+      } catch (rpcErr) {
+        logger.error(
+          `[WithdrawalSettlementWorker] Failed to record settlement failure for ${withdrawal.id}: ${rpcErr.message}`,
+        );
+      }
+
+      if (terminal) {
+        // One-time terminal alert: the row has moved to settlement_failed and
+        // will no longer be retried — manual reconciliation is required.
+        logger.error(
+          `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} settlement permanently failed after ${attempts} attempts — moved to terminal settlement_failed status. ALERT: manual reconciliation required (funds NOT restored).`,
+        );
+      } else {
+        logger.error(
+          `[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} deferred (attempt ${attempts}/${SETTLE_RETRY_ATTEMPTS}) — payout already dispatched, funds NOT restored: ${err.message}`,
+        );
+      }
     }
   }
 }

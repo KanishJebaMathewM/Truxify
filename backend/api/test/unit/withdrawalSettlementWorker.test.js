@@ -117,6 +117,58 @@ describe('Withdrawal Settlement Worker', () => {
     expect(settleCalls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('calls record_settle_failure with p_terminal=false on a non-terminal settle failure', async () => {
+    vi.useFakeTimers();
+    mockPendingWithdrawals([
+      { id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: null, settle_attempts: 0 },
+    ]);
+    dispatchPayoutMock.mockResolvedValue({ success: true, settlementRef: 'ref-1' });
+    admin.rpc.mockImplementation((name) =>
+      name === 'settle_withdrawal_tx'
+        ? Promise.resolve({ error: { message: 'rpc timeout' } })
+        : Promise.resolve({ error: null })
+    );
+
+    const running = settlePendingWithdrawals();
+    await vi.advanceTimersByTimeAsync(6000);
+    await running;
+
+    // Bounded settle retries exhausted for this cycle, but the attempt budget
+    // is not yet spent, so the failure is recorded as non-terminal.
+    expect(admin.rpc).toHaveBeenCalledWith('record_settle_failure', {
+      p_withdrawal_id: 'w1',
+      p_error: expect.any(String),
+      p_terminal: false,
+    });
+    expect(admin.rpc).not.toHaveBeenCalledWith('fail_withdrawal_tx', expect.anything());
+  });
+
+  it('calls record_settle_failure with p_terminal=true once the settle attempt budget is exhausted', async () => {
+    vi.useFakeTimers();
+    // settle_attempts of 2 + this failure = 3 >= SETTLE_RETRY_ATTEMPTS (3),
+    // so the row should transition to the terminal settlement_failed status.
+    mockPendingWithdrawals([
+      { id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: null, settle_attempts: 2 },
+    ]);
+    dispatchPayoutMock.mockResolvedValue({ success: true, settlementRef: 'ref-1' });
+    admin.rpc.mockImplementation((name) =>
+      name === 'settle_withdrawal_tx'
+        ? Promise.resolve({ error: { message: 'rpc timeout' } })
+        : Promise.resolve({ error: null })
+    );
+
+    const running = settlePendingWithdrawals();
+    await vi.advanceTimersByTimeAsync(6000);
+    await running;
+
+    expect(admin.rpc).toHaveBeenCalledWith('record_settle_failure', {
+      p_withdrawal_id: 'w1',
+      p_error: expect.any(String),
+      p_terminal: true,
+    });
+    expect(admin.rpc).not.toHaveBeenCalledWith('fail_withdrawal_tx', expect.anything());
+  });
+
   it('does not re-dispatch a withdrawal whose payout was already attempted', async () => {
     mockPendingWithdrawals([
       { id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: '2026-08-04T10:00:00Z', settlement_ref: 'ref-1' },

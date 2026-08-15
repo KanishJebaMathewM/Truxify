@@ -671,7 +671,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     });
   } catch (err) {
     logger.error(err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    res.status(500).json({ error: 'Internal Server Error', details: err?.message });
   }
 });
 

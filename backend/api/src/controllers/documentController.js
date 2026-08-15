@@ -145,12 +145,8 @@ export async function uploadDriverDocument(req, res) {
       });
     }
 
-    const extension = verifiedMimeType === 'application/pdf' ? 'pdf'
-      : verifiedMimeType === 'image/png' ? 'png'
-      : 'jpg';
-
     // Appended randomUUID() to guarantee uniqueness even during rapid concurrent uploads
-    const storagePath = `${driverId}/${documentType}-${Date.now()}-${randomUUID()}.${extension}`;
+    const storagePath = `${driverId}/${documentType}-${Date.now()}-${crypto.randomUUID()}.${extension}`;
 
     const { error: storageError } = await client.storage
       .from('driver-documents')

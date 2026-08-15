@@ -149,12 +149,51 @@ class ZKIDService {
 
     // ============ Verification Request ============
 
+    /**
+     * Validate a zero-knowledge verification proof before trusting it.
+     *
+     * The prover must sign the verification challenge (the keccak256 hash of
+     * the identity and credential hashes) with the wallet that owns the
+     * identity. We recover the prover's address from that signature so the
+     * `verified` flag reflects an actual, attributable proof rather than a
+     * hardcoded `true`. Missing, malformed, zero, or non-recoverable proofs
+     * are rejected.
+     *
+     * @returns {{ verified: boolean, prover?: string, reason?: string }}
+     */
+    verifyProof(proofData, identityHash, credentialHash) {
+        if (!proofData || !ethers.isHexString(proofData) || proofData === ethers.ZeroHash) {
+            return { verified: false, reason: 'Missing or invalid proofData' };
+        }
+
+        const challenge = ethers.keccak256(
+            ethers.AbiCoder.defaultAbiCoder().encode(
+                ['bytes32', 'bytes32'],
+                [identityHash, credentialHash]
+            )
+        );
+
+        try {
+            const prover = ethers.verifyMessage(ethers.getBytes(challenge), proofData);
+            return { verified: true, prover };
+        } catch (err) {
+            logger.error('Proof signature recovery failed:', err);
+            return { verified: false, reason: 'Proof signature recovery failed' };
+        }
+    }
+
     async requestVerification(identityHash, credentialHash, proofData) {
         try {
+            // Never submit or record a verification without a passing proof.
+            const proof = this.verifyProof(proofData, identityHash, credentialHash);
+            if (!proof.verified) {
+                throw new Error(proof.reason || 'Proof verification failed');
+            }
+
             const tx = await this.zkid.requestVerification(
                 identityHash,
                 credentialHash,
-                proofData || ethers.ZeroHash,
+                proofData,
                 { gasLimit: 200000 }
             );
             const receipt = await tx.wait();
@@ -178,14 +217,18 @@ class ZKIDService {
                 requestId,
                 identityHash,
                 credentialHash,
-                txHash: receipt.hash
+                txHash: receipt.hash,
+                verified: proof.verified,
+                prover: proof.prover
             });
 
             logger.info(`✅ Verification requested: ${requestId}`);
             return {
                 success: true,
                 requestId,
-                txHash: receipt.hash
+                txHash: receipt.hash,
+                verified: proof.verified,
+                prover: proof.prover
             };
         } catch (error) {
             logger.error('Verification request failed:', error);
@@ -329,7 +372,8 @@ class ZKIDService {
                 identity_hash: data.identityHash,
                 credential_hash: data.credentialHash,
                 tx_hash: data.txHash,
-                verified: true,
+                verified: !!data.verified,
+                prover: data.prover || null,
                 created_at: new Date().toISOString()
             }]);
         if (error) throw error;

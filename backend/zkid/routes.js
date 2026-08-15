@@ -1,11 +1,13 @@
 import express from 'express';
 import zkidService from './zkid.service.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
+import { requirePolicy } from '../api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
 
 // Create identity
-router.post('/zkid/identity/create', async (req, res) => {
+router.post('/zkid/identity/create', authenticate, requirePolicy('zkid:create-identity'), async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -24,7 +26,7 @@ router.post('/zkid/identity/create', async (req, res) => {
 });
 
 // Issue credential
-router.post('/zkid/credential/issue', async (req, res) => {
+router.post('/zkid/credential/issue', authenticate, requirePolicy('zkid:issue-credential'), async (req, res) => {
     try {
         const { identityHash, credentialType, schemaHash } = req.body;
         if (!identityHash || !credentialType) {
@@ -43,7 +45,7 @@ router.post('/zkid/credential/issue', async (req, res) => {
 });
 
 // Verify credential
-router.get('/zkid/credential/verify/:credentialHash', async (req, res) => {
+router.get('/zkid/credential/verify/:credentialHash', authenticate, requirePolicy('zkid:verify-credential'), async (req, res) => {
     try {
         const { credentialHash } = req.params;
         const result = await zkidService.verifyCredential(credentialHash);
@@ -55,7 +57,7 @@ router.get('/zkid/credential/verify/:credentialHash', async (req, res) => {
 });
 
 // Revoke credential
-router.post('/zkid/credential/revoke', async (req, res) => {
+router.post('/zkid/credential/revoke', authenticate, requirePolicy('zkid:revoke-credential'), async (req, res) => {
     try {
         const { credentialHash } = req.body;
         if (!credentialHash) {
@@ -74,7 +76,7 @@ router.post('/zkid/credential/revoke', async (req, res) => {
 });
 
 // Request verification
-router.post('/zkid/verification/request', async (req, res) => {
+router.post('/zkid/verification/request', authenticate, requirePolicy('zkid:request-verification'), async (req, res) => {
     try {
         const { identityHash, credentialHash, proofData } = req.body;
         if (!identityHash || !credentialHash) {
@@ -93,7 +95,7 @@ router.post('/zkid/verification/request', async (req, res) => {
 });
 
 // Create selective disclosure
-router.post('/zkid/disclosure/create', async (req, res) => {
+router.post('/zkid/disclosure/create', authenticate, requirePolicy('zkid:create-disclosure'), async (req, res) => {
     try {
         const { identityHash, disclosedAttributes, recipient } = req.body;
         if (!identityHash || !disclosedAttributes || !recipient) {
@@ -116,7 +118,7 @@ router.post('/zkid/disclosure/create', async (req, res) => {
 });
 
 // Revoke selective disclosure
-router.post('/zkid/disclosure/revoke', async (req, res) => {
+router.post('/zkid/disclosure/revoke', authenticate, requirePolicy('zkid:revoke-disclosure'), async (req, res) => {
     try {
         const { disclosureId } = req.body;
         if (!disclosureId) {
@@ -135,7 +137,7 @@ router.post('/zkid/disclosure/revoke', async (req, res) => {
 });
 
 // Get identity
-router.get('/zkid/identity/:identityHash', async (req, res) => {
+router.get('/zkid/identity/:identityHash', authenticate, requirePolicy('zkid:view-identity'), async (req, res) => {
     try {
         const { identityHash } = req.params;
         const identity = await zkidService.getIdentity(identityHash);
@@ -147,7 +149,7 @@ router.get('/zkid/identity/:identityHash', async (req, res) => {
 });
 
 // Get stats
-router.get('/zkid/stats', async (req, res) => {
+router.get('/zkid/stats', authenticate, requirePolicy('zkid:view-stats'), async (req, res) => {
     try {
         const stats = await zkidService.getZKIDStats();
         res.json({ success: true, data: stats });

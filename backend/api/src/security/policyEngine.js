@@ -154,6 +154,20 @@ const POLICIES = {
   'crossdock:verify':           {},
   'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
   'crossdock:list':             {},
+
+  // ZK-ID subsystem (#14688): previously mounted with no authentication,
+  // allowing unauthenticated credential forgery and verification spoofing.
+  // Privileged issuance/revocation is admin-only (server-wallet operations);
+  // proof-bearing and read actions require an authenticated principal.
+  'zkid:create-identity':      {},
+  'zkid:issue-credential':     { roles: [ROLES.ADMIN] },
+  'zkid:verify-credential':    {},
+  'zkid:revoke-credential':    { roles: [ROLES.ADMIN] },
+  'zkid:request-verification': {},
+  'zkid:create-disclosure':    {},
+  'zkid:revoke-disclosure':    {},
+  'zkid:view-identity':        {},
+  'zkid:view-stats':           {},
 };
 
 export class PolicyEngine {

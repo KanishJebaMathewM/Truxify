@@ -83,7 +83,7 @@ $$;
 -- Called from: POST /api/drivers/wallet/withdraw
 create or replace function withdraw_funds_tx(
   p_driver_id   uuid,
-  p_amount      int
+  p_amount      numeric
 ) returns void
 language plpgsql
 security definer
@@ -91,8 +91,8 @@ security definer
 set search_path = public
 as $
 declare
-  v_confirmed int;
-  v_pending   int;
+  v_confirmed numeric;
+  v_pending   numeric;
 begin
   select wallet_confirmed, wallet_pending
     into v_confirmed, v_pending

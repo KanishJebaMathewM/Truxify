@@ -33,16 +33,16 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION withdraw_funds_tx(
   p_driver_id   UUID,
-  p_amount      INT
+  p_amount      numeric
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_confirmed  INT;
-  v_pending    INT;
-  v_day_total  INT;
+  v_confirmed  numeric;
+  v_pending    numeric;
+  v_day_total  numeric;
   v_daily_cap  CONSTANT INT := 10000000;  -- ₹1,00,000 in paisa per UTC calendar day
 BEGIN
   -- Verify the caller IS the driver. get_profile_id() maps the Firebase JWT
@@ -106,8 +106,8 @@ $$;
 -- Function creation grants EXECUTE to PUBLIC by default (callable with the
 -- public anon key). Revoke it and allow only authenticated sessions so the
 -- ownership guard above is the only gate for real users.
-REVOKE EXECUTE ON FUNCTION withdraw_funds_tx(UUID, INT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION withdraw_funds_tx(UUID, INT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION withdraw_funds_tx(UUID, numeric) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION withdraw_funds_tx(UUID, numeric) TO authenticated;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. submit_rating_tx — verify the caller IS the customer by profiles.id

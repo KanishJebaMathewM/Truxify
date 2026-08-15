@@ -216,15 +216,15 @@ $$;
 
 CREATE OR REPLACE FUNCTION withdraw_funds_tx(
   p_driver_id   UUID,
-  p_amount      INT
+  p_amount      numeric
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_confirmed INT;
-  v_pending   INT;
+  v_confirmed numeric;
+  v_pending   numeric;
 BEGIN
   -- Verify the caller IS the driver
   IF auth.uid() <> p_driver_id THEN

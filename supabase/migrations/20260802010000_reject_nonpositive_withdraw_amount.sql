@@ -37,16 +37,16 @@ ALTER TABLE driver_details
 -- 2. Harden withdraw_funds_tx: positive-amount guard + daily withdrawal cap.
 CREATE OR REPLACE FUNCTION withdraw_funds_tx(
   p_driver_id   UUID,
-  p_amount      INT
+  p_amount      numeric
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_confirmed  INT;
-  v_pending    INT;
-  v_day_total  INT;
+  v_confirmed  numeric;
+  v_pending    numeric;
+  v_day_total  numeric;
   v_daily_cap  CONSTANT INT := 10000000;  -- ₹1,00,000 in paisa per UTC calendar day
 BEGIN
   -- Verify the caller IS the driver.

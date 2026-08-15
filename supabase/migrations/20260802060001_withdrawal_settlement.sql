@@ -42,7 +42,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_driver_id uuid;
-  v_amount int;
+  v_amount numeric;
 BEGIN
   IF auth.role() <> 'service_role' THEN
     RAISE EXCEPTION 'Only the backend service can settle withdrawals';
@@ -90,7 +90,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_driver_id uuid;
-  v_amount int;
+  v_amount numeric;
 BEGIN
   IF auth.role() <> 'service_role' THEN
     RAISE EXCEPTION 'Only the backend service can fail withdrawals';

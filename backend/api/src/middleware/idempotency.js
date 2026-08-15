@@ -101,8 +101,6 @@ export function requireIdempotency(ttlSeconds = 3600) {
         return res.status(cached.statusCode).json(cached.body);
       }
 
-      let pendingCache = null;
-
       if (redisClient) {
         const lockKey = `${key}:lock`;
         const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);

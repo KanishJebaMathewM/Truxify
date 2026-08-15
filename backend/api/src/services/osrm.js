@@ -3,7 +3,7 @@ import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
 
-export const osrmBreaker = new CircuitBreaker(async (url, options) => {
+const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {
     await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
@@ -281,7 +281,7 @@ export const __testing = {
 
 // === Spec 22: ===
 // === Spec 22: OSRM failover ===
-export function haversineFallbackKm(lat1, lon1, lat2, lon2) {
+function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const nLat1 = Number(lat1);
   const nLon1 = Number(lon1);
   const nLat2 = Number(lat2);

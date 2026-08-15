@@ -36,8 +36,8 @@ router.post(
 
       res.json(result);
     } catch (err) {
-      if (err.message?.includes('[ML]')) {
-        logger.warn({ err: err.message, requestId: req.requestId }, 'ML engine unavailable for deadhead matching');
+      if (err?.message?.includes('[ML]')) {
+        logger.warn({ err: err?.message, requestId: req.requestId }, 'ML engine unavailable for deadhead matching');
         return res.status(503).json({ error: 'ML recommendation engine is temporarily unavailable.' });
       }
       logger.error({ err, requestId: req.requestId }, 'Deadhead matching failed');

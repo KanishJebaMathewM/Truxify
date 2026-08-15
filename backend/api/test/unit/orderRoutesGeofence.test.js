@@ -1,4 +1,3 @@
-import { describe, it, expect, vi } from 'vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
@@ -64,27 +63,6 @@ import { orderValidationService, orderLifecycleService } from '../../src/core/co
 
 const app = express();
 app.use(express.json());
-app.use('/api/orders', orderRoutes);
-
-describe('POST /api/orders/:id/geofence-confirm validation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    findOrderByIdOrDisplayIdMock.mockReset();
-    assertDriverAssignmentMock.mockReset();
-    geofenceAutoConfirmMock.mockReset();
-  });
-
-  it('should accept valid lat, lng and geofence_radius_m', async () => {
-    findOrderByIdOrDisplayIdMock.mockResolvedValue({
-      id: '123',
-      driver_id: DRIVER_HEADERS['x-user-id'],
-      customer_id: 'customer-1'
-    });
-    geofenceAutoConfirmMock.mockResolvedValue({ success: true });
-app.use((req, res, next) => {
-  req.user = { id: 'driver-1' };
-  next();
-});
 app.use('/api/orders', orderRoutes);
 
 describe('POST /api/orders/:id/geofence-confirm validation', () => {

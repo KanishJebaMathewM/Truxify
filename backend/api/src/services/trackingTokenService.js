@@ -55,9 +55,18 @@ export class TrackingTokenService {
   }
 
   async validateToken(rawToken) {
+    // `tracking_tokens` has no anon RLS policy and anon privileges are revoked,
+    // so the service-role client is required to look up the hash — the public
+    // `/tracking` handlers must not use the anon `supabase` client
+    // (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('validateToken requires service-role client');
+      throw new Error('Service-role client required for tracking token validation');
+    }
+
     const tokenHash = this.hashToken(rawToken);
 
-    const { data: token, error } = await this._supabase
+    const { data: token, error } = await this._supabaseAdmin
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')
       .eq('token_hash', tokenHash)
@@ -147,7 +156,14 @@ export class TrackingTokenService {
   }
 
   async getOrderForPublicTracking(orderDisplayId) {
-    const { data: order, error: orderError } = await this._supabase
+    // `orders` has no anon RLS policy and anon privileges are revoked, so the
+    // service-role client is required to read it (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderForPublicTracking requires service-role client');
+      throw new Error('Service-role client required for public tracking order');
+    }
+
+    const { data: order, error: orderError } = await this._supabaseAdmin
       .from('orders')
       .select(`
         order_display_id,
@@ -212,7 +228,14 @@ export class TrackingTokenService {
   }
 
   async getOrderTimeline(orderDisplayId) {
-    const { data, error } = await this._supabase
+    // `order_timeline` has no anon RLS policy and anon privileges are revoked,
+    // so the service-role client is required to read it (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderTimeline requires service-role client');
+      throw new Error('Service-role client required for public tracking timeline');
+    }
+
+    const { data, error } = await this._supabaseAdmin
       .from('order_timeline')
       .select('milestone, milestone_time, completed, sort_order')
       .eq('order_display_id', orderDisplayId)
@@ -235,7 +258,7 @@ export class TrackingTokenService {
       throw new Error('Service-role client required for driver location tracking');
     }
 
-    const { data: order, error: orderError } = await this._supabase
+    const { data: order, error: orderError } = await this._supabaseAdmin
       .from('orders')
       .select('driver_id')
       .eq('order_display_id', orderDisplayId)

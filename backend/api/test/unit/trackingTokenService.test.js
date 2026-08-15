@@ -298,11 +298,12 @@ describe('TrackingTokenService', () => {
     });
 
     it('prefers the service-role client over the anon client', async () => {
-      mockData.store.orders.push({
+      const adminMock = createMockSupabase();
+      adminMock.store.orders = [];
+      adminMock.store.orders.push({
         order_display_id: '#FF20241205',
         driver_id: 'driver-uuid-456',
       });
-      const adminMock = createMockSupabase();
       adminMock.store.driver_locations = [];
       adminMock.store.driver_locations.push({
         driver_id: 'driver-uuid-456',

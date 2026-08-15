@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { BaseEvent } from "../../src/core/events/BaseEvent.js";
+import { EventMetadata, EVENT_CATEGORIES } from "../../src/core/events/EventMetadata.js";
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },

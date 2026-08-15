@@ -206,28 +206,6 @@ export function paisaToMaticWei(paisa) {
   return maticWei;
 }
 
-/**
- * Convert an amount in wei back to paisa using the canonical scale.
- * Rounding is floored; intended for audit/display, not for authoritative
- * payout math (which must always derive from the integer paisa amount).
- *
- * @param {string|bigint|number} wei - Amount in wei
- * @returns {bigint} Amount in paisa
- */
-export function maticWeiToPaisa(wei) {
-  return BigInt(wei) / PAISA_WEI_SCALE;
-}
-
-/**
- * Whether |a - b| ≤ toleranceWei (both coerced to BigInt). Used to compare
- * the same monetary figure persisted by different code versions without
- * letting small legacy rounding differences block legit flows.
- *
- * @param {string|bigint|number} a
- * @param {string|bigint|number} b
- * @param {string|bigint|number} [toleranceWei] - default 1 gwei
- * @returns {boolean}
- */
 export function weiWithinTolerance(a, b, toleranceWei = ESCROW_AMOUNT_TOLERANCE_WEI) {
   const aBig = BigInt(a);
   const bBig = BigInt(b);

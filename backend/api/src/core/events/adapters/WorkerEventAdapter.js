@@ -27,7 +27,7 @@ export class WorkerEventAdapter extends EventPublisher {
           await worker.terminate();
         }
       } catch (err) {
-        logger.error(`[WorkerEventAdapter] Failed to terminate worker "${name}":`, err.message);
+        logger.error(`[WorkerEventAdapter] Failed to terminate worker "${name}":`, err?.message);
       }
     }
     this._workers.clear();
@@ -86,7 +86,7 @@ export class WorkerEventAdapter extends EventPublisher {
         }
         logger.debug(`[WorkerEventAdapter] Sent "${event.eventType}" to worker "${name}"`);
       } catch (err) {
-        logger.error(`[WorkerEventAdapter] Failed to send to worker "${name}":`, err.message);
+        logger.error(`[WorkerEventAdapter] Failed to send to worker "${name}":`, err?.message);
       }
     }
   }
@@ -104,10 +104,10 @@ export class WorkerEventAdapter extends EventPublisher {
       try {
         const result = handler(event);
         if (result && typeof result.catch === 'function') {
-          result.catch(err => logger.error('[WorkerEventAdapter] Handler error:', err.message));
+          result.catch(err => logger.error('[WorkerEventAdapter] Handler error:', err?.message));
         }
       } catch (err) {
-        logger.error('[WorkerEventAdapter] Handler error:', err.message);
+        logger.error('[WorkerEventAdapter] Handler error:', err?.message);
       }
     }
   }

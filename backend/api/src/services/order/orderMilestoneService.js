@@ -17,7 +17,7 @@ import {
   OTP_LOCKOUT_MINUTES,
   DELIVERY_OTP_READY_STATUSES
 } from './orderNotificationService.js';
-import { escrowRelease, markEscrowBookingStarted, paisaToMaticWei } from '../escrow.js';
+import { escrowRelease, markEscrowBookingStarted, paisaToMaticWei, resolveExpectedDepositAmount } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { broadcastOrderMilestone } from '../../sockets/tracker.js';
@@ -160,7 +160,7 @@ export class OrderMilestoneService {
 
       const { data: order, error: orderErr } = await this.orderRepository.findOrderById(
         orderId,
-        'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, total_amount'
+        'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, total_amount, escrow_amount_wei, pending_bid_acceptance'
       );
       if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
       if (order.driver_id !== driverId)
@@ -217,9 +217,24 @@ export class OrderMilestoneService {
 
       if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
         try {
+          // Payout defense-in-depth: use the authoritative escrowed amount
+          // (escrow_amount_wei / accepted bid), NOT total_amount, which includes
+          // platform fee + toll and differs from the deposited bid amount.
+          let expectedAmountWei;
+          const resolvedAmount = resolveExpectedDepositAmount(order);
+          if (resolvedAmount.expectedAmountWei != null) {
+            expectedAmountWei = resolvedAmount.expectedAmountWei;
+          } else if (order.total_amount != null) {
+            expectedAmountWei = paisaToMaticWei(order.total_amount);
+          } else if (order.pending_bid_acceptance?.bid_amount != null) {
+            expectedAmountWei = paisaToMaticWei(order.pending_bid_acceptance.bid_amount);
+          } else {
+            expectedAmountWei = null;
+          }
+
           const releaseResult = await escrowRelease(
             order.order_display_id,
-            order.total_amount != null ? paisaToMaticWei(order.total_amount) : null,
+            expectedAmountWei,
           );
           if (releaseResult.txHash) {
             releaseTxHash = releaseResult.txHash;

@@ -220,7 +220,10 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         });
 
         nullifiers[nullifier] = true;
-        spentCommitments[commitment] = true;
+        commitmentAmounts[commitment] -= amount;
+        if (commitmentAmounts[commitment] == 0) {
+            spentCommitments[commitment] = true;
+        }
 
         emit TransactionProcessed(nullifier, recipient, amount);
     }
@@ -290,7 +293,10 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         });
 
         nullifiers[nullifier] = true;
-        spentCommitments[commitment] = true;
+        commitmentAmounts[commitment] -= amount;
+        if (commitmentAmounts[commitment] == 0) {
+            spentCommitments[commitment] = true;
+        }
 
         emit TransactionProcessed(nullifier, recipient, amount);
     }

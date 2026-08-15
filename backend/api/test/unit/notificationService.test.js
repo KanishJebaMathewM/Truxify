@@ -33,6 +33,8 @@ const {
   sendPushNotification,
   insertNotification,
   sendDeliveryOtpNotification,
+  hashDeliveryOtp,
+  verifyDeliveryOtpHash,
 } = await import('../../src/services/notificationService.js');
 
 function okBatch(tokens) {
@@ -339,13 +341,8 @@ describe('sendPushNotification', () => {
       order_display_id: 'ORD-2001',
     });
     expect(result.success).toBe(true);
-import { sendPushNotification, sendFcmNotification } from '../../src/services/notificationService.js';
-import crypto from 'crypto';
-import { sendPushNotification, sendFcmNotification, hashDeliveryOtp, verifyDeliveryOtpHash } from '../../src/services/notificationService.js';
-import crypto from 'crypto';
-import notificationService from '../../src/services/notificationService.js';
-import { sendPushNotification, sendFcmNotification, hashDeliveryOtp, verifyDeliveryOtpHash } from '../../src/services/notificationService.js';
-import { DomainError } from '../../src/services/order/domainError.js';
+  });
+});
 
 describe('notificationService allowlist validation', () => {
   it('should throw DomainError for invalid notif_type in insertNotification', async () => {
@@ -384,14 +381,14 @@ describe('notificationService allowlist validation', () => {
 // and getUserFcmToken chains .select().eq().maybeSingle() — a mock lacking
 // either export, or with a chain shape that doesn't reach maybeSingle(),
 // makes every scenario collapse into the same early-return branch.
-const { mockFrom, mockInsert, mockSend } = vi.hoisted(() => {
+const { mockFrom, mockInsert, mockSend, mockMaybeSingle } = vi.hoisted(() => {
   const mockMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
   const mockEq = vi.fn(() => ({ maybeSingle: mockMaybeSingle }));
   const mockSelect = vi.fn(() => ({ eq: mockEq }));
   const mockInsert = vi.fn().mockResolvedValue({ data: { id: 'fcm-token-1' }, error: null });
   const mockFrom = vi.fn(() => ({ select: mockSelect, insert: mockInsert }));
   const mockSend = vi.fn().mockResolvedValue('mock-message-id');
-  return { mockFrom, mockInsert, mockSend };
+  return { mockFrom, mockInsert, mockSend, mockMaybeSingle };
 });
 
 vi.mock('../../src/config/db.js', () => ({

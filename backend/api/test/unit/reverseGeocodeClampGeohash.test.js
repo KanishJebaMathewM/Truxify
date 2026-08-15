@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampGeohashPrecision } from '../../../src/lib/reverseGeocode.js';
+import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 
 describe('clampGeohashPrecision', () => {
   it('returns exact MIN boundary', () => {

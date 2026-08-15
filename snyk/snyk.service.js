@@ -7,6 +7,20 @@ import logger from '../backend/api/src/middleware/logger.js';
 
 const execAsync = promisify(exec);
 
+const REQUEST_TIMEOUT_MS = 15000;
+
+async function runSnyk(command, options = {}) {
+    return new Promise((resolve, reject) => {
+        exec(command, options, (error, stdout, stderr) => {
+            const code = error?.code;
+            if (code !== 0 && code !== 1) {
+                return reject(new Error(stderr || error?.message || 'Snyk command failed'));
+            }
+            resolve({ stdout, stderr, code });
+        });
+    });
+}
+
 class SnykService {
     constructor() {
         this.snykToken = process.env.SNYK_TOKEN;
@@ -69,7 +83,7 @@ class SnykService {
         try {
             const safePath = this._sanitizePath(projectPath);
             const command = `snyk test --severity-threshold=high --json`;
-            const { stdout, stderr } = await execAsync(command, { cwd: safePath });
+            const { stdout, stderr } = await runSnyk(command, { cwd: safePath });
             
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Dependency scan error:', stderr);
@@ -101,7 +115,7 @@ class SnykService {
         try {
             const safeImage = this._sanitizeImage(image);
             const command = `snyk container test ${safeImage} --severity-threshold=high --json`;
-            const { stdout, stderr } = await execAsync(command);
+            const { stdout, stderr } = await runSnyk(command);
             
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Container scan error:', stderr);
@@ -134,7 +148,7 @@ class SnykService {
         try {
             const safePath = this._sanitizePath(inputPath);
             const command = `snyk iac test ${safePath} --severity-threshold=high --json`;
-            const { stdout, stderr } = await execAsync(command);
+            const { stdout, stderr } = await runSnyk(command);
             
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('IaC scan error:', stderr);
@@ -167,7 +181,7 @@ class SnykService {
         try {
             const safePath = this._sanitizePath(inputPath);
             const command = `snyk code test ${safePath} --severity-threshold=high --json`;
-            const { stdout, stderr } = await execAsync(command);
+            const { stdout, stderr } = await runSnyk(command);
             
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Code scan error:', stderr);
@@ -224,7 +238,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             
@@ -247,7 +262,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             
@@ -269,7 +285,8 @@ class SnykService {
                 {
                     headers: {
                         'Authorization': `token ${this.snykToken}`
-                    }
+                    },
+                    timeout: REQUEST_TIMEOUT_MS
                 }
             );
             

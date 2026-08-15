@@ -1,8 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
-const CACHEABLE_STATUS = new Set([200, 201, 202, 204]);
-
 const inMemoryStore = new Map();
 const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
@@ -49,10 +47,6 @@ function setInMemory(key, data, ttlMs) {
     }
   }
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
-}
-
-function isCacheable(statusCode) {
-  return CACHEABLE_STATUS.has(statusCode);
 }
 
 function cacheKey(req, idempotencyKey) {

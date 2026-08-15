@@ -211,13 +211,6 @@ class OracleService {
     return logEntry;
   }
 
-  getStatus() {
-    return {
-      providers: ['OTPVerifier', 'GPSVerifier', 'StatusVerifier'],
-      threshold: 2,
-    };
-  }
-
   async verifyCrossChain(orderId, blockchainHash) {
     try {
       const { data: order, error } = await this.supabase

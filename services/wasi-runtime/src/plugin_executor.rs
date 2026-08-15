@@ -1,7 +1,13 @@
 use anyhow::Result;
 use wasmtime::{
-    Engine, Instance, Memory, Module, Store, StoreLimitsBuilder,
+    Config, Engine, Instance, Memory, Module, Store, StoreLimitsBuilder, Trap,
 };
+
+/// Maximum number of fuel units a plugin may consume before it is terminated.
+/// Wasmtime consumes one fuel unit per wasm instruction; this bounds a plugin
+/// to roughly 1e9 instructions, preventing an infinite loop from pinning the
+/// calling thread indefinitely (CPU-exhaustion / DoS).
+const MAX_FUEL: u64 = 1_000_000_000;
 
 pub struct WasiPluginExecutor {
     pub max_memory_bytes: usize,
@@ -17,7 +23,9 @@ impl WasiPluginExecutor {
             return Ok("[]".to_string());
         }
 
-        let engine = Engine::default();
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config)?;
         let module = Module::from_binary(&engine, wasm_bytes)?;
 
         // Real runtime sandbox: cap both the module's initial AND maximum
@@ -31,6 +39,9 @@ impl WasiPluginExecutor {
 
         let mut store = Store::new(&engine, ());
         store.limiter(|_| &mut limits);
+        // Bounded CPU: terminate the plugin once it exhausts its fuel budget
+        // so an unbounded loop cannot hang the worker.
+        store.set_fuel(MAX_FUEL)?;
 
         let instance = Instance::new(&mut store, &module, &[])?;
 
@@ -51,7 +62,9 @@ impl WasiPluginExecutor {
             .checked_add(input_bytes.len())
             .ok_or_else(|| anyhow::anyhow!("input length overflow"))?;
 
-        if input_offset + input_bytes.len() > mem_bytes {
+        let out_cap = mem_bytes - out_offset;
+
+        if out_offset > mem_bytes {
             anyhow::bail!("input data does not fit in plugin linear memory");
         }
         if out_offset > mem_bytes {
@@ -63,17 +76,25 @@ impl WasiPluginExecutor {
         // ABI: run(in_ptr, in_len, out_ptr, out_cap) -> out_len.
         // The host tells the guest exactly where to write its output and how much
         // room is available; it must never trust a guest-supplied length blindly.
-        let out_cap = mem_bytes - out_offset;
         let run = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "run")?;
-        let out_len = run.call(
+        let out_len = match run.call(
             &mut store,
             (
                 input_offset as i32,
                 input_bytes.len() as i32,
                 out_offset as i32,
-                out_cap as i32,
+                (out_cap.min(i32::MAX as usize)) as i32,
             ),
-        )? as usize;
+        ) {
+            Ok(len) => len as usize,
+            // A fuel-exhaustion trap means the plugin exceeded its instruction
+            // budget (e.g. an infinite loop). Surface it as a clear error
+            // instead of letting the call hang forever.
+            Err(e) if matches!(e, Trap::OutOfFuel) => {
+                anyhow::bail!("plugin exceeded instruction/fuel limit (possible infinite loop)")
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         // Bounds-check the guest-reported length against the agreed capacity
         // before allocating or reading. This prevents a malicious guest from

@@ -216,7 +216,7 @@ router.get('/faqs', async (req, res) => {
   const appType = normalizeRequiredText(req.query.app_type);
 
   try {
-    let query = supabase
+    let query = adminDb
       .from('faqs')
       .select(FAQ_COLUMNS)
       .eq('is_active', true)

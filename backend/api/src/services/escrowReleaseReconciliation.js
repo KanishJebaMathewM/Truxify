@@ -76,7 +76,7 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: pendingOrders, error } = await orderRepository.findPendingEscrowReleases();
     if (error) {
-      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error.message);
+      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error?.message ?? String(error));
       return;
     }
 
@@ -200,7 +200,7 @@ async function finalizeWithRelease(order, txHash, orderRepository, chainConfirme
   if (rpcResult.error) {
     // Fail closed: if the gate rejects (e.g. escrow_status never persisted as
     // 'released'), do NOT credit — the row keeps retrying.
-    throw new Error(`complete_trip_tx failed: ${rpcResult.error.message}`);
+    throw new Error(`complete_trip_tx failed: ${rpcResult.error?.message}`);
   }
 
   logger.info(
@@ -222,7 +222,7 @@ async function recordAttemptError(order, orderRepository, err) {
   });
 
   if (error) {
-    logger.error(`[escrow-release-reconciliation] Failed to record attempt error for order ${order.id}:`, error.message);
+    logger.error(`[escrow-release-reconciliation] Failed to record attempt error for order ${order.id}:`, error?.message ?? String(error));
     return;
   }
 

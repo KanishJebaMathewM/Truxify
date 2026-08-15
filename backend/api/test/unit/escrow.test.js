@@ -135,7 +135,7 @@ describe('escrow service — paisaToMaticWei', () => {
     expect(wei).toBe(400_000_000_000_000n);
   });
 
-  it('enforces the default 100 MATIC safety cap when env vars are absent', async () => {
+  it('converts large amounts without the removed 100 MATIC hard cap (env vars absent)', async () => {
     const rateEnv = process.env.ESCROW_MATIC_PER_PAISA;
     const capEnv = process.env.MAX_ESCROW_MATIC;
     delete process.env.ESCROW_MATIC_PER_PAISA;
@@ -144,17 +144,30 @@ describe('escrow service — paisaToMaticWei', () => {
     vi.resetModules();
     const { paisaToMaticWei: defaultRateWei } = await import('../../src/services/escrow.js');
 
-    // 10,000,000 paisa (₹100k) × 0.000004 = 40 MATIC — a realistic large
-    // order that is now well under the default 100 MATIC cap, no RangeError.
+    // 10,000,000 paisa (₹100k) × 0.000004 = 40 MATIC — a realistic large order.
     expect(defaultRateWei(10_000_000)).toBe(ethers.parseEther('40'));
-    // An order far beyond the cap is rejected with a handled RangeError.
-    expect(() => defaultRateWei(100_000_000_000)).toThrow(RangeError);
+
+    // Previously the 100 MATIC cap (~Rs.250,000) made this throw a RangeError,
+    // silently breaking escrow for high-value shipments. The cap is removed so
+    // large/high-value orders convert correctly instead of throwing.
+    const bigPaisa = 100_000_000_000; // ₹1B @ default rate = 400,000 MATIC
+    expect(() => defaultRateWei(bigPaisa)).not.toThrow();
+    expect(defaultRateWei(bigPaisa)).toBe(BigInt(bigPaisa) * 4_000_000_000_000n);
 
     if (rateEnv !== undefined) process.env.ESCROW_MATIC_PER_PAISA = rateEnv;
     else delete process.env.ESCROW_MATIC_PER_PAISA;
     if (capEnv !== undefined) process.env.MAX_ESCROW_MATIC = capEnv;
     else delete process.env.MAX_ESCROW_MATIC;
     vi.resetModules();
+  });
+
+  it('converts a high-value shipment above the old 100 MATIC cap (issue #14682)', () => {
+    // 62,500,000 paisa (₹625,000) × 0.000004 = 250 MATIC — above the old cap
+    // that broke escrow for shipments above ~Rs.250,000.
+    const paisa = 62_500_000;
+    const wei = paisaToMaticWei(paisa);
+    expect(wei).toBe(ethers.parseEther('250'));
+    expect(wei).toBe(BigInt(paisa) * 4_000_000_000_000n);
   });
 
   it('converts using a custom rate when env var is overridden', async () => {

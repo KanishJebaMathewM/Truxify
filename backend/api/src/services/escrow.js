@@ -197,7 +197,13 @@ const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
  *
  * @param {number|string|bigint} paisa - Amount in paisa (e.g. 5000 = ₹50)
  * @returns {bigint} Amount in wei
- * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
+ * @throws {RangeError} If paisa is negative or not a finite number
+ *
+ * NOTE: The previous 100 MATIC hard cap (MAX_ESCROW_MATIC) silently broke
+ * escrow for high-value shipments (~Rs.250,000+). The cap has been removed so
+ * large orders convert correctly; the on-chain amount is a uint256 and can
+ * represent any realistic shipment value. MAX_ESCROW_MATIC remains only as a
+ * non-blocking reference for operators/logging.
  */
 export function paisaToMaticWei(paisa) {
   if (paisa == null) {
@@ -209,11 +215,6 @@ export function paisaToMaticWei(paisa) {
   }
   const paisaBig = BigInt(Math.round(numeric));
   const maticWei = paisaBig * PAISA_WEI_SCALE;
-  const maxMaticWei = BigInt(Math.round(MAX_ESCROW_MATIC * 1e18));
-  if (maticWei > maxMaticWei) {
-    const matic = maticWei / 1_000_000_000_000_000_000n;
-    throw new RangeError(`Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
-  }
   return maticWei;
 }
 

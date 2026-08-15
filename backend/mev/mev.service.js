@@ -111,6 +111,9 @@ class MEVService {
     // ============ MEV Protected Escrow ============
 
     async createEscrow(driver, amount, secret, userId) {
+        if (!userId) {
+            throw new Error('Authenticated user context is required to create an escrow.');
+        }
         try {
             // Create commitment first
             const commitment = await this.createCommitment(secret, userId);
@@ -141,6 +144,7 @@ class MEVService {
                 customer: this.wallet.address,
                 driver,
                 amount,
+                userId,
                 commitHash: secretHash,
                 secretHash,
                 txHash: receipt.hash
@@ -176,8 +180,39 @@ class MEVService {
 
     // ============ Release with MEV Protection ============
 
-    async releaseEscrow(escrowId, secret) {
+    async releaseEscrow(escrowId, secret, proof, user) {
         try {
+            if (!user || !user.id) {
+                throw new Error('Authentication required to release an escrow.');
+            }
+
+            // On-chain sanity: the deposit must exist and must not already be
+            // released. Without this, a replayed or stale release could be
+            // submitted against an already-settled deposit.
+            const deposit = await this.escrow.deposits(escrowId);
+            if (!deposit || deposit[2] === 0n) {
+                await this.updateEscrowStatus(escrowId, 'not_found').catch(() => {});
+                throw new Error(`Escrow ${escrowId} does not exist.`);
+            }
+            if (deposit[3]) {
+                throw new Error(`Escrow ${escrowId} has already been released.`);
+            }
+
+            // Authorization: the caller must be the user who created this
+            // escrow (or an admin). `secret` is not an authorization mechanism;
+            // anyone could know it, so ownership is enforced server-side
+            // against the stored deposit record (#14673).
+            const stored = await this.getStoredEscrow(escrowId);
+            if (stored) {
+                if (user.role !== 'admin' && stored.user_id !== user.id) {
+                    logger.warn(
+                        { userId: user.id, escrowId, owner: stored.user_id },
+                        'Escrow release denied: caller is not the deposit owner'
+                    );
+                    throw new Error('Forbidden: you are not authorized to release this escrow.');
+                }
+            }
+
             const tx = await this.escrow.releaseDepositPrivate(
                 escrowId,
                 secret,
@@ -195,6 +230,21 @@ class MEVService {
         } catch (error) {
             logger.error('Escrow release failed:', error);
             throw error;
+        }
+    }
+
+    async getStoredEscrow(escrowId) {
+        try {
+            const { data, error } = await supabase
+                .from('mev_escrows')
+                .select('user_id, escrow_id')
+                .eq('escrow_id', escrowId)
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
+        } catch (error) {
+            logger.error('Stored escrow lookup failed:', error);
+            return null;
         }
     }
 
@@ -298,6 +348,7 @@ class MEVService {
                 customer: data.customer,
                 driver: data.driver,
                 amount: data.amount,
+                user_id: data.userId,
                 commit_hash: data.commitHash,
                 secret_hash: data.secretHash,
                 tx_hash: data.txHash,

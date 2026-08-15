@@ -154,6 +154,11 @@ const POLICIES = {
   'crossdock:verify':           {},
   'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
   'crossdock:list':             {},
+
+  // MEV escrow subsystem (#14673): escrow funding/release spend server funds,
+  // so every state-changing action must be authenticated and authorized.
+  'mev:escrow':               { roles: [ROLES.CUSTOMER, ROLES.DRIVER, ROLES.ADMIN] },
+  'mev:flashbots':            { roles: [ROLES.ADMIN] },
 };
 
 export class PolicyEngine {

@@ -66,6 +66,11 @@ export class TrackingTokenService {
 
     const tokenHash = this.hashToken(rawToken);
 
+    if (!this._supabaseAdmin) {
+      this._logger.error('validateToken requires service-role client');
+      throw new Error('Service-role client required for tracking token validation');
+    }
+
     const { data: token, error } = await this._supabaseAdmin
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')

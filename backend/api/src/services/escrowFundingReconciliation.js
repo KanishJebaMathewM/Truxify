@@ -255,7 +255,7 @@ export async function reconcileStaleFunding(orderRepository) {
         limit: STALE_FUNDING_PAGE_SIZE,
       });
       if (error) {
-        logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
+        logger.error('[escrow-funding] Failed to load stale funding orders:', error?.message ?? String(error));
         return;
       }
       if (!staleOrders || staleOrders.length === 0) break;

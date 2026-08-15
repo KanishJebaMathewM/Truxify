@@ -1,9 +1,12 @@
 import express from 'express';
 import multer from 'multer';
+import { unlink } from 'fs/promises';
 import voiceAiService from '../services/voice/VoiceAiService.js';
 import logger from '../middleware/logger.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+
+const VALID_LANGUAGES = ['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml'];
 
 const router = express.Router();
 const upload = multer({
@@ -32,6 +35,11 @@ router.post('/assistant', authenticate, userLimiter, upload.single('audio'), asy
     }
 
     const language = req.body.language || 'en';
+    if (typeof language !== 'string' || !VALID_LANGUAGES.includes(language)) {
+      await unlink(req.file.path).catch(() => {});
+      return res.status(400).json({ error: 'Unsupported language. Supported: ' + VALID_LANGUAGES.join(', ') });
+    }
+
     const audioFilePath = req.file.path;
 
     logger.info(`Received voice query from user ${req.user?.id} in ${language}`);
@@ -47,13 +55,17 @@ router.post('/assistant', authenticate, userLimiter, upload.single('audio'), asy
     // Pipe the ElevenLabs stream directly to the Express response
     audioStream.pipe(res);
 
-    audioStream.on('error', (err) => {
+    audioStream.on('error', async (err) => {
       logger.error('Error streaming audio back to client:', err);
       res.end();
+      await unlink(audioFilePath).catch(() => {});
     });
 
   } catch (error) {
     logger.error('Voice Assistant Endpoint Error:', error);
+    if (req.file) {
+      await unlink(req.file.path).catch(() => {});
+    }
     res.status(500).json({ error: 'Failed to process voice query' });
   }
 });

@@ -167,7 +167,6 @@ import {
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker, stopStaleOrderWorker } from './workers/staleOrderWorker.js'
 import { startDevicePruningWorker, stopDevicePruningWorker } from './workers/devicePruningWorker.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {

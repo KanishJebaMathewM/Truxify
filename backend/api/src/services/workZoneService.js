@@ -76,6 +76,10 @@ export function generateBypassWaypoint(congestedPoint) {
   if (!congestedPoint || !congestedPoint.lat || !congestedPoint.lng) {
     return null;
   }
+  // Guard against NaN/Infinity values for lng, which would produce invalid bypass coordinates.
+  if (!Number.isFinite(Number(congestedPoint.lng))) {
+    return null;
+  }
 
   // To bypass a congested point (e.g. radius of 5km), we shift the coordinate perpendicularly.
   // 1 degree of latitude is ~111 km. To shift by ~7 km:

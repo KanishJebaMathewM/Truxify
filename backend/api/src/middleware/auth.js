@@ -476,11 +476,7 @@ export async function authenticate(req, res, next) {
           { isActive: false },
           TOMBSTONE_TTL_SECONDS,
         ).catch((err) => logger.error({ err }, "Cache set failed"));
-      }
 
-      // Check if profile was deactivated (separate check from is_active=false)
-      const profileIsDeactivated = profile?.deactivated_at != null;
-      if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
           hint: "Contact support to reactivate your account.",

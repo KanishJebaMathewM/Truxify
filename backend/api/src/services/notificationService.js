@@ -66,18 +66,6 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY = 500;
 const RETRY_MAX_DELAY = 5000;
 
-const REDIS_NOTIF_CHANNEL = 'truxify:notifications';
-async function publishNotificationEvent(userId, event) {
-  const { redisClient } = await import('../config/db.js');
-  if (!redisClient) return;
-  try {
-    const payload = JSON.stringify({ userId, event, timestamp: new Date().toISOString() });
-    await redisClient.publish(REDIS_NOTIF_CHANNEL, payload);
-  } catch (err) {
-    logger.error({ event: 'REDIS_NOTIF_PUBLISH_ERROR', userId, err: err?.message }, '[NotificationService] Failed to publish notification event to Redis');
-  }
-}
-
 function calculateRetryBackoff(attempt) {
   const delay = Math.min(RETRY_BASE_DELAY * Math.pow(2, attempt), RETRY_MAX_DELAY);
   return delay + Math.floor(Math.random() * 200);
@@ -86,15 +74,6 @@ function calculateRetryBackoff(attempt) {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/**
- * Safe redaction for diagnostic logs. Full FCM tokens must never be logged.
- */
-function redactToken(token) {
-  if (!token || typeof token !== 'string') return '[none]';
-  if (token.length <= 8) return '[redacted]';
-  return `${token.slice(0, 4)}…${token.slice(-4)}`;
-}
 
 /**
  * One-way digest used when a token identity must appear in logs.
@@ -166,22 +145,6 @@ function dedupeTokens(devices) {
     }
   }
   return byToken;
-}
-
-async function clearInvalidToken(userId) {
-  if (!supabaseAdmin) return;
-  try {
-    await supabaseAdmin
-      .from('profiles')
-      .update({
-        fcm_token: null,
-        fcm_token_updated_at: new Date().toISOString()
-      })
-      .eq('id', userId);
-  } catch (dbErr) {
-    logger.error({ err: dbErr, userId }, '[FCM] Failed to clear invalid FCM token');
-  }
-  return;
 }
 
 /**

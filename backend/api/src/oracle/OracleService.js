@@ -252,17 +252,6 @@ class OracleService {
     }
   }
 
-  /**
-   * Returns the current oracle service status including provider count and threshold.
-   * @returns {object}
-   */
-  getStatus() {
-    return {
-      providers: 3,
-      threshold: 2,
-      timestamp: new Date().toISOString(),
-    };
-  }
 }
 
 export default OracleService;

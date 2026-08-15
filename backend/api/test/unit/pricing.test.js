@@ -245,7 +245,6 @@ describe('Pricing Service Unit Tests', () => {
 
 
 // === Spec 10 test ===
-import { guardNonNegative } from '../../src/lib/pricing.js';
 describe('guardNonNegative', () => {
   it('passes positive', () => { expect(guardNonNegative(10, 'x')).toBe(10); });
   it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });

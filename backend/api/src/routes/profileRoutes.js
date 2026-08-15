@@ -312,6 +312,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     if (driverDetailsErr) {
       return res.status(500).json({ error: 'Failed to sync wallet to driver details.', details: driverDetailsErr.message });
     }
+    }
 
     if (req.user && req.user.uid) {
       try { await invalidateCachedProfile(req.user.uid); } catch (err) { logger.error({ event: 'PROFILE_CACHE_INVALIDATE_ERROR', userId: req.user.uid, error: err && (err.message || String(err)) }, 'Cache invalidation failed'); }

@@ -126,9 +126,28 @@ async function sendNewTripNotifications({ pickupLat, pickupLng, weightTonnes, pi
   logger.info(`[orders] New trip notifications sent to ${sent}/${driverIds.length} targeted drivers for order ${orderDisplayId} (${failed} failed).`);
 }
 
+function deriveRequestFingerprint(userId, body) {
+  return createHash('sha256')
+    .update(`${userId}:${JSON.stringify(body ?? {})}`)
+    .digest('hex');
+}
+
 export async function createOrder({ orderData, userId, user, idempotencyKey = null }) {
   return measureExecution('OrderCreationService.createOrder', async () => {
     const fingerprint = deriveRequestFingerprint(userId, orderData);
+
+    const {
+      pickup_address, pickup_lat, pickup_lng,
+      drop_address, drop_lat, drop_lng,
+      pickup_date, pickup_time,
+      goods_type, weight_tonnes, length_ft, width_ft, height_ft,
+      is_stackable, is_fragile, special_requirements,
+      payment_method_id, upi_id
+    } = orderData || {};
+
+    if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
+      throw new DomainError(400, { error: 'Missing required routing or cargo specification fields.' });
+    }
 
   const validationError = validateCoordinates(
     Number(pickup_lat), Number(pickup_lng), Number(drop_lat), Number(drop_lng)
@@ -162,36 +181,6 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
       details: pricingErr.message,
     });
   }
-
-    if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
-      throw new DomainError(400, { error: 'Missing required routing or cargo specification fields.' });
-    }
-
-    let pricing;
-    try {
-      const routeEstimate = await getRouteEstimate({
-        pickupLat: Number(pickup_lat),
-        pickupLng: Number(pickup_lng),
-        dropLat: Number(drop_lat),
-        dropLng: Number(drop_lng),
-      });
-      pricing = computeOrderPricing({
-        pickupLat: Number(pickup_lat),
-        pickupLng: Number(pickup_lng),
-        dropLat: Number(drop_lat),
-        dropLng: Number(drop_lng),
-        weightTonnes: Number(weight_tonnes),
-        roadDistanceKm: routeEstimate?.distanceKm,
-        isFragile: Boolean(is_fragile),
-        isStackable: Boolean(is_stackable),
-      });
-    } catch (pricingErr) {
-      logger.error('Pricing computation error:', pricingErr.message);
-      throw new DomainError(400, {
-        error: 'Unable to compute freight pricing for the given route/cargo.',
-        details: pricingErr.message,
-      });
-    }
 
     let estimatedPrice = null;
     try {

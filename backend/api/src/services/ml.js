@@ -103,7 +103,7 @@ async function handleResponse(response, url = '', method = 'GET') {
         return JSON.parse(text);
     } catch (err) {
         logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
-        throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
+        throw new Error(`[ML] Invalid JSON response from ML engine: ${err?.message ?? String(err)}`, { cause: err });
     }
 }
 
@@ -512,7 +512,7 @@ export async function matchEnRouteLoads({
       recommendations = result.recommendations || [];
       mlUsed = true;
     } catch (err) {
-      logger.warn('[ML] matchEnRouteLoads: falling back to haversine. Reason: ' + err.message);
+      logger.warn('[ML] matchEnRouteLoads: falling back to haversine. Reason: ' + (err?.message ?? String(err)));
     }
   }
 

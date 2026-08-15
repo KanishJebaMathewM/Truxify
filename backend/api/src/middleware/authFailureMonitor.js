@@ -14,7 +14,7 @@ const DEFAULT_WINDOW_MS = 60_000; // 1 minute
 const DEFAULT_BAN_DURATION_MS = 15 * 60_000; // 15 minutes
 const GC_INTERVAL_MS = 5 * 60_000; // Garbage collection every 5 min
 
-export const securityEvents = new EventEmitter();
+const securityEvents = new EventEmitter();
 
 // Route-specific sensitive threshold overrides
 const ROUTE_THRESHOLDS = new Map([

@@ -154,6 +154,17 @@ const POLICIES = {
   'crossdock:verify':           {},
   'crossdock:view':             { ownership: (u, r) => r?.transfer && (u.role === ROLES.ADMIN || r.transfer.from_driver_id === u.id || r.transfer.to_driver_id === u.id) },
   'crossdock:list':             {},
+
+  // Atomic-swap router (#14671): every mutating swap action requires an
+  // authenticated principal. Roles are intentionally unrestricted (any
+  // authenticated user may swap), but ownership of the funding wallet is
+  // enforced server-side via a signature check in the swap routes/service.
+  'swap:create':              {},
+  'swap:execute':             {},
+  'swap:refund':              {},
+  'swap:cross-chain:create':  {},
+  'swap:cross-chain:execute': {},
+  'swap:cross-chain:refund':  {},
 };
 
 export class PolicyEngine {

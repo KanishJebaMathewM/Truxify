@@ -235,6 +235,15 @@ router.get('/scheduler/task/:taskId', (req, res) => {
 router.get('/scheduler/tasks', (req, res) => {
     try {
         const { status } = req.query;
+
+        const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'];
+        if (status !== undefined && !validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+            });
+        }
+
         const tasks = scheduler.getTasks(status);
         
         res.json({

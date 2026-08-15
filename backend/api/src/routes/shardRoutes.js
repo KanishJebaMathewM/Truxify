@@ -2,6 +2,7 @@ import express from 'express';
 import logger from '../middleware/logger.js';
 import shardManager from '../services/sharding/ShardManager.js';
 import { shardMiddleware, crossShardQuery } from '../middleware/shardMiddleware.js';
+import { validateCoordinateRange } from '../lib/coordinates.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -22,11 +23,6 @@ function parseCoordinate(value, field) {
   return { value: parsed };
 }
 
-function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
-  return null;
-}
 
 // Get shard status
 router.get('/shards/status', authenticate, userLimiter, requirePolicy('shard:view'), async (req, res) => {

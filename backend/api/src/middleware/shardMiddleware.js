@@ -1,4 +1,5 @@
 import shardManager from '../services/sharding/ShardManager.js';
+import { validateCoordinateRange } from '../lib/coordinates.js';
 import logger from './logger.js';
 
 function firstDefined(...values) {
@@ -21,11 +22,6 @@ function parseCoordinate(value) {
   return { value: parsed };
 }
 
-function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
-  return null;
-}
 
 export const shardMiddleware = async (req, res, next) => {
   try {

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import spanFactory, { STANDARD_ATTRIBUTES } from '../../src/core/telemetry/SpanFactory.js';
-import { SPAN_NAMES } from '../../src/core/telemetry/SpanFactory.js';
+import spanFactory, { STANDARD_ATTRIBUTES, SPAN_NAMES } from '../../src/core/telemetry/SpanFactory.js';
 
 describe('SpanFactory', () => {
   describe('SPAN_NAMES', () => {

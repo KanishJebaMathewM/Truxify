@@ -6,7 +6,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { checkContentLength, sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
-import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {
   it('returns the filename unchanged when it is already safe', () => {
@@ -65,7 +64,6 @@ describe('sanitizeUploadFilename', () => {
     expect(sanitizeUploadFilename(null, 'fallback.pdf')).toBe('fallback.pdf');
     expect(sanitizeUploadFilename(undefined, 'backup.jpg')).toBe('backup.jpg');
   });
-});
 
   it('rejects Windows reserved device names regardless of extension', () => {
     expect(sanitizeUploadFilename('nul.pdf')).toBe('upload');
@@ -100,7 +98,6 @@ describe('sanitizeUploadFilename', () => {
 });
 
 // === Spec 18 test ===
-import { checkContentLength } from '../../src/lib/uploadFilename.js';
 describe('checkContentLength', () => {
   it('returns ok when content-length is within limit', () => {
     const req = { headers: { 'content-length': '1024' } };
@@ -129,7 +126,7 @@ describe('checkContentLength', () => {
     expect(result.ok).toBe(true);
     expect(result.length).toBe(0);
   });
-
+});
 
 describe('sanitizeUploadFilename - additional edge cases', () => {
   it('handles whitespace-only string as fallback', () => {

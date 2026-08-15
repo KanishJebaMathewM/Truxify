@@ -79,7 +79,7 @@ router.post('/confirm', oracleVerificationLimiter, authenticate, validateBody(or
     if (error instanceof PolicyError || error.status) {
       return res.status(error.status || 403).json({
         success: false,
-        error: error.message
+        error: error?.message ?? String(error)
       });
     }
 
@@ -106,7 +106,7 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
     if (error instanceof PolicyError || error.status) {
       return res.status(error.status || 403).json({
         success: false,
-        error: error.message
+        error: error?.message ?? String(error)
       });
     }
 

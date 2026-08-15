@@ -8,8 +8,8 @@ const OFFLINE_GPS_PAGE_SIZE = 1000;
 
 class WebRTCSignalingServer {
   constructor(server) {
-    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
-    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: MAX_WS_PAYLOAD_BYTES });
+    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10);
+    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: Number.isFinite(MAX_WS_PAYLOAD_BYTES) ? MAX_WS_PAYLOAD_BYTES : 4096 });
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -209,6 +209,9 @@ class WebRTCSignalingServer {
   }
 
   normalizeLocation(location) {
+    if (location == null) {
+      throw new TypeError('normalizeLocation: location must not be null or undefined');
+    }
     return {
       ...location,
       lat: Number(location.lat),
@@ -362,6 +365,9 @@ class WebRTCSignalingServer {
   }
 
   async getPeersNearLocation(lat, lng, radius = 10) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new TypeError('getPeersNearLocation: lat and lng must be finite numbers');
+    }
     const nearbyPeers = [];
     for (const [peerId, peer] of this.peers) {
       if (peer.location) {
@@ -382,6 +388,12 @@ class WebRTCSignalingServer {
   }
 
   calculateDistance(lat1, lng1, lat2, lng2) {
+    if (
+      !Number.isFinite(lat1) || !Number.isFinite(lng1) ||
+      !Number.isFinite(lat2) || !Number.isFinite(lng2)
+    ) {
+      throw new TypeError('calculateDistance: all coordinates must be finite numbers');
+    }
     const R = 6371; // Earth's radius in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLng = (lng2 - lng1) * Math.PI / 180;

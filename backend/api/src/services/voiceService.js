@@ -44,6 +44,10 @@ async function getBookingContext(bookingId, userId) {
     return null;
   }
 
+  if (bookingId == null) {
+    return null;
+  }
+
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const isUuid = uuidRegex.test(bookingId);
 

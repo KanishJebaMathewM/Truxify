@@ -78,6 +78,10 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
  * @returns {number} Surge multiplier between MIN_SURGE_MULTIPLIER and MAX_SURGE_MULTIPLIER
  */
 function getRushHourMultiplier(date) {
+  // Guard against invalid Date objects that produce NaN from getUTCHours.
+  if (!date || Number.isNaN(date.getTime())) {
+    return 1.0;
+  }
   const hour = date.getUTCHours();
   const isMorningRush = hour >= RUSH_HOUR_START_AM && hour < RUSH_HOUR_END_AM;
   const isEveningRush = hour >= RUSH_HOUR_START_PM && hour < RUSH_HOUR_END_PM;

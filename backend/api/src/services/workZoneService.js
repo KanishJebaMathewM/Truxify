@@ -18,7 +18,9 @@ const SEVERE_DELAY_THRESHOLD_MINS = 45;
  */
 export async function predictWorkZoneDelays(start, end, waypoints = [], departureDate, departureTime) {
   try {
-    const allPoints = [start, ...waypoints, end].filter(p => p && p.lat && p.lng);
+    const allPoints = [start, ...waypoints, end].filter(
+      p => p != null && typeof p.lat === 'number' && typeof p.lng === 'number'
+    );
     if (allPoints.length === 0) {
       return { hasSevereDelay: false, predictedDelayMins: 0, problematicPoint: null };
     }

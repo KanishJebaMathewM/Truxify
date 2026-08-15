@@ -25,7 +25,7 @@ export const shardMiddleware = async (req, res, next) => {
     const rawLat = firstDefined(req.query.lat, req.body?.lat);
     const rawLng = firstDefined(req.query.lng, req.body?.lng);
 
-    if (rawLat !== undefined || rawLng !== undefined) {
+    if (rawLat !== undefined && rawLat !== null || rawLng !== undefined && rawLng !== null) {
       const parsedLat = parseCoordinate(rawLat);
       const parsedLng = parseCoordinate(rawLng);
 

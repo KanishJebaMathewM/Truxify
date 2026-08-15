@@ -110,6 +110,12 @@ export async function optimizeWaypoints(start, end, waypoints, departureDate, de
 }
 
 export function getHaversineDistance(lat1, lon1, lat2, lon2) {
+  if (
+    !Number.isFinite(lat1) || !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) || !Number.isFinite(lon2)
+  ) {
+    throw new TypeError('getHaversineDistance: all coordinates must be finite numbers');
+  }
   const R = 6371; // km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;

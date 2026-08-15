@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { requireApiKey } from '../../../src/middleware/apiKey.js';
+import { requireApiKey, AuthConfig } from '../../../src/middleware/apiKey.js';
 
 const mockReq = (headers = {}) => ({
   headers,
@@ -111,5 +111,36 @@ describe('requireApiKey middleware', () => {
 
     expect(res.statusCode).toBe(401);
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthConfig env parsing', () => {
+  it('falls back to defaults when env values are malformed', () => {
+    process.env.SIGNATURE_MAX_AGE_MS = 'abc';
+    process.env.RATE_LIMIT_WINDOW_MS = 'not-a-number';
+    process.env.RATE_LIMIT_MAX_REQUESTS = '';
+    process.env.KEY_CACHE_TTL_MS = '0';
+    try {
+      const config = new AuthConfig();
+      expect(config.signatureMaxAgeMs).toBe(300000);
+      expect(config.defaultRateLimitWindowMs).toBe(60000);
+      expect(config.defaultRateLimitMax).toBe(100);
+      expect(config.cacheTtlMs).toBe(600000);
+    } finally {
+      delete process.env.SIGNATURE_MAX_AGE_MS;
+      delete process.env.RATE_LIMIT_WINDOW_MS;
+      delete process.env.RATE_LIMIT_MAX_REQUESTS;
+      delete process.env.KEY_CACHE_TTL_MS;
+    }
+  });
+
+  it('uses valid env values without coercion', () => {
+    process.env.SIGNATURE_MAX_AGE_MS = '5000';
+    try {
+      const config = new AuthConfig();
+      expect(config.signatureMaxAgeMs).toBe(5000);
+    } finally {
+      delete process.env.SIGNATURE_MAX_AGE_MS;
+    }
   });
 });

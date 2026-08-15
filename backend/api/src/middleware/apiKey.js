@@ -6,6 +6,14 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Environment-driven security values must never become NaN at runtime: a
+// malformed value (e.g. SIGNATURE_MAX_AGE_MS=abc) silently disables the
+// checks that consume them. Parse with a positive-integer fallback instead.
+const parseEnvInt = (raw, fallback) => {
+  const n = parseInt(raw, 10);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
 export class AuthConfig {
   constructor() {
     this.reload();
@@ -21,16 +29,16 @@ export class AuthConfig {
     // Security Policies
     this.allowQueryParam = process.env.ALLOW_API_KEY_IN_QUERY === 'true'; // Default false (anti-pattern)
     this.requireHmac = process.env.REQUIRE_HMAC_SIGNATURE === 'true';
-    this.signatureMaxAgeMs = parseInt(process.env.SIGNATURE_MAX_AGE_MS || '300000', 10); // 5 minutes
+    this.signatureMaxAgeMs = parseEnvInt(process.env.SIGNATURE_MAX_AGE_MS, 300000); // 5 minutes
     this.enableRateLimiting = process.env.ENABLE_RATE_LIMITING !== 'false';
     
     // Rate Limit Defaults
-    this.defaultRateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
-    this.defaultRateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10);
+    this.defaultRateLimitWindowMs = parseEnvInt(process.env.RATE_LIMIT_WINDOW_MS, 60000);
+    this.defaultRateLimitMax = parseEnvInt(process.env.RATE_LIMIT_MAX_REQUESTS, 100);
 
     // Redis Configuration
     this.redisUrl = process.env.REDIS_URL || null;
-    this.cacheTtlMs = parseInt(process.env.KEY_CACHE_TTL_MS || '600000', 10); // 10 minutes
+    this.cacheTtlMs = parseEnvInt(process.env.KEY_CACHE_TTL_MS, 600000); // 10 minutes
 
     // Internal Store Parsing
     this.parsedKeys = this._parseRawKeys(this.validKeysRaw);

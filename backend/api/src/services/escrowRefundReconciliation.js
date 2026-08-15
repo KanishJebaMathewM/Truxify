@@ -18,6 +18,11 @@ const LOCK_TTL_SECONDS = 120;
 const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
 const MAX_RETRIES = 10;
 const BASE_BACKOFF_MS = 60_000; // Base backoff for exponential retries (1 minute)
+// Lease for a claimed refund reconciliation. If the worker crashes between
+// claim and finalize, the claim becomes reclaimable once this lease expires so
+// the refund is not frozen forever (issue #14694). Kept long enough to cover
+// the on-chain refund confirmation window for a live worker.
+const CLAIM_LEASE_SECONDS = 900;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
@@ -87,7 +92,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           continue;
         }
 
-        const { data: claimed, error: claimError } = await orderRepository.claimRefundReconciliation(order.id, instanceId);
+        const { data: claimed, error: claimError } = await orderRepository.claimRefundReconciliation(order.id, instanceId, CLAIM_LEASE_SECONDS);
 
         if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
           logger.info(`[escrow-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
@@ -173,6 +178,18 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           }
           receipt = await submitted.waitForConfirmation();
           refundTxHash = receipt.hash ?? submitted.txHash;
+
+          // Persist the on-chain tx hash immediately after submission (issue
+          // #14694). If the worker crashes before finalize, a later re-claim
+          // will find refund_tx_hash already set and take the idempotent
+          // confirmEscrowRefund path instead of submitting a duplicate refund.
+          // Refreshing reconciled_at also keeps the lease alive while we wait.
+          const persistedAt = new Date().toISOString();
+          await orderRepository.updateOrder(order.id, {
+            refund_tx_hash: refundTxHash,
+            reconciled_at: persistedAt,
+            updated_at: persistedAt,
+          });
         } else {
           receipt = await confirmEscrowRefund(refundTxHash);
         }

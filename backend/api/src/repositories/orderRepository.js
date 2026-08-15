@@ -637,12 +637,13 @@ export class OrderRepository {
       .limit(50), 'findPendingEscrowRefunds');
   }
 
-  async claimRefundReconciliation(orderId, instanceId, client) {
+  async claimRefundReconciliation(orderId, instanceId, leaseSeconds, client) {
     const supabaseClient = client || this.supabase;
     return this._retryableQuery(() => supabaseClient
       .rpc('claim_refund_reconciliation', {
         p_order_id: orderId,
         p_instance_id: instanceId,
+        p_lease_seconds: leaseSeconds,
       }), 'claimRefundReconciliation');
   }
 

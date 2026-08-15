@@ -6,7 +6,6 @@ import { confirmEscrowRefund, submitEscrowRefund } from '../services/escrow.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
-import { submitEscrowRefund } from '../services/escrow.js';
 
 let staleOrderWorkerTask = null;
 let staleOrderRunning = false;

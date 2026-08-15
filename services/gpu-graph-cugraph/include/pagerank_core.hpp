@@ -27,6 +27,13 @@ inline PageRankResult computePageRankHost(
     size_t numNodes = rowOffsets.size() - 1;
     std::vector<float> ranks(numNodes, 1.0f / numNodes);
 
+    // Reject malformed CSR input up front. Without this, a negative or
+    // over-large colIndices value (or out-of-range start/end) would index
+    // nextRanks out of bounds below.
+    if (colIndices.size() < static_cast<size_t>(rowOffsets.back())) {
+        return { {}, 0, false };
+    }
+
     // Two rank buffers reused across iterations (no per-loop reallocation).
     std::vector<float> nextRanks(numNodes, 0.0f);
 
@@ -54,10 +61,21 @@ inline PageRankResult computePageRankHost(
             int end = rowOffsets[u + 1];
             int outDegree = end - start;
 
+            // Guard against out-of-range CSR offsets before dereferencing.
+            if (start < 0 || end < 0 ||
+                end > static_cast<int>(colIndices.size())) {
+                return { {}, 0, false };
+            }
+
             if (outDegree > 0) {
                 float share = ranks[u] / outDegree;
                 for (int idx = start; idx < end; ++idx) {
                     int v = colIndices[idx];
+                    // Bounds-check the destination node: colIndices is a
+                    // signed int vector, so v may be negative or >= numNodes.
+                    if (v < 0 || v >= static_cast<int>(numNodes)) {
+                        continue;
+                    }
                     nextRanks[v] += dampingFactor * share;
                 }
             }

@@ -46,7 +46,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
     const { data: pendingOrders, error } = await orderRepository.findPendingEscrowRefunds();
 
     if (error) {
-      logger.error('[escrow-reconciliation] Failed to load pending refunds:', error.message);
+      logger.error('[escrow-reconciliation] Failed to load pending refunds:', error?.message ?? String(error));
       return;
     }
 

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
+import '../controllers/app_controller.dart';
+import '../services/blockchain_receipt_service.dart';
 import 'common_widgets.dart';
 
 class ActiveOrderCard extends StatelessWidget {
@@ -156,22 +158,96 @@ class HistoryOrderCard extends StatelessWidget {
                   .textTheme
                   .bodyMedium
                   ?.copyWith(
-                    color:
-                        TruxifyColors.adaptiveSecondaryText(context),
+                    fontWeight: FontWeight.bold,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
-            const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton(
-                onPressed: onTap,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 42),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14),
-                ),
-                child: const Text('View Details'),
+            if (order.goodsType != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Goods: ${order.goodsType} (${order.weightTonnes ?? "—"} tonnes)',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
               ),
+            ],
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Text(
+                  'Rating Given: ',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: TruxifyColors.adaptiveSecondaryText(context),
+                      ),
+                ),
+                if (order.ratingGiven != null)
+                  Text(
+                    '⭐' * order.ratingGiven!,
+                    style: const TextStyle(fontSize: 13),
+                  )
+                else
+                  Text(
+                    'Not rated yet',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontStyle: FontStyle.italic,
+                          color: Colors.grey,
+                        ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton(
+                  onPressed: onTap,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  child: const Text('View Details', style: TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () {
+                    final routeParts = order.route.split(' → ');
+                    final pickup = routeParts.length == 2 ? routeParts.first : order.route;
+                    final drop = routeParts.length == 2 ? routeParts.last : order.route;
+                    final draft = RouteDraft(
+                      pickup: pickup,
+                      drop: drop,
+                      dateLabel: 'Tomorrow',
+                      goodsType: order.goodsType ?? 'Textile',
+                      weightTonnes: order.weightTonnes ?? '5',
+                      dimensions: order.dimensions ?? '10 × 8 × 6',
+                      stacked: order.isStackable ?? true,
+                      fragile: order.isFragile ?? false,
+                      requirements: const [],
+                    );
+                    TruxifyScope.of(context).openFindTrucks(draft: draft);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: TruxifyColors.accent,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  child: const Text('Rebook', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                ),
+                if (isSuccess) ...[
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => BlockchainReceiptService.showReceipt(context, order.orderId),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: TruxifyColors.accentDark,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    ),
+                    child: const Text('View Receipt', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
             ),
           ],
         ),

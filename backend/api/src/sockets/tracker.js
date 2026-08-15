@@ -177,6 +177,7 @@ let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
 let driverStateSweepInterval = null;
+let wsUpgradeLimitsCleanupInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
 
 const WS_UPGRADE_RATE_LIMIT = 5;
@@ -704,7 +705,7 @@ export function initWebSocketServer(server, orderRepository) {
 
   // Periodically purge expired per-IP WebSocket upgrade-limit entries, so the
   // in-memory fallback map does not leak during Redis outages.
-  let wsUpgradeLimitsCleanupInterval = setInterval(() => {
+  wsUpgradeLimitsCleanupInterval = setInterval(() => {
     sweepWsUpgradeMemoryLimits();
   }, WS_UPGRADE_LIMITS_SWEEP_INTERVAL_MS);
 
@@ -1206,163 +1207,6 @@ export async function handleLocationPing(ws, data, req) {
   }
 }
 
-/**
- * Telemetry flush, retry, overflow and recovery handling now lives entirely in
- * the shared telemetryBuffer module. tracker.js exposes a thin `__testing`
- * surface so the existing unit-test contracts keep working.
- */
-async function flushTelemetryBuffer() {
-  if (currentFlushPromise) {
-    return currentFlushPromise;
-  }
-
-  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
-    flushBackoffMs = 1000;
-    return;
-  }
-
-  if (!getMongoDb()) {
-    logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
-    return;
-  }
-
-  if (flushMutex) return;
-  flushMutex = true;
-
-  // Atomic buffer swap: take everything pending (retry queue first, then the
-  // active buffer) and reset both. Any ping that arrives while the insert is
-  // in flight lands in the fresh active buffer, and on failure the taken
-  // records are prepended back so oldest data retries first. Taking a merged
-  // snapshot (instead of aliasing the active buffer as the flush buffer)
-  // avoids re-queueing the same array twice on transient failures.
-  const recordsToFlush = telemetryFlushBuffer.length > 0
-    ? [...telemetryFlushBuffer, ...(await telemetryWriteBuffer.toArray())]
-    : await telemetryWriteBuffer.toArray();
-  telemetryFlushBuffer = [];
-  await telemetryWriteBuffer.clear();
-
-  if (recordsToFlush.length === 0) {
-    flushMutex = false;
-    return;
-  }
-
-  currentFlushPromise = (async () => {
-    logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
-
-    try {
-      const collection = getMongoDb().collection('telemetry');
-      await collection.insertMany(recordsToFlush, { ordered: false });
-      telemetryTotalFlushed += recordsToFlush.length;
-      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
-      flushBackoffMs = 1000;
-    } catch (err) {
-      const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
-
-      if (isBulkWriteError) {
-        if (err.writeErrors && err.writeErrors.length > 0) {
-          const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
-            `doc ${e.index}: ${e.err?.message || 'unknown'}`
-          ).join('; ');
-          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
-        } else {
-          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
-        }
-        const failed = err.writeErrors
-          ? recordsToFlush.filter((_, i) => err.writeErrors.some(e => e.index === i))
-          : [];
-        if (failed.length > 0) {
-          const overflowDrop = await telemetryWriteBuffer.prepend(failed);
-          if (overflowDrop > 0) {
-            telemetryTotalDropped += overflowDrop;
-            telemetryOverflowDropped += overflowDrop;
-            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
-          }
-        }
-      } else {
-        flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        const overflowDrop = await telemetryWriteBuffer.prepend(recordsToFlush);
-        if (overflowDrop > 0) {
-          telemetryTotalDropped += overflowDrop;
-          telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
-        }
-      }
-    } finally {
-      currentFlushPromise = null;
-      flushMutex = false;
-    }
-  })();
-
-  return currentFlushPromise;
-}
-
-function monitorBufferSize() {
-  const activeLen = telemetryWriteBuffer.length;
-  const flushLen = telemetryFlushBuffer.length;
-  const totalLen = activeLen + flushLen;
-  const usagePct = totalLen / MAX_BUFFER_SIZE;
-  if (usagePct >= BUFFER_CRIT_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  }
-}
-
-function scheduleNextFlush() {
-  if (!isSchedulerActive) return;
-
-  telemetryFlushTimeout = setTimeout(async () => {
-    try {
-      await flushTelemetryBuffer();
-    } finally {
-      scheduleNextFlush();
-    }
-  }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
-}
-
-async function loadRecoveryFile() {
-  try {
-    if (fs.existsSync(RECOVERY_FILE_PATH)) {
-      const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
-      if (content) {
-        const records = [];
-        for (const line of content.split('\n').filter(Boolean)) {
-          try {
-            records.push(JSON.parse(line));
-          } catch (err) {
-            logger.error('[TRUXIFY RECOVERY] Skipping malformed recovery line:', err.message);
-          }
-        }
-        if (records.length > 0) {
-          await telemetryWriteBuffer.prepend(records);
-          logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
-        }
-      }
-      fs.unlinkSync(RECOVERY_FILE_PATH);
-    }
-  } catch (err) {
-    logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
-    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (_) { /* ignore */ }
-  }
-}
-
-async function initTelemetryScheduler() {
-  await loadRecoveryFile();
-  isSchedulerActive = true;
-  scheduleNextFlush();
-  
-  telemetryMonitorInterval = setInterval(() => {
-    monitorBufferSize();
-  }, BUFFER_MONITOR_INTERVAL_MS);
-}
 
 export async function closeWebSocketServer() {
   if (telemetryFlushTimeout) {
@@ -1394,47 +1238,6 @@ export async function closeWebSocketServer() {
   if (driverStateSweepInterval) {
     clearInterval(driverStateSweepInterval);
     driverStateSweepInterval = null;
-  }
-
-  // Wait for MongoDB to be available before final flush
-  const parsedWait = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS, 10);
-  const mongoMaxWaitMs = Number.isNaN(parsedWait) ? 10000 : parsedWait;
-  if (mongoMaxWaitMs > 0) {
-    const mongoPollIntervalMs = Math.min(500, mongoMaxWaitMs);
-    const mongoWaitStart = Date.now();
-    while (!getMongoDb() && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
-      await new Promise(r => setTimeout(r, mongoPollIntervalMs));
-    }
-    if (!getMongoDb()) {
-      const allPending = [
-        ...telemetryFlushBuffer,
-        ...(await telemetryWriteBuffer.toArray())
-      ];
-      if (allPending.length > 0) {
-        try {
-          const lines = allPending.map(r => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${allPending.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
-        } catch (fileErr) {
-          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${allPending.length} records lost.`);
-        }
-      }
-    }
-  }
-
-  // Wait for any in-flight flush to complete
-  if (currentFlushPromise) {
-    try {
-      await currentFlushPromise;
-    } catch (err) {
-      // Ignore errors; final flush retry will handle them
-    }
-  }
-
-  try {
-    await flushTelemetryBuffer();
-  } catch (err) {
-    logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
   }
 
   // Close the distributed location fan-out: unsubscribe and release the

@@ -240,7 +240,7 @@ class KeyRotationService {
 
   async logKeyRotationEvent(userId, walletAddress, reason, status, errorMessage = null, requestIp = null) {
     try {
-      await client
+      await supabase
         .from('key_rotation_audit_log')
         .insert([{
           user_id: userId,

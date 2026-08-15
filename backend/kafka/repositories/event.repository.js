@@ -27,17 +27,38 @@ class EventRepository {
 
   async getEventsByOrderId(orderId, limit = 100) {
     try {
-      const { data, error } = await supabase
+      const query = supabase
         .from('events')
         .select('*')
         .eq('order_id', orderId)
         .order('timestamp', { ascending: false })
-        .limit(limit);
+        .order('event_id', { ascending: false });
+
+      if (limit != null) query.limit(limit);
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return data;
     } catch (error) {
       logger.error('Failed to get events:', error);
+      throw error;
+    }
+  }
+
+  async getAllEventsByOrderId(orderId) {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('order_id', orderId)
+        .order('timestamp', { ascending: false })
+        .order('event_id', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error('Failed to get all events:', error);
       throw error;
     }
   }
@@ -77,8 +98,8 @@ class EventRepository {
 
   async replayEvents(orderId) {
     try {
-      const events = await this.getEventsByOrderId(orderId);
-      
+      const events = await this.getAllEventsByOrderId(orderId);
+       
       // Replay events in order
       for (const event of [...events].reverse()) {
         // Emit event again
@@ -124,8 +145,8 @@ class EventRepository {
 
   async getSnapshot(orderId) {
     try {
-      const events = await this.getEventsByOrderId(orderId);
-      
+      const events = await this.getAllEventsByOrderId(orderId);
+       
       // Build current state from events
       const snapshot = {
         orderId,

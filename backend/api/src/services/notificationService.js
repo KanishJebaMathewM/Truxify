@@ -3,7 +3,6 @@ import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
-import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { DomainError } from './order/domainError.js';
 
 // ============================================================================

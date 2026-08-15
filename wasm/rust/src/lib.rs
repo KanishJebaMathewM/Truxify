@@ -109,8 +109,17 @@ pub fn calculate_eta(distance: f64, speed: f64, traffic_factor: f64) -> f64 {
 
 #[wasm_bindgen]
 pub fn validate_otp(input_otp: &str, correct_otp: &str) -> bool {
-    // Fast OTP validation at edge
-    input_otp == correct_otp
+    // Constant-time OTP validation at the edge to avoid timing side-channels.
+    let a = input_otp.as_bytes();
+    let b = correct_otp.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 // ============ Data Processing ============

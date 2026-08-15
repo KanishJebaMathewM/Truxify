@@ -55,10 +55,9 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
         throw validationErr;
       }
       audioBuffer = file.buffer;
-      safeFilename = sanitizeUploadFilename(file.originalname || 'voice-query.wav', 'voice-query.wav');
     }
 
-    const safeFilename = sanitizeUploadFilename(file.originalname, 'voice-query.wav');
+    safeFilename = sanitizeUploadFilename(file.originalname, 'voice-query.wav');
 
     const result = await processVoiceQuery(req.user.id, bookingId, file.buffer, safeFilename);
     

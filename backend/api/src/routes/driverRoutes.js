@@ -1841,8 +1841,8 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, 
           orderDisplayId: order.order_display_id,
           type: 'pickup',
           address: order.pickup_address,
-          lat: pickupLat,
-          lng: pickupLng
+          lat: order.pickup_lat,
+          lng: order.pickup_lng
         });
       }
       tasks.push({
@@ -1851,8 +1851,8 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, 
         orderDisplayId: order.order_display_id,
         type: 'dropoff',
         address: order.drop_address,
-        lat: dropLat,
-        lng: dropLng
+        lat: order.drop_lat,
+        lng: order.drop_lng
       });
     }
 

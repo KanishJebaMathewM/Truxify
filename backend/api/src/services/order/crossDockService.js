@@ -73,9 +73,6 @@ function hoursAhead(hours) {
   return new Date(Date.now() + hours * 60 * 60 * 1000);
 }
 
-import { haversineKm } from '../../lib/pricing.js';
-export { haversineKm };
-
 /**
  * Find candidate drivers near a cross-dock point who can take the load onward.
  *

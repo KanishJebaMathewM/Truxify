@@ -45,7 +45,7 @@ async function isNonceReplayed(nonce) {
     } catch (err) {
       logger.error(`[Webhook] Redis nonce check failed: ${err.message}`);
       // Fail closed: if we cannot verify the nonce we must not accept the event.
-      throw new Error('Unable to verify webhook nonce');
+      throw new Error('Unable to verify webhook nonce', { cause: err });
     }
   }
 

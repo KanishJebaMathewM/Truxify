@@ -45,8 +45,14 @@ class AtomicSwapService {
 
     // ============ Swap Operations ============
 
-    async createSwap(counterparty, tokenAddress, amount, secret) {
+    async createSwap(counterparty, tokenAddress, amount, secret, initiator) {
         try {
+        // `initiator` is the server-verified signer (the funding wallet owner),
+        // never the server wallet. Reject attempts to fund from the server
+        // wallet, which would let a caller drain server funds.
+        if (!initiator || initiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+            throw new Error('Invalid initiator: funding wallet must be user-owned');
+        }
         const hashLock = this.generateHashLock(secret);
         if (await this.swap.usedHashLocks(hashLock)) {
             throw new Error('Hash lock already used');
@@ -68,7 +74,7 @@ class AtomicSwapService {
 
             await this.storeSwap({
                 swapId,
-                initiator: this.wallet.address,
+                initiator,
                 counterparty,
                 tokenAddress,
                 amount,
@@ -81,7 +87,6 @@ class AtomicSwapService {
                 success: true,
                 swapId: swapId.toString(),
                 hashLock,
-                secret,
                 txHash: receipt.hash
             };
         } catch (error) {
@@ -134,8 +139,11 @@ class AtomicSwapService {
 
     // ============ Cross-Chain Swap Operations ============
 
-    async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret) {
+    async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret, initiator) {
         try {
+        if (!initiator || initiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+            throw new Error('Invalid initiator: funding wallet must be user-owned');
+        }
         const hashLock = this.generateHashLock(secret);
         if (await this.swap.usedHashLocks(hashLock)) {
             throw new Error('Hash lock already used');
@@ -160,7 +168,7 @@ class AtomicSwapService {
                 swapId,
                 sourceChainId: 137, // Polygon
                 destChainId,
-                initiator: this.wallet.address,
+                initiator,
                 counterparty,
                 tokenAddress,
                 amount,
@@ -174,7 +182,6 @@ class AtomicSwapService {
                 success: true,
                 swapId: swapId.toString(),
                 hashLock,
-                secret,
                 proof,
                 txHash: receipt.hash
             };

@@ -243,12 +243,6 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), get
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), getOrderDetails);
 
-// 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
-// ============================================================================
-router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
-  const orderId = req.params.id;
-
-// ============================================================================
 // 13b. FETCH EN-ROUTE LOAD OFFERS (DRIVER) — GET /api/orders/load-offers/en-route
 // ============================================================================
 /**

@@ -162,7 +162,6 @@ export function requireIdempotency(ttlSeconds = 3600) {
         // a duplicate arriving after 'finish' finds the cached entry and
         // short-circuits instead of re-acquiring the lock and re-entering the
         // handler.
-        let pendingCache = null;
         const finalize = async () => {
           if (pendingCache) {
             const cachePromise = pendingCache;
@@ -204,6 +203,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
         res.once('close', releaseMemoryLock);
       }
 
+      let pendingCache = null;
       let responded = false;
 
       const originalJson = res.json.bind(res);

@@ -336,31 +336,6 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
   }
 });
 
-// ============================================================================
-// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
-// ============================================================================
-/**
- * Friendly alias of /:id/verify-delivery for the driver app.
- * Accepts the same body { otp } and delegates to the same pipeline.
- * Registered on the orders router as /:id/confirm-otp, exposed to the driver
- * app at /api/orders/:id/confirm-otp via the /api/orders mount in index.js.
- *
- * This keeps the driver app URL surface clean while reusing identical logic.
- */
-const handleDeliveryVerification = async (req, res) => {
-  try {
-    let order = null;
-    if (UUID_RE.test(orderId)) {
-      const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
-      order = orderById;
-    }
-    if (!order) {
-      const { data: orderByDisplay } = await orderRepository.findOrderByDisplayForTimeline(orderId);
-      order = orderByDisplay;
-    }
-
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
 // 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), submitBid);
 
@@ -378,6 +353,12 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
 
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), verifyDeliveryController);
+
+// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
+// Friendly alias of /:id/verify-delivery for the driver app. It accepts the
+// same body { otp } and delegates to the identical pipeline so the driver's
+// Confirm Delivery flow can release the escrow and credit the wallet.
+router.post('/:id/confirm-otp', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), verifyDeliveryController);
 
 // 14. RESEND DELIVERY OTP (DRIVER)
 router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requireRole(['driver']), validateParams(paramIdSchema), resendOtp);

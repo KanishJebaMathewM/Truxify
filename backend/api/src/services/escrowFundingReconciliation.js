@@ -59,21 +59,64 @@ async function finalizeOrRevert(order, orderRepository) {
 
     if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
       logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
+      let refundResult;
       try {
-        await submitEscrowRefund(order.order_display_id);
-        await orderRepository.updateOrder(order.id, {
-          escrow_status: 'refunded',
-          escrow_refund_error: null,
-          updated_at: new Date().toISOString(),
-        });
+        refundResult = await submitEscrowRefund(order.order_display_id);
       } catch (err) {
-        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
-        await orderRepository.updateOrder(order.id, {
+        refundResult = { txHash: null, error: err.message };
+        logger.error(`[escrow-funding] Refund failed for cancelled order ${order.order_display_id}: ${err.message}`);
+      }
+
+      // submitEscrowRefund resolves (never throws) with { error } / a missing
+      // txHash on chain failures. Only mark the order refunded once the refund
+      // tx is actually confirmed on-chain; otherwise it must stay retryable.
+      if (refundResult?.error || !refundResult?.txHash) {
+        const refundError = refundResult?.error || 'escrow refund was not submitted';
+        logger.error(
+          `[escrow-funding] Order ${order.order_display_id} refund not confirmed (${refundError}) — marking refund_failed.`
+        );
+        await orderRepository.updateOrderWithFilter(order.id, {
+          escrow_status: 'refund_failed',
+          escrow_refund_error: refundError,
+          updated_at: new Date().toISOString(),
+        }, [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: order.id },
+        ], 'id').catch((stateErr) => {
+          logger.error(`[escrow-funding] Failed to record refund failure for ${order.order_display_id}: ${stateErr.message}`);
+        });
+        return;
+      }
+
+      try {
+        await refundResult.waitForConfirmation();
+      } catch (err) {
+        logger.error(
+          `[escrow-funding] Refund confirmation failed for ${order.order_display_id}: ${err.message} — marking refund_failed.`
+        );
+        await orderRepository.updateOrderWithFilter(order.id, {
           escrow_status: 'refund_failed',
           escrow_refund_error: err.message,
           updated_at: new Date().toISOString(),
+        }, [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: order.id },
+        ], 'id').catch((stateErr) => {
+          logger.error(`[escrow-funding] Failed to record refund confirmation failure for ${order.order_display_id}: ${stateErr.message}`);
         });
+        return;
       }
+
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_status: 'refunded',
+        escrow_refund_error: null,
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((stateErr) => {
+        logger.error(`[escrow-funding] Failed to record refund success for ${order.order_display_id}: ${stateErr.message}`);
+      });
       return;
     }
 

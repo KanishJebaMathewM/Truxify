@@ -187,6 +187,84 @@ describe('escrowFundingReconciliation', () => {
       );
     });
 
+    it('marks a cancelled order refund_failed when the on-chain refund is not submitted (regression #14704)', async () => {
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
+
+      const cancelledOrder = {
+        id: 'order-cancel',
+        order_display_id: 'DIS-CANCEL',
+        status: 'cancelled',
+        escrow_status: 'funding',
+        escrow_booking_id: 'booking-cancel',
+        escrow_amount_wei: '1000000000000000000',
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        customer_id: 'cust-1',
+        pending_bid_acceptance: null,
+      };
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [cancelledOrder], error: null });
+
+      const { getEscrowBooking, submitEscrowRefund } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+      submitEscrowRefund.mockResolvedValueOnce({ txHash: null, error: 'refund not submitted' });
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValueOnce({ error: null });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      // The refund was never submitted, so the order must NOT be marked
+      // terminal 'refunded' — it must stay retryable as 'refund_failed'.
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalledWith(
+        'order-cancel',
+        expect.objectContaining({ escrow_status: 'refund_failed', escrow_refund_error: 'refund not submitted' }),
+        [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: 'order-cancel' },
+        ],
+        'id'
+      );
+    });
+
+    it('waits for chain confirmation before marking a cancelled order refunded (regression #14704)', async () => {
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValue(undefined);
+
+      const cancelledOrder = {
+        id: 'order-cancel-ok',
+        order_display_id: 'DIS-CANCEL-OK',
+        status: 'cancelled',
+        escrow_status: 'funding',
+        escrow_booking_id: 'booking-cancel-ok',
+        escrow_amount_wei: '1000000000000000000',
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        customer_id: 'cust-1',
+        pending_bid_acceptance: null,
+      };
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [cancelledOrder], error: null });
+
+      const { getEscrowBooking, submitEscrowRefund } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+      const waitForConfirmation = vi.fn().mockResolvedValueOnce(undefined);
+      submitEscrowRefund.mockResolvedValueOnce({ txHash: '0xtxhash', waitForConfirmation });
+      mockOrderRepository.updateOrderWithFilter.mockResolvedValueOnce({ error: null });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(waitForConfirmation).toHaveBeenCalled();
+      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalledWith(
+        'order-cancel-ok',
+        expect.objectContaining({ escrow_status: 'refunded', escrow_refund_error: null }),
+        [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: 'order-cancel-ok' },
+        ],
+        'id'
+      );
+    });
+
     it('pages through the stale set in bounded chunks until a short page', async () => {
       const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
       acquireLock.mockResolvedValueOnce('lock-value');

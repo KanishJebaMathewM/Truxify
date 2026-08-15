@@ -27,6 +27,7 @@ vi.mock('../../../src/cache/CacheInvalidator.js', () => ({
 
 const cacheManager = await import('../../../src/cache/CacheManager.js');
 const { CacheNamespace } = await import('../../../src/cache/CacheNamespace.js');
+const { publishInvalidation } = await import('../../../src/cache/CachePublisher.js');
 
 function mockRedisClient() {
   return {
@@ -124,5 +125,28 @@ describe('CacheManager', () => {
   it('CacheNamespace built-ins include profile with the user:profile prefix', () => {
     const ns = CacheNamespace.get('profile');
     expect(ns.prefix).toBe('user:profile');
+  });
+
+  it('invalidateBatch deletes only the requested keys locally', async () => {
+    const del = vi.fn();
+    client.pipeline = vi.fn(() => {
+      const p = { del, exec: vi.fn().mockResolvedValue([]) };
+      return p;
+    });
+    await cacheManager.invalidateBatch('profile', ['u1', 'u2']);
+    expect(del).toHaveBeenCalledWith('user:profile:u1');
+    expect(del).toHaveBeenCalledWith('user:profile:u2');
+  });
+
+  it('invalidateBatch publishes per-key INVALIDATE_KEY events scoped to the batch, not the whole namespace', async () => {
+    await cacheManager.invalidateBatch('profile', ['u1', 'u2']);
+    expect(publishInvalidation).toHaveBeenCalledTimes(2);
+    for (const call of publishInvalidation.mock.calls) {
+      const [, event] = call;
+      expect(event.type).toBe('INVALIDATE_KEY');
+      expect(event).not.toHaveProperty('pattern');
+    }
+    const publishedKeys = publishInvalidation.mock.calls.map(([, e]) => e.key).sort();
+    expect(publishedKeys).toEqual(['user:profile:u1', 'user:profile:u2']);
   });
 });

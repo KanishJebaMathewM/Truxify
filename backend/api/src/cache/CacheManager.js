@@ -97,10 +97,10 @@ export async function invalidateBatch(namespace, entityIds, opts = {}) {
     await pipeline.exec();
     stats.deletes += keys.length;
     if (!opts.localOnly) {
-      await _publishInvalidation(namespace, {
-        type: 'INVALIDATE_PATTERN',
-        pattern: CacheKeyBuilder.pattern(namespace),
-      });
+      const publishes = keys.map((key) =>
+        _publishInvalidation(namespace, { type: 'INVALIDATE_KEY', key })
+      );
+      await Promise.all(publishes);
     }
   } catch (err) {
     stats.errors++;

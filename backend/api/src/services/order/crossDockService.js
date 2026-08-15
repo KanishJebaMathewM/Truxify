@@ -27,7 +27,7 @@ import { sendPushNotification } from '../notificationService.js';
 
 export { DomainError } from './domainError.js';
 
-export const CROSS_DOCK_STATUSES = Object.freeze({
+const CROSS_DOCK_STATUSES = Object.freeze({
   REQUESTED: 'requested',
   ACCEPTED: 'accepted',
   VERIFIED: 'verified',

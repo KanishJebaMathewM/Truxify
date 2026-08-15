@@ -382,11 +382,69 @@ async function shutdown() {
   }
 
   try {
+    // Capture the records the final flush will attempt BEFORE it atomically
+    // swaps them out of the buffer, so a timeout branch can recover them
+    // instead of silently losing them when the process exits.
+    const pendingRecords = [...retryQueue, ...buffer.toArray()];
+
     const finalFlush = flush();
-    await Promise.race([
-      finalFlush,
-      new Promise((resolve) => setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS)),
-    ]);
+    if (finalFlush) {
+      let timedOut = false;
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, SHUTDOWN_FLUSH_TIMEOUT_MS);
+      });
+      await Promise.race([finalFlush, timeoutPromise]);
+
+      if (timedOut) {
+        // The in-flight insert is still pending. Persist a copy to the
+        // recovery file so a process exit cannot lose the records, then let
+        // the underlying flush settle and DISCARD the recovery copy if it
+        // actually succeeds (avoids re-inserting already-persisted rows on
+        // the next startup).
+        let wroteRecovery = false;
+        try {
+          const lines = pendingRecords.map((r) => JSON.stringify(r)).join('\n');
+          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
+          wroteRecovery = true;
+          logger.warn(
+            `[TRUXIFY SHUTDOWN] Final flush exceeded ${SHUTDOWN_FLUSH_TIMEOUT_MS}ms. ` +
+            `Wrote ${pendingRecords.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`
+          );
+        } catch (fileErr) {
+          logger.error(
+            `[TRUXIFY SHUTDOWN] Failed to write recovery file on flush timeout: ${fileErr.message}. ` +
+            `${pendingRecords.length} records may be lost.`
+          );
+        }
+
+        try {
+          await finalFlush;
+          if (wroteRecovery) {
+            try {
+              fs.unlinkSync(RECOVERY_FILE_PATH);
+            } catch (_) {
+              /* ignore */
+            }
+          }
+        } catch (flushErr) {
+          if (wroteRecovery) {
+            logger.warn(
+              `[TRUXIFY SHUTDOWN] Final flush failed after timeout; ` +
+              `${pendingRecords.length} records retained in recovery file.`
+            );
+          } else {
+            logger.error(
+              `[TRUXIFY SHUTDOWN] Final flush failed and recovery write failed: ` +
+              `${pendingRecords.length} records lost.`,
+              flushErr.message
+            );
+          }
+        }
+      }
+    }
   } catch (err) {
     logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
   }

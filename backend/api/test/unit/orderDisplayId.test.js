@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateOrderDisplayId, validateOrderDisplayId } from '../../../src/lib/orderDisplayId.js';
+import { generateOrderDisplayId, validateOrderDisplayId, parseDisplayId } from '../../../src/lib/orderDisplayId.js';
 
 describe('orderDisplayId.js', () => {
   describe('generateOrderDisplayId', () => {

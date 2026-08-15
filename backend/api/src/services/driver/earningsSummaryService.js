@@ -11,7 +11,7 @@
  * as a fraction of gross freight value. Surfaced to drivers as the saving
  * they make by booking directly.
  */
-export const BROKER_COMMISSION_RATE = 0.35;
+const BROKER_COMMISSION_RATE = 0.35;
 
 /**
  * Upper bound on rows read for a single summary. A driver cannot complete

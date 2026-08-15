@@ -240,7 +240,8 @@ class EventStore {
 
     validateCreateOrder(payload) {
         if (!payload.customerId) return { valid: false, error: 'customerId required' };
-        if (!payload.amount) return { valid: false, error: 'amount required' };
+        if (typeof payload.amount !== 'number' || !Number.isFinite(payload.amount) || payload.amount <= 0)
+            return { valid: false, error: 'amount must be a positive finite number' };
         if (!payload.pickup) return { valid: false, error: 'pickup location required' };
         if (!payload.dropoff) return { valid: false, error: 'dropoff location required' };
         return { valid: true };

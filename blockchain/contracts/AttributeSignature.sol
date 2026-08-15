@@ -2,49 +2,61 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 /**
  * @title AttributeSignature
- * @dev Verifies cryptographic attribute-based signatures (ABS) using simulated pairing operations.
- * Allows drivers to prove possession of regulatory certifications anonymously.
+ * @dev Verifies attribute-based signatures (ABS) for permissioned features.
+ *      The previous implementation accepted ANY non-zero 64-byte blob as a
+ *      valid signature, so anyone could forge attribute proofs. The verifier
+ *      now requires the signature to be a real ECDSA signature over the exact
+ *      manifest hash and policy predicate (issue #10796). A genuine
+ *      bilinear-pairing ABS scheme should replace this path when implemented.
  */
 contract AttributeSignature is Ownable {
+    using ECDSA for bytes32;
 
     event PermitVerified(bytes32 indexed manifestHash, string policyPredicate, bool isValid);
+    event IssuerUpdated(address indexed issuer, bool trusted);
+
+    /// @dev Attribute authorities allowed to sign attribute-based permits.
+    mapping(address => bool) public trustedIssuers;
 
     constructor() Ownable(msg.sender) {}
 
     /**
-     * @dev Verifies that the attribute-based signature corresponds to a valid policy predicate.
-     *
-     * A genuine ABS verification requires a bilinear pairing check on alt_bn128
-     * (e.g. e(S1, P2) == e(G1, H2)) over `_manifestHash` and `_policyPredicate`.
-     * That relation is not implemented here, so this function FAILS CLOSED:
-     * it never accepts a signature it cannot actually verify. Previously it
-     * accepted any 64-byte blob whose first two 32-byte words were non-zero,
-     * letting anyone forge "valid" attribute signatures for any manifest and
-     * any policy predicate.
-     *
-     * The pairing precompile (0x08) exists on EVM chains, but the incoming
-     * 64-byte `_signature` does not carry the G1/G2 points required for a real
-     * e(P1, Q1) == e(P2, Q2) check, so returning `false` is the only sound
-     * result here. Contract integrators must wire a real pairing verifier
-     * before any signature can be accepted.
+     * @dev Owner registers or removes an attribute authority that may issue
+     *      attribute-based signatures.
+     */
+    function setTrustedIssuer(address issuer, bool trusted) external onlyOwner {
+        trustedIssuers[issuer] = trusted;
+        emit IssuerUpdated(issuer, trusted);
+    }
+
+    /**
+     * @dev Verifies that the attribute-based signature is a real ECDSA
+     *      signature by a trusted attribute authority over the manifest hash
+     *      and policy predicate. The signature binds the credential to these
+     *      exact inputs, so a signature valid for one manifest/policy cannot
+     *      be replayed for another (a replayed signature recovers a different,
+     *      untrusted address).
      */
     function verifyAttributeSignature(
         bytes32 _manifestHash,
         string calldata _policyPredicate,
         bytes calldata _signature
     ) external returns (bool) {
-        // Refuse clearly malformed signatures before doing anything else.
-        require(_signature.length >= 64, "Invalid signature dimensions for ABS pairing");
+        require(_signature.length == 65, "Invalid signature dimensions for ABS pairing");
 
-        // Fail closed: no genuine pairing/ABS verification is implemented, so a
-        // signature can never be validated against the manifest hash and the
-        // policy predicate. The signature bytes, manifest hash and predicate
-        // are bound together so the (rejected) check cannot be replayed across
-        // credentials; the result is always false.
-        bool isValid = false;
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                keccak256(abi.encode(_manifestHash, _policyPredicate))
+            )
+        );
+
+        (address recovered, ECDSA.RecoverError err, ) = messageHash.tryRecover(_signature);
+        bool isValid = (err == ECDSA.RecoverError.NoError && trustedIssuers[recovered]);
         emit PermitVerified(_manifestHash, _policyPredicate, isValid);
         return isValid;
     }

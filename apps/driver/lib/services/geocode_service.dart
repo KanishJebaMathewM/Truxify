@@ -89,7 +89,9 @@ class GeocodeService {
   }
 
   /// Reverse geocode coordinates to an address string.
-  static Future<String?> reverseGeocode(LatLng point) async {
+  ///
+  /// An optional [client] can be provided for test-injection.
+  static Future<String?> reverseGeocode(LatLng point, {http.Client? client}) async {
     final key = '${point.latitude},${point.longitude}';
     _evictExpired();
     final cached = _reverseCache[key];
@@ -105,13 +107,18 @@ class GeocodeService {
       },
     );
 
+    const headers = <String, String>{
+      'Accept': 'application/json',
+      'User-Agent': 'Truxify-Driver-App',
+    };
+
     try {
-      final resp = await http
-          .get(uri, headers: const {
-            'Accept': 'application/json',
-            'User-Agent': 'Truxify-Driver-App',
-          })
-          .timeout(const Duration(seconds: 6));
+      final http.Response resp;
+      if (client != null) {
+        resp = await client.get(uri, headers: headers).timeout(const Duration(seconds: 6));
+      } else {
+        resp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 6));
+      }
       if (resp.statusCode != 200) return null;
 
       final decoded = jsonDecode(resp.body) as Map<String, dynamic>?;
@@ -149,7 +156,7 @@ class GeocodeService {
           .where((s) => s.isNotEmpty)
           .toList();
     } catch (e) {
-      debugPrint('[GeocodeService] Error: $e');
+      debugPrint('[GeocodeService] autocomplete failed for "$query": $e');
       return [];
     }
   }
@@ -210,7 +217,7 @@ class GeocodeService {
           .whereType<SearchResult>()
           .toList();
     } catch (e) {
-      debugPrint('[GeocodeService] searchPlaces failed: $e');
+      debugPrint('[GeocodeService] autocomplete failed for query "$query": $e');
       return [];
     }
   }

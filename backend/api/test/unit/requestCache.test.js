@@ -1,10 +1,6 @@
-/**
- * Unit tests for backend/api/src/lib/requestCache.js
- *
- * Run with:  npm run test:unit -- test/unit/requestCache.test.js
- */
-import { describe, it, expect, beforeEach } from 'vitest';
-import { RequestCache } from '../../src/lib/requestCache.js';
+import { describe, it, expect } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { RequestCache, attachResponseCleanup } from '../../src/lib/requestCache.js';
 
 describe('RequestCache', () => {
   let cache;
@@ -13,108 +9,69 @@ describe('RequestCache', () => {
     cache = new RequestCache();
   });
 
-  describe('constructor', () => {
-    it('initializes with an empty Map', () => {
-      expect(cache.size).toBe(0);
-    });
+  it('starts empty', () => {
+    expect(cache.size).toBe(0);
+    expect(cache.has('key')).toBe(false);
+    // get() returns null for cache misses (not undefined), distinguishing
+    // missing keys from stored null/undefined values.
+    expect(cache.get('key')).toBeNull();
   });
 
-  describe('set', () => {
-    it('stores a value by key and returns the cache instance for chaining', () => {
-      const result = cache.set('key1', 'value1');
-      expect(result).toBe(cache); // set() returns `this`
-      expect(cache.get('key1')).toBe('value1');
-    });
-
-    it('overwrites an existing key', () => {
-      cache.set('key1', 'value1');
-      cache.set('key1', 'value2');
-      expect(cache.get('key1')).toBe('value2');
-      expect(cache.size).toBe(1);
-    });
-
-    it('stores different value types', () => {
-      cache.set('string', 'hello');
-      cache.set('number', 42);
-      cache.set('object', { foo: 'bar' });
-      cache.set('array', [1, 2, 3]);
-      cache.set('null', null);
-      cache.set('undefined', undefined);
-
-      expect(cache.get('string')).toBe('hello');
-      expect(cache.get('number')).toBe(42);
-      expect(cache.get('object')).toEqual({ foo: 'bar' });
-      expect(cache.get('array')).toEqual([1, 2, 3]);
-      expect(cache.get('null')).toBe(null);
-      expect(cache.get('undefined')).toBe(undefined);
-    });
+  it('set and get return the value', () => {
+    cache.set('key', 'value');
+    expect(cache.get('key')).toBe('value');
   });
 
-  describe('get', () => {
-    it('returns undefined for non-existent keys', () => {
-      expect(cache.get('nonexistent')).toBe(undefined);
-    });
-
-    it('returns the stored value for existing keys', () => {
-      cache.set('key', { nested: { value: 42 } });
-      expect(cache.get('key')).toEqual({ nested: { value: 42 } });
-    });
+  it('set returns this for chaining', () => {
+    const result = cache.set('key', 'value');
+    expect(result).toBe(cache);
   });
 
-  describe('has', () => {
-    it('returns false for non-existent keys', () => {
-      expect(cache.has('nonexistent')).toBe(false);
-    });
-
-    it('returns true for existing keys', () => {
-      cache.set('present', true);
-      expect(cache.has('present')).toBe(true);
-    });
-
-    it('returns false after delete (via clear)', () => {
-      cache.set('temp', 1);
-      expect(cache.has('temp')).toBe(true);
-      cache.clear();
-      expect(cache.has('temp')).toBe(false);
-    });
+  it('has returns true after set', () => {
+    cache.set('key', 'value');
+    expect(cache.has('key')).toBe(true);
   });
 
-  describe('clear', () => {
-    it('removes all entries', () => {
-      cache.set('a', 1);
-      cache.set('b', 2);
-      cache.set('c', 3);
-      expect(cache.size).toBe(3);
-
-      cache.clear();
-
-      expect(cache.size).toBe(0);
-      expect(cache.get('a')).toBe(undefined);
-      expect(cache.get('b')).toBe(undefined);
-      expect(cache.get('c')).toBe(undefined);
-    });
-
-    it('can be called on an empty cache without error', () => {
-      expect(() => cache.clear()).not.toThrow();
-    });
+  it('has returns false after delete via clear', () => {
+    cache.set('a', 1);
+    cache.set('b', 2);
+    cache.clear();
+    expect(cache.has('a')).toBe(false);
+    expect(cache.has('b')).toBe(false);
   });
 
-  describe('size', () => {
-    it('reflects the number of entries', () => {
-      expect(cache.size).toBe(0);
-      cache.set('a', 1);
-      expect(cache.size).toBe(1);
-      cache.set('b', 2);
-      expect(cache.size).toBe(2);
-      cache.set('c', 3);
-      expect(cache.size).toBe(3);
-    });
+  it('size tracks number of entries', () => {
+    expect(cache.size).toBe(0);
+    cache.set('a', 1);
+    expect(cache.size).toBe(1);
+    cache.set('b', 2);
+    expect(cache.size).toBe(2);
+    cache.set('a', 3);
+    expect(cache.size).toBe(2); // same key, not incremented
+    cache.clear();
+    expect(cache.size).toBe(0);
+  });
 
-    it('decreases when entries are cleared', () => {
-      cache.set('a', 1);
-      cache.set('b', 2);
-      cache.clear();
-      expect(cache.size).toBe(0);
-    });
+  it('overwrites existing key', () => {
+    cache.set('key', 'v1');
+    cache.set('key', 'v2');
+    expect(cache.get('key')).toBe('v2');
+    expect(cache.size).toBe(1);
   });
 });
+
+
+// === Spec 25 test ===
+import { EventEmitter } from 'node:events';
+import { attachResponseCleanup } from '../../src/lib/requestCache.js';
+describe('attachResponseCleanup', () => {
+  it('removes on finish', () => {
+    const em = new EventEmitter();
+    const res = new EventEmitter();
+    attachResponseCleanup(em, res, 'data');
+    expect(em.listenerCount('data')).toBe(1);
+    res.emit('finish');
+    expect(em.listenerCount('data')).toBe(0);
+  });
+});
+

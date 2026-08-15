@@ -40,8 +40,23 @@ class AnomalyDetector:
         
         self.max_history = 1000
         self.anomaly_history = deque(maxlen=self.max_history)
-        
+
+        # Per-(data_type, entity) rolling buffers of recent feature vectors.
+        # Real-time detection feeds these genuine windows to the model instead
+        # of tiling a single timestep into a constant sequence, which was out
+        # of distribution for models trained on diverse multi-step sequences
+        # (issue #11669).
+        self._feature_buffers = {}
+
         logger.info("✅ Anomaly Detector initialized")
+
+    def _get_feature_buffer(self, data_type: str, entity_key: str):
+        """Get (or create) the rolling feature buffer for an entity."""
+        key = (data_type, entity_key or 'default')
+        if key not in self._feature_buffers:
+            seq_len = self.models[data_type].sequence_length
+            self._feature_buffers[key] = deque(maxlen=seq_len)
+        return self._feature_buffers[key]
     
     def train_models(self, data: Dict[str, np.ndarray], epochs: int = 50):
         """Train all models"""
@@ -71,7 +86,7 @@ class AnomalyDetector:
         
         return results
     
-    def detect_anomaly(self, data_type: str, data: np.ndarray) -> Dict:
+    def detect_anomaly(self, data_type: str, data: np.ndarray, entity_key: str = None) -> Dict:
         """Detect anomalies in real-time data"""
         try:
             if data_type not in self.models:
@@ -89,9 +104,21 @@ class AnomalyDetector:
                 data_scaled = scaler.transform(data)
             else:
                 data_scaled = data
-            
+
+            # Build a genuine rolling window for this entity (padded at the
+            # front by repeating the earliest observation during warm-up)
+            # instead of tiling the single timestep (issue #11669).
+            buffer = self._get_feature_buffer(data_type, entity_key)
+            buffer.append(data_scaled[0])
+
+            seq = list(buffer)
+            seq_len = model.sequence_length
+            if len(seq) < seq_len:
+                seq = [seq[0]] * (seq_len - len(seq)) + seq
+            window = np.array(seq, dtype=np.float32)
+
             # Get anomaly score
-            result = model.get_anomaly_score(data_scaled)
+            result = model.get_anomaly_score(window)
             
             # Determine severity
             score = result['anomaly_score']
@@ -146,8 +173,12 @@ class AnomalyDetector:
             # Extract features
             features = self._extract_driver_features(driver_data)
             
-            # Detect anomaly
-            result = self.detect_anomaly('driver_behavior', features)
+            # Detect anomaly (window keyed per driver)
+            result = self.detect_anomaly(
+                'driver_behavior',
+                features,
+                entity_key=str(driver_data.get('driver_id') or '')
+            )
             
             # Add driver-specific info
             result['driver_id'] = driver_data.get('driver_id')
@@ -164,9 +195,23 @@ class AnomalyDetector:
         try:
             # Extract features
             features = self._extract_transaction_features(transaction)
-            
-            # Detect anomaly
-            result = self.detect_anomaly('transactions', features)
+
+            # Detect anomaly (window keyed per stable entity, NOT the unique
+            # transaction_id). Keying per transaction_id created a fresh 1-element
+            # buffer for every tx that was front-padded into a constant sequence,
+            # so the anomaly score could never cross the threshold (issue #13900).
+            entity_id = (
+                transaction.get('account_id')
+                or transaction.get('customer_id')
+                or transaction.get('card_id')
+                or transaction.get('user_id')
+                or transaction.get('transaction_id')
+            )
+            result = self.detect_anomaly(
+                'transactions',
+                features,
+                entity_key=str(entity_id or '')
+            )
             
             # Add transaction-specific info
             result['transaction_id'] = transaction.get('transaction_id')
@@ -184,8 +229,12 @@ class AnomalyDetector:
             # Extract features
             features = self._extract_gps_features(gps_data)
             
-            # Detect anomaly
-            result = self.detect_anomaly('gps_tracking', features)
+            # Detect anomaly (window keyed per driver)
+            result = self.detect_anomaly(
+                'gps_tracking',
+                features,
+                entity_key=str(gps_data.get('driver_id') or '')
+            )
             
             # Add GPS-specific info
             result['driver_id'] = gps_data.get('driver_id')

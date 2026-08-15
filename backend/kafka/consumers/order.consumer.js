@@ -102,6 +102,10 @@ class OrderConsumer {
     const handlers = this.handlers;
 
     const messageHandler = async (topic, message, rawMessage) => {
+      // Set when a side-effect topic claims the event for two-phase
+      // processing; used below to flip the claim to completed/failed.
+      let claimedEventId = null;
+
       // Order read-model topics: apply the event atomically with its
       // idempotency record. If the event was already applied (duplicate,
       // redelivery after a restart, replay, or a publish retried after a
@@ -125,11 +129,15 @@ class OrderConsumer {
         }
       } else {
         // Side-effect topics (wallet credits, notifications, ...): claim the
-        // event as processed BEFORE running handlers so a redelivery can never
-        // apply the same side effect twice.
+        // event as 'processing' BEFORE running handlers so a redelivery can
+        // never apply the same side effect twice concurrently, then flip the
+        // claim to 'completed' only after the handlers succeed (issue #11192).
+        // A failed handler flips it to 'failed' so a later delivery can
+        // re-claim and retry the event instead of losing the side effect.
         const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        claimedEventId = eventId;
         if (eventId) {
-          const isNew = await processedEventRepository.claimProcessed(
+          const isNew = await processedEventRepository.claimProcessing(
             topic,
             eventId,
             message?.orderId || message?.payload?.orderId || null
@@ -141,12 +149,14 @@ class OrderConsumer {
         }
       }
 
+      let handlerFailed = false;
       if (handlers.has(topic)) {
         const topicHandlers = handlers.get(topic);
         for (const handler of topicHandlers) {
           try {
             await handler(message, rawMessage);
           } catch (error) {
+            handlerFailed = true;
             logger.error(`Handler error for ${topic}:`, error);
             await this.storeDeadLetter(topic, rawMessage, error);
           }
@@ -155,18 +165,35 @@ class OrderConsumer {
 
       if (this._eventBus) {
         const eventType = topic.replace(/\./g, '_').toUpperCase();
-        if (message && typeof message === 'object' && message.metadata) {
-          // Object form reuses the original event id so the in-process
-          // EventBus deduplication window applies to redelivered messages.
-          this._eventBus.publish(message, {
-            adapters: [],
-            source: `kafka:${groupId}`,
-          });
+        try {
+          if (message && typeof message === 'object' && message.metadata) {
+            // Object form reuses the original event id so the in-process
+            // EventBus deduplication window applies to redelivered messages.
+            await this._eventBus.publish(message, {
+              adapters: [],
+              source: `kafka:${groupId}`,
+            });
+          } else {
+            await this._eventBus.publish(eventType, message, {
+              adapters: [],
+              source: `kafka:${groupId}`,
+            });
+          }
+        } catch (error) {
+          handlerFailed = true;
+          logger.error(`EventBus publish error for ${topic}:`, error);
+        }
+      }
+
+      // Two-phase claim resolution for side-effect topics: only a fully
+      // succeeded handler run (and EventBus fan-out) marks the event
+      // 'completed'. Any failure leaves it 'failed' so the next delivery can
+      // re-claim and retry it (issue #11192).
+      if (claimedEventId) {
+        if (handlerFailed) {
+          await processedEventRepository.markFailed(topic, claimedEventId);
         } else {
-          this._eventBus.publish(eventType, message, {
-            adapters: [],
-            source: `kafka:${groupId}`,
-          });
+          await processedEventRepository.markCompleted(topic, claimedEventId);
         }
       }
     };
@@ -286,3 +313,12 @@ class OrderConsumer {
 }
 
 export default new OrderConsumer();
+
+// === Spec 31: ===
+// === Spec 31: idempotent dedup ===
+const TTL = 24 * 60 * 60;
+export async function markProcessed(redis, key) {
+  const r = await redis.set(`dedup:${key}`, '1', 'EX', TTL, 'NX');
+  return r === 'OK';
+}
+

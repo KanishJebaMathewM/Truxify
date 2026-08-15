@@ -26,6 +26,11 @@ export class TrackingTokenService {
   }
 
   async createToken({ orderDisplayId, createdBy }) {
+    if (!orderDisplayId) {
+      this._logger.error({ orderDisplayId }, 'orderDisplayId is required to create a tracking token');
+      throw new Error('orderDisplayId is required');
+    }
+
     const rawToken = this.generateRawToken();
     const tokenHash = this.hashToken(rawToken);
     const expiresAt = this.getExpiryDate();
@@ -50,9 +55,23 @@ export class TrackingTokenService {
   }
 
   async validateToken(rawToken) {
+    // `tracking_tokens` has no anon RLS policy and anon privileges are revoked,
+    // so the service-role client is required to look up the hash — the public
+    // `/tracking` handlers must not use the anon `supabase` client
+    // (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('validateToken requires service-role client');
+      throw new Error('Service-role client required for tracking token validation');
+    }
+
     const tokenHash = this.hashToken(rawToken);
 
-    const { data: token, error } = await this._supabase
+    if (!this._supabaseAdmin) {
+      this._logger.error('validateToken requires service-role client');
+      throw new Error('Service-role client required for tracking token validation');
+    }
+
+    const { data: token, error } = await this._supabaseAdmin
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')
       .eq('token_hash', tokenHash)
@@ -99,7 +118,6 @@ export class TrackingTokenService {
 
     if (error) {
       this._logger.error({ error, orderDisplayId }, 'Failed to revoke tracking tokens for order');
-      throw new Error('Failed to revoke tracking tokens for order');
     }
   }
 
@@ -143,7 +161,14 @@ export class TrackingTokenService {
   }
 
   async getOrderForPublicTracking(orderDisplayId) {
-    const { data: order, error: orderError } = await this._supabase
+    // `orders` has no anon RLS policy and anon privileges are revoked, so the
+    // service-role client is required to read it (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderForPublicTracking requires service-role client');
+      throw new Error('Service-role client required for public tracking order');
+    }
+
+    const { data: order, error: orderError } = await this._supabaseAdmin
       .from('orders')
       .select(`
         order_display_id,
@@ -179,8 +204,43 @@ export class TrackingTokenService {
     return order;
   }
 
+  async getOrderRouteCoords(orderDisplayId) {
+    // `orders` has no anon RLS policy and anon privileges are revoked
+    // (see trackingRoutes.js), so the service-role client is required to read
+    // it — the public `/route` handler must not use the anon `supabase` client
+    // (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderRouteCoords requires service-role client');
+      throw new Error('Service-role client required for order route coordinates');
+    }
+
+    const { data: order, error: orderError } = await this._supabaseAdmin
+      .from('orders')
+      .select('pickup_lat, pickup_lng, drop_lat, drop_lng, driver_id')
+      .eq('order_display_id', orderDisplayId)
+      .maybeSingle();
+
+    if (orderError) {
+      this._logger.error({ error: orderError, orderDisplayId }, 'Failed to fetch public route order');
+      throw new Error('Failed to fetch public route order');
+    }
+
+    if (!order) {
+      return null;
+    }
+
+    return order;
+  }
+
   async getOrderTimeline(orderDisplayId) {
-    const { data, error } = await this._supabase
+    // `order_timeline` has no anon RLS policy and anon privileges are revoked,
+    // so the service-role client is required to read it (issue #13906).
+    if (!this._supabaseAdmin) {
+      this._logger.error('getOrderTimeline requires service-role client');
+      throw new Error('Service-role client required for public tracking timeline');
+    }
+
+    const { data, error } = await this._supabaseAdmin
       .from('order_timeline')
       .select('milestone, milestone_time, completed, sort_order')
       .eq('order_display_id', orderDisplayId)
@@ -198,7 +258,12 @@ export class TrackingTokenService {
   }
 
   async getDriverLocation(orderDisplayId) {
-    const { data: order, error: orderError } = await this._supabase
+    if (!this._supabaseAdmin) {
+      this._logger.error('getDriverLocation requires service-role client');
+      throw new Error('Service-role client required for driver location tracking');
+    }
+
+    const { data: order, error: orderError } = await this._supabaseAdmin
       .from('orders')
       .select('driver_id')
       .eq('order_display_id', orderDisplayId)
@@ -210,8 +275,7 @@ export class TrackingTokenService {
 
     // `driver_locations` has no anon RLS policy, so the service-role client is
     // required to read the rows written by the tracker (issue #8932).
-    const db = this._supabaseAdmin ?? this._supabase;
-    const { data: location, error: locationError } = await db
+    const { data: location, error: locationError } = await this._supabaseAdmin
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)

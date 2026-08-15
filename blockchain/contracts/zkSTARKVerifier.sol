@@ -2,25 +2,18 @@
 pragma solidity ^0.8.19;
 
 contract zkSTARKVerifier {
-    // Simplified zk-STARK verifier
-    // In production: use actual STARK verification
+    // Placeholder zk-STARK verifier. No actual STARK proof system / AIR is
+    // wired in yet, so this contract FAILS CLOSED: it rejects every proof
+    // instead of accepting fabricated ones. Callers can never be tricked
+    // into trusting a proof that was never verified.
+    // In production: replace verifyProof with the real STARK verifier
+    // (FRI + Merkle root commitment + constraint-checking) for the circuit.
 
     function verifyProof(
         bytes calldata proof,
         bytes calldata publicInputs
     ) external pure returns (bool) {
-        // Reject empty and all-zero proofs instead of accepting every proof
-        if (!_hasNonZeroByte(proof) || !_hasNonZeroByte(publicInputs)) {
-            return false;
-        }
-        // Placeholder verification
-        return true;
-    }
-
-    function _hasNonZeroByte(bytes calldata data) internal pure returns (bool) {
-        for (uint i = 0; i < data.length; i++) {
-            if (data[i] != 0) return true;
-        }
+        // No real verification logic exists yet, so no proof can be accepted.
         return false;
     }
 }

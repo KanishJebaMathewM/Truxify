@@ -24,15 +24,6 @@ import logger from "../middleware/logger.js";
 import { measureExecution } from "../core/performanceMetrics.js";
 
 // Safe math utilities for reputation calculations.
-// Boundary clamping (0–MAX_REPUTATION) is handled by clampReputation.
-
-
-/** @type {number} Must match Reputation.sol MAX_REPUTATION constant */
-const MAX_REPUTATION = 10000;
-
-export function clampReputation(value) {
-  return Math.max(0, Math.min(MAX_REPUTATION, Number(value) || 0));
-}
 
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
@@ -61,7 +52,7 @@ export function initReputationContract() {
         REPUTATION_ABI,
         relayer,
       );
-      logger.info("✅ Polygon Reputation contract client initialised.");
+      logger.info("Polygon Reputation contract client initialised.");
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: err && (err.message || String(err)) },
@@ -220,7 +211,8 @@ export async function getDriverReputation(walletAddress) {
         }),
       ]);
       clearTimeout(timeoutId);
-      return Number(score);
+      const n = Number(score);
+      return Number.isFinite(n) ? n : null;
     } catch (err) {
       logger.error(
         { event: 'REPUTATION_FETCH_ERROR', walletAddress, error: err && (err.message || String(err)) },
@@ -231,3 +223,22 @@ export async function getDriverReputation(walletAddress) {
     }
   });
 }
+
+
+// === Spec 23: ===
+// === Spec 23: rating bounds ===
+const MIN_R = 1.00, MAX_R = 5.00;
+export function clampRating(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return MIN_R;
+  if (n < MIN_R) return MIN_R;
+  if (n > MAX_R) return MAX_R;
+  return Math.round(n * 100) / 100;
+}
+export function aggregateRating(r) {
+  if (!Array.isArray(r) || r.length === 0) return MIN_R;
+  const valid = r.filter((x) => Number.isFinite(Number(x)));
+  if (valid.length === 0) return MIN_R;
+  return clampRating(valid.reduce((a,b) => a + Number(b), 0) / valid.length);
+}
+

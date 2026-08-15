@@ -163,44 +163,54 @@ class KyberKEM:
         for i in range(self.k):
             v = (v + self._negacyclic_convolve(t_decompressed[i], r[i], self.n, self.q)) % self.q
         v = (v + e2) % self.q
-        
+
+        # Embed a random 256-bit message as one bit per coefficient (encoded at
+        # q/2). The holder of the secret key recovers this message on
+        # decapsulation; it is never derivable from the public key and ciphertext
+        # alone, so the shared secret is bound to the key owner.
+        message = (np.frombuffer(secrets.token_bytes(self.n), dtype=np.uint8) & 1).astype(np.int64)
+        v = (v + message * (self.q // 2)) % self.q
+
         # Compress ciphertext
         u_compressed = self._compress(u, 10)
         v_compressed = self._compress(v, 4)
-        
-        # Derive shared secret from the compressed ciphertext so it matches
-        # decapsulate, which hashes the compressed u/v transmitted in the ciphertext
-        shared_secret = hashlib.sha256(
-            np.concatenate([u_compressed.flatten(), v_compressed.flatten()]).tobytes()
-        ).digest()
-        
+
+        # Shared secret is bound to the encapsulated message, which is only
+        # recoverable with the secret key during decapsulation.
+        shared_secret = hashlib.sha256(message.tobytes()).digest()
+
         ciphertext = {
             'u': u_compressed,
             'v': v_compressed
         }
-        
+
         return ciphertext, shared_secret
     
     def decapsulate(self, ciphertext: Dict, secret_key: Dict) -> bytes:
-        """Decapsulate shared secret"""
+        """Decapsulate shared secret using the recipient's secret key."""
         u = ciphertext['u']
         v = ciphertext['v']
         s = secret_key['s']
-        
+
         # Decompress ciphertext
         u_decompressed = self._decompress(u, 10)
         v_decompressed = self._decompress(v, 4)
-        
-        # Compute v - s^T * u
+
+        # Recover the encapsulated message: v - s^T * u strips the public
+        # masking, leaving the secret-key-dependent message plus lattice noise.
+        # Without the secret key this term cannot be reconstructed.
         result = v_decompressed.copy()
         for i in range(self.k):
             result = (result - self._negacyclic_convolve(s[i], u_decompressed[i], self.n, self.q)) % self.q
-        
-        # Derive shared secret
-        shared_secret = hashlib.sha256(
-            np.concatenate([u.flatten(), v.flatten()]).tobytes()
-        ).digest()
-        
+
+        # Decode each coefficient back to a message bit: values near q/2 encode a
+        # 1, values near 0/q encode a 0. This depends on the secret key.
+        message = (np.minimum(result, self.q - result) > (self.q // 4)).astype(np.int64)
+
+        # Derive the shared secret from the recovered message so it matches the
+        # value produced at encapsulation time, and only for the correct key.
+        shared_secret = hashlib.sha256(message.tobytes()).digest()
+
         return shared_secret
 
 class DilithiumSignature:

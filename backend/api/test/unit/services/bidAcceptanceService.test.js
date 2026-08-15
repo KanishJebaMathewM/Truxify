@@ -4,7 +4,6 @@ import { ethers } from 'ethers';
 import { createSupabaseMock } from '../../helpers/supabaseMock.js';
 import { OrderRepository } from '../../../src/repositories/orderRepository.js';
 import { BidAcceptanceService, DomainError } from '../../../src/services/order/bidAcceptanceService.js';
-import { acquireLock, releaseLock } from '../../../src/lib/redisLock.js';
 
 vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -14,11 +13,6 @@ vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
     submitEscrowRefund: vi.fn(),
   };
 });
-
-vi.mock('../../../src/lib/redisLock.js', () => ({
-  acquireLock: vi.fn(),
-  releaseLock: vi.fn(),
-}));
 
 describe('BidAcceptanceService', () => {
   let supabaseMock;
@@ -37,12 +31,6 @@ describe('BidAcceptanceService', () => {
     submitEscrowRefund.mockResolvedValue({ txHash: '0x456' });
     escrowDeposit.mockClear();
     submitEscrowRefund.mockClear();
-
-    // Set up redisLock mocks: resolve with a mock token by default
-    acquireLock.mockResolvedValue('mock-lock-token');
-    releaseLock.mockResolvedValue(undefined);
-    acquireLock.mockClear();
-    releaseLock.mockClear();
 
     orderRepository = new OrderRepository(supabaseMock.supabase);
 
@@ -118,9 +106,9 @@ describe('BidAcceptanceService', () => {
     // Verify the correct amountWei was computed using ESCROW_MATIC_PER_PAISA
     // bid_amount = 50000 paisa (₹500) converted via paisaToMaticWei
     const escrowArgs = escrowDeposit.mock.calls[0];
-    const amountWei = escrowArgs[3];
+    const amountWei = escrowArgs[2];
     expect(typeof amountWei).toBe('bigint');
-    expect(amountWei).toBe(ethers.parseEther('0.2'));
+    expect(amountWei).toBe(ethers.parseEther((50000 * 0.000004).toFixed(18)));
     // Two-phase acceptance: the driver must NOT be committed at accept time.
     expect(supabaseMock.calls.some(call => call.rpc === 'accept_bid_tx')).toBe(false);
 

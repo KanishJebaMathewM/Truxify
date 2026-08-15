@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ghcr.io/kanishjebamathewm/truxify-api:latest
+        image: ghcr.io/kanishjebamathewm/truxify-api:1.0.0
         ports:
         - containerPort: 5000
         resources:

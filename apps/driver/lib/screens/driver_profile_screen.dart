@@ -88,9 +88,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           _kycStatus = details['kyc_status']?.toString() ?? details['kycStatus']?.toString() ?? 'Unverified';
 
           _truckType = truck['truck_type']?.toString() ?? truck['type']?.toString();
-          _capacityWeight = (truck['capacity_weight_tonnes'] as num?)?.toDouble() ?? (truck['capacityWeight'] as num?)?.toDouble() ?? 0.0;
+          _capacityWeight = (truck['max_capacity_tons'] as num?)?.toDouble()
+              ?? (truck['capacity_weight_tonnes'] as num?)?.toDouble()
+              ?? (truck['capacityWeight'] as num?)?.toDouble()
+              ?? 0.0;
           _capacityVolume = (truck['capacity_volume_m3'] as num?)?.toDouble() ?? (truck['capacityVolume'] as num?)?.toDouble() ?? 0.0;
-          _registrationNumber = truck['registration_number']?.toString() ?? truck['registrationNumber']?.toString();
+          _registrationNumber = truck['number_plate']?.toString()
+              ?? truck['registration_number']?.toString()
+              ?? truck['registrationNumber']?.toString();
 
           final parsedBadges = details['badges'] as List<dynamic>? ?? [];
           _badges = parsedBadges.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -271,11 +276,24 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 onPressed: () async {
                   if (formKey.currentState?.validate() ?? false) {
                     final apiClient = ApiClient();
+                    final weight = double.tryParse(weightController.text);
+                    final volume = double.tryParse(volumeController.text);
+                    if (weight == null || volume == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Capacity weight and volume must be valid numbers.',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
                     try {
                       await apiClient.put('/api/driver/truck', body: {
                         'type': typeController.text.trim(),
-                        'capacityWeight': double.parse(weightController.text),
-                        'capacityVolume': double.parse(volumeController.text),
+                        'capacityWeight': weight,
+                        'capacityVolume': volume,
                         'registrationNumber': regController.text.trim().toUpperCase(),
                       });
                       Navigator.of(context).pop();
@@ -288,6 +306,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                       );
                     } catch (e) {
                       debugPrint('Failed to update truck: $e');
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Failed to update truck details. Please try again.'),
+                            backgroundColor: TruxifyColors.error,
+                          ),
+                        );
+                      }
                     } finally {
                       apiClient.close();
                     }

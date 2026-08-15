@@ -101,3 +101,4 @@ describe('securityHeadersVerifier', () => {
     expect(next).toHaveBeenCalledOnce();
   });
 });
+

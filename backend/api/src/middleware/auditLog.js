@@ -1,84 +1,166 @@
+// ============================================================================
+// FILE: src/middleware/auditLogMiddleware.js
+// Description: Enterprise Audit Logging Middleware & State Interceptor
+// ============================================================================
+
 import { auditLogService } from '../services/auditLogService.js';
 import logger from './logger.js';
+import * as Sentry from '@sentry/node';
+
+/**
+ * Sensitive field keys to automatically redact from audit payloads.
+ */
+const SENSITIVE_KEYS = new Set([
+  'password',
+  'passwordconfirmation',
+  'secret',
+  'token',
+  'authorization',
+  'accesstoken',
+  'refreshtoken',
+  'apikey',
+  'privatekey',
+  'ssn',
+  'creditcard',
+  'cardnumber',
+  'cvv',
+]);
 
 /**
  * Maps HTTP methods and policy actions to semantic resource types.
- * This mapping provides human-readable resource types in audit logs.
  */
-const ACTION_RESOURCE_MAP = {
-  'admin:view-dashboard':              { resourceType: 'admin_dashboard' },
-  'admin:invalidate-cache':            { resourceType: 'user_profile_cache' },
-  'ticket:admin-view-all':             { resourceType: 'support_ticket' },
-  'ticket:view':                       { resourceType: 'support_ticket' },
-  'ticket:update':                     { resourceType: 'support_ticket' },
-  'ticket:add-comment':                { resourceType: 'support_ticket_comment' },
-  'fraud:view-stats':                  { resourceType: 'fraud_stats' },
-  'fraud:view-risk':                   { resourceType: 'fraud_risk_profile' },
-  'fraud:manage-review':               { resourceType: 'fraud_review' },
-  'fraud:analyze-network':             { resourceType: 'fraud_network' },
-  'order:create':                      { resourceType: 'order' },
-  'order:cancel':                      { resourceType: 'order' },
-  'order:accept-bid':                  { resourceType: 'order' },
-  'order:change-drop':                 { resourceType: 'order' },
-  'order:confirm-deposit':             { resourceType: 'order' },
-  'order:submit-rating':               { resourceType: 'order_rating' },
-  'bid:submit':                        { resourceType: 'load_bid' },
-  'milestone:update':                  { resourceType: 'order_milestone' },
-  'delivery:verify':                   { resourceType: 'delivery_verification' },
-  'delivery:resend-otp':               { resourceType: 'delivery_otp' },
-  'driver:withdraw':                   { resourceType: 'wallet_withdrawal' },
-  'driver:toggle-online':              { resourceType: 'driver_status' },
-  'profile:update':                    { resourceType: 'user_profile' },
-  'profile:update-wallet':             { resourceType: 'wallet_address' },
-  'truck:register':                    { resourceType: 'truck' },
-  'shard:view':                        { resourceType: 'shard_config' },
-  'shard:query-orders':                { resourceType: 'shard_query' },
-  'webrtc:view-stats':                 { resourceType: 'webrtc_stats' },
-};
+const ACTION_RESOURCE_MAP = Object.freeze({
+  'admin:view-dashboard': { resourceType: 'admin_dashboard' },
+  'admin:invalidate-cache': { resourceType: 'user_profile_cache' },
+  'ticket:admin-view-all': { resourceType: 'support_ticket' },
+  'ticket:view': { resourceType: 'support_ticket' },
+  'ticket:update': { resourceType: 'support_ticket' },
+  'ticket:add-comment': { resourceType: 'support_ticket_comment' },
+  'fraud:view-stats': { resourceType: 'fraud_stats' },
+  'fraud:view-risk': { resourceType: 'fraud_risk_profile' },
+  'fraud:manage-review': { resourceType: 'fraud_review' },
+  'fraud:analyze-network': { resourceType: 'fraud_network' },
+  'order:create': { resourceType: 'order' },
+  'order:cancel': { resourceType: 'order' },
+  'order:accept-bid': { resourceType: 'order' },
+  'order:change-drop': { resourceType: 'order' },
+  'order:confirm-deposit': { resourceType: 'order' },
+  'order:submit-rating': { resourceType: 'order_rating' },
+  'bid:submit': { resourceType: 'load_bid' },
+  'milestone:update': { resourceType: 'order_milestone' },
+  'delivery:verify': { resourceType: 'delivery_verification' },
+  'delivery:resend-otp': { resourceType: 'delivery_otp' },
+  'driver:withdraw': { resourceType: 'wallet_withdrawal' },
+  'driver:toggle-online': { resourceType: 'driver_status' },
+  'profile:update': { resourceType: 'user_profile' },
+  'profile:update-wallet': { resourceType: 'wallet_address' },
+  'truck:register': { resourceType: 'truck' },
+  'shard:view': { resourceType: 'shard_config' },
+  'shard:query-orders': { resourceType: 'shard_query' },
+  'webrtc:view-stats': { resourceType: 'webrtc_stats' },
+});
 
 /**
- * Resolves the resource type from the policy action and request context.
+ * Recursively sanitizes sensitive parameters, arrays, and nested structures.
+ */
+function sanitizePayload(data, maxDepth = 5, currentDepth = 0) {
+  if (data === null || data === undefined) return data;
+  if (currentDepth > maxDepth) return '[Max Depth Exceeded]';
+
+  if (typeof data !== 'object') {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizePayload(item, maxDepth, currentDepth + 1));
+  }
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(data)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+    if (SENSITIVE_KEYS.has(normalizedKey)) {
+      sanitized[key] = '[REDACTED]';
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizePayload(value, maxDepth, currentDepth + 1);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+/**
+ * Computes structural differences between beforeState and afterState.
+ */
+function computeStateDiff(before, after) {
+  if (!before && !after) return null;
+  if (!before) return { added: sanitizePayload(after) };
+  if (!after) return { removed: sanitizePayload(before) };
+
+  const cleanBefore = sanitizePayload(before);
+  const cleanAfter = sanitizePayload(after);
+
+  const changes = {};
+  const allKeys = new Set([...Object.keys(cleanBefore), ...Object.keys(cleanAfter)]);
+
+  for (const key of allKeys) {
+    const prevVal = cleanBefore[key];
+    const newVal = cleanAfter[key];
+
+    if (JSON.stringify(prevVal) !== JSON.stringify(newVal)) {
+      changes[key] = {
+        from: prevVal !== undefined ? prevVal : null,
+        to: newVal !== undefined ? newVal : null,
+      };
+    }
+  }
+
+  return Object.keys(changes).length > 0 ? changes : null;
+}
+
+/**
+ * Resolves the resource type from policy action or URI pattern.
  */
 function resolveResourceType(action, req) {
   const mapping = ACTION_RESOURCE_MAP[action];
   if (mapping) return mapping.resourceType;
 
-  // Fallback: derive from HTTP method and path
-  const pathParts = (req.originalUrl || req.path).split('/').filter(Boolean);
+  const pathParts = (req.originalUrl || req.path || '').split('?')[0].split('/').filter(Boolean);
   if (pathParts.length >= 2) {
-    return pathParts[1] || 'unknown';
+    const primarySegment = pathParts[1].toLowerCase().replace(/s$/, '');
+    return primarySegment || 'unknown';
   }
   return 'unknown';
 }
 
 /**
- * Extracts the resource ID from the request parameters or body.
+ * Resolves the target resource identifier from request params or body.
  */
 function resolveResourceId(req) {
-  return req.params?.id
-    || req.params?.orderId
-    || req.params?.userId
-    || req.params?.reviewId
-    || req.params?.ticketId
-    || req.body?.id
-    || null;
+  return (
+    req.params?.id ||
+    req.params?.orderId ||
+    req.params?.userId ||
+    req.params?.reviewId ||
+    req.params?.ticketId ||
+    req.body?.id ||
+    req.query?.id ||
+    null
+  );
 }
 
 /**
- * Creates reusable audit logging middleware.
- *
- * This middleware intercepts the response to capture the status code after
- * the route handler completes, then writes an audit entry asynchronously.
- * Audit failures are silently caught and logged — they never prevent
- * the request from succeeding.
+ * Factory creating configurable audit logging middleware.
  *
  * @param {object} options
- * @param {string} options.action       - The policy action identifier (e.g., 'admin:view-dashboard')
- * @param {string} [options.resourceType] - Override resource type (auto-detected from action if omitted)
- * @param {function} [options.getBeforeState] - Async function to capture before-state: (req) => object
- * @param {function} [options.getAfterState]  - Async function to capture after-state: (req, res) => object
- * @param {function} [options.getMetadata]    - Async function to capture metadata: (req, res) => object
- * @param {function} [options.shouldLog]      - Filter function: (req, res) => boolean. Default: log all.
+ * @param {string} options.action - Policy action identifier
+ * @param {string} [options.resourceType] - Explicit override for resource type
+ * @param {function} [options.getBeforeState] - Capture pre-mutation state: (req) => object
+ * @param {function} [options.getAfterState] - Capture post-mutation state: (req, res) => object
+ * @param {function} [options.getMetadata] - Attach operational metadata: (req, res) => object
+ * @param {function} [options.shouldLog] - Filter function: (req, res) => boolean
+ * @param {boolean} [options.logAnonymous=false] - Whether to capture unauthenticated actions
  */
 export function auditLog(options = {}) {
   const {
@@ -88,111 +170,65 @@ export function auditLog(options = {}) {
     getAfterState,
     getMetadata,
     shouldLog,
+    logAnonymous = false,
   } = options;
 
   return (req, res, next) => {
-    // Skip if no authenticated user
-    if (!req.user) {
+    // Skip if no authenticated user (unless anonymous logging explicitly enabled)
+    if (!req.user && !logAnonymous) {
       return next();
     }
 
-    // Skip if shouldLog filter rejects this request
-    if (shouldLog && !shouldLog(req, null)) {
+    // Evaluate execution filter
+    if (shouldLog && !shouldLog(req, res)) {
       return next();
     }
 
     const startTime = Date.now();
     let beforeState = null;
 
-    // Capture before-state before the response is sent
+    // Asynchronously capture before-state prior to downstream handlers
     const captureBeforeState = async () => {
       if (getBeforeState) {
         try {
           beforeState = await getBeforeState(req);
         } catch (err) {
-          logger.debug({ err }, '[AuditLog] Failed to capture before-state');
+          logger.debug({ err, action }, '[AuditLog] Failed to capture before-state');
         }
       }
     };
 
-    // Hook into response finish event to capture the final state and write the audit entry
+    // Attach response finish hook
     res.on('finish', () => {
-      writeAuditEntry(req, res, {
-        action,
-        overrideResourceType,
-        beforeState,
-        startTime,
-        getAfterState,
-        getMetadata,
-      }).catch((err) => {
-        logger.debug({ err }, '[AuditLog] Unhandled audit write error');
+      setImmediate(async () => {
+        try {
+          await writeAuditEntry(req, res, {
+            action,
+            overrideResourceType,
+            beforeState,
+            startTime,
+            getAfterState,
+            getMetadata,
+          });
+        } catch (err) {
+          logger.error({ err, action }, '[AuditLog] Unhandled error during audit write');
+          Sentry.captureException(err, { tags: { context: 'audit_log_write', action } });
+        }
       });
-
     });
 
-    // Capture before-state synchronously, then proceed
+    // Execute state capture and continue middleware chain
     Promise.resolve(captureBeforeState())
       .then(() => next())
       .catch((err) => {
-        logger.debug({ err }, '[AuditLog] Before-state capture failed, proceeding');
+        logger.debug({ err, action }, '[AuditLog] Before-state resolution exception, continuing execution');
         next();
       });
   };
 }
 
 /**
- * Keys whose values must never reach the audit log. Matching is
- * case-insensitive on the final path segment so nested payloads are covered
- * too (e.g. `body.password`, `headers.authorization`).
- */
-const SENSITIVE_KEY_PATTERN = /(password|passwd|secret|token|otp|authorization|api[_-]?key|access[_-]?key|cookie|cvv|pin)\b/i;
-
-/**
- * Recursively redacts sensitive fields before an audit entry is persisted.
- *
- * beforeState / afterState / metadata are developer-supplied snapshots that
- * can echo request bodies verbatim. Scrub here — not at the call sites — so a
- * future getAfterState callback cannot accidentally leak credentials into the
- * audit trail.
- *
- * @param {unknown} value
- * @param {string} [path] - current object path, used for key matching
- * @returns {unknown} the value with sensitive fields replaced by "[REDACTED]"
- */
-export function scrubPii(value, path = '') {
-  if (value === null || value === undefined) return value;
-
-  if (Array.isArray(value)) {
-    return value.map((item, index) => scrubPii(item, `${path}[${index}]`));
-  }
-
-  if (typeof value === 'object') {
-    const scrubbed = {};
-    for (const [key, item] of Object.entries(value)) {
-      const keyPath = path ? `${path}.${key}` : key;
-      const isSensitive = SENSITIVE_KEY_PATTERN.test(key);
-      scrubbed[key] = isSensitive ? '[REDACTED]' : scrubPii(item, keyPath);
-    }
-    return scrubbed;
-  }
-
-  if (typeof value === 'string') {
-    // Redact 16-digit card numbers that may be embedded in strings.
-    const CARD_NUMBER_PATTERN = /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/g;
-    let scrubbed = value.replace(CARD_NUMBER_PATTERN, '[REDACTED]');
-    // Redact full 10-digit Indian mobile numbers (starting 6-9) that may be
-    // embedded in log/metadata strings. Partial numbers (e.g. last 4 digits
-    // shown in UIs) are left alone.
-    const PHONE_PATTERN = /\b[6-9]\d{9}\b/g;
-    scrubbed = scrubbed.replace(PHONE_PATTERN, '[REDACTED]');
-    return scrubbed;
-  }
-
-  return value;
-}
-
-/**
- * Writes the audit entry to the database.
+ * Persists audit record to database and logs event.
  */
 async function writeAuditEntry(req, res, {
   action,
@@ -210,65 +246,71 @@ async function writeAuditEntry(req, res, {
     try {
       afterState = await getAfterState(req, res);
     } catch (err) {
-      logger.debug({ err }, '[AuditLog] Failed to capture after-state');
+      logger.debug({ err, action }, '[AuditLog] Failed to capture after-state');
     }
   }
 
-  let metadata = null;
+  let metadata = {};
   if (getMetadata) {
     try {
-      metadata = await getMetadata(req, res);
+      const customMeta = await getMetadata(req, res);
+      if (customMeta && typeof customMeta === 'object') {
+        metadata = { ...customMeta };
+      }
     } catch (err) {
-      logger.debug({ err }, '[AuditLog] Failed to capture metadata');
+      logger.debug({ err, action }, '[AuditLog] Failed to capture metadata');
     }
   }
 
-  // Add timing info to metadata
+  // Calculate execution timing and state diffs
   const durationMs = Date.now() - startTime;
-  if (!metadata) {
-    metadata = {};
-  }
   metadata.duration_ms = durationMs;
 
-  await auditLogService.log({
-    actorId: req.user.id,
-    actorRole: req.user.role,
-    actorName: req.user.fullName,
-    action,
+  const sanitizedBefore = sanitizePayload(beforeState);
+  const sanitizedAfter = sanitizePayload(afterState);
+  const stateDiff = computeStateDiff(sanitizedBefore, sanitizedAfter);
+
+  if (stateDiff) {
+    metadata.diff = stateDiff;
+  }
+
+  const actorId = req.user?.id || 'ANONYMOUS';
+  const actorRole = req.user?.role || 'UNAUTHENTICATED';
+  const actorName = req.user?.fullName || req.user?.username || 'System/Guest';
+
+  const payload = {
+    actorId,
+    actorRole,
+    actorName,
+    action: action || `http:${req.method.toLowerCase()}:${req.route?.path || 'unknown'}`,
     resourceType,
-    resourceId,
+    resourceId: resourceId ? String(resourceId) : null,
     method: req.method,
     path: req.originalUrl || req.path,
-    ipAddress: req.ip || req.connection?.remoteAddress,
-    userAgent: req.headers?.['user-agent'],
-    correlationId: req.correlationId,
-    requestId: req.requestId,
+    ipAddress: req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress,
+    userAgent: req.headers?.['user-agent'] || 'unknown',
+    correlationId: req.correlationId || req.headers['x-correlation-id'] || null,
+    requestId: req.requestId || req.headers['x-request-id'] || null,
     statusCode: res.statusCode,
-    beforeState: scrubPii(beforeState),
-    afterState: scrubPii(afterState),
-    metadata: scrubPii(metadata),
-  });
+    beforeState: sanitizedBefore,
+    afterState: sanitizedAfter,
+    metadata: sanitizePayload(metadata),
+    status: res.statusCode < 400 ? 'SUCCESS' : 'FAILURE',
+    timestamp: new Date().toISOString(),
+  };
+
+  await auditLogService.log(payload);
 }
 
 /**
- * Convenience: creates audit middleware for common admin operations.
- * Just pass the action name — the middleware handles the rest.
- *
- * @param {string} action - The policy action identifier
- * @returns {Function} Express middleware
+ * Convenience helper for auditing general administrative actions.
  */
 export function auditAdminAction(action) {
   return auditLog({ action });
 }
 
 /**
- * Convenience: creates audit middleware that captures before/after state
- * by fetching the resource from Supabase.
- *
- * @param {string} action         - The policy action identifier
- * @param {string} resourceType   - The Supabase table name
- * @param {function} [getIdFn]    - Function to extract resource ID from req: (req) => string
- * @returns {Function} Express middleware
+ * High-order helper for capturing state pre- and post-mutation from Supabase.
  */
 export function auditWithState(action, resourceType, getIdFn) {
   const extractId = getIdFn || resolveResourceId;
@@ -289,7 +331,6 @@ export function auditWithState(action, resourceType, getIdFn) {
       return data || null;
     },
     getAfterState: async (req, res) => {
-      // Only capture after-state for successful mutations (2xx responses)
       if (res.statusCode >= 400) return null;
       const { supabaseAdmin } = await import('../config/db.js');
       if (!supabaseAdmin) return null;

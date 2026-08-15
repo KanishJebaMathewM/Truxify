@@ -48,7 +48,7 @@ router.get('/estimate', authenticate, userLimiter, async (req, res) => {
       { event: 'ROUTE_ESTIMATE_ERROR', requestId: req.requestId || req.id, error: err && err.message },
       'Error calculating route estimate',
     );
-    res.status(500).json({ error: 'Internal server error.' });
+    return res.status(500).json({ error: 'Internal server error.' });
   }
 });
 

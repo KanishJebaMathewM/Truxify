@@ -1,53 +1,112 @@
 import { describe, it, expect } from 'vitest';
-import { escapeLike } from '../../src/lib/escapeLike.js';
+import { escapeLike, escapeSqlLike } from '../../src/lib/escapeLike.js';
 
 describe('escapeLike', () => {
-  it('returns non-string inputs unchanged', () => {
-    expect(escapeLike(null)).toBe(null);
-    expect(escapeLike(undefined)).toBe(undefined);
-    expect(escapeLike(42)).toBe(42);
-    expect(escapeLike(true)).toBe(true);
-    expect(escapeLike({ foo: 'bar' })).toEqual({ foo: 'bar' });
+  it('escapes % wildcard', () => {
+    expect(escapeLike('100%')).toBe('100\\%');
   });
 
-  it('escapes backslashes', () => {
-    expect(escapeLike('path\\to\\file')).toBe('path\\\\to\\\\file');
-  });
-
-  it('escapes percent signs used in LIKE wildcards', () => {
-    expect(escapeLike('hello%world')).toBe('hello\\%world');
-  });
-
-  it('escapes underscores used in LIKE wildcards', () => {
+  it('escapes _ wildcard', () => {
     expect(escapeLike('user_name')).toBe('user\\_name');
   });
 
-  it('escapes all three special characters together', () => {
-    expect(escapeLike('50%_test\\value')).toBe('50\\%\\_test\\\\value');
+  it('escapes backslash', () => {
+    expect(escapeLike('path\\to\\file')).toBe('path\\\\to\\\\file');
   });
 
-  it('handles empty strings', () => {
+  it('leaves plain strings unchanged', () => {
+    expect(escapeLike('normaltext')).toBe('normaltext');
+  });
+
+  it('handles empty string', () => {
     expect(escapeLike('')).toBe('');
   });
 
-  it('handles consecutive wildcards and backslashes', () => {
-    expect(escapeLike('%%%___\\\\')).toBe('\\%\\%\\%\\_\\_\\_\\\\\\\\');
+  it('escapes multiple special characters in correct order', () => {
+    expect(escapeLike('user%100_name\\path')).toBe('user\\%100\\_name\\\\path');
   });
 
-  it('returns the same string when no special chars are present', () => {
-    expect(escapeLike('normal text here')).toBe('normal text here');
+  it('escapes consecutive backslashes', () => {
+    expect(escapeLike('a\\\\b')).toBe('a\\\\\\\\b');
   });
 
-  it('returns a string type for a string input', () => {
-    const result = escapeLike('test');
-    expect(typeof result).toBe('string');
+  it('returns null for null input', () => {
+    expect(escapeLike(null)).toBeNull();
   });
 
-  it('escapes square bracket wildcards', () => {
-    expect(escapeLike('a[b]c')).toBe('a\\[b\\]c');
+  it('returns undefined for undefined input', () => {
+    expect(escapeLike(undefined)).toBeUndefined();
   });
 
-  it('escapes mixed wildcards including brackets in one pass', () => {
-    expect(escapeLike('50%_[x]')).toBe('50\\%\\_\\[x\\]');
+  it('converts non-string inputs to string', () => {
+    expect(escapeLike(42)).toBe('42');
+    expect(escapeLike(true)).toBe('true');
+  });
+});
+
+describe('escapeSqlLike', () => {
+  it('escapes backslash', () => {
+    expect(escapeSqlLike('path\\to\\file')).toBe('path\\\\to\\\\file');
+  });
+
+  it('escapes % wildcard', () => {
+    expect(escapeSqlLike('100%')).toBe('100\\%');
+  });
+
+  it('escapes _ wildcard', () => {
+    expect(escapeSqlLike('user_name')).toBe('user\\_name');
+  });
+
+  it('escapes square brackets', () => {
+    expect(escapeSqlLike('test[1]')).toBe('test\\[1\\]');
+  });
+
+  it('leaves plain strings unchanged', () => {
+    expect(escapeSqlLike('normaltext')).toBe('normaltext');
+  });
+
+  it('handles empty string', () => {
+    expect(escapeSqlLike('')).toBe('');
+  });
+
+  it('returns null for null input', () => {
+    expect(escapeSqlLike(null)).toBeNull();
+  });
+
+  it('returns undefined for undefined input', () => {
+    expect(escapeSqlLike(undefined)).toBeUndefined();
+  });
+
+  it('converts non-string inputs to string', () => {
+    expect(escapeSqlLike(42)).toBe('42');
+    expect(escapeSqlLike(true)).toBe('true');
+  });
+
+  it('escapes mixed special characters correctly', () => {
+    expect(escapeSqlLike('a%b_c\\d[e]f')).toBe('a\\%b\\_c\\\\d\\[e\\]f');
+  });
+
+  it('escapes consecutive backslashes correctly', () => {
+    // Each input backslash should be doubled in the output
+    const result = escapeSqlLike('test\\\\end');
+    expect(result).toBe('test\\\\\\\\end');
+  });
+});
+
+describe('escapeLike and escapeSqlLike - additional coverage', () => {
+  it('escapeLike handles unicode characters', () => {
+    expect(escapeLike('hello world')).toBe('hello world');
+    expect(escapeLike('café')).toBe('café');
+  });
+
+  it('escapeSqlLike handles unicode characters', () => {
+    expect(escapeSqlLike('hello world')).toBe('hello world');
+    expect(escapeSqlLike('café')).toBe('café');
+  });
+
+  it('escapeLike and escapeSqlLike produce different outputs', () => {
+    // escapeSqlLike handles [] as well, escapeLike does not
+    expect(escapeLike('[test]')).toBe('[test]');
+    expect(escapeSqlLike('[test]')).toBe('\\[test\\]');
   });
 });

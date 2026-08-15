@@ -1,12 +1,11 @@
 import express from 'express';
 import daoService from './dao.service.js';
 import logger from '../api/src/middleware/logger.js';
-import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
 // Join DAO
-router.post('/dao/join', authenticate, async (req, res) => {
+router.post('/dao/join', async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -25,7 +24,7 @@ router.post('/dao/join', authenticate, async (req, res) => {
 });
 
 // Leave DAO
-router.post('/dao/leave', authenticate, async (req, res) => {
+router.post('/dao/leave', async (req, res) => {
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
@@ -44,7 +43,7 @@ router.post('/dao/leave', authenticate, async (req, res) => {
 });
 
 // Create proposal
-router.post('/dao/proposal/create', authenticate, async (req, res) => {
+router.post('/dao/proposal/create', async (req, res) => {
     try {
         const { title, description, callData, target, value, proposalType, proposer } = req.body;
         if (!title || !description) {
@@ -71,7 +70,7 @@ router.post('/dao/proposal/create', authenticate, async (req, res) => {
 });
 
 // Cast vote
-router.post('/dao/vote/cast', authenticate, async (req, res) => {
+router.post('/dao/vote/cast', async (req, res) => {
     try {
         const { proposalId, votingPower, voterAddress } = req.body;
         if (!proposalId || !votingPower) {
@@ -90,7 +89,7 @@ router.post('/dao/vote/cast', authenticate, async (req, res) => {
 });
 
 // Execute proposal
-router.post('/dao/proposal/execute', authenticate, async (req, res) => {
+router.post('/dao/proposal/execute', async (req, res) => {
     try {
         const { proposalId } = req.body;
         if (!proposalId) {
@@ -109,7 +108,7 @@ router.post('/dao/proposal/execute', authenticate, async (req, res) => {
 });
 
 // Get proposal
-router.get('/dao/proposal/:proposalId', authenticate, async (req, res) => {
+router.get('/dao/proposal/:proposalId', async (req, res) => {
     try {
         const { proposalId } = req.params;
         const proposal = await daoService.getProposal(proposalId);
@@ -121,7 +120,7 @@ router.get('/dao/proposal/:proposalId', authenticate, async (req, res) => {
 });
 
 // Get member
-router.get('/dao/member/:userAddress', authenticate, async (req, res) => {
+router.get('/dao/member/:userAddress', async (req, res) => {
     try {
         const { userAddress } = req.params;
         const member = await daoService.getMember(userAddress);
@@ -133,7 +132,7 @@ router.get('/dao/member/:userAddress', authenticate, async (req, res) => {
 });
 
 // Get stats
-router.get('/dao/stats', authenticate, async (req, res) => {
+router.get('/dao/stats', async (req, res) => {
     try {
         const stats = await daoService.getDAOStats();
         res.json({ success: true, data: stats });

@@ -62,9 +62,10 @@ _WEATHER_CLIENT = httpx.Client(
     headers={"Accept": "application/json"},
 )
 
-# Non-neutral multipliers indicate a successful upstream response; the neutral
-# 1.0 entry may be a cached failure (short TTL) rather than a good response.
-_SUCCESS_MULTIPLIER = (1.1, 1.2)
+# The cache TTL is driven by an explicit success/failure flag (see
+# _cache_weather_multiplier) rather than the multiplier value, because the
+# neutral 1.0 multiplier is returned for both a successful clear-weather
+# response and for a failed lookup.
 
 
 def reset_weather_cache() -> None:
@@ -88,12 +89,17 @@ def _cached_weather_multiplier(city: str) -> Optional[float]:
         return None
 
 
-def _cache_weather_multiplier(city: str, multiplier: float) -> None:
-    """Cache a weather multiplier with a TTL; failures use a short TTL."""
+def _cache_weather_multiplier(city: str, multiplier: float, ok: bool = True) -> None:
+    """Cache a weather multiplier with a TTL; failures use a short TTL.
+
+    The TTL is chosen from an explicit success flag so that a successful
+    clear-weather response (neutral 1.0) is cached with the long success TTL,
+    while failed lookups (also neutral 1.0) still use the short failure TTL.
+    """
     with _WEATHER_CACHE_LOCK:
         ttl = (
             ML_WEATHER_CACHE_TTL_SECONDS
-            if multiplier in _SUCCESS_MULTIPLIER
+            if ok
             else ML_WEATHER_FAILURE_TTL_SECONDS
         )
         _WEATHER_CACHE[city] = (multiplier, _now() + ttl)
@@ -101,18 +107,23 @@ def _cache_weather_multiplier(city: str, multiplier: float) -> None:
             _WEATHER_CACHE.popitem(last=False)
 
 
-def _parse_weather_multiplier(response: httpx.Response) -> float:
-    """Map an OpenWeather response body to a price multiplier (default 1.0)."""
+def _parse_weather_multiplier(response: httpx.Response) -> Tuple[float, bool]:
+    """Map an OpenWeather response body to a (multiplier, ok) tuple.
+
+    ``ok`` is True only when the upstream returned a successful 200 response,
+    so callers can cache successes (including neutral 1.0 clear-weather) with
+    the long TTL and cache failures with the short failure TTL.
+    """
     if response.status_code != 200:
-        return 1.0
+        return 1.0, False
     weather_main = (
         response.json().get("weather", [{}])[0].get("main", "").lower()
     )
     if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
-        return 1.2
+        return 1.2, True
     if weather_main in ["drizzle", "mist", "fog", "haze", "dust", "sand", "ash"]:
-        return 1.1
-    return 1.0
+        return 1.1, True
+    return 1.0, True
 
 
 def close_weather_resources() -> None:
@@ -358,19 +369,19 @@ def _get_weather_multiplier(city: str) -> float:
     cached = _cached_weather_multiplier(city)
     if cached is not None:
         return cached
-    multiplier = _fetch_weather_multiplier_http(city)
-    _cache_weather_multiplier(city, multiplier)
+    multiplier, ok = _fetch_weather_multiplier_http(city)
+    _cache_weather_multiplier(city, multiplier, ok)
     return multiplier
 
 
-def _fetch_weather_multiplier_http(city: str) -> float:
-    """Issue a single OpenWeather request; returns 1.0 on any failure.
+def _fetch_weather_multiplier_http(city: str) -> Tuple[float, bool]:
+    """Issue a single OpenWeather request; returns (1.0, False) on any failure.
 
     Isolated from the cache so tests can stub the network call directly.
     """
     api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
     if not api_key:
-        return 1.0
+        return 1.0, False
     try:
         url = (
             "https://api.openweathermap.org/data/2.5/weather"
@@ -380,7 +391,7 @@ def _fetch_weather_multiplier_http(city: str) -> float:
         return _parse_weather_multiplier(response)
     except Exception as e:
         logger.warning("Weather API failed for %s: %s", city, e)
-        return 1.0
+        return 1.0, False
 
 
 async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) -> float:
@@ -403,12 +414,12 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
             f"?q={city}&appid={api_key}"
         )
         response = await client.get(url, timeout=ML_WEATHER_TIMEOUT_SECONDS)
-        multiplier = _parse_weather_multiplier(response)
-        _cache_weather_multiplier(city, multiplier)
+        multiplier, ok = _parse_weather_multiplier(response)
+        _cache_weather_multiplier(city, multiplier, ok)
         return multiplier
     except Exception as e:
         logger.warning("Weather API failed for %s: %s", city, e)
-        _cache_weather_multiplier(city, 1.0)
+        _cache_weather_multiplier(city, 1.0, ok=False)
         return 1.0
 
 

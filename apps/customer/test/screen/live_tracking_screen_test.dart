@@ -18,6 +18,7 @@ class MockResilientWebSocket extends Mock implements ResilientWebSocket {}
 class MockSupabaseClient extends Mock implements SupabaseClient {}
 class MockGoTrueClient extends Mock implements GoTrueClient {}
 class MockUser extends Mock implements User {}
+class MockRealtimeChannel extends Mock implements RealtimeChannel {}
 
 void main() {
   late MockOrderService mockOrderService;
@@ -142,6 +143,60 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('45 mins'), findsOneWidget);
+    });
+  });
+
+  group('LiveTrackingScreen realtime subscription regression (#12175)', () {
+    testWidgets('subscribes to Supabase Realtime when order id is an integer', (tester) async {
+      final mockChannel = MockRealtimeChannel();
+
+      when(() => mockSupabase.removeChannel(any())).thenAnswer((_) async {});
+      when(() => mockChannel.onBroadcast(
+            event: any(named: 'event'),
+            callback: any(named: 'callback'),
+          )).thenReturn(mockChannel);
+      when(() => mockChannel.onPostgresChanges(
+            event: any(named: 'event'),
+            schema: any(named: 'schema'),
+            table: any(named: 'table'),
+            filter: any(named: 'filter'),
+            callback: any(named: 'callback'),
+          )).thenReturn(mockChannel);
+      when(() => mockChannel.subscribe()).thenReturn(mockChannel);
+      when(() => mockChannel.subscribe(any())).thenReturn(mockChannel);
+
+      final channelNames = <String>[];
+      when(() => mockSupabase.channel(any())).thenAnswer((invocation) {
+        channelNames.add(invocation.positionalArguments.first as String);
+        return mockChannel;
+      });
+
+      when(() => mockOrderService.fetchOrderById(any())).thenAnswer((_) async => {
+        'id': 123,
+        'order_display_id': 'TX1001',
+        'pickup_address': 'Surat, Gujarat',
+        'drop_address': 'Mumbai, Maharashtra',
+        'pickup_lat': 21.17,
+        'pickup_lng': 72.83,
+        'drop_lat': 19.07,
+        'drop_lng': 72.87,
+        'driver_id': 'driver-1',
+        'driver_name': 'Suresh Kumar',
+        'driver_phone': '9876543210',
+        'truck_id': 'truck-1',
+        'truck_number': 'GJ-05-XX-1234',
+        'status': 'In Transit',
+        'updated_at': '2026-08-03T00:00:00Z',
+      });
+
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // The numeric order id must be coerced to a string and the realtime
+      // subscription channel must be created. With `as String` this would
+      // throw (swallowing the subscription); the fix uses toString().
+      expect(channelNames, contains('driver-location:123'));
     });
   });
 }

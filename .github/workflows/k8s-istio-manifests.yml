@@ -18,7 +18,7 @@ jobs:
     name: Validate k8s/istio YAML manifests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Check for BOMs and duplicate mapping keys
         run: node .github/scripts/check-istio-manifests.js

@@ -381,22 +381,15 @@ export class EventStoreCore {
     }
     if (row.snapshot_version !== undefined && row.snapshot_version !== null) {
       const schemaVersion = Number(row.snapshot_version);
-      if (!Number.isInteger(schemaVersion) || schemaVersion < 0 || schemaVersion > this.snapshotSchemaVersion) {
+      if (Number.isNaN(schemaVersion) || schemaVersion > this.snapshotSchemaVersion) {
         return null;
       }
     }
-    // Preserve the stored schema version exactly. The old `Number(...) || default`
-    // idiom coerced a stored snapshot_version of 0 into the default schema
-    // version, silently mislabeling v0 snapshots as the current schema version.
-    const storedSchemaVersion =
-      row.snapshot_version !== undefined && row.snapshot_version !== null
-        ? Number(row.snapshot_version)
-        : this.snapshotSchemaVersion;
     return {
       aggregateId: row.aggregate_id ?? row.aggregateId,
       version,
       state: row.state,
-      snapshotVersion: storedSchemaVersion,
+      snapshotVersion: Number(row.snapshot_version) || this.snapshotSchemaVersion,
       createdAt: row.created_at ?? row.timestamp,
     };
   }
@@ -448,44 +441,23 @@ export class EventStoreCore {
    * Snapshot policy: snapshot when the aggregate has grown by
    * `snapshotThreshold` events since its last snapshot. Never snapshot every
    * event, and never delete the underlying event history.
-   *
-   * The trigger and the snapshot state are based on DB-authoritative data:
-   * `getLatestVersion` bypasses the in-memory event cache, and the state is
-   * rebuilt from freshly-fetched rows. This keeps snapshots consistent across
-   * instances whose caches have not yet seen writes committed by another
-   * instance.
    */
   async checkSnapshot(aggregateId) {
-    const latestVersion = await this.getLatestVersion(aggregateId);
-    if (latestVersion === null || latestVersion <= 0) {
-      return false;
+    const events = await this.getEventStream(aggregateId);
+    if (!events || events.length === 0) {
+      return;
     }
-
+    const latestVersion = Math.max(...events.map((e) => Number(e.version) || 0));
     const snapshot = await this.getSnapshot(aggregateId);
     const snapshotVersion = snapshot ? Number(snapshot.version) : 0;
 
-    if (latestVersion - snapshotVersion < this.snapshotThreshold) {
-      return false;
+    if (latestVersion - snapshotVersion >= this.snapshotThreshold) {
+      const state = await this.getAggregateState(aggregateId);
+      await this.takeSnapshot(aggregateId, state, latestVersion);
+      this.logger.info?.(`Snapshot taken for ${aggregateId} at version ${latestVersion}`);
+      return true;
     }
-
-    // Rebuild the snapshot state from freshly-fetched rows so it includes
-    // events committed by other instances, and refresh the cache so this
-    // instance's reads stay consistent with the database afterwards.
-    const rawRows = await this.db.fetchEventStream(aggregateId);
-    const events = (rawRows || [])
-      .map(normalizeEventRow)
-      .filter(Boolean)
-      .sort((a, b) => Number(a.version) - Number(b.version));
-    this.eventStreams.set(aggregateId, events);
-
-    const state = await this.rebuildFromRows(aggregateId, rawRows);
-    if (!state) {
-      return false;
-    }
-
-    await this.takeSnapshot(aggregateId, state, latestVersion);
-    this.logger.info?.(`Snapshot taken for ${aggregateId} at version ${latestVersion}`);
-    return true;
+    return false;
   }
 }
 

@@ -4,24 +4,25 @@ import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { predictEta } from '../services/ml.js';
+import { haversineKm } from '../lib/pricing.js';
 
 const router = express.Router();
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 function parseCoord(value, min, max) {
   const n = Number(value);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
+
+// Sanitize a trip identifier before interpolating it into a PostgREST `.or()`
+// filter. The filter grammar treats `)`, `,`, quotes and whitespace as syntax,
+// so an unsanitized value could break out of the intended predicate
+// (injection / malformed query / DoS). Rejects any such characters.
+function sanitizeTripId(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (/[,)(\s'"]/.test(trimmed)) return null;
+  return trimmed;
 }
 
 // ============================================================================
@@ -34,12 +35,18 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'tripId is required.' });
     }
 
+    // Sanitize before interpolating into the PostgREST filter (see sanitizeTripId).
+    const safeTripId = sanitizeTripId(tripId);
+    if (!safeTripId) {
+      return res.status(400).json({ error: 'tripId contains invalid characters.' });
+    }
+
     // Resolve the trip by primary key or display id, then its linked order for
     // the drop coordinates that define the remaining route.
     const { data: trip, error: tripErr } = await supabaseAdmin
       .from('trips')
       .select('id, trip_display_id, order_id')
-      .or(`id.eq.${tripId},trip_display_id.eq.${tripId}`)
+      .or(`id.eq.${safeTripId},trip_display_id.eq.${safeTripId}`)
       .maybeSingle();
 
     if (tripErr) {

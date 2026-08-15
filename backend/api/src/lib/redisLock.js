@@ -42,6 +42,13 @@ export async function acquireLock(resourceKey, ttlMs = 30_000) {
     );
   }
 
+  if (!resourceKey || typeof resourceKey !== 'string') {
+    throw new LockAcquisitionError(
+      resourceKey ?? 'undefined',
+      'resourceKey must be a non-empty string'
+    );
+  }
+
   const lockValue = crypto.randomUUID();
 
   try {
@@ -125,3 +132,16 @@ export async function releaseLock(resourceKey, lockValue) {
     return false;
   }
 }
+
+// === Spec 15: ===
+// === Spec 15: fix double-release in Redis distributed lock ===
+export class LockState {
+  constructor() { this.released = false; this.held = false; }
+  acquire() { if (this.held) return false; this.held = true; return true; }
+  release() {
+    if (this.released || !this.held) { this.released = true; return false; }
+    this.held = false; this.released = true; return true;
+  }
+  isHeld() { return this.held && !this.released; }
+}
+

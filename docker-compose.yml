@@ -15,7 +15,10 @@ services:
     build:
       context: ./backend/api
       target: development
+<<<<<<< HEAD
+=======
     image: ghcr.io/kanishjebamathewm/truxify-api
+>>>>>>> upstream/main
     container_name: truxify-api
     env_file:
       - .env
@@ -85,7 +88,10 @@ services:
   ml-engine:
     build:
       context: ./backend/ml
+<<<<<<< HEAD
+=======
     image: ghcr.io/kanishjebamathewm/truxify-ml
+>>>>>>> upstream/main
     container_name: truxify-ml-engine
     env_file:
       - .env
@@ -255,7 +261,11 @@ services:
     ports:
       - "5678:5678"
     environment:
+<<<<<<< HEAD
+      - N8N_HOST=localhost
+=======
       - N8N_HOST=${N8N_HOST:-localhost}
+>>>>>>> upstream/main
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=development
@@ -264,6 +274,7 @@ services:
       - ML_API_KEY=${ML_API_KEY:-local_ml_secret}
       - ML_ENGINE_URL=http://ml-engine:8000
       - BACKEND_API_URL=${BACKEND_API_URL:-http://api:5000}
+      - ADMIN_ALERT_EMAIL=${ADMIN_ALERT_EMAIL:-admin@localhost}
     volumes:
       - n8n_data:/home/node/.n8n
     healthcheck:

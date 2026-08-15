@@ -1,27 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OrderValidationService } from '../../src/services/order/orderValidationService.js';
 
 const mockOrderRepository = {
   findOrderById: vi.fn(),
   findOrderByDisplayId: vi.fn(),
 };
 
-vi.mock('../../src/core/container.js', () => ({
-  orderRepository: mockOrderRepository,
-}));
+const mockSupabase = { from: vi.fn() };
+
+vi.mock('../../src/config/db.js', () => ({ supabase: mockSupabase }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 describe('orderValidationService', () => {
   let orderValidationService;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    orderValidationService = (await import('../../src/services/order/orderValidationService.js')).default;
+    orderValidationService = new OrderValidationService({
+      supabase: mockSupabase,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+    orderValidationService.orderRepository = mockOrderRepository;
   });
 
   describe('findOrderByIdOrDisplayId', () => {
     it('finds order by UUID id', async () => {
       const order = { id: 'order-uuid-1', order_display_id: '#FF20260808ABC', status: 'pending' };
-      mockOrderRepository.findOrderById.mockResolvedValue(order);
+      mockOrderRepository.findOrderById.mockResolvedValue({ data: order, error: null });
 
       const result = await orderValidationService.findOrderByIdOrDisplayId('order-uuid-1');
       expect(result).toEqual(order);
@@ -29,16 +34,16 @@ describe('orderValidationService', () => {
 
     it('finds order by display id', async () => {
       const order = { id: 'order-uuid-1', order_display_id: '#FF20260808ABC', status: 'pending' };
-      mockOrderRepository.findOrderById.mockResolvedValue(null);
-      mockOrderRepository.findOrderByDisplayId.mockResolvedValue(order);
+      mockOrderRepository.findOrderById.mockResolvedValue({ data: null, error: null });
+      mockOrderRepository.findOrderByDisplayId.mockResolvedValue({ data: order, error: null });
 
       const result = await orderValidationService.findOrderByIdOrDisplayId('#FF20260808ABC');
       expect(result).toEqual(order);
     });
 
     it('returns null when order not found by either id', async () => {
-      mockOrderRepository.findOrderById.mockResolvedValue(null);
-      mockOrderRepository.findOrderByDisplayId.mockResolvedValue(null);
+      mockOrderRepository.findOrderById.mockResolvedValue({ data: null, error: null });
+      mockOrderRepository.findOrderByDisplayId.mockResolvedValue({ data: null, error: null });
 
       const result = await orderValidationService.findOrderByIdOrDisplayId('nonexistent');
       expect(result).toBeNull();

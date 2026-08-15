@@ -146,12 +146,12 @@ import {
   sumEarnings,
   toDateKey,
 } from '../services/driver/earningsReportService.js';
-import { userLimiter, createStore } from '../middleware/rateLimiter.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, paramIdSchema, predictDriverProfitSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
@@ -630,8 +630,10 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
         });
       }
 
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+      const now = new Date();
+      const cutoff = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (limitDays - 1))
+      );
       windowFilter = { start: cutoff.toISOString().split('T')[0] };
     }
 
@@ -1194,7 +1196,6 @@ const predictProfitLimiter = rateLimit({
   message: { error: 'Too many prediction requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore('rl:predict-profit:'),
 });
 
 router.post(
@@ -1619,7 +1620,7 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
  *       400:
  *         description: Invalid payload
  */
-router.post('/weigh-stations/sync-weight', authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
+router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authenticate, requirePolicy('driver:view-stats'), userLimiter, async (req, res) => {
   try {
     const driverId = req.user.id;
     const { truck_id, axles } = req.body;

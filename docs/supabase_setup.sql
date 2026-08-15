@@ -685,7 +685,7 @@ create table if not exists wallet_transactions (
   driver_id        uuid not null,                             -- profiles.id
   order_display_id text,                                      -- orders.order_display_id
   trip_display_id  text,                                      -- trips.trip_display_id
-  amount           int not null,                              -- paisa (always positive)
+   amount           numeric(20,0) not null check (amount >= 0), -- paisa (always non-negative)
   txn_type         text not null
                    check (txn_type in ('credit','debit','withdrawal','refund')),
   status           text not null default 'confirmed'

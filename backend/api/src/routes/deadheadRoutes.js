@@ -3,7 +3,6 @@ import rateLimit from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody } from '../middleware/validate.js';
-import { createStore } from '../middleware/rateLimiter.js';
 import { matchDeadheadSchema } from '../validation/requestSchemas.js';
 import { matchDeadhead } from '../services/ml.js';
 import logger from '../middleware/logger.js';
@@ -16,7 +15,6 @@ const deadheadLimiter = rateLimit({
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore('rl:deadhead:'),
 });
 
 router.post(
@@ -38,12 +36,12 @@ router.post(
 
       res.json(result);
     } catch (err) {
-      if (err.message?.includes('[ML]')) {
-        logger.warn({ err: err.message, requestId: req.requestId }, 'ML engine unavailable for deadhead matching');
+      if (err?.message?.includes('[ML]')) {
+        logger.warn({ err: err?.message, requestId: req.requestId }, 'ML engine unavailable for deadhead matching');
         return res.status(503).json({ error: 'ML recommendation engine is temporarily unavailable.' });
       }
       logger.error({ err, requestId: req.requestId }, 'Deadhead matching failed');
-      res.status(500).json({ error: 'Deadhead matching failed.' });
+      return res.status(500).json({ error: 'Deadhead matching failed.' });
     }
   },
 );

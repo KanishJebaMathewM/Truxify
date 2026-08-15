@@ -92,12 +92,32 @@ class _MLDashboardState extends State<MLDashboard> {
     );
   }
 
+  /// Safely coerce a metric value (num, or a JSON string such as "0.95")
+  /// into a double. Returns null when the value is missing or unparsable so
+  /// the dashboard can skip it instead of crashing.
+  double? _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value == null) return null;
+    return double.tryParse(value.toString());
+  }
+
   Widget _buildMetricsCard() {
-    final results = metrics?['results'] as Map<String, dynamic>? ?? {};
+    final rawResults = metrics?['results'];
+    final Map<String, dynamic> results;
+    if (rawResults is Map) {
+      results = Map<String, dynamic>.from(rawResults);
+    } else {
+      // `results` may arrive as a list (or any other shape) on some
+      // responses; treat anything that is not a map as "no metrics".
+      results = {};
+    }
+
     final rows = <Widget>[];
     results.forEach((metric, values) {
-      final prod = values['production']?.toStringAsFixed(2);
-      final shadow = values['shadow']?.toStringAsFixed(2);
+      if (values is! Map) return;
+      final prod = _toDouble(values['production'])?.toStringAsFixed(2);
+      final shadow = _toDouble(values['shadow'])?.toStringAsFixed(2);
+      if (prod == null || shadow == null) return;
       rows.add(_buildMetricRow(metric, prod, shadow, metric == 'rmse'));
     });
 
@@ -121,9 +141,11 @@ class _MLDashboardState extends State<MLDashboard> {
   }
 
   Widget _buildMetricRow(String metric, String prod, String shadow, bool lowerBetter) {
-    final isBetter = lowerBetter 
-        ? double.parse(shadow) < double.parse(prod)
-        : double.parse(shadow) > double.parse(prod);
+    final prodVal = double.tryParse(prod);
+    final shadowVal = double.tryParse(shadow);
+    final isBetter = prodVal != null && shadowVal != null
+        ? (lowerBetter ? shadowVal < prodVal : shadowVal > prodVal)
+        : false;
     
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 4),

@@ -1,15 +1,34 @@
 import express from 'express';
-import GlobalStore from './GlobalStore.js';
+import GlobalStore from './Globalreq.store.js';
 import logger from '../api/src/middleware/logger.js';
+import { authenticate } from '../api/src/middleware/auth.js';
 
 const router = express.Router();
 
-// Initialize store
-const store = new GlobalStore({
-    user: null,
-    settings: {},
-    notifications: [],
-    data: {}
+// Per-tenant store instances so a caller only ever touches their own
+// namespace (prevents cross-tenant leak/tamper, issue #13966).
+const tenantStores = new Map();
+function getTenantStore(userId) {
+    if (!tenantStores.has(userId)) {
+        tenantStores.set(userId, new GlobalStore({
+            user: null,
+            settings: {},
+            notifications: [],
+            data: {}
+        }));
+    }
+    return tenantStores.get(userId);
+}
+
+// Require an authenticated session on every store route. Anonymous callers are
+// rejected before they can read or mutate any tenant's state.
+router.use(authenticate);
+router.use((req, res, next) => {
+    if (!req.user || !req.user.id) {
+        return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    req.store = getTenantStore(req.user.id);
+    next();
 });
 
 // ============ State Routes ============
@@ -18,7 +37,7 @@ const store = new GlobalStore({
 router.get('/store/state', (req, res) => {
     try {
         const { key } = req.query;
-        const value = key ? store.get(key) : store.get();
+        const value = key ? req.store.get(key) : req.store.get();
         res.json({
             success: true,
             data: value,
@@ -41,7 +60,7 @@ router.post('/store/state', (req, res) => {
             });
         }
         
-        store.set(key, value);
+        req.store.set(key, value);
         res.json({
             success: true,
             data: { key, value },
@@ -64,7 +83,7 @@ router.post('/store/update', (req, res) => {
             });
         }
         
-        store.update(updates);
+        req.store.update(updates);
         res.json({
             success: true,
             data: updates,
@@ -87,7 +106,7 @@ router.post('/store/atomic', (req, res) => {
             });
         }
         
-        store.atomic(updates);
+        req.store.atomic(updates);
         res.json({
             success: true,
             data: updates,
@@ -112,12 +131,12 @@ router.post('/store/transaction', async (req, res) => {
             });
         }
         
-        const result = await store.transactionAsync(async (tx) => {
+        const result = await req.store.transactionAsync(async (tx) => {
             for (const op of operations) {
                 if (op.type === 'set') {
-                    tx.addOperation(() => store.set(op.key, op.value));
+                    tx.addOperation(() => req.store.set(op.key, op.value));
                 } else if (op.type === 'update') {
-                    tx.addOperation(() => store.update(op.updates));
+                    tx.addOperation(() => req.store.update(op.updates));
                 } else if (op.type === 'custom') {
                     tx.addOperation(op.fn);
                 }
@@ -147,12 +166,12 @@ router.post('/store/transaction/simple', async (req, res) => {
             });
         }
         
-        const result = await store.transactionAsync(async (tx) => {
+        const result = await req.store.transactionAsync(async (tx) => {
             for (const op of operations) {
                 if (op.set) {
-                    await tx.execute(() => store.set(op.key, op.value));
+                    await tx.execute(() => req.store.set(op.key, op.value));
                 } else if (op.update) {
-                    await tx.execute(() => store.update(op.updates));
+                    await tx.execute(() => req.store.update(op.updates));
                 } else if (op.custom) {
                     await tx.execute(op.custom);
                 }
@@ -175,7 +194,7 @@ router.post('/store/transaction/simple', async (req, res) => {
 // Undo
 router.post('/store/undo', (req, res) => {
     try {
-        const success = store.undo();
+        const success = req.store.undo();
         res.json({
             success,
             data: { undone: success },
@@ -190,7 +209,7 @@ router.post('/store/undo', (req, res) => {
 // Redo
 router.post('/store/redo', (req, res) => {
     try {
-        const success = store.redo();
+        const success = req.store.redo();
         res.json({
             success,
             data: { redone: success },
@@ -208,8 +227,8 @@ router.get('/store/undo/status', (req, res) => {
         res.json({
             success: true,
             data: {
-                canUndo: store.canUndo(),
-                canRedo: store.canRedo()
+                canUndo: req.store.canUndo(),
+                canRedo: req.store.canRedo()
             },
             timestamp: new Date().toISOString()
         });
@@ -224,7 +243,7 @@ router.get('/store/undo/status', (req, res) => {
 // Get history
 router.get('/store/history', (req, res) => {
     try {
-        const history = store.getHistory();
+        const history = req.store.getHistory();
         res.json({
             success: true,
             data: history,
@@ -240,7 +259,7 @@ router.get('/store/history', (req, res) => {
 // Get transaction history
 router.get('/store/transactions', (req, res) => {
     try {
-        const history = store.getTransactionHistory();
+        const history = req.store.getTransactionHistory();
         res.json({
             success: true,
             data: history,
@@ -258,7 +277,7 @@ router.get('/store/transactions', (req, res) => {
 // Create snapshot
 router.post('/store/snapshot/create', (req, res) => {
     try {
-        const snapshot = store.createSnapshot();
+        const snapshot = req.store.createSnapshot();
         res.json({
             success: true,
             data: snapshot,
@@ -281,7 +300,7 @@ router.post('/store/snapshot/restore', (req, res) => {
             });
         }
         
-        store.restoreSnapshot(snapshot);
+        req.store.restoreSnapshot(snapshot);
         res.json({
             success: true,
             data: { restored: true },
@@ -298,7 +317,7 @@ router.post('/store/snapshot/restore', (req, res) => {
 // Get stats
 router.get('/store/stats', (req, res) => {
     try {
-        const stats = store.getStats();
+        const stats = req.store.getStats();
         res.json({
             success: true,
             data: stats,
@@ -319,13 +338,13 @@ router.post('/store/control', (req, res) => {
         
         switch (action) {
             case 'enableTracking':
-                store.enableTracking();
+                req.store.enableTracking();
                 break;
             case 'disableTracking':
-                store.disableTracking();
+                req.store.disableTracking();
                 break;
             case 'reset':
-                store.reset();
+                req.store.reset();
                 break;
             default:
                 return res.status(400).json({

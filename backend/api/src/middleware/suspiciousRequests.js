@@ -6,8 +6,11 @@ const SQLI_PATTERNS = [
   /insert\s+into/i,
   /delete\s+from/i,
   /or\s+1=1/i,
-  // Note: standalone "--" SQL comment patterns removed to avoid false positives
-  // (markdown YAML headers, date ranges like 2026-01-01--2026-02-01, negative numbers).
+  // Match -- only when it appears in a SQL comment context: preceded by
+  // whitespace, a quote, a closing paren, or a semicolon — not when
+  // embedded mid-word (e.g. date ranges like 2026-01-01--2026-02-01,
+  // negative numbers, or note fields containing "--").
+  /(?:^|[\s'");])--/,
 ];
 
 const XSS_PATTERNS = [
@@ -38,11 +41,12 @@ export default function suspiciousRequests(req, res, next) {
   const body = JSON.stringify(req.body || {});
   const query = JSON.stringify(req.query || {});
   const url = req.originalUrl || "";
+  // Node lowercases header names; some runtimes/clients send the user-agent as
+  // a repeated array header — take the first value. Truncate to the 256-char
+  // log limit so an oversized header cannot bloat the warning payload.
   const rawUa = req.headers["user-agent"];
-  // A repeated user-agent header arrives as an array; take the first value
-  // and clamp the length so a hostile agent string cannot inject log lines.
   const ua = (Array.isArray(rawUa) ? rawUa[0] : rawUa) || "";
-  const uaForLog = typeof ua === "string" ? ua.slice(0, 256) : String(ua).slice(0, 256);
+  const userAgent = ua.length > 256 ? ua.slice(0, 256) : ua;
 
   const findings = [];
 
@@ -55,7 +59,7 @@ export default function suspiciousRequests(req, res, next) {
   if (matches(PATH_TRAVERSAL_PATTERNS, url))
     findings.push("Path Traversal");
 
-  if (matches(SUSPICIOUS_UA, ua))
+  if (matches(SUSPICIOUS_UA, userAgent))
     findings.push("Suspicious User Agent");
 
   if (findings.length) {
@@ -68,11 +72,11 @@ export default function suspiciousRequests(req, res, next) {
       method: req.method,
       path: req.originalUrl,
       findings,
-      userAgent: uaForLog,
+      userAgent,
     }, "Suspicious request detected");
 
     const blocking = findings.filter(f =>
-      ['Path Traversal'].includes(f)
+      ['SQL Injection', 'Path Traversal'].includes(f)
     );
     if (blocking.length) {
       return res.status(403).json({ error: 'Request blocked: suspicious content detected' });
@@ -81,3 +85,23 @@ export default function suspiciousRequests(req, res, next) {
 
   next();
 }
+
+// === Spec 6: ===
+// === Spec 6: prevent prototype pollution ===
+const FORBIDDEN = new Set(['__proto__', 'prototype', 'constructor']);
+export function sanitizeKey(k) {
+  if (typeof k !== 'string') return null;
+  if (FORBIDDEN.has(k)) return null;
+  if (k.startsWith('__') || k.includes('..')) return null;
+  return k;
+}
+export function sanitizeQueryParams(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const safe = sanitizeKey(k);
+    if (safe !== null) out[safe] = v;
+  }
+  return out;
+}
+

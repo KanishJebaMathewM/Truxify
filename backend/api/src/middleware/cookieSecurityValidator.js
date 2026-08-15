@@ -20,11 +20,8 @@ function validateCookies(req, value) {
 
   for (const cookie of cookies) {
     const cookieValue = String(cookie);
-    // Attribute names are case-insensitive per RFC 6265 (e.g. `httponly`
-    // is equivalent to `HttpOnly`), so match on the lowercased cookie.
-    const lowerCookie = cookieValue.toLowerCase();
     const missingAttributes = RECOMMENDED_ATTRIBUTES.filter(
-      (attribute) => !lowerCookie.includes(attribute.toLowerCase())
+      (attribute) => !cookieValue.includes(attribute)
     );
 
     if (missingAttributes.length === 0) continue;

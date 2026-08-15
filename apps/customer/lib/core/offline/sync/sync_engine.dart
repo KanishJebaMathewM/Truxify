@@ -22,6 +22,9 @@ class SyncEngine {
     ConflictResolver? resolver,
     this.maxRetries = 5,
     this.batchSize = 20,
+    this.httpClient = _defaultHttpClient,
+    this.getCurrentToken = _defaultGetCurrentToken,
+    this.refreshAuthToken = _defaultRefreshAuthToken,
   }) : resolver = resolver ?? ConflictResolver();
 
   final OfflineEventDb db;
@@ -29,6 +32,27 @@ class SyncEngine {
   final ConflictResolver resolver;
   final int maxRetries;
   final int batchSize;
+
+  /// HTTP client used for batch uploads. Injected to keep the engine testable.
+  final http.Client httpClient;
+
+  /// Returns the current Supabase access token, or null if the session is
+  /// missing/expired. Overridable so tests can stub auth state.
+  final String? Function() getCurrentToken;
+
+  /// Attempts to refresh the auth session and returns the new access token, or
+  /// null if the refresh itself failed. Overridable so tests can stub refresh.
+  final Future<String?> Function() refreshAuthToken;
+
+  static http.Client get _defaultHttpClient => http.Client();
+
+  static String? _defaultGetCurrentToken() =>
+      Supabase.instance.client.auth.currentSession?.accessToken;
+
+  static Future<String?> _defaultRefreshAuthToken() async {
+    final refreshed = await Supabase.instance.client.auth.refreshSession();
+    return refreshed.session?.accessToken;
+  }
 
   bool _isSyncing = false;
 
@@ -103,7 +127,8 @@ class SyncEngine {
     final SyncUploadOutcome uploadOutcome;
     try {
       uploadOutcome = await _uploadBatch(resolved);
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Unexpected error during batch upload: $e');
       // An unexpected error during upload must never leave events stuck in the
       // transient `syncing` state; fall through to failure handling below so
       // they are re-queued on a later sync pass.
@@ -144,29 +169,43 @@ class SyncEngine {
     try {
       // 🚀 AUTH EXTRACTION (Issue #361/#362 Fix)
       // Grab the fresh active Supabase JWT token from the local client session
-      final session = Supabase.instance.client.auth.currentSession;
-      final token = session?.accessToken;
+      final token = getCurrentToken();
 
       if (token == null) {
         developer.log('[SyncEngine] ⚠️ Cannot sync batch: User session token is null/expired.');
         return SyncUploadOutcome.retryableFailure;
       }
 
-      final response = await http.post(
-        Uri.parse('$apiBaseUrl/api/v1/trips/events/batch'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token', // ✅ INJECT ACCESS TOKEN
-        },
-        body: body,
-      ).timeout(AppConfig.syncTimeout);
+      final response = await _postBatch(body, token);
 
       if (response.statusCode == 200 || response.statusCode == 202) {
         return SyncUploadOutcome.success;
       }
 
+      // 🔐 Issue #11487: a 401 means the access token expired. Refresh the
+      // session and retry ONCE with the new token instead of blindly retrying
+      // against a dead token. Only a failed refresh is terminal, so a merely
+      // expired token can never permanently discard queued trip events.
       if (response.statusCode == 401) {
-        developer.log('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized).');
+        developer.log('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized). Refreshing token and retrying.');
+        final newToken = await refreshAuthToken();
+        if (newToken == null) {
+          developer.log('[SyncEngine] ❌ Token refresh failed; marking batch as permanently failed.');
+          return SyncUploadOutcome.permanentFailure;
+        }
+        final retry = await _postBatch(body, newToken);
+        if (retry.statusCode == 200 || retry.statusCode == 202) {
+          return SyncUploadOutcome.success;
+        }
+        // A refreshed token means the auth problem is solved; any remaining
+        // failure is a transport issue, not a permanent rejection. Only 4xx
+        // conflict/validation errors are terminal — everything else (429/5xx)
+        // must be re-queued so queued trip events are never silently lost.
+        if (retry.statusCode == 409 ||
+            retry.statusCode == 422 ||
+            retry.statusCode == 400) {
+          return SyncUploadOutcome.permanentFailure;
+        }
         return SyncUploadOutcome.retryableFailure;
       }
 
@@ -180,10 +219,22 @@ class SyncEngine {
       }
 
       return SyncUploadOutcome.retryableFailure;
-    } catch (_) {
+    } catch (e) {
+      developer.log('[SyncEngine] Batch upload threw: $e');
       await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
       return SyncUploadOutcome.retryableFailure;
     }
+  }
+
+  Future<http.Response> _postBatch(String body, String token) {
+    return httpClient.post(
+      Uri.parse('$apiBaseUrl/api/v1/trips/events/batch'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token', // ✅ INJECT ACCESS TOKEN
+      },
+      body: body,
+    ).timeout(AppConfig.syncTimeout);
   }
 
   int _maxRetryCount(List<TripEvent> events) {

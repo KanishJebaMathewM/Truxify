@@ -5,6 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "dispute-trigger",
+        "authentication": "headerAuth",
         "options": {}
       },
       "id": "1d8ea83e-d9a4-4db2-a9b0-30f16f5c5315",
@@ -14,22 +15,45 @@
       "position": [
         250,
         300
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/status",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/freeze",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "4e78b8a5-d8ca-43bc-9cb7-78fe7ea9b10c",
-      "name": "Check Escrow Status",
+      "name": "Freeze Payment Contract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         450,
         300
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -37,7 +61,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
         "options": {}
@@ -90,50 +114,75 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/orders/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/timeline",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/generate-dispute-pdf",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "gpsTrail",
+              "value": "={{$node[\"Query MongoDB GPS Trail\"].json}}"
+            },
+            {
+              "name": "otpLogs",
+              "value": "={{$node[\"Query Supabase OTP Logs\"].json}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "f512c1b1-21c2-4632-bd88-12cd2a8aefaa",
-      "name": "Fetch Order Timeline",
+      "name": "Package Dispute PDF",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         850,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/support/tickets",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/notify-dispute",
         "sendBody": true,
         "bodyParametersUi": {
           "parameter": [
             {
-              "name": "subject",
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "title",
               "value": "Dispute Flagged: Delivery Unconfirmed"
             },
             {
-              "name": "category",
-              "value": "payment"
-            },
-            {
-              "name": "description",
-              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Evidence gathered from the GPS trail and OTP logs."
+              "name": "body",
+              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}."
             }
           ]
         },
         "options": {}
       },
       "id": "76bcca3e-51c3-4d44-be12-2cde2a5bdeee",
-      "name": "Open Support Ticket",
+      "name": "Notify Both Parties",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         1050,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -161,14 +210,30 @@
       "position": [
         1450,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
+          "combinator": "or",
           "string": [
             {
+              "value1": "={{$json.status}}",
+              "operation": "equals",
+              "value2": "disputed"
+            },
+            {
+              "value1": "={{$json.data.status}}",
+              "operation": "equals",
+              "value2": "disputed"
+            },
+            {
               "value1": "={{$json.order.status}}",
+              "operation": "equals",
               "value2": "disputed"
             }
           ]
@@ -186,18 +251,21 @@
     {
       "parameters": {
         "operation": "insert",
-        "table": "order_timeline",
+        "table": "arbitration_records",
         "data": {
-          "order_display_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
-          "milestone": "Escalated to Arbitration",
-          "completed": false,
-          "sort_order": 100
+          "booking_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+          "status": "pending",
+          "details": "Escalated after 24h of inactivity"
         }
       },
       "id": "dc12cbb5-a87f-47bc-9b2f-9811abecdd33",
-      "name": "Record Escalation Event",
+      "name": "Create Arbitration Record",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "position": [
         1850,
         200
@@ -205,7 +273,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escalation Alert: Arbitration Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
         "textBody": "=The dispute for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}} has remained unresolved for 24 hours. Please review the packaged GPS trail and OTP logs.",
         "options": {}
@@ -223,6 +291,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "admin-resolution",
+        "authentication": "headerAuth",
         "options": {}
       },
       "id": "5b23dca9-48cf-4ef2-ba2e-ffbc8601dd77",
@@ -232,22 +301,45 @@
       "position": [
         250,
         600
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$json.body.bookingId}}/status",
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/release",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            }
+          ]
+        },
         "options": {}
       },
       "id": "cc897db2-6d2c-47bc-ad78-87efcdbc5a8f",
-      "name": "Verify Escrow Release",
+      "name": "Release Escrow Payment",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         500,
         600
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
@@ -255,7 +347,7 @@
     },
     {
       "parameters": {
-        "toEmail": "admin@truxify.com",
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
         "subject": "=Escrow Alert: Release Escrow Payment Failed for Booking {{$json.body.bookingId}}",
         "textBody": "=CRITICAL: The Release Escrow Payment step failed after 3 retries for Booking {{$json.body.bookingId}}. Escrow payment was not released on-chain. Immediate manual intervention required.",
         "options": {}
@@ -268,6 +360,38 @@
         500,
         800
       ]
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
+        "subject": "=Escrow Alert: Package Dispute PDF Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Package Dispute PDF step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Dispute evidence could not be packaged. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-dispute-pdf-failed",
+      "name": "Alert Admin — Dispute PDF Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        850,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
+        "subject": "=Escrow Alert: Notify Both Parties Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Notify Both Parties step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. The disputed parties were not notified. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-notify-failed",
+      "name": "Alert Admin — Notify Parties Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        500
+      ]
     }
   ],
   "connections": {
@@ -275,14 +399,14 @@
       "main": [
         [
           {
-            "node": "Check Escrow Status",
+            "node": "Freeze Payment Contract",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Check Escrow Status": {
+    "Freeze Payment Contract": {
       "main": [
         [
           {
@@ -309,40 +433,43 @@
       "main": [
         [
           {
-            "node": "Fetch Order Timeline",
+            "node": "Package Dispute PDF",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Query Supabase OTP Logs": {
+    "Package Dispute PDF": {
       "main": [
         [
           {
-            "node": "Fetch Order Timeline",
+            "node": "Notify Both Parties",
             "type": "main",
             "index": 0
           }
-        ]
-      ]
-    },
-    "Fetch Order Timeline": {
-      "main": [
+        ],
         [
           {
-            "node": "Open Support Ticket",
+            "node": "Alert Admin — Dispute PDF Failed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Open Support Ticket": {
+    "Notify Both Parties": {
       "main": [
         [
           {
             "node": "Wait 24h",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Notify Parties Failed",
             "type": "main",
             "index": 0
           }
@@ -375,10 +502,28 @@
       "main": [
         [
           {
-            "node": "Record Escalation Event",
+            "node": "Create Arbitration Record",
             "type": "main",
             "index": 0
           },
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Arbitration Record": {
+      "main": [
+        [
+          {
+            "node": "Admin Resolution Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
           {
             "node": "Email Admin",
             "type": "main",
@@ -391,7 +536,7 @@
       "main": [
         [
           {
-            "node": "Verify Escrow Release",
+            "node": "Release Escrow Payment",
             "type": "main",
             "index": 0
           }
@@ -412,5 +557,11 @@
     }
   },
   "active": true,
-  "settings": {}
+  "settings": {},
+  "credentials": {
+    "httpHeaderAuth": {
+      "name": "Truxify Internal API Key",
+      "id": ""
+    }
+  }
 }

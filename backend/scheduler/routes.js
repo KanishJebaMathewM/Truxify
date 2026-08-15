@@ -80,7 +80,14 @@ router.delete('/scheduler/tasks', (req, res) => {
                 'LOW': Priority.LOW,
                 'IDLE': Priority.IDLE
             };
-            priorityValue = prioMap[priority.toUpperCase()];
+            const upperPriority = priority.toUpperCase();
+            if (!(upperPriority in prioMap)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid priority value. Must be one of: CRITICAL, HIGH, MEDIUM, LOW, IDLE'
+                });
+            }
+            priorityValue = prioMap[upperPriority];
         }
         
         const count = scheduler.cancelAll(priorityValue);
@@ -235,6 +242,15 @@ router.get('/scheduler/task/:taskId', (req, res) => {
 router.get('/scheduler/tasks', (req, res) => {
     try {
         const { status } = req.query;
+
+        const validStatuses = ['pending', 'running', 'completed', 'failed', 'cancelled'];
+        if (status !== undefined && !validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+            });
+        }
+
         const tasks = scheduler.getTasks(status);
         
         res.json({

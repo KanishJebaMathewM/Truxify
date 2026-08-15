@@ -20,7 +20,7 @@ export class DidPeer2Engine {
     const keySegment = segments[1];
     const serviceSegment = segments[2];
 
-    const publicKeyHex = keySegment.substring(3); // Strip EzVz
+    const publicKeyHex = keySegment.substring(4); // Strip EzVz (4-char prefix)
     const endpoint = Buffer.from(serviceSegment.split('~')[1], 'base64url').toString('utf8');
 
     return {

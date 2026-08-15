@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 
 
@@ -46,6 +47,7 @@ contract TruxifyUpgradeable is
         string reason;
         uint256 createdAt;
         uint256 votingEndsAt;
+        uint256 snapshotBlock;
         uint256 votesFor;
         uint256 votesAgainst;
         bool executed;
@@ -121,7 +123,10 @@ contract TruxifyUpgradeable is
     event EscrowCreated(uint256 indexed escrowId, address customer, address driver, uint256 amount);
     event EscrowReleased(uint256 indexed escrowId, address driver, uint256 amount);
     event EscrowDisputed(uint256 indexed escrowId, address customer);
+<<<<<<< HEAD
+=======
     event EscrowResolved(uint256 indexed escrowId, address recipient, uint256 amount);
+>>>>>>> upstream/main
     event ProposalCreated(uint256 indexed proposalId, address proposer, address implementation);
     event VoteCast(uint256 indexed proposalId, address voter, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed proposalId, bool passed);
@@ -227,10 +232,13 @@ contract TruxifyUpgradeable is
         uint256 requestTimestamp = emergencyUpgradeRequests[newImplementation];
         if (requestTimestamp != 0) {
             require(
+<<<<<<< HEAD
+=======
                 approvedImplementations[newImplementation],
                 "Implementation not approved"
             );
             require(
+>>>>>>> upstream/main
                 block.timestamp >= requestTimestamp + EMERGENCY_UPGRADE_TIMELOCK,
                 "Emergency timelock not yet elapsed"
             );
@@ -308,6 +316,8 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
     emit EscrowDisputed(escrowId, msg.sender);
 }
 
+<<<<<<< HEAD
+=======
 /**
  * @dev Resolves a disputed escrow by releasing the funds to either the
  *      customer (refund) or the driver, as determined by the dispute
@@ -332,6 +342,7 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
     emit EscrowResolved(escrowId, recipient, escrow.amount);
 }
 
+>>>>>>> upstream/main
     // ============ DAO Governance ============
     function createProposal(
         address newImplementation,
@@ -350,6 +361,7 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
             reason: reason,
             createdAt: block.timestamp,
             votingEndsAt: block.timestamp + daoVotingPeriod,
+            snapshotBlock: block.number,
             votesFor: 0,
             votesAgainst: 0,
             executed: false,
@@ -367,10 +379,12 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
         require(!hasVoted[proposalId][msg.sender], "Already voted");
         require(address(governanceToken) != address(0), "Governance token not configured");
 
-        // Voting power comes from token balance, not address count. An
-        // attacker who spins up 1000 empty addresses gets zero extra votes —
-        // they'd need to actually acquire 1000 addresses' worth of tokens.
-        uint256 weight = governanceToken.balanceOf(msg.sender);
+        // Voting power is snapshotted at the proposal's creation block via the
+        // token's checkpointing (OpenZeppelin Votes). This locks each token's
+        // weight to the moment the proposal was created, so transferring tokens
+        // to a fresh address after voting cannot conjure new voting power — the
+        // new address held zero tokens at the snapshot block and reverts below.
+        uint256 weight = IVotes(address(governanceToken)).getPastVotes(msg.sender, proposal.snapshotBlock);
         require(weight > 0, "No voting power");
 
         hasVoted[proposalId][msg.sender] = true;
@@ -490,10 +504,13 @@ function resolveDisputedEscrow(uint256 escrowId, address recipient) external onl
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
         require(
+<<<<<<< HEAD
+=======
             approvedImplementations[newImplementation],
             "Implementation not approved"
         );
         require(
+>>>>>>> upstream/main
             emergencyUpgradeRequests[newImplementation] == 0,
             "Emergency upgrade already requested for this implementation"
         );

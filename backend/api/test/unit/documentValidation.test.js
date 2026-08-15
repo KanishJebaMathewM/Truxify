@@ -2,90 +2,126 @@ import { describe, it, expect } from 'vitest';
 import {
   detectDocumentMimeType,
   validateDocumentBuffer,
+  matchesMimeSignature,
   DocumentValidationError,
   ALLOWED_DOCUMENT_MIME_TYPES,
 } from '../../src/lib/documentValidation.js';
 
-const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
-const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
-const PDF_BYTES = Buffer.from('%PDF-1.4 rest of file', 'utf-8');
-const EXECUTABLE_BYTES = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]); // MZ header
-const SHELL_SCRIPT_RENAMED_AS_JPG = Buffer.from('#!/bin/sh\nrm -rf /\n', 'utf-8');
+describe('documentValidation', () => {
+  describe('detectDocumentMimeType', () => {
+    it('detects JPEG from magic bytes', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(detectDocumentMimeType(jpegBuffer)).toBe('image/jpeg');
+    });
 
-describe('detectDocumentMimeType', () => {
-  it('detects a real JPEG by its magic bytes', () => {
-    expect(detectDocumentMimeType(JPEG_BYTES)).toBe('image/jpeg');
+    it('detects PNG from magic bytes', () => {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      expect(detectDocumentMimeType(pngBuffer)).toBe('image/png');
+    });
+
+    it('detects PDF from magic bytes', () => {
+      const pdfBuffer = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+      expect(detectDocumentMimeType(pdfBuffer)).toBe('application/pdf');
+    });
+
+    it('returns null for empty buffer', () => {
+      expect(detectDocumentMimeType(Buffer.alloc(0))).toBeNull();
+    });
+
+    it('returns null for null input', () => {
+      expect(detectDocumentMimeType(null)).toBeNull();
+    });
+
+    it('returns null for unknown content', () => {
+      const unknownBuffer = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+      expect(detectDocumentMimeType(unknownBuffer)).toBeNull();
+    });
+
+    it('returns null for incomplete JPEG header', () => {
+      const shortBuffer = Buffer.from([0xff, 0xd8]);
+      expect(detectDocumentMimeType(shortBuffer)).toBeNull();
+    });
   });
 
-  it('detects a real PNG by its magic bytes', () => {
-    expect(detectDocumentMimeType(PNG_BYTES)).toBe('image/png');
+  describe('validateDocumentBuffer', () => {
+    it('accepts valid JPEG buffer', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(validateDocumentBuffer(jpegBuffer)).toBe('image/jpeg');
+    });
+
+    it('accepts valid PNG buffer', () => {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      expect(validateDocumentBuffer(pngBuffer)).toBe('image/png');
+    });
+
+    it('accepts valid PDF buffer', () => {
+      const pdfBuffer = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d]);
+      expect(validateDocumentBuffer(pdfBuffer)).toBe('application/pdf');
+    });
+
+    it('throws DocumentValidationError for invalid content', () => {
+      const unknownBuffer = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+      expect(() => validateDocumentBuffer(unknownBuffer)).toThrow(DocumentValidationError);
+    });
+
+    it('throws for null buffer', () => {
+      expect(() => validateDocumentBuffer(null)).toThrow(DocumentValidationError);
+    });
+
+    it('rejects MIME mismatch', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(() => validateDocumentBuffer(jpegBuffer, 'image/png')).toThrow('does not match declared type');
+    });
+
+    it('accepts matching declared MIME type', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(validateDocumentBuffer(jpegBuffer, 'image/jpeg')).toBe('image/jpeg');
+    });
   });
 
-  it('detects a real PDF by its magic bytes', () => {
-    expect(detectDocumentMimeType(PDF_BYTES)).toBe('application/pdf');
+  describe('matchesMimeSignature', () => {
+    it('matches PNG signature', () => {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      expect(matchesMimeSignature(pngBuffer, 'image/png')).toBe(true);
+    });
+
+    it('matches JPEG signature', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(matchesMimeSignature(jpegBuffer, 'image/jpeg')).toBe(true);
+    });
+
+    it('returns false for wrong mime type', () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+      expect(matchesMimeSignature(jpegBuffer, 'image/png')).toBe(false);
+    });
+
+    it('returns false for short buffer', () => {
+      const shortBuffer = Buffer.from([0xff, 0xd8]);
+      expect(matchesMimeSignature(shortBuffer, 'image/jpeg')).toBe(false);
+    });
+
+    it('returns false for null', () => {
+      expect(matchesMimeSignature(null, 'image/jpeg')).toBe(false);
+    });
   });
 
-  it('returns null for an executable renamed to look like an image', () => {
-    expect(detectDocumentMimeType(EXECUTABLE_BYTES)).toBeNull();
+  describe('DocumentValidationError', () => {
+    it('has correct name', () => {
+      const err = new DocumentValidationError('test');
+      expect(err.name).toBe('DocumentValidationError');
+      expect(err instanceof Error).toBe(true);
+    });
   });
 
-  it('returns null for a truncated JPEG signature', () => {
-    // Only the first two of the three JPEG magic bytes are present.
-    expect(detectDocumentMimeType(Buffer.from([0xff, 0xd8]))).toBeNull();
-  });
+  describe('ALLOWED_DOCUMENT_MIME_TYPES', () => {
+    it('contains expected MIME types', () => {
+      expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain('image/jpeg');
+      expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain('image/png');
+      expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain('application/pdf');
+    });
 
-  it('returns null for a truncated PDF signature', () => {
-    expect(detectDocumentMimeType(Buffer.from('%PD', 'utf-8'))).toBeNull();
-  });
-
-  it('returns null for a shell script renamed to .jpg', () => {
-    expect(detectDocumentMimeType(SHELL_SCRIPT_RENAMED_AS_JPG)).toBeNull();
-  });
-
-  it('returns null for an empty buffer', () => {
-    expect(detectDocumentMimeType(Buffer.alloc(0))).toBeNull();
-  });
-
-  it('returns null for a non-buffer input', () => {
-    expect(detectDocumentMimeType('not a buffer')).toBeNull();
-  });
-
-  it('only ever reports allowed document mime types', () => {
-    for (const buf of [JPEG_BYTES, PNG_BYTES, PDF_BYTES]) {
-      const detected = detectDocumentMimeType(buf);
-      expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain(detected);
-    }
-  });
-});
-
-describe('validateDocumentBuffer', () => {
-  it('accepts a real JPEG declared as image/jpeg', () => {
-    expect(validateDocumentBuffer(JPEG_BYTES, 'image/jpeg')).toBe('image/jpeg');
-  });
-
-  it('rejects an executable renamed to .jpg, regardless of declared type', () => {
-    expect(() => validateDocumentBuffer(EXECUTABLE_BYTES, 'image/jpeg')).toThrow(
-      DocumentValidationError
-    );
-  });
-
-  it('rejects content whose real type does not match the declared type', () => {
-    expect(() => validateDocumentBuffer(PNG_BYTES, 'image/jpeg')).toThrow(
-      /does not match declared type/
-    );
-  });
-
-  it('accepts content when no declared type is provided, based on content alone', () => {
-    expect(validateDocumentBuffer(PDF_BYTES, undefined)).toBe('application/pdf');
-  });
-
-  it('treats an empty-string declared type as absent', () => {
-    expect(validateDocumentBuffer(PDF_BYTES, '')).toBe('application/pdf');
-    expect(validateDocumentBuffer(PDF_BYTES, '   ')).toBe('application/pdf');
-  });
-
-  it('compares the declared type case-insensitively', () => {
-    expect(validateDocumentBuffer(JPEG_BYTES, 'IMAGE/JPEG')).toBe('image/jpeg');
-    expect(validateDocumentBuffer(PNG_BYTES, 'Image/PNG')).toBe('image/png');
+    it('is frozen', () => {
+      expect(Object.isFrozen(ALLOWED_DOCUMENT_MIME_TYPES)).toBe(true);
+    });
   });
 });

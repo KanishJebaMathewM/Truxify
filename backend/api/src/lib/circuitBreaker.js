@@ -19,6 +19,7 @@ export class CircuitBreaker {
     this.successCount = 0;
     this.nextAttempt = Date.now();
     this._halfOpenTimer = null;
+    this._halfOpenProbeInFlight = false;
   }
 
   _scheduleHalfOpen() {
@@ -32,7 +33,6 @@ export class CircuitBreaker {
       }
       this._halfOpenTimer = null;
     }, this.resetTimeoutMs);
-    this._halfOpenTimer.unref?.();
   }
 
   getState() {
@@ -58,7 +58,11 @@ export class CircuitBreaker {
     this.reset();
   }
 
+  // Timer is declared at function scope so the finally block can safely clear it even if fn() throws synchronously.
   async execute(fn, ...args) {
+    if (typeof fn !== 'function') {
+      throw new TypeError('circuitBreaker execute: fn must be a function');
+    }
     const currentState = this.getState();
 
     if (currentState === CircuitState.OPEN) {
@@ -67,6 +71,20 @@ export class CircuitBreaker {
         return this.fallback(...args);
       }
       throw new Error(`CircuitBreaker:${this.name} is OPEN`);
+    }
+
+    if (currentState === CircuitState.HALF_OPEN) {
+      // Only a single (or small bounded number of) trial request is admitted
+      // during the recovery probe window; the rest are short-circuited like
+      // OPEN so we don't hammer the struggling dependency (retry-storm risk).
+      if (this._halfOpenProbeInFlight) {
+        logger.warn(`[CircuitBreaker:${this.name}] Probe already in flight, rejecting extra HALF_OPEN request`);
+        if (typeof this.fallback === 'function') {
+          return this.fallback(...args);
+        }
+        throw new Error(`CircuitBreaker:${this.name} is HALF_OPEN (probe in flight)`);
+      }
+      this._halfOpenProbeInFlight = true;
     }
 
     let timer;
@@ -93,6 +111,7 @@ export class CircuitBreaker {
   onSuccess() {
     if (this.state === CircuitState.HALF_OPEN) {
       this.reset();
+      this._halfOpenProbeInFlight = false;
       logger.info(`[CircuitBreaker:${this.name}] Service recovered. State reset to CLOSED`);
     } else {
       this.failureCount = 0;
@@ -106,6 +125,7 @@ export class CircuitBreaker {
 
     if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.failureThreshold) {
       this.state = CircuitState.OPEN;
+      this._halfOpenProbeInFlight = false;
       this.nextAttempt = Date.now() + this.resetTimeoutMs;
       this._scheduleHalfOpen();
       logger.warn(`[CircuitBreaker:${this.name}] Circuit opened until ${new Date(this.nextAttempt).toISOString()}`);

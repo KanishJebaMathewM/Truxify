@@ -20,7 +20,7 @@ const COMMON_DISPATCH_TRANSLATIONS = {
         'turn off engine during loading': 'Apague el motor durante la carga'
     },
     'pa': {
-        'proceed to dock door 14': 'ਡੌਕ ਡੋਰ 14 'ਤੇ ਜਾਓ',
+        'proceed to dock door 14': "ਡੌਕ ਡੋਰ 14 'ਤੇ ਜਾਓ",
         'caution icy bridge ahead': 'ਅੱਗੇ ਬਰਫ਼ੀਲੇ ਪੁਲ ਤੋਂ ਸਾਵਧਾਨ ਰਹੋ',
         'turn off engine during loading': 'ਲੋਡਿੰਗ ਦੌਰਾਨ ਇੰਜਣ ਬੰਦ ਕਰੋ'
     }
@@ -47,7 +47,7 @@ export function translateVoiceTransmission(transmissionParams) {
     const normalizedText = transcriptText.trim().toLowerCase();
     const tgtLangLower = tgtLangKey.toLowerCase();
 
-    let translatedText = transcriptText;
+    let translatedText;
 
     // Perform translation lookup or fallback to synthesized translation engine
     if (COMMON_DISPATCH_TRANSLATIONS[tgtLangLower] && COMMON_DISPATCH_TRANSLATIONS[tgtLangLower][normalizedText]) {

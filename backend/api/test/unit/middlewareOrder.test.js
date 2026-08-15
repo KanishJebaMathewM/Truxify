@@ -30,11 +30,35 @@ const REQUIRED_BEFORE_ROUTES = [
   { name: 'suspicious requests', marker: 'app.use(suspiciousRequests)' },
   { name: 'content-type enforcement', marker: 'app.use(requireJsonContent)' },
   // Fraud detection is deliberately registered per-route (after authenticate)
-  // for the high-value orders/payments/trips routers — see #6321 — so the
-  // marker locks in that mount rather than a global registration.
-  { name: 'fraud detection', marker: "app.use('/api/orders', fraudDetectionMiddleware" },
+  // for the high-value orders/payments/trips routers — see #6321 — so this
+  // locks in that mount rather than a global registration.
+  //
+  // Matched by pattern, not by an exact substring: the argument list between
+  // the path and fraudDetectionMiddleware legitimately grows (`authenticate`
+  // was inserted there), and a literal marker turns that into a red guard
+  // instead of tracking what it is actually asserting.
+  {
+    name: 'fraud detection',
+    pattern: /app\.use\(\s*'\/api\/orders'\s*,(?:[^,)]+,\s*)*\s*fraudDetectionMiddleware\b/g,
+  },
   { name: 'global rate limiter', marker: "app.use('/api/', globalLimiter)" },
 ];
+
+/** Number of times an entry's marker or pattern appears in `source`. */
+function countOccurrences(source, entry) {
+  if (entry.pattern) {
+    return source.match(entry.pattern)?.length ?? 0;
+  }
+  return source.split(entry.marker).length - 1;
+}
+
+/** Offset of an entry's first match, or -1 when absent. */
+function firstIndexOf(source, entry) {
+  if (entry.pattern) {
+    return source.search(entry.pattern);
+  }
+  return source.indexOf(entry.marker);
+}
 
 describe('express middleware registration order', () => {
   let source;
@@ -44,9 +68,9 @@ describe('express middleware registration order', () => {
   });
 
   it('registers every security middleware exactly once', () => {
-    for (const { name, marker } of REQUIRED_BEFORE_ROUTES) {
-      const occurrences = source.split(marker).length - 1;
-      expect(occurrences, `${name} should be registered exactly once`).toBe(1);
+    for (const entry of REQUIRED_BEFORE_ROUTES) {
+      const occurrences = countOccurrences(source, entry);
+      expect(occurrences, `${entry.name} should be registered exactly once`).toBe(1);
     }
   });
 
@@ -54,12 +78,12 @@ describe('express middleware registration order', () => {
     const mount = source.indexOf("app.use('/api/earnings'");
     expect(mount, '/api/earnings should be mounted').toBeGreaterThan(-1);
 
-    for (const { name, marker } of REQUIRED_BEFORE_ROUTES) {
-      const registered = source.indexOf(marker);
-      expect(registered, `${name} should be registered`).toBeGreaterThan(-1);
+    for (const entry of REQUIRED_BEFORE_ROUTES) {
+      const registered = firstIndexOf(source, entry);
+      expect(registered, `${entry.name} should be registered`).toBeGreaterThan(-1);
       expect(
         registered,
-        `/api/earnings is mounted before ${name} — that path would bypass it`
+        `/api/earnings is mounted before ${entry.name} — that path would bypass it`
       ).toBeLessThan(mount);
     }
   });
@@ -82,11 +106,31 @@ describe('express middleware registration order', () => {
     ).toEqual([]);
   });
 
+  it('keeps every high-value router behind fraud detection', () => {
+    // The property the fraud marker is really guarding. Asserted per router so
+    // a removal names the router that lost the middleware.
+    for (const mountPath of ['/api/orders', '/api/payments', '/api/v1/trips']) {
+      const pattern = new RegExp(
+        `app\\.use\\(\\s*'${mountPath}'\\s*,(?:[^,)]+,\\s*)*\\s*fraudDetectionMiddleware\\b`
+      );
+      expect(
+        source,
+        `${mountPath} should be mounted behind fraudDetectionMiddleware`
+      ).toMatch(pattern);
+    }
+  });
+
   it('keeps the earnings mount alongside the other REST routes', () => {
     const earnings = source.indexOf("app.use('/api/earnings'");
-    const orders = source.indexOf("app.use('/api/orders', orderRoutes)");
+    // Matched by prefix, not by the full argument list: /api/orders picked up
+    // `authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware`
+    // along the way, and an exact marker silently degrades to -1 here — which
+    // makes `earnings > orders` pass for the wrong reason.
+    const orders = source.indexOf("app.use('/api/orders'");
     const profile = source.indexOf("app.use('/api/profile'");
 
+    expect(orders, '/api/orders should be mounted').toBeGreaterThan(-1);
+    expect(profile, '/api/profile should be mounted').toBeGreaterThan(-1);
     expect(earnings).toBeGreaterThan(orders);
     expect(earnings).toBeLessThan(profile);
   });

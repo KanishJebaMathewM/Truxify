@@ -128,7 +128,7 @@ const buffer = new TelemetryRingBuffer(MAX_BUFFER_SIZE);
  */
 function enqueue(record) {
   eventsReceived++;
-  let dropped = 0;
+  let dropped;
   try {
     dropped = buffer.push(record);
   } catch (err) {

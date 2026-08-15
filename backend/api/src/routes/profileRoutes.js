@@ -104,7 +104,7 @@ import {
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
-import { supabase, createUserClient } from '../config/db.js';
+import { supabaseAdmin, createUserClient } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -290,7 +290,8 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   }
 
   try {
-    const { data: existing, error: checkErr } = await supabase
+    const userDb = createUserClient(req.token);
+    const { data: existing, error: checkErr } = await userDb
       .from('profiles')
       .select('polygon_wallet_address')
       .eq('id', userId)
@@ -299,7 +300,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     if (checkErr) return res.status(500).json({ error: 'Failed to fetch profile.', details: checkErr.message });
     if (!existing) return res.status(404).json({ error: 'Profile not found.' });
 
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await userDb
       .from('profiles')
       .update({
         polygon_wallet_address: normalized,
@@ -314,7 +315,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user.role === 'driver') {
-      const { error: driverDetailsErr } = await supabase
+      const { error: driverDetailsErr } = await userDb
         .from('driver_details')
         .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
 
@@ -370,6 +371,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     const userId = req.user.id;
     const { full_name, language, dark_mode, is_online, phone, email, number_plate } = req.body;
     const role = req.user.role;
+    const userDb = createUserClient(req.token);
 
     const profileUpdate = {};
     if (full_name !== undefined) profileUpdate.full_name = full_name;
@@ -378,7 +380,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (phone !== undefined) profileUpdate.phone = phone;
     if (email !== undefined) profileUpdate.email = email;
 
-    const { data, error } = await supabase
+    const { data, error } = await userDb
       .from('profiles')
       .update(profileUpdate)
       .eq('id', userId)
@@ -388,7 +390,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     if (error) throw error;
     if (role === 'driver') {
       if (typeof is_online === 'boolean') {
-        const { error: driverError } = await supabase
+        const { error: driverError } = await userDb
         .from('driver_details')
         .update({
           is_online
@@ -400,7 +402,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
 
       if (number_plate !== undefined) {
         const normalizedPlate = sanitizeNumberPlate(number_plate);
-        const { error: truckError } = await supabase
+        const { error: truckError } = await userDb
           .from('trucks')
           .update({
             number_plate: normalizedPlate
@@ -476,7 +478,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     const { fcmToken } = req.body;
     const trimmedToken = fcmToken?.trim();
 
-    const { error } = await supabase
+    const { error } = await createUserClient(req.token)
       .from('profiles')
       .update({
         fcm_token: trimmedToken,
@@ -550,13 +552,14 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
+    const userDb = createUserClient(req.token);
     // PostgREST caps a single response at 1000 rows, so page through the
     // whole history instead of silently truncating the statement.
     const pageSize = 1000;
     const trips = [];
 
     while (true) {
-      let pageQuery = supabase
+      let pageQuery = userDb
         .from('orders')
         .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
         .eq('driver_id', userId)
@@ -588,7 +591,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
 
     // Fetch the driver's name/phone so the statement PDF shows the real driver
     // instead of the app-side 'Driver' fallback.
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await userDb
       .from('profiles')
       .select('full_name, phone')
       .eq('id', userId)
@@ -719,7 +722,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     let profileError = null;
 
     if (uuidRegex.test(targetUserId)) {
-      const result = await supabase
+      const result = await supabaseAdmin
         .from('profiles')
         .select('id, firebase_uid')
         .eq('id', targetUserId)
@@ -729,7 +732,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
     }
 
     if (!profile && !profileError) {
-      const firebaseLookup = await supabase
+      const firebaseLookup = await supabaseAdmin
         .from('profiles')
         .select('id, firebase_uid')
         .eq('firebase_uid', targetUserId)
@@ -764,12 +767,13 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
   const userId = req.user.id;
 
   try {
+    const userDb = createUserClient(req.token);
     // 1. Fetch completed orders / trips for stats.
     // `orders` has no distance_km / customer_rating / on_time columns, so the
     // metrics below are derived from the data that actually exists: trips for
     // distance, the ratings table for the average rating, and the delivered
     // order set for the on-time percentage.
-    const { data: orders, error } = await supabase
+    const { data: orders, error } = await userDb
       .from('orders')
       .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
@@ -779,7 +783,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const { data: tripRows, error: tripsError } = await supabase
+    const { data: tripRows, error: tripsError } = await userDb
       .from('trips')
       .select('distance')
       .eq('driver_id', userId)
@@ -789,7 +793,7 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
     }
 
-    const { data: ratingRows, error: ratingsError } = await supabase
+    const { data: ratingRows, error: ratingsError } = await userDb
       .from('ratings')
       .select('stars')
       .eq('driver_id', userId);

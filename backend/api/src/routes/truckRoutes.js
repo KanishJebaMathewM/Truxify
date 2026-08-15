@@ -114,11 +114,6 @@ function sanitizeTruckName(name) {
     .replace(/on\w+=/gi, '');
 }
 
-function validateCapacity(capacity) {
-  const num = Number(capacity);
-  return Number.isFinite(num) && num > 0 && num <= 100 ? num : null;
-}
-
 const router = express.Router();
 
 /**

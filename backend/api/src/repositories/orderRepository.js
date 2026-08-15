@@ -606,7 +606,7 @@ export class OrderRepository {
   async findStaleFundingOrders(cutoff, { offset = 0, limit = 1000 } = {}) {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, status, cancellation_fee, total_amount, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
       .eq('escrow_status', 'funding')
       .not('pending_bid_acceptance', 'is', null)
       .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')

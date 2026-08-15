@@ -36,6 +36,8 @@ vi.mock('../../src/config/db.js', () => ({
 
 vi.mock('../../src/services/escrow.js', () => ({
   submitEscrowRefund: vi.fn(),
+  submitEscrowCancelWithPenalty: vi.fn(),
+  paisaToMaticWei: vi.fn(),
   getEscrowBooking: vi.fn(),
 }));
 

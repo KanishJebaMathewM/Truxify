@@ -1,6 +1,6 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
+import { submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking } from './escrow.js';
 import { acquireLock, renewLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
@@ -60,7 +60,31 @@ async function finalizeOrRevert(order, orderRepository) {
     if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
       logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
       try {
-        await submitEscrowRefund(order.order_display_id);
+        // Issue #14687: derive the on-chain penalty from the pre-cancel trip
+        // stage persisted as `cancellation_fee` at cancel time, not from the
+        // already-cancelled `order.status` (which would always yield 0%). When
+        // a penalty applies, route through submitEscrowCancelWithPenalty so the
+        // driver is compensated instead of issuing a full refund.
+        const cancellationFee = Number(order.cancellation_fee ?? 0);
+        let driverFeeWei = 0n;
+        if (cancellationFee > 0 && order.escrow_amount_wei != null && order.total_amount) {
+          const totalAmount = Number(order.total_amount);
+          if (Number.isFinite(totalAmount) && totalAmount > 0) {
+            driverFeeWei = (BigInt(order.escrow_amount_wei) * BigInt(cancellationFee)) / BigInt(Math.round(totalAmount));
+          }
+        }
+        if (driverFeeWei === 0n) {
+          driverFeeWei = paisaToMaticWei(cancellationFee);
+        }
+
+        const submitted = driverFeeWei > 0n
+          ? await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei)
+          : await submitEscrowRefund(order.order_display_id);
+
+        if (submitted?.error || !submitted?.txHash) {
+          throw new Error(submitted?.error || 'escrow refund was not submitted');
+        }
+
         await orderRepository.updateOrder(order.id, {
           escrow_status: 'refunded',
           escrow_refund_error: null,

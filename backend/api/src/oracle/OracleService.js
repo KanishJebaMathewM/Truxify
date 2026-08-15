@@ -20,6 +20,14 @@ class OracleService {
     this.supabase = deps.supabase || supabase;
   }
 
+  getStatus() {
+    return {
+      providers: 3,
+      threshold: 2,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   async confirmDelivery({ orderId, otp, gpsCoordinates }) {
     const providerResults = [];
 

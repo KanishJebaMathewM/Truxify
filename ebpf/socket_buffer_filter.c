@@ -38,16 +38,47 @@ struct telemetry_event {
 
 SEC("socket")
 int socket_telemetry_filter(struct __sk_buff *skb) {
-    // Read IP header
+    // Determine the real L2 (Ethernet/VLAN) header length. A flat ETH_HLEN is
+    // wrong for VLAN-tagged frames, where an extra 4-byte tag follows the MACs.
+    __u16 l2_header_len = ETH_HLEN;
+    struct ethhdr eth;
+    if (bpf_skb_load_bytes(skb, 0, &eth, sizeof(eth)) < 0)
+        return 0;
+
+    if (eth.h_proto == bpf_htons(ETH_P_8021Q) ||
+        eth.h_proto == bpf_htons(ETH_P_8021AD)) {
+        __u16 vlan_proto;
+        // The encapsulated EtherType sits just past the 4-byte VLAN tag.
+        if (bpf_skb_load_bytes(skb, ETH_HLEN + 2, &vlan_proto, sizeof(vlan_proto)) < 0)
+            return 0;
+        l2_header_len = ETH_HLEN + 4;
+        // Handle a second (QinQ) VLAN tag the same way.
+        if (vlan_proto == bpf_htons(ETH_P_8021Q) ||
+            vlan_proto == bpf_htons(ETH_P_8021AD)) {
+            l2_header_len = ETH_HLEN + 8;
+        }
+    }
+
+    // Read IP header from the true L2 offset.
     struct iphdr ip;
-    if (bpf_skb_load_bytes(skb, ETH_HLEN, &ip, sizeof(ip)) < 0)
+    if (bpf_skb_load_bytes(skb, l2_header_len, &ip, sizeof(ip)) < 0)
         return 0; // Drop invalid packet
+
+    // Do not assume a fixed 20-byte IP header: honor the real header length
+    // (ip.ihl * 4) after bounds-checking it, so IP options don't misparse L4.
+    if (ip.ihl < 5)
+        return 0;
+    __u16 ip_header_len = ip.ihl * 4;
+    // The full IP header (including options) must fit in the packet.
+    if (skb->len < l2_header_len + ip_header_len)
+        return 0;
 
     if (ip.protocol != IPPROTO_TCP)
         return 0;
 
+    __u32 l4_offset = l2_header_len + ip_header_len;
     struct tcphdr tcp;
-    if (bpf_skb_load_bytes(skb, ETH_HLEN + sizeof(ip), &tcp, sizeof(tcp)) < 0)
+    if (bpf_skb_load_bytes(skb, l4_offset, &tcp, sizeof(tcp)) < 0)
         return 0;
 
     // Get trusted port from config map (default 0 = disabled, meaning all ports filtered)
@@ -74,11 +105,11 @@ int socket_telemetry_filter(struct __sk_buff *skb) {
     // Guard against short/truncated packets: subtracting the L2/L3/L4 header
     // sizes from an undersized skb->len wraps the __u32 and would emit a bogus
     // near-UINT_MAX payload_len in the ring buffer event.
-    if (skb->len < ETH_HLEN + sizeof(ip) + (tcp.doff * 4))
+    if (skb->len < l4_offset + (tcp.doff * 4))
         return 0;
 
     // Calculate payload length
-    __u32 payload_len = skb->len - (ETH_HLEN + sizeof(ip) + (tcp.doff * 4));
+    __u32 payload_len = skb->len - (l4_offset + (tcp.doff * 4));
     if (payload_len > 0) {
         struct telemetry_event *evt = bpf_ringbuf_reserve(&telemetry_ringbuf, sizeof(struct telemetry_event), 0);
         if (evt) {

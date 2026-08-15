@@ -27,7 +27,7 @@ vi.mock('@opentelemetry/api', () => {
   };
 });
 
-vi.mock('../../../../tracing/tracing.js', () => ({
+vi.mock('../../../../src/tracing/tracing.js', () => ({
   default: {
     getTracer: vi.fn(() => ({
       startSpan: vi.fn(() => ({
@@ -40,7 +40,7 @@ vi.mock('../../../../tracing/tracing.js', () => ({
   },
 }));
 
-vi.mock('../../../../core/telemetry/SpanFactory.js', () => ({
+vi.mock('../../../../src/core/telemetry/SpanFactory.js', () => ({
   default: {
     startWorkerSpan: vi.fn(() => ({
       setStatus: vi.fn(),
@@ -51,7 +51,7 @@ vi.mock('../../../../core/telemetry/SpanFactory.js', () => ({
   STANDARD_ATTRIBUTES: {},
 }));
 
-vi.mock('../../../../core/telemetry/ContextPropagator.js', () => ({
+vi.mock('../../../../src/core/telemetry/ContextPropagator.js', () => ({
   ContextPropagator: {
     snapshot: vi.fn(() => ({ mock: 'snapshot' })),
     restore: vi.fn((snapshot, fn) => fn()),

@@ -44,7 +44,7 @@ class SpatialTemporalGAT(nn.Module):
     
     def __init__(
         self,
-        in_features: int = 64,
+        in_features: int = 5,
         hidden_features: int = 128,
         out_features: int = 32,
         num_heads: int = 8,

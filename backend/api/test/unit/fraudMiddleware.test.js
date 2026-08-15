@@ -14,7 +14,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { fraudDetectionMiddleware, networkAnalysisMiddleware } from '../../src/middleware/fraudMiddleware.js';
+import { fraudDetectionMiddleware, networkAnalysisMiddleware, clampRiskScore, accumulateRisk } from '../../src/middleware/fraudMiddleware.js';
 
 function makeReqRes(overrides = {}) {
   const req = {
@@ -96,7 +96,6 @@ describe('fraudMiddleware', () => {
 
 
 // === Spec 13 test ===
-import { clampRiskScore, accumulateRisk } from '../../src/middleware/fraudMiddleware.js';
 describe('clampRiskScore', () => {
   it('50 passes', () => { expect(clampRiskScore(50)).toBe(50); });
   it('150 → 100', () => { expect(clampRiskScore(150)).toBe(100); });

@@ -229,7 +229,7 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
 
     return res.status(201).json({ message: 'Truck registered successfully.', truck });
   } catch (err) {
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return res.status(500).json({ error: 'Internal Server Error', details: err?.message });
   }
 });
 

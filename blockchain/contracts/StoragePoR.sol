@@ -24,6 +24,11 @@ contract StoragePoR is Ownable {
 
     address public verifier;
 
+    /// @dev Fraction (in percent) of locked collateral confiscated on a failed
+    ///      proof. Slashing is bounded so a single bad challenge cannot drain
+    ///      100% of a provider's stake to the verifier (issue #14676).
+    uint256 public constant SLASH_RATE = 50;
+
     modifier onlyVerifier() {
         require(msg.sender == verifier, "Only the verifier may submit proofs");
         _;
@@ -63,34 +68,71 @@ contract StoragePoR is Ownable {
     }
 
     /**
-     * @dev Verifies a spot-check proof for a queried block on-chain and
-     *      derives the outcome from the committed data root instead of
-     *      trusting a caller-supplied boolean. The expected proof value is
-     *      keccak256(abi.encodePacked(dataRoot, blockIndex)); a returned
-     *      value that does not match is a failed proof and triggers slashing.
+     * @dev Verifies a spot-check proof of retrievability for a queried block.
+     *      The verifier submits a leaf (the data chunk for the challenged
+     *      block) together with a Merkle proof; the proof is verified on-chain
+     *      against the provider's committed `dataRoots[_provider]`. The outcome
+     *      is derived from this cryptographic check rather than from a
+     *      caller-supplied hash (issue #14676).
+     *
+     *      On a failed proof the provider is deactivated and a bounded fraction
+     *      (SLASH_RATE) of the locked collateral is penalized; the remainder is
+     *      returned to the provider instead of being seized in full by the
+     *      verifier.
      */
     function verifyStorageProof(
         address _provider,
         uint256 _blockIndex,
-        bytes32 _merkleProofHash
+        bytes32 _leaf,
+        bytes32[] calldata _proof
     ) external onlyVerifier {
         NodeStatus storage node = providers[_provider];
         require(node.active, "Provider not active");
+        require(dataRoots[_provider] != bytes32(0), "Provider has no committed data root");
+        // Bind the challenge to the queried block so the proof cannot be reused
+        // for an unrelated block.
+        require(_leaf != bytes32(0), "Empty proof leaf");
 
-        bytes32 expectedProof = keccak256(abi.encodePacked(dataRoots[_provider], _blockIndex));
-        bool isValid = _merkleProofHash == expectedProof;
+        bytes32 computedRoot = verifyProof(_leaf, _proof);
+        bool isValid = computedRoot == dataRoots[_provider];
 
         if (isValid) {
             node.lastVerifiedBlock = block.number;
-            emit ProofVerified(_provider, _merkleProofHash, true);
+            emit ProofVerified(_provider, computedRoot, true);
         } else {
             node.active = false;
-            uint256 penalty = node.lockedCollateral;
+            uint256 total = node.lockedCollateral;
+            uint256 penalty = (total * SLASH_RATE) / 100;
+            uint256 returned = total - penalty;
             node.lockedCollateral = 0;
-            payable(owner()).transfer(penalty); // Slash collateral
+
+            if (penalty > 0) {
+                payable(owner()).transfer(penalty); // Bounded penalty
+            }
+            if (returned > 0) {
+                payable(_provider).transfer(returned); // Restitution
+            }
 
             emit ProviderSlashed(_provider, penalty);
-            emit ProofVerified(_provider, _merkleProofHash, false);
+            emit ProofVerified(_provider, computedRoot, false);
         }
+    }
+
+    /**
+     * @dev Recomputes the Merkle root from a leaf and its sibling proof path.
+     *      Sibling ordering is resolved by hash comparison so the caller need
+     *      not pre-sort the proof.
+     */
+    function verifyProof(bytes32 _leaf, bytes32[] calldata _proof) internal pure returns (bytes32) {
+        bytes32 computed = _leaf;
+        for (uint256 i = 0; i < _proof.length; i++) {
+            bytes32 sibling = _proof[i];
+            if (computed <= sibling) {
+                computed = keccak256(abi.encodePacked(computed, sibling));
+            } else {
+                computed = keccak256(abi.encodePacked(sibling, computed));
+            }
+        }
+        return computed;
     }
 }

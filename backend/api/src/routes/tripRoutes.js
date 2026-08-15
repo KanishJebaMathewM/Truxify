@@ -613,7 +613,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       },
     });
   } catch (err) {
-    return res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    return res.status(500).json({ error: 'Internal Server Error', details: err?.message });
   }
 });
 

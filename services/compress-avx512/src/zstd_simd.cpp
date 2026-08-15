@@ -69,15 +69,18 @@ std::vector<float> Avx512MatrixCompressor::decompressFloatMatrix(
         return {};
     }
 
-    std::vector<float> restored(decompCap / sizeof(float));
+    std::vector<uint8_t> restoredBytes(decompCap);
     size_t written = ZSTD_decompress(
-        restored.data(), decompCap, compressed.data(), compressed.size()
+        restoredBytes.data(), decompCap, compressed.data(), compressed.size()
     );
-    if (ZSTD_isError(written)) {
+    if (ZSTD_isError(written) || written % sizeof(float) != 0) {
         return {};
     }
 
-    restored.resize(written / sizeof(float));
+    std::vector<float> restored(
+        reinterpret_cast<float*>(restoredBytes.data()),
+        reinterpret_cast<float*>(restoredBytes.data() + written)
+    );
     return restored;
 #else
     size_t count = compressed.size() / sizeof(float);

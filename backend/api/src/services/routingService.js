@@ -107,7 +107,7 @@ export async function optimizeWaypoints(start, end, waypoints, departureDate, de
     // Filter out any undefined slots just in case
     return optimizedWaypoints.filter(Boolean);
   } catch (err) {
-    logger.error('Failed to optimize route with OSRM:', err.message);
+    logger.error('Failed to optimize route with OSRM:', err?.message ?? String(err));
     return effectiveWaypoints; // Fallback to original order on failure
   }
 }

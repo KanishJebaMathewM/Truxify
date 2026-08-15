@@ -1,7 +1,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
@@ -165,7 +165,7 @@ class DigilockerService {
     const serialized = JSON.stringify({ dlData, rcData, insuranceData });
     const documentHash = '0x' + crypto.createHash('sha256').update(serialized).digest('hex');
 
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile, error: profileErr } = await supabaseAdmin
       .from('profiles')
       .select('polygon_wallet_address')
       .eq('id', userId)
@@ -191,7 +191,7 @@ class DigilockerService {
       logger.info(`[DigilockerService] KYC verifier contract address/private key not set. Mocking on-chain hash submission.`);
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('profiles')
       .update({ is_digilocker_verified: true })
       .eq('id', userId);
@@ -292,7 +292,7 @@ class DigilockerService {
     for (const doc of documents) {
       const docHash = '0x' + crypto.createHash('sha256').update(doc.data).digest('hex');
 
-      const { data: profile } = await supabase
+      const { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', driverId)
@@ -347,7 +347,7 @@ class DigilockerService {
         updated_at: new Date().toISOString()
       };
 
-      const { data: existing, error: findError } = await supabase
+      const { data: existing, error: findError } = await supabaseAdmin
         .from('driver_documents')
         .select('id')
         .eq('driver_id', driverId)
@@ -361,13 +361,13 @@ class DigilockerService {
       }
 
       const { data: docRecord, error: dbErr } = existing
-        ? await supabase
+        ? await supabaseAdmin
             .from('driver_documents')
             .update(docPayload)
             .eq('id', existing.id)
             .select()
             .single()
-        : await supabase
+        : await supabaseAdmin
             .from('driver_documents')
             .insert(docPayload)
             .select()

@@ -14,7 +14,7 @@ function isCacheEnabled() {
 
 export async function getProfile(userId) {
   return measureExecution('ProfileService.getProfile', async () => {
-  if (!supabase) {
+  if (!supabaseAdmin) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
 
@@ -30,7 +30,7 @@ export async function getProfile(userId) {
     }
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('profiles')
     .select('*')
     .eq('id', userId)
@@ -101,7 +101,7 @@ export async function getCustomerStats(userId) {
 
 export async function getDriverDetails(userId) {
   return measureExecution('ProfileService.getDriverDetails', async () => {
-  if (!supabase) {
+  if (!supabaseAdmin) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
 
@@ -117,7 +117,7 @@ export async function getDriverDetails(userId) {
     }
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('driver_details')
     .select('*')
     .eq('user_id', userId)
@@ -139,8 +139,8 @@ export async function getDriverDetails(userId) {
 
 export async function createProfile(profileData) {
   return measureExecution('ProfileService.createProfile', async () => {
-  if (!supabase) throw new Error('Supabase client not configured');
-  const { data, error } = await supabase.from('profiles').insert(profileData).select().single();
+  if (!supabaseAdmin) throw new Error('Supabase client not configured');
+  const { data, error } = await supabaseAdmin.from('profiles').insert(profileData).select().single();
   if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });
@@ -148,8 +148,8 @@ export async function createProfile(profileData) {
 
 export async function updateProfile(userId, updateData) {
   return measureExecution('ProfileService.updateProfile', async () => {
-  if (!supabase) throw new Error('Supabase client not configured');
-  const { data, error } = await supabase.from('profiles').update(updateData).eq('id', userId).select().single();
+  if (!supabaseAdmin) throw new Error('Supabase client not configured');
+  const { data, error } = await supabaseAdmin.from('profiles').update(updateData).eq('id', userId).select().single();
   if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });

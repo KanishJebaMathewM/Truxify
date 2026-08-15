@@ -33,7 +33,9 @@ contract SubstrateBridge is Ownable {
         require(!processedMessages[_messageHash], "Message already processed by bridge");
         require(_signature.length == 65, "Invalid bridge transaction signature");
         require(
-            _messageHash.toEthSignedMessageHash().recover(_signature) == owner(),
+            keccak256(abi.encodePacked(_messageHash, _destParachainId, _recipient, _amount))
+                .toEthSignedMessageHash()
+                .recover(_signature) == owner(),
             "Invalid bridge transaction signature"
         );
 

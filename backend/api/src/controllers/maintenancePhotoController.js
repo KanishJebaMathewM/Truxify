@@ -64,7 +64,7 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Verify ticket exists and belongs to this driver
-    const { data: ticket, error: ticketError } = await supabase
+    const { data: ticket, error: ticketError } = await userClient
       .from('truck_maintenance_tickets')
       .select('id, driver_id, photo_urls')
       .eq('id', ticketId)

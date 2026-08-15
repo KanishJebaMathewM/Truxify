@@ -502,7 +502,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
 
     return res.json({ success: true, message: 'FCM token updated successfully.' });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to update FCM token.', details: err.message });
+    return res.status(500).json({ error: 'Failed to update FCM token.', details: err?.message });
   }
 });
 

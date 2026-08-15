@@ -105,13 +105,6 @@ export const SecurityAdmin = {
 // 4. CORE MIDDLEWARE ENGINE
 // ==========================================
 
-function parseEnvNumber(raw, fallback, { min } = {}) {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return fallback;
-  if (min !== undefined && n < min) return fallback;
-  return n;
-}
-
 export default function authFailureMonitor(req, res, next) {
   const ip = extractClientIP(req);
 

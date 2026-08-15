@@ -5,8 +5,6 @@
  */
 import logger from '../middleware/logger.js';
 
-import logger from '../middleware/logger.js';
-
 const checkBypassEligibility = async (driverId, lat, lng) => {
   // No real WIM/bypass provider (Drivewyze/PrePass) is integrated. The
   // previous implementation returned a Math.random() coin-flip presented as a

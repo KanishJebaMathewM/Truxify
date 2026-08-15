@@ -144,19 +144,19 @@ pub fn compress_data(data: &[u8]) -> Vec<u8> {
     }
 
     let mut compressed = Vec::new();
-    let mut count = 1;
-    
+    let mut count: u32 = 1;
+
     for i in 1..data.len() {
         if data[i] == data[i-1] {
             count += 1;
         } else {
             compressed.push(data[i-1]);
-            compressed.push(count);
+            compressed.extend_from_slice(&count.to_le_bytes());
             count = 1;
         }
     }
     compressed.push(data[data.len()-1]);
-    compressed.push(count);
-    
+    compressed.extend_from_slice(&count.to_le_bytes());
+
     compressed
 }

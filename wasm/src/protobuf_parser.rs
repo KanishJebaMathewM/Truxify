@@ -61,10 +61,11 @@ pub fn decode_protobuf_telemetry_zero_copy(protobuf_bytes: &[u8]) -> String {
                     None => break,
                 };
                 idx += c;
-                let len = len as usize;
-                if idx + len > protobuf_bytes.len() {
+                let remaining = (protobuf_bytes.len() - idx) as u64;
+                if len > remaining {
                     break;
                 }
+                let len = len as usize;
                 idx += len;
             }
             _ => break,
@@ -173,5 +174,17 @@ mod tests {
         let out = decode_protobuf_telemetry_zero_copy(&payload);
         assert!(out.contains("\"status\":\"error\""));
         assert!(!out.contains("28.6139"));
+    }
+
+    #[test]
+    fn oversized_length_delimited_field_is_rejected() {
+        // Length-delimited field (tag wire_type 2) with a u64::MAX declared length.
+        // Must not truncate/overflow or hang; parsing should safely stop.
+        let tag = (3u64 << 3) | 2;
+        let mut payload = encode_varint(tag);
+        payload.extend(encode_varint(u64::MAX));
+        payload.extend_from_slice(&[0u8; 16]);
+        let out = decode_protobuf_telemetry_zero_copy(&payload);
+        assert!(out.contains("\"status\":\"error\""));
     }
 }

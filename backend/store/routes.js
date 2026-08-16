@@ -1,5 +1,5 @@
 import express from 'express';
-import GlobalStore from './Globalreq.store.js';
+import GlobalStore from './GlobalStore.js';
 import logger from '../api/src/middleware/logger.js';
 import { authenticate } from '../api/src/middleware/auth.js';
 

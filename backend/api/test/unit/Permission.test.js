@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { Permission } from "../../../src/core/auth/Permission.js";
+import { Permission } from "../../src/core/auth/Permission.js";
 
 describe("Permission", () => {
   it("rejects non-string action in constructor", () => {

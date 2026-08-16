@@ -24,7 +24,6 @@ describe('redisLock', () => {
 
 
 // === Spec 15 test ===
-import { LockState } from '../../src/lib/redisLock.js';
 describe('LockState', () => {
   it('acquires once', () => { const l = new LockState(); expect(l.acquire()).toBe(true); expect(l.acquire()).toBe(false); });
   it('release once ok', () => { const l = new LockState(); l.acquire(); expect(l.release()).toBe(true); });

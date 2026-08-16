@@ -84,7 +84,7 @@ describe('errors', () => {
   it('all subclasses are catchable as Error', () => {
     const errs = [new NotFoundError(), new ValidationError(), new UnauthorizedError()]
     for (const err of errs) {
-      let caught = false
+      let caught
       try { throw err } catch (e) { caught = true; expect(e).toBe(err) }
       expect(caught).toBe(true)
     }

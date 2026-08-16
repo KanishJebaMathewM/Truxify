@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getLiveTrafficMultiplier } from '../../src/services/trafficService.js';
 
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  default: mockLogger,
 }));
 
 describe('trafficService', () => {

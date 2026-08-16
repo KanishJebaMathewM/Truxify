@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSupabase = {};
-vi.mock('../../src/config/db.js', () => ({
+vi.mock('../../../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
   supabase: mockSupabase,
   supabaseAdmin: mockSupabase,
@@ -9,61 +9,133 @@ vi.mock('../../src/config/db.js', () => ({
   get firebaseAdmin() { return mockSupabase; },
 }));
 
-vi.mock('../../src/middleware/logger.js', () => ({
+vi.mock('../../../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('../../src/core/performanceMetrics.js', () => ({
+vi.mock('../../../../src/core/performanceMetrics.js', () => ({
   measureExecution: (_name, fn) => fn(),
 }));
 
 // Mock all health check modules
-vi.mock('../../src/core/health/checks/supabaseHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/supabaseHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'supabase',
+    status: 'healthy',
+    critical: true,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/mongodbHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/mongodbHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'mongodb',
+    status: 'healthy',
+    critical: true,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/postgresHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/postgresHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'postgres',
+    status: 'healthy',
+    critical: true,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/redisHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/redisHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'redis',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/firebaseHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/firebaseHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'firebase',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/polygonHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/polygonHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'polygon',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/escrowHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/escrowHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'escrow',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/kafkaHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/kafkaHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'kafka',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/graphqlHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/graphqlHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'graphql',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/websocketHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/websocketHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'websocket',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/mlHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/mlHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'ml_engine',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
-vi.mock('../../src/core/health/checks/workerHealth.js', () => ({
-  default: vi.fn(() => ({ status: 'healthy' })),
+vi.mock('../../../../src/core/health/checks/workerHealth.js', () => ({
+  default: vi.fn(() => ({
+    name: 'workers',
+    status: 'healthy',
+    critical: false,
+    responseTime: 5,
+    timestamp: new Date().toISOString(),
+  })),
 }));
 
 describe('health/index.js — createDefaultAggregator', () => {
@@ -72,7 +144,7 @@ describe('health/index.js — createDefaultAggregator', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    const module = await import('../../src/core/health/index.js');
+    const module = await import('../../../../src/core/health/index.js');
     createDefaultAggregator = module.createDefaultAggregator;
     HealthAggregator = module.HealthAggregator;
   });

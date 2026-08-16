@@ -10,7 +10,7 @@ vi.mock('../../src/core/events/EventBus.js', () => ({ EventBus: vi.fn() }));
 
 describe('WorkerEventAdapter', () => {
   it('provides a fallback class when module unavailable', async () => {
-    const { WorkerEventAdapter } = await import('../../src/core/events/WorkerEventAdapter.js');
+    const { WorkerEventAdapter } = await import('../../src/core/events/adapters/WorkerEventAdapter.js');
     expect(WorkerEventAdapter).toBeDefined();
   });
 });

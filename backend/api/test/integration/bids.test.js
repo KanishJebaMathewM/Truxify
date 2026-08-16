@@ -22,7 +22,6 @@ vi.mock('../../src/services/escrow.js', async () => {
     escrowDeposit: vi.fn(),
     escrowRelease: vi.fn(),
     submitEscrowRefund: vi.fn(),
-    submitEscrowRefund: vi.fn(),
     confirmEscrowRefund: vi.fn(),
     // Mirrors the real implementation's escrow:<id> booking id derivation
     getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),

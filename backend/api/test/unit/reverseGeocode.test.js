@@ -127,8 +127,6 @@ describe('reverseGeocode', () => {
   });
 });
 
-
-import { clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
 describe('clampGeohashPrecision', () => {
   it('null -> clamped to MIN 1', () => { expect(clampGeohashPrecision(null)).toBe(1); });
   it('15 -> clamped to 12', () => { expect(clampGeohashPrecision(15)).toBe(12); });

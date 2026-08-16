@@ -2088,7 +2088,6 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { publish: vi.fn().mockResolvedValue(1), get: redisGet, set: redisSet, del: vi.fn() },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
         firebaseAdmin: null,

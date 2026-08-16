@@ -61,7 +61,11 @@ const ALREADY_COMPRESSED = [
 export function shouldCompress(req, res) {
   // Explicit per-request opt-out. Useful for debugging and for endpoints that
   // stream, where buffering for compression would defeat the point.
-  if (req.headers['x-no-compression']) {
+  if (req.headers['x-no-compression'] !== undefined) {
+    return false;
+  }
+
+  if (typeof res.getHeader !== 'function') {
     return false;
   }
 

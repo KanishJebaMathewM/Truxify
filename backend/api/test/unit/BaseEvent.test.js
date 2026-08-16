@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { BaseEvent } from "../../src/core/events/BaseEvent.js";
 import { EVENT_CATEGORIES, EventMetadata } from "../../src/core/events/EventMetadata.js";
 

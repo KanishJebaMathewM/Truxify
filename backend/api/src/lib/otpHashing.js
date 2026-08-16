@@ -53,7 +53,7 @@ export function constantTimeEqualHex(a, b) {
   // Reject non-hex input before any comparison to preserve the timing
   // guarantee for valid inputs.  Buffer.from with hex encoding silently
   // truncates at the first invalid char, so we validate upfront.
-  if (!/^[0-9a-fA-F]+$/.test(a) || !/^[0-9a-fA-F]+$/.test(b)) return false;
+  if (!/^[0-9a-fA-F]*$/.test(a) || !/^[0-9a-fA-F]*$/.test(b)) return false;
   // Pad the shorter string with null bytes so both buffers are the same length.
   // This keeps the crypto.timingSafeEqual call constant-time regardless of
   // whether the inputs differ in length.

@@ -21,7 +21,7 @@ const { policyMock, PolicyErrorMock } = vi.hoisted(() => {
       this.name = 'PolicyError';
     }
   }
-  return { policyMock: { authorize: vi.fn() }, PolicyErrorMock };
+  return { policyMock: { authorize: vi.fn(), isOwnershipOnlyPolicy: () => false }, PolicyErrorMock };
 });
 
 // Mock the policy engine so the real requirePolicy middleware can be

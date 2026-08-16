@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateOrderDisplayId, validateOrderDisplayId, parseDisplayId } from '../../../src/lib/orderDisplayId.js';
+import { generateOrderDisplayId, isValidOrderDisplayId, parseDisplayId } from '../../src/lib/orderDisplayId.js';
 
 describe('orderDisplayId.js', () => {
   describe('generateOrderDisplayId', () => {
@@ -18,16 +18,16 @@ describe('orderDisplayId.js', () => {
     });
   });
 
-  describe('validateOrderDisplayId', () => {
+  describe('isValidOrderDisplayId', () => {
     it('returns true for generated ID', () => {
       const id = generateOrderDisplayId();
-      expect(validateOrderDisplayId(id)).toBe(true);
+      expect(isValidOrderDisplayId(id)).toBe(true);
     });
 
     it('returns false for invalid format', () => {
-      expect(validateOrderDisplayId('')).toBe(false);
-      expect(validateOrderDisplayId(null)).toBe(false);
-      expect(validateOrderDisplayId(undefined)).toBe(false);
+      expect(isValidOrderDisplayId('')).toBe(false);
+      expect(isValidOrderDisplayId(null)).toBe(false);
+      expect(isValidOrderDisplayId(undefined)).toBe(false);
     });
   });
 });

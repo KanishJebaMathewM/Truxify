@@ -45,7 +45,7 @@ describe('DomainError', () => {
 
   it('can be caught as a regular Error', () => {
     const err = new DomainError(404, { error: 'not found' })
-    let caught = false
+    let caught
     try {
       throw err
     } catch (e) {

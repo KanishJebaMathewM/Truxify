@@ -125,7 +125,6 @@ describe('otpHashing', () => {
 
 
 // === Spec 12 test ===
-import { describe, it, expect } from 'vitest';
 describe('constantTimeEqualHex', () => {
   it('equal returns true', () => { expect(constantTimeEqualHex('abcdef', 'abcdef')).toBe(true); });
   it('different returns false', () => { expect(constantTimeEqualHex('abcdef', '123456')).toBe(false); });

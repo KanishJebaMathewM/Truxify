@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and push API canary (previous ref)
         if: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./previous/backend/api
           target: production
@@ -55,7 +55,7 @@ jobs:
             ghcr.io/kanishjebamathewm/truxify-api:canary
 
       - name: Build and push API
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: backend/api
           target: production
@@ -82,7 +82,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push ML
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: backend/ml
           push: true

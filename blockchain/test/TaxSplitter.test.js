@@ -107,4 +107,124 @@ describe("TaxSplitter Contract", function () {
     expect(taxAuthAfter - taxAuthBefore).to.equal(ethers.parseEther("0.13"));
     expect(await ethers.provider.getBalance(splitter.getAddress())).to.equal(0n);
   });
+
+  it("Should revert a replayed payout id instead of paying out twice", async function () {
+    const [owner, driver, taxAuth] = await ethers.getSigners();
+    const TaxSplitter = await ethers.getContractFactory("TaxSplitter");
+    const splitter = await TaxSplitter.deploy();
+
+    const payoutId = ethers.keccak256(ethers.toUtf8Bytes("PAYOUT_RETRY"));
+    const totalAmount = ethers.parseEther("1.0");
+
+    const tx = await splitter.splitPayout(
+      payoutId,
+      driver.address,
+      taxAuth.address,
+      totalAmount,
+      12,
+      1,
+      { value: totalAmount }
+    );
+    await tx.wait();
+
+    const driverAfterFirst = await ethers.provider.getBalance(driver.address);
+    const taxAuthAfterFirst = await ethers.provider.getBalance(taxAuth.address);
+
+    // The payer retries the same logical payout, e.g. after a timed-out RPC.
+    await expect(
+      splitter.splitPayout(
+        payoutId,
+        driver.address,
+        taxAuth.address,
+        totalAmount,
+        12,
+        1,
+        { value: totalAmount }
+      )
+    ).to.be.revertedWith("Payout already processed");
+
+    // Neither wallet was credited a second time.
+    expect(await ethers.provider.getBalance(driver.address)).to.equal(driverAfterFirst);
+    expect(await ethers.provider.getBalance(taxAuth.address)).to.equal(taxAuthAfterFirst);
+  });
+
+  it("Should expose processedPayouts so a payer can check before retrying", async function () {
+    const [owner, driver, taxAuth] = await ethers.getSigners();
+    const TaxSplitter = await ethers.getContractFactory("TaxSplitter");
+    const splitter = await TaxSplitter.deploy();
+
+    const payoutId = ethers.keccak256(ethers.toUtf8Bytes("PAYOUT_LOOKUP"));
+    const totalAmount = ethers.parseEther("1.0");
+
+    expect(await splitter.processedPayouts(payoutId)).to.equal(false);
+
+    const tx = await splitter.splitPayout(
+      payoutId,
+      driver.address,
+      taxAuth.address,
+      totalAmount,
+      12,
+      1,
+      { value: totalAmount }
+    );
+    await tx.wait();
+
+    expect(await splitter.processedPayouts(payoutId)).to.equal(true);
+  });
+
+  it("Should still process a distinct payout id after an earlier one settled", async function () {
+    const [owner, driver, taxAuth] = await ethers.getSigners();
+    const TaxSplitter = await ethers.getContractFactory("TaxSplitter");
+    const splitter = await TaxSplitter.deploy();
+
+    const totalAmount = ethers.parseEther("1.0");
+    const firstId = ethers.keccak256(ethers.toUtf8Bytes("PAYOUT_SEQ_1"));
+    const secondId = ethers.keccak256(ethers.toUtf8Bytes("PAYOUT_SEQ_2"));
+
+    await (await splitter.splitPayout(
+      firstId, driver.address, taxAuth.address, totalAmount, 12, 1, { value: totalAmount }
+    )).wait();
+
+    const taxAuthBefore = await ethers.provider.getBalance(taxAuth.address);
+
+    // A different payout id is unrelated and must go through normally.
+    await (await splitter.splitPayout(
+      secondId, driver.address, taxAuth.address, totalAmount, 12, 1, { value: totalAmount }
+    )).wait();
+
+    const taxAuthAfter = await ethers.provider.getBalance(taxAuth.address);
+    expect(taxAuthAfter - taxAuthBefore).to.equal(ethers.parseEther("0.13"));
+    expect(await splitter.processedPayouts(secondId)).to.equal(true);
+  });
+
+  it("Should block a tax-authority re-entrancy replay of the in-flight payout id", async function () {
+    const [owner, driver] = await ethers.getSigners();
+    const TaxSplitter = await ethers.getContractFactory("TaxSplitter");
+    const splitter = await TaxSplitter.deploy();
+
+    const ReentrantTaxAuthority = await ethers.getContractFactory("ReentrantTaxAuthority");
+    const attacker = await ReentrantTaxAuthority.deploy(await splitter.getAddress());
+
+    const payoutId = ethers.keccak256(ethers.toUtf8Bytes("PAYOUT_REENTRANT"));
+    const totalAmount = ethers.parseEther("1.0");
+
+    // Fund the attacker so its re-entrant call can carry its own msg.value.
+    await (await attacker.arm(payoutId, driver.address, { value: ethers.parseEther("1.0") })).wait();
+
+    const driverBefore = await ethers.provider.getBalance(driver.address);
+    await (await splitter.splitPayout(
+      payoutId,
+      driver.address,
+      await attacker.getAddress(),
+      totalAmount,
+      12,
+      1,
+      { value: totalAmount }
+    )).wait();
+    const driverAfter = await ethers.provider.getBalance(driver.address);
+
+    // The re-entrant call hit the guard, so the driver was paid exactly once.
+    expect(await attacker.reentrySucceeded()).to.equal(false);
+    expect(driverAfter - driverBefore).to.equal(ethers.parseEther("0.87"));
+  });
 });

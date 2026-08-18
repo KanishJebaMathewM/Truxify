@@ -9,6 +9,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  */
 contract TaxSplitter is Ownable {
 
+    /// @dev Payout ids that have already been settled. Guards against a payer
+    /// replaying the same logical payout (e.g. retrying after an RPC timeout).
+    mapping(bytes32 => bool) public processedPayouts;
+
     event TaxDeducted(bytes32 indexed payoutId, address indexed driver, uint256 gstAmount, uint256 tdsAmount, uint256 netPayout);
 
     constructor() Ownable(msg.sender) {}
@@ -25,6 +29,7 @@ contract TaxSplitter is Ownable {
         uint256 _gstRatePct,
         uint256 _tdsRatePct
     ) external payable returns (uint256 netPayout) {
+        require(!processedPayouts[_payoutId], "Payout already processed");
         require(_totalAmount > 0, "Total amount must be > 0");
         require(msg.value >= _totalAmount, "Insufficient value sent for tax split");
         require(_gstRatePct + _tdsRatePct <= 100, "Tax rates exceed 100%");
@@ -32,6 +37,10 @@ contract TaxSplitter is Ownable {
         uint256 gstAmount = (_totalAmount * _gstRatePct) / 100;
         uint256 tdsAmount = (_totalAmount * _tdsRatePct) / 100;
         netPayout = _totalAmount - gstAmount - tdsAmount;
+
+        // Checks-effects-interactions: mark the payout settled before any
+        // external call, so a reentrant call with the same id cannot pay twice.
+        processedPayouts[_payoutId] = true;
 
         // Route tax to government authority wallet
         (bool taxSent, ) = _taxAuthorityWallet.call{value: gstAmount + tdsAmount}("");

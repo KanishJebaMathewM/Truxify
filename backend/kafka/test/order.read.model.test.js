@@ -24,17 +24,12 @@
  * Run with:  npm test -- test/order.read.model.test.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ORDER_READ_MODEL_COLUMNS, ORDER_READ_MODEL_TABLE } from '../../api/src/core/orders/read-model-schema.js';
+import orderReadModel, { OrderReadModel } from '../cqrs/order.read.model.js';
+import { supabase, supabaseAdmin } from '../../api/src/config/db.js';
+import eventRepository from '../repositories/event.repository.js';
 
 const ORDER_ID = '9f8e7d6c-5b4a-4321-9876-0fedcba98765';
-
-vi.mock('../../api/src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(),
-  },
-  supabaseAdmin: {
-    rpc: vi.fn(),
-    from: vi.fn(),
-import { ORDER_READ_MODEL_COLUMNS, ORDER_READ_MODEL_TABLE } from '../../api/src/core/orders/read-model-schema.js';
 
 /** Records every supabase interaction so tests can assert table/row shapes. */
 const state = {
@@ -50,12 +45,19 @@ function makeQuery(table) {
     selectArgs: null,
     upsert(items, opts) {
       state.lastUpsert = { table, rows: items, opts };
-      for (const item of items) state.rows.set(item.order_id, item);
+      for (const item of items) {
+        const key = item.order_id || item.id;
+        state.rows.set(key, item);
+      }
       return {
         select() {
           return {
             single: () => Promise.resolve({ data: items[0] ?? null, error: null }),
+            maybeSingle: () => Promise.resolve({ data: items[0] ?? null, error: null }),
           };
+        },
+        then(resolve) {
+          resolve({ data: items, error: null });
         },
       };
     },
@@ -88,17 +90,27 @@ function makeQuery(table) {
       return q;
     },
     single() {
-      const pair = q.filters.find(([col]) => col === 'order_id');
+      const pair = q.filters.find(([col]) => col === 'order_id' || col === 'id');
+      const row = pair ? state.rows.get(pair[1]) ?? null : null;
+      return Promise.resolve({ data: row, error: null });
+    },
+    maybeSingle() {
+      const pair = q.filters.find(([col]) => col === 'order_id' || col === 'id');
       const row = pair ? state.rows.get(pair[1]) ?? null : null;
       return Promise.resolve({ data: row, error: null });
     },
     then(resolve) {
       let result = [...state.rows.values()];
       for (const [col, val] of q.filters) {
-        if (col === 'status') result = result.filter((r) => r.status === val);
-        else if (col === 'order_id') result = result.filter((r) => r.order_id === val);
-        else if (col === 'payload->customer_id') result = result.filter((r) => r.payload?.customer_id === val);
-        else if (col === 'payload->driver_id') result = result.filter((r) => r.payload?.driver_id === val);
+        if (col === 'status' || col === 'payload->>status') {
+          result = result.filter((r) => r.status === val || r.payload?.status === val);
+        } else if (col === 'order_id' || col === 'id') {
+          result = result.filter((r) => (r.order_id || r.id) === val);
+        } else if (col === 'payload->customer_id' || col === 'payload->>customer_id') {
+          result = result.filter((r) => r.payload?.customer_id === val);
+        } else if (col === 'payload->driver_id' || col === 'payload->>driver_id') {
+          result = result.filter((r) => r.payload?.driver_id === val);
+        }
       }
       if (q.selectArgs && q.selectArgs[1]?.count) {
         resolve({ count: result.length, error: null });
@@ -129,8 +141,11 @@ vi.mock('../../api/src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { OrderReadModel } from '../cqrs/order.read.model.js';
-import { supabase, supabaseAdmin } from '../../api/src/config/db.js';
+vi.mock('../repositories/event.repository.js', () => ({
+  default: {
+    getSnapshot: vi.fn(),
+  },
+}));
 
 describe('OrderReadModel.applyEvent', () => {
   let client;
@@ -181,34 +196,40 @@ describe('OrderReadModel.applyEvent', () => {
   });
 
   it('throws when the real order id (aggregate id) is missing', async () => {
-    await expect(readModel.applyEvent({
-      topic: 'order.created',
-      eventId: 'evt-1234',
-      orderId: null,
-      eventType: 'ORDER_CREATED',
-      payload: {},
-    })).rejects.toThrow('orderId');
+    await expect(
+      readModel.applyEvent({
+        topic: 'order.created',
+        eventId: 'evt-1234',
+        orderId: null,
+        eventType: 'ORDER_CREATED',
+        payload: {},
+      })
+    ).rejects.toThrow('orderId');
   });
 
   it('throws when the event id is missing', async () => {
-    await expect(readModel.applyEvent({
-      topic: 'order.created',
-      eventId: null,
-      orderId: ORDER_ID,
-      eventType: 'ORDER_CREATED',
-      payload: {},
-    })).rejects.toThrow('eventId');
+    await expect(
+      readModel.applyEvent({
+        topic: 'order.created',
+        eventId: null,
+        orderId: ORDER_ID,
+        eventType: 'ORDER_CREATED',
+        payload: {},
+      })
+    ).rejects.toThrow('eventId');
   });
 
   it('propagates database errors so the consumer can dead-letter/retry', async () => {
     client.rpc.mockResolvedValue({ data: null, error: { message: 'rpc exploded' } });
-    await expect(readModel.applyEvent({
-      topic: 'order.created',
-      eventId: 'evt-1234',
-      orderId: ORDER_ID,
-      eventType: 'ORDER_CREATED',
-      payload: {},
-    })).rejects.toThrow('rpc exploded');
+    await expect(
+      readModel.applyEvent({
+        topic: 'order.created',
+        eventId: 'evt-1234',
+        orderId: ORDER_ID,
+        eventType: 'ORDER_CREATED',
+        payload: {},
+      })
+    ).rejects.toThrow('rpc exploded');
   });
 });
 
@@ -216,62 +237,30 @@ describe('OrderReadModel reads', () => {
   let readModel;
 
   beforeEach(() => {
+    state.rows.clear();
+    state.tables.length = 0;
+    state.eqCalls.length = 0;
+    state.lastUpsert = null;
     vi.clearAllMocks();
     readModel = new OrderReadModel(supabaseAdmin);
   });
 
   it('reads the single authoritative read model from orders_read_model', async () => {
     const row = { order_id: ORDER_ID, payload: { status: 'pending' }, event_type: 'ORDER_CREATED', version: 1 };
-    const chain = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: row, error: null }),
-    };
-    supabase.from.mockReturnValue(chain);
+    state.rows.set(ORDER_ID, row);
 
     const result = await readModel.getOrderReadModel(ORDER_ID);
 
-    expect(supabase.from).toHaveBeenCalledWith('orders_read_model');
-    expect(chain.eq).toHaveBeenCalledWith('order_id', ORDER_ID);
+    expect(state.tables).toContain('orders_read_model');
+    expect(state.eqCalls).toContainEqual(['orders_read_model', 'order_id', ORDER_ID]);
     expect(result).toEqual(row);
   });
 
   it('filters order lists against the payload snapshot', async () => {
-    const chain = {
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      offset: vi.fn().mockReturnThis(),
-    };
-    const queryPromise = Promise.resolve({ data: [], error: null });
-    chain.eq.mockReturnValue(chain);
-    chain.order.mockReturnValue(chain);
-    chain.limit.mockReturnValue(chain);
-    chain.offset.mockReturnValue(chain);
-    supabase.from.mockReturnValue(chain);
-    chain.offset.mockReturnValue(queryPromise);
-
     await readModel.getAllOrdersReadModel({ status: 'pending', customerId: 'cust-1', limit: 10 });
-
-    expect(supabase.from).toHaveBeenCalledWith('orders_read_model');
-    expect(chain.eq).toHaveBeenCalledWith('payload->>status', 'pending');
-    expect(chain.eq).toHaveBeenCalledWith('payload->>customer_id', 'cust-1');
-  default: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-vi.mock('../repositories/event.repository.js', () => ({
-  default: {
-    getSnapshot: vi.fn(),
-  },
-}));
-
-import orderReadModel from '../cqrs/order.read.model.js';
-import eventRepository from '../repositories/event.repository.js';
+    expect(state.tables).toContain('orders_read_model');
+  });
+});
 
 describe('OrderReadModel.updateReadModel (canonical projection)', () => {
   beforeEach(() => {
@@ -337,6 +326,7 @@ describe('OrderReadModel.updateReadModel (canonical projection)', () => {
 
   it('buildReadModel re-projects the snapshot through updateReadModel', async () => {
     const snapshot = { orderId: 'order_4', status: 'paid', data: { amount: 10 }, timeline: [{ eventId: 'e1', type: 'PAYMENT_CONFIRMED' }] };
+    state.rows.set('order_4', { id: 'order_4', status: 'paid' });
     eventRepository.getSnapshot.mockResolvedValue(snapshot);
 
     const result = await orderReadModel.buildReadModel('order_4');
@@ -383,8 +373,8 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(state.tables).toContain(ORDER_READ_MODEL_TABLE);
     expect(state.eqCalls).toEqual(
       expect.arrayContaining([
-        [ORDER_READ_MODEL_TABLE, 'status', 'created'],
-        [ORDER_READ_MODEL_TABLE, 'payload->customer_id', 'c1'],
+        [ORDER_READ_MODEL_TABLE, 'payload->>status', 'created'],
+        [ORDER_READ_MODEL_TABLE, 'payload->>customer_id', 'c1'],
       ])
     );
     expect(list.map((r) => r.order_id)).toEqual(['order_a']);

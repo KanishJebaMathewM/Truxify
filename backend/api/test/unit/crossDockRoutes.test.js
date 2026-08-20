@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { DomainError } from '../../src/services/order/domainError.js';
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => { req.user = req.user || { id: 'u1' }; next(); },
@@ -97,6 +98,7 @@ describe('crossDockRoutes', () => {
           cross_dock_lat: '19.0760',
           cross_dock_lng: '72.8777',
           radius_km: '10',
+          limit: '20',
         });
 
       expect(res.status).toBe(200);
@@ -108,6 +110,7 @@ describe('crossDockRoutes', () => {
           crossDockLng: 72.8777,
           fromDriverId: 'u1',
           radiusKm: 10,
+          limit: 20,
         })
       );
     });
@@ -150,8 +153,36 @@ describe('crossDockRoutes', () => {
       expect(res.body.error).toContain('Invalid candidate');
     });
 
-    it('cd5: returns 500 when service throws error', async () => {
-      findHandoffCandidates.mockRejectedValue(new Error('Database error'));
+    it('cd5: returns 400 when longitude is out of range', async () => {
+      const res = await request(makeApp())
+        .get('/cross-dock/candidates')
+        .query({
+          orderId: VALID_ORDER_ID,
+          cross_dock_lat: '19.0760',
+          cross_dock_lng: '200',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid candidate');
+    });
+
+    it('cd6: forwards DomainError from service', async () => {
+      findHandoffCandidates.mockRejectedValue(new DomainError(403, { error: 'Access denied: not order driver' }));
+
+      const res = await request(makeApp())
+        .get('/cross-dock/candidates')
+        .query({
+          orderId: VALID_ORDER_ID,
+          cross_dock_lat: '19.0760',
+          cross_dock_lng: '72.8777',
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Access denied: not order driver');
+    });
+
+    it('cd7: returns 500 when service throws unexpected error', async () => {
+      findHandoffCandidates.mockRejectedValue(new Error('Database connection failed'));
 
       const res = await request(makeApp())
         .get('/cross-dock/candidates')
@@ -167,7 +198,7 @@ describe('crossDockRoutes', () => {
   });
 
   describe('POST /cross-dock', () => {
-    it('cd6: returns 201 with transfer on successful creation', async () => {
+    it('cd8: returns 201 with transfer on successful creation', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         order_id: VALID_ORDER_ID,
@@ -183,43 +214,94 @@ describe('crossDockRoutes', () => {
         .query({ orderId: VALID_ORDER_ID })
         .send({
           to_driver_id: VALID_DRIVER_ID,
-          cross_dock_lat: '19.0760',
-          cross_dock_lng: '72.8777',
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
           cross_dock_note: 'Meet at gate B',
         });
 
       expect(res.status).toBe(201);
       expect(res.body.id).toBe(VALID_TRANSFER_ID);
       expect(res.body.status).toBe('pending');
+      expect(createTransferRequest).toHaveBeenCalledWith({
+        orderId: VALID_ORDER_ID,
+        fromDriverId: 'u1',
+        toDriverId: VALID_DRIVER_ID,
+        crossDockLat: 19.0760,
+        crossDockLng: 72.8777,
+        crossDockNote: 'Meet at gate B',
+      });
     });
 
-    it('cd7: returns 400 when orderId query param is missing', async () => {
+    it('cd9: returns 400 when orderId query param is missing', async () => {
       const res = await request(makeApp())
         .post('/cross-dock')
         .send({
           to_driver_id: VALID_DRIVER_ID,
-          cross_dock_lat: '19.0760',
-          cross_dock_lng: '72.8777',
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
         });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('orderId');
     });
 
-    it('cd8: returns 400 when to_driver_id is invalid', async () => {
+    it('cd10: returns 400 when orderId query param is invalid UUID', async () => {
+      const res = await request(makeApp())
+        .post('/cross-dock')
+        .query({ orderId: 'bad-uuid' })
+        .send({
+          to_driver_id: VALID_DRIVER_ID,
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('orderId');
+    });
+
+    it('cd11: returns 400 when to_driver_id is invalid UUID', async () => {
       const res = await request(makeApp())
         .post('/cross-dock')
         .query({ orderId: VALID_ORDER_ID })
         .send({
           to_driver_id: 'invalid-uuid',
-          cross_dock_lat: '19.0760',
-          cross_dock_lng: '72.8777',
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
         });
 
       expect(res.status).toBe(400);
     });
 
-    it('cd9: returns 500 when service throws error', async () => {
+    it('cd12: returns 400 when cross_dock_lat is out of range', async () => {
+      const res = await request(makeApp())
+        .post('/cross-dock')
+        .query({ orderId: VALID_ORDER_ID })
+        .send({
+          to_driver_id: VALID_DRIVER_ID,
+          cross_dock_lat: 95.0,
+          cross_dock_lng: 72.8777,
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('cd13: forwards DomainError from service', async () => {
+      createTransferRequest.mockRejectedValue(new DomainError(409, { error: 'Order already has an active transfer' }));
+
+      const res = await request(makeApp())
+        .post('/cross-dock')
+        .query({ orderId: VALID_ORDER_ID })
+        .send({
+          to_driver_id: VALID_DRIVER_ID,
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('Order already has an active transfer');
+    });
+
+    it('cd14: returns 500 when service throws unexpected error', async () => {
       createTransferRequest.mockRejectedValue(new Error('Service unavailable'));
 
       const res = await request(makeApp())
@@ -227,16 +309,17 @@ describe('crossDockRoutes', () => {
         .query({ orderId: VALID_ORDER_ID })
         .send({
           to_driver_id: VALID_DRIVER_ID,
-          cross_dock_lat: '19.0760',
-          cross_dock_lng: '72.8777',
+          cross_dock_lat: 19.0760,
+          cross_dock_lng: 72.8777,
         });
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('GET /cross-dock', () => {
-    it('cd10: returns 200 with transfers list', async () => {
+    it('cd15: returns 200 with transfers list', async () => {
       const mockTransfers = [
         { id: VALID_TRANSFER_ID, status: 'pending', from_driver_id: 'u1' },
         { id: '423e4567-e89b-12d3-a456-426614174004', status: 'accepted', from_driver_id: 'u1' },
@@ -256,7 +339,7 @@ describe('crossDockRoutes', () => {
       });
     });
 
-    it('cd11: returns 200 with empty array when no transfers', async () => {
+    it('cd16: returns 200 with empty array when no transfers', async () => {
       listTransfers.mockResolvedValue([]);
 
       const res = await request(makeApp()).get('/cross-dock');
@@ -265,7 +348,7 @@ describe('crossDockRoutes', () => {
       expect(res.body.transfers).toHaveLength(0);
     });
 
-    it('cd12: uses default limit when not provided', async () => {
+    it('cd17: uses default limit (50) when limit is not provided', async () => {
       listTransfers.mockResolvedValue([]);
 
       await request(makeApp()).get('/cross-dock');
@@ -277,17 +360,27 @@ describe('crossDockRoutes', () => {
       });
     });
 
-    it('cd13: returns 500 when service throws error', async () => {
+    it('cd18: forwards DomainError from service', async () => {
+      listTransfers.mockRejectedValue(new DomainError(401, { error: 'Invalid authentication session' }));
+
+      const res = await request(makeApp()).get('/cross-dock');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Invalid authentication session');
+    });
+
+    it('cd19: returns 500 when service throws unexpected error', async () => {
       listTransfers.mockRejectedValue(new Error('Database error'));
 
       const res = await request(makeApp()).get('/cross-dock');
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('GET /cross-dock/:id', () => {
-    it('cd14: returns 200 with transfer details (without OTP hash)', async () => {
+    it('cd20: returns 200 with transfer details (without OTP secrets)', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         order_id: VALID_ORDER_ID,
@@ -309,23 +402,33 @@ describe('crossDockRoutes', () => {
       expect(res.body.transfer.otp_expires_at).toBeUndefined();
     });
 
-    it('cd15: returns 400 for invalid UUID format', async () => {
+    it('cd21: returns 400 for invalid UUID format in param', async () => {
       const res = await request(makeApp()).get('/cross-dock/invalid-id');
 
       expect(res.status).toBe(400);
     });
 
-    it('cd16: returns 500 when service throws error', async () => {
+    it('cd22: forwards DomainError (404) when transfer not found', async () => {
+      getTransfer.mockRejectedValue(new DomainError(404, { error: 'Transfer request not found' }));
+
+      const res = await request(makeApp()).get(`/cross-dock/${VALID_TRANSFER_ID}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Transfer request not found');
+    });
+
+    it('cd23: returns 500 when service throws unexpected error', async () => {
       getTransfer.mockRejectedValue(new Error('Database error'));
 
       const res = await request(makeApp()).get(`/cross-dock/${VALID_TRANSFER_ID}`);
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('POST /cross-dock/:id/accept', () => {
-    it('cd17: returns 200 with updated transfer on accept', async () => {
+    it('cd24: returns 200 with updated transfer on accept', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         status: 'accepted',
@@ -343,23 +446,33 @@ describe('crossDockRoutes', () => {
       });
     });
 
-    it('cd18: returns 400 for invalid UUID', async () => {
+    it('cd25: returns 400 for invalid UUID param', async () => {
       const res = await request(makeApp()).post('/cross-dock/not-valid-id/accept');
 
       expect(res.status).toBe(400);
     });
 
-    it('cd19: returns 500 when service throws error', async () => {
+    it('cd26: forwards DomainError (403/409) from service', async () => {
+      acceptTransferRequest.mockRejectedValue(new DomainError(403, { error: 'Only target driver can accept transfer' }));
+
+      const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/accept`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Only target driver can accept transfer');
+    });
+
+    it('cd27: returns 500 when service throws unexpected error', async () => {
       acceptTransferRequest.mockRejectedValue(new Error('Cannot accept'));
 
       const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/accept`);
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('POST /cross-dock/:id/decline', () => {
-    it('cd20: returns 200 with updated transfer on decline', async () => {
+    it('cd28: returns 200 with updated transfer on decline', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         status: 'declined',
@@ -373,23 +486,33 @@ describe('crossDockRoutes', () => {
       expect(res.body.status).toBe('declined');
     });
 
-    it('cd21: returns 400 for invalid UUID', async () => {
+    it('cd29: returns 400 for invalid UUID param', async () => {
       const res = await request(makeApp()).post('/cross-dock/invalid-id/decline');
 
       expect(res.status).toBe(400);
     });
 
-    it('cd22: returns 500 when service throws error', async () => {
+    it('cd30: forwards DomainError (409) from service', async () => {
+      declineTransferRequest.mockRejectedValue(new DomainError(409, { error: 'Transfer is no longer pending' }));
+
+      const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/decline`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('Transfer is no longer pending');
+    });
+
+    it('cd31: returns 500 when service throws unexpected error', async () => {
       declineTransferRequest.mockRejectedValue(new Error('Cannot decline'));
 
       const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/decline`);
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('POST /cross-dock/:id/cancel', () => {
-    it('cd23: returns 200 with updated transfer on cancel', async () => {
+    it('cd32: returns 200 with updated transfer on cancel', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         status: 'cancelled',
@@ -403,23 +526,33 @@ describe('crossDockRoutes', () => {
       expect(res.body.status).toBe('cancelled');
     });
 
-    it('cd24: returns 400 for invalid UUID', async () => {
+    it('cd33: returns 400 for invalid UUID param', async () => {
       const res = await request(makeApp()).post('/cross-dock/invalid-id/cancel');
 
       expect(res.status).toBe(400);
     });
 
-    it('cd25: returns 500 when service throws error', async () => {
+    it('cd34: forwards DomainError (403) from service', async () => {
+      cancelTransferRequest.mockRejectedValue(new DomainError(403, { error: 'Only originating driver can cancel transfer' }));
+
+      const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/cancel`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Only originating driver can cancel transfer');
+    });
+
+    it('cd35: returns 500 when service throws unexpected error', async () => {
       cancelTransferRequest.mockRejectedValue(new Error('Cannot cancel'));
 
       const res = await request(makeApp()).post(`/cross-dock/${VALID_TRANSFER_ID}/cancel`);
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 
   describe('POST /cross-dock/:id/verify', () => {
-    it('cd26: returns 200 with verified transfer on valid handoff code', async () => {
+    it('cd36: returns 200 with verified transfer on valid handoff code', async () => {
       const mockTransfer = {
         id: VALID_TRANSFER_ID,
         status: 'verified',
@@ -440,7 +573,7 @@ describe('crossDockRoutes', () => {
       });
     });
 
-    it('cd27: returns 400 for invalid UUID', async () => {
+    it('cd37: returns 400 for invalid UUID param', async () => {
       const res = await request(makeApp())
         .post('/cross-dock/invalid-id/verify')
         .send({ handoff_code: '123456' });
@@ -448,22 +581,42 @@ describe('crossDockRoutes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('cd28: returns 400 for invalid handoff code format', async () => {
+    it('cd38: returns 400 for non-numeric handoff code', async () => {
       const res = await request(makeApp())
         .post(`/cross-dock/${VALID_TRANSFER_ID}/verify`)
-        .send({ handoff_code: 'abc' });
+        .send({ handoff_code: 'abcdef' });
 
       expect(res.status).toBe(400);
     });
 
-    it('cd29: returns 500 when service throws error', async () => {
-      verifyHandoff.mockRejectedValue(new Error('Invalid or expired handoff code'));
+    it('cd39: returns 400 for handoff code with wrong length', async () => {
+      const res = await request(makeApp())
+        .post(`/cross-dock/${VALID_TRANSFER_ID}/verify`)
+        .send({ handoff_code: '123' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('cd40: forwards DomainError (422) on invalid/expired OTP code', async () => {
+      verifyHandoff.mockRejectedValue(new DomainError(422, { error: 'Invalid or expired handoff code' }));
+
+      const res = await request(makeApp())
+        .post(`/cross-dock/${VALID_TRANSFER_ID}/verify`)
+        .send({ handoff_code: '123456' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe('Invalid or expired handoff code');
+    });
+
+    it('cd41: returns 500 when service throws unexpected error', async () => {
+      verifyHandoff.mockRejectedValue(new Error('Unexpected verification failure'));
 
       const res = await request(makeApp())
         .post(`/cross-dock/${VALID_TRANSFER_ID}/verify`)
         .send({ handoff_code: '123456' });
 
       expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal Server Error');
     });
   });
 });

@@ -10,11 +10,13 @@
  *   - Calls next() when valid key provided via query.api_key
  *   - Accepts any key from comma-separated VALID_API_KEYS list
  *   - Logs warning and captures Sentry event on invalid key attempt
+ *   - safeCompare performs timing-safe comparison to prevent timing attacks (#13951)
  *
  * Run with: npx vitest run test/unit/apiKey.test.js
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { requireApiKey } from '../../src/middleware/apiKey.js';
+import crypto from 'crypto';
+import { requireApiKey, safeCompare } from '../../src/middleware/apiKey.js';
 import logger from '../../src/middleware/logger.js';
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -57,6 +59,42 @@ function createMocks(overrides = {}) {
     next: vi.fn(),
   };
 }
+
+describe('safeCompare - timing attack protection (#13951)', () => {
+  it('returns true when comparing identical strings', () => {
+    const key = 'sk_live_secret_key_1234567890';
+    expect(safeCompare(key, key)).toBe(true);
+    expect(safeCompare('exact-match-key', 'exact-match-key')).toBe(true);
+  });
+
+  it('returns false when comparing different strings of the same length', () => {
+    const key1 = 'sk_live_secret_key_1234567890';
+    const key2 = 'sk_live_secret_key_0987654321';
+    expect(safeCompare(key1, key2)).toBe(false);
+  });
+
+  it('returns false when comparing strings of different lengths', () => {
+    const key1 = 'short_key';
+    const key2 = 'longer_secret_key';
+    expect(safeCompare(key1, key2)).toBe(false);
+  });
+
+  it('performs constant-time dummy comparison via crypto.timingSafeEqual on length mismatch', () => {
+    const spy = vi.spyOn(crypto, 'timingSafeEqual');
+    const result = safeCompare('short', 'longer_string');
+
+    expect(result).toBe(false);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('returns false when either argument is not a string', () => {
+    expect(safeCompare(null, 'test')).toBe(false);
+    expect(safeCompare('test', undefined)).toBe(false);
+    expect(safeCompare(12345, '12345')).toBe(false);
+    expect(safeCompare({}, {})).toBe(false);
+  });
+});
 
 describe('requireApiKey', () => {
   beforeEach(() => {

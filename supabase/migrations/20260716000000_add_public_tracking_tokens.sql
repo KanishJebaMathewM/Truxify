@@ -73,6 +73,7 @@ create or replace function revoke_tracking_tokens_on_terminal_status()
 returns trigger
 language plpgsql
 security definer
+set search_path = public, pg_temp
 as $$
 begin
   if new.status in ('delivered', 'cancelled', 'payment_released') then

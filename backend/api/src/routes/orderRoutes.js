@@ -156,7 +156,6 @@ import {
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
 import { DomainError } from '../services/order/domainError.js';
-import { createOrder } from '../services/order/orderCreationService.js';
 import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLockOrFallback } from '../lib/lockFallback.js';
@@ -212,37 +211,11 @@ import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '.
 import { computeOrderPricing } from '../lib/pricing.js';
 
 
-async function readLoadOfferCache(cacheKey) {
-  if (!redisClient) return null;
-const getOrderResource = async (req) => {
-  const { id } = req.params;
-  if (!id) return null;
-  return await orderRepository.findOrderById(id);
-};
-
-
-router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
-  const { driver_lat, driver_lng, geofence_radius_m } = req.body;
-
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
 
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
-
-  if (!req.params.id || !req.params.id.trim()) {
-    return res.status(400).json({ error: 'Invalid order id' });
-  }
-  let geofenceRadiusM;
-  if (geofence_radius_m !== undefined) {
-    geofenceRadiusM = parseFloat(geofence_radius_m);
-    if (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0) {
-      return res.status(400).json({ error: 'Invalid geofence_radius_m' });
-    }
-    logger.error('Bid acceptance exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
 
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
@@ -423,6 +396,36 @@ router.post(
         }
         geofenceRadiusM = parsedRadius;
       }
+
+      if (!req.params.id || !req.params.id.trim()) {
+        return res.status(400).json({ error: 'Invalid order id' });
+      }
+
+      const order = await orderValidationService.findOrderByIdOrDisplayId(
+        req.params.id,
+        'id, driver_id, customer_id'
+      );
+      orderValidationService.assertOrderFound(order);
+      orderValidationService.assertDriverAssignment(order, req.user.id);
+
+      const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
+        orderId: order.id,
+        driverId: req.user.id,
+        driverLat: lat,
+        driverLng: lng,
+        geofenceRadiusM,
+      });
+
+      return res.json(result);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return res.status(err.status).json(err.payload);
+      }
+      logger.error('Geofence auto-confirm exception:', err.message);
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
 
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), getOrderHistory);
@@ -923,18 +926,7 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
  *             schema:
  *               $ref: '#/components/schemas/DriverLocationResponse'
  */
-router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
-  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id, status');
-  return { order };
-}), validateParams(paramIdSchema), async (req, res) => {
-  const orderId = req.params.id;
-  try {
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status');
-    orderValidationService.assertOrderFound(order);
-
-    if (!order.driver_id) {
-      return res.status(404).json({ error: 'No driver assigned to this order.' });
-    }
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), getDriverLocation);
 
 // 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
 router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), getLiveRouteGeometry);
@@ -1064,8 +1056,6 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
   }
 });
 
-export default router;
-
 // GET /api/orders/history
 router.get('/history', authenticate, userLimiter, requirePolicy('order:view-history'), async (req, res) => {
   const { cursor } = req.query;
@@ -1138,7 +1128,7 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view-timeline', async (req) => {
   const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
-})), validateParams(paramIdSchema), async (req, res) => {
+}), validateParams(paramIdSchema), async (req, res) => {
   try {
     const timeline = await orderLifecycleService.getOrderTimeline(req.params.id, req.user.id);
     return res.json(timeline);
@@ -1181,7 +1171,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:subm
 router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
   const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
-})), validateParams(paramIdSchema), async (req, res) => {
+}), validateParams(paramIdSchema), async (req, res) => {
   try {
     const detail = await orderLifecycleService.getOrderDetail(req.params.id, req.user.id);
     return res.json(detail);
@@ -1191,40 +1181,6 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async 
     }
     logger.error('Order detail fetch error:', err);
     return res.status(500).json({ error: 'Failed to fetch order.' });
-  }
-});
-
-// GET /api/orders/:id/bids - customer views bids on their order
-router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
-  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id');
-  return { order };
-})), validateParams(paramIdSchema), async (req, res) => {
-  try {
-    const bids = await orderLifecycleService.getBidsForOrder(req.params.id, req.user.id);
-    return res.json({ bids });
-  } catch (err) {
-    if (err instanceof DomainError) {
-      return res.status(err.status).json(err.payload);
-    }
-    logger.error('Order bids fetch error:', err);
-    return res.status(500).json({ error: 'Failed to fetch bids.' });
-  }
-});
-
-// POST /api/orders/:id/bids/:bidId/accept - customer accepts a bid
-router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
-  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id');
-  return { order };
-})), validateParams(paramIdSchema), async (req, res) => {
-  try {
-    const result = await orderLifecycleService.acceptBid(req.params.id, req.params.bidId, req.user.id);
-    return res.json(result);
-  } catch (err) {
-    if (err instanceof DomainError) {
-      return res.status(err.status).json(err.payload);
-    }
-    logger.error('Bid acceptance error:', err);
-    return res.status(500).json({ error: 'Failed to accept bid.' });
   }
 });
 

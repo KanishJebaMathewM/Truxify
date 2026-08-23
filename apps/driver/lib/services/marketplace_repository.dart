@@ -114,8 +114,10 @@ class MarketplaceRepository {
   /// `GET /api/orders/load-offers/en-route`. An envelope without a `loads`
   /// key resolves to an empty list.
   static List<dynamic> _unwrapLoads(dynamic decoded) {
-    if (decoded is Map<String, dynamic>) {
-      return decoded['loads'] as List? ?? const [];
+    if (decoded is Map) {
+      final loads = decoded['loads'];
+      if (loads is List) return loads;
+      if (loads == null) return const [];
     }
     if (decoded is List) return decoded;
     throw StateError('Unexpected response type');

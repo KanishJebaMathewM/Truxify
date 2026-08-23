@@ -172,6 +172,16 @@ void main() {
       expect(loads.first.id, 'load-1');
       expect(loads.first.customer, 'Acme Corp');
     });
+
+    test('returns empty list when en-route envelope has no loads key', () async {
+      final client = MockClient((request) async {
+        return http.Response('{"total": 0}', 200);
+      });
+
+      final loads = await _repository(client).fetchEnRouteLoads();
+
+      expect(loads, isEmpty);
+    });
   });
 
   group('MarketplaceRepository.submitBid', () {

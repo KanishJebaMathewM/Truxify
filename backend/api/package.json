@@ -37,7 +37,7 @@
     "circuit-breaker-js": "0.0.1",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.14",
     "dotenv": "^17.4.2",
     "ethers": "6.17.0",
     "express": "^5.2.1",

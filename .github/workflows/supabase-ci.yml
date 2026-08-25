@@ -31,7 +31,7 @@ jobs:
         run: python3 scripts/check-definer-search-path.py
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v3
         with:
           version: latest
 

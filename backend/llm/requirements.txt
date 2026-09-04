@@ -1,5 +1,5 @@
 torch==2.13.0
-transformers==5.10.1
+transformers==5.16.1
 sentence-transformers==2.2.2
 chromadb==1.5.9
 redis==5.0.0

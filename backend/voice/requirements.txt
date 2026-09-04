@@ -1,6 +1,6 @@
 whisper==1.1.10
 torch==2.13.0
-transformers==5.5.0
+transformers==5.10.1
 speech-recognition==3.10.0
 google-trans==3.0.0
 elevenlabs==0.2.0

@@ -1,7 +1,7 @@
 torch==2.13.0
-transformers==5.5.0
+transformers==5.10.1
 sentence-transformers==2.2.2
-chromadb==0.4.18
+chromadb==1.5.9
 redis==5.0.0
 fastapi==0.104.1
 uvicorn==0.24.0

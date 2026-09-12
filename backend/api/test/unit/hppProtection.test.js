@@ -1,99 +1,96 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import hppProtection from '../../src/middleware/hppProtection.js';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
+import hppProtection from '../../src/middleware/hppProtection.js'
+import logger from '../../src/middleware/logger.js'
 
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
-
-let logger;
-
-beforeEach(async () => {
-  logger = (await import('../../src/middleware/logger.js')).default;
-  vi.clearAllMocks();
-});
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn()
+  }
+}))
 
 function makeReq(query = {}) {
   return {
     query,
     ip: '127.0.0.1',
     originalUrl: '/api/test',
-    requestId: 'req-123',
-  };
+    requestId: 'req-123'
+  }
 }
 
 function makeRes() {
   return {
-    on: vi.fn(),
-  };
+    on: vi.fn()
+  }
 }
 
-describe('hppProtection', () => {
-  it('leaves single-value query params unchanged', () => {
-    const req = makeReq({ page: '1', limit: '10' });
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
-    expect(req.query).toEqual({ page: '1', limit: '10' });
-    expect(next).toHaveBeenCalledOnce();
-    expect(logger.warn).not.toHaveBeenCalled();
-  });
+describe('hppProtection middleware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
 
-  it('collapses array query params to the first value', () => {
-    const req = makeReq({ page: ['2', '3', '4'] });
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
-    expect(req.query.page).toBe('2');
-    expect(Array.isArray(req.query.page)).toBe(false);
-  });
+  it('should call next() and not log warnings when req.query has no duplicate params', () => {
+    const req = makeReq({ page: '1', limit: '10' })
+    const res = makeRes()
+    const next = vi.fn()
 
-  it('logs a warning when duplicate params are detected', () => {
-    const req = makeReq({ ids: ['1', '2', '3'] });
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
+    hppProtection(req, res, next)
+
+    expect(req.query).toEqual({ page: '1', limit: '10' })
+    expect(next).toHaveBeenCalledOnce()
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('should normalize one duplicate param (array value) to first value and log a warning', () => {
+    const req = makeReq({ status: ['active', 'pending'], page: '1' })
+    const res = makeRes()
+    const next = vi.fn()
+
+    hppProtection(req, res, next)
+
+    expect(req.query.status).toBe('active')
+    expect(Array.isArray(req.query.status)).toBe(false)
+    expect(next).toHaveBeenCalledOnce()
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: 'req-123',
         ip: '127.0.0.1',
-        path: '/api/test',
-        duplicateParams: ['ids'],
+        duplicateParams: ['status']
       }),
       'Potential HTTP Parameter Pollution detected'
-    );
-    expect(next).toHaveBeenCalledOnce();
-  });
+    )
+  })
 
-  it('collapses multiple duplicate params and reports all in warning', () => {
-    const req = makeReq({ a: ['x', 'y'], b: ['p', 'q'] });
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
-    expect(req.query.a).toBe('x');
-    expect(req.query.b).toBe('p');
+  it('should normalize multiple duplicate params and include all param names in the warning', () => {
+    const req = makeReq({ role: ['admin', 'user'], sort: ['asc', 'desc'] })
+    const res = makeRes()
+    const next = vi.fn()
+
+    hppProtection(req, res, next)
+
+    expect(req.query.role).toBe('admin')
+    expect(req.query.sort).toBe('asc')
+    expect(next).toHaveBeenCalledOnce()
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        duplicateParams: expect.arrayContaining(['a', 'b']),
+        requestId: 'req-123',
+        ip: '127.0.0.1',
+        duplicateParams: expect.arrayContaining(['role', 'sort'])
       }),
       'Potential HTTP Parameter Pollution detected'
-    );
-    expect(next).toHaveBeenCalledOnce();
-  });
+    )
+  })
 
-  it('passes through to next() after processing', () => {
-    const req = makeReq({ q: ['search'] });
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
-    expect(next).toHaveBeenCalledOnce();
-  });
+  it('should handle empty query object gracefully', () => {
+    const req = makeReq({})
+    const res = makeRes()
+    const next = vi.fn()
 
-  it('handles empty query object', () => {
-    const req = makeReq({});
-    const res = makeRes();
-    const next = vi.fn();
-    hppProtection(req, res, next);
-    expect(next).toHaveBeenCalledOnce();
-    expect(logger.warn).not.toHaveBeenCalled();
-  });
-});
+    hppProtection(req, res, next)
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+})

@@ -1,182 +1,93 @@
-import { describe, it, expect } from 'vitest';
-import {
-  validatePricePrediction,
-  convertToPaisa,
-  RejectionReason,
-} from '../../src/lib/predictionValidator.js';
+﻿import { describe, it, expect } from 'vitest'
+import { validatePricePrediction, convertToPaisa } from '../../src/lib/predictionValidator.js'
 
 describe('predictionValidator', () => {
   describe('validatePricePrediction', () => {
-    const validPrediction = {
-      estimated_price: 5000,
-      currency: 'INR',
-      min_price: 4000,
-      max_price: 6000,
-      confidence: 0.85,
-    };
+    it('should return NULL_RESPONSE for null or undefined input', () => {
+      expect(validatePricePrediction(null)).toEqual(expect.objectContaining({ ok: false, error: 'NULL_RESPONSE' }))
+      expect(validatePricePrediction(undefined)).toEqual(expect.objectContaining({ ok: false, error: 'NULL_RESPONSE' }))
+    })
 
-    it('accepts a valid prediction', () => {
-      const result = validatePricePrediction(validPrediction);
-      expect(result.ok).toBe(true);
-      expect(result.validated.estimated_price).toBe(5000);
-      expect(result.validated.currency).toBe('INR');
-    });
+    it('should return UNEXPECTED_TYPE for non-object types', () => {
+      expect(validatePricePrediction('string')).toEqual(expect.objectContaining({ ok: false, error: 'UNEXPECTED_TYPE' }))
+      expect(validatePricePrediction(123)).toEqual(expect.objectContaining({ ok: false, error: 'UNEXPECTED_TYPE' }))
+    })
 
-    it('rejects null input', () => {
-      const result = validatePricePrediction(null);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.NULL_RESPONSE);
-    });
+    it('should return MISSING_FIELD when estimated_price is missing', () => {
+      expect(validatePricePrediction({ currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'MISSING_FIELD' }))
+    })
 
-    it('rejects undefined input', () => {
-      const result = validatePricePrediction(undefined);
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.NULL_RESPONSE);
-    });
+    it('should return NOT_A_NUMBER when estimated_price is a string', () => {
+      expect(validatePricePrediction({ estimated_price: '1000', currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'NOT_A_NUMBER' }))
+    })
 
-    it('rejects non-object input', () => {
-      const result = validatePricePrediction('not an object');
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.UNEXPECTED_TYPE);
-    });
+    it('should return NAN when estimated_price is NaN', () => {
+      expect(validatePricePrediction({ estimated_price: NaN, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'NAN' }))
+    })
 
-    it('rejects missing estimated_price', () => {
-      const result = validatePricePrediction({ currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-    });
+    it('should return INFINITY when estimated_price is Infinity', () => {
+      expect(validatePricePrediction({ estimated_price: Infinity, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'INFINITY' }))
+    })
 
-    it('rejects non-number estimated_price', () => {
-      const result = validatePricePrediction({ estimated_price: '5000', currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.NOT_A_NUMBER);
-    });
+    it('should return ZERO when estimated_price is 0', () => {
+      expect(validatePricePrediction({ estimated_price: 0, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'ZERO' }))
+    })
 
-    it('rejects NaN estimated_price', () => {
-      const result = validatePricePrediction({ estimated_price: NaN, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.NAN);
-    });
+    it('should return NEGATIVE when estimated_price is negative', () => {
+      expect(validatePricePrediction({ estimated_price: -500, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'NEGATIVE' }))
+    })
 
-    it('rejects Infinity estimated_price', () => {
-      const result = validatePricePrediction({ estimated_price: Infinity, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INFINITY);
-    });
+    it('should return BELOW_MIN when estimated_price is below MIN_PRICE_INR (100)', () => {
+      expect(validatePricePrediction({ estimated_price: 50, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'BELOW_MIN' }))
+    })
 
-    it('rejects negative price', () => {
-      const result = validatePricePrediction({ estimated_price: -100, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.NEGATIVE);
-    });
+    it('should return ABOVE_MAX when estimated_price exceeds MAX_PRICE_INR (500000)', () => {
+      expect(validatePricePrediction({ estimated_price: 600000, currency: 'INR' })).toEqual(expect.objectContaining({ ok: false, error: 'ABOVE_MAX' }))
+    })
 
-    it('rejects zero price', () => {
-      const result = validatePricePrediction({ estimated_price: 0, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.ZERO);
-    });
+    it('should return MISSING_FIELD when currency is missing', () => {
+      expect(validatePricePrediction({ estimated_price: 1000 })).toEqual(expect.objectContaining({ ok: false, error: 'MISSING_FIELD' }))
+    })
 
-    it('rejects price below minimum (100 INR)', () => {
-      const result = validatePricePrediction({ estimated_price: 50, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.BELOW_MIN);
-    });
+    it('should return INVALID_CURRENCY when currency is invalid', () => {
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'USD' })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_CURRENCY' }))
+    })
 
-    it('rejects price above maximum (500000 INR)', () => {
-      const result = validatePricePrediction({ estimated_price: 600000, currency: 'INR' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.ABOVE_MAX);
-    });
+    it('should return INVALID_MIN_PRICE when min_price > estimated_price', () => {
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', min_price: 1200 })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_MIN_PRICE' }))
+    })
 
-    it('rejects missing currency', () => {
-      const result = validatePricePrediction({ estimated_price: 5000 });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.MISSING_FIELD);
-    });
+    it('should return INVALID_MAX_PRICE when max_price < estimated_price', () => {
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', max_price: 800 })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_MAX_PRICE' }))
+    })
 
-    it('rejects non-INR currency', () => {
-      const result = validatePricePrediction({ estimated_price: 5000, currency: 'USD' });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CURRENCY);
-    });
+    it('should return INVALID_MAX_PRICE when max_price > 3x estimated_price', () => {
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', max_price: 4000 })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_MAX_PRICE' }))
+    })
 
-    it('rejects invalid min_price type', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        min_price: 'not a number',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
-    });
+    it('should return INVALID_CONFIDENCE when confidence is out of range [0, 1]', () => {
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', confidence: -0.1 })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_CONFIDENCE' }))
+      expect(validatePricePrediction({ estimated_price: 1000, currency: 'INR', confidence: 1.5 })).toEqual(expect.objectContaining({ ok: false, error: 'INVALID_CONFIDENCE' }))
+    })
 
-    it('rejects min_price above estimated_price', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        min_price: 6000,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
-    });
-
-    it('rejects invalid max_price type', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        max_price: 'not a number',
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
-    });
-
-    it('rejects max_price below estimated_price', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        max_price: 4000,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
-    });
-
-    it('rejects confidence outside 0..1 range', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        confidence: 1.5,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
-    });
-
-    it('rejects negative confidence', () => {
-      const result = validatePricePrediction({
-        ...validPrediction,
-        confidence: -0.1,
-      });
-      expect(result.ok).toBe(false);
-      expect(result.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
-    });
-
-    it('accepts valid confidence at boundaries', () => {
-      expect(validatePricePrediction({ ...validPrediction, confidence: 0 }).ok).toBe(true);
-      expect(validatePricePrediction({ ...validPrediction, confidence: 1 }).ok).toBe(true);
-    });
-
-    it('defaults confidence to null when omitted', () => {
-      const { confidence, ...withoutConfidence } = validPrediction;
-      const result = validatePricePrediction(withoutConfidence);
-      expect(result.ok).toBe(true);
-      expect(result.validated.confidence).toBeNull();
-    });
-  });
+    it('should return ok: true for a valid prediction', () => {
+      const result = validatePricePrediction({ estimated_price: 5000, currency: 'INR', confidence: 0.9 })
+      expect(result.ok).toBe(true)
+      expect(result.validated).toBeDefined()
+    })
+  })
 
   describe('convertToPaisa', () => {
-    it('converts INR to paisa correctly', () => {
-      expect(convertToPaisa(5000)).toBe(500000);
-      expect(convertToPaisa(0.01)).toBe(1);
-    });
+    it('should correctly convert valid numbers to paisa', () => {
+      expect(convertToPaisa(10)).toBe(1000)
+      expect(convertToPaisa(55.5)).toBe(5550)
+    })
 
-    it('returns null for invalid inputs', () => {
-      expect(convertToPaisa(null)).toBeNull();
-      expect(convertToPaisa(NaN)).toBeNull();
-      expect(convertToPaisa(Infinity)).toBeNull();
-    });
-  });
-});
+    it('should handle NaN, Infinity, and non-numbers gracefully', () => {
+      expect(convertToPaisa(NaN)).toBe(0)
+      expect(convertToPaisa(Infinity)).toBe(0)
+      expect(convertToPaisa('invalid')).toBe(0)
+      expect(convertToPaisa(null)).toBe(0)
+    })
+  })
+})

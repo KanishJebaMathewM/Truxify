@@ -32,10 +32,10 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
 
 class ETARequest(BaseModel):
     order_id: str
-    source_lat: float
-    source_lng: float
-    dest_lat: float
-    dest_lng: float
+    source_lat: float = Field(..., ge=-90, le=90, description="Source latitude")
+    source_lng: float = Field(..., ge=-180, le=180, description="Source longitude")
+    dest_lat: float = Field(..., ge=-90, le=90, description="Destination latitude")
+    dest_lng: float = Field(..., ge=-180, le=180, description="Destination longitude")
 
 
 class ETAUpdateRequest(BaseModel):

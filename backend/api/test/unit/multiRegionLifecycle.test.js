@@ -105,6 +105,70 @@ describe('RegionService lifecycle', () => {
         expect(service._replicationInterval).toBeNull();
     });
 
+    it('promotes a healthy region when the replication primary fails', async () => {
+        const primary = { name: 'primary', primary: true };
+        const secondary = { name: 'secondary', primary: false };
+        const tertiary = { name: 'tertiary', primary: false };
+
+        const service = Object.create(RegionService.prototype);
+        service.primaryRegion = primary;
+        service.regions = [primary, secondary, tertiary];
+        service.updateDNS = vi.fn().mockResolvedValue(undefined);
+        service.storeFailoverEvent = vi.fn().mockResolvedValue(undefined);
+
+        await service.handleFailover(
+            ['primary', 'secondary', 'tertiary'],
+            [secondary, tertiary]
+        );
+
+        expect(service.primaryRegion).toBe(secondary);
+        expect(primary.primary).toBe(false);
+        expect(secondary.primary).toBe(true);
+        expect(tertiary.primary).toBe(false);
+        expect(service.updateDNS).toHaveBeenCalledOnce();
+        expect(service.updateDNS).toHaveBeenCalledWith(['primary'], 'down');
+    });
+
+    it('uses the promoted region as the replication source', async () => {
+        const primary = { name: 'primary', primary: true };
+        const secondary = { name: 'secondary', primary: false };
+        const service = Object.create(RegionService.prototype);
+        service._stopped = false;
+        service.primaryRegion = primary;
+        service.regions = [primary, secondary];
+        service.updateDNS = vi.fn().mockResolvedValue(undefined);
+        service.storeFailoverEvent = vi.fn().mockResolvedValue(undefined);
+        service.fetchDataFromRegion = vi.fn().mockResolvedValue({ payload: true });
+        service.replicateToRegion = vi.fn().mockResolvedValue(undefined);
+        service.redis = {
+            incr: vi.fn(),
+            set: vi.fn()
+        };
+
+        await service.handleFailover(['primary', 'secondary'], [secondary]);
+        await service.replicateData();
+
+        expect(service.fetchDataFromRegion).toHaveBeenCalledOnce();
+        expect(service.fetchDataFromRegion).toHaveBeenCalledWith(secondary);
+        expect(service.replicateToRegion).toHaveBeenCalledWith(primary, { payload: true });
+    });
+
+    it('does not replace the primary when the current primary remains healthy', async () => {
+        const primary = { name: 'primary', primary: true };
+        const secondary = { name: 'secondary', primary: false };
+        const service = Object.create(RegionService.prototype);
+        service.primaryRegion = primary;
+        service.regions = [primary, secondary];
+        service.updateDNS = vi.fn().mockResolvedValue(undefined);
+        service.storeFailoverEvent = vi.fn().mockResolvedValue(undefined);
+
+        await service.handleFailover(['primary'], [primary, secondary]);
+
+        expect(service.primaryRegion).toBe(primary);
+        expect(primary.primary).toBe(true);
+        expect(secondary.primary).toBe(false);
+    });
+
     it('does not perform Redis work from a callback that resumes after stop', async () => {
         let resolveFetch;
         const fetchPromise = new Promise(resolve => {

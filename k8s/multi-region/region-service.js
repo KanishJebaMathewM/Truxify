@@ -100,7 +100,7 @@ export class RegionService {
         const recovered = currentActive.filter(c => !previousActive.includes(c));
 
         if (failed.length > 0 || recovered.length > 0) {
-            await this.handleFailover(previousActive, this.activeRegions);
+            await this.handleFailover(previousActive, currentActive);
         }
         
         if (this._stopped) return results;
@@ -141,11 +141,34 @@ export class RegionService {
     // ============ Failover ============
 
     async handleFailover(previous, current) {
-        logger.warn(`⚠️ Failover detected! Previous: ${previous.join(', ')} -> Current: ${current.join(', ')}`);
+        const currentNames = current.map(region =>
+            typeof region === 'string' ? region : region.name
+        );
+
+        logger.warn(`⚠️ Failover detected! Previous: ${previous.join(', ')} -> Current: ${currentNames.join(', ')}`);
         
         // Find failed regions
-        const failed = previous.filter(p => !current.includes(p));
-        const recovered = current.filter(c => !previous.includes(c));
+        const failed = previous.filter(p => !currentNames.includes(p));
+        const recovered = currentNames.filter(c => !previous.includes(c));
+
+        // Promote a healthy region when the current replication primary fails.
+        const primaryFailed = this.primaryRegion && failed.includes(this.primaryRegion.name);
+        if (primaryFailed && currentNames.length > 0) {
+            const promotedPrimaryName = currentNames[0];
+            const promotedPrimary =
+                current.find(region => typeof region !== 'string' && region.name === promotedPrimaryName) ||
+                this.regions.find(region => region.name === promotedPrimaryName);
+
+            if (promotedPrimary) {
+                this.primaryRegion = promotedPrimary;
+
+                this.regions.forEach(region => {
+                    region.primary = region.name === promotedPrimary.name;
+                });
+
+                logger.warn(`🔄 Promoted ${promotedPrimary.name} to replication primary`);
+            }
+        }
         
         // Update DNS (in production: Route53)
         if (failed.length > 0) {
@@ -158,7 +181,7 @@ export class RegionService {
         // Store failover event
         await this.storeFailoverEvent({
             previous,
-            current,
+            current: currentNames,
             failed,
             recovered,
             timestamp: new Date().toISOString()

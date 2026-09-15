@@ -55,6 +55,38 @@ class ETAResponse(BaseModel):
     timestamp: str
 
 
+def _get_order_route(order_id: str) -> Optional[Dict[str, float]]:
+    """Return server-authoritative pickup/drop coordinates for an order."""
+    try:
+        from app.models.database import SessionLocal
+        db = SessionLocal()
+        try:
+            result = db.execute(
+                text(
+                    "SELECT pickup_lat, pickup_lng, drop_lat, drop_lng "
+                    "FROM orders WHERE order_display_id = :oid"
+                ),
+                {"oid": order_id},
+            ).mappings().first()
+            if result is None:
+                return None
+
+            coordinates = {
+                "source_lat": result["pickup_lat"],
+                "source_lng": result["pickup_lng"],
+                "dest_lat": result["drop_lat"],
+                "dest_lng": result["drop_lng"],
+            }
+            if any(value is None for value in coordinates.values()):
+                return None
+            return {key: float(value) for key, value in coordinates.items()}
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Order route lookup failed for {order_id}: {e}")
+        return None
+
+
 def _order_is_assigned(order_id: str) -> bool:
     """Return True only if the order exists and is assigned to a driver."""
     try:
@@ -78,13 +110,29 @@ def _order_is_assigned(order_id: str) -> bool:
 
 @router.post("/predict")
 async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
-    """Predict ETA for a trip"""
+    """Predict ETA for a trip using the order's authoritative route."""
+    order_route = _get_order_route(request.order_id)
+    if order_route is None:
+        raise HTTPException(status_code=404, detail="Order not found or route coordinates unavailable")
+
     try:
+        # Use coordinates stored on the order rather than trusting caller input.
+        # This keeps user-controlled coordinates from being persisted to the
+        # TrafficData table used by model retraining.
+        source = {
+            'lat': order_route['source_lat'],
+            'lng': order_route['source_lng'],
+        }
+        destination = {
+            'lat': order_route['dest_lat'],
+            'lng': order_route['dest_lng'],
+        }
+
         # Ingest traffic data
         traffic_data = await traffic_pipeline.ingest_traffic_data(
             f"order_{request.order_id}",
-            {'lat': request.source_lat, 'lng': request.source_lng},
-            {'lat': request.dest_lat, 'lng': request.dest_lng}
+            source,
+            destination
         )
 
         if traffic_data:
@@ -116,8 +164,8 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
                 # Fetch the actual route distance (metres) from the routing
                 # engine, then convert predicted speed -> travel time.
                 osrm_data = await traffic_pipeline._fetch_osrm_data(
-                    {'lat': request.source_lat, 'lng': request.source_lng},
-                    {'lat': request.dest_lat, 'lng': request.dest_lng}
+                    source,
+                    destination
                 )
                 route_distance_m = float(osrm_data.get('distance') or 0)
                 eta_seconds = eta_seconds_from_speed(route_distance_m, predicted_speed_mps)
@@ -139,6 +187,8 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
 
         raise HTTPException(status_code=500, detail="ETA prediction failed")
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Internal error: {e}")
 

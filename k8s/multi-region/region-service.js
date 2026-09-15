@@ -281,10 +281,10 @@ export class RegionService {
             await this.redis.set(`replication:${region.name}:last_sync`, Date.now());
         } catch (error) {
             logger.error(`Failed to replicate to ${region.name}:`, error);
+            await this.redis.incr(`replication:${region.name}:error_count`);
+            await this.redis.set(`replication:${region.name}:last_error`, new Date().toISOString());
+            throw error;
         }
-        await this.redis.incr(`replication:${region.name}:error_count`);
-        await this.redis.set(`replication:${region.name}:last_error`, new Date().toISOString());
-        throw lastError;
     }
 
     // ============ Database Operations ============

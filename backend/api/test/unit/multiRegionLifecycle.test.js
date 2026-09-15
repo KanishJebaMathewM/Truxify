@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import axios from 'axios';
 
 const redisQuit = vi.fn().mockResolvedValue('OK');
 
@@ -34,6 +35,8 @@ describe('RegionService lifecycle', () => {
     beforeEach(async () => {
         vi.useFakeTimers();
         redisQuit.mockClear();
+        axios.get.mockReset();
+        axios.post.mockReset();
 
         const module = await import('../../../../k8s/multi-region/region-service.js');
         RegionService = module.RegionService;
@@ -133,5 +136,55 @@ describe('RegionService lifecycle', () => {
         expect(service.replicateToRegion).not.toHaveBeenCalled();
         expect(service.redis.incr).not.toHaveBeenCalled();
         expect(service.redis.set).not.toHaveBeenCalled();
+    });
+
+    it('rethrows the original error and records a failed replication', async () => {
+        const replicationError = new Error('secondary unavailable');
+        axios.post.mockRejectedValueOnce(replicationError);
+
+        const service = Object.create(RegionService.prototype);
+        service._stopped = false;
+        service.redis = {
+            set: vi.fn(),
+            incr: vi.fn()
+        };
+
+        const region = { name: 'secondary', endpoint: 'https://secondary.example' };
+
+        await expect(service.replicateToRegion(region, { payload: true })).rejects.toBe(replicationError);
+        expect(service.redis.incr).toHaveBeenCalledWith('replication:secondary:error_count');
+        expect(service.redis.set).toHaveBeenCalledWith(
+            'replication:secondary:last_error',
+            expect.any(String)
+        );
+        expect(service.redis.set).not.toHaveBeenCalledWith(
+            'replication:secondary:last_sync',
+            expect.anything()
+        );
+    });
+
+    it('records successful replication without incrementing the error counter', async () => {
+        axios.post.mockResolvedValueOnce({ status: 200 });
+
+        const service = Object.create(RegionService.prototype);
+        service._stopped = false;
+        service.redis = {
+            set: vi.fn(),
+            incr: vi.fn()
+        };
+
+        const region = { name: 'secondary', endpoint: 'https://secondary.example' };
+
+        await service.replicateToRegion(region, { payload: true });
+
+        expect(service.redis.set).toHaveBeenCalledWith(
+            'replication:secondary:last_sync',
+            expect.any(Number)
+        );
+        expect(service.redis.incr).not.toHaveBeenCalled();
+        expect(service.redis.set).not.toHaveBeenCalledWith(
+            'replication:secondary:last_error',
+            expect.anything()
+        );
     });
 });

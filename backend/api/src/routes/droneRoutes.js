@@ -11,17 +11,40 @@ const router = express.Router();
  */
 router.post('/launch', authenticate, userLimiter, async (req, res) => {
   try {
+    if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only drivers or admins can launch drone deliveries.' });
+    }
+
     const { trip_id, parcel_id, safe_zone_gps, destination_gps } = req.body;
 
     if (!trip_id || !parcel_id || !safe_zone_gps || !destination_gps) {
       return res.status(400).json({ error: 'Missing required parameters: trip_id, parcel_id, safe_zone_gps, destination_gps' });
     }
 
+    const { supabase } = await import('../config/db.js');
+    const { data: trip } = await supabase
+      .from('trips')
+      .select('driver_id')
+      .eq('id', trip_id)
+      .maybeSingle();
+
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+    if (!trip.driver_id) {
+      return res.status(400).json({ error: 'No driver assigned to this trip.' });
+    }
+    if (req.user.role !== 'admin' && trip.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied. You can only launch drones for your own trips.' });
+    }
+
     const mission = await droneService.launchDroneDelivery({
       tripId: trip_id,
       parcelId: parcel_id,
       safeZoneGps: safe_zone_gps,
-      destinationGps: destination_gps
+      destinationGps: destination_gps,
+      userId: req.user.id,
+      tripDriverId: trip.driver_id
     });
 
     return res.status(201).json({
@@ -44,6 +67,13 @@ router.get('/telemetry/:missionId', authenticate, userLimiter, async (req, res) 
 
     if (!telemetry) {
       return res.status(404).json({ error: 'Drone mission not found or inactive' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const missionOwnerId = telemetry.driver_id || telemetry.user_id;
+      if (missionOwnerId !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this drone mission.' });
+      }
     }
 
     return res.json({ telemetry });

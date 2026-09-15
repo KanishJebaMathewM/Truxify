@@ -1,14 +1,20 @@
 import express from 'express';
 import { generateIftaReport } from '../services/iftaTax.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/generate-report', (req, res) => {
+router.post('/generate-report', authenticate, userLimiter, (req, res) => {
     try {
         const { truckId, quarter, year, waypoints, fuelPurchases } = req.body;
 
         if (!truckId) {
             return res.status(400).json({ error: 'truckId parameter is required.' });
+        }
+
+        if (req.user.role !== 'admin' && req.user.role !== 'driver') {
+            return res.status(403).json({ error: 'Access denied. Only drivers or admins can generate IFTA reports.' });
         }
 
         if (!waypoints || !Array.isArray(waypoints)) {

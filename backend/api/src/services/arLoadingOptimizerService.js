@@ -15,7 +15,7 @@ class ARLoadingOptimizerService {
    * @param {Array<Object>} params.pallets - [{ id: 'PLT-1', lengthCm: 120, widthCm: 100, heightCm: 150, weightKg: 850, fragile: false }]
    * @returns {Object} AR 3D spatial layout plan and axle weight distribution profile
    */
-  async generateLoadingPlan({ container, pallets }) {
+  async generateLoadingPlan({ container, pallets, userId, tripDriverId }) {
     if (!container || !Array.isArray(pallets) || pallets.length === 0) {
       throw new Error('Invalid container specs or empty pallets list');
     }
@@ -94,6 +94,9 @@ class ARLoadingOptimizerService {
     const planId = `AR-PLAN-${Date.now()}`;
     const plan = {
       planId,
+      user_id: userId || null,
+      created_by: userId || null,
+      assigned_driver_id: tripDriverId || null,
       container,
       totalWeightKg,
       maxPayloadKg,

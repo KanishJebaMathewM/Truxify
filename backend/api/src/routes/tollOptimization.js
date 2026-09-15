@@ -1,9 +1,11 @@
 import express from 'express';
 import { optimizeTollRoutes } from '../services/tollOptimization.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/optimize', (req, res) => {
+router.post('/optimize', authenticate, userLimiter, (req, res) => {
     try {
         const { routes, loadDetails } = req.body;
 

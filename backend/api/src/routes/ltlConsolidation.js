@@ -1,9 +1,11 @@
 import express from 'express';
 import { matchLtlPartialLoads } from '../services/ltlConsolidation.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/match', (req, res) => {
+router.post('/match', authenticate, userLimiter, (req, res) => {
     try {
         const { truck, partialLoads } = req.body;
 

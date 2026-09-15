@@ -2,6 +2,7 @@ import express from 'express';
 import { carbonTokenService } from '../services/carbonTokenService.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { supabase } from '../config/db.js';
 
 const router = express.Router();
 
@@ -11,10 +12,26 @@ const router = express.Router();
  */
 router.post('/mint', authenticate, userLimiter, async (req, res) => {
   try {
+    if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only drivers or admins can mint carbon credits.' });
+    }
+
     const { truck_id, trip_id, distance_km, fuel_saved_liters, load_weight_kg } = req.body;
 
     if (!truck_id || !trip_id || fuel_saved_liters === undefined) {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('driver_id')
+        .eq('id', trip_id)
+        .maybeSingle();
+
+      if (!trip || trip.driver_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You can only mint credits for your own trips.' });
+      }
     }
 
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
@@ -40,10 +57,18 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
  */
 router.post('/purchase', authenticate, userLimiter, async (req, res) => {
   try {
+    if (req.user.role !== 'customer' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only customers or admins can purchase carbon credits.' });
+    }
+
     const { token_id, buyer_address, shipper_id } = req.body;
 
     if (!token_id || !buyer_address || !shipper_id) {
       return res.status(400).json({ error: 'Missing required parameters: token_id, buyer_address, shipper_id' });
+    }
+
+    if (req.user.role !== 'admin' && shipper_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied. You can only purchase credits for your own account.' });
     }
 
     const redeemedToken = await carbonTokenService.purchaseCarbonCredits({
@@ -72,6 +97,22 @@ router.get('/:tokenId', authenticate, userLimiter, async (req, res) => {
 
     if (!token) {
       return res.status(404).json({ error: 'Carbon credit token not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const isBuyer = token.shipperId === req.user.id;
+      let isMinter = false;
+      if (!isBuyer && token.tripId) {
+        const { data: trip } = await supabase
+          .from('trips')
+          .select('driver_id')
+          .eq('id', token.tripId)
+          .maybeSingle();
+        isMinter = Boolean(trip && trip.driver_id === req.user.id);
+      }
+      if (!isMinter && !isBuyer) {
+        return res.status(403).json({ error: 'Access denied. You do not own this carbon credit token.' });
+      }
     }
 
     return res.json({ token });

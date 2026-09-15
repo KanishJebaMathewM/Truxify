@@ -17,7 +17,7 @@ class DroneService {
    * @param {Object} params.destinationGps - { lat, lng }
    * @returns {Object} Mission dispatch details
    */
-  async launchDroneDelivery({ tripId, parcelId, safeZoneGps, destinationGps }) {
+  async launchDroneDelivery({ tripId, parcelId, safeZoneGps, destinationGps, userId, tripDriverId }) {
     const droneId = `DRN-AeroX-${Math.floor(10 + Math.random() * 90)}`;
     const missionId = `MSN-${Date.now()}`;
 
@@ -26,6 +26,8 @@ class DroneService {
       droneId,
       tripId,
       parcelId,
+      user_id: userId || null,
+      driver_id: tripDriverId || null,
       status: 'DISPATCHED',
       safeZoneGps,
       destinationGps,

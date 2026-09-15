@@ -1,4 +1,4 @@
-const tireWearService = require('../services/tireWearService');
+import { calculateTireWear } from '../services/tireWearService.js';
 
 const getTireWearPrediction = async (req, res) => {
     try {
@@ -8,7 +8,7 @@ const getTireWearPrediction = async (req, res) => {
             return res.status(400).json({ error: 'driverId is required' });
         }
 
-        const prediction = await tireWearService.calculateTireWear(driverId);
+        const prediction = await calculateTireWear(driverId);
         return res.status(200).json({ success: true, data: prediction });
     } catch (err) {
         console.error('Tire wear controller error:', err.message);
@@ -16,6 +16,4 @@ const getTireWearPrediction = async (req, res) => {
     }
 };
 
-module.exports = {
-    getTireWearPrediction,
-};
+export { getTireWearPrediction };

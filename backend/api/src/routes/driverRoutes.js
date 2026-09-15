@@ -705,7 +705,13 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
  */
 async function handleGetDriverEarnings(req, res) {
   try {
-    const driverId = req.params.driverId || req.user?.id;
+    const requestedDriverId = req.params.driverId || req.user?.id;
+
+    if (req.user.role !== 'admin' && req.user.id !== requestedDriverId) {
+      return res.status(403).json({ error: 'Access denied. You can only view your own earnings.' });
+    }
+
+    const driverId = requestedDriverId;
     const period = (req.query.period || 'week').toLowerCase();
 
     const now = new Date();

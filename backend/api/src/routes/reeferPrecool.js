@@ -1,9 +1,11 @@
 import express from 'express';
 import { evaluateReeferPrecooling } from '../services/reeferPrecool.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/evaluate-precool', (req, res) => {
+router.post('/evaluate-precool', authenticate, userLimiter, (req, res) => {
     try {
         const { reeferId, etaMinutes, targetCargoTempF, currentReeferTempF, ambientWeatherTempF } = req.body;
 

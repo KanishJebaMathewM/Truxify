@@ -1,9 +1,11 @@
 import express from 'express';
 import { verifyTrailerSealIntegrity } from '../services/sealIntegrity.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/verify', (req, res) => {
+router.post('/verify', authenticate, userLimiter, (req, res) => {
     try {
         const { ebolId, expectedSerial, sealImageBase64, checkStage, baselineHash } = req.body;
 

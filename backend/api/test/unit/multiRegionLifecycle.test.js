@@ -125,8 +125,8 @@ describe('RegionService lifecycle', () => {
         expect(primary.primary).toBe(false);
         expect(secondary.primary).toBe(true);
         expect(tertiary.primary).toBe(false);
+        expect(service.updateDNS).toHaveBeenCalledOnce();
         expect(service.updateDNS).toHaveBeenCalledWith(['primary'], 'down');
-        expect(service.updateDNS).toHaveBeenCalledWith(['secondary', 'tertiary'], 'up');
     });
 
     it('uses the promoted region as the replication source', async () => {

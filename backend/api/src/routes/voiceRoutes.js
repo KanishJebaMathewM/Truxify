@@ -98,15 +98,3 @@ router.get('/audio/:id', authenticate, userLimiter, (req, res) => {
 });
 
 export default router;
-
-const express = require('express');
-const router = express.Router();
-const multer = require('multer');
-const voiceController = require('../controllers/voiceController');
-const authMiddleware = require('../middleware/authMiddleware');
-
-const upload = multer({ storage: multer.memoryStorage() });
-
-router.post('/query', authMiddleware, upload.single('audio'), voiceController.handleVoiceQuery);
-
-module.exports = router;

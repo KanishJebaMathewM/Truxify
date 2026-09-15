@@ -25,8 +25,8 @@ const CHALLENGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // Number of OTP fallback digits.
 const FALLBACK_OTP_DIGITS = 6;
 
-// Per-user threshold overrides (in-process; a production deployment would
-// persist these in Supabase).
+// Per-user threshold preferences. A user may only lower the threshold;
+// the server-configured threshold remains the maximum security boundary.
 const userThresholds = new Map();
 
 // Active challenge sessions keyed by challengeId.
@@ -105,9 +105,16 @@ function verifyBiometricToken(token, session, method) {
 
 /**
  * Check whether a given freight value requires biometric authentication.
+ *
+ * The configured server threshold is the maximum allowed threshold. A user's
+ * optional preference may only make biometric verification more restrictive.
  */
 export function requiresBiometricAuth(userId, freightValuePaisa) {
-    const threshold = userThresholds.get(userId) ?? DEFAULT_THRESHOLD_PAISA;
+    const userThreshold = userThresholds.get(userId);
+    const threshold = userThreshold === undefined
+        ? DEFAULT_THRESHOLD_PAISA
+        : Math.min(userThreshold, DEFAULT_THRESHOLD_PAISA);
+
     return freightValuePaisa >= threshold;
 }
 
@@ -116,20 +123,32 @@ export function requiresBiometricAuth(userId, freightValuePaisa) {
  */
 export function getBiometricThreshold(userId) {
     return {
-        threshold_paisa: userThresholds.get(userId) ?? DEFAULT_THRESHOLD_PAISA,
+        threshold_paisa: Math.min(
+            userThresholds.get(userId) ?? DEFAULT_THRESHOLD_PAISA,
+            DEFAULT_THRESHOLD_PAISA
+        ),
         default_threshold_paisa: DEFAULT_THRESHOLD_PAISA,
     };
 }
 
 /**
  * Update the freight-value threshold for a user.
- * Minimum 1 paisa; maximum ₹10,00,000 (₹10 lakh).
+ *
+ * Users may lower their personal threshold, but cannot raise it above the
+ * server-configured threshold used as the security boundary.
  */
 export function updateBiometricThreshold(userId, thresholdPaisa) {
     const parsed = Number(thresholdPaisa);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100_000_000) {
-        throw new Error('threshold_paisa must be an integer between 1 and 100000000');
+    if (
+        !Number.isInteger(parsed) ||
+        parsed < 1 ||
+        parsed > DEFAULT_THRESHOLD_PAISA
+    ) {
+        throw new Error(
+            `threshold_paisa must be an integer between 1 and ${DEFAULT_THRESHOLD_PAISA}`
+        );
     }
+
     userThresholds.set(userId, parsed);
     logger.info(`[BiometricAuth] Threshold updated for user ${userId}: ${parsed} paisa`);
     return getBiometricThreshold(userId);

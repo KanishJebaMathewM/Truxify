@@ -521,6 +521,7 @@ app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysis
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
+app.use('/api/drone', droneRoutes)
 // Mounted here, with the other REST routes, so it sits behind the full
 // middleware chain — body parsers, correlation/request IDs, HPP protection,
 // content-type enforcement, fraud detection and the /api rate limiter.

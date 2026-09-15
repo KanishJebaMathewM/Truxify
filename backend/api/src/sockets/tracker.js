@@ -1161,64 +1161,58 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
-  // Resolve order details from Supabase and verify driver ownership
+  // Resolve order details from Supabase and verify driver ownership with fail-closed security (#14789)
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
   if (_orderRepository && (orderUUID || orderDisplayId)) {
     try {
-      // ── Cache-first order resolution ────────────────────────────────
-      // Check Redis for a cached driver→order mapping before hitting the
-      // database.  This avoids repeated Supabase queries for the same
-      // driver during an active trip.
+      const idToLookup = orderUUID || orderDisplayId;
+      let verifiedOrder = null;
+
       const cached = await getCachedDriverOrder(driver_id);
-      if (cached) {
+      if (cached && (cached.orderId === idToLookup || cached.orderDisplayId === idToLookup)) {
         orderUUID = cached.orderId;
         orderDisplayId = cached.orderDisplayId;
-      } else {
-        const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
-        if (order) {
-          orderUUID = order.id;
-          orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
-        }
+        const { data: freshOrder } = await _orderRepository.findOrderByAnyId(orderUUID, 'id, order_display_id, driver_id');
+        verifiedOrder = freshOrder;
       }
 
-      // ── Authorization check (runs regardless of cache hit or miss) ─
-      // The authorization guard must always execute so that a stale cache entry
-      // for a previously-assigned driver cannot authorize a reassigned driver.
-      if (orderUUID && orderDisplayId) {
-        const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
-        if (order && order.driver_id !== driver_id) {
-          logger.warn({
-            event: 'UNAUTHORIZED_ORDER_TRACKING',
-            driverId: driver_id,
-            orderId: order.id,
-            orderDisplayId: order.order_display_id,
-            assignedDriverId: order.driver_id,
-          }, 'Driver attempted to submit location for order they are not assigned to');
-          // Drop the stale cache entry so a reassignment can never be silently
-          // reused to authorize a driver that is no longer assigned to this order.
-          await invalidateDriverOrderCache(driver_id);
-          return ws.send(JSON.stringify({
-            error: 'Not authorized to track this order',
-            orderId: orderDisplayId || orderUUID,
-          }));
-        }
-        // Keep the cache in sync with the authoritative assignment. If the order
-        // was reassigned (or the cached mapping went stale), this overwrites it
-        // with the current driver→order binding on every authorized ping.
-        if (order) {
-          orderUUID = order.id;
-          orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, order.id, order.order_display_id);
-        }
+      if (!verifiedOrder) {
+        const { data: foundOrder } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        verifiedOrder = foundOrder;
       }
+
+      // Fail-closed: If an order ID was supplied but could not be resolved, reject telemetry broadcast
+      if (!verifiedOrder) {
+        logger.warn({ event: 'UNRESOLVABLE_ORDER_TRACKING', driver_id, idToLookup }, 'Location ping rejected: unable to resolve order');
+        await invalidateDriverOrderCache(driver_id);
+        return ws.send(JSON.stringify({ error: 'Order not found or unresolvable', orderId: idToLookup }));
+      }
+
+      // Strict ownership check: driver_id must match
+      if (verifiedOrder.driver_id !== driver_id) {
+        logger.warn({
+          event: 'UNAUTHORIZED_ORDER_TRACKING',
+          driver_id,
+          orderId: verifiedOrder.id,
+          orderDisplayId: verifiedOrder.order_display_id,
+          assignedDriverId: verifiedOrder.driver_id,
+        }, 'Driver attempted to submit location for order they are not assigned to');
+        await invalidateDriverOrderCache(driver_id);
+        return ws.send(JSON.stringify({
+          error: 'Not authorized to track this order',
+          orderId: verifiedOrder.order_display_id || verifiedOrder.id,
+        }));
+      }
+
+      orderUUID = verifiedOrder.id;
+      orderDisplayId = verifiedOrder.order_display_id;
+      await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
     } catch (err) {
       logger.error('Failed to resolve order details in tracker:', err.message);
     }
+  }
   }
 
   // Recalculate ETA only after the authenticated driver/order ownership check

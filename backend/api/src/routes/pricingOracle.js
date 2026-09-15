@@ -1,9 +1,11 @@
 import express from 'express';
 import { calculateFairMarketValue } from '../services/pricingOracle.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/evaluate-load', (req, res) => {
+router.post('/evaluate-load', authenticate, userLimiter, (req, res) => {
     try {
         const { load, marketConditions } = req.body;
 

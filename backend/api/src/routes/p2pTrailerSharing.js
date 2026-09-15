@@ -3,16 +3,22 @@ import {
     publishTrailerRepositioningListing,
     findMatchingTrailersForTrip
 } from '../services/p2pTrailerSharing.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
 // Carrier A posts an empty trailer needing repositioning
-router.post('/list-trailer', (req, res) => {
+router.post('/list-trailer', authenticate, userLimiter, (req, res) => {
     try {
         const { carrierId, trailerId, trailerType, originCity, originState, destinationCity, destinationState, dailyRateUSD } = req.body;
 
         if (!carrierId || !trailerId || !originCity || !destinationCity) {
             return res.status(400).json({ error: 'carrierId, trailerId, originCity, and destinationCity are required.' });
+        }
+
+        if (req.user.role !== 'admin' && carrierId !== req.user.id) {
+            return res.status(403).json({ error: 'Access denied. carrierId must match your user ID.' });
         }
 
         const listing = publishTrailerRepositioningListing({
@@ -36,7 +42,7 @@ router.post('/list-trailer', (req, res) => {
 });
 
 // Carrier B searches for matching repositioning trailers for power-only trips
-router.post('/find-matches', (req, res) => {
+router.post('/find-matches', authenticate, userLimiter, (req, res) => {
     try {
         const { seekerCarrierId, originCity, destinationCity, requiredTrailerType } = req.body;
 

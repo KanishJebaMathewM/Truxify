@@ -11,10 +11,18 @@ const router = express.Router();
  */
 router.post('/deposit', authenticate, userLimiter, async (req, res) => {
   try {
+    if (req.user.role !== 'broker' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only brokers or admins can deposit lumper fees.' });
+    }
+
     const { booking_id, broker_address, estimated_fee } = req.body;
 
     if (!booking_id || !broker_address || !estimated_fee) {
       return res.status(400).json({ error: 'Missing required parameters: booking_id, broker_address, estimated_fee' });
+    }
+
+    if (req.user.role !== 'admin' && broker_address !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied. Broker address must match your user ID.' });
     }
 
     const escrow = await lumperEscrowService.depositLumperFee({
@@ -38,10 +46,18 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
  */
 router.post('/release', authenticate, userLimiter, async (req, res) => {
   try {
+    if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only drivers or admins can release lumper escrow.' });
+    }
+
     const { escrow_id, driver_wallet, receipt_url, claimed_amount } = req.body;
 
     if (!escrow_id || !driver_wallet || !receipt_url) {
       return res.status(400).json({ error: 'Missing required parameters: escrow_id, driver_wallet, receipt_url' });
+    }
+
+    if (req.user.role !== 'admin' && driver_wallet !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied. Driver wallet must match your user ID.' });
     }
 
     const releasedEscrow = await lumperEscrowService.processReceiptAndRelease({
@@ -71,6 +87,14 @@ router.get('/:escrowId', authenticate, userLimiter, async (req, res) => {
 
     if (!escrow) {
       return res.status(404).json({ error: 'Lumper escrow contract not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const isBroker = escrow.broker_address === req.user.id;
+      const isDriver = escrow.driver_wallet === req.user.id;
+      if (!isBroker && !isDriver) {
+        return res.status(403).json({ error: 'Access denied. You are not a participant in this escrow.' });
+      }
     }
 
     return res.json({ escrow });

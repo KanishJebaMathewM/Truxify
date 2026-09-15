@@ -44,6 +44,13 @@ router.get('/plan/:planId', authenticate, userLimiter, async (req, res) => {
       return res.status(404).json({ error: 'AR loading plan not found' });
     }
 
+    if (req.user.role !== 'admin') {
+      const planOwnerId = plan.user_id || plan.created_by;
+      if (planOwnerId && planOwnerId !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. You do not own this loading plan.' });
+      }
+    }
+
     return res.json({ plan });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to retrieve AR loading plan' });

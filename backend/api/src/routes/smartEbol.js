@@ -1,9 +1,11 @@
 import express from 'express';
 import { processGeofencedSignature } from '../services/smartEbol.js';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/sign', (req, res) => {
+router.post('/sign', authenticate, userLimiter, (req, res) => {
     try {
         const {
             ebolId,
@@ -17,6 +19,10 @@ router.post('/sign', (req, res) => {
 
         if (!ebolId || !receiverId) {
             return res.status(400).json({ error: 'ebolId and receiverId are required.' });
+        }
+
+        if (req.user.role !== 'admin' && receiverId !== req.user.id) {
+            return res.status(403).json({ error: 'Access denied. receiverId must match your user ID.' });
         }
 
         if (!facilityCoordinates || facilityCoordinates.latitude === undefined || facilityCoordinates.longitude === undefined) {

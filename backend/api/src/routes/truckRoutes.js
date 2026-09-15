@@ -838,8 +838,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
 
-  // Ensure truck belongs to the caller (if driver) or caller is admin
-  if (req.user.role === 'driver') {
+  if (req.user.role !== 'admin') {
     const { data: truck, error: truckErr } = await supabase
       .from('trucks')
       .select('id')

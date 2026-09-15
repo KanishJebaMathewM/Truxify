@@ -85,6 +85,7 @@ import {
   handlePaymentLockedEvent,
   handlePaymentReleasedEvent,
   handleDisputeOpenedEvent,
+  enqueueLiveEvent,
   saveLastProcessedBlock,
   getLastProcessedBlock,
 } from '../../src/services/blockchain/eventListener.js';
@@ -126,6 +127,56 @@ describe('Polygon Smart Contract Event Listener Service', () => {
     expect(mockOrderData.escrow_status).toBe('locked');
     expect(mockTripData.payment_status).toBe('locked');
     expect(await getLastProcessedBlock()).toBe(45091235);
+  });
+
+  it('should serialize live events in enqueue order', async () => {
+    const processingOrder = [];
+    let activeHandlers = 0;
+    let maxConcurrentHandlers = 0;
+
+    const createHandler = (name, delayMs) => async () => {
+      activeHandlers += 1;
+      maxConcurrentHandlers = Math.max(maxConcurrentHandlers, activeHandlers);
+      processingOrder.push(`${name}:start`);
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+      processingOrder.push(`${name}:end`);
+      activeHandlers -= 1;
+    };
+
+    const first = enqueueLiveEvent(createHandler('first', 20), {});
+    const second = enqueueLiveEvent(createHandler('second', 1), {});
+    const third = enqueueLiveEvent(createHandler('third', 1), {});
+
+    await Promise.all([first, second, third]);
+
+    expect(processingOrder).toEqual([
+      'first:start',
+      'first:end',
+      'second:start',
+      'second:end',
+      'third:start',
+      'third:end',
+    ]);
+    expect(maxConcurrentHandlers).toBe(1);
+  });
+
+  it('should continue processing queued live events after a handler failure', async () => {
+    const processingOrder = [];
+
+    const failing = enqueueLiveEvent(async () => {
+      processingOrder.push('failed:start');
+      throw new Error('simulated live event failure');
+    }, {});
+
+    const succeeding = enqueueLiveEvent(async () => {
+      processingOrder.push('second:start');
+    }, {});
+
+    await Promise.all([failing, succeeding]);
+
+    expect(processingOrder).toEqual(['failed:start', 'second:start']);
   });
 
   it('should handle PaymentReleased event, update DB, and send FCM push notifications to driver & customer', async () => {

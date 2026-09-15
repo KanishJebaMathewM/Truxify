@@ -71,6 +71,59 @@ describe('RegionService lifecycle', () => {
         clearInterval(service._replicationInterval);
     });
 
+    it('does not overlap health-check runs when one exceeds the interval', async () => {
+        const service = Object.create(RegionService.prototype);
+        service._healthInterval = null;
+        service._healthCheckInProgress = false;
+        service._stopped = false;
+
+        let resolveHealthCheck;
+        service.checkAllRegions = vi.fn().mockImplementation(
+            () => new Promise(resolve => {
+                resolveHealthCheck = resolve;
+            })
+        );
+
+        await service.startHealthChecks();
+
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(service.checkAllRegions).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(service.checkAllRegions).toHaveBeenCalledTimes(1);
+
+        resolveHealthCheck();
+        await vi.advanceTimersByTimeAsync(0);
+
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(service.checkAllRegions).toHaveBeenCalledTimes(2);
+
+        clearInterval(service._healthInterval);
+    });
+
+    it('releases the health-check guard when a run fails', async () => {
+        const service = Object.create(RegionService.prototype);
+        service._healthInterval = null;
+        service._healthCheckInProgress = false;
+        service._stopped = false;
+        service.checkAllRegions = vi.fn()
+            .mockRejectedValueOnce(new Error('health check failed'))
+            .mockResolvedValueOnce({});
+
+        await service.startHealthChecks();
+
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(service.checkAllRegions).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(service._healthCheckInProgress).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(service.checkAllRegions).toHaveBeenCalledTimes(2);
+
+        clearInterval(service._healthInterval);
+    });
+
     it('clears both interval handles and closes Redis on stop', async () => {
         const service = Object.create(RegionService.prototype);
         service._healthInterval = setInterval(() => {}, 10000);

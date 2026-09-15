@@ -76,6 +76,22 @@ def _order_is_assigned(order_id: str) -> bool:
         return False
 
 
+def _route_order_id(route_id: str) -> Optional[str]:
+    """Resolve the order display id encoded by an ETA route id."""
+    prefix = "order_"
+    if not isinstance(route_id, str) or not route_id.startswith(prefix):
+        return None
+
+    order_id = route_id[len(prefix):].strip()
+    return order_id or None
+
+
+def _route_is_authorized(route_id: str) -> bool:
+    """Return True only for route ids backed by an assigned order."""
+    order_id = _route_order_id(route_id)
+    return order_id is not None and _order_is_assigned(order_id)
+
+
 @router.post("/predict")
 async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
     """Predict ETA for a trip"""
@@ -173,7 +189,10 @@ async def update_eta(order_id: str, request: ETAUpdateRequest, _auth=Depends(ver
 
 @router.get("/traffic/{route_id}")
 async def get_traffic(route_id: str, _auth=Depends(verify_api_key)):
-    """Get real-time traffic data"""
+    """Get real-time traffic data for an authorized order route."""
+    if not _route_is_authorized(route_id):
+        raise HTTPException(status_code=404, detail="Route not found")
+
     try:
         traffic = await traffic_pipeline.get_real_time_traffic(route_id)
         utc_now = datetime.now(timezone.utc)
@@ -197,7 +216,10 @@ async def get_traffic(route_id: str, _auth=Depends(verify_api_key)):
 
 @router.get("/forecast/{route_id}")
 async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=Depends(verify_api_key)):
-    """Get traffic forecast"""
+    """Get traffic forecast for an authorized order route."""
+    if not _route_is_authorized(route_id):
+        raise HTTPException(status_code=404, detail="Route not found")
+
     try:
         forecast = await traffic_pipeline.get_traffic_forecast(route_id, hours)
         utc_now = datetime.now(timezone.utc)

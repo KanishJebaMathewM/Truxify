@@ -574,7 +574,10 @@ class EventStore {
             .select('*');
 
         if (filters.status) {
-            query = query.eq('status', filters.status);
+            // Normalize to lowercase so callers that pass uppercase values
+            // (e.g. 'CREATED' from the write side) still match the canonical
+            // lowercase values stored in the status column.
+            query = query.eq('status', filters.status.toLowerCase());
         }
         if (filters.customerId) {
             query = query.eq('payload->>customerId', filters.customerId);

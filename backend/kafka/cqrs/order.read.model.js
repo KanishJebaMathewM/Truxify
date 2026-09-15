@@ -3,6 +3,7 @@ import logger from '../../api/src/middleware/logger.js';
 import eventRepository from '../repositories/event.repository.js';
 import {
   ORDER_READ_MODEL_TABLE,
+  ORDER_STATUSES,
   assertOrderReadModelRow,
   deriveOrderStatus,
   deriveEventTypeFromTimeline,
@@ -343,10 +344,9 @@ class OrderReadModel {
    * single authoritative read model.
    */
   async getOrderStats() {
-    const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
     const stats = {};
 
-    for (const status of statuses) {
+    for (const status of ORDER_STATUSES) {
       const { count, error } = await this.client
         .from(ORDER_READ_MODEL_TABLE)
         .select('*', { count: 'exact', head: true })

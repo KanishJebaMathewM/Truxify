@@ -1,8 +1,8 @@
 import asyncio
 import inspect
 import json
-import pickle
 import hashlib
+import hmac
 import logging
 import os
 import pickle
@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 MODEL_STORAGE_DIR = os.environ.get(
     "MODEL_STORAGE_DIR",
     os.path.join(os.path.dirname(__file__), "..", "..", "models_storage"),
+)
+MODEL_ARTIFACT_SIGNATURE_DIR = os.environ.get(
+    "MODEL_ARTIFACT_SIGNATURE_DIR",
+    os.path.join(os.path.dirname(MODEL_STORAGE_DIR), "model_signatures"),
 )
 
 # ---------------------------------------------------------------------------
@@ -34,7 +38,10 @@ MODEL_STORAGE_DIR = os.environ.get(
 #    (an HTTP-triggered retrain racing a lazy auto-train from a prediction)
 #    can otherwise write the same model concurrently.
 # ---------------------------------------------------------------------------
-MODEL_STORAGE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models_storage")
+MODEL_STORAGE_DIR = os.environ.get(
+    "MODEL_STORAGE_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "..", "models_storage"),
+)
 
 _model_locks: dict[str, asyncio.Lock] = {}
 _model_write_locks: dict[str, threading.Lock] = {}
@@ -125,6 +132,118 @@ def get_previous_meta_path(model_name: str) -> str:
     os.makedirs(MODEL_STORAGE_DIR, exist_ok=True)
     return os.path.join(MODEL_STORAGE_DIR, f"{model_name}_previous_meta.json")
 
+
+def _generations_root(model_name: str) -> str:
+    return os.path.join(MODEL_STORAGE_DIR, "generations", model_name)
+
+
+def _generation_dir(model_name: str, generation: str) -> str:
+    return os.path.join(_generations_root(model_name), generation)
+
+
+def _generation_model_path(model_name: str, generation: str) -> str:
+    return os.path.join(_generation_dir(model_name, generation), "model.pkl")
+
+
+def _generation_meta_path(model_name: str, generation: str) -> str:
+    return os.path.join(_generation_dir(model_name, generation), "meta.json")
+
+
+def _active_ptr_path(model_name: str) -> str:
+    return os.path.join(MODEL_STORAGE_DIR, f"{model_name}_active.json")
+
+
+def _previous_ptr_path(model_name: str) -> str:
+    return os.path.join(MODEL_STORAGE_DIR, f"{model_name}_previous_active.json")
+
+
+def _generate_generation_id() -> str:
+    return f"gen_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:8]}"
+
+
+def _read_pointer(path: str) -> Optional[str]:
+    try:
+        with open(path, "r") as file:
+            generation = json.load(file).get("generation")
+    except (OSError, ValueError, TypeError):
+        return None
+    return generation if isinstance(generation, str) else None
+
+
+def get_active_generation(model_name: str) -> Optional[str]:
+    return _read_pointer(_active_ptr_path(model_name))
+
+
+def get_previous_generation(model_name: str) -> Optional[str]:
+    return _read_pointer(_previous_ptr_path(model_name))
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    temporary_path = f"{path}.{uuid.uuid4().hex}.tmp"
+    with open(temporary_path, "w") as file:
+        json.dump(data, file)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temporary_path, path)
+
+
+def _generation_exists(model_name: str, generation: str) -> bool:
+    return os.path.exists(_generation_model_path(model_name, generation))
+
+
+def _mirror_to_flat(model_name: str, generation: str) -> None:
+    for source, destination in (
+        (_generation_model_path(model_name, generation), get_model_path(model_name)),
+        (_generation_meta_path(model_name, generation), get_meta_path(model_name)),
+    ):
+        temporary_path = f"{destination}.{uuid.uuid4().hex}.tmp"
+        with open(source, "rb") as source_file, open(temporary_path, "wb") as destination_file:
+            shutil.copyfileobj(source_file, destination_file)
+            destination_file.flush()
+            os.fsync(destination_file.fileno())
+        os.replace(temporary_path, destination)
+
+
+def _artifact_signature_path(path: str) -> str:
+    artifact_id = hashlib.sha256(os.path.abspath(path).encode()).hexdigest()
+    os.makedirs(MODEL_ARTIFACT_SIGNATURE_DIR, exist_ok=True)
+    return os.path.join(MODEL_ARTIFACT_SIGNATURE_DIR, f"{artifact_id}.sig")
+
+
+def _artifact_hmac_key() -> bytes:
+    key = os.environ.get("MODEL_ARTIFACT_HMAC_KEY")
+    if not key:
+        raise RuntimeError("MODEL_ARTIFACT_HMAC_KEY must be configured to load or save model artifacts")
+    return key.encode()
+
+
+def _sign_artifact(path: str) -> None:
+    digest = hmac.new(_artifact_hmac_key(), digestmod=hashlib.sha256)
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
+            digest.update(chunk)
+    signature_path = _artifact_signature_path(path)
+    temporary_path = f"{signature_path}.{uuid.uuid4().hex}.tmp"
+    with open(temporary_path, "w") as file:
+        file.write(digest.hexdigest())
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temporary_path, signature_path)
+
+
+def _verify_artifact(path: str) -> bool:
+    signature_path = _artifact_signature_path(path)
+    try:
+        with open(signature_path, "r") as file:
+            expected = file.read().strip()
+        digest = hmac.new(_artifact_hmac_key(), digestmod=hashlib.sha256)
+        with open(path, "rb") as file:
+            for chunk in iter(lambda: file.read(8192), b""):
+                digest.update(chunk)
+        return hmac.compare_digest(digest.hexdigest(), expected)
+    except (OSError, RuntimeError):
+        return False
+
 def get_model_hash_path(model_name: str) -> str:
     os.makedirs(MODEL_STORAGE_DIR, exist_ok=True)
     return os.path.join(MODEL_STORAGE_DIR, f"{model_name}.sha256")
@@ -188,34 +307,74 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
         metrics: Optional metrics dict.
         training_meta: Optional training metadata (source, timestamp, feature_hash, etc.).
     """
-    path = get_model_path(model_name)
-    meta_path = get_meta_path(model_name)
+    with _get_write_lock(model_name):
+        generation = _generate_generation_id()
+        generation_dir = _generation_dir(model_name, generation)
+        os.makedirs(generation_dir, exist_ok=True)
+        model_path = _generation_model_path(model_name, generation)
+        meta_path = _generation_meta_path(model_name, generation)
+        model_tmp = f"{model_path}.{uuid.uuid4().hex}.tmp"
+        meta_tmp = f"{meta_path}.{uuid.uuid4().hex}.tmp"
+        meta = {
+            "model_name": model_name,
+            "generation": generation,
+            "saved_at": datetime.now().isoformat(),
+            "metrics": metrics or {},
+        }
+        if training_meta:
+            meta["training_meta"] = training_meta
+        try:
+            with open(model_tmp, "wb") as file:
+                pickle.dump(model, file)
+                file.flush()
+                os.fsync(file.fileno())
+            with open(meta_tmp, "w") as file:
+                json.dump(meta, file, indent=2)
+                file.flush()
+                os.fsync(file.fileno())
+            with open(model_tmp, "rb") as file:
+                if pickle.load(file) is None:
+                    raise ValueError(f"Generated artifact for '{model_name}' is empty")
+            os.replace(model_tmp, model_path)
+            os.replace(meta_tmp, meta_path)
+            _sign_artifact(model_path)
+            active_path = _active_ptr_path(model_name)
+            previous_path = _previous_ptr_path(model_name)
+            current = get_active_generation(model_name)
+            if current:
+                _atomic_write_json(previous_path, {"generation": current})
+            _atomic_write_json(active_path, {"generation": generation})
+            _mirror_to_flat(model_name, generation)
+            _sign_artifact(get_model_path(model_name))
+        finally:
+            for temporary_path in (model_tmp, meta_tmp):
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
+    logger.info("Model '%s' generation %s published", model_name, generation)
 
-    if os.path.exists(path):
-        os.replace(path, get_previous_model_path(model_name))
-    if os.path.exists(meta_path):
-        os.replace(meta_path, get_previous_meta_path(model_name))
-    if os.path.exists(get_model_hash_path(model_name)):
-        os.replace(get_model_hash_path(model_name), get_previous_model_hash_path(model_name))
 
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "wb") as f:
-        pickle.dump(model, f)
-    os.replace(tmp_path, path)
-    _save_model_hash(model_name)
+def publish_model(model: Any, model_name: str, metrics: Optional[dict] = None) -> str:
+    """Publish a model and return its active generation identifier."""
+    save_model(model, model_name, metrics)
+    return get_active_generation(model_name) or "production"
 
-    meta = {
-        "model_name": model_name,
-        "saved_at": datetime.now().isoformat(),
-        "metrics": metrics or {},
-    }
-    if training_meta:
-        meta["training_meta"] = training_meta
-    meta_tmp = meta_path + ".tmp"
-    with open(meta_tmp, "w") as f:
-        json.dump(meta, f, indent=2)
-    os.replace(meta_tmp, meta_path)
-    logger.info("Model '%s' saved to %s (previous version preserved)", model_name, path)
+
+def delete_model(model_name: str) -> None:
+    """Remove persisted generations and compatibility mirrors for a model."""
+    with _get_write_lock(model_name):
+        for path in (
+            get_model_path(model_name),
+            get_meta_path(model_name),
+            _active_ptr_path(model_name),
+            _previous_ptr_path(model_name),
+        ):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        shutil.rmtree(_generations_root(model_name), ignore_errors=True)
 
 def restore_previous_model(model_name: str) -> bool:
     """Roll back *model_name* to its previously-published generation.
@@ -224,40 +383,18 @@ def restore_previous_model(model_name: str) -> bool:
     reversible (mirroring the old flat-file semantics). Returns False (no-op)
     when there is no previous generation to restore.
     """
-    prev_path = get_previous_model_path(model_name)
-    prev_meta_path = get_previous_meta_path(model_name)
-    prev_hash_path = get_previous_model_hash_path(model_name)
-    if not os.path.exists(prev_path):
-        logger.warning("No previous version of model '%s' to restore", model_name)
-        return False
-
-    # Refuse to restore a tampered/corrupted previous artifact. A missing or
-    # mismatched hash means the rollback source cannot be trusted (RCE/#13095).
-    if not _verify_previous_model_hash(model_name):
-        logger.error(
-            "Refusing to restore model '%s': previous artifact failed integrity check",
-            model_name,
-        )
-        return False
-
-    path = get_model_path(model_name)
-    meta_path = get_meta_path(model_name)
-    hash_path = get_model_hash_path(model_name)
-
+    with _get_write_lock(model_name):
+        active_path = _active_ptr_path(model_name)
+        previous_path = _previous_ptr_path(model_name)
+        current = get_active_generation(model_name)
+        previous = get_previous_generation(model_name)
+        if previous is None or not _generation_exists(model_name, previous):
+            logger.warning("No previous generation of model '%s' to restore", model_name)
+            return False
         _atomic_write_json(active_path, {"generation": previous})
-        if current is not None and _generation_exists(model_name, current):
+        if current and _generation_exists(model_name, current):
             _atomic_write_json(previous_path, {"generation": current})
-        else:
-            try:
-                os.remove(previous_path)
-            except OSError:
-                pass
-
-        _mirror_to_flat(
-            model_name,
-            _generation_model_path(model_name, previous),
-            _generation_meta_path(model_name, previous),
-        )
+        _mirror_to_flat(model_name, previous)
         logger.warning("Model '%s' rolled back to generation %s", model_name, previous)
         return True
 
@@ -290,30 +427,16 @@ def _generation_candidates(model_name: str):
         yield model_path, _generation_meta_path(model_name, gen)
     yield get_model_path(model_name), get_meta_path(model_name)
 
-    if os.path.exists(hash_path):
-        os.replace(hash_path, hash_path + ".swap")
-    if os.path.exists(prev_hash_path):
-        os.replace(prev_hash_path, hash_path)
-    if os.path.exists(hash_path + ".swap"):
-        os.replace(hash_path + ".swap", prev_hash_path)
-
-    logger.warning("Model '%s' rolled back to previous version", model_name)
-    return True
-
 def load_model(model_name: str) -> Optional[Any]:
-    path = get_model_path(model_name)
-    if not os.path.exists(path):
-        logger.warning("Model '%s' not found at %s", model_name, path)
-        return None
-    if not _verify_model_hash(model_name):
-        logger.error(
-            "Refusing to load model '%s': integrity check failed (missing or "
-            "mismatched sha256). Artifact may be tampered or corrupted.",
-            model_name,
-        )
-        return None
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    for path, _ in _generation_candidates(model_name):
+        if os.path.exists(path):
+            if not _verify_artifact(path):
+                logger.error(" refusing to load unsigned or invalid model artifact: %s", path)
+                continue
+            with open(path, "rb") as file:
+                return pickle.load(file)
+    logger.warning("Model '%s' not found", model_name)
+    return None
 
 def model_exists(model_name: str) -> bool:
     for model_path, _ in _generation_candidates(model_name):

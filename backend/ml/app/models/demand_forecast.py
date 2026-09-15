@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 import numpy as np
 from typing import List, Optional
@@ -169,36 +170,18 @@ def train_demand_forecast_model() -> dict:
         metrics["promotion_reason"] = reason
 
         if promoted:
-            # save_model() atomically publishes a new generation. The cache is
-            # invalidated only after publication succeeded, so concurrent
-            # predictions keep serving the previous valid model until then.
-            save_model((model, scaler), MODEL_NAME, metrics)
+            # Publish only after evaluation succeeds; save_model preserves the
+            # previous active generation for a later rollback.
+            training_meta = {
+                "source": "module_trained",
+                "training_timestamp": time.time(),
+                "feature_hash": str(hash(tuple(FEATURE_NAMES))),
+            }
+            save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
             reset_model_cache()
             logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
         else:
-            promoted = False
-            reason = (
-                f"New model MAE {mae:.4f} did not improve on production MAE {current_mae:.4f} "
-                f"by the required {PROMOTION_MAE_IMPROVEMENT_THRESHOLD:.0%} threshold "
-                f"(delta {improvement:.2%}); keeping existing production model."
-            )
-
-    metrics["promoted"] = promoted
-    metrics["promotion_reason"] = reason
-
-    if promoted:
-        training_meta = {
-            "source": "module_trained",
-            "training_timestamp": time.time(),
-            "feature_hash": str(hash(tuple(FEATURE_NAMES))),
-        }
-        save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
-        # Invalidate the in-memory cache so the next predict_demand call
-        # loads the newly trained model instead of the stale cached copy
-        reset_model_cache()
-        logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
-    else:
-        logger.info("Demand forecast model trained but NOT promoted. %s", reason)
+            logger.info("Demand forecast model trained but NOT promoted. %s", reason)
 
         return metrics
 

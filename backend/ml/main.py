@@ -722,7 +722,7 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
 
 
 @app.post("/train/demand/rollback")
-async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
+async def rollback_demand_endpoint(test_id: Optional[str] = None, _auth=Depends(verify_api_key)):
     """Roll back the demand-forecast model to its previously-promoted version.
 
     This is the real rollback path for the model actually retrained by
@@ -734,6 +734,9 @@ async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
     async with get_model_lock(DEMAND_MODEL_NAME):
         try:
             result = await asyncio.to_thread(rollback_demand_forecast_model)
+            if result.get("rolled_back") and test_id:
+                from routes.ab_testing import ab_service
+                ab_service.mark_test_terminal(test_id, "rolled_back")
             return result
         except Exception as e:
             logger.error("Demand model rollback failed: %s", e)

@@ -1,5 +1,5 @@
 {
-  "name": "ML Model Auto-Rollback Pipeline",
+  "name": "Demand Forecast Model Auto-Rollback Pipeline",
   "nodes": [
     {
       "parameters": {
@@ -13,10 +13,7 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [
-        0,
-        0
-      ],
+      "position": [0, 0],
       "id": "schedule-trigger",
       "name": "Schedule Check"
     },
@@ -36,16 +33,13 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [
-        200,
-        0
-      ],
+      "position": [200, 0],
       "id": "check-active-tests",
-      "name": "Check Active Tests"
+      "name": "Check Active Demand Test"
     },
     {
       "parameters": {
-        "url": "={{$node[\"Check Active Tests\"].json.active_test ? 'http://ml-engine:8000/ab-testing/evaluate/' + $node[\"Check Active Tests\"].json.active_test.test_id : 'http://ml-engine:8000/ab-testing/status'}}",
+        "url": "={{$node[\"Check Active Demand Test\"].json.active_test ? 'http://ml-engine:8000/ab-testing/evaluate/' + $node[\"Check Active Demand Test\"].json.active_test.test_id : 'http://ml-engine:8000/ab-testing/status'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -59,12 +53,9 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [
-        400,
-        0
-      ],
+      "position": [400, 0],
       "id": "evaluate-test",
-      "name": "Evaluate Test"
+      "name": "Evaluate Demand Test"
     },
     {
       "parameters": {
@@ -73,12 +64,9 @@
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        600,
-        0
-      ],
+      "position": [600, 0],
       "id": "decision-node",
-      "name": "Decision"
+      "name": "Demand Rollback Decision"
     },
     {
       "parameters": {
@@ -93,17 +81,14 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [
-        800,
-        0
-      ],
+      "position": [800, 0],
       "id": "rollback-branch",
-      "name": "Should Rollback?"
+      "name": "Should Roll Back Demand Model?"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://ml-engine:8000/ab-testing/rollback/{{$node[\"Decision\"].json.test_id}}",
+        "url": "http://ml-engine:8000/train/demand/rollback?test_id={{$node[\"Demand Rollback Decision\"].json.test_id}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -117,29 +102,23 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [
-        1000,
-        -100
-      ],
+      "position": [1000, -100],
       "id": "execute-rollback",
-      "name": "Execute Rollback"
+      "name": "Restore Previous Demand Model"
     },
     {
       "parameters": {
         "toEmail": "ml-alerts@truxify.org",
-        "subject": "⚠️ ML Model Auto-Rollback Triggered: {{$node[\"Decision\"].json.test_id}}",
+        "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.test_id}}",
         "htmlFormat": true,
-        "message": "<h3>ML Model Auto-Rollback Triggered</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong>.</p><p>Auto-rollback executed successfully at: {{$node[\"Decision\"].json.evaluated_at}}.</p><p>Previous stable model baseline has been restored.</p>",
+        "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Demand Rollback Decision\"].json.test_id}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
-      "position": [
-        1200,
-        -100
-      ],
+      "position": [1200, -100],
       "id": "send-alert",
-      "name": "Send Alert"
+      "name": "Send Demand Rollback Alert"
     }
   ],
   "connections": {

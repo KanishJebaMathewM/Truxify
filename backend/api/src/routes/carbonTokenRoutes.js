@@ -100,8 +100,16 @@ router.get('/:tokenId', authenticate, userLimiter, async (req, res) => {
     }
 
     if (req.user.role !== 'admin') {
-      const isMinter = token.driver_id === req.user.id;
-      const isBuyer = token.shipper_id === req.user.id;
+      const isBuyer = token.shipperId === req.user.id;
+      let isMinter = false;
+      if (!isBuyer && token.tripId) {
+        const { data: trip } = await supabase
+          .from('trips')
+          .select('driver_id')
+          .eq('id', token.tripId)
+          .maybeSingle();
+        isMinter = Boolean(trip && trip.driver_id === req.user.id);
+      }
       if (!isMinter && !isBuyer) {
         return res.status(403).json({ error: 'Access denied. You do not own this carbon credit token.' });
       }

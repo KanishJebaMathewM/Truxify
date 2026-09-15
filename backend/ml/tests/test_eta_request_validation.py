@@ -32,7 +32,7 @@ def test_eta_request_rejects_invalid_geographic_coordinates(field, value):
     payload[field] = value
 
     with pytest.raises(ValidationError):
-        ETARequest.model_validate(payload)
+        ETARequest(**payload)
 
 
 def test_eta_request_accepts_coordinates_at_valid_boundaries():

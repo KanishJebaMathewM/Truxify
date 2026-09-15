@@ -72,6 +72,7 @@ import escortWalletRoutes from './routes/escortWalletRoutes.js'
 import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
+import arLoadingRoutes from './routes/arLoadingRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -575,6 +576,7 @@ app.use('/api/oracle', oracleRoutes)
 app.use('/api/carbon-credits', carbonTokenRoutes)
 app.use('/api/ml', mlRoutes)
 app.use('/api/tire-analytics', tireAnalyticsRoutes)
+app.use('/api/ar-loading', arLoadingRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES

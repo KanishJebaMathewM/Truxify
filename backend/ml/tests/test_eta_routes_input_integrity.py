@@ -1,7 +1,32 @@
+import sys
+import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+class _TrafficPipelineStub:
+    def __init__(self, db_url, redis_url):
+        self.ingest_traffic_data = AsyncMock()
+        self.predict_eta = AsyncMock()
+        self._fetch_osrm_data = AsyncMock()
+
+
+async def _run_inference_stub(*args, **kwargs):
+    return None
+
+
+mock_traffic_module = types.ModuleType("services.traffic_pipeline")
+mock_traffic_module.TrafficPipeline = _TrafficPipelineStub
+mock_traffic_module.eta_seconds_from_speed = lambda distance, speed: (
+    distance / speed if distance and speed and speed > 0 else None
+)
+sys.modules["services.traffic_pipeline"] = mock_traffic_module
+
+mock_execution_module = types.ModuleType("app.execution")
+mock_execution_module.run_inference = _run_inference_stub
+sys.modules["app.execution"] = mock_execution_module
 
 from routes import eta_routes
 
@@ -28,32 +53,27 @@ async def test_predict_eta_uses_authoritative_order_coordinates():
     )
     osrm_data = {"distance": 10000, "duration": 900}
 
+    eta_routes.traffic_pipeline.ingest_traffic_data.return_value = traffic_data
+    eta_routes.traffic_pipeline._fetch_osrm_data.return_value = osrm_data
+
     with patch.object(
         eta_routes,
         "_get_order_route",
         return_value=authoritative_route,
     ), patch.object(
-        eta_routes.traffic_pipeline,
-        "ingest_traffic_data",
-        new=AsyncMock(return_value=traffic_data),
-    ) as mock_ingest, patch.object(
         eta_routes,
         "run_inference",
         new=AsyncMock(return_value=20.0),
-    ), patch.object(
-        eta_routes.traffic_pipeline,
-        "_fetch_osrm_data",
-        new=AsyncMock(return_value=osrm_data),
-    ) as mock_osrm:
+    ):
         response = await eta_routes.predict_eta(request, None)
 
     assert response.order_id == request.order_id
-    mock_ingest.assert_awaited_once_with(
+    eta_routes.traffic_pipeline.ingest_traffic_data.assert_awaited_once_with(
         "order_ORDER-123",
         {"lat": authoritative_route["source_lat"], "lng": authoritative_route["source_lng"]},
         {"lat": authoritative_route["dest_lat"], "lng": authoritative_route["dest_lng"]},
     )
-    mock_osrm.assert_awaited_once_with(
+    eta_routes.traffic_pipeline._fetch_osrm_data.assert_awaited_once_with(
         {"lat": authoritative_route["source_lat"], "lng": authoritative_route["source_lng"]},
         {"lat": authoritative_route["dest_lat"], "lng": authoritative_route["dest_lng"]},
     )

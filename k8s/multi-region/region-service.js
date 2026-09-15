@@ -10,6 +10,7 @@ export class RegionService {
         this.activeRegions = [];
         this.primaryRegion = null;
         this._healthInterval = null;
+        this._healthCheckInProgress = false;
         this._replicationInterval = null;
         this._stopped = false;
         this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -74,8 +75,16 @@ export class RegionService {
     async startHealthChecks() {
         if (this._stopped || this._healthInterval) return;
         this._healthInterval = setInterval(async () => {
-            if (this._stopped) return;
-            await this.checkAllRegions();
+            if (this._stopped || this._healthCheckInProgress) return;
+
+            this._healthCheckInProgress = true;
+            try {
+                await this.checkAllRegions();
+            } catch (error) {
+                logger.error('Health check cycle failed:', error);
+            } finally {
+                this._healthCheckInProgress = false;
+            }
         }, 10000); // Every 10 seconds
     }
 

@@ -13,7 +13,7 @@ router.post('/analyze', authenticate, userLimiter, async (req, res) => {
   try {
     const { truck_id, tpms_readings } = req.body;
 
-    if (!truck_id || !tpms_readings) {
+    if (!truck_id || !Array.isArray(tpms_readings) || tpms_readings.length === 0) {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, tpms_readings' });
     }
 

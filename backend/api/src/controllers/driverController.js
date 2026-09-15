@@ -30,8 +30,10 @@ function assertCanAccess(req, driverId, res) {
 
 /**
  * GET /api/driver/:driverId
- * Returns a driver's public profile and driver_details for the authenticated
- * driver (or admin). Uses the user-scoped client so RLS applies.
+ * Returns a driver's public profile, driver_details, and active truck for the
+ * authenticated driver (or admin). Admins use the service-role client so RLS
+ * cannot hide the target driver's rows; non-admins keep their user-scoped
+ * client so RLS applies.
  */
 export async function getDriverById(req, res) {
   try {
@@ -59,9 +61,20 @@ export async function getDriverById(req, res) {
       return res.status(500).json({ error: 'Failed to fetch driver details.', details: detailsErr.message });
     }
 
+    let truck = null;
+    if (details && details.truck_id) {
+      const { data: truckData, error: truckErr } = await db
+        .from('trucks')
+        .select('*')
+        .eq('id', details.truck_id)
+        .maybeSingle();
+      if (!truckErr) truck = truckData || null;
+    }
+
     return res.json({
       profile,
-      driverDetails: details || { rating: 0, total_trips: 0, is_online: false, kyc_status: 'Unverified' }
+      driverDetails: details || { rating: 0, total_trips: 0, is_online: false, kyc_status: 'Unverified' },
+      truck
     });
   } catch (err) {
     logger.error({ err, requestId: req.requestId }, '[Driver] getDriverById error');
@@ -125,8 +138,12 @@ export async function getDriverTrips(req, res) {
 
 /**
  * PUT /api/driver/:driverId
- * Updates a driver's profile fields. The requesting driver can only update
- * their own profile; admins may update any driver.
+ * Updates a driver's profile fields. Only name, full_name, phone, and email
+ * are whitelisted; driver-detail fields (is_online, kyc_status, truck_id,
+ * rating) are handled by the dedicated /online, /hos/status, /truck, and
+ * status handlers so they are never written to the profiles table.
+ * The requesting driver can only update their own profile; admins may update
+ * any driver.
  */
 export async function updateDriver(req, res) {
   try {

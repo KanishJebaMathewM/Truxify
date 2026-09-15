@@ -15,6 +15,7 @@ function createMockSupabase(store = {}) {
           _mode: null,
           eq(col, val) { this._filters.push({ col, val }); return this },
           gt(col, val) { this._filters.push({ col, val, op: 'gt' }); return this },
+          gte(col, val) { this._filters.push({ col, val, op: 'gte' }); return this },
           lt(col, val) { this._filters.push({ col, val, op: 'lt' }); return this },
           order() { return this },
           limit(n) { this._limit = n; return this },
@@ -79,6 +80,8 @@ function createMockSupabase(store = {}) {
               for (const f of this._filters) {
                 if (f.op === 'gt') {
                   rows = rows.filter(r => r[f.col] > f.val)
+                } else if (f.op === 'gte') {
+                  rows = rows.filter(r => r[f.col] >= f.val)
                 } else if (f.op === 'lt') {
                   rows = rows.filter(r => r[f.col] < f.val)
                 } else {
@@ -445,6 +448,44 @@ describe('TrackingTokenService', () => {
       expect(loc).not.toBeNull()
       expect(loc.latitude).toBe(26.912)
       expect(loc.longitude).toBe(75.787)
+    })
+
+    it('returns a fresh active driver location within the 15-minute freshness window', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#TRX-FRESH',
+        driver_id: 'drv-fresh',
+      })
+      mockData.store.driver_locations.push({
+        driver_id: 'drv-fresh',
+        latitude: 26.91,
+        longitude: 75.78,
+        last_updated_at: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+        is_active: true,
+      })
+
+      const loc = await service.getDriverLocation('#TRX-FRESH')
+
+      expect(loc).not.toBeNull()
+      expect(loc.latitude).toBe(26.91)
+      expect(loc.longitude).toBe(75.78)
+    })
+
+    it('returns null for an active driver location older than 15 minutes', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#TRX-STALE',
+        driver_id: 'drv-stale',
+      })
+      mockData.store.driver_locations.push({
+        driver_id: 'drv-stale',
+        latitude: 26.91,
+        longitude: 75.78,
+        last_updated_at: new Date(Date.now() - 15 * 60 * 1000 - 1000).toISOString(),
+        is_active: true,
+      })
+
+      const loc = await service.getDriverLocation('#TRX-STALE')
+
+      expect(loc).toBeNull()
     })
   })
 })

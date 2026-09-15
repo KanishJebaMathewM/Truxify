@@ -3,6 +3,7 @@ import logger from '../middleware/logger.js';
 
 const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
+const DRIVER_LOCATION_FRESHNESS_MS = 15 * 60 * 1000;
 
 // Helper to validate standard UUID format
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -282,11 +283,13 @@ export class TrackingTokenService {
       return null;
     }
 
+    const freshnessCutoff = new Date(Date.now() - DRIVER_LOCATION_FRESHNESS_MS).toISOString();
     const { data: location, error: locationError } = await this._supabaseAdmin
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)
       .eq('is_active', true)
+      .gte('last_updated_at', freshnessCutoff)
       .order('last_updated_at', { ascending: false })
       .limit(1)
       .single();

@@ -146,6 +146,19 @@ export class RegionService {
         // Find failed regions
         const failed = previous.filter(p => !current.includes(p));
         const recovered = current.filter(c => !previous.includes(c));
+
+        // Promote a healthy region when the current replication primary fails.
+        const primaryFailed = this.primaryRegion && failed.includes(this.primaryRegion.name);
+        if (primaryFailed && current.length > 0) {
+            const promotedPrimary = current[0];
+            this.primaryRegion = promotedPrimary;
+
+            this.regions.forEach(region => {
+                region.primary = region.name === promotedPrimary.name;
+            });
+
+            logger.warn(`🔄 Promoted ${promotedPrimary.name} to replication primary`);
+        }
         
         // Update DNS (in production: Route53)
         if (failed.length > 0) {

@@ -17,12 +17,20 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
     }
 
+    const distanceKm = Number(distance_km ?? 0);
+    const fuelSavedLiters = Number(fuel_saved_liters);
+    const loadWeightKg = Number(load_weight_kg ?? 0);
+    if (![distanceKm, fuelSavedLiters, loadWeightKg].every(Number.isFinite) ||
+        [distanceKm, fuelSavedLiters, loadWeightKg].some((value) => value < 0)) {
+      return res.status(400).json({ error: 'Carbon metrics must be finite, non-negative numbers' });
+    }
+
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
       truckId: truck_id,
       tripId: trip_id,
-      distanceKm: Number(distance_km || 0),
-      fuelSavedLiters: Number(fuel_saved_liters),
-      loadWeightKg: Number(load_weight_kg || 0)
+      distanceKm,
+      fuelSavedLiters,
+      loadWeightKg
     });
 
     return res.status(201).json({

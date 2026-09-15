@@ -9,22 +9,26 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: {
-    error: vi.fn(),
-    warn: vi.fn(),
-    info: vi.fn(),
-  },
+  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-const {
-  registerDeviceToken,
-  registerDevice,
-  unregisterDeviceToken,
-  unregisterDevice,
-  updateLocation,
-  unregisterAllDeviceTokens,
-  getDevicePlatforms,
-} = await import('../../src/controllers/deviceController.js');
+vi.mock('../../src/services/notificationService.js', () => ({
+  default: { pruneStaleDevices: vi.fn().mockResolvedValue({ pruned: 0 }) },
+}));
+
+let registerDeviceToken, registerDevice, unregisterDeviceToken,
+    unregisterDevice, updateLocation, unregisterAllDeviceTokens, getDevicePlatforms;
+
+beforeAll(async () => {
+  const mod = await import('../../src/controllers/deviceController.js');
+  registerDeviceToken     = mod.registerDeviceToken;
+  registerDevice          = mod.registerDevice;
+  unregisterDeviceToken   = mod.unregisterDeviceToken;
+  unregisterDevice        = mod.unregisterDevice;
+  updateLocation          = mod.updateLocation;
+  unregisterAllDeviceTokens = mod.unregisterAllDeviceTokens;
+  getDevicePlatforms      = mod.getDevicePlatforms;
+});
 
 function makeResponse() {
   const res = {};

@@ -38,7 +38,10 @@ console.error = (...args) => {
   originalError(...args);
 };
 
-const RedisMock = require('./mocks/redisMock');
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+const { default: RedisMock } = await import('./mocks/redisMock.js');
 
 global.mockRedis = new RedisMock();
 

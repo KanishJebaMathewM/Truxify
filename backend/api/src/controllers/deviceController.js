@@ -171,7 +171,7 @@ export async function unregisterDeviceToken(req, res, next) {
       });
     }
 
-    const { data: deletedRows, error: rpcError } = await supabaseAdmin.rpc('unregister_device_token', {
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('unregister_device_token', {
       p_user_id:   userId,
       p_fcm_token: finalToken,
     });
@@ -182,7 +182,7 @@ export async function unregisterDeviceToken(req, res, next) {
     }
 
     // If no rows were deleted, the token was not registered for this user
-    const deletedCount = Array.isArray(deletedRows) ? deletedRows.length : (deletedRows ?? 0);
+    const deletedCount = Array.isArray(rpcResult) ? rpcResult.length : (rpcResult ?? 0);
     if (deletedCount === 0) {
       return res.status(404).json({
         success: false,
@@ -322,9 +322,67 @@ export async function pruneDevices(req, res, next) {
   }
 }
 
+/**
+ * Update the authenticated user's current location.
+ */
+export async function updateLocation(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new UnauthorizedError('User not authenticated'));
+    }
+
+    const { latitude, longitude, heading, speed } = req.body;
+
+    const lat = parseFloat(latitude);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+      return res.status(400).json({ error: 'latitude must be a valid number between -90 and 90' });
+    }
+
+    const lng = parseFloat(longitude);
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+      return res.status(400).json({ error: 'longitude must be a valid number between -180 and 180' });
+    }
+
+    const parsedHeading = Number.isFinite(parseFloat(heading)) ? parseFloat(heading) : null;
+    const parsedSpeed   = Number.isFinite(parseFloat(speed))   ? parseFloat(speed)   : null;
+
+    const { error } = await supabaseAdmin
+      .from('user_locations')
+      .upsert(
+        {
+          user_id:    userId,
+          latitude:   lat,
+          longitude:  lng,
+          heading:    parsedHeading,
+          speed:      parsedSpeed,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
+
+    if (error) {
+      logger.error('[DeviceController] Failed to update location:', error.message);
+      return next(new AppError('Failed to update location', 500));
+    }
+
+    return res.json({ success: true, message: 'Location updated' });
+  } catch (err) {
+    logger.error('[DeviceController] Unexpected error in updateLocation:', err.message);
+    return next(err);
+  }
+}
+
+// Aliases for route-layer consumers that prefer shorter names
+export const registerDevice   = registerDeviceToken;
+export const unregisterDevice = unregisterDeviceToken;
+
 export default {
   registerDeviceToken,
+  registerDevice,
   unregisterDeviceToken,
+  unregisterDevice,
+  updateLocation,
   unregisterAllDeviceTokens,
   getDevicePlatforms,
   pruneDevices

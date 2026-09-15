@@ -49,6 +49,7 @@
     ]
   },
   "dependencies": {
-    "dataloader": "^2.2.3"
+    "dataloader": "^2.2.3",
+    "memory-pager": "^1.5.0"
   }
 }

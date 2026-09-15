@@ -9,7 +9,7 @@
  * Every handler enforces object-level authorization: a driver may only read
  * or update their own profile/trips, admins may operate on any driver.
  */
-import { supabase, createUserClient } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 function isAdmin(req) {
@@ -38,7 +38,7 @@ export async function getDriverById(req, res) {
     const { driverId } = req.params;
     if (!assertCanAccess(req, driverId, res)) return;
 
-    const db = createUserClient(req.token) || supabase;
+    const db = isAdmin(req) ? (supabaseAdmin || supabase) : (createUserClient(req.token) || supabase);
     const { data: profile, error: profileErr } = await db
       .from('profiles')
       .select('id, full_name, phone, email')
@@ -98,7 +98,7 @@ export async function getDriverTrips(req, res) {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const db = createUserClient(req.token) || supabase;
+    const db = isAdmin(req) ? (supabaseAdmin || supabase) : (createUserClient(req.token) || supabase);
     const { data: trips, error, count } = await db
       .from('trips')
       .select('*', { count: 'exact' })
@@ -134,8 +134,7 @@ export async function updateDriver(req, res) {
     if (!assertCanAccess(req, driverId, res)) return;
 
     const UPDATABLE_FIELDS = new Set([
-      'name', 'full_name', 'phone', 'email',
-      'rating', 'is_online', 'kyc_status', 'truck_id'
+      'name', 'full_name', 'phone', 'email'
     ]);
 
     const patch = {};
@@ -149,7 +148,7 @@ export async function updateDriver(req, res) {
 
     patch.updated_at = new Date().toISOString();
 
-    const db = createUserClient(req.token) || supabase;
+    const db = isAdmin(req) ? (supabaseAdmin || supabase) : (createUserClient(req.token) || supabase);
     const { data: profile, error: profileErr } = await db
       .from('profiles')
       .update(patch)

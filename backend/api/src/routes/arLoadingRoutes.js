@@ -19,7 +19,9 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
 
     const plan = await arLoadingOptimizerService.generateLoadingPlan({
       container: container || {},
-      pallets
+      pallets,
+      userId: req.user.id,
+      tripDriverId: req.body.trip_driver_id || req.body.driver_id || null
     });
 
     return res.status(201).json({
@@ -46,7 +48,8 @@ router.get('/plan/:planId', authenticate, userLimiter, async (req, res) => {
 
     if (req.user.role !== 'admin') {
       const planOwnerId = plan.user_id || plan.created_by;
-      if (planOwnerId && planOwnerId !== req.user.id) {
+      const isAssignedDriver = plan.assigned_driver_id && plan.assigned_driver_id === req.user.id;
+      if (planOwnerId !== req.user.id && !isAssignedDriver) {
         return res.status(403).json({ error: 'Access denied. You do not own this loading plan.' });
       }
     }

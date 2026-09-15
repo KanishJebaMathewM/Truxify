@@ -2,8 +2,13 @@ import crypto from 'crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+    getChallengeStatus,
+    getFallbackOtp,
+    requiresBiometricAuth,
+    updateBiometricThreshold,
     createChallenge,
     getChallenge,
+    verifyFallbackOtp,
     verifyBiometric,
 } from '../../src/services/biometricAuthService.js';
 
@@ -109,6 +114,50 @@ describe('biometricAuthService', () => {
         expect(result).toEqual({
             success: false,
             error: 'Biometric token verification is not configured',
+        });
+    });
+
+    it('evaluates freight value against the configured threshold', () => {
+        updateBiometricThreshold('driver-bio-test-1', 5_000_000);
+
+        expect(requiresBiometricAuth('driver-bio-test-1', 4_999_999)).toBe(false);
+        expect(requiresBiometricAuth('driver-bio-test-1', 5_000_000)).toBe(true);
+    });
+
+    it('updates and validates biometric thresholds', () => {
+        const updated = updateBiometricThreshold('driver-bio-test-1', 2_000_000);
+
+        expect(updated.threshold_paisa).toBe(2_000_000);
+        expect(() => updateBiometricThreshold('driver-bio-test-1', 0)).toThrow();
+        expect(() => updateBiometricThreshold('driver-bio-test-1', 'invalid')).toThrow();
+    });
+
+    it('creates a challenge and exposes a pending status to its owner', () => {
+        const challenge = createChallenge('driver-bio-test-1', 'shipment-999', 6_000_000);
+
+        expect(challenge.challengeId).toBeDefined();
+        expect(challenge.nonce).toBeDefined();
+        expect(getChallengeStatus(challenge.challengeId, 'driver-bio-test-1')).toMatchObject({
+            status: 'pending',
+            shipmentId: 'shipment-999',
+        });
+    });
+
+    it('verifies a fallback OTP and consumes the challenge', () => {
+        const challenge = createChallenge('driver-bio-test-1', 'shipment-999', 6_000_000);
+        const result = verifyFallbackOtp(challenge.challengeId, getFallbackOtp(challenge.challengeId));
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe('fallback_otp');
+        expect(getChallenge(challenge.challengeId).status).toBe('verified');
+    });
+
+    it('rejects an incorrect fallback OTP', () => {
+        const challenge = createChallenge('driver-bio-test-1', 'shipment-999', 6_000_000);
+
+        expect(verifyFallbackOtp(challenge.challengeId, '000000')).toEqual({
+            success: false,
+            error: 'Invalid OTP',
         });
     });
 });

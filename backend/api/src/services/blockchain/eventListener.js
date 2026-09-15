@@ -16,6 +16,7 @@ let isListening = false;
 let currentProvider = null;
 let currentContract = null;
 let reconnectAttempt = 0;
+let liveEventQueue = Promise.resolve();
 const MAX_RECONNECT_DELAY_MS = 30000;
 
 export async function getLastProcessedBlock() {
@@ -36,6 +37,20 @@ export async function saveLastProcessedBlock(blockNumber) {
   } catch (err) {
     logger.warn(`[EventListener] Redis save last block error: ${err.message}`);
   }
+}
+
+/**
+ * Serialize live blockchain events so database synchronization and cursor updates
+ * cannot overlap across concurrent ethers event callbacks.
+ */
+export function enqueueLiveEvent(handler, eventPayload) {
+  liveEventQueue = liveEventQueue
+    .then(() => handler(eventPayload))
+    .catch((err) => {
+      logger.error(`[EventListener] Live event processing error: ${err.message}`);
+    });
+
+  return liveEventQueue;
 }
 
 export async function handlePaymentLockedEvent({ bookingId, amount, customer, blockNumber }) {
@@ -247,9 +262,10 @@ export async function startEventListener() {
       }
     }
 
-    // Subscribe to live contract events
+    // Subscribe to live contract events. Handlers are serialized through the queue
+    // so overlapping callbacks cannot mutate DB state or the block cursor concurrently.
     currentContract.on('PaymentLocked', (bookingId, amount, customer, event) => {
-      handlePaymentLockedEvent({
+      void enqueueLiveEvent(handlePaymentLockedEvent, {
         bookingId,
         amount,
         customer,
@@ -258,7 +274,7 @@ export async function startEventListener() {
     });
 
     currentContract.on('PaymentReleased', (bookingId, amount, driver, event) => {
-      handlePaymentReleasedEvent({
+      void enqueueLiveEvent(handlePaymentReleasedEvent, {
         bookingId,
         amount,
         driver,
@@ -267,7 +283,7 @@ export async function startEventListener() {
     });
 
     currentContract.on('DisputeOpened', (bookingId, reason, event) => {
-      handleDisputeOpenedEvent({
+      void enqueueLiveEvent(handleDisputeOpenedEvent, {
         bookingId,
         reason,
         blockNumber: event?.log?.blockNumber ?? event?.blockNumber,

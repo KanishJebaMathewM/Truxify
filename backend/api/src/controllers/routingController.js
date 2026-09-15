@@ -3,19 +3,45 @@ const osrmService = require('../services/osrmService');
 const getRoute = async (req, res) => {
     try {
         const { startLon, startLat, endLon, endLat } = req.query;
+        const rawCoordinates = [startLon, startLat, endLon, endLat];
 
-        if (!startLon || !startLat || !endLon || !endLat) {
+        if (rawCoordinates.some(value => value === undefined || value === null || value === '')) {
             return res.status(400).json({
                 error: 'Missing coordinates',
                 message: 'startLon, startLat, endLon, and endLat are required'
             });
         }
 
+        if (rawCoordinates.some(value => typeof value !== 'string')) {
+            return res.status(400).json({
+                error: 'Invalid coordinates',
+                message: 'Coordinates must be provided as scalar values'
+            });
+        }
+
+        const trimmedCoordinates = rawCoordinates.map(value => value.trim());
+
+        if (trimmedCoordinates.some(value => value === '')) {
+            return res.status(400).json({
+                error: 'Missing coordinates',
+                message: 'startLon, startLat, endLon, and endLat are required'
+            });
+        }
+
+        const parsedCoordinates = trimmedCoordinates.map(Number);
+
+        if (parsedCoordinates.some(value => !Number.isFinite(value))) {
+            return res.status(400).json({
+                error: 'Invalid coordinates',
+                message: 'Coordinates must be finite numbers'
+            });
+        }
+
         const route = await osrmService.getRouteWithResilience(
-            parseFloat(startLon),
-            parseFloat(startLat),
-            parseFloat(endLon),
-            parseFloat(endLat)
+            parsedCoordinates[0],
+            parsedCoordinates[1],
+            parsedCoordinates[2],
+            parsedCoordinates[3]
         );
 
         return res.status(200).json({

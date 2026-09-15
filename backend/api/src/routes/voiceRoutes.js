@@ -77,7 +77,6 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
     res.json(result);
   } catch (err) {
     logger.error('Voice AI query failed:', err);
-    res.status(500).json({ error: err.message || 'Internal Server Error', stack: err.stack });
     logger.error({ requestId: req.requestId, query: req.body?.query }, 'Voice AI query failed:', err);
     res.status(500).json({ error: err?.message || 'Internal Server Error' });
   }
@@ -98,15 +97,3 @@ router.get('/audio/:id', authenticate, userLimiter, (req, res) => {
 });
 
 export default router;
-
-const express = require('express');
-const router = express.Router();
-const multer = require('multer');
-const voiceController = require('../controllers/voiceController');
-const authMiddleware = require('../middleware/authMiddleware');
-
-const upload = multer({ storage: multer.memoryStorage() });
-
-router.post('/query', authMiddleware, upload.single('audio'), voiceController.handleVoiceQuery);
-
-module.exports = router;

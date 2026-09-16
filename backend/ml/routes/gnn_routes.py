@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 import networkx as nx
 import json
 from datetime import datetime
@@ -21,7 +21,7 @@ class Node(BaseModel):
     lat: float
     lng: float
     traffic: Optional[float] = 0
-    road_type: Optional[str] = "local"
+    road_type: Literal["highway", "arterial", "collector", "local", "street"] = "local"
     speed_limit: Optional[float] = 50
 
 class Edge(BaseModel):
@@ -41,6 +41,14 @@ class RouteRequest(BaseModel):
     end_node: str
     nodes: List[Node]
     edges: List[Edge]
+    objectives: Optional[List[str]] = ["time", "cost", "fuel"]
+    constraints: Optional[Dict[str, Any]] = None
+
+class RouteUpdateRequest(BaseModel):
+    route: List[Dict[str, Any]]
+    nodes: List[Node]
+    edges: List[Edge]
+    traffic_data: Dict[str, Dict[str, Any]]
     objectives: Optional[List[str]] = ["time", "cost", "fuel"]
     constraints: Optional[Dict[str, Any]] = None
 
@@ -174,16 +182,39 @@ async def train_model(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/update-route")
-async def update_route(route: List[Dict], traffic_data: Dict):
-    """Update route with real-time traffic"""
+async def update_route(request: RouteUpdateRequest):
+    """Update route with real-time traffic and reroute over the updated network."""
     try:
-        updated_route = optimizer.real_time_update(route, traffic_data)
-        
+        request_builder = GraphNetworkBuilder()
+        request_builder.build_road_network(
+            [node.dict() for node in request.nodes],
+            [edge.dict() for edge in request.edges]
+        )
+        graph_data = request_builder.get_pytorch_data()
+
+        start = request.route[0].get('from') if request.route else None
+        end = request.route[-1].get('to') if request.route else None
+        if start is None or end is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Route must contain at least one edge with 'from' and 'to' fields"
+            )
+
+        updated_route = optimizer.real_time_update(
+            request.route,
+            request.traffic_data,
+            graph_data=graph_data,
+            objectives=request.objectives,
+            constraints=request.constraints
+        )
+
         return {
             'success': True,
             'data': updated_route,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Route update failed: {e}")
         logger.error(f"Internal error: {e}")

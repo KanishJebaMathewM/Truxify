@@ -29,6 +29,8 @@ class GNNRouteModel(nn.Module):
             hidden_dim = hidden_channels
         if out_channels is not None:
             output_dim = out_channels
+        if edge_dim is not None and edge_dim <= 0:
+            raise ValueError("edge_dim must be a positive integer when provided")
 
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim

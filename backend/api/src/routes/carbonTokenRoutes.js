@@ -32,6 +32,16 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
       if (!trip || trip.driver_id !== req.user.id) {
         return res.status(403).json({ error: 'Access denied. You can only mint credits for your own trips.' });
       }
+
+      const { data: truck } = await supabase
+        .from('trucks')
+        .select('driver_id')
+        .eq('id', truck_id)
+        .maybeSingle();
+
+      if (!truck || truck.driver_id !== req.user.id) {
+        return res.status(403).json({ error: 'Access denied. truck_id must be associated with your account.' });
+      }
     }
 
     const token = await carbonTokenService.calculateAndMintCarbonCredits({

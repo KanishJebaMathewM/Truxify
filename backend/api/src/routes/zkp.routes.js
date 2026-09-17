@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
 import zkpService from '../services/zkp/zkp.service.js';
 import { LockAcquisitionError } from '../lib/redisLock.js';
 import { redisRateLimiter } from '../middleware/redisRateLimiter.js';
@@ -132,7 +132,7 @@ router.get('/status/:userId', authenticate, async (req, res) => {
  * GET /zkp/stats
  * Returns aggregate KYC verification counts.
  */
-router.get('/stats', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/stats', authenticate, async (req, res) => {
   try {
     const stats = await zkpService.getVerificationStats();
     return res.status(200).json({ success: true, ...stats });

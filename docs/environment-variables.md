@@ -177,7 +177,7 @@ This document lists all environment variables used in the Truxify backend API (`
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `APP_VERSION` | - | - | App version string |
-| `PUBLIC_TRACKING_URL` | Required in production | `https://track.example.com` | Fixed public origin for customer tracking links. The API never falls back to the request Host header. |
+| `PUBLIC_TRACKING_URL` | - | - | Public tracking URL for customers |
 | `PLATFORM_UPI_ID` | - | - | Platform UPI ID for payments |
 | `UPI_GATEWAY` | - | - | UPI gateway URL |
 | `FRAUD_THRESHOLD` | - | `0.8` | Fraud detection score threshold |

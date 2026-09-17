@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import logger from '../middleware/logger.js';
 
 /**
@@ -12,23 +11,18 @@ class DroneService {
   /**
    * Initiates a drone launch for last-mile delivery handoff.
    * @param {Object} params
-  * @param {string} params.ownerId
-  * @param {string} params.tripId
+   * @param {string} params.tripId
    * @param {string} params.parcelId
    * @param {Object} params.safeZoneGps - { lat, lng }
    * @param {Object} params.destinationGps - { lat, lng }
    * @returns {Object} Mission dispatch details
    */
-  async launchDroneDelivery({ ownerId, tripId, parcelId, safeZoneGps, destinationGps }) {
-    if (!ownerId || !tripId || !parcelId) {
-      throw new Error('ownerId, tripId, and parcelId are required');
-    }
+  async launchDroneDelivery({ tripId, parcelId, safeZoneGps, destinationGps }) {
     const droneId = `DRN-AeroX-${Math.floor(10 + Math.random() * 90)}`;
-    const missionId = `MSN-${crypto.randomUUID()}`;
+    const missionId = `MSN-${Date.now()}`;
 
     const missionData = {
       missionId,
-      ownerId,
       droneId,
       tripId,
       parcelId,
@@ -52,15 +46,12 @@ class DroneService {
    * @param {string} missionId
    * @returns {Object|null} Telemetry details
    */
-  async getDroneTelemetry(missionId, ownerId) {
+  async getDroneTelemetry(missionId) {
     if (!this.activeMissions.has(missionId)) {
       return null;
     }
 
     const mission = this.activeMissions.get(missionId);
-    if (ownerId && mission.ownerId !== ownerId) {
-      return null;
-    }
     return {
       ...mission,
       lastTelemetryUpdate: new Date().toISOString()

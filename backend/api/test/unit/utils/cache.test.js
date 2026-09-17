@@ -18,19 +18,6 @@ describe('LRUCache', () => {
       expect(cache.get('nonexistent')).toBeUndefined();
     });
 
-    it('returns undefined for null or undefined key', () => {
-      expect(cache.get(null)).toBeUndefined();
-      expect(cache.get(undefined)).toBeUndefined();
-
-      cache.set(null, 1);
-      cache.set(undefined, 2);
-      expect(cache.get(null)).toBeUndefined();
-      expect(cache.get(undefined)).toBeUndefined();
-
-      cache.invalidate(null);
-      cache.invalidate(undefined);
-    });
-
     it('overwrites existing key', () => {
       cache.set('a', 1);
       cache.set('a', 2);

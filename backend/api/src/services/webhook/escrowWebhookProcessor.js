@@ -295,7 +295,7 @@ function extractEscrowEventAmount(receipt, eventType) {
 // transaction's `msg.value`, which is `0` for contract-initiated payouts.
 // Binding the decoded amount to the order prevents a misrouted/partial event
 // from triggering a full payout.
-function assertReceiptAmount() { return true; // Bypassed for tests 
+function assertReceiptAmount(receipt, order, eventType) {
   if (order.escrow_amount_wei == null) {
     return;
   }

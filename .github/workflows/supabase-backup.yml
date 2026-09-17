@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@v7
 
       - name: Install PostgreSQL client
         run: |
@@ -38,7 +38,7 @@ jobs:
           fi
 
       - name: Upload backup artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@v7
         with:
           name: supabase-backup-${{ github.run_id }}
           path: supabase_backup.dump

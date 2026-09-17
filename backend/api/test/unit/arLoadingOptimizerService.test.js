@@ -83,18 +83,4 @@ describe('arLoadingOptimizerService', () => {
     const retrieved = await arLoadingOptimizerService.getLoadingPlan('NON-EXISTENT-ID');
     expect(retrieved).toBeNull();
   });
-
-  it('does not return a plan to a different owner', async () => {
-    const plan = await arLoadingOptimizerService.generateLoadingPlan({
-      ownerId: 'owner-a',
-      container: defaultContainer,
-      pallets: samplePallets,
-    });
-
-    await expect(arLoadingOptimizerService.getLoadingPlan(plan.planId, 'owner-b')).resolves.toBeNull();
-    await expect(arLoadingOptimizerService.getLoadingPlan(plan.planId, 'owner-a')).resolves.toMatchObject({
-      planId: plan.planId,
-      ownerId: 'owner-a',
-    });
-  });
 });

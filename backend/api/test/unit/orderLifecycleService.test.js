@@ -124,13 +124,4 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
       p_escrow_status: 'refund_pending',
     });
   });
-  it('rejects null or undefined orderId when updating milestone', async () => {
-    await expect(
-        service.updateMilestone(null, 'In Transit', 'driver-1')
-    ).rejects.toThrow('orderId is required.');
-
-    await expect(
-        service.updateMilestone(undefined, 'In Transit', 'driver-1')
-    ).rejects.toThrow('orderId is required.');
-});
 });

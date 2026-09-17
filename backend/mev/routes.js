@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import express from 'express';
 import mevService from './mev.service.js';
 import logger from '../api/src/middleware/logger.js';
-import { authenticate, requirePolicy, requireRole } from '../api/src/middleware/index.js';
+import { authenticate, requirePolicy } from '../api/src/middleware/index.js';
 
 const router = express.Router();
 
@@ -102,7 +102,7 @@ router.post('/mev/flashbots/:escrowId', requirePolicy('mev:flashbots'), async (r
 });
 
 // Get MEV protection level
-router.get('/mev/protection/:escrowId', requireRole(['admin']), async (req, res) => {
+router.get('/mev/protection/:escrowId', async (req, res) => {
     try {
         const { escrowId } = req.params;
         const result = await mevService.getMEVProtectionLevel(escrowId);
@@ -114,7 +114,7 @@ router.get('/mev/protection/:escrowId', requireRole(['admin']), async (req, res)
 });
 
 // Get escrow details
-router.get('/mev/escrow/:escrowId', requireRole(['admin']), async (req, res) => {
+router.get('/mev/escrow/:escrowId', async (req, res) => {
     try {
         const { escrowId } = req.params;
         const result = await mevService.getEscrowDetails(escrowId);

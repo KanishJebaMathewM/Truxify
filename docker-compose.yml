@@ -13,8 +13,8 @@ services:
 
   api:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ./backend/api
+      target: development
     image: ghcr.io/kanishjebamathewm/truxify-api
     container_name: truxify-api
     env_file:
@@ -53,7 +53,7 @@ services:
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
     volumes:
-      - ./backend:/app/backend
+      - ./backend/api:/app
       - /app/node_modules
     depends_on:
       db:

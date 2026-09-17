@@ -361,6 +361,3 @@ export function stopEscrowFundingReconciliation() {
   clearInterval(fundingTimer);
   fundingTimer = null;
 }
-
-export const processQueue = reconcileStaleFunding;
-

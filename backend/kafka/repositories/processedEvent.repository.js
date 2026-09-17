@@ -331,35 +331,6 @@ class ProcessedEventRepository {
       this.activeClaims.delete(claimKey);
     }
   }
-
-  /**
-   * Look up the current processing status of an event in kafka_processed_events.
-   *
-   * @param {string} topic
-   * @param {string} eventId
-   * @param {string} [consumerGroup]
-   * @returns {Promise<'processing'|'completed'|'failed'|null>} Current status, or null if no claim exists.
-   */
-  async getStatus(topic, eventId, consumerGroup) {
-    try {
-      let query = supabaseAdmin
-        .from('kafka_processed_events')
-        .select('status')
-        .eq('topic', topic)
-        .eq('event_id', eventId);
-
-      if (consumerGroup !== undefined && consumerGroup !== null) {
-        query = query.eq('consumer_group', consumerGroup);
-      }
-
-      const { data, error } = await query.maybeSingle();
-      if (error) throw error;
-      return data?.status || null;
-    } catch (error) {
-      logger.error(`Failed to get status for event ${eventId} on ${topic} (group: ${consumerGroup}):`, error);
-      throw error;
-    }
-  }
 }
 
 export default new ProcessedEventRepository();

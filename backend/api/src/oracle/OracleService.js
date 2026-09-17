@@ -23,32 +23,12 @@ class OracleService {
   constructor(deps = {}) {
     this.orderRepository = deps.orderRepository || null;
     this.supabase = deps.supabase || supabase;
-    this.chainlinkRpcUrl = deps.chainlinkRpcUrl || process.env.CHAINLINK_RPC_URL || null;
-    this.defaultGasPriceGwei = deps.defaultGasPriceGwei || (process.env.DEFAULT_GAS_PRICE_GWEI ? Number(process.env.DEFAULT_GAS_PRICE_GWEI) : 30);
   }
 
   getStatus() {
-    const chainlinkEnabled = process.env.CHAINLINK_ENABLED === 'true';
-    const backupOracleEnabled = process.env.BACKUP_ORACLE_ENABLED === 'true';
-
-    // Parsed threshold falls back to the module default (ORACLE_THRESHOLD)
-    // if the env var is unset or not a valid positive integer.
-    const parsedThreshold = Number.parseInt(process.env.ORACLE_CONSENSUS_THRESHOLD, 10);
-    const threshold = Number.isInteger(parsedThreshold) && parsedThreshold > 0
-      ? parsedThreshold
-      : ORACLE_THRESHOLD;
-
-    // Core providers (OTP, GPS, order-status) are always active. Chainlink
-    // and the backup oracle are optional and toggled via env config.
-    const activeProviders = ORACLE_PROVIDER_COUNT
-      + (chainlinkEnabled ? 1 : 0)
-      + (backupOracleEnabled ? 1 : 0);
-
     return {
-      providers: activeProviders,
-      threshold,
-      chainlinkEnabled,
-      backupOracleEnabled,
+      providers: 3,
+      threshold: 2,
       timestamp: new Date().toISOString(),
     };
   }
@@ -67,15 +47,7 @@ class OracleService {
 
     const confirmedCount = providerResults.filter(r => r.confirmed === true).length;
     const totalProviders = providerResults.length;
-    // === Issue #14786 Fix: Mandatory Customer OTP Enforcement ===
-    const hasConsensus = otpResult.confirmed === true && confirmedCount >= ORACLE_THRESHOLD;
-
-    if (!otpResult.confirmed && (gpsResult.confirmed || statusResult.confirmed)) {
-      logger.warn(
-        { orderId, gpsConfirmed: gpsResult.confirmed, statusConfirmed: statusResult.confirmed },
-        '[OracleSecurity] Potential unauthorized self-confirmation attempt blocked: GPS/Status consensus achieved without mandatory customer OTP.'
-      );
-    }
+    const hasConsensus = confirmedCount >= ORACLE_THRESHOLD;
 
     await this.logOracleResult(orderId, providerResults, hasConsensus);
 
@@ -123,7 +95,7 @@ class OracleService {
       }
 
       if (order.otp_verified === true || otpRecord?.verified === true) {
-        return { confirmed: true, provider: 'OTPVerifier', reason: 'Already verified', timestamp: new Date().toISOString() };
+        return { confirmed: true, provider: 'OTPVerifier', timestamp: new Date().toISOString() };
       }
 
       if (!otpRecord) {
@@ -296,57 +268,6 @@ class OracleService {
     }
   }
 
-  async getPriceFeed(pair = 'MATIC/USD', options = {}) {
-    const defaultPrices = {
-      'MATIC/USD': 0.75,
-      'ETH/USD': 3000.0,
-      'USDC/USD': 1.0,
-      'FUEL/USD': 3.90,
-    };
-
-    const normalizedPair = String(pair).toUpperCase().trim();
-    const fallbackPrice = options.fallbackPrice ?? defaultPrices[normalizedPair] ?? 1.0;
-
-    // Check environment override
-    const envKey = `ORACLE_PRICE_${normalizedPair.replace(/[^A-Z0-9]/g, '_')}`;
-    const envPrice = process.env[envKey];
-    if (envPrice && Number.isFinite(Number(envPrice)) && Number(envPrice) > 0) {
-      return {
-        pair: normalizedPair,
-        price: Number(envPrice),
-        source: 'env_override',
-        fallback: false,
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    if (process.env.CHAINLINK_ENABLED === 'true' && (options.fetchPriceFn || options.rpcUrl || this.chainlinkRpcUrl)) {
-      try {
-        if (options.fetchPriceFn) {
-          const fetched = await options.fetchPriceFn(normalizedPair);
-          if (Number.isFinite(fetched) && fetched > 0) {
-            return {
-              pair: normalizedPair,
-              price: fetched,
-              source: 'chainlink',
-              fallback: false,
-              timestamp: new Date().toISOString(),
-            };
-          }
-        }
-      } catch (err) {
-        logger.warn({ pair: normalizedPair, err: err?.message || String(err) }, '[OracleService] Failed to fetch live price feed, using fallback');
-      }
-    }
-
-    return {
-      pair: normalizedPair,
-      price: fallbackPrice,
-      source: 'fallback',
-      fallback: true,
-      timestamp: new Date().toISOString(),
-    };
-  }
 }
 
 export default OracleService;

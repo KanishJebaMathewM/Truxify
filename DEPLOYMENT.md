@@ -57,7 +57,7 @@ version: '3.8'
 
 services:
   truxify-api:
-    image: truxify/api:1.0.0
+    image: truxify/api:latest
     deploy:
       replicas: 3
       update_config:
@@ -98,134 +98,83 @@ docker stack deploy -c docker-compose.prod.yml truxify_stack
 
 For massive scale, high availability, and self-healing, Kubernetes is the recommended orchestration engine.
 
-The example below mirrors the current API deployment contract in `k8s/deployments/api-deployement.yaml` and the matching `api-service.yaml` manifest.
+### `deployment.yaml`
 
-### API Service Account
-
-The API deployment runs under the dedicated `api-service-account` with automatic service-account token mounting disabled:
-
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: api-service-account
-  namespace: truxify
-  labels:
-    app: truxify
-    component: api
-automountServiceAccountToken: false
-```
-
-### API Deployment and Service
+Below is a basic Deployment and Service configuration for the Truxify API:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-deployment
-  namespace: truxify
+  name: truxify-api
   labels:
-    app: truxify
-    component: api
+    app: truxify-api
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: truxify
-      component: api
+      app: truxify-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
-        app: truxify
-        component: api
+        app: truxify-api
     spec:
-      automountServiceAccountToken: false
-      serviceAccountName: api-service-account
       containers:
-      - name: api
-        image: truxify/api:1.0.0
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          capabilities:
-            drop:
-              - ALL
-        imagePullPolicy: IfNotPresent
+      - name: truxify-api
+        image: truxify/api:latest
         ports:
         - containerPort: 5000
-        envFrom:
-        - configMapRef:
-            name: truxify-config
-        - secretRef:
-            name: truxify-secrets
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: REDIS_URL
         resources:
-          requests:
+          limits:
             memory: "512Mi"
             cpu: "500m"
-          limits:
-            memory: "1Gi"
-            cpu: "1000m"
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
         livenessProbe:
           httpGet:
-            path: /api/health/live
+            path: /health
             port: 5000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /api/health/ready
-            port: 5000
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 2
-        startupProbe:
-          httpGet:
-            path: /api/health/live
-            port: 5000
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          failureThreshold: 30
-      restartPolicy: Always
+          initialDelaySeconds: 15
+          periodSeconds: 20
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: api-service
-  namespace: truxify
-  labels:
-    app: truxify
-    component: api
+  name: truxify-api-svc
 spec:
-  type: ClusterIP
-  ports:
-  - port: 5000
-    targetPort: 5000
-    protocol: TCP
-    name: http
   selector:
-    app: truxify
-    component: api
+    app: truxify-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP
 ```
 
 ### Deploying to the Cluster
-
-Apply the API ServiceAccount, Deployment, and Service using the repository manifests:
+Apply the configuration using `kubectl`:
 ```bash
-kubectl apply -f k8s/authorization/api-service-account.yaml \
-  -f k8s/deployments/api-deployement.yaml \
-  -f k8s/services/api-service.yaml
+kubectl apply -f deployment.yaml
 ```
-
-### Health Endpoints
-
-The API exposes separate liveness and readiness endpoints for Kubernetes probes:
-
-* `GET /api/health/live` — process liveness; returns HTTP 200 while the API process is running.
-* `GET /api/health/ready` — dependency readiness; returns HTTP 200 when critical dependencies are reachable and HTTP 503 otherwise.
 
 ---
 

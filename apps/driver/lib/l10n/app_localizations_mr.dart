@@ -533,16 +533,4 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get resendOtp => 'Resend OTP';
-
-  @override
-  String get language => 'Language';
-
-  @override
-  String get english => 'English';
-
-  @override
-  String get hindi => 'Hindi';
-
-  @override
-  String get tamil => 'Tamil';
 }

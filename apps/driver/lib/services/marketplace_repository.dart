@@ -72,7 +72,7 @@ class MarketplaceRepository {
   }
 
   Future<List<LoadOffer>> fetchLoadOffers() async {
-    final path = '/api/loads';
+    final path = '/api/orders/load-offers';
     try {
       final decoded = await _apiClient.get(path);
       final body = _unwrapLoads(decoded);
@@ -110,7 +110,7 @@ class MarketplaceRepository {
 
   /// Extracts the list of load offers from a marketplace response, accepting
   /// both the bare-list shape and the paginated `{ loads: [...] }` envelope
-  /// returned by `GET /api/loads` and
+  /// returned by `GET /api/orders/load-offers` and
   /// `GET /api/orders/load-offers/en-route`. An envelope without a `loads`
   /// key resolves to an empty list.
   static List<dynamic> _unwrapLoads(dynamic decoded) {

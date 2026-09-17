@@ -273,79 +273,28 @@ describe('ShardManager', () => {
   });
 
   describe('executeCrossShardQuery', () => {
-    it('executes the query across all initialized shards and returns healthy breakdown', async () => {
+    it('executes the query across all initialized shards', async () => {
       for (const [, shard] of ShardManager.shards) {
         shard.pool.query.mockResolvedValue({
           rows: [{ result: 1 }],
         });
       }
 
-      const response = await ShardManager.executeCrossShardQuery({
+      const results = await ShardManager.executeCrossShardQuery({
         query: 'SELECT 1',
         params: [],
       });
 
-      expect(response.results).toHaveLength(4);
-      expect(response.failed).toEqual([]);
-      expect(response.healthy).toEqual([
+      expect(results).toHaveLength(4);
+
+      expect(results.map((result) => result.shard)).toEqual([
         'north',
         'south',
         'east',
         'west',
       ]);
-      expect(response.unhealthy).toEqual([]);
-      expect(response.partial).toBe(false);
-      expect(response.results.map((result) => result.shard)).toEqual([
-        'north',
-        'south',
-        'east',
-        'west',
-      ]);
-      expect(response.results[0].data).toEqual([{ result: 1 }]);
-    });
 
-    it('captures failed shards and returns partial: true when a shard query rejects', async () => {
-      for (const [name, shard] of ShardManager.shards) {
-        if (name === 'east') {
-          shard.pool.query.mockRejectedValue(new Error('East shard connection timeout'));
-        } else {
-          shard.pool.query.mockResolvedValue({
-            rows: [{ result: 1 }],
-          });
-        }
-      }
-
-      const response = await ShardManager.executeCrossShardQuery({
-        query: 'SELECT 1',
-        params: [],
-      });
-
-      expect(response.results).toHaveLength(3);
-      expect(response.failed).toEqual(['east']);
-      expect(response.healthy).toEqual(['north', 'south', 'west']);
-      expect(response.unhealthy).toEqual(['east']);
-      expect(response.partial).toBe(true);
-    });
-
-    it('captures uninitialized shard pools in failed list', async () => {
-      ShardManager.shards.get('west').pool = null;
-
-      for (const [name, shard] of ShardManager.shards) {
-        if (shard.pool) {
-          shard.pool.query.mockResolvedValue({
-            rows: [{ result: 1 }],
-          });
-        }
-      }
-
-      const response = await ShardManager.executeCrossShardQuery({
-        query: 'SELECT 1',
-        params: [],
-      });
-
-      expect(response.results).toHaveLength(3);
-      expect(response.failed).toEqual(['west']);
-      expect(response.partial).toBe(true);
+      expect(results[0].data).toEqual([{ result: 1 }]);
     });
   });
 

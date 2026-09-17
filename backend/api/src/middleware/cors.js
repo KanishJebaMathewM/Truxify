@@ -1,5 +1,4 @@
 import cors from "cors";
-import logger from "./logger.js";
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
@@ -9,8 +8,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     try {
       const parsed = new URL(origin);
       return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch (err) {
-      logger.warn('[CORS] Origin check failed:', err);
+    } catch (_) {
       return false;
     }
   });

@@ -10,7 +10,6 @@ export class RegionService {
         this.activeRegions = [];
         this.primaryRegion = null;
         this._healthInterval = null;
-        this._healthCheckInProgress = false;
         this._replicationInterval = null;
         this._stopped = false;
         this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -75,16 +74,8 @@ export class RegionService {
     async startHealthChecks() {
         if (this._stopped || this._healthInterval) return;
         this._healthInterval = setInterval(async () => {
-            if (this._stopped || this._healthCheckInProgress) return;
-
-            this._healthCheckInProgress = true;
-            try {
-                await this.checkAllRegions();
-            } catch (error) {
-                logger.error('Health check cycle failed:', error);
-            } finally {
-                this._healthCheckInProgress = false;
-            }
+            if (this._stopped) return;
+            await this.checkAllRegions();
         }, 10000); // Every 10 seconds
     }
 
@@ -109,7 +100,7 @@ export class RegionService {
         const recovered = currentActive.filter(c => !previousActive.includes(c));
 
         if (failed.length > 0 || recovered.length > 0) {
-            await this.handleFailover(previousActive, currentActive);
+            await this.handleFailover(previousActive, this.activeRegions);
         }
         
         if (this._stopped) return results;
@@ -150,34 +141,11 @@ export class RegionService {
     // ============ Failover ============
 
     async handleFailover(previous, current) {
-        const currentNames = current.map(region =>
-            typeof region === 'string' ? region : region.name
-        );
-
-        logger.warn(`⚠️ Failover detected! Previous: ${previous.join(', ')} -> Current: ${currentNames.join(', ')}`);
+        logger.warn(`⚠️ Failover detected! Previous: ${previous.join(', ')} -> Current: ${current.join(', ')}`);
         
         // Find failed regions
-        const failed = previous.filter(p => !currentNames.includes(p));
-        const recovered = currentNames.filter(c => !previous.includes(c));
-
-        // Promote a healthy region when the current replication primary fails.
-        const primaryFailed = this.primaryRegion && failed.includes(this.primaryRegion.name);
-        if (primaryFailed && currentNames.length > 0) {
-            const promotedPrimaryName = currentNames[0];
-            const promotedPrimary =
-                current.find(region => typeof region !== 'string' && region.name === promotedPrimaryName) ||
-                this.regions.find(region => region.name === promotedPrimaryName);
-
-            if (promotedPrimary) {
-                this.primaryRegion = promotedPrimary;
-
-                this.regions.forEach(region => {
-                    region.primary = region.name === promotedPrimary.name;
-                });
-
-                logger.warn(`🔄 Promoted ${promotedPrimary.name} to replication primary`);
-            }
-        }
+        const failed = previous.filter(p => !current.includes(p));
+        const recovered = current.filter(c => !previous.includes(c));
         
         // Update DNS (in production: Route53)
         if (failed.length > 0) {
@@ -190,7 +158,7 @@ export class RegionService {
         // Store failover event
         await this.storeFailoverEvent({
             previous,
-            current: currentNames,
+            current,
             failed,
             recovered,
             timestamp: new Date().toISOString()
@@ -276,10 +244,6 @@ export class RegionService {
             
             const data = await this.fetchDataFromRegion(this.primaryRegion);
             if (this._stopped) return;
-            if (data === null) {
-                logger.warn(`Skipping replication because no data was fetched from primary region ${this.primaryRegion.name}`);
-                return;
-            }
             
             // Replicate to other regions
             for (const region of this.regions) {
@@ -317,10 +281,10 @@ export class RegionService {
             await this.redis.set(`replication:${region.name}:last_sync`, Date.now());
         } catch (error) {
             logger.error(`Failed to replicate to ${region.name}:`, error);
-            await this.redis.incr(`replication:${region.name}:error_count`);
-            await this.redis.set(`replication:${region.name}:last_error`, new Date().toISOString());
-            throw error;
         }
+        await this.redis.incr(`replication:${region.name}:error_count`);
+        await this.redis.set(`replication:${region.name}:last_error`, new Date().toISOString());
+        throw lastError;
     }
 
     // ============ Database Operations ============
@@ -356,20 +320,7 @@ export class RegionService {
         
         const health = await this.redis.get('regions:health');
         metrics.routing = routingStats;
-
-        if (!health) {
-            metrics.health = {};
-        } else {
-            try {
-                const parsedHealth = JSON.parse(health);
-                metrics.health = parsedHealth && typeof parsedHealth === 'object' && !Array.isArray(parsedHealth)
-                    ? parsedHealth
-                    : {};
-            } catch (error) {
-                logger.warn('Invalid cached region health data; using empty health metrics.', error);
-                metrics.health = {};
-            }
-        }
+        metrics.health = health ? JSON.parse(health) : {};
         
         return metrics;
     }

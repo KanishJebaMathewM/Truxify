@@ -86,70 +86,16 @@ router.get('/shards/location', authenticate, userLimiter, requirePolicy('shard:v
 // Cross-shard query (registered before /shards/:shardName/orders so "all" is not captured as a shard name)
 router.get('/shards/all/orders', authenticate, userLimiter, requirePolicy('shard:query-orders'), crossShardQuery, async (req, res) => {
   try {
-    const crossShardRes = await req.executeCrossShard(
+    const results = await req.executeCrossShard(
       'SELECT COUNT(*) as total FROM orders'
     );
-
-    const isObject = crossShardRes && typeof crossShardRes === 'object' && !Array.isArray(crossShardRes);
-    const results = isObject ? (crossShardRes.results || []) : (crossShardRes || []);
-    const failedShards = isObject && Array.isArray(crossShardRes.failed) ? crossShardRes.failed : [];
-    const healthyShards = isObject && Array.isArray(crossShardRes.healthy)
-      ? crossShardRes.healthy
-      : results.map((r) => r.shard);
-    const unhealthyShards = isObject && Array.isArray(crossShardRes.unhealthy)
-      ? crossShardRes.unhealthy
-      : failedShards;
-    const isPartial = isObject
-      ? (crossShardRes.partial ?? (failedShards.length > 0))
-      : (failedShards.length > 0);
-
-    // If all shards failed completely: 503 Service Unavailable
-    if (failedShards.length > 0 && healthyShards.length === 0) {
-      res.setHeader('Retry-After', '30');
-      return res.status(503).json({
-        success: false,
-        error: 'All database shards are unavailable',
-        data: {
-          total: 0,
-          shards: [],
-          failedShards,
-          healthy: [],
-          unhealthy: unhealthyShards,
-          partial: true,
-        },
-      });
-    }
-
-    const total = results.reduce((sum, r) => sum + parseInt(r.data?.[0]?.total || 0, 10), 0);
-
-    // If partial shard failure: 207 Multi-Status
-    if (isPartial || failedShards.length > 0) {
-      res.setHeader('Retry-After', '30');
-      return res.status(207).json({
-        success: false,
-        warning: 'results partially unavailable',
-        data: {
-          total,
-          shards: results,
-          failedShards,
-          healthy: healthyShards,
-          unhealthy: unhealthyShards,
-          partial: true,
-        },
-      });
-    }
-
-    // Complete success: 200 OK
+    const total = results.reduce((sum, r) => sum + parseInt(r.data[0]?.total || 0), 0);
     res.json({
       success: true,
       data: {
         total,
-        shards: results,
-        healthy: healthyShards,
-        unhealthy: [],
-        failedShards: [],
-        partial: false,
-      },
+        shards: results
+      }
     });
   } catch (error) {
     logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);

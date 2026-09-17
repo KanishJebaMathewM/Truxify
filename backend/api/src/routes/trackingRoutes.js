@@ -82,11 +82,7 @@ router.post(
       });
 
       // Build the public tracking URL
-      const baseUrl = process.env.PUBLIC_TRACKING_URL;
-      if (!baseUrl) {
-        logger.error({ orderDisplayId }, 'PUBLIC_TRACKING_URL is not configured');
-        return res.status(503).json({ error: 'Tracking links are temporarily unavailable' });
-      }
+      const baseUrl = process.env.PUBLIC_TRACKING_URL || `${req.protocol}://${req.get('host')}`;
       const trackingUrl = `${baseUrl}/track/${tokenData.token}`;
 
       logger.info({ orderDisplayId, userId, tokenId: tokenData.id }, 'Tracking share link generated');

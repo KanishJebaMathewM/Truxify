@@ -44,18 +44,14 @@ contract AttributeSignature is Ownable {
     function verifyAttributeSignature(
         bytes32 _manifestHash,
         string calldata _policyPredicate,
-        address _subject,
-        uint256 _nonce,
-        uint256 _expiry,
         bytes calldata _signature
     ) external returns (bool) {
-        require(block.timestamp <= _expiry, "Attribute permit expired");
         require(_signature.length == 65, "Invalid signature dimensions for ABS pairing");
 
         bytes32 messageHash = keccak256(
             abi.encodePacked(
                 "\x19Ethereum Signed Message:\n32",
-                keccak256(abi.encode(_manifestHash, _policyPredicate, _subject, _nonce, _expiry))
+                keccak256(abi.encode(_manifestHash, _policyPredicate))
             )
         );
 

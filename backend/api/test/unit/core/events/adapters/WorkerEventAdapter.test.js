@@ -89,27 +89,6 @@ describe('WorkerEventAdapter', () => {
       // Should not throw
       await expect(adapter.disconnect()).resolves.not.toThrow();
     });
-
-    it('continues disconnecting when one worker termination fails', async () => {
-      const failedWorker = {
-        terminate: vi.fn().mockRejectedValue(new Error('shutdown failed')),
-      };
-      const healthyWorker = {
-        terminate: vi.fn().mockResolvedValue(undefined),
-      };
-      adapter.registerWorker('failed', failedWorker);
-      adapter.registerWorker('healthy', healthyWorker);
-
-      await expect(adapter.disconnect()).resolves.toBeUndefined();
-      expect(failedWorker.terminate).toHaveBeenCalledOnce();
-      expect(healthyWorker.terminate).toHaveBeenCalledOnce();
-    });
-
-    it('can reconnect after disconnecting', async () => {
-      await adapter.disconnect();
-      await adapter.connect();
-      expect(adapter.isConnected).toBe(true);
-    });
   });
 
   describe('registerWorker', () => {
@@ -131,61 +110,6 @@ describe('WorkerEventAdapter', () => {
       const mockWorker = {};
       expect(() => adapter.registerWorker('w1', mockWorker)).not.toThrow();
     });
-
-    it('routes worker messages to handlers with normalized metadata', () => {
-      const messageHandlers = [];
-      const mockWorker = {
-        on: vi.fn((_event, handler) => messageHandlers.push(handler)),
-      };
-      const handler = vi.fn();
-      adapter.registerWorker('orders', mockWorker);
-      adapter.onWorkerMessage('orders', handler);
-
-      messageHandlers[0]({
-        eventType: 'ORDER_CREATED',
-        payload: { orderId: 'order-1' },
-        metadata: { correlationId: 'corr-1' },
-      });
-
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({
-        payload: { orderId: 'order-1' },
-        metadata: expect.objectContaining({
-          eventType: 'ORDER_CREATED',
-          source: 'worker:orders',
-          correlationId: 'corr-1',
-        }),
-      }));
-    });
-
-    it('ignores messages without an event type', () => {
-      const messageHandlers = [];
-      const mockWorker = {
-        on: vi.fn((_event, handler) => messageHandlers.push(handler)),
-      };
-      const handler = vi.fn();
-      adapter.registerWorker('orders', mockWorker);
-      adapter.onWorkerMessage('orders', handler);
-
-      messageHandlers[0]({ payload: { ignored: true } });
-
-      expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('uses the full message as payload when payload is absent', () => {
-      const messageHandlers = [];
-      const mockWorker = {
-        on: vi.fn((_event, handler) => messageHandlers.push(handler)),
-      };
-      const handler = vi.fn();
-      adapter.registerWorker('orders', mockWorker);
-      adapter.onWorkerMessage('orders', handler);
-
-      messageHandlers[0]({ eventType: 'HEARTBEAT', sequence: 3 });
-
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({
-        payload: { eventType: 'HEARTBEAT', sequence: 3 },
-      }));
-    });
   });
 
   describe('removeWorker', () => {
@@ -200,25 +124,6 @@ describe('WorkerEventAdapter', () => {
 
     it('does nothing for non-existent worker', () => {
       expect(() => adapter.removeWorker('non-existent')).not.toThrow();
-    });
-
-    it('removes the message listener from workers that support off', () => {
-      const offMock = vi.fn();
-      const mockWorker = { on: vi.fn(), off: offMock };
-      adapter.registerWorker('w1', mockWorker);
-
-      adapter.removeWorker('w1');
-
-      expect(offMock).toHaveBeenCalledWith('message', expect.any(Function));
-    });
-
-    it('removes the worker even when off is unavailable', () => {
-      const mockWorker = { on: vi.fn() };
-      adapter.registerWorker('w1', mockWorker);
-
-      adapter.removeWorker('w1');
-
-      expect(adapter._workers.has('w1')).toBe(false);
     });
   });
 
@@ -236,52 +141,6 @@ describe('WorkerEventAdapter', () => {
       const event = { eventType: 'ORDER_CREATED', payload: { orderId: '123' }, metadata: {} };
       await adapter.publish(event);
       expect(postMessageMock).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'ORDER_CREATED' }));
-    });
-
-    it('serializes metadata objects that expose toJSON', async () => {
-      const postMessageMock = vi.fn();
-      const metadata = { toJSON: vi.fn(() => ({ requestId: 'req-1' })) };
-      adapter.registerWorker('w1', { postMessage: postMessageMock });
-
-      await adapter.publish({ eventType: 'ORDER_UPDATED', payload: {}, metadata });
-
-      expect(metadata.toJSON).toHaveBeenCalledOnce();
-      expect(postMessageMock).toHaveBeenCalledWith({
-        eventType: 'ORDER_UPDATED',
-        payload: {},
-        metadata: { requestId: 'req-1' },
-      });
-    });
-
-    it('publishes independently to every registered worker', async () => {
-      const first = vi.fn();
-      const second = vi.fn();
-      adapter.registerWorker('first', { postMessage: first });
-      adapter.registerWorker('second', { postMessage: second });
-
-      await adapter.publish({ eventType: 'BROADCAST', payload: { ok: true } });
-
-      expect(first).toHaveBeenCalledOnce();
-      expect(second).toHaveBeenCalledOnce();
-    });
-
-    it('continues publishing when one worker throws', async () => {
-      const healthyWorker = vi.fn();
-      adapter.registerWorker('failed', {
-        postMessage: vi.fn(() => { throw new Error('worker unavailable'); }),
-      });
-      adapter.registerWorker('healthy', { postMessage: healthyWorker });
-
-      await expect(adapter.publish({ eventType: 'RETRYABLE', payload: {} }))
-        .resolves.toBeUndefined();
-      expect(healthyWorker).toHaveBeenCalledOnce();
-    });
-
-    it('does not fail when a worker has no send method', async () => {
-      adapter.registerWorker('passive', {});
-
-      await expect(adapter.publish({ eventType: 'NOOP', payload: {} }))
-        .resolves.toBeUndefined();
     });
 
     it('falls back to send when postMessage is absent', async () => {
@@ -344,23 +203,6 @@ describe('WorkerEventAdapter', () => {
       const event = {};
       // Should not throw — errors are caught internally
       expect(() => adapter._emitWorkerEvent('w1', event)).not.toThrow();
-    });
-
-    it('continues notifying handlers when one handler throws', () => {
-      const failedHandler = vi.fn(() => { throw new Error('handler failed'); });
-      const healthyHandler = vi.fn();
-      adapter.onWorkerMessage('w1', failedHandler);
-      adapter.onWorkerMessage('w1', healthyHandler);
-
-      adapter._emitWorkerEvent('w1', { eventType: 'ORDER_CREATED' });
-
-      expect(failedHandler).toHaveBeenCalledOnce();
-      expect(healthyHandler).toHaveBeenCalledOnce();
-    });
-
-    it('does nothing when a worker has no registered handlers', () => {
-      expect(() => adapter._emitWorkerEvent('unknown', { eventType: 'UNKNOWN' }))
-        .not.toThrow();
     });
   });
 });

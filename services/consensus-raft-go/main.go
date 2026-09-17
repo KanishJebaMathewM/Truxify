@@ -85,10 +85,6 @@ const maxRequestBodyBytes = 1 << 20
 // returns false when the body exceeds the cap; the net/http server drains and
 // closes the connection afterwards so it is not left in an unsafe state.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
-	if r.ContentLength > maxRequestBodyBytes {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return false
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		var maxErr *http.MaxBytesError
@@ -164,23 +160,13 @@ type RaftNode struct {
 	// never accepts new entries without evidence of a reachable quorum. A peer
 	// is also dropped from liveAck whenever a heartbeat fails or is rejected, so
 	// liveness reflects recent contact instead of a once-set flag.
-	liveAck    map[string]bool
-	persister  *persister
-	httpClient *http.Client
+	liveAck            map[string]bool
+	persister          *persister
+	httpClient         *http.Client
 	// rng is this node's own source of randomness for election timeouts. It is
 	// only accessed while holding mu, so a per-node Rand is safe for concurrent
 	// use across election goroutines of different nodes.
-	rng *rand.Rand
-
-	wal                 *os.File
-	storePath           string
-	walPath             string
-	persistedIndex      uint64
-	snapshotIndex       uint64
-	snapshotTerm        uint64
-	snapshotState       map[string]string
-	snapshotPath        string
-	compactionThreshold uint64
+		rng *rand.Rand
 }
 
 // persister durably stores the Raft stable state (currentTerm, votedFor, and
@@ -198,15 +184,9 @@ type persister struct {
 }
 
 func newPersister(id string) *persister {
-	if f := os.Getenv("RAFT_STATE_FILE"); f != "" {
-		if f == "none" {
-			return &persister{path: ""}
-		}
-		return &persister{path: f}
-	}
 	dir := os.Getenv("RAFT_STATE_DIR")
-	if dir == "" || dir == "none" {
-		return &persister{path: ""}
+	if dir == "" {
+		dir = "."
 	}
 	_ = os.MkdirAll(dir, 0o755)
 	return &persister{path: filepath.Join(dir, "raft-state-"+id+".json")}
@@ -215,9 +195,6 @@ func newPersister(id string) *persister {
 // load reads the persisted snapshot. It returns zero values if no state file
 // exists or it is unreadable, so a first boot starts from a clean slate.
 func (p *persister) load() (uint64, string, []LogEntry) {
-	if p == nil || p.path == "" {
-		return 0, "", nil
-	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	data, err := os.ReadFile(p.path)
@@ -239,9 +216,6 @@ func (p *persister) load() (uint64, string, []LogEntry) {
 }
 
 func (p *persister) write() error {
-	if p == nil || p.path == "" {
-		return nil
-	}
 	s := struct {
 		Term     uint64     `json:"current_term"`
 		VotedFor string     `json:"voted_for"`
@@ -260,9 +234,6 @@ func (p *persister) write() error {
 
 // SaveState persists the current term and the candidate this node voted for.
 func (p *persister) SaveState(term uint64, votedFor string) error {
-	if p == nil || p.path == "" {
-		return nil
-	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.term = term
@@ -272,15 +243,13 @@ func (p *persister) SaveState(term uint64, votedFor string) error {
 
 // SaveLog persists the full replicated log after it is mutated.
 func (p *persister) SaveLog(log []LogEntry) error {
-	if p == nil || p.path == "" {
-		return nil
-	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.log = make([]LogEntry, len(log))
 	copy(p.log, log)
 	return p.write()
 }
+
 
 func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 	heartbeatMs := envInt("RAFT_HEARTBEAT_MS", 100)
@@ -294,33 +263,26 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 	term, votedFor, log := p.load()
 
 	return &RaftNode{
-		NodeID:              id,
-		CurrentTerm:         term,
-		VotedFor:            votedFor,
-		Role:                Follower,
-		Log:                 log,
-		persister:           p,
-		Peers:               peers,
-		PeerURLs:            peerURLs,
-		LeaderID:            "",
-		lastLeaderSeen:      time.Now(),
-		heartbeatInterval:   time.Duration(heartbeatMs) * time.Millisecond,
+		NodeID:             id,
+		CurrentTerm:        term,
+		VotedFor:           votedFor,
+		Role:               Follower,
+		Log:                log,
+		persister:          p,
+		Peers:              peers,
+		PeerURLs:           peerURLs,
+		LeaderID:           "",
+		lastLeaderSeen:     time.Now(),
+		heartbeatInterval:  time.Duration(heartbeatMs) * time.Millisecond,
 		electionTimeoutMin: time.Duration(electionMinMs) * time.Millisecond,
 		electionTimeoutMax: time.Duration(electionMaxMs) * time.Millisecond,
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
-		nextIndex:           make(map[string]uint64),
-		matchIndex:          make(map[string]uint64),
-		liveAck:             make(map[string]bool),
-		walPath:             defaultWALPath(),
-		compactionThreshold: uint64(envInt("RAFT_COMPACTION_THRESHOLD", 1000)),
-		httpClient:          &http.Client{Timeout: 500 * time.Millisecond},
-		rng:                 rand.New(rand.NewSource(rand.Int63())),
+		nextIndex:          make(map[string]uint64),
+		matchIndex:         make(map[string]uint64),
+		peerLive:           make(map[string]bool),
+		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
+		rng:                rand.New(rand.NewSource(rand.Int63())),
 	}
-}
-
-// logIndex maps a canonical 1-based log index to its 0-based slice index in rn.Log.
-func (rn *RaftNode) logIndex(index uint64) int {
-	return int(index - rn.snapshotIndex - 1)
 }
 
 func (rn *RaftNode) lastLogIndex() uint64 {
@@ -351,6 +313,8 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 	}
 	rn.CurrentTerm = term
 	rn.VotedFor = ""
+	// Durably record the higher term before any response so a restart cannot
+	// re-enter a term it already observed (Raft §5.1).
 	if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
 		log.Printf("raft persist error: %v", err)
 	}
@@ -359,6 +323,8 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 		rn.Role = Follower
 	}
 	rn.lastLeaderSeen = time.Now()
+	// A higher term must be durable before any request in it is acknowledged;
+	// otherwise a restart would return to the stale lower term (Raft §3.5).
 	if err := rn.persistTermLocked(term, ""); err != nil {
 		log.Printf("⚠️ node [%s] failed to persist term %d: %v", rn.NodeID, term, err)
 	}
@@ -372,6 +338,8 @@ func (rn *RaftNode) startElection() {
 	rn.CurrentTerm++
 	term := rn.CurrentTerm
 	rn.VotedFor = rn.NodeID
+	// Persist the new term and self-vote before soliciting votes (Raft §5.1: a
+	// candidate must durably record its term before sending RequestVote).
 	if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
 		log.Printf("raft persist error: %v", err)
 	}
@@ -379,6 +347,8 @@ func (rn *RaftNode) startElection() {
 	rn.electionStarted = time.Now()
 	rn.electionTimeout = rn.randomElectionTimeout()
 
+	// Persist the term and the self-vote before requesting votes: a node must
+	// never campaign in a term that is not durable (Raft §3.5).
 	if err := rn.persistTermLocked(term, rn.VotedFor); err != nil {
 		rn.Role = Follower
 		rn.VotedFor = ""
@@ -393,20 +363,22 @@ func (rn *RaftNode) startElection() {
 		CandidateID:  rn.NodeID,
 		LastLogIndex: rn.lastLogIndex(),
 		LastLogTerm:  rn.lastLogTerm(),
-	}
-	rn.persistMeta()
-	rn.mu.Unlock()
+		}
+		rn.persistMeta()
+		rn.mu.Unlock()
 
+		// Perform outbound HTTP RPC requests without holding rn.mu to avoid deadlocks
 	responses := rn.requestVotes(req)
 
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
+	// Verify the node is still a candidate in the same term
 	if rn.Role != Candidate || rn.CurrentTerm != term {
 		return
 	}
 
-	votes := 1
+	votes := 1 // self vote
 	for _, resp := range responses {
 		if resp.Term > rn.CurrentTerm {
 			rn.stepDownLocked(resp.Term)
@@ -420,12 +392,26 @@ func (rn *RaftNode) startElection() {
 	if votes >= rn.quorum() {
 		rn.Role = Leader
 		rn.LeaderID = rn.NodeID
+		// Per-follower replication state (Raft §5.3): the leader seeds
+		// nextIndex = lastLogIndex+1 and learns each follower's true match
+		// index from AppendEntries acknowledgements, backing off on rejection.
+		// matchIndex starts empty and is learned from AppendEntries acks, while
+		// liveAck is seeded optimistically below because winning the election
+		// already proves a reachable quorum (issue #13975).
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
-		rn.liveAck = make(map[string]bool, len(rn.PeerURLs))
+		rn.peerLive = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
+			// Seed matchIndex to 0 on election per Raft spec; let sendHeartbeats'
+			// existing monotonic update learn the true match index.
 			rn.matchIndex[url] = 0
+			// Winning the election proves a quorum of peers is reachable: they
+			// responded to RequestVote. Seed liveAck optimistically so a fresh
+			// leader can accept client commits immediately instead of waiting
+			// for a heartbeat round that, on a log mismatch, would otherwise
+			// leave liveAck empty and reject every commit (issue #13975).
+			rn.liveAck[url] = true
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -546,6 +532,9 @@ func (rn *RaftNode) sendHeartbeats() {
 			next = rn.snapshotIndex + 1
 		}
 		if next <= rn.snapshotIndex {
+			// The follower is behind the retained log prefix: send it the
+			// snapshot instead of re-sending the full (possibly unbounded)
+			// entry tail.
 			snap := &InstallSnapshotRequest{
 				Term:          term,
 				LeaderID:      rn.NodeID,
@@ -559,7 +548,7 @@ func (rn *RaftNode) sendHeartbeats() {
 		prevLogIndex := next - 1
 		prevLogTerm := rn.snapshotTerm
 		if prevLogIndex > rn.snapshotIndex {
-			prevLogTerm = rn.Log[rn.logIndex(prevLogIndex)].Term
+			prevLogTerm = rn.Log[prevLogIndex-rn.snapshotIndex-1].Term
 		}
 		req := AppendEntriesRequest{
 			Term:         term,
@@ -569,7 +558,7 @@ func (rn *RaftNode) sendHeartbeats() {
 			LeaderCommit: rn.CommitIndex,
 		}
 		if next <= rn.lastLogIndex() {
-			req.Entries = append(req.Entries, rn.Log[rn.logIndex(next):]...)
+			req.Entries = append(req.Entries, rn.Log[next-rn.snapshotIndex-1:]...)
 		}
 		states = append(states, peerState{url: url, request: req})
 	}
@@ -626,15 +615,12 @@ func (rn *RaftNode) sendHeartbeats() {
 				return
 			}
 			if res.snapResp.Success {
-				rn.liveAck[res.url] = true
 				if res.snapshot.SnapshotIndex > rn.matchIndex[res.url] {
 					rn.matchIndex[res.url] = res.snapshot.SnapshotIndex
 				}
 				if next := res.snapshot.SnapshotIndex + 1; next > rn.nextIndex[res.url] {
 					rn.nextIndex[res.url] = next
 				}
-			} else {
-				rn.liveAck[res.url] = false
 			}
 			continue
 		}
@@ -643,21 +629,30 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
-			rn.liveAck[res.url] = true
+			rn.peerLive[res.url] = true
 			// Follower accepted the prefix; monotonically record highest matching index.
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
 				rn.matchIndex[res.url] = newMatch
 			}
-			// nextIndex must never lag matchIndex+1.
+			// nextIndex must never lag matchIndex+1. Repairing it separately
+			// matters when a stale failure response has already decremented
+			// nextIndex below what the follower is known to hold: newMatch
+			// would then not exceed matchIndex, and nesting this update inside
+			// that check would leave nextIndex stuck low forever, re-sending
+			// entries the follower already has on every heartbeat.
 			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
 				rn.nextIndex[res.url] = next
 			}
 		} else {
-			// Peer rejected the append (log mismatch): it must not count
-			// toward the live quorum until a fresh success response.
-			rn.liveAck[res.url] = false
+			// Peer rejected the append (log mismatch): it still responded, so
+			// it is reachable and counts toward the live quorum. Reachability
+			// is proven by any AppendEntries reply (success or rejection); only
+			// an unreachable peer (res.err != nil above) is dropped. The leader
+			// converges the follower's log via the nextIndex back-off below.
+			rn.liveAck[res.url] = true
 			if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
+				// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
 				rn.nextIndex[res.url]--
 			}
 		}
@@ -707,8 +702,8 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 // instead of accepting /commit entries it cannot replicate.
 func (rn *RaftNode) leaderHasLiveQuorumLocked() bool {
 	acked := 1 // self
-	for _, url := range rn.PeerURLs {
-		if rn.liveAck[url] {
+	for url, m := range rn.matchIndex {
+		if rn.peerLive[url] && m >= rn.CommitIndex {
 			acked++
 		}
 	}
@@ -821,9 +816,6 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		if err := rn.persister.SaveState(rn.CurrentTerm, rn.VotedFor); err != nil {
 			log.Printf("raft persist error: %v", err)
 		}
-		if err := rn.persistTermLocked(rn.CurrentTerm, rn.VotedFor); err != nil {
-			log.Printf("raft persist term error: %v", err)
-		}
 		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
 		rn.persistMeta()
@@ -845,22 +837,6 @@ func (rn *RaftNode) isLogUpToDate(lastLogIndex, lastLogTerm uint64) bool {
 	return lastLogIndex >= myLastIdx
 }
 
-// isClusterMember reports whether id identifies this node or a configured Raft peer.
-func (rn *RaftNode) isClusterMember(id string) bool {
-	if id == "" {
-		return false
-	}
-	if id == rn.NodeID {
-		return true
-	}
-	for _, peerID := range rn.Peers {
-		if peerID == id {
-			return true
-		}
-	}
-	return false
-}
-
 // HandleAppend implements the Raft AppendEntries RPC.
 func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	if !requireAuth(w, r) {
@@ -876,12 +852,6 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	defer rn.mu.Unlock()
 
 	resp := AppendEntriesResponse{Term: rn.CurrentTerm, Success: false}
-
-	if !rn.isClusterMember(req.LeaderID) {
-		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
 
 	if req.Term > rn.CurrentTerm {
 		rn.stepDownLocked(req.Term)
@@ -942,7 +912,7 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 			return false
 		}
 	} else {
-		prev := rn.Log[rn.logIndex(req.PrevLogIndex)]
+		prev := rn.Log[req.PrevLogIndex-rn.snapshotIndex-1]
 		if prev.Term != req.PrevLogTerm {
 			return false
 		}
@@ -953,11 +923,11 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 		if e.Index <= rn.snapshotIndex {
 			continue
 		}
-		idx := rn.logIndex(e.Index)
-		if idx < len(rn.Log) {
-			if rn.Log[idx].Term != e.Term {
+		idx := int(e.Index - rn.snapshotIndex)
+		if idx <= len(rn.Log) {
+			if rn.Log[idx-1].Term != e.Term {
 				appended = req.Entries[i:]
-				rn.Log = rn.Log[:idx]
+				rn.Log = rn.Log[:idx-1]
 				rn.Log = append(rn.Log, req.Entries[i:]...)
 				if err := rn.persister.SaveLog(rn.Log); err != nil {
 					log.Printf("raft persist error: %v", err)
@@ -986,57 +956,48 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	return true
 }
 
-// writeSnapshotCommitSuccess writes an idempotent success response for an
-// entry that has been compacted into the snapshot. Its original timestamp is no
-// longer retained, so the response intentionally omits committed_at.
-func (rn *RaftNode) writeSnapshotCommitSuccess(w http.ResponseWriter, orderID string) {
+// writeCommitSuccess writes the success payload for a committed order entry.
+func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":           true,
-		"already_committed": true,
-		"raft_index":       rn.snapshotIndex,
-		"term":             rn.snapshotTerm,
-		"order_id":         orderID,
-	})
-}
-
-// writeCommitSuccess writes the success payload for a committed order entry.
-func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry, alreadyCommitted ...bool) {
-	w.Header().Set("Content-Type", "application/json")
-	resp := map[string]interface{}{
 		"success":      true,
 		"raft_index":   entry.Index,
 		"term":         entry.Term,
 		"order_id":     entry.OrderID,
 		"committed_at": entry.Timestamp.Format(time.RFC3339),
-	}
-	if len(alreadyCommitted) > 0 && alreadyCommitted[0] {
-		resp["already_committed"] = true
-	}
-	json.NewEncoder(w).Encode(resp)
+	})
 }
 
+// commitRetryTimeout bounds how long HandleCommitOrder waits for a single
+// entry to replicate to a quorum before answering 503. It is short on purpose:
+// the entry is already durable in the leader's log and will commit on a later
+// background heartbeat, so we only retry local replication rather than forcing
+// the client to retry (which, without trusting the idempotency guard, could
+// append a duplicate entry for the same OrderID).
 const commitRetryTimeout = 2 * time.Second
+
+// commitRetryInterval is the delay between replication rounds while waiting for
+// an entry to commit.
 const commitRetryInterval = 25 * time.Millisecond
 
+// waitForCommit drives background heartbeats for the entry at entryIndex and
+// returns once it is committed to a quorum, the node steps down, or the bounded
+// retry window elapses. Replication is looped (not a single round) so a slow
+// follower that misses the first heartbeat does not cause a spurious 503 and
+// does not force the client to retry-and-duplicate.
 func (rn *RaftNode) waitForCommit(entryIndex uint64) (committed bool, steppedDown bool, entry LogEntry) {
 	deadline := time.Now().Add(commitRetryTimeout)
 	for {
 		rn.sendHeartbeats()
 
 		rn.mu.Lock()
-		idx := rn.logIndex(entryIndex)
 		if rn.Role != Leader {
-			if idx >= 0 && idx < len(rn.Log) {
-				entry = rn.Log[idx]
-			}
+			entry = rn.Log[entryIndex-1]
 			rn.mu.Unlock()
 			return false, true, entry
 		}
 		committed = rn.CommitIndex >= entryIndex
-		if idx >= 0 && idx < len(rn.Log) {
-			entry = rn.Log[idx]
-		}
+		entry = rn.Log[entryIndex-1]
 		rn.mu.Unlock()
 
 		if committed {
@@ -1104,15 +1065,10 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Idempotency: an identical (order_id, command) already present in the retained
-	// log or compacted snapshot is never appended again. Snapshot matches are
-	// already committed and can be answered without touching the retained log.
-	if rn.snapshotIndex > 0 && rn.snapshotState[req.OrderID] == req.Command {
-		rn.mu.Unlock()
-		rn.writeSnapshotCommitSuccess(w, req.OrderID)
-		return
-	}
-
+	// Idempotency: an identical (order_id, command) already present in the log
+	// is never appended again. When it is already committed the retry is
+	// answered with the existing entry's index; when it is still pending
+	// replication the flow below simply waits for it to commit.
 	entryIndex := rn.findEntryLocked(req.OrderID, req.Command, uint64(len(rn.Log)))
 	if entryIndex == 0 {
 		// State-transition validation: the command must follow the order's
@@ -1125,7 +1081,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		}
 
 		entry := LogEntry{
-			Index:     rn.lastLogIndex() + 1,
+			Index:     uint64(len(rn.Log) + 1),
 			Term:      rn.CurrentTerm,
 			Command:   req.Command,
 			OrderID:   req.OrderID,
@@ -1138,25 +1094,25 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		if err := rn.persister.SaveLog(rn.Log); err != nil {
 			log.Printf("raft persist error: %v", err)
 		}
-		if err := rn.persistEntriesLocked([]LogEntry{entry}); err != nil {
-			log.Printf("raft persist error: %v", err)
-		}
 		entryIndex = entry.Index
 	}
 
 	if entryIndex <= rn.CommitIndex {
 		// Already committed in a previous round — answer the retry idempotently.
-		var e LogEntry
-		if idx := rn.logIndex(entryIndex); idx >= 0 && idx < len(rn.Log) {
-			e = rn.Log[idx]
-		}
+		e := rn.Log[entryIndex-1]
 		rn.mu.Unlock()
-		rn.writeCommitSuccess(w, e, true)
+		rn.writeCommitSuccess(w, e)
 		return
 	}
 
 	rn.mu.Unlock()
 
+	// Replicate to followers and wait (bounded) for a quorum acknowledgement
+	// before treating the entry as committed. A single heartbeat round can miss
+	// slow followers even though the entry is durable in the leader's log, so we
+	// loop for a short bounded window instead of answering 503 after one round.
+	// The idempotency guard above (findEntryLocked) means a client that still
+	// retries never appends a duplicate entry for the same OrderID.
 	committed, steppedDown, entry := rn.waitForCommit(entryIndex)
 
 	if steppedDown {
@@ -1181,7 +1137,10 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Propagate the updated LeaderCommit to followers so they apply the entry
+	// before the client observes success.
 	rn.sendHeartbeats()
+
 	rn.writeCommitSuccess(w, entry)
 }
 
@@ -1247,7 +1206,7 @@ func main() {
 		if err := node.recoverFromWAL(statePath); err != nil {
 			log.Fatalf("Fatal consensus storage error: %v", err)
 		}
-		log.Printf("💾 node [%s] recovered raft state from %s (log length %d, term %d)", nodeID, len(node.Log), node.CurrentTerm)
+		log.Printf("💾 node [%s] recovered raft state from %s (log length %d, term %d)", nodeID, statePath, len(node.Log), node.CurrentTerm)
 	}
 
 	http.HandleFunc("/api/v1/raft/status", node.HandleStatus)

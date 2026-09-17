@@ -100,8 +100,8 @@ class TruckMaintenanceTicket {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'].toString())
           : null,
-      photoUrls: json['photo_urls'] is List
-          ? (json['photo_urls'] as List).map((e) => e.toString()).toList()
+      photoUrls: json['photo_urls'] != null
+          ? List<String>.from((json['photo_urls'] as List?) ?? [])
           : const [],
     );
   }

@@ -66,24 +66,9 @@ router.post('/request-bypass', async (req, res) => {
 
         const maxWeightLimit = Number(truck.max_capacity_tons) * LBS_PER_TONNE;
         const axleWeight = Number(order.weight_tonnes) * LBS_PER_TONNE;
-        
-        let isVerified = Boolean(profile?.is_digilocker_verified);
-        if (!isVerified) {
-            const { data: verifiedDocs } = await supabaseAdmin
-                .from('driver_documents')
-                .select('id')
-                .eq('driver_id', req.user.id)
-                .or('is_govt_verified.eq.true,status.in.(approved,verified)')
-                .limit(1);
-            if (verifiedDocs && verifiedDocs.length > 0) {
-                isVerified = true;
-            }
-        }
-
         // There is no safety-score column in the schema; derive the safety
         // signal from the driver's verified registration (fail closed to 0).
-        const safetyScore = isVerified ? 100 : 0;
-
+        const safetyScore = profile?.is_digilocker_verified ? 100 : 0;
 
         if (!Number.isFinite(axleWeight) || !Number.isFinite(maxWeightLimit)) {
             logger.warn('[WIM] Truck/load records missing weight data, failing closed:', { truckId, bolId });

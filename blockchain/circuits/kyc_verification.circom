@@ -31,8 +31,8 @@ template Poseidon2() {
     // Round 2
     component sb0_1 = SBox5();
     component sb1_1 = SBox5();
-    sb0_1.in <== s0_1;
-    sb1_1.in <== s1_1;
+    sb0_0.in <== s0_1;
+    sb1_0.in <== s1_1;
 
     // Final MDS mix
     signal s0_2 <== 2 * sb0_1.out + sb1_1.out + 0x41ab982c;
@@ -198,3 +198,4 @@ template KYCVerification() {
 
 // Public inputs order: userAddress (input[0]), documentHash (input[1])
 component main {public [userAddress, documentHash]} = KYCVerification();
+

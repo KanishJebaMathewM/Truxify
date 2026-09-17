@@ -17,10 +17,6 @@ export class LRUCache {
    * @returns {any} The cached value or undefined
    */
   get(key) {
-    if (key == null) {
-      return undefined;
-    }
-
     if (!this.cache.has(key)) {
       return undefined;
     }
@@ -47,10 +43,6 @@ export class LRUCache {
    * @param {number} ttlMs Optional TTL in milliseconds override
    */
   set(key, value, ttlMs = this.defaultTtlMs) {
-    if (key == null) {
-      return;
-    }
-
     if (this.cache.has(key)) {
       this.cache.delete(key);
     } else if (this.cache.size >= this.capacity) {
@@ -70,9 +62,6 @@ export class LRUCache {
    * @param {string} key 
    */
   invalidate(key) {
-    if (key == null) {
-      return;
-    }
     this.cache.delete(key);
   }
 

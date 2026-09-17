@@ -199,8 +199,8 @@ class DriverItem(BaseModel):
     max_length_m: float = Field(..., gt=0)
     max_width_m: float = Field(..., gt=0)
     max_height_m: float = Field(..., gt=0)
-    preferred_dest_lat: float = Field(0.0, ge=-90, le=90)
-    preferred_dest_lng: float = Field(0.0, ge=-180, le=180)
+    preferred_dest_lat: Optional[float] = Field(0.0, ge=-90, le=90)
+    preferred_dest_lng: Optional[float] = Field(0.0, ge=-180, le=180)
     rating: float = Field(3.0, ge=1, le=5)
 
 
@@ -328,6 +328,10 @@ class TruckSpecs(BaseModel):
     max_length_m: float = Field(..., gt=0)
     max_width_m: float = Field(..., gt=0)
     max_height_m: float = Field(..., gt=0)
+    fuel_price_inr_per_l: float = Field(100.0, gt=0)
+    fuel_efficiency_km_per_l: float = Field(5.0, gt=0)
+    toll_per_km_inr: float = Field(1.5, ge=0)
+    operating_cost_per_km_inr: float = Field(1.5, ge=0)
 
 
 class AvailableLoad(BaseModel):
@@ -342,6 +346,7 @@ class AvailableLoad(BaseModel):
     height_m: float = Field(..., gt=0)
     pickup_deadline: str = Field(..., description="ISO datetime string")
     payment_inr: float = Field(..., gt=0)
+    toll_estimate_inr: Optional[float] = Field(None, ge=0)
 
 
 class DeadheadInput(BaseModel):
@@ -450,9 +455,6 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
         input.nearby_drivers,
     ]
     try:
-        # predict_demand runs CPU-bound gradient-boosting inference (and may
-        # auto-train on first use); run it off the event loop so it cannot
-        # stall unrelated requests or /health.
         demand = await run_inference(predict_demand, features)
         if demand is None:
             raise HTTPException(status_code=503, detail="Model not available")
@@ -471,9 +473,6 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 @app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
-        # predict_price performs CPU-bound model scoring and blocking weather
-        # HTTP lookups; run it on a bounded inference worker so it never blocks
-        # the FastAPI event loop and stalls other ML endpoints.
         result = await run_inference(
             predict_price,
             distance_km=input.distance_km,
@@ -490,8 +489,7 @@ async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_
         if result is None:
             raise HTTPException(
                 status_code=503,
-                detail="Price model unavailable: no model trained on real historical data. "
-                       "Train via POST /train/price once completed trips exist.",
+                detail="Price model unavailable: no model trained on real historical data. Train via POST /train/price once completed trips exist.",
             )
         return PricePredictOutput(**result)
     except ValueError as e:
@@ -517,8 +515,6 @@ async def bilateral_match_endpoint(input: BilateralMatchInput, _auth=Depends(ver
     try:
         loads = [load.model_dump() for load in input.loads]
         drivers = [driver.model_dump() for driver in input.drivers]
-        # Hungarian assignment over the cost matrix is CPU-bound; run off the
-        # event loop so a large matching job cannot stall the service.
         result = await run_inference(match_bilateral, loads, drivers)
         return BilateralMatchOutput(**result)
     except ValueError as e:
@@ -527,7 +523,7 @@ async def bilateral_match_endpoint(input: BilateralMatchInput, _auth=Depends(ver
         raise
     except Exception as e:
         logger.error("Bilateral matching failed: %s", e)
-        raise HTTPException(status_code=500, detail="Matching failed")
+        raise HTTPException(status_code=500, detail="Bilateral matching failed")
 
 
 # ---------------------------------------------------------------------------
@@ -537,8 +533,6 @@ async def bilateral_match_endpoint(input: BilateralMatchInput, _auth=Depends(ver
 @app.post("/predict/driver-profit", response_model=DriverProfitOutput)
 async def predict_driver_profit_endpoint(input: DriverProfitInput, _auth=Depends(verify_api_key)):
     try:
-        # Gradient-boosting inference (incl. per-stage prediction spread) is
-        # CPU-bound; run off the event loop.
         result = await run_inference(
             driver_profit_predictor.predict,
             route_distance=input.route_distance,
@@ -548,6 +542,8 @@ async def predict_driver_profit_endpoint(input: DriverProfitInput, _auth=Depends
             cargo_weight=input.cargo_weight,
             trip_duration=input.trip_duration,
         )
+        if result is None:
+            raise HTTPException(status_code=503, detail="Driver profit model unavailable")
         return DriverProfitOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -563,22 +559,22 @@ async def predict_driver_profit_endpoint(input: DriverProfitInput, _auth=Depends
 # ---------------------------------------------------------------------------
 
 @app.post("/optimise/packing", response_model=PackingOutput)
-async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
+async def optimise_packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
     try:
-        packages = [pkg.model_dump() for pkg in input.packages]
-        truck = input.truck.model_dump()
-        addresses = [addr.model_dump() for addr in input.delivery_addresses]
-        # 3-D bin packing and nearest-neighbour sequencing are CPU-bound; run
-        # off the event loop so large packing jobs cannot stall the service.
-        result = await run_inference(optimise_packing, packages, truck, addresses)
+        result = await run_inference(
+            optimise_packing,
+            packages=[package.model_dump() for package in input.packages],
+            truck=input.truck.model_dump(),
+            delivery_addresses=[address.model_dump() for address in input.delivery_addresses],
+        )
         return PackingOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Packing optimisation failed: %s", e)
-        raise HTTPException(status_code=500, detail="Packing optimisation failed")
+        logger.error("Packing optimization failed: %s", e)
+        raise HTTPException(status_code=500, detail="Packing optimization failed")
 
 
 # ---------------------------------------------------------------------------
@@ -588,8 +584,6 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
 @app.post("/recommend/loads", response_model=RecommendOutput)
 async def recommend_loads_endpoint(input: RecommendLoadsInput, _auth=Depends(verify_api_key)):
     try:
-        # Recommend does numpy scoring but may lazy-load the persisted SVD
-        # model from disk (blocking I/O); run off the event loop.
         result = await run_inference(
             collaborative_filter.recommend_loads,
             user_id=input.user_id,
@@ -632,8 +626,6 @@ async def recommend_trucks_endpoint(input: RecommendTrucksInput, _auth=Depends(v
 @app.post("/score/trust", response_model=TrustScoreOutput)
 async def trust_score_endpoint(input: TrustScoreInput, _auth=Depends(verify_api_key)):
     try:
-        # RandomForest risk classification is CPU-bound and may lazily train a
-        # model on first use; run off the event loop.
         result = await run_inference(
             trust_scorer.predict,
             cancellation_rate=input.cancellation_rate,
@@ -662,7 +654,6 @@ async def deadhead_endpoint(input: DeadheadInput, _auth=Depends(verify_api_key))
         driver_dest = input.driver_destination.model_dump()
         truck_specs = input.truck_specs.model_dump()
         loads = [load.model_dump() for load in input.available_loads]
-        # Haversine scoring over every load is CPU-bound; run off the loop.
         result = await run_inference(
             find_return_loads, driver_dest, truck_specs, input.arrival_time, loads
         )
@@ -687,7 +678,6 @@ async def mid_trip_endpoint(input: MidTripInput, _auth=Depends(verify_api_key)):
         route = [wp.model_dump() for wp in input.remaining_route]
         capacity = input.available_capacity.model_dump()
         loads = [load.model_dump() for load in input.nearby_loads]
-        # Haversine scoring over every nearby load is CPU-bound; run off loop.
         result = await run_inference(
             find_mid_trip_loads, current_loc, route, capacity, loads
         )
@@ -708,10 +698,6 @@ async def mid_trip_endpoint(input: MidTripInput, _auth=Depends(verify_api_key)):
 @app.post("/train/demand", response_model=TrainResponse)
 async def train_demand_endpoint(_auth=Depends(verify_api_key)):
     timeout = float(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
-    # Serialize concurrent trainings of the same model: only one publication can
-    # be in flight at a time for "demand_forecast". On timeout the async lock is
-    # released while the worker thread finishes in the background, but the
-    # worker is signalled to skip publishing (see run_training_job).
     async with get_model_lock(DEMAND_MODEL_NAME):
         try:
             metrics = await run_training_job(
@@ -719,187 +705,14 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
                 train_demand_forecast_model,
                 timeout=timeout,
             )
-            return TrainResponse(status="success", metrics=metrics)
-        except asyncio.TimeoutError:
-            logger.error("Demand model training timed out after %s seconds", timeout)
-            raise HTTPException(status_code=504, detail="Training timed out")
+            return TrainResponse(status="trained", metrics=metrics)
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail="Demand training timed out")
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error("Demand model training failed: %s", e)
-            raise HTTPException(status_code=500, detail="Training failed")
+            logger.error("Demand training failed: %s", e)
+            raise HTTPException(status_code=500, detail="Demand training failed")
 
 
-@app.post("/train/demand/rollback")
-async def rollback_demand_endpoint(test_id: Optional[str] = None, _auth=Depends(verify_api_key)):
-    """Roll back the demand-forecast model to its previously-promoted version.
-
-    This is the real rollback path for the model actually retrained by
-    /train/demand and the n8n weekly retraining workflow. It is
-    intentionally separate from /ab-testing/rollback/{test_id}, which
-    belongs to the unrelated ETA shadow-traffic A/B testing system and has
-    no knowledge of the demand-forecast model or its versions.
-    """
-    async with get_model_lock(DEMAND_MODEL_NAME):
-        try:
-            result = await asyncio.to_thread(rollback_demand_forecast_model)
-            if result.get("rolled_back") and test_id:
-                from routes.ab_testing import ab_service
-                ab_service.mark_test_terminal(test_id, "rolled_back")
-            return result
-        except Exception as e:
-            logger.error("Demand model rollback failed: %s", e)
-            raise HTTPException(status_code=500, detail="Rollback failed")
-
-
-@app.get("/models/demand/status")
-async def demand_model_status(_auth=Depends(verify_api_key)):
-    """Compare the active demand model with its rollback candidate."""
-    active_version = get_active_generation(DEMAND_MODEL_NAME)
-    previous_version = get_previous_generation(DEMAND_MODEL_NAME)
-    active_meta = get_generation_meta(DEMAND_MODEL_NAME, active_version) if active_version else None
-    previous_meta = get_generation_meta(DEMAND_MODEL_NAME, previous_version) if previous_version else None
-    active_mae = (active_meta or {}).get("metrics", {}).get("mae")
-    previous_mae = (previous_meta or {}).get("metrics", {}).get("mae")
-
-    return {
-        "model": DEMAND_MODEL_NAME,
-        "active_version": active_version or "production",
-        "previous_version": previous_version,
-        "active_metrics": (active_meta or {}).get("metrics", {}),
-        "previous_metrics": (previous_meta or {}).get("metrics", {}),
-        "should_rollback": (
-            active_mae is not None
-            and previous_mae is not None
-            and active_mae > previous_mae
-        ),
-    }
-
-
-@app.post("/train/price", response_model=TrainResponse)
-async def train_price_endpoint(_auth=Depends(verify_api_key)):
-    timeout = float(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
-    async with get_model_lock(PRICE_MODEL_NAME):
-        try:
-            metrics = await run_training_job(
-                PRICE_MODEL_NAME,
-                train_price_model,
-                timeout=timeout,
-            )
-            return TrainResponse(status="success", metrics=metrics)
-        except PriceModelDataUnavailableError as e:
-            logger.warning("Price model training skipped: %s", e)
-            raise HTTPException(status_code=503, detail=str(e))
-        except asyncio.TimeoutError:
-            logger.error("Price model training timed out after %s seconds", timeout)
-            raise HTTPException(status_code=504, detail="Training timed out")
-        except Exception as e:
-            logger.error("Price model training failed: %s", e)
-            raise HTTPException(status_code=500, detail="Training failed")
-
-
-# ---------------------------------------------------------------------------
-# Model Registry
-# ---------------------------------------------------------------------------
-
-@app.get("/models")
-async def list_models(_auth=Depends(verify_api_key)):
-    from app.models.base import MODEL_STORAGE_DIR
-    import os, json
-    models = []
-    if os.path.isdir(MODEL_STORAGE_DIR):
-        for f in os.listdir(MODEL_STORAGE_DIR):
-            if f.endswith("_meta.json"):
-                with open(os.path.join(MODEL_STORAGE_DIR, f)) as fh:
-                    models.append(json.load(fh))
-    return {"models": models}
-
-# ---------------------------------------------------------------------------
-# Predictive Fleet Maintenance
-# ---------------------------------------------------------------------------
-from app.models.predictive_maintenance import predictive_maintenance
-
-class PredictiveMaintenanceInput(BaseModel):
-    engine_temperature: float = Field(..., description="Engine temperature in Celsius")
-    tire_pressure: float = Field(..., description="Tire pressure in PSI")
-    oil_level: float = Field(..., description="Oil level percentage")
-    coolant_level: float = Field(..., description="Coolant level percentage")
-    mileage: float = Field(..., description="Total vehicle mileage")
-
-class PredictiveMaintenanceOutput(BaseModel):
-    failure_probability: float
-    is_at_risk: bool
-    anomalies_detected: List[str]
-    recommendation: str
-
-@app.post("/predict/maintenance", response_model=PredictiveMaintenanceOutput)
-async def predict_maintenance_endpoint(input: PredictiveMaintenanceInput, _auth=Depends(verify_api_key)):
-    try:
-        # Rule-based + statistical risk scoring is CPU-bound; run off the
-        # event loop so it cannot stall other endpoints or /health.
-        result = await run_inference(
-            predictive_maintenance.predict,
-            engine_temperature=input.engine_temperature,
-            tire_pressure=input.tire_pressure,
-            oil_level=input.oil_level,
-            coolant_level=input.coolant_level,
-            mileage=input.mileage,
-        )
-        return PredictiveMaintenanceOutput(**result)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Predictive maintenance prediction failed: %s", e)
-        raise HTTPException(status_code=500, detail="Predictive maintenance prediction failed")
-
-# ---------------------------------------------------------------------------
-# KYC Document OCR Verification
-# ---------------------------------------------------------------------------
-
-class KYCVerificationOutput(BaseModel):
-    verified: bool
-    document_type: str
-    extracted_number: Optional[str] = None
-    raw_text: str
-
-@app.post("/verify/kyc", response_model=KYCVerificationOutput)
-async def verify_kyc_endpoint(file: UploadFile = File(...), _auth=Depends(verify_api_key)):
-    allowed_content_types = {"image/jpeg", "image/png", "image/webp"}
-    max_file_size_bytes = 5 * 1024 * 1024  # 5 MB
-
-    if file.content_type not in allowed_content_types:
-        raise HTTPException(
-            status_code=422,
-            detail="Unsupported file type. Upload a JPEG, PNG, or WebP image.",
-        )
-
-    if file.size is not None and file.size > max_file_size_bytes:
-        raise HTTPException(status_code=422, detail="File too large. Maximum size is 5 MB.")
-
-    try:
-        image_bytes = await file.read()
-
-        if len(image_bytes) == 0:
-            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
-
-        if len(image_bytes) > max_file_size_bytes:
-            raise HTTPException(status_code=422, detail="File too large. Maximum size is 5 MB.")
-
-        text = await run_inference(ocr_verifier.extract_text, image_bytes)
-        if text is None:
-            # OCR failed (undecodable image, Tesseract unavailable, ...).
-            # Never fall back to a simulated licence: report unverified.
-            return KYCVerificationOutput(
-                verified=False,
-                document_type="Unknown",
-                extracted_number=None,
-                raw_text="",
-            )
-
-        result = ocr_verifier.verify_license(text)
-        return KYCVerificationOutput(**result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("KYC OCR verification failed: %s", e)
-        raise HTTPException(status_code=500, detail="KYC OCR verification failed")
+# ...

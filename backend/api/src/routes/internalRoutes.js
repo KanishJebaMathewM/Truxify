@@ -28,9 +28,8 @@
 
 import express from 'express';
 import logger from '../middleware/logger.js';
-import { requireEscrowOperatorKey } from '../middleware/apiKey.js';
+import { requireEscrowOperatorKey, safeCompare } from '../middleware/apiKey.js';
 import { supabase, supabaseAdmin } from '../config/db.js';
-import { safeCompare } from '../middleware/apiKey.js';
 import {
   setEscrowPaused,
   getPauseState,

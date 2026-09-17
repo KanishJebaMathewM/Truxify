@@ -158,7 +158,7 @@ class AuditLogService {
     };
 
     let dbSuccess = false;
-    let dbError = null;
+    let dbError;
 
     // Write to Supabase (persistent storage)
     try {

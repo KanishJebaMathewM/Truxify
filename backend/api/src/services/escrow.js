@@ -314,6 +314,15 @@ export async function checkEscrowHealth() {
 }
 
 /**
+ * Derive a deterministic booking ID from an order's display ID.
+ * @param {string} orderDisplayId — e.g. "#FF20260521"
+ * @returns {string} bytes32 hex string
+ */
+export function getEscrowBookingId(orderDisplayId) {
+  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`]);
+}
+
+/**
  * Retrieves a full escrow booking record by its ID.
  * Used by the funding reconciliation sweeper to verify on-chain deposits.
  * Resolves Issue #7340.
@@ -327,6 +336,23 @@ export async function getEscrowBooking(escrowBookingId) {
     return null;
   }
 
+  const trimmedId = escrowBookingId.trim();
+
+  // On-chain lookup when given a bytes32 hex string
+  if (ethers.isHexString(trimmedId, 32)) {
+    if (!escrowContract) {
+      logger.warn('[escrow] Contract not initialised — cannot query bookings.');
+      return null;
+    }
+    try {
+      return await escrowContract.bookings(trimmedId);
+    } catch (err) {
+      logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
+      return null;
+    }
+  }
+
+  // Database lookup when given an off-chain record ID
   if (!supabaseAdmin) {
     logger.error('supabaseAdmin not configured for getEscrowBooking');
     return null;
@@ -336,48 +362,18 @@ export async function getEscrowBooking(escrowBookingId) {
     const { data, error } = await supabaseAdmin
       .from('escrow_bookings')
       .select('*')
-      .eq('id', escrowBookingId.trim())
+      .eq('id', trimmedId)
       .maybeSingle();
 
     if (error) {
-      logger.error({ err: error, escrowBookingId }, 'Failed to fetch escrow booking');
+      logger.error({ err: error, escrowBookingId: trimmedId }, 'Failed to fetch escrow booking');
       throw error;
     }
 
     return data;
   } catch (err) {
-    logger.error({ err, escrowBookingId }, 'Unexpected error in getEscrowBooking');
+    logger.error({ err, escrowBookingId: trimmedId }, 'Unexpected error in getEscrowBooking');
     throw err;
-  }
-}
-
-/**
- * Query the escrow contract's bookings mapping for a given booking ID.
- * Used by escrowFundingReconciliation and the release reconciler to check
- * the authoritative on-chain booking state.
- * Used by escrowFundingReconciliation and the payout amount checks to read
- * the authoritative on-chain state for a booking.
- *
- * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
- * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
- */
-export async function getEscrowBooking(escrowBookingId) {
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
-    return null;
-  }
-
-  if (!ethers.isHexString(escrowBookingId, 32)) {
-    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
-    return null;
-  }
-
-  try {
-    const booking = await escrowContract.bookings(escrowBookingId);
-    return booking;
-  } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
-    return null;
   }
 }
 

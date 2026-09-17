@@ -1,6 +1,5 @@
 import Redis from 'ioredis';
 import crypto from 'crypto';
-import { redisClient } from '../config/db.js';
 
 const MIN_HMAC_SECRET_BYTES = 32;
 const MAX_TIMESTAMP_DIFF_MS = 5 * 60 * 1000; // 5 minutes tolerance
@@ -61,7 +60,7 @@ export const isNonceValid = async (nonce) => {
   if (usedNonces.has(nonce)) {
     return false;
   }
-  fallbackNonces.set(nonce, Date.now() + MAX_TIMESTAMP_DIFF_MS);
+  usedNonces.add(nonce);
   return true;
 };
 

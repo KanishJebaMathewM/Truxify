@@ -22,12 +22,10 @@ async function deployChannel(total = ethers.parseEther("10")) {
   return { channel, owner, partyA, partyB, channelId, total };
 }
 
-async function signState(signer, channel, channelId, balanceA, balanceB, sequence) {
-  const network = await ethers.provider.getNetwork();
-  const channelAddress = await channel.getAddress();
+async function signState(signer, channelId, balanceA, balanceB, sequence) {
   const stateHash = ethers.solidityPackedKeccak256(
-    ["uint256", "address", "bytes32", "uint256", "uint256", "uint256"],
-    [network.chainId, channelAddress, channelId, sequence, balanceA, balanceB]
+    ["bytes32", "uint256", "uint256", "uint256"],
+    [channelId, sequence, balanceA, balanceB]
   );
   return signer.signMessage(ethers.getBytes(stateHash));
 }
@@ -52,8 +50,8 @@ describe("StateChannel", function () {
       const shareA = total / 2n;
       const shareB = total - shareA;
 
-      const sigA = await signState(partyA, channel, channelId, shareA, shareB, 1n);
-      const sigB = await signState(partyB, channel, channelId, shareA, shareB, 1n);
+      const sigA = await signState(partyA, channelId, shareA, shareB, 1n);
+      const sigB = await signState(partyB, channelId, shareA, shareB, 1n);
 
       await channel.connect(partyA).cooperativeClose(channelId, shareA, shareB, sigA, sigB);
 
@@ -64,8 +62,8 @@ describe("StateChannel", function () {
 
     it("rejects a close with an invalid balance sum", async function () {
       const { channel, partyA, partyB, channelId, total } = await deployChannel();
-      const sigA = await signState(partyA, channel, channelId, total, total, 1n);
-      const sigB = await signState(partyB, channel, channelId, total, total, 1n);
+      const sigA = await signState(partyA, channelId, total, total, 1n);
+      const sigB = await signState(partyB, channelId, total, total, 1n);
 
       await assertRejectsWith(
         channel.connect(partyA).cooperativeClose(channelId, total, total, sigA, sigB),
@@ -80,7 +78,7 @@ describe("StateChannel", function () {
       const balanceA = (total * 6n) / 10n;
       const balanceB = total - balanceA;
 
-      const sigB = await signState(partyB, channel, channelId, balanceA, balanceB, 1n);
+      const sigB = await signState(partyB, channelId, balanceA, balanceB, 1n);
       await channel
         .connect(partyA)
         .initiateUnilateralExit(channelId, 1n, balanceA, balanceB, sigB);
@@ -98,7 +96,7 @@ describe("StateChannel", function () {
       const balanceB = total - balanceA;
 
       // partyA signs their own claim; only userB's signature is accepted.
-      const sigA = await signState(partyA, channel, channelId, balanceA, balanceB, 1n);
+      const sigA = await signState(partyA, channelId, balanceA, balanceB, 1n);
       await assertRejectsWith(
         channel.connect(partyA).initiateUnilateralExit(channelId, 1n, balanceA, balanceB, sigA),
         "Invalid signature"
@@ -110,7 +108,7 @@ describe("StateChannel", function () {
       const balanceA = (total * 6n) / 10n;
       const balanceB = total - balanceA;
 
-      const sigB = await signState(partyB, channel, channelId, balanceA, balanceB, 1n);
+      const sigB = await signState(partyB, channelId, balanceA, balanceB, 1n);
       await channel.connect(partyA).initiateUnilateralExit(channelId, 1n, balanceA, balanceB, sigB);
 
       // Re-posting the same already-signed state must be rejected so it cannot
@@ -124,13 +122,13 @@ describe("StateChannel", function () {
     it("does not extend challengeExpiry when a newer state is submitted mid-dispute (issue #10792)", async function () {
       const { channel, partyA, partyB, channelId, total } = await deployChannel();
 
-      const sigB1 = await signState(partyB, channel, channelId, (total * 6n) / 10n, (total * 4n) / 10n, 1n);
+      const sigB1 = await signState(partyB, channelId, (total * 6n) / 10n, (total * 4n) / 10n, 1n);
       await channel
         .connect(partyA)
         .initiateUnilateralExit(channelId, 1n, (total * 6n) / 10n, (total * 4n) / 10n, sigB1);
       const expiryAfterFirst = (await channel.channels(channelId)).challengeExpiry;
 
-      const sigB2 = await signState(partyB, channel, channelId, (total * 7n) / 10n, (total * 3n) / 10n, 2n);
+      const sigB2 = await signState(partyB, channelId, (total * 7n) / 10n, (total * 3n) / 10n, 2n);
       await channel
         .connect(partyA)
         .initiateUnilateralExit(channelId, 2n, (total * 7n) / 10n, (total * 3n) / 10n, sigB2);
@@ -149,7 +147,7 @@ describe("StateChannel", function () {
   describe("finalizeExit", function () {
     it("rejects finalization while the challenge period is active", async function () {
       const { channel, owner, partyA, partyB, channelId, total } = await deployChannel();
-      const sigB = await signState(partyB, channel, channelId, (total * 6n) / 10n, (total * 4n) / 10n, 1n);
+      const sigB = await signState(partyB, channelId, (total * 6n) / 10n, (total * 4n) / 10n, 1n);
       await channel.connect(partyA).initiateUnilateralExit(channelId, 1n, (total * 6n) / 10n, (total * 4n) / 10n, sigB);
 
       await assertRejectsWith(channel.connect(owner).finalizeExit(channelId), "Challenge period active");
@@ -160,7 +158,7 @@ describe("StateChannel", function () {
       const balanceA = (total * 6n) / 10n;
       const balanceB = total - balanceA;
 
-      const sigB = await signState(partyB, channel, channelId, balanceA, balanceB, 1n);
+      const sigB = await signState(partyB, channelId, balanceA, balanceB, 1n);
       await channel.connect(partyA).initiateUnilateralExit(channelId, 1n, balanceA, balanceB, sigB);
 
       // The same-state re-submission attack must not be able to extend expiry.

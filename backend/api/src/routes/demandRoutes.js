@@ -68,7 +68,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
         nearby_drivers: 0,
       });
     } catch (mlErr) {
-      logger.warn('[DemandHeatmap] ML engine prediction failed, falling back to basic data:', mlErr?.message ?? String(mlErr));
+      logger.warn('[DemandHeatmap] ML engine prediction failed, falling back to basic data:', mlErr.message);
     }
 
     // Generate intelligent route recommendations and earnings potential based on ML predictions
@@ -138,46 +138,3 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
 });
 
 export default router;
-
-
-  // ============================================================================
-  // TRUXIFY ENTERPRISE DEMAND ANALYTICS & QUERY SANITIZATION SUBSYSTEM (#14636)
-  // Provides robust null-guarding, geo-bound sanitization, and fallback telemetry.
-  // ============================================================================
-  function sanitizeDemandQueryParameters(query) {
-    const sanitized = {};
-    if (!query) return sanitized;
-    
-    // Normalize and guard geographical bounds
-    sanitized.latitude = query.lat !== undefined ? Number(query.lat) : null;
-    sanitized.longitude = query.lng !== undefined ? Number(query.lng) : null;
-    sanitized.radiusKm = query.radius !== undefined ? Math.min(Number(query.radius), 100) : 15;
-    sanitized.timeWindow = query.window || '24h';
-    
-    if (sanitized.latitude !== null && (isNaN(sanitized.latitude) || Math.abs(sanitized.latitude) > 90)) {
-      throw new Error('Invalid latitude parameter supplied for demand query');
-    }
-    if (sanitized.longitude !== null && (isNaN(sanitized.longitude) || Math.abs(sanitized.longitude) > 180)) {
-      throw new Error('Invalid longitude parameter supplied for demand query');
-    }
-    
-    return sanitized;
-  }
-
-  function emitDemandTelemetryAudit(endpoint, actorId, errorPayload) {
-    try {
-      const auditRecord = {
-        timestamp: new Date().toISOString(),
-        endpoint,
-        actorId: actorId || 'anonymous_system_actor',
-        errorDetails: errorPayload?.message ?? String(errorPayload),
-        severity: 'WARNING'
-      };
-      // Non-blocking telemetry audit emission hook
-      if (typeof logger !== 'undefined' && logger.debug) {
-        logger.debug(auditRecord, '[Demand Telemetry Audit] Recorded exception state.');
-      }
-    } catch (auditErr) {
-      // Fail-safe suppression for audit telemetry pipeline
-    }
-  }

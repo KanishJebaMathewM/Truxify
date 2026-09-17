@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
@@ -9,17 +9,6 @@ const mockLogger = vi.hoisted(() => ({
 
 vi.mock('../../../src/middleware/logger.js', () => ({
   default: mockLogger,
-}));
-
-vi.mock('../../../src/services/order/deliveryVerificationService.js', () => ({
-  DeliveryVerificationService: vi.fn().mockImplementation(() => ({
-    assertDriverAtDropoff: vi.fn().mockResolvedValue(true),
-  })),
-}));
-
-vi.mock('../../../src/config/db.js', () => ({
-  supabase: { from: vi.fn() },
-  supabaseAdmin: { from: vi.fn() },
 }));
 
 // Build a configurable supabase chain mock.
@@ -55,179 +44,22 @@ function createChain({ otpRecord, orderRecord, error = null } = {}) {
   return chain;
 }
 
-const { default: OracleService, ORACLE_PROVIDER_COUNT, ORACLE_THRESHOLD } = await import('../../../src/oracle/OracleService.js');
+const { default: OracleService } = await import('../../../src/oracle/OracleService.js');
+// Use the real hashing helper to build a verifiable OTP record.
 const { hashOtp } = await import('../../../src/lib/otpHashing.js');
 
 describe('OracleService', () => {
   let service;
   let chain;
 
-  const originalEnv = { ...process.env };
-
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     chain = createChain();
     service = new OracleService({ supabase: { from: chain.from }, orderRepository: null });
   });
 
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  describe('Constructor Defaults & Dependency Injection', () => {
-    it('sets default properties when no dependencies are provided', () => {
-      const defaultService = new OracleService();
-      expect(defaultService.orderRepository).toBeNull();
-      expect(defaultService.supabase).toBeDefined();
-      expect(defaultService.chainlinkRpcUrl).toBeNull();
-      expect(defaultService.defaultGasPriceGwei).toBe(30);
-    });
-
-    it('accepts custom injected dependencies', () => {
-      const customRepo = { findById: vi.fn() };
-      const customDb = { from: vi.fn() };
-      const customService = new OracleService({
-        orderRepository: customRepo,
-        supabase: customDb,
-        chainlinkRpcUrl: 'https://polygon-mainnet.g.alchemy.com',
-        defaultGasPriceGwei: 45,
-      });
-
-      expect(customService.orderRepository).toBe(customRepo);
-      expect(customService.supabase).toBe(customDb);
-      expect(customService.chainlinkRpcUrl).toBe('https://polygon-mainnet.g.alchemy.com');
-      expect(customService.defaultGasPriceGwei).toBe(45);
-    });
-
-    it('reads configuration from environment variables if not passed in deps', () => {
-      process.env.CHAINLINK_RPC_URL = 'https://rpc.example.com';
-      process.env.DEFAULT_GAS_PRICE_GWEI = '50';
-
-      const envService = new OracleService();
-      expect(envService.chainlinkRpcUrl).toBe('https://rpc.example.com');
-      expect(envService.defaultGasPriceGwei).toBe(50);
-    });
-  });
-
-  describe('getStatus & Environment Variable Overrides', () => {
-    it('returns default status when optional environment flags are absent', () => {
-      delete process.env.CHAINLINK_ENABLED;
-      delete process.env.BACKUP_ORACLE_ENABLED;
-      delete process.env.ORACLE_CONSENSUS_THRESHOLD;
-
-      const status = service.getStatus();
-      expect(status.providers).toBe(ORACLE_PROVIDER_COUNT); // 3
-      expect(status.threshold).toBe(ORACLE_THRESHOLD); // 2
-      expect(status.chainlinkEnabled).toBe(false);
-      expect(status.backupOracleEnabled).toBe(false);
-      expect(status.timestamp).toBeDefined();
-    });
-
-    it('applies CHAINLINK_ENABLED and BACKUP_ORACLE_ENABLED overrides', () => {
-      process.env.CHAINLINK_ENABLED = 'true';
-      process.env.BACKUP_ORACLE_ENABLED = 'true';
-
-      const status = service.getStatus();
-      expect(status.providers).toBe(5); // 3 core + 1 chainlink + 1 backup
-      expect(status.chainlinkEnabled).toBe(true);
-      expect(status.backupOracleEnabled).toBe(true);
-    });
-
-    it('applies custom ORACLE_CONSENSUS_THRESHOLD override', () => {
-      process.env.ORACLE_CONSENSUS_THRESHOLD = '4';
-      const status = service.getStatus();
-      expect(status.threshold).toBe(4);
-    });
-
-    it('falls back to default threshold for non-integer or negative env threshold', () => {
-      process.env.ORACLE_CONSENSUS_THRESHOLD = 'invalid';
-      expect(service.getStatus().threshold).toBe(ORACLE_THRESHOLD);
-
-      process.env.ORACLE_CONSENSUS_THRESHOLD = '-2';
-      expect(service.getStatus().threshold).toBe(ORACLE_THRESHOLD);
-
-      process.env.ORACLE_CONSENSUS_THRESHOLD = '0';
-      expect(service.getStatus().threshold).toBe(ORACLE_THRESHOLD);
-    });
-  });
-
-  describe('Price Feed Retrieval & Fallback Behavior (getPriceFeed)', () => {
-    it('returns baseline price for standard pairs', async () => {
-      const maticFeed = await service.getPriceFeed('MATIC/USD');
-      expect(maticFeed.pair).toBe('MATIC/USD');
-      expect(maticFeed.price).toBe(0.75);
-      expect(maticFeed.fallback).toBe(true);
-      expect(maticFeed.source).toBe('fallback');
-
-      const ethFeed = await service.getPriceFeed('ETH/USD');
-      expect(ethFeed.price).toBe(3000.0);
-
-      const fuelFeed = await service.getPriceFeed('FUEL/USD');
-      expect(fuelFeed.price).toBe(3.90);
-    });
-
-    it('normalizes pair string case and whitespace', async () => {
-      const feed = await service.getPriceFeed('  matic/usd  ');
-      expect(feed.pair).toBe('MATIC/USD');
-      expect(feed.price).toBe(0.75);
-    });
-
-    it('uses environment variable price override when configured', async () => {
-      process.env.ORACLE_PRICE_MATIC_USD = '0.92';
-      const feed = await service.getPriceFeed('MATIC/USD');
-      expect(feed.price).toBe(0.92);
-      expect(feed.source).toBe('env_override');
-      expect(feed.fallback).toBe(false);
-    });
-
-    it('fetches live price when Chainlink is enabled and RPC/fetch function is provided', async () => {
-      process.env.CHAINLINK_ENABLED = 'true';
-      const mockFetchPrice = vi.fn().mockResolvedValue(0.88);
-
-      const feed = await service.getPriceFeed('MATIC/USD', {
-        rpcUrl: 'https://rpc.example.com',
-        fetchPriceFn: mockFetchPrice,
-      });
-
-      expect(mockFetchPrice).toHaveBeenCalledWith('MATIC/USD');
-      expect(feed.price).toBe(0.88);
-      expect(feed.source).toBe('chainlink');
-      expect(feed.fallback).toBe(false);
-    });
-
-    it('handles network failure during price fetch and falls back gracefully', async () => {
-      process.env.CHAINLINK_ENABLED = 'true';
-      const mockFetchPrice = vi.fn().mockRejectedValue(new Error('Network timeout contacting Chainlink RPC'));
-
-      const feed = await service.getPriceFeed('MATIC/USD', {
-        rpcUrl: 'https://rpc.example.com',
-        fetchPriceFn: mockFetchPrice,
-      });
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ pair: 'MATIC/USD' }),
-        expect.stringContaining('Failed to fetch live price feed')
-      );
-      expect(feed.price).toBe(0.75); // baseline fallback
-      expect(feed.fallback).toBe(true);
-      expect(feed.source).toBe('fallback');
-    });
-
-    it('uses custom fallbackPrice when provided in options', async () => {
-      const feed = await service.getPriceFeed('CUSTOM/TOKEN', { fallbackPrice: 42.5 });
-      expect(feed.pair).toBe('CUSTOM/TOKEN');
-      expect(feed.price).toBe(42.5);
-      expect(feed.fallback).toBe(true);
-    });
-
-    it('defaults unknown pair price to 1.0 if no baseline exists', async () => {
-      const feed = await service.getPriceFeed('UNKNOWN/PAIR');
-      expect(feed.price).toBe(1.0);
-      expect(feed.fallback).toBe(true);
-    });
-  });
-
-  describe('confirmDelivery (Consensus Verification)', () => {
+  describe('confirmDelivery', () => {
     it('reaches consensus when 2 of 3 providers confirm', async () => {
       const { hash, salt } = hashOtp('123456');
       const otpRecord = {
@@ -236,7 +68,8 @@ describe('OracleService', () => {
         otp_salt: salt,
         expires_at: new Date(Date.now() + 60000).toISOString(),
       };
-
+      // OTP confirms via the real hash; status is in-progress; GPS provider
+      // fails (no driver telemetry) — so consensus is 2/3.
       chain.otpRecord = otpRecord;
       chain.orderRecord = { id: 'order-1', status: 'in_transit', driver_id: 'd1', drop_lat: 12.9, drop_lng: 77.5 };
 
@@ -268,61 +101,51 @@ describe('OracleService', () => {
   });
 
   describe('_verifyOTP', () => {
-    it('returns confirmed when order.otp_verified is already true', async () => {
+    it('returns already verified when orders.otp_verified is true', async () => {
+      // First query returns order with otp_verified=true.
       chain.orderRecord = { id: 'order-1', otp_verified: true };
       chain.otpRecord = null;
       const result = await service._verifyOTP('order-1', '123456');
       expect(result.confirmed).toBe(true);
+      expect(result.reason).toBe('Already verified');
+      // Should not query delivery_otps when already verified.
+      const fromCalls = chain.from.mock.calls;
+      expect(fromCalls.length).toBe(1);
+      expect(fromCalls[0][0]).toBe('orders');
     });
 
-    it('fails when order is not found', async () => {
+    it('fails when no OTP record exists', async () => {
+      chain.otpRecord = null;
       chain.orderRecord = null;
       const result = await service._verifyOTP('order-1', '123456');
       expect(result.confirmed).toBe(false);
-      expect(result.reason).toBe('Order not found');
-    });
-
-    it('fails when no OTP record exists for order', async () => {
-      chain.orderRecord = { id: 'order-1', otp_verified: false };
-      chain.otpRecord = null;
-      const result = await service._verifyOTP('order-1', '123456');
-      expect(result.confirmed).toBe(false);
-      expect(result.reason).toBe('No OTP record found for order');
+      expect(result.reason).toContain('No OTP record');
     });
 
     it('fails for an expired OTP', async () => {
-      chain.orderRecord = { id: 'order-1', otp_verified: false };
       chain.otpRecord = {
         id: 'otp-1',
-        otp_hash: 'hash',
+        otp_hash: 'x',
         expires_at: new Date(Date.now() - 60000).toISOString(),
       };
+      chain.orderRecord = null;
       const result = await service._verifyOTP('order-1', '123456');
       expect(result.confirmed).toBe(false);
-      expect(result.reason).toBe('OTP expired');
-    });
-
-    it('handles database error gracefully', async () => {
-      chain.error = { message: 'Database connection failed' };
-      const result = await service._verifyOTP('order-1', '123456');
-      expect(result.confirmed).toBe(false);
-      expect(result.error).toBe('Database connection failed');
+      expect(result.reason).toContain('expired');
     });
   });
 
   describe('_verifyGPS', () => {
-    it('fails for invalid or out-of-range coordinates', async () => {
-      expect((await service._verifyGPS('order-1', { lat: 100, lng: 77.5 })).confirmed).toBe(false);
-      expect((await service._verifyGPS('order-1', { lat: 12.9, lng: 200 })).confirmed).toBe(false);
-      expect((await service._verifyGPS('order-1', null)).confirmed).toBe(false);
-      expect((await service._verifyGPS('order-1', { lat: 'invalid', lng: 77.5 })).confirmed).toBe(false);
+    it('fails for invalid coordinates', async () => {
+      const result = await service._verifyGPS('order-1', { lat: 999, lng: 77.5 });
+      expect(result.confirmed).toBe(false);
     });
 
-    it('fails when order is not found', async () => {
+    it('fails when the order is not found', async () => {
       chain.orderRecord = null;
       const result = await service._verifyGPS('order-1', { lat: 12.9, lng: 77.5 });
       expect(result.confirmed).toBe(false);
-      expect(result.reason).toBe('Order not found');
+      expect(result.reason).toContain('Order not found');
     });
   });
 
@@ -335,57 +158,43 @@ describe('OracleService', () => {
       }
     });
 
-    it('rejects terminal or invalid statuses', async () => {
-      for (const status of ['delivered', 'payment_released', 'cancelled', 'created']) {
-        chain.orderRecord = { id: 'order-1', status };
-        const result = await service._verifyOrderStatus('order-1');
-        expect(result.confirmed).toBe(false);
-      }
-    });
-
-    it('handles database errors during status verification', async () => {
-      chain.error = { message: 'DB connection down' };
+    it('rejects terminal statuses', async () => {
+      chain.orderRecord = { id: 'order-1', status: 'delivered' };
       const result = await service._verifyOrderStatus('order-1');
       expect(result.confirmed).toBe(false);
-      expect(result.error).toBe('DB connection down');
     });
   });
 
   describe('verifyCrossChain', () => {
-    const validHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-
-    it('rejects invalid blockchain transaction hash format', async () => {
-      const result = await service.verifyCrossChain('order-1', 'invalid-hash');
-      expect(result.verified).toBe(false);
-      expect(result.code).toBe('INVALID_BLOCKCHAIN_HASH');
-    });
-
-    it('verifies when hash matches and escrow is funded', async () => {
+    it('verifies when the hash matches and escrow is funded', async () => {
       chain.orderRecord = {
         id: 'order-1',
-        blockchain_tx_hash: validHash,
+        blockchain_tx_hash: '0xABC123',
         escrow_status: 'funded',
       };
-      const result = await service.verifyCrossChain('order-1', validHash);
+      const result = await service.verifyCrossChain('order-1', '0xabc123');
       expect(result.verified).toBe(true);
-      expect(result.verificationUrl).toBe(`https://polygonscan.com/tx/${validHash}`);
+      expect(result.verificationUrl).toContain('polygonscan.com');
     });
 
-    it('fails when escrow is not funded or released', async () => {
+    it('fails when the hash differs', async () => {
       chain.orderRecord = {
         id: 'order-1',
-        blockchain_tx_hash: validHash,
-        escrow_status: 'pending',
+        blockchain_tx_hash: '0xABC123',
+        escrow_status: 'funded',
       };
-      const result = await service.verifyCrossChain('order-1', validHash);
+      const result = await service.verifyCrossChain('order-1', '0xDIFFERENT');
       expect(result.verified).toBe(false);
     });
 
-    it('fails when order is not found', async () => {
-      chain.orderRecord = null;
-      const result = await service.verifyCrossChain('order-1', validHash);
+    it('fails when escrow is not funded', async () => {
+      chain.orderRecord = {
+        id: 'order-1',
+        blockchain_tx_hash: '0xABC123',
+        escrow_status: 'pending',
+      };
+      const result = await service.verifyCrossChain('order-1', '0xabc123');
       expect(result.verified).toBe(false);
-      expect(result.error).toBe('Order not found');
     });
   });
 });

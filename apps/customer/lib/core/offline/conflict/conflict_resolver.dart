@@ -1,4 +1,4 @@
-import '../models/trip_event.dart';
+﻿import '../models/trip_event.dart';
 
 class ConflictResolutionResult {
   final List<TripEvent> resolved;
@@ -12,121 +12,101 @@ class ConflictResolutionResult {
 
 class ConflictResolver {
   ConflictResolutionResult resolveWithDetails(List<TripEvent> events) {
-    try {
-      final resolved = resolve(events);
-      final resolvedIds = resolved.map((e) => e.id).toSet();
-      final supersededIds = events
-          .map((e) => e.id)
-          .where((id) => !resolvedIds.contains(id))
-          .toList();
+    final resolved = resolve(events);
+    final resolvedIds = resolved.map((e) => e.id).toSet();
+    final supersededIds = events
+        .map((e) => e.id)
+        .where((id) => !resolvedIds.contains(id))
+        .toList();
 
-      return ConflictResolutionResult(
-        resolved: resolved,
-        supersededIds: supersededIds,
-      );
-    } catch (err, stack) {
-      print('[ConflictResolver Error] Failed in resolveWithDetails: $err\n$stack');
-      return ConflictResolutionResult(resolved: events, supersededIds: []);
-    }
+    return ConflictResolutionResult(
+      resolved: resolved,
+      supersededIds: supersededIds,
+    );
   }
 
   List<TripEvent> resolve(List<TripEvent> events) {
-    try {
-      final sorted = List<TripEvent>.of(events)
-        ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
+    final sorted = List<TripEvent>.of(events)
+      ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
 
-      final gpsEvents = <TripEvent>[];
-      final otpByStop = <String, TripEvent>{};
-      final stopByTripStop = <String, TripEvent>{};
-      final lifecycleByTrip = <String, TripEvent>{};
-      final routeEvents = <TripEvent>[];
-      final podByTrip = <String, TripEvent>{};
+    final gpsByTrip = <String, TripEvent>{};
+    final otpByStop = <String, TripEvent>{};
+    final stopByTripStop = <String, TripEvent>{};
+    final lifecycleByTrip = <String, TripEvent>{};
+    final routeEvents = <TripEvent>[];
+    final podByTrip = <String, TripEvent>{};
 
-      for (final event in sorted) {
-        try {
-          switch (event.type) {
-            case 'gpsUpdate':
-              gpsEvents.add(event);
-              break;
-            case 'otpDelivery':
-              {
-                final key = '${event.tripId}:${event.payload['stopId']}';
-                final current = otpByStop[key];
-                if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
-                  otpByStop[key] = event;
-                }
-              }
-              break;
-            case 'stopArrival':
-              {
-                final key = '${event.tripId}:${event.payload['stopId']}';
-                final current = stopByTripStop[key];
-                if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
-                  stopByTripStop[key] = event;
-                }
-              }
-              break;
-            case 'podMetadata':
-              {
-                final key = event.tripId;
-                podByTrip[key] = _mergePodMetadata(podByTrip[key], event);
-              }
-              break;
-            case 'routeDeviation':
-              routeEvents.add(event);
-              break;
-            case 'tripStart':
-            case 'tripEnd':
-              {
-                final key = '${event.tripId}:${event.type}';
-                lifecycleByTrip.putIfAbsent(key, () => event);
-              }
-              break;
-            default:
-              routeEvents.add(event);
-              break;
+    for (final event in sorted) {
+      switch (event.type) {
+        case 'gpsUpdate':
+          final current = gpsByTrip[event.tripId];
+          if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
+            gpsByTrip[event.tripId] = event;
           }
-        } catch (eventErr) {
-          routeEvents.add(event);
+          break;
+      case 'otpDelivery':
+        {
+          final key = '${event.tripId}:${event.payload['stopId']}';
+          final current = otpByStop[key];
+          if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
+            otpByStop[key] = event;
+          }
         }
+        break;
+      case 'stopArrival':
+        {
+          final key = '${event.tripId}:${event.payload['stopId']}';
+          final current = stopByTripStop[key];
+          if (current == null || _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
+            stopByTripStop[key] = event;
+          }
+        }
+        break;
+        case 'podMetadata':
+          final key = event.tripId;
+          podByTrip[key] = _mergePodMetadata(podByTrip[key], event);
+          break;
+        case 'routeDeviation':
+          routeEvents.add(event);
+          break;
+        case 'tripStart':
+        case 'tripEnd':
+          final key = '${event.tripId}:${event.type}';
+          lifecycleByTrip.putIfAbsent(key, () => event);
+          break;
+        default:
+          routeEvents.add(event);
+          break;
       }
-
-      final resolved = <TripEvent>[
-        ...gpsEvents,
-        ...otpByStop.values,
-        ...stopByTripStop.values,
-        ...podByTrip.values,
-        ...routeEvents,
-        ...lifecycleByTrip.values,
-      ]
-        ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
-
-      return resolved;
-    } catch (e) {
-      return events;
     }
+
+    final resolved = <TripEvent>[
+      ...gpsByTrip.values,
+      ...otpByStop.values,
+      ...stopByTripStop.values,
+      ...podByTrip.values,
+      ...routeEvents,
+      ...lifecycleByTrip.values,
+    ]
+      ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
+
+    return resolved;
   }
 
   static int _compareTimestamp(String left, String right) {
-    try {
-      final leftTime = DateTime.tryParse(left)?.millisecondsSinceEpoch ?? 0;
-      final rightTime = DateTime.tryParse(right)?.millisecondsSinceEpoch ?? 0;
-      return leftTime.compareTo(rightTime);
-    } catch (_) {
-      return 0;
-    }
+    final leftTime = DateTime.tryParse(left)?.millisecondsSinceEpoch ?? 0;
+    final rightTime = DateTime.tryParse(right)?.millisecondsSinceEpoch ?? 0;
+    return leftTime.compareTo(rightTime);
   }
 
   static Iterable<Map<String, dynamic>> _attachmentRows(Object? value) sync* {
     if (value is! List) return;
     for (final item in value) {
-      try {
-        if (item is Map<String, dynamic>) {
-          yield item;
-        } else if (item is Map) {
-          yield Map<String, dynamic>.from(item);
-        }
-      } catch (_) {}
+      if (item is Map<String, dynamic>) {
+        yield item;
+      } else if (item is Map) {
+        yield Map<String, dynamic>.from(item);
+      }
     }
   }
 
@@ -135,31 +115,27 @@ class ConflictResolver {
       return incoming;
     }
 
-    try {
-      final mergedPayload = Map<String, dynamic>.from(existing.payload);
-      final incomingPayload = Map<String, dynamic>.from(incoming.payload);
+    final mergedPayload = Map<String, dynamic>.from(existing.payload);
+    final incomingPayload = Map<String, dynamic>.from(incoming.payload);
 
-      if (incomingPayload['attachments'] is List && mergedPayload['attachments'] is List) {
-        final merged = <Map<String, dynamic>>[];
-        final seen = <String>{};
-        for (final item in [
-          ..._attachmentRows(mergedPayload['attachments']),
-          ..._attachmentRows(incomingPayload['attachments']),
-        ]) {
-          if (item is! Map<String, dynamic>) continue;
-          final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
-          if (!seen.contains(hash)) {
-            seen.add(hash);
-            merged.add(item);
-          }
+    if (incomingPayload['attachments'] is List && mergedPayload['attachments'] is List) {
+      final merged = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      for (final item in [
+        ..._attachmentRows(mergedPayload['attachments']),
+        ..._attachmentRows(incomingPayload['attachments']),
+      ]) {
+        if (item is! Map<String, dynamic>) continue;
+        final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
+        if (!seen.contains(hash)) {
+          seen.add(hash);
+          merged.add(item);
         }
-        mergedPayload['attachments'] = merged;
       }
-
-      return existing.copyWith(payload: mergedPayload, occurredAt: incoming.occurredAt);
-    } catch (_) {
-      return incoming;
+      mergedPayload['attachments'] = merged;
     }
+
+    return existing.copyWith(payload: mergedPayload, occurredAt: incoming.occurredAt);
   }
 }
 
@@ -177,3 +153,5 @@ class ResolutionStrategy {
 
   static final List<ResolutionStrategy> values = [latestWins, earliestWins, serverWins, clientWins];
 }
+
+

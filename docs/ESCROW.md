@@ -1,9 +1,3 @@
-# Delivery confirmation OTP invariant
-
-Delivery confirmation must use the six-digit OTP issued for the linked order.
-The API must reject missing order OTPs and must never accept a universal,
-development, or mock fallback such as `123456`, because final-stop confirmation
-can release escrow.
 # Escrow Service
 
 ## Overview

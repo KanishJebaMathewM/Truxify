@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
 import '../models/app_models.dart';
@@ -58,7 +57,6 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   String? _amountInr;
   String? _upiIntentError;
   String? _lockError;
-  late final String _orderIdempotencyKey;
 
   late final AnimationController _controller;
   late final OrderService _orderService;
@@ -74,7 +72,6 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     _paymentRepo = widget.paymentRepository ?? PaymentRepository();
     _addressRepo = widget.addressRepository ?? AddressRepository();
     _apiClient = widget.apiClient ?? ApiClient();
-    _orderIdempotencyKey = const Uuid().v4();
     _controller = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
     _loadCheckoutData();
@@ -124,7 +121,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     }
   }
 
-  Future<void> _createOrderAndInitiatePayment() async {
+  Future<void> _pay() async {
     final finalDropLat = _selectedAddress?.latitude ?? widget.draft.dropLat;
     final finalDropLng = _selectedAddress?.longitude ?? widget.draft.dropLng;
 
@@ -150,10 +147,27 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-      _upiIntentError = null;
-    });
+    // Parse price to paisa
+    final cleanPriceStr = widget.truck.price.replaceAll('₹', '').replaceAll(',', '').trim();
+    final amountRupees = double.tryParse(cleanPriceStr) ?? 0.0;
+    final amountPaisa = (amountRupees * 100).round();
+
+    // Trigger mock UPI Payment Intent
+    final upiRef = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _UpiPaymentMockDialog(amount: widget.truck.price),
+    );
+
+    if (upiRef == null || upiRef.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment cancelled by user')),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
 
     try {
       final pickupDate = widget.draft.pickupDate;
@@ -162,7 +176,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
               '${pickupDate.minute.toString().padLeft(2, '0')}'
           : widget.draft.dateLabel;
 
-final orderId = _createdOrderId ?? await _orderService.createOrder(
+      final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup.trim(),
         dropAddress: (_selectedAddress?.fullAddress ?? widget.draft.drop).trim(),
         pickupLat: widget.draft.pickupLat!,
@@ -179,10 +193,26 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
         targetTemperatureMax: widget.draft.targetTemperatureMax,
         driverId: widget.truck.driverId.trim(),
         truckId: widget.truck.truckId.trim(),
-        idempotencyKey: _orderIdempotencyKey,
+      );
 
-      _createdOrderId ??= orderId;
-      await _fetchUpiIntent(_createdOrderId!);
+      _createdOrderId = orderId;
+
+      // Call backend POST /api/payments/lock to lock payment on smart contract
+      await _orderService.lockPayment(
+        bookingId: orderId,
+        upiReference: upiRef,
+        amountPaisa: amountPaisa.toDouble(),
+      );
+
+      if (!mounted) return;
+      setState(() => _showSuccess = true);
+      await _controller.forward(from: 0);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+      if (!mounted) return;
+
+      TruxifyScope.of(context).openOrders(tabIndex: 0);
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
       debugPrint('Failed to complete booking: $e');
 

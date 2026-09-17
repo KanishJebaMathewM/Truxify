@@ -9,8 +9,8 @@
  * state. All on-chain escrow submissions in services/escrow.js consult
  * isEscrowPaused() before building/sending a transaction.
  *
- * Fail-closed semantics: if Redis is unreachable the pause state cannot be
- * verified, so new escrow submissions are blocked until state is readable.
+ * Fail-open semantics: if Redis is unreachable the flag cannot be read, so
+ * escrow submissions proceed (a Redis outage must not freeze all payments).
  */
 
 import logger from '../middleware/logger.js';
@@ -33,7 +33,7 @@ const PAUSED_AT_KEY = 'escrow:circuit-breaker:paused-at';
  */
 export async function isEscrowPaused() {
   if (!redisClient) {
-    return true;
+    return false;
   }
   try {
     const value = await redisClient.get(PAUSE_KEY);
@@ -41,9 +41,9 @@ export async function isEscrowPaused() {
   } catch (err) {
     logger.error(
       { err: err?.message ?? String(err), event: 'ESCROW_CIRCUIT_BREAKER_READ_ERROR' },
-      '[escrow-circuit-breaker] Failed to read pause flag from Redis — failing closed.'
+      '[escrow-circuit-breaker] Failed to read pause flag from Redis — failing open.'
     );
-    return true;
+    return false;
   }
 }
 
@@ -86,7 +86,7 @@ export async function setEscrowPaused(paused) {
  */
 export async function getPauseState() {
   if (!redisClient) {
-    return { paused: true, pausedAt: null, stateUnknown: true };
+    return { paused: false, pausedAt: null };
   }
   try {
     const [value, pausedAt] = await Promise.all([
@@ -97,9 +97,9 @@ export async function getPauseState() {
   } catch (err) {
     logger.error(
       { err: err?.message ?? String(err), event: 'ESCROW_CIRCUIT_BREAKER_READ_ERROR' },
-      '[escrow-circuit-breaker] Failed to read pause state — reporting as paused.'
+      '[escrow-circuit-breaker] Failed to read pause state — reporting as not paused.'
     );
-    return { paused: true, pausedAt: null, stateUnknown: true };
+    return { paused: false, pausedAt: null };
   }
 }
 

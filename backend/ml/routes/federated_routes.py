@@ -13,14 +13,6 @@ router = APIRouter(prefix="/federated", tags=["Federated Learning"])
 redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
 server = FederatedServer(redis_url)
 
-_clients: Dict[str, FederatedClient] = {}
-
-def get_or_create_client(client_id: str) -> FederatedClient:
-    """Retrieve existing client instance or create and register a new one."""
-    if client_id not in _clients:
-        _clients[client_id] = FederatedClient(client_id, server.redis if server.redis is not None else redis_url)
-    return _clients[client_id]
-
 class ClientData(BaseModel):
     client_id: str
     data: Optional[List[List[float]]] = None
@@ -54,33 +46,11 @@ async def start_round():
 async def aggregate_weights():
     """Force weight aggregation"""
     try:
-        # First drain any pending client updates from Redis
-        server.drain_pending_client_updates()
-
-        if not server.client_weights:
-            raise HTTPException(
-                status_code=400,
-                detail="No client weights available for aggregation"
-            )
-
-        num_clients = len(server.client_weights)
-        res = server._aggregate_weights()
-        if not res:
-            raise HTTPException(
-                status_code=400,
-                detail="No client weights available for aggregation"
-            )
-
+        server._aggregate_weights()
         return {
             'success': True,
-            'message': 'Weights aggregated successfully',
-            'data': {
-                'round': server.round,
-                'clients_aggregated': num_clients
-            }
+            'message': 'Weights aggregated successfully'
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Internal error: {e}")
 
@@ -118,7 +88,7 @@ async def get_global_model():
 async def register_client(request: TrainingRequest):
     """Register a new client"""
     try:
-        client = get_or_create_client(request.client_id)
+        client = FederatedClient(request.client_id, redis_url)
         return {
             'success': True,
             'message': f'Client {request.client_id} registered',
@@ -133,7 +103,7 @@ async def register_client(request: TrainingRequest):
 async def train_client(request: TrainingRequest):
     """Train client locally"""
     try:
-        client = get_or_create_client(request.client_id)
+        client = FederatedClient(request.client_id, redis_url)
         
         # Simulate local data
         data, labels = client.simulate_driver_behavior()
@@ -156,22 +126,9 @@ async def train_client(request: TrainingRequest):
 
 @router.post("/client/participate")
 async def participate_in_round(request: TrainingRequest):
-    """Participate in current round with idempotency guard"""
+    """Participate in current round"""
     try:
-        # Idempotency check: if client already participated in this round
-        if (
-            (request.client_id, server.round) in server.accepted_updates
-            or request.client_id in server.client_weights
-        ):
-            return {
-                'success': True,
-                'duplicate': True,
-                'message': f'Client {request.client_id} already participated in round {server.round}',
-                'client_id': request.client_id,
-                'round': server.round
-            }
-
-        client = get_or_create_client(request.client_id)
+        client = FederatedClient(request.client_id, redis_url)
         
         # Get local data
         data, labels = client.simulate_driver_behavior()
@@ -181,10 +138,7 @@ async def participate_in_round(request: TrainingRequest):
             data, labels,
             epochs=request.epochs
         )
-
-        # Fallback drain to ensure server ingests the update immediately
-        server.drain_pending_client_updates()
-
+        
         return {
             'success': True,
             'data': result,

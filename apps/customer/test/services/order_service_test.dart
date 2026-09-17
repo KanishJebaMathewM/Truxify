@@ -59,38 +59,8 @@ void main() {
       () => apiClient.post(
         '/api/orders',
         body: any(named: 'body'),
-        idempotencyKey: any(named: 'idempotencyKey'),
       ),
     ).called(1);
-  });
-
-test('createOrder forwards a caller-supplied idempotency key', () async {
-    when(() => apiClient.post(
-      '/api/orders',
-      body: any(named: 'body'),
-      idempotencyKey: 'checkout-attempt-1',
-    )).thenAnswer((_) async => {
-      'order': {'order_display_id': 'ORD-123'},
-    });
-
-    await orderService.createOrder(
-      pickupAddress: 'Pickup Loc',
-      dropAddress: 'Drop Loc',
-      pickupLat: 12.3,
-      pickupLng: 45.6,
-      dropLat: 78.9,
-      dropLng: 12.3,
-      pickupTime: '10:00 AM',
-      goodsType: 'Timber',
-      weightTonnes: 5.5,
-      idempotencyKey: 'checkout-attempt-1',
-    );
-
-    verify(() => apiClient.post(
-      '/api/orders',
-      body: any(named: 'body'),
-      idempotencyKey: 'checkout-attempt-1',
-    )).called(1);
   });
 
   test('createOrder and changeDrop trim leading/trailing whitespace from string fields', () async {

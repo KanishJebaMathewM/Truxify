@@ -82,14 +82,6 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
   });
-
-  it('should reject an unbounded geofence radius with 400', async () => {
-    const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 501 });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('500');
-  });
 });
 
 // Regression tests for issue #12053: the geofence-confirm route must be

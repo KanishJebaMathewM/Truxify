@@ -1,4 +1,5 @@
 import { DomainError } from './domainError.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 import logger from '../../middleware/logger.js';
 
 const DEFAULT_MILESTONES = [

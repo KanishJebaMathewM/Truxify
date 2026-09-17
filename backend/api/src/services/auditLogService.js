@@ -2,41 +2,12 @@ import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { appendFile } from 'fs/promises';
 import path from 'path';
-import { createClient } from 'redis';
 
 const TABLE = 'application_audit_logs';
 
 const DEAD_LETTER_PATH =
   process.env.AUDIT_DEAD_LETTER_FILE ||
   path.join(process.cwd(), 'audit-dead-letter.log');
-
-// Redis configuration
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const STREAM_NAME = 'truxify:audit_events';
-
-let redisClient;
-try {
-  redisClient = createClient({ url: redisUrl });
-  
-  redisClient.on('error', (err) => {
-    logger.error({ err }, '[AuditLog] Redis Client Error');
-  });
-} catch (err) {
-  logger.error({ err }, '[AuditLog] Failed to initialize Redis client');
-}
-
-/**
- * Connect to Redis if not already connected
- */
-async function connectRedis() {
-  if (redisClient && !redisClient.isOpen) {
-    try {
-      await redisClient.connect();
-    } catch (err) {
-      logger.error({ err }, '[AuditLog] Failed to connect to Redis');
-    }
-  }
-}
 
 /**
  * Persist a failed audit record to a durable, append-only dead-letter log so
@@ -62,47 +33,11 @@ async function deadLetterAuditEntry(record, reason) {
 }
 
 /**
- * Log audit event to Redis stream for real-time processing
- * @param {object} eventData - Audit event data
- */
-async function logToRedisStream(eventData) {
-  try {
-    await connectRedis();
-    
-    if (!redisClient || !redisClient.isOpen) {
-      logger.warn('[AuditLog] Redis client not available — skipping stream write');
-      return;
-    }
-
-    const payload = {
-      timestamp: new Date().toISOString(),
-      userId: eventData.userId || eventData.actorId || 'system',
-      action: eventData.action,
-      entityType: eventData.entityType || eventData.resourceType,
-      entityId: eventData.entityId || eventData.resourceId,
-      details: JSON.stringify(eventData.details || eventData.metadata || {}),
-      idempotencyKey: eventData.idempotencyKey || `${Date.now()}-${Math.random()}`,
-    };
-
-    await redisClient.xAdd(STREAM_NAME, '*', payload);
-  } catch (err) {
-    logger.error(
-      { err },
-      '[AuditLog] Failed to write audit event to Redis stream'
-    );
-    // Fallback to console for debugging
-    logger.info('[AuditLog] AUDIT FALLBACK:', JSON.stringify(eventData));
-  }
-}
-
-/**
  * Centralized audit log service for recording privileged administrative operations.
  *
  * Uses the Supabase admin client (service role) to bypass RLS for writes.
  * All write failures are caught and logged but never propagate — audit logging
  * must never prevent the request from succeeding.
- * 
- * Also writes to Redis stream for real-time event processing.
  */
 class AuditLogService {
   /**
@@ -137,6 +72,12 @@ class AuditLogService {
       return null;
     }
 
+    // Guard against missing actorId to prevent silent failures
+    if (!entry.actorId) {
+      logger.warn('[AuditLog] Skipping audit entry — missing actorId:', { action: entry.action, path: entry.path });
+      return null;
+    }
+
     const record = {
       actor_id: entry.actorId,
       actor_role: entry.actorRole,
@@ -157,10 +98,6 @@ class AuditLogService {
       created_at: new Date().toISOString(),
     };
 
-    let dbSuccess = false;
-    let dbError = null;
-
-    // Write to Supabase (persistent storage)
     try {
       const { data, error } = await supabaseAdmin
         .from(TABLE)
@@ -169,47 +106,17 @@ class AuditLogService {
         .single();
 
       if (error) {
-        logger.error({ err: error }, '[AuditLog] Failed to insert audit entry to Supabase');
-        dbError = error.message || 'insert_error';
-        await deadLetterAuditEntry(record, dbError);
-      } else {
-        dbSuccess = true;
+        logger.error({ err: error }, '[AuditLog] Failed to insert audit entry');
+        await deadLetterAuditEntry(record, error.message || 'insert_error');
+        return null;
       }
+
+      return data;
     } catch (err) {
-      logger.error({ err }, '[AuditLog] Exception inserting audit entry to Supabase');
-      dbError = err.message || 'insert_exception';
-      await deadLetterAuditEntry(record, dbError);
+      logger.error({ err }, '[AuditLog] Exception inserting audit entry');
+      await deadLetterAuditEntry(record, err.message || 'insert_exception');
+      return null;
     }
-
-    // Write to Redis stream (real-time processing) - non-blocking
-    const redisEventData = {
-      userId: entry.actorId,
-      action: entry.action,
-      entityType: entry.resourceType,
-      entityId: entry.resourceId,
-      details: {
-        actorRole: entry.actorRole,
-        actorName: entry.actorName,
-        method: entry.method,
-        path: entry.path,
-        ipAddress: entry.ipAddress,
-        userAgent: entry.userAgent,
-        correlationId: entry.correlationId,
-        requestId: entry.requestId,
-        statusCode: entry.statusCode,
-        beforeState: entry.beforeState,
-        afterState: entry.afterState,
-        metadata: entry.metadata,
-      },
-      idempotencyKey: entry.requestId || entry.correlationId,
-    };
-
-    // Fire-and-forget Redis write (don't block the response)
-    logToRedisStream(redisEventData).catch((err) => {
-      logger.error({ err }, '[AuditLog] Background Redis stream write failed');
-    });
-
-    return dbSuccess ? record : null;
   }
 
   /**
@@ -299,110 +206,7 @@ class AuditLogService {
       },
     };
   }
-
-  /**
-   * Read events from Redis stream for processing
-   * @param {string} consumerGroup - Consumer group name
-   * @param {string} consumerName - Consumer name
-   * @param {number} count - Number of messages to read
-   * @returns {Promise<Array>} Array of stream messages
-   */
-  async readFromStream(consumerGroup = 'audit-processors', consumerName = 'worker-1', count = 10) {
-    try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen) {
-        logger.warn('[AuditLog] Redis client not available for stream reading');
-        return [];
-      }
-
-      // Try to read from consumer group first
-      try {
-        const messages = await redisClient.xReadGroup(
-          consumerGroup,
-          consumerName,
-          { key: STREAM_NAME, id: '>' },
-          { COUNT: count }
-        );
-        
-        if (messages && messages[0]) {
-          return messages[0].messages.map(msg => ({
-            id: msg.id,
-            data: msg.message,
-          }));
-        }
-      } catch (groupErr) {
-        // If consumer group doesn't exist, create it and try again
-        if (groupErr.message.includes('NOGROUP')) {
-          try {
-            await redisClient.xGroupCreate(STREAM_NAME, consumerGroup, '0', { MKSTREAM: true });
-            logger.info('[AuditLog] Created consumer group:', consumerGroup);
-          } catch (createErr) {
-            logger.error({ err: createErr }, '[AuditLog] Failed to create consumer group');
-          }
-        }
-      }
-
-      // Fallback to simple read if group read fails
-      const messages = await redisClient.xRange(STREAM_NAME, '-', '+', { COUNT: count });
-      return messages.map(msg => ({
-        id: msg.id,
-        data: msg.message,
-      }));
-    } catch (err) {
-      logger.error({ err }, '[AuditLog] Failed to read from Redis stream');
-      return [];
-    }
-  }
-
-  /**
-   * Acknowledge processed messages in Redis stream
-   * @param {string} consumerGroup - Consumer group name
-   * @param {Array<string>} messageIds - Array of message IDs to acknowledge
-   */
-  async acknowledgeMessages(consumerGroup = 'audit-processors', messageIds = []) {
-    try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen || messageIds.length === 0) {
-        return;
-      }
-
-      await redisClient.xAck(STREAM_NAME, consumerGroup, messageIds);
-    } catch (err) {
-      logger.error({ err }, '[AuditLog] Failed to acknowledge Redis stream messages');
-    }
-  }
-
-  /**
-   * Get stream info (length, consumer groups, etc.)
-   * @returns {Promise<object>} Stream information
-   */
-  async getStreamInfo() {
-    try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen) {
-        return { error: 'Redis client not available' };
-      }
-
-      const info = await redisClient.xInfoStream(STREAM_NAME);
-      const groups = await redisClient.xInfoGroups(STREAM_NAME);
-      
-      return {
-        streamName: STREAM_NAME,
-        length: info.length,
-        radixTreeKeys: info['radix-tree-keys'],
-        radixTreeNodes: info['radix-tree-nodes'],
-        groups: groups || [],
-      };
-    } catch (err) {
-      logger.error({ err }, '[AuditLog] Failed to get stream info');
-      return { error: err.message };
-    }
-  }
 }
 
 export const auditLogService = new AuditLogService();
-export { redisClient, STREAM_NAME };
 export default auditLogService;

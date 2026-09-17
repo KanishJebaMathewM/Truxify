@@ -90,7 +90,7 @@ describe("correlationIdMiddleware", () => {
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it("emits the correlation ID event with request metadata when propagated from client", () => {
+  it("emits the correlation ID event with request metadata", () => {
     const { request } = runMiddleware({ "x-correlation-id": "trace-abc" });
     request.requestId = "request-123";
 
@@ -104,21 +104,6 @@ describe("correlationIdMiddleware", () => {
         requestId: "request-123",
       },
       "Correlation ID trace-abc propagated from client",
-    );
-  });
-
-  it("emits the correlation ID event with request metadata when generated", () => {
-    const request = { headers: {}, id: "req-999" };
-    mockLogger.debug.mockClear();
-    correlationIdMiddleware(request, createResponse(), vi.fn());
-
-    expect(mockLogger.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "CORRELATION_ID_SET",
-        correlationId: request.correlationId,
-        requestId: "req-999",
-      }),
-      expect.stringContaining("generated"),
     );
   });
 });

@@ -47,173 +47,11 @@ class AnomalyDetectionService {
   constructor(deps = {}) {
     this.alertRouter = deps.alertRouter;
     this.keyRotationService = deps.keyRotationService;
-    this.behavioralProfiles = new Map();
-    this._maxBehavioralProfiles = deps.maxBehavioralProfiles || 5000;
-    this._evictionFraction = deps.evictionFraction || 0.25;
-    this._totalProfilesEvicted = 0;
-  }
-
-  calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Earth radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  _evictFromMap(map, maxSize, label = 'entries') {
-    if (!map || map.size <= maxSize) return 0;
-
-    const keys = [...map.keys()];
-    const countToDelete = Math.max(
-      Math.floor(keys.length * this._evictionFraction),
-      map.size - maxSize
-    );
-    const toDelete = keys.slice(0, countToDelete);
-    toDelete.forEach(k => map.delete(k));
-
-    logger.info(`[AnomalyDetection] Evicted ${toDelete.length} stale ${label} (remaining: ${map.size})`);
-    return toDelete.length;
-  }
-
-  recordBehavior(userId, behaviorData = {}) {
-    if (!userId) return null;
-
-    let profile = this.behavioralProfiles.get(userId);
-    if (!profile) {
-      profile = {
-        userId,
-        events: [],
-        patterns: {
-          locationHistory: [],
-          typingSpeed: [],
-          transactionPatterns: [],
-        },
-        lastActivity: Date.now(),
-        createdAt: Date.now(),
-      };
-      this.behavioralProfiles.set(userId, profile);
-    }
-
-    if (behaviorData.event) {
-      profile.events.push(behaviorData.event);
-    }
-    if (behaviorData.lat != null && behaviorData.lng != null) {
-      profile.patterns.locationHistory.push({
-        lat: behaviorData.lat,
-        lng: behaviorData.lng,
-        timestamp: behaviorData.timestamp || Date.now(),
-      });
-    }
-    if (Array.isArray(behaviorData.locationHistory)) {
-      profile.patterns.locationHistory.push(...behaviorData.locationHistory);
-    }
-    if (behaviorData.patterns) {
-      profile.patterns = { ...profile.patterns, ...behaviorData.patterns };
-    }
-
-    profile.lastActivity = Date.now();
-
-    if (this.behavioralProfiles.size > this._maxBehavioralProfiles) {
-      const evicted = this._evictFromMap(this.behavioralProfiles, this._maxBehavioralProfiles, 'behavioral profiles');
-      this._totalProfilesEvicted += evicted;
-    }
-
-    return profile;
-  }
-
-  getBehaviorProfile(userId) {
-    if (!userId) return null;
-    return this.behavioralProfiles.get(userId) || null;
-  }
-
-  detectAnomaly(dataOrUserId, options = {}) {
-    let behaviorData = dataOrUserId;
-    if (typeof dataOrUserId === 'string') {
-      behaviorData = this.getBehaviorProfile(dataOrUserId);
-    }
-    if (!behaviorData) {
-      return { isAnomaly: false, anomaly: false, reason: 'INSUFFICIENT_DATA', confidence: 0 };
-    }
-
-    const locations =
-      behaviorData.patterns?.locationHistory ||
-      behaviorData.locationHistory ||
-      behaviorData.locations ||
-      (Array.isArray(behaviorData) ? behaviorData : null);
-
-    if (!Array.isArray(locations) || locations.length < 2) {
-      return {
-        isAnomaly: false,
-        anomaly: false,
-        reason: 'INSUFFICIENT_DATA',
-        confidence: 0,
-        message: 'Insufficient location data points for anomaly analysis',
-      };
-    }
-
-    const maxAllowedSpeed = options.maxSpeedKmh || 150;
-    let maxSpeedKmh = 0;
-    let anomalousPair = null;
-
-    for (let i = 1; i < locations.length; i++) {
-      const prev = locations[i - 1];
-      const curr = locations[i];
-      if (prev.lat == null || prev.lng == null || curr.lat == null || curr.lng == null) continue;
-
-      const distKm = this.calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
-      const timeDiffMs = (curr.timestamp || 0) - (prev.timestamp || 0);
-      const hours = timeDiffMs / 3_600_000;
-
-      if (hours <= 0) {
-        if (distKm > 1) {
-          return {
-            isAnomaly: true,
-            anomaly: true,
-            type: 'IMPOSSIBLE_SPEED',
-            speedKmh: Infinity,
-            reason: 'Zero-time teleportation detected',
-            message: 'Impossible speed: instant location teleportation detected',
-          };
-        }
-        continue;
-      }
-
-      const speedKmh = distKm / hours;
-      if (speedKmh > maxSpeedKmh) {
-        maxSpeedKmh = speedKmh;
-        anomalousPair = { prev, curr, speedKmh, distKm };
-      }
-    }
-
-    if (maxSpeedKmh > maxAllowedSpeed) {
-      return {
-        isAnomaly: true,
-        anomaly: true,
-        type: 'IMPOSSIBLE_SPEED',
-        speedKmh: maxSpeedKmh,
-        maxAllowedSpeed,
-        details: anomalousPair,
-        message: `Impossible speed detected: ${Math.round(maxSpeedKmh)} km/h exceeds threshold of ${maxAllowedSpeed} km/h`,
-      };
-    }
-
-    return {
-      isAnomaly: false,
-      anomaly: false,
-      maxSpeedKmh,
-      message: 'Normal behavior',
-    };
   }
 
   isWithdrawalDirection(transaction) {
     return String(transaction?.type || '').toLowerCase() === 'withdrawal';
   }
-
 
   async analyzeTransaction(userId, walletAddress, transaction) {
     return measureExecution('AnomalyDetectionService.analyzeTransaction', async () => {
@@ -326,12 +164,10 @@ class AnomalyDetectionService {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 4;
       }
 
-      const allIdentical = data.every(t => amountToMinorUnits(t.amount) === amountToMinorUnits(data[0].amount));
-      if (allIdentical) return 0;
-
-      const totalUnits = data.reduce((sum, t) => sum + amountToMinorUnits(t.amount), 0n);
-      const avg = Number(totalUnits) / data.length / 1e18;
-      const amounts = data.map(t => Number(amountToMinorUnits(t.amount)) / 1e18);
+      const amounts = data.map(t => parseFloat(t.amount) || 0);
+      let sum = 0;
+      for (const amount of amounts) { sum = Number((sum + amount).toPrecision(15)); }
+      const avg = sum / amounts.length;
       let varianceSum = 0;
       for (const amount of amounts) { varianceSum += Math.pow(amount - avg, 2); }
       const variance = varianceSum / amounts.length;
@@ -341,7 +177,6 @@ class AnomalyDetectionService {
       return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 4;
     }
   }
-
 
   detectUnusualTime(transaction) {
     const txTime = new Date(transaction.timestamp);

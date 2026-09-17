@@ -36,21 +36,20 @@ export function validatePagination(options = {}) {
         return res.status(400).json({ error: 'Invalid offset parameter' });
       }
     } else if (req.query.page) {
-      const parsedPage = parseInteger(req.query.page);
-      if (parsedPage !== null && parsedPage < 1) {
-        return res.status(400).json({ error: 'Invalid page parameter: must be >= 1' });
-      }
-      if (Number.isFinite(parsedPage) && parsedPage > 0) {
-        const computedOffset = (parsedPage - 1) * limit;
-        // Guard against NaN (e.g., if limit is 0) and cap at maxOffset
-        offset = Number.isNaN(computedOffset) ? defaultOffset : Math.min(computedOffset, maxOffset);
-      } else {
-        return res.status(400).json({ error: 'Invalid page parameter' });
-      }
+       const parsedPage = parseInteger(req.query.page);
+       if (parsedPage !== null && parsedPage < 1) {
+         return res.status(400).json({ error: 'Invalid page parameter: must be >= 1' });
+       }
+       if (Number.isFinite(parsedPage) && parsedPage > 0) {
+          const computedOffset = (parsedPage - 1) * limit;
+          // Guard against NaN (e.g., if limit is 0) and cap at maxOffset
+          offset = Number.isNaN(computedOffset) ? defaultOffset : Math.min(computedOffset, maxOffset);
+       } else {
+          return res.status(400).json({ error: 'Invalid page parameter' });
+       }
     }
 
     // Reassign normalized values back to query so downstream controllers see capped values safely
-    offset = Math.max(0, offset);
     req.query.limit = limit;
     req.query.offset = offset;
     

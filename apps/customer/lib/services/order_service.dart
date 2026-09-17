@@ -61,7 +61,6 @@ class OrderService {
     double? targetTemperatureMax,
     String? driverId,
     String? truckId,
-    String? idempotencyKey,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -85,7 +84,6 @@ class OrderService {
           if (driverId != null && driverId.trim().isNotEmpty) 'driver_id': driverId.trim(),
           if (truckId != null && truckId.trim().isNotEmpty) 'truck_id': truckId.trim(),
         },
-        idempotencyKey: idempotencyKey,
       ) as Map<String, dynamic>?;
 
       return body?['order']?['order_display_id']?.toString() ?? '';

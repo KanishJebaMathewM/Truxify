@@ -59,16 +59,10 @@ describe('BlockchainMonitor', () => {
     monitor.setupEventHandlers();
     expect(Object.keys(monitor.eventHandlers).sort()).toEqual([
       'BalanceUpdateFailed',
-      'BookingCancelled',
-      'BookingCreated',
-      'BookingDisputed',
-      'BookingStarted',
-      'DisputeResolved',
       'GeofenceBreach',
       'InsuranceClaimApproved',
       'InsuranceClaimRejected',
       'PaymentReceived',
-      'PaymentReleased',
       'SmartContractRevert',
     ]);
   });

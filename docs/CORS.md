@@ -1,8 +1,3 @@
-# Tracking link origin
-
-Customer tracking links must use the server-configured `PUBLIC_TRACKING_URL`.
-Do not derive bearer-token URLs from the request `Host` header, forwarded host,
-or other client-controlled origin data.
 # CORS Middleware
 
 ## Overview

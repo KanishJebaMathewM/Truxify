@@ -13,9 +13,9 @@ describe('RequestCache', () => {
     expect(cache.get('order:1')).toEqual({ id: 'o1' });
   });
 
-  it('returns null for a missing key', () => {
+  it('returns undefined for a missing key', () => {
     const cache = new RequestCache();
-    expect(cache.get('missing')).toBeNull();
+    expect(cache.get('missing')).toBeUndefined();
   });
 
   it('set returns the cache for chaining', () => {
@@ -44,7 +44,7 @@ describe('RequestCache', () => {
     cache.set('b', 2);
     cache.clear();
     expect(cache.size).toBe(0);
-    expect(cache.get('a')).toBeNull();
+    expect(cache.get('a')).toBeUndefined();
   });
 
   it('tracks size as keys are added', () => {

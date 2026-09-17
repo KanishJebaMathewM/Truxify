@@ -216,9 +216,6 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
 
         if (newStatus == ShipmentStatus.Delivered) {
             s.receivedAt = block.timestamp;
-            s.isActive = false;
-        } else if (newStatus == ShipmentStatus.Cancelled) {
-            s.isActive = false;
         }
 
         // Append-only status history: past states can never be rewritten.

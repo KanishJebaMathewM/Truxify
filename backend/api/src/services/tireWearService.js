@@ -68,7 +68,7 @@ const calculateTireWear = async (driverId) => {
         };
     } catch (err) {
         console.error('Error calculating tire wear:', err.message);
-        throw new Error('Failed to calculate tire wear analytics.', { cause: err });
+        throw new Error('Failed to calculate tire wear analytics.');
     }
 };
 

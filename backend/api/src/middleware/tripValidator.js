@@ -1,3 +1,5 @@
+import logger from '../middleware/logger.js';
+
 export const tripValidator = {
   validate: (req, res, next) => {
     const tripId = req.params?.tripId ?? req.params?.id;

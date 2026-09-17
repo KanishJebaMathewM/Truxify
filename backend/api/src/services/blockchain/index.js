@@ -15,9 +15,6 @@ import {
   handleDisputeOpenedEvent,
 } from './eventListener.js';
 
-const defaultBlockchainMetrics = new BlockchainMetrics();
-const defaultEscalationHandler = new EscalationHandler({});
-
 export {
   Multicall3Service,
   BatchCallBuilder,
@@ -29,8 +26,6 @@ export {
   ESCALATION_LEVELS,
   ESCALATION_THRESHOLDS,
   BlockchainMetrics,
-  defaultBlockchainMetrics,
-  defaultEscalationHandler,
   startEventListener,
   stopEventListener,
   isEventListenerActive,

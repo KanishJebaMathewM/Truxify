@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getProfile, getProfileById } from '../../src/services/profileService.js';
+import { describe, it, expect } from 'vitest';
+import { getProfileById } from '../../../src/services/profileService.js';
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
@@ -60,9 +60,8 @@ vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
-  get supabaseAdmin() {
-    return supabaseRef.current;
-  },
+  // No service-role key in tests — the service falls back to the anon mock.
+  supabaseAdmin: undefined,
 }));
 
 vi.mock('../../src/lib/profileCache.js', () => profileCacheRef);

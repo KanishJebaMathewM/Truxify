@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -571,7 +572,9 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	if !updatedSeen.After(oldTime) {
 		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
 	}
-}func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
+}
+
+func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
 	bypassAuth = true
 	defer func() { bypassAuth = false }()
 
@@ -594,6 +597,14 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var res map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if res["already_committed"] != true {
+		t.Errorf("expected already_committed=true on duplicate submission, got %v", res["already_committed"])
 	}
 
 	// Verify no new entry was appended
@@ -645,10 +656,11 @@ func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
 	// Transition manually to leader (simulating startElection election win)
 	node.mu.Lock()
 	node.Role = Leader
+	node.LeaderID = "node1"
 	node.CurrentTerm = 1
 	node.nextIndex = map[string]uint64{"http://localhost:9999": 1}
 	node.matchIndex = map[string]uint64{"http://localhost:9999": 0}
-	node.peerLive = map[string]bool{"http://localhost:9999": false}
+	node.liveAck = map[string]bool{"http://localhost:9999": false}
 	node.mu.Unlock()
 
 	// Try to commit order command
@@ -693,7 +705,12 @@ func TestRaftStatePersistAndLoad(t *testing.T) {
 	}
 
 	// Persist
-	node.persistState()
+	if err := node.persister.SaveState(node.CurrentTerm, node.VotedFor); err != nil {
+		t.Fatalf("SaveState failed: %v", err)
+	}
+	if err := node.persister.SaveLog(node.Log); err != nil {
+		t.Fatalf("SaveLog failed: %v", err)
+	}
 
 	// Create new node and load
 	node2 := NewRaftNode("test-node-1", nil, nil)
@@ -748,3 +765,202 @@ func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
 		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
 	}
 }
+
+// TestSingleNodeOrElectionSeedDoesNotFalselyClaimQuorum verifies that an isolated
+// leader with optimistic election seeds or unacknowledged peers cannot falsely claim
+// quorum: /commit must reject with 503 rather than prematurely succeeding.
+func TestSingleNodeOrElectionSeedDoesNotFalselyClaimQuorum(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	// 3-node cluster: node1 is leader, node2 & node3 have not acknowledged in current term.
+	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{"http://127.0.0.1:54321", "http://127.0.0.1:54322"})
+	node.mu.Lock()
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 2
+	// Optimistic election seeds must NOT count as acknowledgment for new entries
+	node.nextIndex = map[string]uint64{"http://127.0.0.1:54321": 10, "http://127.0.0.1:54322": 10}
+	node.matchIndex = map[string]uint64{"http://127.0.0.1:54321": 9, "http://127.0.0.1:54322": 9}
+	// liveAck is empty (no current-term heartbeat round has completed)
+	node.liveAck = make(map[string]bool)
+	node.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-seed-1","command":"CREATED"}`))
+	w := httptest.NewRecorder()
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable without current-term quorum acknowledgment, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.Log) != 0 {
+		t.Errorf("expected no entry to be appended to log without quorum, got %d entries", len(node.Log))
+	}
+}
+
+// TestSuccessfulRealQuorumCommit verifies /commit succeeds only after the entry
+// has real current-term quorum acknowledgment replicated to followers.
+func TestSuccessfulRealQuorumCommit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node1 := NewRaftNode("node1", []string{"node2", "node3"}, nil)
+	node2 := NewRaftNode("node2", []string{"node1", "node3"}, nil)
+	node3 := NewRaftNode("node3", []string{"node1", "node2"}, nil)
+
+	s1 := httptest.NewServer(raftHandlers(node1))
+	defer s1.Close()
+	s2 := httptest.NewServer(raftHandlers(node2))
+	defer s2.Close()
+	s3 := httptest.NewServer(raftHandlers(node3))
+	defer s3.Close()
+
+	node1.PeerURLs = []string{s2.URL, s3.URL}
+	node2.PeerURLs = []string{s1.URL, s3.URL}
+	node3.PeerURLs = []string{s1.URL, s2.URL}
+
+	node1.mu.Lock()
+	node1.Role = Leader
+	node1.LeaderID = "node1"
+	node1.CurrentTerm = 1
+	node1.nextIndex = map[string]uint64{s2.URL: 1, s3.URL: 1}
+	node1.matchIndex = map[string]uint64{s2.URL: 0, s3.URL: 0}
+	node1.liveAck = map[string]bool{s2.URL: true, s3.URL: true}
+	node1.mu.Unlock()
+
+	body := strings.NewReader(`{"order_id":"ord-quorum-ok","command":"CREATED"}`)
+	resp, err := http.Post(s1.URL+"/api/v1/raft/commit", "application/json", body)
+	if err != nil {
+		t.Fatalf("commit request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from leader, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Success   bool   `json:"success"`
+		RaftIndex uint64 `json:"raft_index"`
+		OrderID   string `json:"order_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if !payload.Success || payload.RaftIndex != 1 || payload.OrderID != "ord-quorum-ok" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+
+	// Verify replicated and committed on both followers
+	for name, n := range map[string]*RaftNode{"node2": node2, "node3": node3} {
+		n.mu.Lock()
+		logLen := len(n.Log)
+		commit := n.CommitIndex
+		n.mu.Unlock()
+		if logLen != 1 {
+			t.Errorf("%s: expected 1 log entry, got %d", name, logLen)
+		}
+		if commit != 1 {
+			t.Errorf("%s: expected commit_index 1, got %d", name, commit)
+		}
+	}
+}
+
+// TestDuplicateOrderSubmissionIdempotency verifies duplicate (order_id, command)
+// submissions do not append a new entry and return 200 with already_committed=true.
+func TestDuplicateOrderSubmissionIdempotency(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.mu.Lock()
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 1
+	node.mu.Unlock()
+
+	// First submission
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-idem-1","command":"CREATED"}`))
+	w1 := httptest.NewRecorder()
+	node.HandleCommitOrder(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for first submission, got %d. Body: %s", w1.Code, w1.Body.String())
+	}
+	var res1 map[string]interface{}
+	json.NewDecoder(w1.Body).Decode(&res1)
+	if res1["already_committed"] == true {
+		t.Errorf("first submission should not have already_committed=true")
+	}
+
+	// Duplicate submission with exact same (order_id, command)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-idem-1","command":"CREATED"}`))
+	w2 := httptest.NewRecorder()
+	node.HandleCommitOrder(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for duplicate submission, got %d. Body: %s", w2.Code, w2.Body.String())
+	}
+	var res2 map[string]interface{}
+	json.NewDecoder(w2.Body).Decode(&res2)
+	if res2["already_committed"] != true {
+		t.Errorf("expected already_committed=true on duplicate submission, got %v", res2["already_committed"])
+	}
+	if res2["raft_index"] != res1["raft_index"] {
+		t.Errorf("expected same raft_index %v, got %v", res1["raft_index"], res2["raft_index"])
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.Log) != 1 {
+		t.Errorf("expected log length to remain 1, got %d", len(node.Log))
+	}
+}
+
+// TestMultiEntryLogIndexCorrectness verifies canonical 1-based log indexing 1..N
+// using the logIndex helper across normal and compacted snapshots.
+func TestMultiEntryLogIndexCorrectness(t *testing.T) {
+	node := NewRaftNode("node1", nil, nil)
+	now := time.Now()
+
+	const n = 10
+	for i := uint64(1); i <= n; i++ {
+		node.Log = append(node.Log, LogEntry{
+			Index:     i,
+			Term:      1,
+			Command:   "CREATED",
+			OrderID:   fmt.Sprintf("ord-%d", i),
+			Timestamp: now,
+		})
+	}
+
+	// Canonical 1-based log indexing: index i in [1..N] maps to slice index i-1
+	for i := uint64(1); i <= n; i++ {
+		idx := node.logIndex(i)
+		if idx != int(i-1) {
+			t.Errorf("expected logIndex(%d) == %d, got %d", i, i-1, idx)
+		}
+		if node.Log[idx].Index != i {
+			t.Errorf("expected entry at logIndex(%d) to have Index %d, got %d", i, i, node.Log[idx].Index)
+		}
+	}
+
+	// Verify behavior with compacted snapshotIndex
+	node.snapshotIndex = 4
+	node.Log = node.Log[4:] // retained entries have Index 5..10
+
+	for i := uint64(5); i <= n; i++ {
+		idx := node.logIndex(i)
+		expected := int(i - 4 - 1)
+		if idx != expected {
+			t.Errorf("with snapshotIndex=4, expected logIndex(%d) == %d, got %d", i, expected, idx)
+		}
+		if node.Log[idx].Index != i {
+			t.Errorf("with snapshotIndex=4, expected entry at logIndex(%d) to have Index %d, got %d", i, i, node.Log[idx].Index)
+		}
+	}
+}
+

@@ -45,7 +45,8 @@ function handleError(res, err, label) {
   if (err instanceof DomainError) {
     return res.status(err.status).json(err.payload);
   }
-  logger.error(`[cross-dock] ${label} exception:`, err.message);
+  const errorMessage = err?.message ?? String(err);
+  logger.error(`[cross-dock] ${label} exception:`, errorMessage);
   return res.status(500).json({ error: 'Internal Server Error' });
 }
 

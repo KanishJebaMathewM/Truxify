@@ -9,6 +9,15 @@ import express from 'express';
 const invalidateCachedProfileMock = vi.fn().mockResolvedValue(undefined);
 const invalidateCachedSupabaseProfileMock = vi.fn().mockResolvedValue(undefined);
 const revokeRefreshTokensMock = vi.fn().mockResolvedValue(undefined);
+const rotateRefreshTokenMock = vi.fn();
+
+vi.mock('../../src/services/refreshTokenService.js', () => ({
+  default: {
+    rotateRefreshToken: rotateRefreshTokenMock,
+    revokeToken: vi.fn().mockResolvedValue(undefined),
+    revokeAllUserTokens: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: invalidateCachedProfileMock,
@@ -164,5 +173,36 @@ describe('POST /api/auth/logout', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('POST /api/auth/refresh', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.JWT_SECRET = 'test-refresh-secret';
+    rotateRefreshTokenMock.mockResolvedValue({
+      user_id: 'user-1',
+      token: 'rotated-refresh-token',
+      expires_at: '2026-10-01T00:00:00.000Z',
+    });
+  });
+
+  it('rotates the refresh token and returns a signed backend JWT', async () => {
+    const res = await request(buildApp())
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'current-token', deviceId: 'device-1', deviceInfo: 'test' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.refreshToken).toBe('rotated-refresh-token');
+    expect(res.body.accessToken).not.toContain('placeholder');
+    expect(res.body.accessToken.split('.')).toHaveLength(3);
+    expect(rotateRefreshTokenMock).toHaveBeenCalledWith('current-token', 'device-1', 'test');
+  });
+
+  it('rejects incomplete refresh requests', async () => {
+    const res = await request(buildApp()).post('/api/auth/refresh').send({ refreshToken: 'token' });
+
+    expect(res.status).toBe(400);
+    expect(rotateRefreshTokenMock).not.toHaveBeenCalled();
   });
 });

@@ -1,14 +1,21 @@
 #include "../include/cuda_vrp.cuh"
+#include <algorithm>
 #include <cmath>
 #include <numeric>
 
 namespace TruxifyCuda {
 
 namespace {
+
+bool isValidLocation(const Location& location) {
+    return std::isfinite(location.x) && std::isfinite(location.y) &&
+           location.x >= -180.0f && location.x <= 180.0f &&
+           location.y >= -90.0f && location.y <= 90.0f;
+}
+
 // Great-circle (haversine) distance in meters. `lat`/`lng` are degrees.
 // `Location.x` is longitude and `Location.y` is latitude, matching the test
-// reference (`refHaversine`) and the regression test for #11549. Using a
-// local PI constant avoids any dependency on `M_PI` portability.
+// reference (`refHaversine`) and the regression test for #11549.
 double haversineMeters(double lat1, double lng1, double lat2, double lng2) {
     const double kPi = 3.14159265358979323846;
     const double R = 6371000.0;
@@ -17,6 +24,7 @@ double haversineMeters(double lat1, double lng1, double lat2, double lng2) {
     double a = std::sin(dLat / 2.0) * std::sin(dLat / 2.0) +
                std::cos(lat1 * kPi / 180.0) * std::cos(lat2 * kPi / 180.0) *
                    std::sin(dLng / 2.0) * std::sin(dLng / 2.0);
+    a = std::clamp(a, 0.0, 1.0);
     return 2.0 * R * std::asin(std::sqrt(a));
 }
 } // namespace
@@ -28,6 +36,16 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
 ) {
     if (stops.empty()) {
         return { 0.0f, 0, true };
+    }
+    // Reject invalid coordinates before routing so malformed values can never
+    // produce NaN/Inf route distances that are marked as valid solutions.
+    if (!isValidLocation(depot)) {
+        return { 0.0f, 0, false };
+    }
+    for (const auto& stop : stops) {
+        if (!isValidLocation(stop)) {
+            return { 0.0f, 0, false };
+        }
     }
     // Reject zero capacity before the division below, which would otherwise be
     // a division-by-zero (UB / SIGFPE) on this reachable, non-empty input.
@@ -50,7 +68,7 @@ VrpSolution CudaVrpSolver::solveParallelVRP(
 
     size_t routesNeeded = (stops.size() + vehicleCapacity - 1) / vehicleCapacity;
 
-    return { distance, routesNeeded, true };
+    return { distance, routesNeeded, std::isfinite(distance) };
 }
 
 } // namespace TruxifyCuda

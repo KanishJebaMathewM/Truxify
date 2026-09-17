@@ -34,6 +34,8 @@ services:
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ML_ENGINE_URL: http://ml-engine:8000
+      # API key auth for backend-to-backend endpoints (n8n workflows)
+      VALID_API_KEYS: ${VALID_API_KEYS:?VALID_API_KEYS is required}
       # Malware scanning
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
@@ -234,7 +236,7 @@ services:
   # service uses its own dedicated, least-privilege database instead of the
   # application's `postgres` superuser-equivalent credentials.
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.38.7
     container_name: truxify-n8n
     env_file:
       - .env
@@ -293,8 +295,6 @@ services:
   clamav:
     image: clamav/clamav:1.4
     container_name: truxify-clamav
-    ports:
-      - "${CLAMAV_PORT:-3310}:3310"
     volumes:
       - clamav_data:/var/lib/clamav
     deploy:
@@ -314,7 +314,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --version || exit 1"]
+      test: ["CMD-SHELL", "clamdscan --ping 1:1 || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 5

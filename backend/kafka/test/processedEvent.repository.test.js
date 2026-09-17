@@ -423,5 +423,32 @@ describe('ProcessedEventRepository claim flow', () => {
       expect(records.get(key).started_at).toBe(staleTime);
     });
   });
+
+  describe('getStatus', () => {
+    it('returns null for an event that has not been claimed', async () => {
+      const status = await processedEventRepository.getStatus('payment.confirmed', 'evt-unseen', 'order-service');
+      expect(status).toBeNull();
+    });
+
+    it('returns "processing" for an actively claimed event', async () => {
+      await processedEventRepository.claimProcessing('payment.confirmed', 'evt-proc', null, 'order-service');
+      const status = await processedEventRepository.getStatus('payment.confirmed', 'evt-proc', 'order-service');
+      expect(status).toBe('processing');
+    });
+
+    it('returns "completed" after an event is marked completed', async () => {
+      await processedEventRepository.claimProcessing('payment.confirmed', 'evt-comp', null, 'order-service');
+      await processedEventRepository.markCompleted('payment.confirmed', 'evt-comp', 'order-service');
+      const status = await processedEventRepository.getStatus('payment.confirmed', 'evt-comp', 'order-service');
+      expect(status).toBe('completed');
+    });
+
+    it('returns "failed" after an event is marked failed', async () => {
+      await processedEventRepository.claimProcessing('payment.confirmed', 'evt-fail', null, 'order-service');
+      await processedEventRepository.markFailed('payment.confirmed', 'evt-fail', 'order-service');
+      const status = await processedEventRepository.getStatus('payment.confirmed', 'evt-fail', 'order-service');
+      expect(status).toBe('failed');
+    });
+  });
 });
 

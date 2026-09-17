@@ -22,7 +22,7 @@ describe('revoke_tracking_tokens_on_terminal_status pins search_path (issue #139
   const hardeningMigration = readFileSync(
     path.resolve(
       __dirname,
-      '../../../../supabase/migrations/20260809000004_set_search_path_on_remaining_definer_functions.sql'
+      '../../../../supabase/migrations/20260809000000_set_search_path_on_remaining_definer_functions.sql'
     ),
     'utf8'
   );

@@ -227,10 +227,16 @@ describe('trackingTokenStatus', () => {
       it('returns "invalid" for unparseable / malformed expires_at date string', () => {
         expect(getTrackingTokenStatus({ expires_at: 'not-a-date' }, NOW)).toBe('invalid');
         expect(getTrackingTokenStatus({ expires_at: '2026-99-99' }, NOW)).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: NaN }, NOW)).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: Infinity }, NOW)).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: -Infinity }, NOW)).toBe('invalid');
       });
 
-      it('returns "invalid" when now parameter is an invalid date string', () => {
+      it('returns "invalid" when now parameter is an invalid date string or non-finite timestamp', () => {
         expect(getTrackingTokenStatus({ expires_at: '2026-06-20T00:00:00.000Z' }, 'invalid-now-date')).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: '2026-06-20T00:00:00.000Z' }, NaN)).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: '2026-06-20T00:00:00.000Z' }, Infinity)).toBe('invalid');
+        expect(getTrackingTokenStatus({ expires_at: '2026-06-20T00:00:00.000Z' }, -Infinity)).toBe('invalid');
       });
     });
   });

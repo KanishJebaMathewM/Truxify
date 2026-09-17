@@ -40,6 +40,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   late final OrderService _orderService;
   late final TrackingService _trackingService;
   List<Map<String, dynamic>> _timeline = [];
+  int _timelineRequestId = 0;
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
   List<LatLng> _routePoints = const [];
@@ -69,6 +70,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   // ── WebSocket connection state ────────────────────────────────────
   bool _wsConnected = false;
+  bool _hasAuthenticatedWebSocket = false;
+  bool _authenticatedForCurrentConnection = false;
+  DateTime? _latestLocationAt;
   String? _mlEta;
 
   String _formatEta(double etaMinutes) {
@@ -179,6 +183,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       urlFactory: buildUrl,
       onConnect: () {
         debugPrint('WebSocket connected, authenticating...');
+        _authenticatedForCurrentConnection = false;
         if (mounted) setState(() => _wsConnected = true);
         final session = SupabaseService.client.auth.currentSession;
         final token = session?.accessToken ?? '';
@@ -193,16 +198,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             }) ??
             false;
         debugPrint('[LiveTracking] auth frame send result: $authSent');
-        // Re-establish the tracking subscription on every (re)connect so a missed
-        // `authenticated` frame cannot silently drop location updates.
-        final subSent = _trackingWebSocket?.send({
-              'event': 'subscribe_tracking',
-              'data': {
-                'order_display_id': widget.orderId,
-              },
-            }) ??
-            false;
-        debugPrint('[LiveTracking] subscribe_tracking frame send result: $subSent');
       },
     );
 
@@ -214,21 +209,35 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         final payload = jsonDecode(message) as Map<String, dynamic>;
 
         if (payload['status'] == 'authenticated') {
-          // First-frame auth succeeded; now register for order updates.
+          if (_authenticatedForCurrentConnection) return;
+
+          final isReconnect = _hasAuthenticatedWebSocket;
+          _authenticatedForCurrentConnection = true;
+          _hasAuthenticatedWebSocket = true;
+
+          // First-frame auth succeeded; now register for order updates. The
+          // server restores persisted subscriptions during authentication, so
+          // this is the only client subscription request needed per connection.
           _trackingWebSocket?.send({
             'event': 'subscribe_tracking',
             'data': {
               'order_display_id': widget.orderId,
             },
           });
+
+          if (isReconnect) {
+            // Keep processing live WebSocket messages while state is fetched.
+            unawaited(_refreshAuthoritativeStateAfterReconnect());
+          }
         } else if (payload['event'] == 'location_update') {
           final data = payload['data'] as Map<String, dynamic>?;
           if (data != null) {
             final lat = (data['latitude'] as num?)?.toDouble();
             final lng = (data['longitude'] as num?)?.toDouble();
+            final timestamp = _parseLocationTimestamp(data);
 
             if (lat != null && lng != null && mounted) {
-              _updateTruckPosition(LatLng(lat, lng));
+              _updateTruckPosition(LatLng(lat, lng), timestamp: timestamp);
             }
           }
         } else if (payload['event'] == 'milestone_update') {
@@ -251,8 +260,23 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     _trackingWebSocket!.connect();
   }
 
-  void _updateTruckPosition(LatLng newPosition) {
+  DateTime? _parseLocationTimestamp(Map<String, dynamic> data) {
+    final rawTimestamp = data['timestamp'] ?? data['updated_at'] ?? data['last_updated_at'];
+    return rawTimestamp == null ? null : DateTime.tryParse(rawTimestamp.toString());
+  }
+
+  void _updateTruckPosition(LatLng newPosition, {DateTime? timestamp}) {
     if (!mounted) return;
+
+    if (timestamp != null &&
+        _latestLocationAt != null &&
+        timestamp.isBefore(_latestLocationAt!)) {
+      return;
+    }
+    if (timestamp != null) {
+      _latestLocationAt = timestamp;
+    }
+
     _fetchEtaFromMl(newPosition);
 
     if (_currentPosition == null) {
@@ -297,7 +321,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }
   }
 
-  Future<void> _loadOrder() async {
+  Future<void> _loadOrder({bool fetchDriverLocation = true}) async {
     try {
       final order = await _orderService.fetchOrderById(widget.orderId);
 
@@ -367,7 +391,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
       if (order != null) {
         await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
-        if (order['id'] != null) {
+        if (order['id'] != null && fetchDriverLocation) {
           _subscribeToSupabaseRealtime(order['id']?.toString() ?? '');
           _fetchInitialDriverLocation();
         }
@@ -375,6 +399,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     } catch (e) {
       debugPrint('Failed to load order: $e');
     }
+  }
+
+  Future<void> _refreshAuthoritativeStateAfterReconnect() async {
+    await Future.wait<void>([
+      _loadOrder(fetchDriverLocation: false),
+      _loadTimeline(),
+      _fetchInitialDriverLocation(),
+    ]);
   }
 
   void _subscribeToSupabaseRealtime(String orderUuid) {
@@ -393,8 +425,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         debugPrint('Received Supabase Realtime location update: $payload');
         final lat = (payload['lat'] as num?)?.toDouble();
         final lng = (payload['lng'] as num?)?.toDouble();
+        final timestamp = _parseLocationTimestamp(payload);
         if (lat != null && lng != null && mounted) {
-          _updateTruckPosition(LatLng(lat, lng));
+          _updateTruckPosition(LatLng(lat, lng), timestamp: timestamp);
         }
       },
     ).subscribe((status, error) {
@@ -412,8 +445,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       final data = locData['data'] ?? locData;
       final lat = (data['lat'] as num?)?.toDouble();
       final lng = (data['lng'] as num?)?.toDouble();
+      final timestamp = data is Map<String, dynamic>
+          ? _parseLocationTimestamp(data)
+          : null;
       if (lat != null && lng != null && mounted) {
-        _updateTruckPosition(LatLng(lat, lng));
+        _updateTruckPosition(LatLng(lat, lng), timestamp: timestamp);
       }
     } catch (e) {
       debugPrint('Failed to fetch initial driver location: $e');
@@ -742,6 +778,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   Future<void> _showCancel() async {
     bool isLoading = false;
+    String? selectedReason;
+    const cancellationReasons = <String>[
+      'Plans changed',
+      'Driver delayed',
+      'Wrong booking details',
+      'Found another truck',
+      'Other',
+    ];
     final rawFee = _order?['cancellation_fee'];
     final feeInRupees = rawFee is num ? rawFee / 100 : null;
     String? feeText = feeInRupees != null ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}' : null;
@@ -767,15 +811,41 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                 const SizedBox(height: 6),
                 Text('This fee is charged for cancelling after assignment.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                 const SizedBox(height: 18),
+                DropdownButtonFormField<String>(
+                  value: selectedReason,
+                  decoration: const InputDecoration(
+                    labelText: 'Cancellation reason',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: cancellationReasons
+                      .map((reason) => DropdownMenuItem<String>(
+                            value: reason,
+                            child: Text(reason),
+                          ))
+                      .toList(),
+                  onChanged: isLoading
+                      ? null
+                      : (reason) => setModalState(() => selectedReason = reason),
+                ),
+                const SizedBox(height: 16),
                 PrimaryButton(
                   label: isLoading ? 'Cancelling...' : 'Confirm Cancel',
                   backgroundColor: TruxifyColors.error,
                   onPressed: isLoading
                       ? null
                       : () async {
+                          if (selectedReason == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Please select a cancellation reason')),
+                            );
+                            return;
+                          }
                           setModalState(() => isLoading = true);
                           try {
-                            final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
+                            final resp = await _orderService.cancelOrder(
+                              orderDisplayId: widget.orderId,
+                              reason: selectedReason,
+                            );
                             final rawFee = resp['cancellation_fee'];
                             final feeInRupees = rawFee is num ? rawFee / 100 : 0;
                             await _loadOrder();
@@ -831,10 +901,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   static const LatLng _fallbackDropPoint = LatLng(26.9124, 75.7873);
 
   Future<void> _loadTimeline() async {
+    final requestId = ++_timelineRequestId;
     try {
       final timeline = await _orderService.fetchOrderTimeline(widget.orderId);
 
-      if (!mounted) return;
+      if (!mounted || requestId != _timelineRequestId) return;
 
       setState(() {
         _timeline = timeline;
@@ -926,7 +997,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         final isLast = i == timelineData.length - 1;
         
         final color = isCurrent ? TruxifyColors.accent : completed ? TruxifyColors.accentDark : TruxifyColors.border;
-        final timestamp = step['timestamp']?.toString();
+        final timestamp = step['milestone_time']?.toString() ?? step['timestamp']?.toString();
 
         return IntrinsicHeight(
           child: Row(

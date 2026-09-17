@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import daoService from './dao.service.js';
 import logger from '../api/src/middleware/logger.js';
 import { authenticate } from '../api/src/middleware/auth.js';
+import { requireDaoAuth } from './middleware/daoAuth.js';
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ function recoverSigner(message, signature) {
 }
 
 // Join DAO — authenticated + wallet-signed to prevent membership spoofing.
-router.post('/dao/join', authenticate, async (req, res) => {
+router.post('/dao/join', requireDaoAuth('join'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
         if (!userAddress || !signature) {
@@ -51,7 +52,7 @@ router.post('/dao/join', authenticate, async (req, res) => {
 });
 
 // Leave DAO — authenticated + wallet-signed to prevent membership spoofing.
-router.post('/dao/leave', authenticate, async (req, res) => {
+router.post('/dao/leave', requireDaoAuth('leave'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
         if (!userAddress || !signature) {
@@ -80,7 +81,7 @@ router.post('/dao/leave', authenticate, async (req, res) => {
 
 // Create proposal — authenticated + wallet-signed; actor bound to the
 // recovered signer so the proposer cannot be spoofed via the request body.
-router.post('/dao/proposal/create', authenticate, async (req, res) => {
+router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, async (req, res) => {
     try {
         const { title, description, callData, target, value, proposalType, userAddress, signature } = req.body;
         if (!title || !description) {
@@ -123,7 +124,7 @@ router.post('/dao/proposal/create', authenticate, async (req, res) => {
 
 // Cast vote — authenticated + wallet-signed; voting power is derived
 // server-side from the voter's on-chain governance-token balance.
-router.post('/dao/vote/cast', authenticate, async (req, res) => {
+router.post('/dao/vote/cast', requireDaoAuth('vote'), authenticate, async (req, res) => {
     try {
         const { proposalId, voterAddress, signature } = req.body;
         if (!proposalId || !voterAddress || !signature) {
@@ -142,7 +143,7 @@ router.post('/dao/vote/cast', authenticate, async (req, res) => {
             });
         }
 
-        const result = await daoService.castVote(proposalId, voterAddress);
+        const result = await daoService.castVote(req.body.proposalId, req.body.votingPower, req.verifiedSigner, req.body.signer);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Vote casting error:', error);
@@ -152,7 +153,7 @@ router.post('/dao/vote/cast', authenticate, async (req, res) => {
 
 // Execute proposal — authenticated + wallet-signed; only the verified
 // signer may trigger execution, preventing spoofed execution requests.
-router.post('/dao/proposal/execute', authenticate, async (req, res) => {
+router.post('/dao/proposal/execute', requireDaoAuth('execute'), authenticate, async (req, res) => {
     try {
         const { proposalId, userAddress, signature } = req.body;
         if (!proposalId) {

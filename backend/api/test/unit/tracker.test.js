@@ -935,6 +935,30 @@ describe('handleLocationPing - main telemetry flow', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['string NaN', 'NaN'],
+    ['string Infinity', 'Infinity'],
+    ['string -Infinity', '-Infinity'],
+    ['literal NaN', NaN],
+    ['literal Infinity', Infinity],
+    ['literal -Infinity', -Infinity],
+  ])('handles non-finite device_timestamp (%s) gracefully', async (_, ts) => {
+    const ws = {
+      driverId: 'driver-1',
+      user: { id: 'driver-1', role: 'driver' },
+      send: vi.fn(),
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: ts,
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
   it('broadcasts to driver subscribers when driver_id subscription exists', async () => {
     const driverSubMessages = [];
     const driverSub = {

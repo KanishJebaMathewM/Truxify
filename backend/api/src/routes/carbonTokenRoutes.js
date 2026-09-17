@@ -17,12 +17,21 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
     }
 
+    const distanceKm = Number(distance_km ?? 0);
+    const fuelSavedLiters = Number(fuel_saved_liters);
+    const loadWeightKg = Number(load_weight_kg ?? 0);
+    if (![distanceKm, fuelSavedLiters, loadWeightKg].every(Number.isFinite) ||
+        [distanceKm, fuelSavedLiters, loadWeightKg].some((value) => value < 0)) {
+      return res.status(400).json({ error: 'Carbon metrics must be finite, non-negative numbers' });
+    }
+
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
+      ownerId: req.user.id,
       truckId: truck_id,
       tripId: trip_id,
-      distanceKm: Number(distance_km || 0),
-      fuelSavedLiters: Number(fuel_saved_liters),
-      loadWeightKg: Number(load_weight_kg || 0)
+      distanceKm,
+      fuelSavedLiters,
+      loadWeightKg
     });
 
     return res.status(201).json({
@@ -40,16 +49,17 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
  */
 router.post('/purchase', authenticate, userLimiter, async (req, res) => {
   try {
-    const { token_id, buyer_address, shipper_id } = req.body;
+    const { token_id, buyer_address } = req.body;
 
-    if (!token_id || !buyer_address || !shipper_id) {
-      return res.status(400).json({ error: 'Missing required parameters: token_id, buyer_address, shipper_id' });
+    if (!token_id || !buyer_address) {
+      return res.status(400).json({ error: 'Missing required parameters: token_id, buyer_address' });
     }
 
     const redeemedToken = await carbonTokenService.purchaseCarbonCredits({
       tokenId: token_id,
       buyerAddress: buyer_address,
-      shipperId: shipper_id
+      shipperId: req.user.id,
+      ownerId: req.user.id,
     });
 
     return res.json({
@@ -68,7 +78,10 @@ router.post('/purchase', authenticate, userLimiter, async (req, res) => {
 router.get('/:tokenId', authenticate, userLimiter, async (req, res) => {
   try {
     const { tokenId } = req.params;
-    const token = await carbonTokenService.getTokenDetails(tokenId);
+    const token = await carbonTokenService.getTokenDetails(
+      tokenId,
+      req.user.role === 'admin' ? null : req.user.id
+    );
 
     if (!token) {
       return res.status(404).json({ error: 'Carbon credit token not found' });

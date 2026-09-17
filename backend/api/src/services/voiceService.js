@@ -55,7 +55,9 @@ async function getBookingContext(bookingId, userId) {
   try {
     let orderQuery = voiceDb.from('orders').select('*');
     if (isUuid) {
-      orderQuery = orderQuery.eq('id', bookingId);
+      orderQuery = orderQuery
+        .eq('id', bookingId)
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
       orderQuery = orderQuery
         .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)

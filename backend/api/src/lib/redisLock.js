@@ -1,3 +1,70 @@
+import { redisClient } from '../config/db.js';
+import logger from '../middleware/logger.js';
+
+/**
+ * Acquires a distributed lock using Redis SET NX EX.
+ * 
+ * @param {string} key - The unique lock identifier (e.g., lock:profile:uid).
+ * @param {number} ttlSeconds - Time-to-live to prevent deadlocks if the process crashes.
+ * @returns {Promise<{acquired: boolean, release: Function}>}
+ */
+export async function acquireDistributedLock(key, ttlSeconds = 5) {
+  if (!redisClient || redisClient.status !== 'ready') {
+    // Fail open locally but log; caller should handle degraded mode
+    return { acquired: false, release: async () => {} };
+  }
+
+  try {
+    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
+    if (lock === 'OK') {
+      return {
+        acquired: true,
+        release: async () => {
+          try {
+            await redisClient.del(key);
+          } catch (err) {
+            logger.error({ err, key }, 'Failed to release distributed lock');
+          }
+        }
+      };
+    }
+  } catch (err) {
+    logger.error({ err, key }, 'Redis lock acquisition error');
+  }
+
+  return { acquired: false, release: async () => {} };
+}
+
+/**
+ * Executes a function with a distributed lock, retrying if the lock is held.
+ * 
+ * @param {string} key - Lock key
+ * @param {Function} fn - Async function to execute
+ * @param {object} options - Retry configuration
+ */
+export async function withLock(key, fn, options = {}) {
+  const { ttlSeconds = 5, retryDelayMs = 100, maxRetries = 3 } = options;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const lock = await acquireDistributedLock(key, ttlSeconds);
+    
+    if (lock.acquired) {
+      try {
+        return await fn();
+      } finally {
+        await lock.release();
+      }
+    }
+    
+    if (attempt < maxRetries) {
+      await new Promise(r => setTimeout(r, retryDelayMs));
+    }
+  }
+  
+  throw new Error(`Failed to acquire lock for ${key} after ${maxRetries} retries`);
+}
+
+
 import crypto from 'crypto';
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
@@ -193,4 +260,118 @@ export class LockState {
   }
   isHeld() { return this.held && !this.released; }
 }
+
+const { createClient } = require('redis');
+
+class RedisLock {
+  constructor(options = {}) {
+    this.redisUrl = options.redisUrl || process.env.REDIS_URL || 'redis://localhost:6379';
+    this.client = createClient({ url: this.redisUrl });
+    this.defaultTtl = options.defaultTtl || 30000; 
+    this.retryDelay = options.retryDelay || 100;
+    this.maxRetries = options.maxRetries || 50;
+
+    this.client.on('error', (err) => {
+      console.error('Redis Lock Client Error:', err);
+    });
+
+    this.acquireScript = `
+      if redis.call("set", KEYS[1], ARGV[1], "NX", "PX", ARGV[2]) then
+        return 1
+      else
+        return 0
+      end
+    `;
+
+    this.releaseScript = `
+      if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+      else
+        return 0
+      end
+    `;
+  }
+
+  async connect() {
+    if (!this.client.isOpen) {
+      await this.client.connect();
+    }
+  }
+
+  async disconnect() {
+    if (this.client.isOpen) {
+      await this.client.disconnect();
+    }
+  }
+
+  async acquire(lockName, owner, ttl = this.defaultTtl) {
+    await this.connect();
+    
+    const lockKey = `lock:${lockName}`;
+    let attempts = 0;
+
+    while (attempts < this.maxRetries) {
+      const result = await this.client.eval(this.acquireScript, {
+        keys: [lockKey],
+        arguments: [owner, ttl.toString()],
+      });
+
+      if (result === 1) {
+        return {
+          success: true,
+          lockKey,
+          owner,
+          ttl,
+        };
+      }
+
+      attempts++;
+      await this.sleep(this.retryDelay);
+    }
+
+    return {
+      success: false,
+      lockKey,
+      owner,
+      message: 'Failed to acquire lock after maximum retries',
+    };
+  }
+
+  async release(lockName, owner) {
+    await this.connect();
+    
+    const lockKey = `lock:${lockName}`;
+    
+    const result = await this.client.eval(this.releaseScript, {
+      keys: [lockKey],
+      arguments: [owner],
+    });
+
+    return {
+      success: result === 1,
+      lockKey,
+      message: result === 1 ? 'Lock released successfully' : 'Lock not owned by caller or already expired',
+    };
+  }
+
+  async extend(lockName, owner, additionalTtl) {
+    await this.connect();
+    
+    const lockKey = `lock:${lockName}`;
+    const currentOwner = await this.client.get(lockKey);
+
+    if (currentOwner === owner) {
+      await this.client.set(lockKey, owner, { PX: additionalTtl });
+      return { success: true, message: 'Lock extended successfully' };
+    }
+
+    return { success: false, message: 'Cannot extend lock: not owned by caller' };
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+module.exports = RedisLock;
 

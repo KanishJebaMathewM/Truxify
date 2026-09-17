@@ -26,16 +26,21 @@ vi.mock('../../src/core/telemetry/WorkerTracer.js', () => ({
 const { settlePendingWithdrawals } = await import('../../src/workers/withdrawalSettlementWorker.js');
 
 function mockPendingWithdrawals(rows) {
-  const query = {
-    select: vi.fn().mockReturnThis(),
+  const selectQuery = {
     eq: vi.fn().mockReturnThis(),
     is: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue({ data: rows, error: null }),
-    update: vi.fn().mockReturnThis(),
   };
-  admin.from.mockReturnValue(query);
-  return query;
+  const updateQuery = {
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    select: vi.fn().mockResolvedValue({ data: [{ id: 'w1' }, { id: 'w2' }], error: null }),
+  };
+  admin.from.mockImplementation(() => ({
+    select: vi.fn().mockReturnValue(selectQuery),
+    update: vi.fn().mockReturnValue(updateQuery),
+  }));
 }
 
 describe('Withdrawal Settlement Worker', () => {

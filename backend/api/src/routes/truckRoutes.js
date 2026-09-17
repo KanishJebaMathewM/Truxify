@@ -838,6 +838,10 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
 
+  if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: fuel advice is restricted to assigned drivers and admins' });
+  }
+
   // Ensure truck belongs to the caller (if driver) or caller is admin
   if (req.user.role === 'driver') {
     const { data: truck, error: truckErr } = await supabase

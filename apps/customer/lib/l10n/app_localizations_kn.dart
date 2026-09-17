@@ -108,8 +108,7 @@ class AppLocalizationsKn extends AppLocalizations {
   String get biometricAuthSuccessful => 'ಬಯೋಮೆಟ್ರಿಕ್ ದೃಢೀಕರಣ ಯಶಸ್ವಿಯಾಗಿದೆ';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'ಯಾವುದೇ ಉಳಿಸಿದ ಸೆಷನ್ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೊದಲು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯೊಂದಿಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.';
+  String get biometricAuthRequiresSession => 'ಯಾವುದೇ ಉಳಿಸಿದ ಸೆಷನ್ ಕಂಡುಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ಮೊದಲು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯೊಂದಿಗೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.';
 
   @override
   String get pleaseEnterPhone => 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ';
@@ -487,4 +486,13 @@ class AppLocalizationsKn extends AppLocalizations {
 
   @override
   String get networkError => 'Network error. Please check your connection.';
+
+  @override
+  String get english => 'English';
+
+  @override
+  String get hindi => 'Hindi';
+
+  @override
+  String get tamil => 'Tamil';
 }

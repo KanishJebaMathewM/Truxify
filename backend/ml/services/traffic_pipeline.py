@@ -23,7 +23,7 @@ import redis
 import os
 import logging
 from functools import partial
-from collections import deque, defaultdict
+from collections import deque, OrderedDict
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -60,6 +60,8 @@ class TrafficData(Base):
     hour = Column(Integer)
 
 class TrafficPipeline:
+    MAX_ROUTE_WINDOWS = 1000
+
     def __init__(self, db_url: str, redis_url: str):
         self.engine = create_engine(db_url)
         Base.metadata.create_all(self.engine)
@@ -78,7 +80,8 @@ class TrafficPipeline:
         # Rolling per-route history of recent feature rows, fed to predict_eta
         # as a genuine 60-step sequence instead of a tiled constant row
         # (issue #11666).
-        self._route_windows = defaultdict(lambda: deque(maxlen=60))
+        self._route_windows = OrderedDict()
+        self._max_route_windows = self.MAX_ROUTE_WINDOWS
         self._osrm_failure_count = 0
         self._osrm_circuit_open = False
 
@@ -325,7 +328,16 @@ class TrafficPipeline:
                 logger.error(f"Prediction failed: expected 5 features, got {route_data.shape[1]}")
                 return None
 
-            window = self._route_windows[route_id or ""]
+            route_key = route_id or ""
+            window = self._route_windows.get(route_key)
+            if window is None:
+                if len(self._route_windows) >= self._max_route_windows:
+                    self._route_windows.popitem(last=False)
+                window = deque(maxlen=60)
+                self._route_windows[route_key] = window
+            else:
+                self._route_windows.move_to_end(route_key)
+
             window.append(route_data[0])
 
             seq = list(window)
@@ -490,7 +502,7 @@ class TrafficPipeline:
         if traffic:
             return traffic.get('congestion', 0)
         return 0
-    
+
     async def get_traffic_forecast(self, route_id: str, hours: int = 1):
         """Get traffic forecast for next N hours"""
         # Get historical data for this route

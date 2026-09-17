@@ -45,4 +45,30 @@ describe('errorHandler Middleware', () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Unauthorized access' });
   });
+
+  it('handles ZodError with zod v4 issues property', () => {
+    const err = {
+      name: 'ZodError',
+      issues: [
+        { path: ['email'], message: 'Invalid email address' },
+        { path: ['nested', 'field'], message: 'Field is required' },
+      ],
+    };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    errorHandler(err, mockReq, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: 'Validation failed',
+      details: [
+        { field: 'email', message: 'Invalid email address' },
+        { field: 'nested.field', message: 'Field is required' },
+      ],
+    });
+  });
 });

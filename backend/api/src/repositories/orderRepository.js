@@ -160,6 +160,18 @@ export class OrderRepository {
   return result;
 }
 
+  async updateDeliveryEtaState(id, updates, previousEta, previousState) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .update(updates)
+        .eq('id', id)
+        .eq('delivery_delay_state', previousState);
+      query = previousEta == null ? query.is('eta', null) : query.eq('eta', previousEta);
+      return query.select('id, eta, delivery_delay_state').maybeSingle();
+    }, 'updateDeliveryEtaState');
+  }
+
   async updateOrderWithFilter(id, updates, filters, selectColumns) {
     return this._retryableQuery(() => {
       let query = this.supabase.from('orders').update(updates).eq('id', id);

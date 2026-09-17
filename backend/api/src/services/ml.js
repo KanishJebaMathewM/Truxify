@@ -1,5 +1,5 @@
 import logger from '../middleware/logger.js';
-import { validatePricePrediction, convertToPaisa, RejectionReason } from '../lib/predictionValidator.js';
+import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
 
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
@@ -33,18 +33,30 @@ function guardMlApiKey() {
  * kilograms. Returns NaN when the value cannot be interpreted.
  */
 function parseWeightKg(weight) {
+  if (weight == null || typeof weight === 'boolean' || Array.isArray(weight)) {
+    return NaN;
+  }
+  if (typeof weight === 'number') {
+    return Number.isFinite(weight) ? weight : NaN;
+  }
   if (typeof weight !== 'string') {
-    const num = Number(weight);
+    return NaN;
+  }
+  const trimmed = weight.trim();
+  if (!trimmed) return NaN;
+
+  const match = trimmed.toLowerCase().match(/([\d.]+)\s*(kg|tons?|tonnes?|t)\b/);
+  if (!match) {
+    const num = Number(trimmed);
     return Number.isFinite(num) ? num : NaN;
   }
-  const match = weight.toLowerCase().match(/([\d.]+)\s*(kg|ton|tonne|t)\b/);
-  if (!match) return NaN;
   const value = Number(match[1]);
-  return match[2] === 'kg' ? value : value * 1000;
+  if (!Number.isFinite(value)) return NaN;
+  return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
 function parseWeightKgSafe(weight) {
-  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
+  if (weight == null || weight === '') {
     logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
     return null;
   }
@@ -280,6 +292,65 @@ export async function predictEta({
   return {
     eta_minutes: result.eta_minutes,
     confidence_interval: result.confidence_interval ?? { lower: 0, upper: 0 },
+  };
+}
+
+/**
+ * Calculates the proportional cancellation penalty for a trip already in
+ * progress. The ML service owns the distance ratio and returns the amount in
+ * the same currency unit supplied by the caller.
+ *
+ * @param {object} params
+ * @param {number} params.distanceCoveredKm - Distance already travelled
+ * @param {number} params.totalDistanceKm - Original route distance
+ * @param {number} params.totalAmount - Original booking amount
+ * @returns {Promise<{penalty_amount: number, covered_ratio: number}>}
+ */
+export async function predictCancellationPenalty({
+  distanceCoveredKm,
+  totalDistanceKm,
+  totalAmount,
+}) {
+  guardMlApiKey();
+
+  if (!Number.isFinite(distanceCoveredKm) || distanceCoveredKm < 0) {
+    throw new Error('[ML] distanceCoveredKm must be a finite non-negative number');
+  }
+  if (!Number.isFinite(totalDistanceKm) || totalDistanceKm <= 0) {
+    throw new Error('[ML] totalDistanceKm must be a finite positive number');
+  }
+  if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+    throw new Error('[ML] totalAmount must be a finite non-negative number');
+  }
+
+  const url = `${getBaseUrl()}/cancellation-penalty`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      distance_covered_km: distanceCoveredKm,
+      total_distance_km: totalDistanceKm,
+      total_amount: totalAmount,
+    }),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+
+  const result = await handleResponse(response, url, 'POST');
+  if (
+    result == null ||
+    !Number.isFinite(result.penalty_amount) ||
+    result.penalty_amount < 0 ||
+    result.penalty_amount > totalAmount ||
+    !Number.isFinite(result.covered_ratio) ||
+    result.covered_ratio < 0 ||
+    result.covered_ratio > 1
+  ) {
+    throw new Error('[ML] Invalid cancellation penalty response');
+  }
+
+  return {
+    penalty_amount: result.penalty_amount,
+    covered_ratio: result.covered_ratio,
   };
 }
 
@@ -530,9 +601,63 @@ function _haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Fetches A/B testing status from the ML engine.
+ * @returns {Promise<object>}
+ */
+export async function getAbTestingStatus() {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/ab-testing/status`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+  return handleResponse(response, url, 'GET');
+}
+
+/**
+ * Triggers an A/B test rollback on the ML engine.
+ * @param {string} testId
+ * @returns {Promise<object>}
+ */
+export async function rollbackAbTest(testId) {
+  guardMlApiKey();
+  if (!testId || typeof testId !== 'string') {
+    throw new Error('[ML] Valid testId is required for rollback');
+  }
+  const url = `${getBaseUrl()}/ab-testing/rollback/${encodeURIComponent(testId)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+  return handleResponse(response, url, 'POST');
+}
+
 export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
   parseWeightKg,
+  parseWeightKgSafe,
+  parseDimensions,
+  getHeaders,
+  handleResponse,
+  getBaseUrl,
+  guardMlApiKey,
+};
+
+export default {
+  predictDemand,
+  predictPrice,
+  predictEta,
+  predictCancellationPenalty,
+  predictDriverProfit,
+  matchDeadhead,
+  matchEnRouteLoads,
+  getAbTestingStatus,
+  rollbackAbTest,
+  handleResponse,
+  __testing,
 };

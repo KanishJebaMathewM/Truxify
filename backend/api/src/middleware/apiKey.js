@@ -24,7 +24,6 @@ export class AuthConfig {
     this.timestampHeaderName = (process.env.API_TIMESTAMP_HEADER || 'x-timestamp').toLowerCase();
     
     // Security Policies
-    this.allowQueryParam = process.env.ALLOW_API_KEY_IN_QUERY === 'true'; // Default false (anti-pattern)
     this.requireHmac = process.env.REQUIRE_HMAC_SIGNATURE === 'true';
     this.signatureMaxAgeMs = safeInt(process.env.SIGNATURE_MAX_AGE_MS, 300000);
     this.enableRateLimiting = process.env.ENABLE_RATE_LIMITING !== 'false';
@@ -544,12 +543,9 @@ export const enforceIpWhitelist = (req, res, next) => {
  * IP filtering, and zero-downtime key rotation.
  */
 export const requireApiKey = (req, res, next) => {
-  // 1. Extract API Key from Headers (or Query if explicitly enabled)
+  // 1. Extract API Key from Headers only
   let apiKey = req.headers[authConfig.keyHeaderName];
 
-  if (!apiKey && authConfig.allowQueryParam && req.query) {
-    apiKey = req.query.api_key || req.query.apiKey;
-  }
 
   // 2. Load environment keys into repository if empty
   if (keyRepo.keyStore.size === 0 && authConfig.isConfigured()) {

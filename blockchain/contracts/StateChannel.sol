@@ -25,12 +25,15 @@ contract StateChannel is ReentrancyGuard {
     }
 
     mapping(bytes32 => Channel) public channels;
+    mapping(address => uint256) public pendingWithdrawals;
     uint256 public channelCounter;
     uint256 public constant CHALLENGE_PERIOD = 1 days;
 
     event ChannelOpened(bytes32 indexed channelId, address indexed userA, address indexed userB, uint256 deposit);
     event DisputeInitiated(bytes32 indexed channelId, uint256 sequence, uint256 challengeExpiry);
     event ChannelClosed(bytes32 indexed channelId, uint256 finalBalanceA, uint256 finalBalanceB);
+    event WithdrawalCredited(address indexed recipient, uint256 amount);
+    event Withdrawn(address indexed recipient, uint256 amount);
 
     function openChannel(address userB) external payable returns (bytes32 channelId) {
         require(msg.value > 0, "Deposit required");
@@ -63,10 +66,18 @@ contract StateChannel is ReentrancyGuard {
         Channel storage channel = channels[channelId];
         require(!channel.isClosed, "Channel closed");
         require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
-        require(sequence >= channel.sequence, "Stale sequence");
+
+        // Prevent indefinite challenge extension griefing: subsequent challenges
+        // must present a strictly higher sequence number.
+        if (channel.isDisputed) {
+            require(sequence > channel.sequence, "Stale sequence");
+        } else {
+            require(sequence >= channel.sequence, "Stale sequence");
+        }
+
         require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
+        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
         
         if (msg.sender == channel.userA) {
             require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");
@@ -94,17 +105,14 @@ contract StateChannel is ReentrancyGuard {
         require(!channel.isClosed, "Channel already closed");
         require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        bytes32 stateHash = keccak256(abi.encodePacked(channelId, channel.sequence + 1, balanceA, balanceB)).toEthSignedMessageHash();
+        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, channel.sequence + 1, balanceA, balanceB)).toEthSignedMessageHash();
         require(stateHash.recover(sigA) == channel.userA, "Invalid sig A");
         require(stateHash.recover(sigB) == channel.userB, "Invalid sig B");
 
         channel.isClosed = true;
 
-        (bool sentA, ) = channel.userA.call{value: balanceA}("");
-        require(sentA, "Transfer A failed");
-
-        (bool sentB, ) = channel.userB.call{value: balanceB}("");
-        require(sentB, "Transfer B failed");
+        _safeTransferOrCredit(channel.userA, balanceA);
+        _safeTransferOrCredit(channel.userB, balanceB);
 
         emit ChannelClosed(channelId, balanceA, balanceB);
     }
@@ -115,20 +123,42 @@ contract StateChannel is ReentrancyGuard {
         require(block.timestamp >= channel.challengeExpiry, "Challenge period active");
         require(!channel.isClosed, "Already closed");
 
-        // Effects-before-interactions: pay out first so a failed transfer
-        // reverts the whole call instead of leaving isClosed set with funds
-        // stuck (issue #7736).
         uint256 amountA = channel.balanceA;
         uint256 amountB = channel.balanceB;
 
-        (bool sentA, ) = channel.userA.call{value: amountA}("");
-        require(sentA, "Transfer A failed");
-
-        (bool sentB, ) = channel.userB.call{value: amountB}("");
-        require(sentB, "Transfer B failed");
-
         channel.isClosed = true;
 
+        _safeTransferOrCredit(channel.userA, amountA);
+        _safeTransferOrCredit(channel.userB, amountB);
+
         emit ChannelClosed(channelId, amountA, amountB);
+    }
+
+    /**
+     * @dev Attempts direct push transfer, falling back to pull-based credit if the
+     *      recipient reverts or runs out of gas. This prevents Denial-of-Service
+     *      attacks where a malicious counterparty traps funds.
+     */
+    function _safeTransferOrCredit(address recipient, uint256 amount) internal {
+        if (amount == 0) return;
+        (bool sent, ) = recipient.call{value: amount}("");
+        if (!sent) {
+            pendingWithdrawals[recipient] += amount;
+            emit WithdrawalCredited(recipient, amount);
+        }
+    }
+
+    /**
+     * @dev Allows participants to pull funds that could not be transferred directly.
+     */
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "No pending withdrawal");
+        pendingWithdrawals[msg.sender] = 0;
+
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "Withdrawal transfer failed");
+
+        emit Withdrawn(msg.sender, amount);
     }
 }

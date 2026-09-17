@@ -61,11 +61,14 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
 
     // Verifier
     address public verifier;
+    address public bridge;
 
     // Constants
     uint256 public constant MAX_BATCH_SIZE = 1000;
     uint256 public constant MIN_BATCH_SIZE = 10;
     uint256 public constant BATCH_TIMEOUT = 1 hours;
+    uint256 internal constant SNARK_FIELD_MODULUS =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
     uint256 public batchCounter;
     uint256 public txCounter;
@@ -111,20 +114,47 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(transactionsData.length > 0, "Empty batch");
         require(transactionsData.length <= MAX_BATCH_SIZE, "Batch too large");
 
-        // Verify proof — fails closed until a real Groth16 verifier is deployed
-        require(_verifyProof(proof), "Invalid proof");
+        uint256 batchId = batchCounter + 1;
+        uint256 batchCommitment = _batchCommitment(transactionsData);
+        bytes32 stateRoot = currentState.root;
+        uint256 batchTimestamp = block.timestamp;
+        bytes32 newStateRoot = _calculateBatchStateRoot(
+            transactionsData,
+            stateRoot,
+            batchId,
+            batchTimestamp
+        );
+
+        require(
+            _verifyBatchProof(proof, batchCommitment, newStateRoot),
+            "Invalid proof"
+        );
 
         // Process transactions
         bytes32[] memory txHashes = new bytes32[](transactionsData.length);
         for (uint256 i = 0; i < transactionsData.length; i++) {
-            (address from, address to, uint256 value, bytes memory data, uint256 nonce, uint256 gasPrice, uint256 gasLimit, bytes memory signature) = 
-                abi.decode(transactionsData[i], (address, address, uint256, bytes, uint256, uint256, uint256, bytes));
+            (
+                address from,
+                address to,
+                uint256 value,
+                bytes memory data,
+                uint256 nonce,
+                uint256 gasPrice,
+                uint256 gasLimit,
+                bytes memory signature
+            ) = abi.decode(
+                transactionsData[i],
+                (address, address, uint256, bytes, uint256, uint256, uint256, bytes)
+            );
 
             // Batch-level dedup on the canonical tx digest before applying.
             bytes32 txHash = _txHash(from, to, value, data, nonce, gasPrice, gasLimit);
             require(!processedTxHashes[txHash], "Duplicate transaction");
             require(!usedNonces[from][nonce], "Nonce already used");
-            require(currentState.balances[from] >= value + gasPrice * gasLimit, "Insufficient balance");
+            require(
+                currentState.balances[from] >= value + gasPrice * gasLimit,
+                "Insufficient balance"
+            );
 
             // Verify signature (same bound digest as executeTransaction)
             bytes32 txHashForSig = _txHash(from, to, value, data, nonce, gasPrice, gasLimit);
@@ -139,23 +169,21 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             txHashes[i] = txHash;
         }
 
+        require(currentState.root == newStateRoot, "Batch state root mismatch");
+
         // Submit batch
-        batchCounter++;
-        uint256 batchId = batchCounter;
-        bytes32 stateRoot = currentState.root;
-        bytes32 newStateRoot = keccak256(abi.encodePacked(stateRoot, block.timestamp, batchId));
+        batchCounter = batchId;
 
         batches[batchId] = Batch({
             id: batchId,
             stateRoot: stateRoot,
             newStateRoot: newStateRoot,
             transactionHashes: txHashes,
-            timestamp: block.timestamp,
+            timestamp: batchTimestamp,
             verified: true,
             proposer: msg.sender
         });
 
-        currentState.root = newStateRoot;
         globalStateRoot = newStateRoot;
 
         totalBatches++;
@@ -173,6 +201,16 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         emit BridgeDeposit(msg.sender, msg.value);
     }
 
+    /// @notice Records a bridge deposit for the original user address.
+    /// @dev Only the configured bridge may call this overload.
+    /// @param user The user whose L2 balance should receive the deposited value.
+    function depositToL2(address user) external payable onlyBridge whenNotPaused {
+        require(user != address(0), "Invalid user");
+        require(msg.value > 0, "Amount must be > 0");
+        currentState.balances[user] += msg.value;
+        emit BridgeDeposit(user, msg.value);
+    }
+
     function withdrawFromL2(
         uint256 amount,
         bytes calldata proof
@@ -180,12 +218,32 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(amount > 0, "Amount must be > 0");
         require(currentState.balances[msg.sender] >= amount, "Insufficient balance");
 
-        // Verify withdrawal proof — fails closed until a real Groth16 verifier is deployed
-        require(_verifyProof(proof), "Invalid proof");
+        require(_verifyProof(proof, msg.sender, amount), "Invalid proof");
 
         currentState.balances[msg.sender] -= amount;
         payable(msg.sender).transfer(amount);
         emit BridgeWithdraw(msg.sender, amount);
+    }
+
+    /// @notice Withdraws for a bridge user while preserving the user's identity in proof validation.
+    /// @dev Only the configured bridge may call this overload; funds are returned to the bridge for queuing.
+    /// @param user The original user whose L2 balance is being withdrawn.
+    /// @param amount The withdrawal amount.
+    /// @param proof The ZK proof whose public inputs must bind to `user` and `amount`.
+    function withdrawFromL2(
+        address user,
+        uint256 amount,
+        bytes calldata proof
+    ) external onlyBridge whenNotPaused {
+        require(user != address(0), "Invalid user");
+        require(amount > 0, "Amount must be > 0");
+        require(currentState.balances[user] >= amount, "Insufficient balance");
+
+        require(_verifyProof(proof, user, amount), "Invalid proof");
+
+        currentState.balances[user] -= amount;
+        payable(msg.sender).transfer(amount);
+        emit BridgeWithdraw(user, amount);
     }
 
     // ============ View Functions ============
@@ -228,6 +286,13 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         verifier = newVerifier;
     }
 
+    /// @notice Configures the bridge contract allowed to act on behalf of users.
+    /// @param newBridge The deployed bridge contract address.
+    function setBridge(address newBridge) external onlyOwner {
+        require(newBridge != address(0), "Invalid bridge");
+        bridge = newBridge;
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -244,6 +309,11 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
     }
 
     // ============ Internal Functions ============
+
+    modifier onlyBridge() {
+        require(msg.sender == bridge, "zkEVM: caller is not bridge");
+        _;
+    }
 
     /**
      * @dev Apply a single transaction with the full signature/nonce/balance
@@ -316,15 +386,100 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         return keccak256(abi.encodePacked(block.chainid, address(this), from, to, value, data, nonce, gasPrice, gasLimit));
     }
 
+    function _batchCommitment(bytes[] calldata transactionsData)
+        internal
+        view
+        returns (uint256)
+    {
+        return _toFieldElement(
+            keccak256(abi.encode(block.chainid, address(this), transactionsData))
+        );
+    }
+
+    function _calculateBatchStateRoot(
+        bytes[] calldata transactionsData,
+        bytes32 initialStateRoot,
+        uint256 batchId,
+        uint256 batchTimestamp
+    ) internal pure returns (bytes32) {
+        bytes32 stateRoot = initialStateRoot;
+
+        for (uint256 i = 0; i < transactionsData.length; i++) {
+            (
+                address from,
+                address to,
+                uint256 value,
+                ,
+                uint256 nonce,
+                ,
+                ,
+
+            ) = abi.decode(
+                transactionsData[i],
+                (address, address, uint256, bytes, uint256, uint256, uint256, bytes)
+            );
+
+            stateRoot = keccak256(abi.encodePacked(
+                stateRoot,
+                from,
+                to,
+                value,
+                nonce
+            ));
+        }
+
+        return keccak256(abi.encodePacked(stateRoot, batchTimestamp, batchId));
+    }
+
+    function _toFieldElement(bytes32 value) internal pure returns (uint256) {
+        return uint256(value) % SNARK_FIELD_MODULUS;
+    }
+
+    function _verifyBatchProof(
+        bytes calldata proof,
+        uint256 expectedBatchCommitment,
+        bytes32 expectedNewStateRoot
+    ) internal view returns (bool) {
+        require(verifier != address(0), "zkEVM: verifier not configured");
+        require(proof.length > 0, "Empty proof");
+
+        (
+            uint[2] memory a,
+            uint[2][2] memory b,
+            uint[2] memory c,
+            uint[2] memory input
+        ) = abi.decode(proof, (uint[2], uint[2][2], uint[2], uint[2]));
+
+        require(input[0] == expectedBatchCommitment, "Batch commitment mismatch");
+        require(
+            input[1] == _toFieldElement(expectedNewStateRoot),
+            "Batch state root mismatch"
+        );
+
+        return IVerifier(verifier).verifyProof(a, b, c, input);
+    }
+
     function _verifyProof(bytes calldata proof) internal view returns (bool) {
-        // A real Groth16/STARK verifier must be configured before withdrawals
-        // or batch execution can ever succeed. Reverting here (instead of
-        // silently failing on the placeholder) makes misconfigurations loud so
-        // user funds are never stranded by an unconfigured proof check.
         require(verifier != address(0), "zkEVM: verifier not configured");
         require(proof.length > 0, "Empty proof");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[2] memory input) =
             abi.decode(proof, (uint[2], uint[2][2], uint[2], uint[2]));
+        return IVerifier(verifier).verifyProof(a, b, c, input);
+    }
+
+    function _verifyProof(
+        bytes calldata proof,
+        address expectedRecipient,
+        uint256 expectedAmount
+    ) internal view returns (bool) {
+        require(verifier != address(0), "zkEVM: verifier not configured");
+        require(proof.length > 0, "Empty proof");
+        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[2] memory input) =
+            abi.decode(proof, (uint[2], uint[2][2], uint[2], uint[2]));
+
+        require(input[0] == uint256(uint160(expectedRecipient)), "Proof recipient mismatch");
+        require(input[1] == expectedAmount, "Proof amount mismatch");
+
         return IVerifier(verifier).verifyProof(a, b, c, input);
     }
 

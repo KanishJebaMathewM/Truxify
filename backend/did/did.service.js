@@ -38,6 +38,8 @@ class DIDService {
 
         this.didRegistryABI = [
             'function createDID(string memory did) external',
+            'function createDIDFor(string memory did, address didOwner) external',
+            'function configureDIDDuringCreation(string memory did, tuple(string id, string endpointType, string serviceEndpoint, string description)[] memory endpoints, tuple(string id, string keyType, string controller, string publicKeyMultibase)[] memory methods) external',
             'function deactivateDID(string memory did) external',
             'function addServiceEndpoint(string memory did, string memory id, string memory type, string memory serviceEndpoint, string memory description) external',
             'function addVerificationMethod(string memory did, string memory id, string memory type, string memory controller, string memory publicKeyMultibase) external',
@@ -47,6 +49,8 @@ class DIDService {
             'function getDID(string memory did) external view returns (address, string, bool, uint256, uint256)',
             'function getCredential(bytes32 credentialId) external view returns (tuple(bytes32, address, address, string, bytes32, uint256, uint256, bool, bytes32))',
             'function isDIDActive(string memory did) external view returns (bool)',
+            'function didInitialized(string memory did) external view returns (bool)',
+            'function issuerNonces(address issuer) external view returns (uint256)',
             'event CredentialIssued(bytes32 indexed credentialId, address issuer, address subject)'
         ];
 
@@ -78,11 +82,14 @@ class DIDService {
         try {
             const did = `did:truxify:${uuidv4()}`;
 
-            const tx = await this.didRegistry.createDID(did);
+            const tx = await this.didRegistry.createDIDFor(did, userAddress);
             const receipt = await tx.wait();
 
-            await this.addServiceEndpoint(did, 'identity', 'IdentityService', `${process.env.API_URL}/api/did/identity`, 'Main identity service');
-            await this.addServiceEndpoint(did, 'credentials', 'CredentialService', `${process.env.API_URL}/api/did/credentials`, 'Credential management service');
+            // Verify on-chain owner matches userAddress before proceeding
+            const didData = await this.didRegistry.getDID(did);
+            if (!didData || didData[0].toLowerCase() !== userAddress.toLowerCase()) {
+                throw new Error(`On-chain DID owner mismatch: expected ${userAddress}, got ${didData?.[0]}`);
+            }
 
             let publicKeyMultibase = publicKey;
             let privateKey = null;
@@ -95,7 +102,37 @@ class DIDService {
                 publicKeyMultibase = `z${base58btc(keyPair.publicKey)}`;
                 privateKey = Buffer.from(keyPair.privateKey).toString('base64');
             }
-            await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
+
+            const initialEndpoints = [
+                {
+                    id: 'identity',
+                    endpointType: 'IdentityService',
+                    serviceEndpoint: `${process.env.API_URL}/api/did/identity`,
+                    description: 'Main identity service'
+                },
+                {
+                    id: 'credentials',
+                    endpointType: 'CredentialService',
+                    serviceEndpoint: `${process.env.API_URL}/api/did/credentials`,
+                    description: 'Credential management service'
+                }
+            ];
+
+            const initialMethods = [
+                {
+                    id: 'key-1',
+                    keyType: 'RsaVerificationKey2018',
+                    controller: did,
+                    publicKeyMultibase: publicKeyMultibase
+                }
+            ];
+
+            const setupTx = await this.didRegistry.configureDIDDuringCreation(
+                did,
+                initialEndpoints,
+                initialMethods
+            );
+            await setupTx.wait();
 
             await this.identityWallet.createWallet(did);
 
@@ -148,8 +185,7 @@ class DIDService {
             );
             const receipt = await tx.wait();
 
-            // Read the exact on-chain credentialId from the CredentialIssued
-            // event so it always matches the contract's own derivation.
+            // 1. Authoritative: Parse CredentialIssued from receipt.logs via contract interface
             let credentialId = null;
             for (const log of receipt.logs) {
                 try {
@@ -163,16 +199,48 @@ class DIDService {
                 }
             }
 
+            // 2. Direct event topic extraction if interface parse was unavailable
             if (!credentialId) {
-                // Fallback: reproduce abi.encodePacked(block.timestamp, msg.sender,
-                // subject, credentialType) using the actual block timestamp.
+                const eventTopic0 = ethers.id('CredentialIssued(bytes32,address,address)');
+                for (const log of receipt.logs) {
+                    if (log.topics && log.topics[0] === eventTopic0 && log.topics[1]) {
+                        credentialId = log.topics[1];
+                        break;
+                    }
+                }
+            }
+
+            // 3. Fallback: reproduce abi.encodePacked(block.timestamp, msg.sender,
+            // subject, credentialType, nonce) matching DIDRegistry.sol exactly,
+            // and verify against on-chain proofHash to prevent nonce race conditions
+            if (!credentialId) {
                 const block = await this.provider.getBlock(receipt.blockNumber);
-                credentialId = ethers.keccak256(
-                    ethers.solidityPacked(
-                        ["uint256", "address", "address", "string"],
-                        [block.timestamp, this.wallet.address, subject, credentialType]
-                    )
-                );
+                const currentNonce = await this.didRegistry.issuerNonces(this.wallet.address);
+                const maxSearch = currentNonce > 20n ? 20n : currentNonce;
+                for (let i = 1n; i <= maxSearch; i++) {
+                    const candidateNonce = currentNonce - i;
+                    const candidateId = ethers.keccak256(
+                        ethers.solidityPacked(
+                            ["uint256", "address", "address", "string", "uint256"],
+                            [block.timestamp, this.wallet.address, subject, credentialType, candidateNonce]
+                        )
+                    );
+                    const onChainCred = await this.didRegistry.getCredential(candidateId);
+                    if (
+                        onChainCred &&
+                        onChainCred[1] &&
+                        onChainCred[1].toLowerCase() === this.wallet.address.toLowerCase() &&
+                        onChainCred[2].toLowerCase() === subject.toLowerCase() &&
+                        onChainCred[8] === proofHash
+                    ) {
+                        credentialId = candidateId;
+                        break;
+                    }
+                }
+            }
+
+            if (!credentialId) {
+                throw new Error(`Failed to resolve valid on-chain credentialId for subject ${subject}`);
             }
 
             await this.identityWallet.addCredential(credentialId);

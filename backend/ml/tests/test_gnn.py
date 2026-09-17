@@ -148,6 +148,40 @@ class TestRouteOptimizer:
         assert ('S', 'M2') in hops
         assert ('M2', 'E') in hops
 
+    def test_optimize_route_height_constraint(self):
+        """Verify truck height exceeding low clearance bypasses restricted edge and selects compliant route."""
+        builder = GraphNetworkBuilder()
+        nodes = [
+            {'id': 'S', 'lat': 10.0, 'lng': 20.0, 'traffic': 0, 'road_type': 'highway', 'speed_limit': 80},
+            {'id': 'M', 'lat': 10.1, 'lng': 20.1, 'traffic': 0, 'road_type': 'arterial', 'speed_limit': 60},
+            {'id': 'E', 'lat': 10.2, 'lng': 20.2, 'traffic': 0, 'road_type': 'highway', 'speed_limit': 80}
+        ]
+        edges = [
+            # Direct route S -> E with low clearance underpass (3.5m), faster and cheaper
+            {'source': 'S', 'target': 'E', 'distance': 10.0, 'time': 10.0, 'cost': 50.0, 'fuel': 3.0, 'max_height': 3.5},
+            # Longer alternate route S -> M -> E with standard clearance (4.5m)
+            {'source': 'S', 'target': 'M', 'distance': 15.0, 'time': 15.0, 'cost': 80.0, 'fuel': 5.0, 'max_height': 4.5},
+            {'source': 'M', 'target': 'E', 'distance': 15.0, 'time': 15.0, 'cost': 80.0, 'fuel': 5.0, 'max_height': 4.5},
+        ]
+        builder.build_road_network(nodes, edges)
+        graph_data = builder.get_pytorch_data()
+
+        optimizer = RouteOptimizer()
+
+        # Truck with height 4.0m exceeds direct route clearance (3.5m) and must take alternate S -> M -> E (4.5m)
+        result = optimizer.optimize_route('S', 'E', graph_data, constraints={'truck_height': 4.0})
+        assert result is not None
+        assert result['success'] is True
+        assert result['route'][-1]['to'] == 'E'
+        hops = [(r['from'], r['to']) for r in result['route']]
+        assert ('S', 'M') in hops
+        assert ('M', 'E') in hops
+        assert ('S', 'E') not in hops
+
+        # Oversized truck with height 5.0m exceeds all road clearances (max 4.5m) -> returns None
+        result_oversized = optimizer.optimize_route('S', 'E', graph_data, constraints={'truck_height': 5.0})
+        assert result_oversized is None
+
     def test_multi_objective_optimization(self, sample_network):
         """Verify Pareto multi-objective selection finds optimal balanced route."""
         _, graph_data = sample_network

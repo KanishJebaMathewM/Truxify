@@ -14,23 +14,28 @@ logger = logging.getLogger(__name__)
 class FederatedClient:
     """Federated Learning Client for Driver Device"""
     
-    def __init__(self, client_id: str, redis_url: str = "redis://localhost:6379"):
+    def __init__(self, client_id: str, redis_url: Any = "redis://localhost:6379"):
         self.client_id = client_id
-        self.redis = redis.Redis.from_url(redis_url)
+        if isinstance(redis_url, str):
+            self.redis = redis.Redis.from_url(redis_url)
+        else:
+            self.redis = redis_url
         self.model = self._create_model()
         self.local_data = None
         self.encryption_key = None
         self.cipher = None
         self.training_round = 0
-        
+        self.pubsub = None
+        self._sub_thread = None
+
         # Register client
         self._register_client()
-        
+
         # Subscribe to updates
         self._subscribe_updates()
-        
+
         logger.info(f"✅ Federated Client {client_id} initialized")
-    
+
     def _create_model(self):
         """Create local model"""
         model = keras.Sequential([
@@ -47,43 +52,95 @@ class FederatedClient:
             metrics=['accuracy']
         )
         return model
-    
+
     def _register_client(self):
-        """Register client with server"""
-        self.redis.sadd('federated:clients', self.client_id)
-        
-        self.encryption_key = self.redis.get('federated:encryption_key')
-        if not self.encryption_key:
-            logger.warning('No server encryption key found in Redis; federated weight exchange will fail')
-            return
-        self.cipher = Fernet(self.encryption_key)
-    
+        """Register client with server and refresh registration TTL"""
+        try:
+            self.redis.sadd('federated:clients', self.client_id)
+            self.redis.setex(f'federated:client:{self.client_id}:ttl', 86400, 'active')
+
+            self.encryption_key = self.redis.get('federated:encryption_key')
+            if not self.encryption_key:
+                logger.warning('No server encryption key found in Redis; federated weight exchange will fail')
+                return
+            self.cipher = Fernet(self.encryption_key)
+        except Exception as e:
+            logger.warning(f"Failed to register client {self.client_id} with Redis: {e}")
+
     def _subscribe_updates(self):
-        """Subscribe to server updates"""
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe('federated:updates')
-        
-        # Process updates in background
-        # In production, use threading
-        pass
-    
+        """Subscribe to server updates via Redis Pub/Sub"""
+        try:
+            self.pubsub = self.redis.pubsub()
+
+            def _handler(msg):
+                if msg and msg.get('type') == 'message':
+                    try:
+                        raw = msg.get('data')
+                        if isinstance(raw, bytes):
+                            raw = raw.decode('utf-8')
+                        data = json.loads(raw)
+                        if data.get('type') == 'weights_available' and data.get('client_id') == self.client_id:
+                            self.receive_weights()
+                    except Exception as exc:
+                        logger.error(f"Error handling client update notice: {exc}")
+
+            self.pubsub.subscribe(**{'federated:updates': _handler})
+            self._sub_thread = self.pubsub.run_in_thread(daemon=True, sleep_time=0.01)
+        except Exception as e:
+            logger.warning(f"Could not start client update subscription: {e}")
+            self.pubsub = None
+            self._sub_thread = None
+
+    def stop_subscription(self):
+        """Stop background subscription thread"""
+        if getattr(self, '_sub_thread', None) is not None:
+            try:
+                self._sub_thread.stop()
+            except Exception:
+                pass
+            self._sub_thread = None
+        if getattr(self, 'pubsub', None) is not None:
+            try:
+                self.pubsub.close()
+            except Exception:
+                pass
+            self.pubsub = None
+
     def receive_weights(self):
-        """Receive model weights from server"""
-        encrypted = self.redis.get(f'federated:weights:{self.client_id}')
-        if encrypted:
-            # Decrypt
-            decrypted = self.cipher.decrypt(encrypted)
-            weights = json.loads(decrypted)
-            
-            # Convert to numpy
-            weights_np = [np.array(w) for w in weights]
-            
-            # Update local model
-            self.model.set_weights(weights_np)
-            
-            logger.info(f"📥 Received weights for round {self.training_round}")
-            return True
-        
+        """Receive model weights from server and synchronize active round"""
+        try:
+            encrypted = self.redis.get(f'federated:weights:{self.client_id}')
+            if encrypted and self.cipher:
+                # Decrypt
+                decrypted = self.cipher.decrypt(encrypted)
+                payload = json.loads(decrypted)
+
+                if isinstance(payload, dict):
+                    weights = payload.get('weights', [])
+                    if 'round' in payload:
+                        self.training_round = payload['round']
+                elif isinstance(payload, list):
+                    weights = payload
+                    saved_round = self.redis.get('federated:round')
+                    if saved_round is not None:
+                        try:
+                            self.training_round = int(saved_round)
+                        except (ValueError, TypeError):
+                            pass
+                else:
+                    return False
+
+                # Convert to numpy
+                weights_np = [np.array(w) for w in weights]
+
+                # Update local model
+                self.model.set_weights(weights_np)
+
+                logger.info(f"📥 Received weights for round {self.training_round}")
+                return True
+        except Exception as e:
+            logger.warning(f"Failed to receive weights for client {self.client_id}: {e}")
+
         return False
     
     def train_local(self, data: np.ndarray, labels: np.ndarray, epochs: int = 5):
@@ -98,13 +155,20 @@ class FederatedClient:
                 batch_size=32,
                 verbose=0
             )
-            
-            logger.info(f"📊 Local training completed: loss={history.history['loss'][-1]:.4f}")
-            
+
+            hist = getattr(history, 'history', {}) if history is not None else {}
+            loss = hist.get('loss', [0.0])[-1] if 'loss' in hist and len(hist['loss']) > 0 else 0.0
+            acc = hist.get('accuracy', [1.0])[-1] if 'accuracy' in hist and len(hist['accuracy']) > 0 else 1.0
+
+            loss_val = float(loss) if isinstance(loss, (int, float, np.number)) else 0.0
+            acc_val = float(acc) if isinstance(acc, (int, float, np.number)) else 1.0
+
+            logger.info(f"📊 Local training completed: loss={loss_val:.4f}")
+
             return {
                 'success': True,
-                'loss': history.history['loss'][-1],
-                'accuracy': history.history['accuracy'][-1]
+                'loss': loss_val,
+                'accuracy': acc_val
             }
             
         except Exception as e:
@@ -165,13 +229,14 @@ class FederatedClient:
             if training_result['success']:
                 # Send update
                 update_result = self.send_update()
+                participated_round = self.training_round
                 self.training_round += 1
-                
+
                 return {
                     'success': True,
                     'training': training_result,
                     'update': update_result,
-                    'round': self.training_round
+                    'round': participated_round
                 }
             else:
                 return training_result

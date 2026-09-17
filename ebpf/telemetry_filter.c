@@ -1,6 +1,6 @@
 /*
  * Truxify eBPF XDP Kernel Packet Filter
- * Rate-limits high-frequency telemetry UDP/WebSocket packets in XDP driver layer
+ * Rate-limits high-frequency telemetry UDP packets in XDP driver layer
  */
 
 #include <linux/bpf.h>
@@ -49,8 +49,11 @@ int xdp_telemetry_filter(struct xdp_md *ctx) {
     if ((void *)(ip + 1) > data_end)
         return XDP_PASS;
 
-    // Filter UDP and TCP/WebSocket telemetry traffic
-    if (ip->protocol == IPPROTO_UDP || ip->protocol == IPPROTO_TCP) {
+    // TCP telemetry is filtered by the socket-level telemetry program, where
+    // the configured telemetry port can be identified safely. XDP only
+    // rate-limits UDP here so ordinary TCP traffic is never dropped by this
+    // telemetry-specific filter.
+    if (ip->protocol == IPPROTO_UDP) {
         __u32 src_ip = ip->saddr;
         __u64 now = bpf_ktime_get_ns();
 

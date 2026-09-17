@@ -111,6 +111,21 @@ describe('POST /api/orders/:id/share-tracking', () => {
 
     expect(res.status).toBe(404)
   })
+
+  it('does not build tracking links from the request Host header', async () => {
+    process.env.PUBLIC_TRACKING_URL = ''
+    userClientFrom.mockImplementation((table) => {
+      if (table === 'orders') return buildOrderChain({ order_display_id: 'ORD-1', customer_id: 'customer-1', status: 'in_transit' }, null)
+      if (table === 'tracking_tokens') return buildInsertChain({ id: 'token-1', order_display_id: 'ORD-1', expires_at: '2030-01-01T00:00:00Z' }, null)
+      throw new Error(`unexpected table: ${table}`)
+    })
+    createUserClientMock.mockReturnValue({ from: userClientFrom })
+
+    const res = await request(app).post('/api/orders/ORD-1/share-tracking').set('Host', 'attacker.example')
+
+    expect(res.status).toBe(503)
+    expect(res.body.error).not.toContain('attacker.example')
+  })
 })
 
 describe('POST /api/orders/:id/share-tracking/revoke', () => {

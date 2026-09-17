@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { __testing } from '../../../src/services/ml.js';
+import { __testing } from '../../src/services/ml.js';
 
 const { parseWeightKg } = __testing;
 

@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const gpsLogSchema = new mongoose.Schema(
   {
@@ -20,4 +20,7 @@ const gpsLogSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.models.GpsLog || mongoose.model("GpsLog", gpsLogSchema);
+const GpsLog = mongoose.models.GpsLog || mongoose.model("GpsLog", gpsLogSchema);
+
+export { GpsLog };
+export default GpsLog;

@@ -4,6 +4,17 @@ import crypto from 'crypto';
  * W3C Verifiable Credentials (VC) Issuer & Status List 2021 Revocation Engine.
  */
 export class W3cCredentialIssuer {
+  constructor(privateKeyPem = process.env.TRUXIFY_VC_PRIVATE_KEY) {
+    if (privateKeyPem) {
+      this.privateKey = crypto.createPrivateKey(privateKeyPem);
+      this.publicKey = crypto.createPublicKey(this.privateKey);
+    } else {
+      const keyPair = crypto.generateKeyPairSync('ed25519');
+      this.privateKey = keyPair.privateKey;
+      this.publicKey = keyPair.publicKey;
+    }
+  }
+
   issueDriverCredential(driverId, attributes) {
     const vc = {
       "@context": [
@@ -26,10 +37,9 @@ export class W3cCredentialIssuer {
       }
     };
 
-    // Sign the VC using mock Ed25519Signature2020 signature suite
     const vcString = JSON.stringify(vc);
-    const signature = crypto.createHash('sha256').update(vcString).digest('hex');
-    
+    const signature = crypto.sign(null, Buffer.from(vcString), this.privateKey).toString('hex');
+
     vc.proof = {
       "type": "Ed25519Signature2020",
       "created": new Date().toISOString(),
@@ -39,6 +49,27 @@ export class W3cCredentialIssuer {
     };
 
     return vc;
+  }
+
+  verifyCredentialProof(vc) {
+    if (!vc || typeof vc !== 'object' || !vc.proof || typeof vc.proof.proofValue !== 'string') {
+      return false;
+    }
+
+    const proofValue = vc.proof.proofValue;
+    if (!/^[0-9a-fA-F]{128}$/.test(proofValue)) {
+      return false;
+    }
+
+    const credential = { ...vc };
+    delete credential.proof;
+
+    return crypto.verify(
+      null,
+      Buffer.from(JSON.stringify(credential)),
+      this.publicKey,
+      Buffer.from(proofValue, 'hex')
+    );
   }
 
   isRevoked(statusListBitstringHex, index) {

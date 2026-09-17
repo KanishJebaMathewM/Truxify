@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Check for duplicate CREATE TABLE definitions across migrations
         run: |
@@ -31,9 +31,9 @@ jobs:
         run: python3 scripts/check-definer-search-path.py
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v3
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Start Supabase locally and run migrations
         run: supabase start

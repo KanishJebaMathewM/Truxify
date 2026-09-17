@@ -5,172 +5,347 @@
  * geohash precision clamping, and address parsing logic.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  reverseGeocode,
+  getReverseGeocode,
+  fetchAddressFromCoords,
+  reverseGeocodePoint,
+  clampGeohashPrecision
+} from '../../../src/lib/reverseGeocode.js';
+import logger from '../../../src/middleware/logger.js';
+import { redisClient } from '../../../src/config/db.js';
 
-vi.mock('../../../middleware/logger.js', () => ({
-  default: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+// Mock dependencies
+vi.mock('../../../src/middleware/logger.js', () => ({
+  default: {
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+  },
 }));
 
-vi.mock('../../../config/db.js', () => ({
-  redisClient: null,
+vi.mock('../../../src/config/db.js', () => ({
+  redisClient: {
+    get: vi.fn(),
+    set: vi.fn(),
+  },
 }));
 
-describe('getTimeoutMs (via reverseGeocode import)', async () => {
+// Mock global fetch
+global.fetch = vi.fn();
+
+describe('getTimeoutMs', async () => {
   const original = process.env.NOMINATIM_TIMEOUT_MS;
 
   afterEach(() => {
-    if (original !== undefined) {
-      process.env.NOMINATIM_TIMEOUT_MS = original;
-    } else {
+    if (original === undefined) {
       delete process.env.NOMINATIM_TIMEOUT_MS;
+    } else {
+      process.env.NOMINATIM_TIMEOUT_MS = original;
     }
   });
 
-  it('uses default 5000ms when env not set', async () => {
+  it('uses default 5000ms when env is not set', async () => {
     delete process.env.NOMINATIM_TIMEOUT_MS;
-    vi.resetModules();
-    const { reverseGeocode } = await import('../../../src/lib/reverseGeocode.js');
-    // reverseGeocode returns null for null lat (which triggers early return without API call)
-    // The getTimeoutMs is called during the API request, so we test it via the URL construction
-    // by verifying it doesn't throw
-    const result = await reverseGeocode(null, null);
-    expect(result).toBeNull();
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
   });
 
-  it('uses custom timeout from env variable', async () => {
+  it('uses custom timeout from env variable when valid positive number', async () => {
     process.env.NOMINATIM_TIMEOUT_MS = '3000';
-    vi.resetModules();
-    const { reverseGeocode } = await import('../../../src/lib/reverseGeocode.js');
-    const result = await reverseGeocode(null, null);
-    expect(result).toBeNull();
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(3000);
+  });
+
+  it('falls back to default 5000ms when env is an empty string', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = '';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+  });
+
+  it('falls back to default 5000ms when env is whitespace', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = '    ';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+  });
+
+  it('falls back to default 5000ms when env is zero', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = '0';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+  });
+
+  it('falls back to default 5000ms when env is negative', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = '-1000';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+  });
+
+  it('falls back to default 5000ms when env is NaN or non-numeric string', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = 'NaN';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+
+    process.env.NOMINATIM_TIMEOUT_MS = 'invalid';
+    expect(getTimeoutMs()).toBe(5000);
+  });
+
+  it('falls back to default 5000ms when env is Infinity or -Infinity', async () => {
+    process.env.NOMINATIM_TIMEOUT_MS = 'Infinity';
+    const { getTimeoutMs } = await import('../../../src/lib/reverseGeocode.js');
+    expect(getTimeoutMs()).toBe(5000);
+
+    process.env.NOMINATIM_TIMEOUT_MS = '-Infinity';
+    expect(getTimeoutMs()).toBe(5000);
   });
 });
 
-describe('reverseGeocode input validation', async () => {
-  beforeEach(() => vi.resetModules());
-  const { reverseGeocode } = await import('../../../src/lib/reverseGeocode.js');
-
-  it('returns null for null latitude', async () => {
-    expect(await reverseGeocode(null, 75.0)).toBeNull();
+describe('Reverse Geocode Utility (Issue #14036)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
   });
 
-  it('returns null for null longitude', async () => {
-    expect(await reverseGeocode(25.0, null)).toBeNull();
+  describe('Early Null Guards & Input Validation', () => {
+    it('returns null immediately without coercion when lat or lon is null', async () => {
+      expect(await reverseGeocode(null, 77.209)).toBeNull();
+      expect(await reverseGeocode(28.6139, null)).toBeNull();
+      expect(await reverseGeocode(null, null)).toBeNull();
+      
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('[ReverseGeocode] Aborted early')
+      );
+    });
+
+    it('returns null immediately when lat or lon is undefined', async () => {
+      expect(await reverseGeocode(undefined, 77.209)).toBeNull();
+      expect(await reverseGeocode(28.6139, undefined)).toBeNull();
+      
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('[ReverseGeocode] Aborted early')
+      );
+    });
+    
+    it('returns null when coordinates cannot be coerced to valid Numbers (NaN)', async () => {
+      expect(await reverseGeocode('abc', 77.209)).toBeNull();
+      expect(await reverseGeocode(28.6139, 'xyz')).toBeNull();
+      expect(await reverseGeocode({}, [])).toBeNull();
+    });
+
+    it('returns null when coordinates fall outside valid geographic boundaries', async () => {
+      // Lat bounds: -90 to 90
+      expect(await reverseGeocode(91, 0)).toBeNull();
+      expect(await reverseGeocode(-91, 0)).toBeNull();
+      
+      // Lon bounds: -180 to 180
+      expect(await reverseGeocode(0, 181)).toBeNull();
+      expect(await reverseGeocode(0, -181)).toBeNull();
+    });
   });
 
-  it('returns null for undefined latitude', async () => {
-    expect(await reverseGeocode(undefined, 75.0)).toBeNull();
+  describe('Redis Caching Mechanism', () => {
+    it('returns cached address immediately if found in Redis', async () => {
+      redisClient.get.mockResolvedValueOnce('Connaught Place, New Delhi');
+      
+      const result = await reverseGeocode(28.632, 77.219);
+      
+      expect(result).toBe('Connaught Place, New Delhi');
+      expect(redisClient.get).toHaveBeenCalledWith('geocode:28.632,77.219');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
   });
 
-  it('returns null for undefined longitude', async () => {
-    expect(await reverseGeocode(25.0, undefined)).toBeNull();
+  describe('Nominatim API Interactions', () => {
+    it('fetches address from API and caches it when Redis cache is empty', async () => {
+      redisClient.get.mockResolvedValueOnce(null);
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          address: { suburb: 'Koramangala', city: 'Bengaluru' }
+        })
+      });
+
+      const result = await reverseGeocode(12.927, 77.627);
+
+      expect(result).toBe('Koramangala, Bengaluru');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(redisClient.set).toHaveBeenCalledWith(
+        'geocode:12.927,77.627',
+        'Koramangala, Bengaluru',
+        'EX',
+        expect.any(Number)
+      );
+    });
+
+        it('handles HTTP 429 Rate Limiting with Retry-After header', async () => {
+      redisClient.get.mockResolvedValue(null);
+      
+      // First call returns 429 Too Many Requests
+      global.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: { get: () => '1' } // 1 second retry
+      });
+
+      // Second call succeeds WITH proper JSON mock
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          address: {}, // Must provide empty address object to fall through to display_name
+          display_name: 'Marine Drive, Mumbai, Maharashtra'
+        })
+      });
+
+      const start = Date.now();
+      const result = await reverseGeocode(18.943, 72.823);
+      const duration = Date.now() - start;
+
+      expect(result).toBe('Marine Drive, Mumbai');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ waitMs: 1000 }),
+        expect.stringContaining('Rate-limited')
+      );
+      expect(duration).toBeGreaterThanOrEqual(950); 
+    });
+
+    it('returns null and logs error when API returns a non-200 status (e.g., 500)', async () => {
+      redisClient.get.mockResolvedValueOnce(null);
+      global.fetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+      const result = await reverseGeocode(0, 0);
+
+      expect(result).toBeNull();
+    });
+
+    it('returns null and logs error when fetch throws an exception (e.g., network failure)', async () => {
+      redisClient.get.mockResolvedValueOnce(null);
+      global.fetch.mockRejectedValueOnce(new Error('Network connection dropped'));
+
+      const result = await reverseGeocode(51.507, -0.127);
+
+      expect(result).toBeNull();
+    });
   });
 
-  it('returns null for NaN latitude', async () => {
-    expect(await reverseGeocode(NaN, 75.0)).toBeNull();
+  describe('Address Formatting Fallbacks', () => {
+    beforeEach(() => {
+      redisClient.get.mockResolvedValue(null);
+    });
+
+    it('formats address using localArea and mainArea', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ address: { village: 'Harda', state: 'Madhya Pradesh' } })
+      });
+      expect(await reverseGeocode(22.33, 77.10)).toBe('Harda, Madhya Pradesh');
+    });
+
+    it('formats address using only mainArea if localArea is missing', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ address: { city: 'Pune' } })
+      });
+      expect(await reverseGeocode(18.52, 73.85)).toBe('Pune');
+    });
+
+    it('formats address using display_name truncated to 2 parts if address block is insufficient', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ address: {}, display_name: 'Taj Mahal, Agra, Uttar Pradesh, India, 282001' })
+      });
+      expect(await reverseGeocode(27.175, 78.042)).toBe('Taj Mahal, Agra');
+    });
   });
 
-  it('returns null for NaN longitude', async () => {
-    expect(await reverseGeocode(25.0, NaN)).toBeNull();
+  describe('Enterprise Integration Aliases', () => {
+    it('verifies that all exported alias functions behave identically to the core reverseGeocode function', async () => {
+      redisClient.get.mockResolvedValue('Alias Test Location');
+      
+      expect(await getReverseGeocode(1, 1)).toBe('Alias Test Location');
+      expect(await fetchAddressFromCoords(1, 1)).toBe('Alias Test Location');
+      expect(await reverseGeocodePoint(1, 1)).toBe('Alias Test Location');
+    });
   });
 
-  it('returns null for string latitude that is not a number', async () => {
-    expect(await reverseGeocode('not-a-number', 75.0)).toBeNull();
+  describe('clampGeohashPrecision', () => {
+    it('clamps precision to bounds MIN=1 and MAX=12, defaulting to 6', () => {
+      expect(clampGeohashPrecision('abc')).toBe(6);
+      
+      // Number(null) is 0, so it hits the < MIN (which is 1) check and returns 1. 
+      // This assertion fixes the failing test matching the actual Math logic.
+      expect(clampGeohashPrecision(null)).toBe(1); 
+      
+      expect(clampGeohashPrecision(0)).toBe(1);
+      expect(clampGeohashPrecision(-5)).toBe(1);
+      
+      expect(clampGeohashPrecision(15)).toBe(12);
+      expect(clampGeohashPrecision(100)).toBe(12);
+      
+      expect(clampGeohashPrecision(7.9)).toBe(7);
+    });
   });
 
-  it('returns null for latitude below -90', async () => {
-    expect(await reverseGeocode(-91, 75.0)).toBeNull();
+  describe('Advanced Edge Cases & Service Resilience (Enterprise Tier)', () => {
+    it('processes numeric string coordinates with excessive whitespaces and newlines correctly', async () => {
+      redisClient.get.mockResolvedValueOnce(null);
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ address: { city: 'Space City' } })
+      });
+
+      const result = await reverseGeocode('  29.55   ', '\n -95.09 \t');
+      expect(result).toBe('Space City');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles exact valid coordinate boundaries without rejecting them', async () => {
+      redisClient.get.mockResolvedValue('Boundary City');
+      expect(await reverseGeocode(90, 180)).toBe('Boundary City');
+      expect(await reverseGeocode(-90, -180)).toBe('Boundary City');
+      expect(await reverseGeocode(0, 0)).toBe('Boundary City'); // Equator/Prime Meridian
+    });
+
+    it('returns null safely and logs error if redis dependency throws unexpected exceptions', async () => {
+      redisClient.get.mockRejectedValueOnce(new Error('Redis connection lost'));
+      
+      const result = await reverseGeocode(12.34, 56.78);
+      expect(result).toBeNull();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        expect.stringContaining('Error reverse geocoding coordinates')
+      );
+    });
+
+    it('verifies getTimeoutMs fallback behavior when process.env.NOMINATIM_TIMEOUT_MS is invalid', async () => {
+      // Temporarily alter env vars to test the timeout fallback logic
+      const originalTimeout = process.env.NOMINATIM_TIMEOUT_MS;
+      process.env.NOMINATIM_TIMEOUT_MS = 'invalid_string';
+      
+      redisClient.get.mockResolvedValueOnce(null);
+      global.fetch.mockResolvedValueOnce({ ok: false, status: 500 });
+      
+      await reverseGeocode(10, 10);
+      
+      // Should fall back to default 5000ms internally without crashing
+      expect(global.fetch).toHaveBeenCalled();
+      
+      // Restore env var
+      process.env.NOMINATIM_TIMEOUT_MS = originalTimeout;
+    });
   });
 
-  it('returns null for latitude above 90', async () => {
-    expect(await reverseGeocode(91, 75.0)).toBeNull();
-  });
-
-  it('returns null for longitude below -180', async () => {
-    expect(await reverseGeocode(25.0, -181)).toBeNull();
-  });
-
-  it('returns null for longitude above 180', async () => {
-    expect(await reverseGeocode(25.0, 181)).toBeNull();
-  });
-
-  it('accepts valid boundary coordinates', async () => {
-    // These pass input validation but will make real API calls
-    // We just verify they don't return null from input validation
-    // by checking they would proceed (not testing the actual API)
-    const lat = 45.0, lon = 90.0;
-    const numLat = Number(lat);
-    const numLon = Number(lon);
-    const inRange = numLat >= -90 && numLat <= 90 && numLon >= -180 && numLon <= 180;
-    expect(inRange).toBe(true);
-  });
-
-  it('accepts string coordinates that parse to valid numbers', async () => {
-    // '45.5' parses to 45.5 which is in range
-    const lat = '45.5', lon = '90.0';
-    const numLat = Number(lat);
-    const numLon = Number(lon);
-    expect(numLat).toBe(45.5);
-    expect(numLon).toBe(90.0);
-    expect(numLat >= -90 && numLat <= 90).toBe(true);
-    expect(numLon >= -180 && numLon <= 180).toBe(true);
-  });
-
-  it('edge boundary coordinates pass input validation', async () => {
-    // Exactly at boundaries: -90 <= lat <= 90 and -180 <= lon <= 180
-    // These coordinates pass the input validation check but may or may not
-    // return an address from the API (that's a separate concern)
-    // We verify the validation logic by checking known-in-range values
-    const lat = 45.0, lon = 90.0;
-    const numLat = Number(lat), numLon = Number(lon);
-    expect(numLat >= -90 && numLat <= 90).toBe(true);
-    expect(numLon >= -180 && numLon <= 180).toBe(true);
-  });
-});
-
-describe('clampGeohashPrecision', async () => {
-  beforeEach(() => vi.resetModules());
-  const { clampGeohashPrecision } = await import('../../../src/lib/reverseGeocode.js');
-
-  it('returns default 6 for non-finite inputs', () => {
-    // 'abc' -> NaN -> not finite -> 6
-    // undefined -> NaN -> not finite -> 6
-    // NaN -> not finite -> 6
-    expect(clampGeohashPrecision('abc')).toBe(6);
-    expect(clampGeohashPrecision(undefined)).toBe(6);
-    expect(clampGeohashPrecision(NaN)).toBe(6);
-    // null -> Number(null) = 0 -> finite, < 1 -> returns MIN (1)
-    expect(clampGeohashPrecision(null)).toBe(1);
-  });
-
-  it('returns MIN (1) for values below 1', () => {
-    expect(clampGeohashPrecision(0)).toBe(1);
-    expect(clampGeohashPrecision(-5)).toBe(1);
-    expect(clampGeohashPrecision(0.5)).toBe(1);
-  });
-
-  it('returns MAX (12) for values above 12', () => {
-    expect(clampGeohashPrecision(13)).toBe(12);
-    expect(clampGeohashPrecision(100)).toBe(12);
-    expect(clampGeohashPrecision(12.1)).toBe(12);
-  });
-
-  it('returns floor of value within range', () => {
-    expect(clampGeohashPrecision(6)).toBe(6);
-    expect(clampGeohashPrecision(6.7)).toBe(6);
-    expect(clampGeohashPrecision(1.1)).toBe(1);
-    expect(clampGeohashPrecision(11.9)).toBe(11);
-  });
-
-  it('handles string numeric inputs', () => {
-    expect(clampGeohashPrecision('6')).toBe(6);
-    expect(clampGeohashPrecision('10')).toBe(10);
-    expect(clampGeohashPrecision('0')).toBe(1);
-    expect(clampGeohashPrecision('15')).toBe(12);
-  });
-
-  it('returns default for Infinity and -Infinity (not finite)', () => {
-    // Number.isFinite(Infinity) === false, so returns DEF (6)
-    expect(clampGeohashPrecision(Infinity)).toBe(6);
-    expect(clampGeohashPrecision(-Infinity)).toBe(6);
+    describe('Extended clampGeohashPrecision Scenarios', () => {
+    it('handles JS type coercion rules correctly for arrays, objects, and undefined', () => {
+      // Empty array coerces to 0 in JS -> hits MIN bounds (1)
+      expect(clampGeohashPrecision([])).toBe(1);
+      // Objects and undefined coerce to NaN -> hits DEF bounds (6)
+      expect(clampGeohashPrecision({})).toBe(6);
+      expect(clampGeohashPrecision(undefined)).toBe(6);
+    });
   });
 });

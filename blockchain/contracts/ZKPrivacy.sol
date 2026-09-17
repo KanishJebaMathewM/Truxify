@@ -307,18 +307,23 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         address recipient,
         uint256 amount,
         bytes memory encryptedData
-    ) external nonReentrant whenNotPaused {
+    ) external payable nonReentrant whenNotPaused {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
+        require(msg.value == amount, "Funding amount must equal transaction amount");
 
-        // Commit the encrypted payload without storing the ciphertext on-chain.
+        // Bind the encrypted payload to the transaction commitment without
+        // persisting the plaintext/ciphertext on-chain.
         bytes32 encryptedDataHash = keccak256(encryptedData);
         bytes32 commitment = keccak256(
             abi.encodePacked(block.timestamp, msg.sender, amount, encryptedDataHash)
         );
         bytes32 nullifier = keccak256(abi.encodePacked(commitment, block.timestamp));
+        require(!commitments[commitment], "Commitment already exists");
 
-        // Store transaction
+        commitments[commitment] = true;
+        commitmentAmounts[commitment] = msg.value;
+
         transactionCounter++;
         bytes32 txId = keccak256(abi.encodePacked(block.timestamp, transactionCounter));
 
@@ -331,9 +336,6 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
             spent: false
         });
 
-        commitments[commitment] = true;
-
-        // Insert into Merkle tree
         _insertCommitment(commitment);
 
         emit TransactionProcessed(nullifier, recipient, amount);

@@ -1,7 +1,3 @@
-# Refresh-token storage
-
-Refresh tokens are bearer credentials and must never be stored in plaintext. The API stores SHA-256 digests in `refresh_tokens.token_hash` and hashes incoming tokens before lookup or revocation. Apply `database/migrations/20260916_hash_refresh_tokens.sql` before deploying this service version; the migration converts existing rows before removing the legacy plaintext column.
-
 # 🔒 Truxify Security Policy
 
 Truxify is committed to maintaining the highest security standards across our logistics platform, API backend, smart contracts, machine learning pipelines, and mobile applications.

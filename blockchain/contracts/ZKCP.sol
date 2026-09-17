@@ -23,7 +23,7 @@ contract ZKCP is Ownable {
     mapping(bytes32 => EscrowAgreement) public agreements;
 
     event PaymentLocked(bytes32 indexed agreementId, address buyer, address seller, uint256 amount);
-    event PaymentReleased(bytes32 indexed agreementId, address indexed seller, uint256 amount);
+    event PaymentReleased(bytes32 indexed agreementId, bytes32 decryptionKey);
     event BuyerRefunded(bytes32 indexed agreementId);
 
     constructor() Ownable(msg.sender) {}
@@ -35,7 +35,6 @@ contract ZKCP is Ownable {
         uint256 _refundDuration
     ) external payable {
         require(msg.value > 0, "Locked value must be > 0");
-        require(_dataHashCommitment != bytes32(0), "Data hash commitment required");
         require(agreements[_agreementId].buyer == address(0), "Agreement ID already exists");
 
         agreements[_agreementId] = EscrowAgreement({
@@ -44,7 +43,6 @@ contract ZKCP is Ownable {
             amount: msg.value,
             dataHashCommitment: _dataHashCommitment,
             refundTimelock: block.timestamp + _refundDuration,
-            keyRevealed: false,
             completed: false
         });
 
@@ -52,8 +50,7 @@ contract ZKCP is Ownable {
     }
 
     /**
-     * @dev Release payment atomically if decryption key matches ZK hash commitment.
-     *      The key itself is intentionally excluded from the event because logs are public.
+     * @dev Release payment atomically if decryption key matches ZK hash commitment
      */
     function claimPayment(bytes32 _agreementId, bytes32 _decryptionKey) external {
         EscrowAgreement storage agreement = agreements[_agreementId];
@@ -68,7 +65,7 @@ contract ZKCP is Ownable {
         agreement.completed = true;
         payable(agreement.seller).transfer(agreement.amount);
 
-        emit PaymentReleased(_agreementId, agreement.seller, agreement.amount);
+        emit PaymentReleased(_agreementId, _decryptionKey);
     }
 
     function refundBuyer(bytes32 _agreementId) external {

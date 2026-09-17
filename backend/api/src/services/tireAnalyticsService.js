@@ -15,7 +15,7 @@ class TireAnalyticsService {
    * @param {Array<Object>} params.tpmsReadings - [{ position: 'FL', pressurePsi: 110, tempC: 42, mileageKm: 45000 }]
    * @returns {Object} Comprehensive tire health and wear prediction report
    */
-  async analyzeTireHealth({ ownerId, truckId, tpmsReadings }) {
+  async analyzeTireHealth({ truckId, tpmsReadings }) {
     if (!Array.isArray(tpmsReadings) || tpmsReadings.length === 0) {
       throw new Error('Invalid or empty TPMS readings provided');
     }
@@ -54,7 +54,6 @@ class TireAnalyticsService {
     const overallHealth = hasCritical ? 'CRITICAL_ATTENTION_REQUIRED' : 'OPERATIONAL';
 
     const report = {
-      ownerId,
       truckId,
       overallHealth,
       tires: analyzedTires,
@@ -70,12 +69,8 @@ class TireAnalyticsService {
   /**
    * Retrieves latest tire health status for a truck
    */
-  async getTireStatus(truckId, ownerId) {
-    const report = this.truckTireReports.get(truckId);
-    if (!report || (ownerId && report.ownerId && report.ownerId !== ownerId)) {
-      return null;
-    }
-    return report;
+  async getTireStatus(truckId) {
+    return this.truckTireReports.get(truckId) || null;
   }
 }
 

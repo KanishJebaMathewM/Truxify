@@ -149,11 +149,6 @@ describe('Tracking Routes', () => {
     app = buildApp();
   });
 
-  it('uses the configured public tracking origin instead of Host', async () => {
-    process.env.PUBLIC_TRACKING_URL = 'https://track.truxify.app';
-    expect(process.env.PUBLIC_TRACKING_URL).toBe('https://track.truxify.app');
-  });
-
   describe('POST /api/orders/:id/share-tracking', () => {
     it('should generate a tracking link for a valid active order', async () => {
       const res = await request(app)

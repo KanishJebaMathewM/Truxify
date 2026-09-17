@@ -3,7 +3,6 @@ import snykService from './snyk.service.js';
 import logger from '../backend/api/src/middleware/logger.js';
 import { authenticate } from '../backend/api/src/middleware/auth.js';
 import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
-import { resolveSnykProjectPath } from './projectPath.js';
 
 const router = express.Router();
 
@@ -81,13 +80,9 @@ router.post('/snyk/scan/code', async (req, res) => {
 router.post('/snyk/monitor', async (req, res) => {
     try {
         const { path } = req.body;
-        const projectPath = resolveSnykProjectPath(path || '.');
-        const result = await snykService.monitorProject(projectPath);
+        const result = await snykService.monitorProject(path || '.');
         res.json({ success: true, data: result });
     } catch (error) {
-        if (error.message.startsWith('Snyk project path')) {
-            return res.status(400).json({ success: false, error: error.message });
-        }
         logger.error('Monitor error:', error);
         res.status(500).json({ success: false, error: error.message });
     }

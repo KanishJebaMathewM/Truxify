@@ -343,26 +343,6 @@ class KEDAService {
         };
     }
 
-    
-    async getServiceHealthDiagnostics(namespace = 'default', deployment = 'api-service') {
-        try {
-            const autoscaling = await this.getAutoscalingMetrics(namespace, deployment);
-            return {
-                status: autoscaling.success ? 'HEALTHY' : 'DEGRADED',
-                diagnosticsTimestamp: new Date().toISOString(),
-                metricsStatus: autoscaling
-            };
-        } catch (error) {
-            const errorMessage = error?.message ?? String(error);
-            logger.error({ event: 'KEDA_DIAGNOSTICS_ERROR', error: errorMessage }, 'Health diagnostics failed');
-            return {
-                status: 'UNHEALTHY',
-                error: errorMessage,
-                diagnosticsTimestamp: new Date().toISOString()
-            };
-        }
-    }
-
     async getStats() {
         return {
             kafkaLagMetric: this.kafkaLagMetric,

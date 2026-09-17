@@ -48,14 +48,14 @@ contract AssetProvenance is Ownable {
         // mistaken for a real handoff. Fail closed instead.
         require(_zkpProofHash != bytes32(0), "A non-empty ZK proof hash is required to verify the handoff");
 
-        // Cryptographically bind zkpProofHash and enforce verified status strictly via valid proof validation (#14778)
-        bytes32 messageHash = keccak256(abi.encodePacked(_cargoHash, current, _to, _zkpProofHash));
-        
+        // The ZK proof itself cannot be cheaply verified on-chain, so we only
+        // mark a record "verified" when a non-zero proof hash is supplied.
+        // Verification is performed off-chain against the referenced proof.
         records.push(Record({
             cargoHash: _cargoHash,
             currentHolder: _to,
             timestamp: block.timestamp,
-            verified: _zkpProofHash != bytes32(0) // Bound to verified off-chain cryptographic commitment validation
+            verified: _zkpProofHash != bytes32(0)
         }));
 
         emit CustodyTransferred(_cargoHash, current, _to, _zkpProofHash);

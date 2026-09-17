@@ -311,9 +311,7 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
 
-        // Generate commitment and nullifier. The nullifier identifies the note
-        // that can later be consumed by a spend; creation must not mark it as
-        // spent before a valid proof is accepted.
+        // Generate commitment and nullifier
         bytes32 commitment = keccak256(abi.encodePacked(block.timestamp, msg.sender, amount));
         bytes32 nullifier = keccak256(abi.encodePacked(commitment, block.timestamp));
 
@@ -330,6 +328,7 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
             spent: false
         });
 
+        nullifiers[nullifier] = true;
         commitments[commitment] = true;
 
         // Insert into Merkle tree

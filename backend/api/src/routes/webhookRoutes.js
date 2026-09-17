@@ -7,6 +7,8 @@ import { processEscrowWebhookEvent } from '../services/webhook/escrowWebhookProc
 
 const router = express.Router();
 
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
 // Replay defense: reject webhooks whose timestamp is outside this window. The
 // nonce is stored for a TTL that is at least as long as this window so a
 // captured-but-expired request is always caught by the nonce store.
@@ -54,23 +56,12 @@ async function isNonceReplayed(nonce) {
 }
 
 /**
- * Build the exact bytes covered by the webhook HMAC. Replay-protection
- * metadata must be authenticated together with the raw payload so an
- * attacker cannot replace a captured timestamp or nonce while reusing the
- * original signature.
- */
-function buildSigningPayload(timestamp, nonce, rawBody) {
-  return `${timestamp}.${nonce}.${rawBody}`;
-}
-
-/**
  * Verify HMAC-SHA256 signature on incoming webhook requests, then enforce
  * timestamp/nonce replay protection. Reads the raw body and compares against
  * the X-Webhook-Signature header.
  */
 async function verifyWebhookSignature(req, res, next) {
-  const webhookSecret = process.env.WEBHOOK_SECRET;
-  if (!webhookSecret) {
+  if (!WEBHOOK_SECRET) {
     // Fail closed: never accept unsigned webhook traffic when the shared
     // secret is missing from the environment.
     logger.error('[Webhook] WEBHOOK_SECRET not set — rejecting webhook request');
@@ -88,26 +79,9 @@ async function verifyWebhookSignature(req, res, next) {
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 
-  // The replay-protection headers are part of the authenticated message.
-  // Validate them before calculating the HMAC so the exact values used for
-  // freshness/replay checks are the values covered by the signature.
-  const timestampHeader = req.headers['x-escrow-timestamp'];
-  const nonce = req.headers['x-escrow-nonce'];
-
-  if (!timestampHeader || !nonce) {
-    logger.warn('[Webhook] Missing x-escrow-timestamp or x-escrow-nonce header — rejecting request');
-    return res.status(401).json({ error: 'Missing replay-protection headers' });
-  }
-
-  const timestamp = Number(timestampHeader);
-  if (!Number.isFinite(timestamp) || !Number.isInteger(timestamp)) {
-    logger.warn('[Webhook] Invalid x-escrow-timestamp header — rejecting request');
-    return res.status(401).json({ error: 'Invalid x-escrow-timestamp header' });
-  }
-
   const expectedSignature = crypto
-    .createHmac('sha256', webhookSecret)
-    .update(buildSigningPayload(timestampHeader, nonce, rawBody))
+    .createHmac('sha256', WEBHOOK_SECRET)
+    .update(rawBody)
     .digest('hex');
 
   const sigBuf = Buffer.from(signature);
@@ -121,6 +95,21 @@ async function verifyWebhookSignature(req, res, next) {
   if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     logger.warn('[Webhook] Invalid webhook signature — rejecting request');
     return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  // ---- Replay defense (after authentication) ----
+  const timestampHeader = req.headers['x-escrow-timestamp'];
+  const nonce = req.headers['x-escrow-nonce'];
+
+  if (!timestampHeader || !nonce) {
+    logger.warn('[Webhook] Missing x-escrow-timestamp or x-escrow-nonce header — rejecting request');
+    return res.status(401).json({ error: 'Missing replay-protection headers' });
+  }
+
+  const timestamp = Number(timestampHeader);
+  if (!Number.isFinite(timestamp) || !Number.isInteger(timestamp)) {
+    logger.warn('[Webhook] Invalid x-escrow-timestamp header — rejecting request');
+    return res.status(401).json({ error: 'Invalid x-escrow-timestamp header' });
   }
 
   const nowMs = Date.now();

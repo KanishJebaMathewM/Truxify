@@ -11,7 +11,7 @@ const SURGE_PEAK_AMPLITUDE = 1.3;
 /**
  * Calculates a live traffic multiplier for a given pickup location.
  * Combines TOMTOM/Google Maps real-time traffic data with a sinusoidal rush-hour
- * surge overlay (7-10 AM and 4-7 PM IST). Falls back to rush-hour only if no API key
+ * surge overlay (7-10 AM and 4-7 PM UTC). Falls back to rush-hour only if no API key
  * is configured or the request fails.
  *
  * @param {number} pickupLat - Pickup latitude
@@ -38,7 +38,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
         if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
         const data = await response.json();
         const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
-        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
+        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, speedDiff / 100)));
       } else {
         const origin = `${pickupLat},${pickupLng}`;
         const destination = `${pickupLat + 0.01},${pickupLng + 0.01}`;
@@ -70,10 +70,9 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
 }
 
 /**
-  * Returns a rush-hour surge multiplier based on the hour of day in IST
- * (UTC+5:30, matching the platform's target market).
+ * Returns a rush-hour surge multiplier based on the hour of day (UTC).
  * Peaks at MIN_SURGE_MULTIPLIER + SURGE_PEAK_AMPLITUDE during the center of
- * the rush-hour windows (morning 7-10 IST, evening 16-19 IST).
+ * the rush-hour windows (morning 7-10 UTC, evening 16-19 UTC).
  *
  * @param {Date} date - Date/time to evaluate
  * @returns {number} Surge multiplier between MIN_SURGE_MULTIPLIER and MAX_SURGE_MULTIPLIER
@@ -83,9 +82,7 @@ function getRushHourMultiplier(date) {
   if (!date || Number.isNaN(date.getTime())) {
     return 1.0;
   }
-  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const hour = new Date(date.getTime() + IST_OFFSET_MS).getUTCHours();
-
+  const hour = date.getUTCHours();
   const isMorningRush = hour >= RUSH_HOUR_START_AM && hour < RUSH_HOUR_END_AM;
   const isEveningRush = hour >= RUSH_HOUR_START_PM && hour < RUSH_HOUR_END_PM;
   if (!isMorningRush && !isEveningRush) {
@@ -101,58 +98,3 @@ function getRushHourMultiplier(date) {
   }
   return Number(result.toFixed(2));
 }
-
-// === ENTERPRISE TRAFFIC WRAPPER (Issue #14108 Expansion) ===
-import { redisClient } from '../config/db.js';
-
-const CACHE_TTL = 300; // 5 minutes caching for live traffic
-
-/**
- * Enterprise Adapter: Safely fetches live traffic multiplier using configured external providers.
- * Includes explicit null guards, Redis caching, and gracefully falls back to the original
- * getRushHourMultiplier heuristic if APIs fail or keys are missing.
- *
- * @param {number|string} lat - Latitude
- * @param {number|string} lng - Longitude
- * @returns {Promise<number>} - Multiplier between 1.0 and 2.5
- */
-export async function getLiveTrafficMultiplierEnterprise(lat, lng) {
-  const nLat = Number(lat);
-  const nLng = Number(lng);
-
-  // Issue #14108: Explicit early null-guards
-  if (lat == null || lng == null || Number.isNaN(nLat) || Number.isNaN(nLng)) {
-    logger.warn('[TrafficService] Invalid coordinates provided, returning default multiplier (1.0).');
-    return 1.0;
-  }
-
-  const cacheKey = `traffic_ent:${nLat.toFixed(3)},${nLng.toFixed(3)}`;
-  
-  if (redisClient) {
-    try {
-      const cached = await redisClient.get(cacheKey);
-      if (cached) return Number.parseFloat(cached);
-    } catch (cacheErr) {
-      logger.debug(`[TrafficService] Redis cache read failed: ${cacheErr.message}`);
-    }
-  }
-
-  // Delegate to the original internal logic to preserve sinusoidal math
-  let multiplier = await getLiveTrafficMultiplier(nLat, nLng);
-
-  if (redisClient) {
-    try {
-      await redisClient.set(cacheKey, multiplier.toFixed(2), 'EX', CACHE_TTL);
-    } catch (err) {
-      // Ignore cache write errors
-    }
-  }
-
-  return multiplier;
-}
-
-// Export a unified enterprise module interface for testing and external consumers
-export const trafficService = { 
-  getLiveTrafficMultiplier: getLiveTrafficMultiplierEnterprise, 
-  getRushHourMultiplier 
-};

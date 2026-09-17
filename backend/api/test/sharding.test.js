@@ -1,12 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-
-vi.hoisted(() => {
-  process.env.SHARD_PASSWORD_NORTH = process.env.SHARD_PASSWORD_NORTH || 'mock';
-  process.env.SHARD_PASSWORD_SOUTH = process.env.SHARD_PASSWORD_SOUTH || 'mock';
-  process.env.SHARD_PASSWORD_EAST = process.env.SHARD_PASSWORD_EAST || 'mock';
-  process.env.SHARD_PASSWORD_WEST = process.env.SHARD_PASSWORD_WEST || 'mock';
-});
-
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import shardManager from '../src/services/sharding/ShardManager.js';
 
 describe('Shard Manager', () => {

@@ -1,84 +1,8 @@
 const snarkjs = require('snarkjs');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { ethers } = require('hardhat');
-
-const FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-const ROUND_CONSTANTS = [
-    0x0c950a76n,
-    0x1b4a390en,
-    0x2e8f01c2n,
-    0x3d7a90b4n,
-    0x41ab982cn,
-    0x5a23cd10n
-];
-
-function mod(value) {
-    const result = value % FIELD_MODULUS;
-    return result >= 0n ? result : result + FIELD_MODULUS;
-}
-
-function pow5(value) {
-    const square = mod(value) ** 2n % FIELD_MODULUS;
-    const fourth = square * square % FIELD_MODULUS;
-    return fourth * mod(value) % FIELD_MODULUS;
-}
-
-function poseidon1(input) {
-    return pow5(mod(input) + ROUND_CONSTANTS[0]);
-}
-
-function poseidon2(left, right) {
-    let state0 = mod(left) + ROUND_CONSTANTS[0];
-    let state1 = mod(right) + ROUND_CONSTANTS[1];
-
-    state0 = pow5(state0);
-    state1 = pow5(state1);
-
-    const mixed0 = mod(2n * state0 + state1 + ROUND_CONSTANTS[2]);
-    const mixed1 = mod(state0 + 2n * state1 + ROUND_CONSTANTS[3]);
-
-    state0 = pow5(mixed0);
-    state1 = pow5(mixed1);
-
-    const final0 = mod(2n * state0 + state1 + ROUND_CONSTANTS[4]);
-    const final1 = mod(state0 + 2n * state1 + ROUND_CONSTANTS[5]);
-    return mod(final0 + final1);
-}
-
-function hashByteArray(value, maxLength) {
-    const bytes = stringToBytes(value, maxLength);
-    let packed = 0n;
-    for (const byte of bytes) {
-        packed = mod(packed * 256n + BigInt(byte));
-    }
-    return poseidon1(packed);
-}
-
-function stringToBytes(value, maxLength) {
-    if (typeof value !== 'string') {
-        throw new TypeError('KYC document fields must be strings');
-    }
-
-    const bytes = Array.from(Buffer.from(value, 'utf8'));
-    if (bytes.length > maxLength) {
-        throw new RangeError(`KYC field exceeds maximum length of ${maxLength} bytes`);
-    }
-
-    return bytes.concat(new Array(maxLength - bytes.length).fill(0));
-}
-
-function hashDocument(driverData) {
-    const nameHash = hashByteArray(driverData.name, 100);
-    const licenseHash = hashByteArray(driverData.licenseNumber, 50);
-    const rcHash = hashByteArray(driverData.rcNumber, 50);
-    const insuranceHash = hashByteArray(driverData.insuranceNumber, 50);
-
-    return poseidon2(
-        poseidon2(nameHash, licenseHash),
-        poseidon2(rcHash, insuranceHash)
-    ).toString();
-}
 
 class ZKProofGenerator {
     constructor() {
@@ -89,28 +13,32 @@ class ZKProofGenerator {
         this.vkPath = path.join(__dirname, '../circuits/verification_key.json');
     }
 
-    generateProof(driverData, userAddress) {
-        const documentHash = hashDocument(driverData);
-        return this._generateProof(driverData, documentHash, userAddress);
-    }
-
-    async _generateProof(driverData, documentHash, userAddress) {
+    async generateProof(driverData, userAddress) {
         try {
             console.log('🔐 Generating ZK-SNARK proof for driver KYC...');
+            
+            // Step 1: Hash the document
+            const documentHash = this.hashDocument(driverData);
             console.log(`📄 Document hash: ${documentHash}`);
+            
+            // Step 2: Generate witness with user binding
             const witness = this.generateWitness(driverData, documentHash, userAddress);
             console.log('✅ Witness generated');
-
+            
+            // Step 3: Generate proof
             const { proof, publicSignals } = await snarkjs.groth16.fullProve(
                 witness,
                 this.wasmPath,
                 this.zkeyPath
             );
             console.log('✅ ZK-SNARK proof generated');
-
+            
+            // Step 4: Format for smart contract
             const formattedProof = this.formatProofForContract(proof);
+            
+            // Step 5: Verify proof locally
             const isValid = await this.verifyProof(proof, publicSignals);
-
+            
             return {
                 proof: formattedProof,
                 publicSignals,
@@ -118,6 +46,7 @@ class ZKProofGenerator {
                 isValid,
                 timestamp: new Date().toISOString()
             };
+            
         } catch (error) {
             console.error('❌ Proof generation failed:', error);
             throw error;
@@ -125,25 +54,43 @@ class ZKProofGenerator {
     }
 
     hashDocument(driverData) {
-        return hashDocument(driverData);
+        const documentString = JSON.stringify({
+            name: driverData.name,
+            licenseNumber: driverData.licenseNumber,
+            rcNumber: driverData.rcNumber,
+            insuranceNumber: driverData.insuranceNumber,
+            issueDate: driverData.issueDate,
+            expiryDate: driverData.expiryDate
+        });
+        
+        return crypto.createHash('sha256').update(documentString).digest('hex');
     }
 
     generateWitness(driverData, documentHash, userAddress) {
+        // Witness for ZK-SNARK
+        // Inputs: userAddress (public), documentHash (public), name, licenseNumber, rcNumber, insuranceNumber
+        // Output: isValid, userCommitment (computed cryptographically)
+        const userAddressField = userAddress ? BigInt(userAddress).toString() : "0";
         return {
-            userAddress: userAddress ? BigInt(userAddress).toString() : '0',
-            documentHash,
-            name: stringToBytes(driverData.name, 100),
-            licenseNumber: stringToBytes(driverData.licenseNumber, 50),
-            rcNumber: stringToBytes(driverData.rcNumber, 50),
-            insuranceNumber: stringToBytes(driverData.insuranceNumber, 50)
+            userAddress: userAddressField,
+            documentHash: documentHash,
+            name: this.stringToBytes(driverData.name),
+            licenseNumber: this.stringToBytes(driverData.licenseNumber),
+            rcNumber: this.stringToBytes(driverData.rcNumber),
+            insuranceNumber: this.stringToBytes(driverData.insuranceNumber)
         };
     }
 
-    stringToBytes(value, maxLength) {
-        return stringToBytes(value, maxLength);
+    stringToBytes(str) {
+        const bytes = [];
+        for (let i = 0; i < str.length; i++) {
+            bytes.push(str.charCodeAt(i));
+        }
+        return bytes;
     }
 
     formatProofForContract(proof) {
+        // Format proof for Solidity verifier
         return {
             a: [proof.pi_a[0], proof.pi_a[1]],
             b: [
@@ -156,15 +103,17 @@ class ZKProofGenerator {
     }
 
     async verifyProof(proof, publicSignals) {
-        const vKey = JSON.parse(fs.readFileSync(this.vkPath, 'utf8'));
+        const vKey = JSON.parse(fs.readFileSync(this.vkPath));
         return await snarkjs.groth16.verify(vKey, publicSignals, proof);
     }
 
     async deployVerifier() {
         console.log('🚀 Deploying KYC Verifier contract...');
+        
         const KYCVerifier = await ethers.getContractFactory('KYCVerifier');
         const verifier = await KYCVerifier.deploy();
         await verifier.waitForDeployment();
+        
         const address = await verifier.getAddress();
         console.log(`✅ KYC Verifier deployed at: ${address}`);
         return verifier;
@@ -172,34 +121,57 @@ class ZKProofGenerator {
 
     async verifyKYCOnChain(verifier, proof, userAddress) {
         console.log('🔍 Verifying KYC on-chain...');
+        
         const { a, b, c, input } = proof;
         const tx = await verifier.verifyKYC(a, b, c, input, userAddress);
         const receipt = await tx.wait();
+        
         console.log(`✅ KYC verification completed. Tx: ${receipt.hash}`);
         return receipt;
     }
 
     async generateAndSubmitProof(driverData, userAddress) {
+        // Generate proof with user binding
         const proofData = await this.generateProof(driverData, userAddress);
-        if (!proofData.isValid) throw new Error('Proof validation failed');
+        
+        if (!proofData.isValid) {
+            throw new Error('Proof validation failed');
+        }
+        
+        // Deploy verifier (if not already deployed)
         const verifier = await this.deployVerifier();
-        const receipt = await this.verifyKYCOnChain(verifier, proofData.proof, userAddress);
-        return { proofData, receipt, verifierAddress: await verifier.getAddress() };
+        
+        // Submit proof on-chain
+        const receipt = await this.verifyKYCOnChain(
+            verifier,
+            proofData.proof,
+            userAddress
+        );
+        
+        return {
+            proofData,
+            receipt,
+            verifierAddress: await verifier.getAddress()
+        };
     }
 }
 
+// Example usage
 async function main() {
     const generator = new ZKProofGenerator();
+    
+    // Sample driver data
     const driverData = {
-        name: 'Rajesh Kumar',
-        licenseNumber: 'DL-2024-123456',
-        rcNumber: 'RC-2024-789012',
-        insuranceNumber: 'INS-2024-345678',
-        issueDate: '2024-01-01',
-        expiryDate: '2029-01-01'
+        name: "Rajesh Kumar",
+        licenseNumber: "DL-2024-123456",
+        rcNumber: "RC-2024-789012",
+        insuranceNumber: "INS-2024-345678",
+        issueDate: "2024-01-01",
+        expiryDate: "2029-01-01"
     };
-    const userAddress = '0x1234567890123456789012345678901234567890';
-
+    
+    const userAddress = "0x1234567890123456789012345678901234567890";
+    
     try {
         const result = await generator.generateAndSubmitProof(driverData, userAddress);
         console.log('✅ KYC verification complete!');
@@ -212,12 +184,12 @@ async function main() {
 }
 
 if (require.main === module) {
-    main().then(() => process.exit(0)).catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+    main()
+        .then(() => process.exit(0))
+        .catch((error) => {
+            console.error(error);
+            process.exit(1);
+        });
 }
 
 module.exports = ZKProofGenerator;
-module.exports.hashDocument = hashDocument;
-module.exports.stringToBytes = stringToBytes;

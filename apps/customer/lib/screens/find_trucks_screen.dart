@@ -225,16 +225,6 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return null;
     }
 
-    // Rebooking supplies the persisted pickup_date as an ISO-8601 timestamp,
-    // while newly entered routes use the human-readable label below.
-    final isoDateTime = DateTime.tryParse(raw);
-    if (isoDateTime != null) {
-      return _ParsedDateTime(
-        date: DateUtils.dateOnly(isoDateTime.toLocal()),
-        time: TimeOfDay.fromDateTime(isoDateTime.toLocal()),
-      );
-    }
-
     final parts = raw.split(',');
     if (parts.length < 2) {
       return null;

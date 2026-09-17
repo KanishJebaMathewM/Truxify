@@ -16,37 +16,6 @@ router = APIRouter(prefix="/gnn", tags=["Graph Neural Networks"])
 builder = GraphNetworkBuilder()
 optimizer = RouteOptimizer()
 
-SUPPORTED_ROUTE_OBJECTIVES = frozenset({
-    "time",
-    "cost",
-    "fuel",
-    "distance",
-    "congestion",
-})
-
-
-def validate_route_objectives(objectives):
-    """Validate that every requested route objective is supported."""
-    if objectives is None:
-        return
-
-    invalid_objectives = []
-    for objective in objectives:
-        if not isinstance(objective, str) or objective not in SUPPORTED_ROUTE_OBJECTIVES:
-            if objective not in invalid_objectives:
-                invalid_objectives.append(objective)
-
-    if invalid_objectives:
-        invalid = ", ".join(repr(objective) for objective in invalid_objectives)
-        supported = ", ".join(sorted(SUPPORTED_ROUTE_OBJECTIVES))
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unsupported route objective(s): {invalid}. "
-                f"Supported objectives: {supported}."
-            ),
-        )
-
 class Node(BaseModel):
     id: str
     lat: float
@@ -75,66 +44,13 @@ class RouteRequest(BaseModel):
     objectives: Optional[List[str]] = ["time", "cost", "fuel"]
     constraints: Optional[Dict[str, Any]] = None
 
-class RouteUpdateRequest(BaseModel):
-    route: List[Dict[str, Any]]
-    nodes: List[Node]
-    edges: List[Edge]
-    traffic_data: Dict[str, Dict[str, Any]]
-    objectives: Optional[List[str]] = ["time", "cost", "fuel"]
-    constraints: Optional[Dict[str, Any]] = None
-
 class TrainRequest(BaseModel):
     epochs: int = 100
     learning_rate: float = 0.001
 
-
-def _multi_objective_optimization(start, end, graph_data, objectives=None, constraints=None):
-    """Select a representative route from the optimizer's Pareto frontier."""
-    requested_objectives = list(objectives) if objectives else ["time", "cost", "fuel"]
-    allowed_objectives = {"time", "cost", "fuel", "distance", "congestion"}
-    invalid_objectives = [objective for objective in requested_objectives if objective not in allowed_objectives]
-    if invalid_objectives:
-        raise ValueError(f"Unsupported objectives: {', '.join(invalid_objectives)}")
-
-    frontier = optimizer._find_pareto_routes(
-        start,
-        end,
-        graph_data,
-        requested_objectives,
-        constraints,
-    )
-    if not frontier:
-        return None
-
-    weights = {
-        "time": 0.5,
-        "cost": 0.3,
-        "fuel": 0.2,
-        "distance": 0.2,
-        "congestion": 2.0,
-    }
-    best_route = min(
-        frontier,
-        key=lambda candidate: sum(
-            weights.get(objective, 1.0) * candidate.get(f"total_{objective}", 0)
-            for objective in requested_objectives
-        ),
-    )
-
-    result = dict(best_route)
-    result["pareto_routes"] = frontier
-    result["pareto_count"] = len(frontier)
-    return result
-
 @router.post("/build-graph")
 async def build_graph(nodes: List[Node], edges: List[Edge]):
     """Build road network graph"""
-    if not nodes:
-        raise HTTPException(
-            status_code=422,
-            detail="At least one node is required to build a graph"
-        )
-
     try:
         graph = builder.build_road_network(
             [node.dict() for node in nodes],
@@ -146,7 +62,7 @@ async def build_graph(nodes: List[Node], edges: List[Edge]):
             'data': {
                 'nodes': len(graph.nodes),
                 'edges': len(graph.edges),
-                'is_connected': nx.is_weakly_connected(graph)
+                'is_connected': nx.is_connected(graph)
             },
             'timestamp': datetime.now().isoformat()
         }
@@ -159,15 +75,17 @@ async def build_graph(nodes: List[Node], edges: List[Edge]):
 @router.post("/optimize-route")
 async def optimize_route(request: RouteRequest):
     """Optimize route using GNN"""
-    validate_route_objectives(request.objectives)
     try:
+        # Build graph
         graph = builder.build_road_network(
             [node.dict() for node in request.nodes],
             [edge.dict() for edge in request.edges]
         )
         
+        # Get PyTorch data
         graph_data = builder.get_pytorch_data()
         
+        # Optimize route
         result = optimizer.optimize_route(
             request.start_node,
             request.end_node,
@@ -197,8 +115,8 @@ async def optimize_route(request: RouteRequest):
 @router.post("/multi-objective")
 async def multi_objective_optimize(request: RouteRequest):
     """Multi-objective route optimization"""
-    validate_route_objectives(request.objectives)
     try:
+        # Build graph
         graph = builder.build_road_network(
             [node.dict() for node in request.nodes],
             [edge.dict() for edge in request.edges]
@@ -206,12 +124,11 @@ async def multi_objective_optimize(request: RouteRequest):
         
         graph_data = builder.get_pytorch_data()
         
-        result = _multi_objective_optimization(
+        result = optimizer.multi_objective_optimization(
             request.start_node,
             request.end_node,
             graph_data,
-            objectives=request.objectives,
-            constraints=request.constraints
+            request.constraints
         )
         
         if result:
@@ -236,15 +153,11 @@ async def multi_objective_optimize(request: RouteRequest):
 async def train_model(request: TrainRequest):
     """Train GNN model"""
     try:
+        # In production: load training data
         train_data = []
         val_data = []
         
-        loss = optimizer.train(
-            train_data,
-            val_data,
-            request.epochs,
-            request.learning_rate
-        )
+        loss = optimizer.train(train_data, val_data, request.epochs)
         
         return {
             'success': True,
@@ -261,39 +174,16 @@ async def train_model(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/update-route")
-async def update_route(request: RouteUpdateRequest):
-    """Update route with real-time traffic and reroute over the updated network."""
+async def update_route(route: List[Dict], traffic_data: Dict):
+    """Update route with real-time traffic"""
     try:
-        request_builder = GraphNetworkBuilder()
-        request_builder.build_road_network(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
-        graph_data = request_builder.get_pytorch_data()
-
-        start = request.route[0].get('from') if request.route else None
-        end = request.route[-1].get('to') if request.route else None
-        if start is None or end is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Route must contain at least one edge with 'from' and 'to' fields"
-            )
-
-        updated_route = optimizer.real_time_update(
-            request.route,
-            request.traffic_data,
-            graph_data=graph_data,
-            objectives=request.objectives,
-            constraints=request.constraints
-        )
-
+        updated_route = optimizer.real_time_update(route, traffic_data)
+        
         return {
             'success': True,
             'data': updated_route,
             'timestamp': datetime.now().isoformat()
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Route update failed: {e}")
         logger.error(f"Internal error: {e}")

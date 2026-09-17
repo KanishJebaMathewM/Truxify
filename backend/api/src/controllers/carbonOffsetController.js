@@ -8,16 +8,9 @@ const getFootprint = async (req, res) => {
             return res.status(400).json({ error: 'distanceKm and weightKg are required' });
         }
 
-        const distance = Number(distanceKm);
-        const weight = Number(weightKg);
-
-        if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(weight) || weight <= 0) {
-            return res.status(400).json({ error: 'distanceKm and weightKg must be positive finite numbers' });
-        }
-
         const footprint = carbonOffsetService.calculateFootprint(
-            distance,
-            weight
+            parseFloat(distanceKm),
+            parseFloat(weightKg)
         );
 
         return res.status(200).json({ success: true, carbonTons: footprint });

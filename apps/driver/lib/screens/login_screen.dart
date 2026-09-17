@@ -276,46 +276,4 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
-
-  
-
-  
-
-  // Validates phone number, manages SnackBar alerts, and extracts clean 10-digit format
-  String? _validateAndGetCleanedPhone(TextEditingController controller) {
-    String raw = controller.text.trim();
-    String cleaned = raw.replaceAll(RegExp(r"\\D"), "");
-
-    if (cleaned.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please enter a phone number"),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return null;
-    }
-
-    if (cleaned.length != 10 || !RegExp(r"^[0-9]{10}$").hasMatch(cleaned)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please enter a valid 10-digit phone number"),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return null;
-    }
-
-    return cleaned;
-  }
-
-  // Primary OTP request trigger bound to UI action
-  void handleOtpRequest(TextEditingController controller) {
-    final String? cleanedPhone = _validateAndGetCleanedPhone(controller);
-    if (cleanedPhone == null) {
-      return;
-    }
-    debugPrint("[LoginScreen] Phone validation passed.");
-  }
-
 }

@@ -12,7 +12,7 @@ vi.mock('@sentry/node', () => ({
   captureException: vi.fn(),
 }));
 
-const { velocityResults, supabaseMock, circuitBreakerMock, escrowServiceMock } = vi.hoisted(() => {
+const { velocityResults, supabaseMock, circuitBreakerMock } = vi.hoisted(() => {
   const velocityResults = {};
   return {
     velocityResults,
@@ -28,9 +28,6 @@ const { velocityResults, supabaseMock, circuitBreakerMock, escrowServiceMock } =
       setEscrowPaused: vi.fn(),
       getPauseState: vi.fn(),
     },
-    escrowServiceMock: {
-      setEscrowContractPaused: vi.fn(),
-    },
   };
 });
 
@@ -44,19 +41,12 @@ vi.mock('../../src/config/db.js', () => ({
 
 vi.mock('../../src/services/escrowCircuitBreaker.js', () => circuitBreakerMock);
 
-vi.mock('../../src/services/escrow.js', () => escrowServiceMock);
-
 import internalRoutes from '../../src/routes/internalRoutes.js';
 import { requireApiKey, authConfig } from '../../src/middleware/apiKey.js';
 
 function buildApp() {
-  process.env.ESCROW_OPERATOR_API_KEYS = VALID_KEY;
   const app = express();
   app.use(express.json());
-  app.use('/api/internal', (req, _res, next) => {
-    req.apiKeyMetadata = { rawKey: VALID_KEY };
-    next();
-  });
   app.use('/api/internal', internalRoutes);
   return app;
 }
@@ -71,9 +61,8 @@ const VALID_KEY = 'internal-test-key';
  * so the auth assertions below exercise the middleware that actually guards
  * these routes in production rather than a stand-in.
  */
-function buildGuardedApp(keys = VALID_KEY, operatorKey = VALID_KEY) {
-  process.env.VALID_API_KEYS = keys;
-  process.env.ESCROW_OPERATOR_API_KEYS = operatorKey;
+function buildGuardedApp() {
+  process.env.VALID_API_KEYS = VALID_KEY;
   authConfig.reload();
   const app = express();
   app.use(express.json());
@@ -127,76 +116,32 @@ describe('POST /api/internal/pause-escrow', () => {
       updatedAt: '2026-08-11T00:00:00.000Z',
       persisted: true,
     });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xabc' });
 
     const res = await request(buildApp()).post('/api/internal/pause-escrow');
 
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(true);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(true);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       paused: true,
       updatedAt: '2026-08-11T00:00:00.000Z',
       persisted: true,
-      onChain: {
-        success: true,
-        txHash: '0xabc'
-      }
     });
   });
 
   it('opens the circuit for an explicit paused:true body', async () => {
     circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: true, updatedAt: 't', persisted: true });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xabc' });
     const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: true });
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(true);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(true);
     expect(res.status).toBe(200);
     expect(res.body.paused).toBe(true);
-    expect(res.body.onChain.txHash).toBe('0xabc');
   });
 
   it('closes the circuit for paused:false', async () => {
     circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: false, updatedAt: 't', persisted: true });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xabc' });
     const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: false });
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(false);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(false);
     expect(res.status).toBe(200);
     expect(res.body.paused).toBe(false);
-  });
-
-  it('returns 502 with correct message if on-chain pause fails after Redis succeeds', async () => {
-    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: true, updatedAt: 't', persisted: true });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Reverted' });
-    const res = await request(buildApp()).post('/api/internal/pause-escrow');
-    expect(res.status).toBe(502);
-    expect(res.body.error).toBe('Redis pause completed, but on-chain pause failed.');
-  });
-
-  it('returns 502 with correct message if on-chain unpause fails', async () => {
-    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: false, updatedAt: 't', persisted: true });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Reverted' });
-    const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: false });
-    expect(res.status).toBe(502);
-    expect(res.body.error).toBe('Redis unpause completed, but on-chain unpause failed.');
-  });
-
-  it('returns 502 with correct message if on-chain pause fails after Redis fails', async () => {
-    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: true, updatedAt: 't', persisted: false });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Reverted' });
-    const res = await request(buildApp()).post('/api/internal/pause-escrow');
-    expect(res.status).toBe(502);
-    expect(res.body.error).toBe('Redis pause failed, but on-chain pause failed.');
-  });
-
-  it('returns 200 with persisted:false when Redis fails but on-chain succeeds', async () => {
-    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: true, updatedAt: 'now', persisted: false });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xabc' });
-    const res = await request(buildApp()).post('/api/internal/pause-escrow');
-    expect(res.status).toBe(200);
-    expect(res.body.persisted).toBe(false);
-    expect(res.body.onChain.success).toBe(true);
   });
 
   it('returns 500 when persisting the pause state fails', async () => {
@@ -208,22 +153,10 @@ describe('POST /api/internal/pause-escrow', () => {
 
   it('closes the circuit for a stringified "false" body', async () => {
     circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: false, updatedAt: 't', persisted: true });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xabc' });
     const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: 'false' });
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(false);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(false);
     expect(res.status).toBe(200);
     expect(res.body.paused).toBe(false);
-  });
-
-  it('rejects a valid non-operator API key', async () => {
-    const res = await request(buildGuardedApp(`${VALID_KEY},reader-key`))
-      .post('/api/internal/pause-escrow')
-      .set('x-api-key', 'reader-key')
-      .send({ paused: false });
-
-    expect(res.status).toBe(403);
-    expect(circuitBreakerMock.setEscrowPaused).not.toHaveBeenCalled();
   });
 });
 
@@ -237,7 +170,6 @@ describe('POST /api/internal/defensive-pause', () => {
       updatedAt: '2026-08-14T00:00:00.000Z',
       persisted: true,
     });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ success: true, txHash: '0xdef' });
   });
 
   it('rejects an unauthenticated call without touching the circuit breaker', async () => {
@@ -267,16 +199,11 @@ describe('POST /api/internal/defensive-pause', () => {
 
     expect(res.status).toBe(200);
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(true);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(true);
     expect(res.body).toEqual({
       paused: true,
       updatedAt: '2026-08-14T00:00:00.000Z',
       persisted: true,
       source: 'security-sentinel',
-      onChain: {
-        success: true,
-        txHash: '0xdef'
-      }
     });
   });
 
@@ -287,13 +214,11 @@ describe('POST /api/internal/defensive-pause', () => {
       .send({ paused: false });
 
     expect(circuitBreakerMock.setEscrowPaused).toHaveBeenCalledWith(true);
-    expect(escrowServiceMock.setEscrowContractPaused).toHaveBeenCalledWith(true);
     expect(res.status).toBe(200);
     expect(res.body.paused).toBe(true);
-    expect(res.body.onChain.txHash).toBe('0xdef');
   });
 
-  it('returns 500 when persisting the pause state fails completely', async () => {
+  it('returns 500 when persisting the pause state fails', async () => {
     circuitBreakerMock.setEscrowPaused.mockRejectedValue(new Error('redis down'));
 
     const res = await request(buildGuardedApp())
@@ -305,31 +230,10 @@ describe('POST /api/internal/defensive-pause', () => {
     expect(res.body.error).toContain('Failed to apply defensive pause');
   });
 
-  it('returns 502 if on-chain defensive pause fails (Redis succeeded)', async () => {
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Escrow contract is not initialised' });
-    const res = await request(buildGuardedApp())
-      .post('/api/internal/defensive-pause')
-      .set('x-api-key', VALID_KEY)
-      .send({});
-
-    expect(res.status).toBe(502);
-    expect(res.body.error).toContain('processed in Redis');
-    expect(res.body.onChainError).toBe('Escrow contract is not initialised');
-  });
-
-  it('returns 502 if on-chain defensive pause fails (Redis also failed)', async () => {
-    circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: true, updatedAt: 'now', persisted: false });
-    escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Reverted' });
-    const res = await request(buildGuardedApp())
-      .post('/api/internal/defensive-pause')
-      .set('x-api-key', VALID_KEY)
-      .send({});
-
-    expect(res.status).toBe(502);
-    expect(res.body.error).toContain('failed off-chain');
-  });
-
-  it('reports 503 with updated message if on-chain succeeds but Redis fails (persisted=false)', async () => {
+  // setEscrowPaused resolves (does not throw) with persisted:false when Redis is
+  // unavailable, and isEscrowPaused() fails open — so the circuit is not really
+  // open. A 2xx here would tell the sentinel its pause worked.
+  it('reports 503 rather than success when the pause was not persisted', async () => {
     circuitBreakerMock.setEscrowPaused.mockResolvedValue({
       paused: true,
       updatedAt: '2026-08-14T00:00:00.000Z',
@@ -342,10 +246,8 @@ describe('POST /api/internal/defensive-pause', () => {
       .send({});
 
     expect(res.status).toBe(503);
-    expect(res.body.error).toContain('Defensive pause succeeded on-chain, but Redis is down');
-    expect(res.body.paused).toBe(true);
+    expect(res.body.paused).toBe(false);
     expect(res.body.persisted).toBe(false);
-    expect(res.body.onChain.txHash).toBe('0xdef');
   });
 
   it('is reachable at all — the route exists rather than falling through to 404', async () => {

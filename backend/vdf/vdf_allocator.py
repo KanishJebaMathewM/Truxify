@@ -83,7 +83,6 @@ class VdfLoadAllocator:
             "driver_id": driver_id,
             "vdf_output": output_y,
             "proof": proof,
-            "is_fairly_allocated": is_valid,
         }
 
 vdf_allocator = VdfLoadAllocator()

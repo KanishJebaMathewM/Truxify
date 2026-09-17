@@ -27,14 +27,7 @@ class BatchCallBuilder {
       callData: this.escrowIface.encodeFunctionData('getBooking', [bookingId]),
       decodeFn: (data) => {
         const decoded = this.escrowIface.decodeFunctionResult('getBooking', data);
-        return {
-          status: decoded.status,
-          paid: decoded.paid,
-          started: decoded.started,
-          amount: decoded.amount ? decoded.amount.toString() : '0',
-          customer: decoded.customer,
-          driver: decoded.driver,
-        };
+        return { status: decoded.status };
       },
     };
   }

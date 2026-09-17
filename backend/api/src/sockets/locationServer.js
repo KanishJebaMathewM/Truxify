@@ -1,13 +1,10 @@
-import { Server } from "socket.io";
+﻿import { Server } from "socket.io";
 import logger from "../middleware/logger.js";
 import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
-import { scheduleEtaRecalculationOnLocationUpdate } from "../services/order/etaService.js";
-import { OrderRepository } from "../repositories/orderRepository.js";
 
 let io = null;
-let _orderRepository = null;
 
 // ─── Heartbeat / dead-connection sweep ───────────────────────────────────────
 
@@ -487,26 +484,6 @@ async function verifyBookingOwnership(customerId, bookingId) {
   } catch (err) {
     logger.error({ err }, '[WS] isCustomerAuthorized error');
     return false;
-  }
-}
-
-/**
- * Broadcasts an ETA update to customers subscribed to a booking room.
- * Mirrors the tracker.js `eta_update` event payload for Socket.IO clients.
- */
-export function emitEtaUpdateToBooking(bookingId, eta) {
-  if (!io || !bookingId || !eta) return;
-
-  try {
-    io.of("/customer")
-      .to(`booking:${bookingId}`)
-      .emit("eta_update", {
-        eta,
-        bookingId,
-        timestamp: new Date().toISOString(),
-      });
-  } catch (error) {
-    logger.error({ bookingId, error: error.message }, '[WS] ETA broadcast error');
   }
 }
 

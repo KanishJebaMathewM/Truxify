@@ -206,7 +206,6 @@ import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '.
 import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
-const MAX_GEOFENCE_RADIUS_M = 500;
 
 const milestoneStore = createStore('rl:milestone:');
 const milestoneLimiter = rateLimit({
@@ -484,8 +483,8 @@ router.post(
       let geofenceRadiusM = 500;
       if (geofence_radius_m !== undefined && geofence_radius_m !== null && geofence_radius_m !== '') {
         const parsedRadius = parseFloat(geofence_radius_m);
-        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0 || parsedRadius > MAX_GEOFENCE_RADIUS_M) {
-          return res.status(400).json({ error: `geofence_radius_m must be between 0 and ${MAX_GEOFENCE_RADIUS_M} meters.` });
+        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
+          return res.status(400).json({ error: 'geofence_radius_m must be a finite positive number.' });
         }
         geofenceRadiusM = parsedRadius;
       }

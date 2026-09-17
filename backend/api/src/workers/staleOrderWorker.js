@@ -104,7 +104,7 @@ export async function reconcileStaleOrders(repository) {
       while (index < staleOrders.length) {
         const currentIndex = index++;
         const order = staleOrders[currentIndex];
-        if (order && order.id) {
+        if (order) {
           if (globalLockAcquired && redisClient) {
             try {
               await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
@@ -157,10 +157,6 @@ export async function reconcileStaleOrders(repository) {
  * @returns {Promise<void>}
  */
 async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
-  if (!staleOrder || !staleOrder.id) {
-    return;
-  }
-
   try {
     const { data: cancelled, error: rpcErr } = await repository.cancelStaleOrder(
       staleOrder.id,
@@ -175,21 +171,16 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
       return;
     }
 
-    const won = Array.isArray(cancelled) ? (cancelled.length > 0 && Boolean(cancelled[0])) : Boolean(cancelled);
+    const won = Array.isArray(cancelled) ? cancelled.length > 0 : Boolean(cancelled);
     if (!won) {
       metrics.skipped += 1;
       logger.info(`[StaleOrderWorker] Order ${staleOrder.id} was not cancelled (accepted or changed concurrently), skipping side effects.`);
       return;
     }
 
-    const order = Array.isArray(cancelled) ? cancelled[0] : cancelled;
-    if (!order) {
-      metrics.skipped += 1;
-      return;
-    }
-
     metrics.cancelled += 1;
 
+    const order = Array.isArray(cancelled) ? cancelled[0] : cancelled;
     const orderDisplayId = order.order_display_id ?? staleOrder.order_display_id;
     // Orders whose escrow has funds to refund (for customer messaging), but an
     // on-chain refund must ONLY be submitted when the escrow is still 'funded'.
@@ -223,25 +214,25 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
     }
 
     // Send a notification to the customer
-    if (order.customer_id) {
-      try {
-        await sendPushNotification(
-          order.customer_id,
-          'Order Cancelled',
-          requiresRefund
-            ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. Any escrowed funds are being refunded.`
+    try {
+      await sendPushNotification(
+        order.customer_id,
+        'Order Cancelled',
+        requiresRefund && refundSubmitted
+          ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. Any escrowed funds are being refunded.`
+          : requiresRefund
+            ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. We will process your refund shortly.`
             : 'Your order was cancelled because it received no accepted bids within 24 hours. Please try posting again.',
-          'order_update',
-          { orderId: order.id ?? staleOrder.id, orderDisplayId }
-        );
-        logger.info(`[StaleOrderWorker] Cancelled order ${orderDisplayId} and notified customer ${order.customer_id}.`);
-      } catch (notifyErr) {
-        logger.warn(`[StaleOrderWorker] Cancelled order ${orderDisplayId}, but failed to notify customer ${order.customer_id}: ${notifyErr.message}`);
-      }
+        'order_update',
+        { orderId: order.id, orderDisplayId }
+      );
+      logger.info(`[StaleOrderWorker] Cancelled order ${orderDisplayId} and notified customer ${order.customer_id}.`);
+    } catch (notifyErr) {
+      logger.warn(`[StaleOrderWorker] Cancelled order ${orderDisplayId}, but failed to notify customer ${order.customer_id}: ${notifyErr.message}`);
     }
   } catch (err) {
     metrics.errors += 1;
-    logger.error(`[StaleOrderWorker] Error processing stale order ${staleOrder?.id}: ${err.message}`);
+    logger.error(`[StaleOrderWorker] Error processing stale order ${staleOrder.id}: ${err.message}`);
   }
 }
 

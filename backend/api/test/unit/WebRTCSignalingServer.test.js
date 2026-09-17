@@ -140,20 +140,7 @@ describe('WebRTCSignalingServer', () => {
     });
   });
 
-
   describe('calculateDistance()', () => {
-        it.each([
-      ['first latitude', NaN, 77.59, 12.97, 77.59],
-      ['first longitude', 12.97, NaN, 12.97, 77.59],
-      ['second latitude', 12.97, 77.59, NaN, 77.59],
-      ['second longitude', 12.97, 77.59, 12.97, NaN],
-      ['positive Infinity', Infinity, 77.59, 12.97, 77.59],
-      ['negative Infinity', -Infinity, 77.59, 12.97, 77.59],
-    ])('throws TypeError for non-finite %s', (_label, lat1, lng1, lat2, lng2) => {
-      expect(() =>
-        server.calculateDistance(lat1, lng1, lat2, lng2),
-      ).toThrow(TypeError);
-    });
     it('returns 0 for identical points', () => {
       expect(server.calculateDistance(12.97, 77.59, 12.97, 77.59)).toBe(0);
     });

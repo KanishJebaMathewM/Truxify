@@ -3,7 +3,7 @@ const { ethers } = require("hardhat");
 
 describe("ZKPrivacy encrypted data commitment", function () {
     it("binds encryptedData to the stored commitment", async function () {
-        const [, recipient] = await ethers.getSigners();
+        const [sender, recipient] = await ethers.getSigners();
         const ZKPrivacy = await ethers.getContractFactory("ZKPrivacy");
         const zkPrivacy = await ZKPrivacy.deploy(ethers.ZeroAddress);
         await zkPrivacy.waitForDeployment();
@@ -16,7 +16,8 @@ describe("ZKPrivacy encrypted data commitment", function () {
         const tx = await zkPrivacy.createPrivateTransaction(
             recipient.address,
             amount,
-            encryptedData
+            encryptedData,
+            { value: amount }
         );
         const receipt = await tx.wait();
         const block = await ethers.provider.getBlock(receipt.blockNumber);
@@ -29,13 +30,13 @@ describe("ZKPrivacy encrypted data commitment", function () {
 
         const expectedCommitment = ethers.solidityPackedKeccak256(
             ["uint256", "address", "uint256", "bytes32"],
-            [block.timestamp, (await ethers.getSigners())[0].address, amount, encryptedDataHash]
+            [block.timestamp, sender.address, amount, encryptedDataHash]
         );
         const commitmentForAlternativeData = ethers.solidityPackedKeccak256(
             ["uint256", "address", "uint256", "bytes32"],
             [
                 block.timestamp,
-                (await ethers.getSigners())[0].address,
+                sender.address,
                 amount,
                 ethers.keccak256(alternativeData)
             ]

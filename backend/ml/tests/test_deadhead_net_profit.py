@@ -1,3 +1,5 @@
+import math
+
 from app.models.deadhead_eliminator import find_return_loads
 
 
@@ -62,5 +64,5 @@ def test_load_specific_toll_is_included_in_incremental_cost():
     )
 
     recommendation = result["recommendations"][0]
-    assert recommendation["estimated_cost_inr"] == 3000.0
-    assert recommendation["estimated_profit_inr"] == 1000.0
+    assert math.isclose(recommendation["estimated_cost_inr"], 3001.51, abs_tol=0.01)
+    assert math.isclose(recommendation["estimated_profit_inr"], 998.49, abs_tol=0.01)

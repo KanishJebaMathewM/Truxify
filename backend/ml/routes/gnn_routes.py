@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 import networkx as nx
 import json
 from datetime import datetime
@@ -52,7 +52,7 @@ class Node(BaseModel):
     lat: float
     lng: float
     traffic: Optional[float] = 0
-    road_type: Optional[str] = "local"
+    road_type: Literal["highway", "arterial", "collector", "local", "street"] = "local"
     speed_limit: Optional[float] = 50
 
 class Edge(BaseModel):

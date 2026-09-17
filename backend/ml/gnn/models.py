@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # traffic, 5-element road-type one-hot, speed_limit -> 9 features).
 GNN_NODE_FEATURE_DIM = 9
 GNN_EDGE_FEATURE_DIM = 5
+GNN_ROAD_TYPES = ('highway', 'arterial', 'collector', 'local', 'street')
 
 class GNNRouteModel(nn.Module):
     """Graph Neural Network for Route Optimization."""
@@ -107,6 +108,13 @@ class GraphNetworkBuilder:
         
     def build_road_network(self, nodes, edges):
         """Build road network from nodes and directed source-to-target edges."""
+        for node in nodes:
+            road_type = node.get('road_type', 'local')
+            if road_type not in GNN_ROAD_TYPES:
+                raise ValueError(
+                    f"Unsupported road type '{road_type}'; expected one of {GNN_ROAD_TYPES}"
+                )
+
         # Add nodes
         for node in nodes:
             self.graph.add_node(
@@ -184,10 +192,13 @@ class GraphNetworkBuilder:
     
     def _road_type_encoding(self, road_type):
         """Encode road type to one-hot"""
-        types = ['highway', 'arterial', 'collector', 'local', 'street']
-        encoding = [0] * len(types)
-        if road_type in types:
-            encoding[types.index(road_type)] = 1
+        if road_type not in GNN_ROAD_TYPES:
+            raise ValueError(
+                f"Unsupported road type '{road_type}'; expected one of {GNN_ROAD_TYPES}"
+            )
+
+        encoding = [0] * len(GNN_ROAD_TYPES)
+        encoding[GNN_ROAD_TYPES.index(road_type)] = 1
         return encoding
     
     def get_pytorch_data(self):

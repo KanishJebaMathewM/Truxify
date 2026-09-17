@@ -32,7 +32,7 @@ dependencies:
   flutter_map: ^8.1.1
   latlong2: ^0.10.1
   http: ^1.6.0
-  shared_preferences: ^2.5.5
+  shared_preferences: 2.2.2
   sqflite: ^2.3.0
   path_provider: ^2.1.2
   connectivity_plus: ^7.2.0

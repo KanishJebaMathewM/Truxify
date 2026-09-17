@@ -30,7 +30,7 @@ async def update_eta_realtime(self, order_id, current_location, destination):
             ]])
 
             route_signature = self.build_route_signature(destination)
-            predicted_speed_mps = await run_inference(
+            predicted_speed_mps = await _traffic_pipeline.run_inference(
                 self.predict_eta,
                 features,
                 f"order_{order_id}",

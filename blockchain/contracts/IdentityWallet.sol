@@ -2,8 +2,13 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract IdentityWallet is Ownable {
+    using ECDSA for bytes32;
+
+    mapping(address => bool) public trustedIssuers;
+    event TrustedIssuerUpdated(address indexed issuer, bool status);
     // Wallet structure
     struct Wallet {
         address owner;
@@ -26,7 +31,15 @@ contract IdentityWallet is Ownable {
     event CredentialAdded(address indexed owner, bytes32 credentialId);
     event CredentialRemoved(address indexed owner, bytes32 credentialId);
 
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) {
+        trustedIssuers[msg.sender] = true;
+    }
+
+    function setTrustedIssuer(address issuer, bool status) external onlyOwner {
+        require(issuer != address(0), "Invalid issuer address");
+        trustedIssuers[issuer] = status;
+        emit TrustedIssuerUpdated(issuer, status);
+    }
 
     function createWallet(string memory did) external {
         require(!hasWallet[msg.sender], "Wallet already exists");
@@ -47,9 +60,15 @@ contract IdentityWallet is Ownable {
         emit WalletCreated(msg.sender, did);
     }
 
-    function addCredential(bytes32 credentialId) external {
+    function addCredential(bytes32 credentialId, bytes memory issuerSig) external {
         require(hasWallet[msg.sender], "Wallet not found");
         require(!credentialInWallet[credentialId][msg.sender], "Credential already in wallet");
+
+        bytes32 messageHash = keccak256(abi.encodePacked(credentialId, msg.sender));
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+        address recoveredIssuer = ethSignedMessageHash.recover(issuerSig);
+
+        require(trustedIssuers[recoveredIssuer], "Unissued or untrusted credential signature");
 
         wallets[msg.sender].credentials.push(credentialId);
         credentialInWallet[credentialId][msg.sender] = true;

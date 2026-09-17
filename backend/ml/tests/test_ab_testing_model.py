@@ -12,6 +12,48 @@ def make_model(threshold=0.95):
     return model
 
 
+def test_evaluation_uses_persisted_production_generation():
+    """A test must compare metrics against the generation it routed to."""
+    model = make_model()
+    model._test_states = {
+        "demand-test": {
+            "production_version": "gen_current",
+            "shadow_version": "gen_candidate",
+        }
+    }
+    model.get_production_version = lambda: "gen_current"
+
+    class Metric:
+        def __init__(self, version, name, value):
+            self.model_version = version
+            self.metric_name = name
+            self.metric_value = value
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return [
+                Metric("gen_current", "mae", 10.0),
+                Metric("gen_candidate", "mae", 5.0),
+            ]
+
+    class Session:
+        def query(self, *_args):
+            return Query()
+
+        def close(self):
+            pass
+
+    model.Session = lambda: Session()
+    result = model.evaluate_test("demand-test")
+
+    assert result["results"]["mae"]["production"] == 10.0
+    assert result["results"]["mae"]["shadow"] == 5.0
+    assert result["shadow_better"] is True
+
+
 class TestCalculateImprovement:
     """Tests for the improvement-percentage helper."""
 

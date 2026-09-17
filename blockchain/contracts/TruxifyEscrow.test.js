@@ -172,6 +172,49 @@ describe("TruxifyEscrow", function () {
     });
   });
 
+  describe("updateDropLocation", function () {
+    async function createBooking(bookingId, amount = AMOUNT) {
+      const sig = await signCommitment(owner, escrow, customer.address, bookingId, driver.address, amount);
+      await escrow.connect(customer).createBooking(bookingId, driver.address, sig, { value: amount });
+    }
+
+    it("tops up an active booking when the new amount increases", async function () {
+      await createBooking(1);
+      const newAmount = ethers.parseEther("1.25");
+
+      await expect(escrow.connect(owner).updateDropLocation(1, newAmount, {
+        value: newAmount - AMOUNT,
+      }))
+        .to.emit(escrow, "BookingAmountUpdated")
+        .withArgs(1, AMOUNT, newAmount);
+
+      expect((await escrow.bookings(1)).amount).to.equal(newAmount);
+    });
+
+    it("creates a customer pull refund when the new amount decreases", async function () {
+      await createBooking(1);
+      const newAmount = ethers.parseEther("0.75");
+
+      await expect(escrow.connect(owner).updateDropLocation(1, newAmount))
+        .to.emit(escrow, "WithdrawalReady")
+        .withArgs(1, customer.address, AMOUNT - newAmount);
+
+      expect((await escrow.bookings(1)).amount).to.equal(newAmount);
+      expect(await escrow.pendingWithdrawals(customer.address)).to.equal(AMOUNT - newAmount);
+    });
+
+    it("rejects an incorrect top-up and non-owner caller", async function () {
+      await createBooking(1);
+      const newAmount = ethers.parseEther("1.25");
+
+      await expect(escrow.connect(owner).updateDropLocation(1, newAmount, { value: 1n }))
+        .to.be.revertedWith("TruxifyEscrow: Incorrect top-up amount");
+      await expect(escrow.connect(attacker).updateDropLocation(1, newAmount, {
+        value: newAmount - AMOUNT,
+      })).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+    });
+  });
+
   describe("concurrent deposits do not collide on a shared nonce (issue #13119)", function () {
     it("funds two distinct bookings built back-to-back with distinct valid nonces", async function () {
       // Simulate two orders accepted in quick succession: the backend reads the

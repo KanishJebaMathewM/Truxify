@@ -86,6 +86,7 @@ flutter run
 ### 3. Backend API (Node.js & Express)
 
 ```bash
+cd backend/api
 npm install
 npm run lint
 npm test
@@ -213,8 +214,8 @@ git commit --no-verify -m "fix(cache): resolve Redis cache-aside TTL expiry on d
 |---|---|
 | **Flutter Apps** | `flutter analyze` |
 | **Node.js Backend** | `npm run lint` |
-| **Python ML Service** | `ruff check .` or `flake8` |
-| **Solidity Contracts** | `npx solhint 'contracts/**/*.sol'` |
+| **Python ML Service** | `python -m ruff check .` |
+| **Solidity Contracts** | `npx solhint@5.0.5 'contracts/**/*.sol'` |
 
 **Mac/Linux:**
 ```bash

@@ -137,6 +137,14 @@ BEGIN
   END IF;
 
   IF p_action = 'retry' THEN
+    IF EXISTS (
+      SELECT 1 FROM wallet_transactions
+      WHERE id = p_withdrawal_id
+        AND (payout_attempted_at IS NOT NULL OR settlement_ref IS NOT NULL)
+    ) THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Cannot retry a withdrawal after payout dispatch was attempted');
+    END IF;
+
     -- Reset to pending, clear attempt & error, schedule immediate retry
     UPDATE wallet_transactions
     SET status = 'pending',

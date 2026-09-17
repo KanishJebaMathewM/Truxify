@@ -39,6 +39,16 @@ describe('routeRoutes', () => {
   });
 
   describe('GET /routes/estimate', () => {
+    it.each(['', '   '])('returns 400 when routeId is blank', async (routeId) => {
+      const res = await request(makeApp())
+        .get('/routes/estimate')
+        .query({ routeId, pickup_lat: '12.3', pickup_lng: '77.6', drop_lat: '13.1', drop_lng: '80.2' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Invalid routeId provided.');
+      expect(mockOsrm.getRouteEstimate).not.toHaveBeenCalled();
+    });
+
     it('returns 400 when coordinates are blank', async () => {
       const res = await request(makeApp()).get('/routes/estimate').query({ pickup_lat: '', pickup_lng: '', drop_lat: '', drop_lng: '' });
       expect(res.status).toBe(400);

@@ -60,13 +60,16 @@ class AtomicSwapService {
         const parsedAmount = ethers.parseEther(amount.toString());
         const swapId = this.generateSwapId();
 
+        const token = tokenAddress || ethers.ZeroAddress;
+        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+
         const tx = await this.swap.openSwap(
                 swapId,
                 counterparty,
                 hashLock,
                 this.lockDuration,
                 {
-                    value: parsedAmount,
+                    value,
                     gasLimit: 300000
                 }
             );
@@ -150,19 +153,22 @@ class AtomicSwapService {
         }
         const parsedAmount = ethers.parseEther(amount.toString());
         const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${counterparty}:${tokenAddress}:${amount}`));
-            const swapId = this.generateSwapId();
+        const swapId = this.generateSwapId();
 
-            const tx = await this.swap.openSwap(
-                swapId,
-                counterparty,
-                hashLock,
-                this.lockDuration,
-                {
-                    value: parsedAmount,
-                    gasLimit: 350000
-                }
-            );
-            const receipt = await tx.wait();
+        const token = tokenAddress || ethers.ZeroAddress;
+        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+
+        const tx = await this.swap.openSwap(
+            swapId,
+            counterparty,
+            hashLock,
+            this.lockDuration,
+            {
+                value,
+                gasLimit: 350000
+            }
+        );
+        const receipt = await tx.wait();
 
             await this.storeCrossChainSwap({
                 swapId,

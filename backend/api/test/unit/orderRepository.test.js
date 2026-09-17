@@ -268,3 +268,154 @@ describe('OrderRepository truck lookup null guards', () => {
     expect(calls).toEqual(['from', 'select', 'in']);
   });
 });
+
+describe('OrderRepository.updateOrder transactional outbox (#11215)', () => {
+  const ORDER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  it('routes through order_update_with_outbox RPC when eventType is provided', async () => {
+    let rpcCalled = false;
+    let rpcArgs = null;
+
+    const mockClient = {
+      rpc: vi.fn((name, params) => {
+        if (name === 'order_update_with_outbox') {
+          rpcCalled = true;
+          rpcArgs = params;
+          return {
+            single: vi.fn().mockResolvedValue({
+              data: { id: ORDER_ID, status: 'delivered', order_display_id: '#ORD-100' },
+              error: null,
+            }),
+          };
+        }
+        throw new Error(`Unexpected RPC ${name}`);
+      }),
+      from: vi.fn(),
+    };
+
+    const repo = new OrderRepository(mockClient);
+    const updates = { status: 'delivered' };
+
+    const result = await repo.updateOrder(ORDER_ID, updates, 'ORDER_DELIVERED', 'idemp-key-1');
+
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({ id: ORDER_ID, status: 'delivered' });
+    expect(rpcCalled).toBe(true);
+    expect(rpcArgs).toEqual({
+      p_order_id: ORDER_ID,
+      p_updates: updates,
+      p_event_type: 'ORDER_DELIVERED',
+      p_payload: {
+        orderId: ORDER_ID,
+        status: 'delivered',
+        updates,
+      },
+      p_idempotency_key: 'idemp-key-1',
+    });
+    // Verifies no separate non-atomic from('orders') update was called
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+
+  it('aborts atomically and produces no event when RPC fails / simulated crash', async () => {
+    const mockClient = {
+      rpc: vi.fn(() => ({
+        single: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'transaction aborted: simulated node crash / dead-letter constraint', code: '40001' },
+        }),
+      })),
+      from: vi.fn(),
+    };
+
+    const repo = new OrderRepository(mockClient);
+    const result = await repo.updateOrder(ORDER_ID, { status: 'cancelled' }, 'ORDER_CANCELLED');
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeDefined();
+    expect(result.error.message).toContain('simulated node crash');
+    // Ensure no fallback or separate writes occurred
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+
+  it('uses standard direct table update when eventType is null', async () => {
+    let fromCalled = false;
+    let updateCalled = false;
+
+    const mockChain = {
+      update: vi.fn(() => mockChain),
+      eq: vi.fn(() => mockChain),
+      select: vi.fn(() => mockChain),
+      single: vi.fn().mockResolvedValue({
+        data: { id: ORDER_ID, status: 'in_transit' },
+        error: null,
+      }),
+    };
+
+    const mockClient = {
+      rpc: vi.fn(),
+      from: vi.fn((table) => {
+        if (table === 'orders') {
+          fromCalled = true;
+          return mockChain;
+        }
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    };
+
+    const repo = new OrderRepository(mockClient);
+    const result = await repo.updateOrder(ORDER_ID, { status: 'in_transit' });
+
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({ id: ORDER_ID, status: 'in_transit' });
+    expect(fromCalled).toBe(true);
+    expect(mockClient.rpc).not.toHaveBeenCalled();
+  });
+
+  it('never falls back to direct table update when eventType is provided even on missing-RPC PGRST202 error', async () => {
+    const mockClient = {
+      rpc: vi.fn(() => ({
+        single: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'function order_update_with_outbox does not exist', code: 'PGRST202' },
+        }),
+      })),
+      from: vi.fn(),
+    };
+
+    const repo = new OrderRepository(mockClient);
+    const result = await repo.updateOrder(ORDER_ID, { status: 'cancelled' }, 'ORDER_CANCELLED');
+
+    expect(result.data).toBeNull();
+    expect(result.error).toBeDefined();
+    expect(result.error.code).toBe('PGRST202');
+    // Ensure no fallback occurred to preserve transactional-only guarantees
+    expect(mockClient.from).not.toHaveBeenCalled();
+  });
+
+  describe('findStaleFundingOrders composite cursor', () => {
+    it('applies composite or filter when after contains updated_at and id', async () => {
+      const mockChain = {
+        select: vi.fn(() => mockChain),
+        eq: vi.fn(() => mockChain),
+        not: vi.fn(() => mockChain),
+        or: vi.fn(() => mockChain),
+        order: vi.fn(() => mockChain),
+        limit: vi.fn(() => mockChain),
+      };
+
+      const mockClient = {
+        from: vi.fn(() => mockChain),
+      };
+
+      const repo = new OrderRepository(mockClient);
+      const cutoff = '2026-09-17T00:00:00.000Z';
+      const cursor = { updated_at: '2026-09-17T01:00:00.000Z', id: '11111111-2222-3333-4444-555555555555' };
+
+      await repo.findStaleFundingOrders(cutoff, { after: cursor, limit: 100 });
+
+      expect(mockChain.or).toHaveBeenCalledWith(
+        `updated_at.gt.${cursor.updated_at},and(updated_at.eq.${cursor.updated_at},id.gt.${cursor.id})`
+      );
+    });
+  });
+});

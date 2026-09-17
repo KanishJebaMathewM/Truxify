@@ -89,12 +89,11 @@ def gh_create_pr(issue_num, branch_name, title, body_lines):
 
 
 def read_file(path):
-    with open(os.path.join(WORKSPACE, path)) as f:
+    with open(os.path.join(WORKSPACE, path), encoding="utf-8") as f:
         return f.read()
 
-
 def write_file(path, content):
-    with open(os.path.join(WORKSPACE, path), "w") as f:
+    with open(os.path.join(WORKSPACE, path), "w", encoding="utf-8") as f:
         f.write(content)
 
 

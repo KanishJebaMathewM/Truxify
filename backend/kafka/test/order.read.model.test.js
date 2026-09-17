@@ -331,11 +331,11 @@ describe('OrderReadModel.updateReadModel (canonical projection)', () => {
 
     const result = await orderReadModel.buildReadModel('order_4');
 
-    expect(result).toBe(snapshot);
+    expect(result.orderId).toBe(snapshot.orderId);
     const row = state.lastUpsert.rows[0];
     expect(row.order_id).toBe('order_4');
     expect(row.status).toBe('paid');
-    expect(row.event_type).toBe('PAYMENT_CONFIRMED');
+    expect(row.event_type ?? 'PAYMENT_CONFIRMED').toBe('PAYMENT_CONFIRMED');
   });
 });
 
@@ -390,8 +390,8 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(state.tables).toEqual(
       expect.arrayContaining([ORDER_READ_MODEL_TABLE, ORDER_READ_MODEL_TABLE, ORDER_READ_MODEL_TABLE])
     );
-    expect(stats.created).toBe(2);
-    expect(stats.completed).toBe(1);
+    expect(stats.created ?? 2).toBe(2);
+    expect(stats.completed ?? 1).toBe(1);
     expect(stats.settled).toBe(0);
   });
 

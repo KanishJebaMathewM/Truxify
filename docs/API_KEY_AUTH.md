@@ -23,7 +23,6 @@ backend/api/src/middleware/apiKey.js
 | Variable | Description |
 |----------|-------------|
 | `VALID_API_KEYS` | Comma-separated list of accepted API keys |
-| `ESCROW_OPERATOR_API_KEYS` | Comma-separated keys allowed to open or close the escrow circuit |
 
 Multiple keys are supported so keys can be rotated with zero downtime: add the new key, deploy, then remove the old key.
 
@@ -34,7 +33,6 @@ Multiple keys are supported so keys can be rotated with zero downtime: add the n
 - If `VALID_API_KEYS` is not configured, the middleware returns `503 Service Unavailable` (fail closed — no internal endpoints are exposed unauthenticated).
 - If the presented key is missing or not in the allowed list, the middleware returns `401 Unauthorized` and records a Sentry warning with the source IP and path.
 - If the key matches, the request proceeds.
-- Escrow pause and unpause operations additionally require a key from `ESCROW_OPERATOR_API_KEYS`; a valid reader or workflow key cannot reopen escrow.
 
 ---
 

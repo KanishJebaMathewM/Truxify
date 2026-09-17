@@ -1,4 +1,3 @@
-import { assertOrderReadModelRow } from '../api/src/core/orders/read-model-schema.js';
 import { randomUUID as uuidv4 } from 'node:crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase, supabaseAdmin } from '../api/src/config/db.js';
@@ -14,7 +13,6 @@ import {
   EventStorePersistenceError,
   toEventStoreError,
 } from './errors.js';
-import { deriveOrderStatus } from '../api/src/core/orders/read-model-schema.js';
 
 // Topic names mirror the values in backend/kafka/config/kafka.config.js.
 // They are duplicated here (instead of importing TOPICS) so this package does
@@ -419,47 +417,22 @@ class EventStore {
      * after a rebuild.
      */
     async _upsertOrderReadModel(orderId, state, eventType, version) {
-        const status = state?.status || eventType;
-        const timeline = state?.timeline || [{ event: eventType, timestamp: new Date().toISOString() }];
-
-        const row = {
-            order_id: orderId,
-            payload: state,
-            event_type: eventType,
-            version: version ?? state?.version,
-            status,
-            timeline,
-            updated_at: new Date().toISOString()
-        };
-
-        try {
-            assertOrderReadModelRow(row);
-        } catch (assertionErr) {
-            this.logger.error('Order read model row assertion failed:', assertionErr);
-            throw assertionErr;
-        }
-
         const { error } = await this._client
             .from('orders_read_model')
             .upsert([{
                 order_id: orderId,
                 payload: state,
-                status: deriveOrderStatus(state),
                 event_type: eventType,
                 version: version ?? state?.version,
                 updated_at: new Date().toISOString()
             }], {
                 onConflict: 'order_id'
             });
-                onConflict: 'order_id'
-            });
 
         if (error) {
             this.logger.error('Failed to update order read model:', error);
-            throw error;
         }
     }
-
 
     async updateOrderReadModel(event) {
         const state = await this.getAggregateState(event.aggregateId);
@@ -599,10 +572,7 @@ class EventStore {
             .select('*');
 
         if (filters.status) {
-            // Normalize to lowercase so callers that pass uppercase values
-            // (e.g. 'CREATED' from the write side) still match the canonical
-            // lowercase values stored in the status column.
-            query = query.eq('status', filters.status.toLowerCase());
+            query = query.eq('payload->>status', filters.status);
         }
         if (filters.customerId) {
             query = query.eq('payload->>customerId', filters.customerId);

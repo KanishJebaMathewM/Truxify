@@ -1,5 +1,5 @@
 {
-  "name": "Demand Forecast Model Auto-Rollback Pipeline",
+  "name": "ML Model Auto-Rollback Pipeline",
   "nodes": [
     {
       "parameters": {
@@ -13,13 +13,16 @@
       },
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "id": "schedule-trigger",
       "name": "Schedule Check"
     },
     {
       "parameters": {
-        "url": "http://ml-engine:8000/models/demand/status",
+        "url": "http://ml-engine:8000/ab-testing/status",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -33,13 +36,16 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [200, 0],
-      "id": "check-demand-model",
-      "name": "Check Active Demand Model"
+      "position": [
+        200,
+        0
+      ],
+      "id": "check-active-tests",
+      "name": "Check Active Tests"
     },
     {
       "parameters": {
-        "url": "http://ml-engine:8000/models/demand/status",
+        "url": "={{$node[\"Check Active Tests\"].json.active_test ? 'http://ml-engine:8000/ab-testing/evaluate/' + $node[\"Check Active Tests\"].json.active_test.test_id : 'http://ml-engine:8000/ab-testing/status'}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -53,20 +59,26 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [400, 0],
-      "id": "evaluate-demand-model",
-      "name": "Evaluate Demand Model"
+      "position": [
+        400,
+        0
+      ],
+      "id": "evaluate-test",
+      "name": "Evaluate Test"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const data = $input.item.json;\nreturn {\n  model: data.model,\n  active_version: data.active_version,\n  previous_version: data.previous_version,\n  should_rollback: Boolean(data.should_rollback),\n  action: data.should_rollback ? 'rollback' : 'keep_active',\n  evaluated_at: new Date().toISOString()\n};"
+        "jsCode": "const data = $input.item.json;\nconst shouldRollback = Boolean(data.should_rollback || (data.metrics && data.metrics.degradation > 0.15));\nreturn {\n  test_id: data.test_id || 'test-default',\n  should_rollback: shouldRollback,\n  action: shouldRollback ? 'rollback' : 'promote',\n  evaluated_at: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [600, 0],
+      "position": [
+        600,
+        0
+      ],
       "id": "decision-node",
-      "name": "Demand Rollback Decision"
+      "name": "Decision"
     },
     {
       "parameters": {
@@ -81,14 +93,17 @@
       },
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [800, 0],
+      "position": [
+        800,
+        0
+      ],
       "id": "rollback-branch",
-      "name": "Should Roll Back Demand Model?"
+      "name": "Should Rollback?"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://ml-engine:8000/train/demand/rollback",
+        "url": "http://ml-engine:8000/ab-testing/rollback/{{$node[\"Decision\"].json.test_id}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -102,23 +117,29 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1000, -100],
+      "position": [
+        1000,
+        -100
+      ],
       "id": "execute-rollback",
-      "name": "Restore Previous Demand Model"
+      "name": "Execute Rollback"
     },
     {
       "parameters": {
         "toEmail": "ml-alerts@truxify.org",
-        "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.active_version}}",
+        "subject": "⚠️ ML Model Auto-Rollback Triggered: {{$node[\"Decision\"].json.test_id}}",
         "htmlFormat": true,
-        "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
+        "message": "<h3>ML Model Auto-Rollback Triggered</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong>.</p><p>Auto-rollback executed successfully at: {{$node[\"Decision\"].json.evaluated_at}}.</p><p>Previous stable model baseline has been restored.</p>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
-      "position": [1200, -100],
+      "position": [
+        1200,
+        -100
+      ],
       "id": "send-alert",
-      "name": "Send Demand Rollback Alert"
+      "name": "Send Alert"
     }
   ],
   "connections": {
@@ -126,25 +147,25 @@
       "main": [
         [
           {
-            "node": "check-demand-model",
+            "node": "check-active-tests",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "check-demand-model": {
+    "check-active-tests": {
       "main": [
         [
           {
-            "node": "evaluate-demand-model",
+            "node": "evaluate-test",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "evaluate-demand-model": {
+    "evaluate-test": {
       "main": [
         [
           {

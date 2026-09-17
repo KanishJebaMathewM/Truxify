@@ -130,8 +130,8 @@ export async function uploadMaintenancePhotos(req, res) {
             throw errObj;
           }
           throw scanError;
-        }
-        const ext = extensionForMime(verifiedMimeType);
+      }
+      const ext = extensionForMime(verifiedMimeType);
         const storagePath = `${driverId}/${ticketId}/${Date.now()}-${randomUUID()}.${ext}`;
 
         const { error: storageError } = await supabase.storage

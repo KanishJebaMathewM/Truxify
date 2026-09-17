@@ -1,16 +1,9 @@
-import { supabaseAdmin, firebaseAdmin, redisClient } from '../config/db.js';
+import { supabaseAdmin, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
-
-/**
- * Notification Service
- * Handles FCM push notification fan-outs, device token deduplication,
- * permanent vs transient error classification, and delivery-OTP management.
- * Resolved duplicate import issues (#14874) to ensure clean module evaluation.
- */
 
 // ============================================================================
 // FCM fan-out configuration
@@ -680,7 +673,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', otp }
+      { orderDisplayId, notifType: 'delivery_otp' }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
@@ -714,9 +707,9 @@ export function isTransientError(errorOrCode) {
   const code = typeof errorOrCode === 'string' || typeof errorOrCode === 'number'
     ? errorOrCode
     : (errorOrCode.code ?? errorOrCode.status ?? errorOrCode.statusCode ?? '');
-
+  
   if (code === 429 || code === 500 || code === 503 || code === '429' || code === '500' || code === '503') return true;
-  if (code === 400 || code === 401 || code === '401') return false;
+  if (code === 400 || code === 401 || code === '400' || code === '401') return false;
 
   const strCode = String(code);
   const category = classifyError(strCode);
@@ -758,192 +751,6 @@ export async function clearInvalidToken(userId, token) {
   }
 }
 
-// ============================================================================
-// NEW: Prune stale inactive devices
-// ============================================================================
-
-/**
- * Remove device records that have been deactivated for longer than the
- * specified number of days. This keeps the user_devices table clean and
- * prevents accumulation of permanently-invalid tokens.
- *
- * @param {number} days - Number of days after deactivation before pruning (default: 30)
- * @returns {Promise<{ pruned: number }>} Count of pruned device records
- */
-export async function pruneStaleDevices(days = 30) {
-  return measureExecution('NotificationService.pruneStaleDevices', async () => {
-    if (!supabaseAdmin) {
-      logger.error('[NotificationService] Service-role client not configured — cannot prune stale devices.');
-      return { pruned: 0 };
-    }
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    const cutoffIso = cutoffDate.toISOString();
-
-    try {
-      const { count, error } = await supabaseAdmin
-        .from('user_devices')
-        .delete()
-        .eq('is_active', false)
-        .lt('deactivated_at', cutoffIso);
-
-      if (error) {
-        logger.error(`[FCM] Failed to prune stale devices: ${error.message}`);
-        return { pruned: 0 };
-      }
-
-      const prunedCount = count ?? 0;
-      if (prunedCount > 0) {
-        logger.info(`[FCM] Pruned ${prunedCount} stale device(s) deactivated before ${cutoffIso}`);
-      }
-      return { pruned: prunedCount };
-    } catch (err) {
-      logger.error(`[FCM] Failed to prune stale devices: ${err.message}`);
-      return { pruned: 0 };
-    }
-  });
-}
-
-// ============================================================================
-// NEW: Individual token send helper (for testing/debugging)
-// ============================================================================
-
-/**
- * Send a notification to a single FCM token. Useful for testing individual
- * tokens or for scenarios where batch sending is not appropriate.
- *
- * @param {string} token - The FCM registration token
- * @param {object} payload - Notification payload with optional notification and data
- * @returns {Promise<{ success: boolean, error?: string }>}
- */
-export async function sendToDevice(token, payload) {
-  return measureExecution('NotificationService.sendToDevice', async () => {
-    if (!firebaseAdmin || !firebaseAdmin.messaging) {
-      logger.warn('[FCM] Firebase not configured — cannot send to device');
-      return { success: false, error: 'Firebase not configured' };
-    }
-
-    if (!token || typeof token !== 'string') {
-      logger.warn('[FCM] Invalid token provided to sendToDevice');
-      return { success: false, error: 'Invalid token' };
-    }
-
-    try {
-      const messageId = await firebaseAdmin.messaging().send({
-        token,
-        notification: payload.notification,
-        data: payload.data,
-      });
-      logger.info(`[FCM] Successfully sent to token (fp: ${tokenFingerprint(token)}), messageId: ${messageId}`);
-      return { success: true, messageId };
-    } catch (error) {
-      const errorCode = error?.code || 'unknown-error';
-      logger.warn(`[FCM] Failed to send to token (fp: ${tokenFingerprint(token)}): ${errorCode}`);
-      return { success: false, error: errorCode };
-    }
-  });
-}
-
-// ============================================================================
-// NEW: Enhanced notification sender with per-device tracking
-// ============================================================================
-
-/**
- * Publish a notification event to Redis channel with structured error logging.
- *
- * @param {object} payload - Notification payload
- * @returns {Promise<boolean>} Whether the publish succeeded
- */
-export async function publishNotification(payload) {
-  if (!redisClient) return false;
-  try {
-    await redisClient.publish('notifications', JSON.stringify(payload));
-    return true;
-  } catch (error) {
-    logger.error('Failed to publish notification to Redis:', {
-      error: error.message,
-      stack: error.stack,
-      payload,
-    });
-    return false;
-  }
-}
-
-export const publishNotificationEvent = publishNotification;
-
-/**
- * Send notification to a user with detailed per-device results.
- * Similar to sendFcmNotification but returns granular results for each device.
- *
- * @param {string} userId - User ID
- * @param {object} payload - Notification payload
- * @returns {Promise<Array>} Array of per-device results
- */
-export async function sendNotification(userId, payload) {
-  return measureExecution('NotificationService.sendNotification', async () => {
-    if (redisClient) {
-      try {
-        await redisClient.publish('notifications', JSON.stringify(payload));
-      } catch (error) {
-        logger.error('Failed to publish notification to Redis:', {
-          error: error.message,
-          stack: error.stack,
-          payload,
-        });
-      }
-    }
-
-    const tokensSent = new Set();
-    const results = [];
-
-    // 1. Query active devices from user_devices
-    const activeDevices = await loadActiveDevices(userId);
-
-    if (activeDevices && activeDevices.length > 0) {
-      for (const device of activeDevices) {
-        if (!device.fcm_token || tokensSent.has(device.fcm_token)) continue;
-        tokensSent.add(device.fcm_token);
-
-        const result = await sendToDevice(device.fcm_token, payload);
-        results.push({
-          deviceId: device.id,
-          token: tokenFingerprint(device.fcm_token),
-          ...result
-        });
-
-        if (!result.success && PERMANENT_TOKEN_ERROR_CODES.has(result.error)) {
-          await deactivateInvalidDevices([device.id], userId, [device.fcm_token]);
-        }
-      }
-    }
-
-    // 2. Profile-level token fallback
-    const profileToken = await getProfileFcmToken(userId);
-
-    if (profileToken && !tokensSent.has(profileToken)) {
-      tokensSent.add(profileToken);
-      const result = await sendToDevice(profileToken, payload);
-      results.push({
-        deviceId: 'profile-fallback',
-        token: tokenFingerprint(profileToken),
-        ...result
-      });
-
-      if (!result.success && PERMANENT_TOKEN_ERROR_CODES.has(result.error)) {
-        await clearInvalidToken(userId, profileToken);
-      }
-    }
-
-    const successCount = results.filter(r => r.success).length;
-    logger.info(
-      `[FCM] sendNotification complete for user ${userId}: ${successCount}/${results.length} devices succeeded`
-    );
-
-    return results;
-  });
-}
-
 export default {
   sendFcmNotification,
   sendPushNotification,
@@ -959,9 +766,4 @@ export default {
   getFcmTokenForUser: getUserFcmToken,
   isTransientError,
   clearInvalidToken,
-  pruneStaleDevices,
-  sendToDevice,
-  sendNotification,
-  publishNotification,
-  publishNotificationEvent,
 };

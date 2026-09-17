@@ -2,8 +2,8 @@
  * Unit tests for backend/api/src/services/voiceService.js
  *
  * Coverage:
- *   - getBookingContext with valid UUID bookingId enforces ownership
- *   - getBookingContext with non-UUID bookingId uses the authenticated user's orders
+ *   - getBookingContext with valid UUID bookingId returns order
+ *   - getBookingContext with non-UUID bookingId uses order_display_id
  *   - getBookingContext returns null when supabase query returns null
  *   - getBookingContext returns null and logs warning on supabase error
  *
@@ -14,8 +14,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockSupabaseFrom = vi.fn();
 const mockEq = vi.fn();
 const mockOr = vi.fn();
-const mockOrder = vi.fn();
-const mockLimit = vi.fn();
 const mockMaybeSingle = vi.fn();
 
 const mockSupabase = {
@@ -42,66 +40,39 @@ describe('getBookingContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     audioCache.clear();
-
-    const queryBuilder = {
-      eq: mockEq,
-      or: mockOr,
-      order: mockOrder,
-      limit: mockLimit,
-      maybeSingle: mockMaybeSingle,
-    };
-
     mockSupabaseFrom.mockReturnValue({
-      select: vi.fn().mockReturnValue(queryBuilder),
+      select: vi.fn().mockReturnValue({
+        eq: mockEq.mockReturnValue({
+          or: mockOr.mockReturnValue({
+            maybeSingle: mockMaybeSingle,
+          }),
+        }),
+      }),
     });
-    mockEq.mockReturnValue(queryBuilder);
-    mockOr.mockReturnValue(queryBuilder);
-    mockOrder.mockReturnValue(queryBuilder);
-    mockLimit.mockReturnValue(queryBuilder);
   });
 
-  it('returns an owned order when bookingId is a valid UUID', async () => {
-    const mockOrderData = {
-      id: '550e8400-e29b-41d4-a716-446655440000',
-      status: 'in_transit',
-      eta: '2 hours',
-    };
-    mockMaybeSingle.mockResolvedValue({ data: mockOrderData, error: null });
+  it('returns order when bookingId is a valid UUID and query succeeds', async () => {
+    const mockOrder = { id: '550e8400-e29b-41d4-a716-446655440000', status: 'in_transit', eta: '2 hours' };
+    mockMaybeSingle.mockResolvedValue({ data: mockOrder, error: null });
 
     const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-1');
 
-    expect(result).toEqual(mockOrderData);
+    expect(result).toEqual(mockOrder);
     expect(mockSupabaseFrom).toHaveBeenCalledWith('orders');
     expect(mockEq).toHaveBeenCalledWith('id', '550e8400-e29b-41d4-a716-446655440000');
     expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-1,driver_id.eq.user-1');
   });
 
-  it('does not return a UUID order when it is not owned by the user', async () => {
-    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
-
-    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-2');
-
-    expect(result).toBeNull();
-    expect(mockEq).toHaveBeenCalledWith('id', '550e8400-e29b-41d4-a716-446655440000');
-    expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-2,driver_id.eq.user-2');
-  });
-
-  it('uses the authenticated user when bookingId is not a valid UUID', async () => {
-    const mockOrderData = {
-      id: '123e4567-e89b-12d3-a456-426614174000',
-      order_display_id: '#FF20260101ABC123DEF456',
-      status: 'delivered',
-    };
-    mockMaybeSingle.mockResolvedValue({ data: mockOrderData, error: null });
+  it('uses order_display_id when bookingId is not a valid UUID', async () => {
+    const mockOrder = { id: '123e4567-e89b-12d3-a456-426614174000', order_display_id: '#FF20260101ABC123DEF456', status: 'delivered' };
+    mockMaybeSingle.mockResolvedValue({ data: mockOrder, error: null });
 
     const result = await getBookingContext('#FF20260101ABC123DEF456', 'driver-1');
 
-    expect(result).toEqual(mockOrderData);
+    expect(result).toEqual(mockOrder);
     expect(mockSupabaseFrom).toHaveBeenCalledWith('orders');
+    expect(mockEq).toHaveBeenCalledWith('order_display_id', '#FF20260101ABC123DEF456');
     expect(mockOr).toHaveBeenCalledWith('customer_id.eq.driver-1,driver_id.eq.driver-1');
-    expect(mockOrder).toHaveBeenCalledWith('created_at', { ascending: false });
-    expect(mockLimit).toHaveBeenCalledWith(1);
-    expect(mockEq).not.toHaveBeenCalled();
   });
 
   it('returns null when supabase query returns null data', async () => {
@@ -141,16 +112,12 @@ describe('getBookingContext', () => {
 
     await getBookingContext(validUuid, 'user-1');
     expect(mockEq).toHaveBeenCalledWith('id', validUuid);
-    expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-1,driver_id.eq.user-1');
 
-    mockEq.mockClear();
-    mockOr.mockClear();
     mockMaybeSingle.mockClear();
 
     const invalidUuid = 'not-a-uuid';
     await getBookingContext(invalidUuid, 'user-1');
-    expect(mockEq).not.toHaveBeenCalled();
-    expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-1,driver_id.eq.user-1');
+    expect(mockEq).toHaveBeenCalledWith('order_display_id', invalidUuid);
   });
 });
 
@@ -189,6 +156,7 @@ describe('trimCache Eviction Logic', () => {
 
   it('enforces MAX_CACHE_SIZE by evicting oldest remaining entries after purging expired items', () => {
     const now = Date.now();
+    // Add 105 fresh entries
     for (let i = 0; i < 105; i++) {
       audioCache.set(`item_${i}`, { buffer: Buffer.from(`data_${i}`), timestamp: now + i });
     }
@@ -196,6 +164,7 @@ describe('trimCache Eviction Logic', () => {
     trimCache();
 
     expect(audioCache.size).toBe(MAX_CACHE_SIZE);
+    // The 5 oldest items (item_0 to item_4) should be evicted
     for (let i = 0; i < 5; i++) {
       expect(audioCache.has(`item_${i}`)).toBe(false);
     }

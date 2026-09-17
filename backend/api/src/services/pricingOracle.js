@@ -17,7 +17,7 @@ const NATIONAL_AVG_FUEL_PRICE = 3.90; // USD per gallon baseline
  * @param {Object} marketConditions - { truckToLoadRatio, localFuelPriceUSD }
  * @returns {Object} Fair market pricing analysis and negotiation counter-offer recommendation
  */
-export function calculateFairMarketValue(load = {}, marketConditions = {}) {
+export function calculateFairMarketValue(load, marketConditions = {}) {
     const {
         distanceMiles = 0,
         equipmentType = 'DRY_VAN',
@@ -25,24 +25,9 @@ export function calculateFairMarketValue(load = {}, marketConditions = {}) {
     } = load;
 
     const {
-        truckToLoadRatio: rawRatio = 1.0, // < 1.0 indicates high demand / carrier market; > 1.0 indicates capacity surplus
-        localFuelPriceUSD: rawFuelPrice = NATIONAL_AVG_FUEL_PRICE
+        truckToLoadRatio = 1.0, // < 1.0 indicates high demand / carrier market; > 1.0 indicates capacity surplus
+        localFuelPriceUSD = NATIONAL_AVG_FUEL_PRICE
     } = marketConditions;
-
-    // Guard: non-positive or non-finite distanceMiles produces no meaningful FMV
-    if (!Number.isFinite(distanceMiles) || distanceMiles <= 0) {
-        return {
-            loadDetails: { distanceMiles: 0, equipmentType, offeredPayoutUSD: currentOfferedPayout, offeredRatePerMileUSD: 0 },
-            oracleValuation: { fairMarketValueUSD: 0, fairRatePerMileUSD: 0, marketGauge: 'FAIR', recommendedCounterOfferUSD: 0, potentialGainUSD: 0 },
-            marketFactorsApplied: { truckToLoadRatio: 1.0, capacityMultiplier: 1.0, localFuelPriceUSD: NATIONAL_AVG_FUEL_PRICE, fuelSurchargePerMileUSD: 0 }
-        };
-    }
-
-    // Guard: clamp non-finite truckToLoadRatio to neutral 1.0 (balanced market)
-    const truckToLoadRatio = Number.isFinite(rawRatio) ? rawRatio : 1.0;
-
-    // Guard: clamp non-finite localFuelPriceUSD to national average
-    const localFuelPriceUSD = Number.isFinite(rawFuelPrice) ? rawFuelPrice : NATIONAL_AVG_FUEL_PRICE;
 
     const baseRatePerMile = BASELINE_RATES_PER_MILE[equipmentType.toUpperCase()] || BASELINE_RATES_PER_MILE.DRY_VAN;
 

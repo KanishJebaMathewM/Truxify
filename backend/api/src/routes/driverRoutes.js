@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @openapi
  * components:
  *   schemas:
@@ -834,12 +834,7 @@ async function handleGetDriverEarnings(req, res) {
 }
 
 router.get('/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
-router.get('/:driverId/earnings', authenticate, userLimiter, (req, res, next) => {
-  if (req.user.role !== 'admin' && req.user.id !== req.params.driverId) {
-    return res.status(403).json({ error: 'You can only view your own earnings.' });
-  }
-  return next();
-}, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
+router.get('/:driverId/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
 
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
@@ -1632,8 +1627,6 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {
       tripsList.sort((a, b) => (b.base_freight - a.base_freight) || new Date(b.pickup_date) - new Date(a.pickup_date));
-    } else if (sort_by === 'pickup_date') {
-      tripsList.sort((a, b) => new Date(b.pickup_date) - new Date(a.pickup_date));
     }
 
     if (format === 'csv') {

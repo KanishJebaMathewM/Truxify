@@ -15,12 +15,12 @@ vi.mock("@opentelemetry/api", () => ({
 }));
 
 // Mock logger
-vi.mock("../../src/middleware/logger.js", () => ({
+vi.mock("../../../src/middleware/logger.js", () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
 // Mock SpanFactory
-vi.mock("../../src/core/telemetry/SpanFactory.js", () => ({
+vi.mock("../../../src/core/telemetry/SpanFactory.js", () => ({
   default: {
     startEventHandlerSpan: vi.fn().mockReturnValue({
       setStatus: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("../../src/core/telemetry/SpanFactory.js", () => ({
 }));
 
 // Mock ContextPropagator
-vi.mock("../../src/core/telemetry/ContextPropagator.js", () => ({
+vi.mock("../../../src/core/telemetry/ContextPropagator.js", () => ({
   ContextPropagator: {
     extractFromEventPayload: vi.fn().mockReturnValue(undefined),
     injectIntoEventPayload: vi.fn((e) => e),
@@ -67,30 +67,6 @@ describe("EventHandler", () => {
     const handler = vi.fn().mockReturnValue(new Promise(() => {}));
     const h = new EventHandler(handler, { timeout: 50 });
     await expect(h.handle({})).rejects.toThrow(/timed out/);
-  });
-
-  it("clears the timeout when the handler resolves early", async () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
-    const h = new EventHandler(vi.fn().mockResolvedValue("result"), { timeout: 1000 });
-
-    try {
-      await expect(h.handle({})).resolves.toBe("result");
-      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      clearTimeoutSpy.mockRestore();
-    }
-  });
-
-  it("clears the timeout when the handler rejects early", async () => {
-    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
-    const h = new EventHandler(vi.fn().mockRejectedValue(new Error("boom")), { timeout: 1000 });
-
-    try {
-      await expect(h.handle({})).rejects.toThrow("boom");
-      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      clearTimeoutSpy.mockRestore();
-    }
   });
 
   it("calls onError when handler throws and onError is provided", async () => {

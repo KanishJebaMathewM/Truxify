@@ -14,10 +14,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26
+      uses: actions/checkout@v3
     
     - name: Setup Node.js
-      uses: actions/setup-node@3235b876344d2a9aa001b8d1453c930bba69e610
+      uses: actions/setup-node@v3
       with:
         node-version: '18'
     
@@ -37,7 +37,7 @@ jobs:
       run: snyk test --severity-threshold=high --json > snyk-report.json
     
     - name: Upload scan results
-      uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5
+      uses: actions/upload-artifact@v3
       with:
         name: snyk-report
         path: snyk-report.json
@@ -50,10 +50,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26
+      uses: actions/checkout@v3
     
     - name: Setup Python
-      uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c
+      uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
@@ -73,7 +73,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26
+      uses: actions/checkout@v3
     
     - name: Build Docker image
       run: docker build -t truxify/api:latest -f Dockerfile.api .
@@ -92,7 +92,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26
+      uses: actions/checkout@v3
     
     - name: Install Snyk
       run: npm install -g snyk

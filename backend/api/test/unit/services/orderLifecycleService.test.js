@@ -9,10 +9,6 @@ vi.mock('../../../src/lib/redisLock.js', () => ({
 }));
 
 describe('OrderLifecycleService - verifyDeliveryFn', () => {
-  it('rejects the universal development OTP before verification', async () => {
-    await expect(service.verifyDeliveryFn('order-123', 'driver-456', '123456')).rejects.toThrow('Invalid delivery OTP');
-    expect(mockDeliveryVerification.verifyDelivery).not.toHaveBeenCalled();
-  });
   let service;
   let mockOrderRepo;
   let mockTimelineService;

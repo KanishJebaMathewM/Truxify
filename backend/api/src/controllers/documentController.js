@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -232,88 +232,3 @@ export async function uploadDriverDocument(req, res) {
     return res.status(500).json({ error: 'An unexpected error occurred' });
   }
 }
-
-/*
-const uploadDocument = async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const file = req.file;
-    const { docType } = req.body;
-
-    if (!file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-
-    if (!docType) {
-      return res.status(400).json({ error: 'Document type (docType) is required' });
-    }
-
-    const result = await documentService.processDocumentUpload(userId, file, docType);
-
-    return res.status(201).json({
-      success: true,
-      message: result.message,
-      data: {
-        documentId: result.documentId,
-        fileUrl: result.fileUrl,
-        fileHash: result.fileHash,
-      },
-    });
-  } catch (error) {
-    if (error.message.includes('No file provided') || error.message.includes('exceeds maximum') || error.message.includes('Invalid file')) {
-      return res.status(400).json({ error: error.message });
-.
-return res.status(403).json({ error: error.message });
-    }
-
-console.error('Document upload controller error:', error.message);
-return res.status(500).json({ error: 'Failed to process document upload' });
-  }
-};
-
-const listDocuments = async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const result = await documentService.getUserDocuments(userId);
-
-    return res.status(200).json({
-      success: true,
-      data: result.documents,
-    });
-  } catch (error) {
-    console.error('List documents controller error:', error.message);
-    return res.status(500).json({ error: 'Failed to retrieve documents' });
-  }
-};
-
-const removeDocument = async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const { documentId } = req.params;
-
-    if (!documentId) {
-      return res.status(400).json({ error: 'Document ID is required' });
-    }
-
-    const result = await documentService.deleteDocumentRecord(userId, documentId);
-
-    return res.status(200).json({
-      success: true,
-      message: result.message,
-    });
-  } catch (error) {
-    if (error.message.includes('not found or unauthorized')) {
-      return res.status(404).json({ error: error.message });
-    }
-
-    console.error('Remove document controller error:', error.message);
-    return res.status(500).json({ error: 'Failed to delete document' });
-  }
-};
-
-module.exports = {
-  uploadDocument,
-  listDocuments,
-  removeDocument,
-};
-*/

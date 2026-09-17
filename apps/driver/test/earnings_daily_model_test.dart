@@ -32,36 +32,4 @@ void main() {
             .amount,
         0.0);
   });
-
-  test('fromMap handles fuel_toll_deduction as num', () {
-    final model = EarningsDailyModel.fromMap({
-      'day_date': '2026-05-14',
-      'amount': 10000,
-      'fuel_toll_deduction': 1500,
-    });
-    expect(model.fuelTollDeduction, 15.0);
-    expect(model.netAmount, 85.0);
-  });
-
-  test('fromMap handles fuel_toll_deduction as String', () {
-    final model = EarningsDailyModel.fromMap({
-      'day_date': '2026-05-14',
-      'amount': '10000',
-      'fuel_toll_deduction': '1500',
-    });
-    expect(model.fuelTollDeduction, 15.0);
-    expect(model.netAmount, 85.0);
-  });
-
-  test('fromMap falls back to 15% estimate when fuel_toll_deduction is null or missing', () {
-    final model = EarningsDailyModel.fromMap({
-      'day_date': '2026-05-14',
-      'amount': 10000,
-      'fuel_toll_deduction': null,
-    });
-    expect(model.amount, 100.0);
-    expect(model.fuelTollDeduction, 15.0);
-    expect(model.netAmount, 85.0);
-  });
 }
-

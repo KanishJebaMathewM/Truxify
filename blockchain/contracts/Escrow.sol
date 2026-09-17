@@ -58,10 +58,6 @@ contract Escrow {
     }
 
     function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable {
-        require(
-            msg.sender == customer || authorizedRelayers[msg.sender] || msg.sender == owner,
-            "Not authorized to deposit"
-        );
         require(bookingId != bytes32(0), "Invalid booking");
         require(customer != address(0), "Invalid customer");
         require(driver != address(0), "Invalid driver");

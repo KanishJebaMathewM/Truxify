@@ -192,9 +192,6 @@ router.post('/withdrawals/:id/retry', authenticate, userLimiter, requirePolicy('
       return res.status(400).json(data);
     }
 
-    if (data?.success === false) {
-      return res.status(409).json(data);
-    }
     res.json(data || { success: true, message: 'Withdrawal retry scheduled' });
   } catch (err) {
     logger.error({ event: 'ADMIN_RETRY_WITHDRAWAL_ERROR', error: err && err.message }, 'Admin retry withdrawal error');

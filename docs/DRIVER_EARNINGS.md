@@ -1,9 +1,3 @@
-# Withdrawal retry safety
-
-An administrator must not retry a withdrawal after payout dispatch has been
-attempted or a provider settlement reference exists. Those records require
-reconciliation or refund handling; clearing dispatch evidence can double-pay a
-driver.
 # Driver Earnings
 
 ## Overview

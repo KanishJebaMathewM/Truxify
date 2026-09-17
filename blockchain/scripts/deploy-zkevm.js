@@ -28,11 +28,6 @@ async function main() {
     await bridge.waitForDeployment();
     console.log(`✅ Bridge deployed: ${await bridge.getAddress()}`);
 
-    // Authorize the bridge to preserve user identity across bridge-mediated calls.
-    const setBridgeTx = await rollup.setBridge(await bridge.getAddress());
-    await setBridgeTx.wait();
-    console.log("✅ Bridge authorized on zkEVM");
-
     // Test rollup
     console.log("\n🧪 Testing zkEVM...");
 

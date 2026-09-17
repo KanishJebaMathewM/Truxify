@@ -145,11 +145,6 @@ router.post(
         `&cu=INR` +
         `&tn=${encodeURIComponent(orderRef)}`;
 
-      logger.info(
-        { event: 'PAYMENT_UPI_INTENT_GENERATED', orderId: order.id, orderRef, amountInr },
-        `[payments] UPI intent generated for order ${orderRef}`
-      );
-
       return res.status(200).json({
         upi_id: platformUpiId,
         amount_inr: amountInr,
@@ -271,34 +266,16 @@ router.post(
       }
 
       if (!tx_hash && (req.body.amount || req.body.upiReference)) {
-        const requestedAmountPaisa = Number(req.body.amount);
-        const expectedAmountPaisa = Number(order.total_amount);
-        if (!Number.isSafeInteger(requestedAmountPaisa) || requestedAmountPaisa <= 0 ||
-            !Number.isSafeInteger(expectedAmountPaisa) || requestedAmountPaisa !== expectedAmountPaisa) {
-          return res.status(400).json({
-            error: 'Payment amount must exactly match the order total.',
-            code: 'PAYMENT_AMOUNT_MISMATCH',
-          });
-        }
-
         const driverId = order.driver_id;
         if (!driverId) {
           return res.status(422).json({ error: 'No driver is assigned to this order yet.' });
         }
 
         const { data: driverDetails } = await orderRepository.findDriverWallet(driverId);
-        const driverWallet = driverDetails?.polygon_wallet_address ?? null;
+        const driverWallet = driverDetails?.polygon_wallet_address ?? '0xDriverAddress';
 
         const { data: customerWalletData } = await orderRepository.findCustomerWallet(req.user.id);
-        const customerWallet = customerWalletData?.polygon_wallet_address ?? null;
-
-        const isValidAddress = (addr) => typeof addr === 'string' && /^0x[a-fA-F0-9]{40}$/.test(addr);
-        if (!isValidAddress(driverWallet) || !isValidAddress(customerWallet)) {
-          return res.status(422).json({
-            error: 'A registered Polygon wallet is required for both customer and driver to lock escrow payment.',
-            code: 'WALLET_REQUIRED',
-          });
-        }
+        const customerWallet = customerWalletData?.polygon_wallet_address ?? '0xCustomerAddress';
 
         const amountWei = typeof paisaToMaticWei === 'function' ? paisaToMaticWei(req.body.amount || order.total_amount) : String(req.body.amount);
 
@@ -374,10 +351,7 @@ router.post(
       );
 
       if (result.error) {
-        logger.warn(
-          { event: 'PAYMENT_RECORD_DEPOSIT_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: result.error, code: result.code },
-          `[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`
-        );
+        logger.warn(`[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`);
         return res.status(422).json({
           error: `Transaction verification failed: ${result.error}`,
           code: result.code,
@@ -397,10 +371,7 @@ router.post(
       );
 
       if (updateErr) {
-        logger.error(
-          { event: 'PAYMENT_ESCROW_STATUS_UPDATE_FAILED', orderId: order.id, error: updateErr.message },
-          '[payments] Failed to update escrow_status'
-        );
+        logger.error('[payments] Failed to update escrow_status:', updateErr.message);
         return res.status(500).json({
           error: 'Payment verified but database update failed. Please contact support.',
         });
@@ -424,12 +395,12 @@ router.post(
         }, req.token ? createUserClient(req.token) : undefined);
 
         if (acceptErr) {
-          logger.error({ event: 'PAYMENT_ACCEPT_BID_FAILED', orderId: order.id, error: acceptErr.message }, '[payments] accept_bid_tx failed after lock');
+          logger.error('[payments] accept_bid_tx failed after lock:', acceptErr.message);
           let refundResult;
           try {
             refundResult = await submitEscrowRefund(order.order_display_id);
           } catch (refundErr) {
-            logger.error({ event: 'PAYMENT_REFUND_FAILED', orderId: order.id, error: refundErr.message }, '[payments] Escrow refund also failed');
+            logger.error('[payments] Escrow refund also failed:', refundErr.message);
             refundResult = { error: refundErr.message };
           }
           let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
@@ -437,7 +408,7 @@ router.post(
             try {
               await refundResult.waitForConfirmation();
             } catch (confirmErr) {
-              logger.error({ event: 'PAYMENT_REFUND_CONFIRMATION_FAILED', orderId: order.id, error: confirmErr.message }, '[payments] Escrow refund confirmation failed');
+              logger.error('[payments] Escrow refund confirmation failed:', confirmErr.message);
               refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
               refundConfirmed = false;
             }
@@ -455,7 +426,7 @@ router.post(
               escrow_status: 'funding',
               escrow_funding_error: `escrow refund pending: ${refundError}`,
             }).catch((stateErr) => {
-              logger.error({ event: 'PAYMENT_MARK_REFUND_PENDING_FAILED', orderId: order.id, error: stateErr.message }, '[payments] Failed to mark escrow refund pending');
+              logger.error('[payments] Failed to mark escrow refund pending:', stateErr.message);
             });
             return res.status(503).json({
               error: 'Payment locked but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
@@ -464,7 +435,7 @@ router.post(
           }
 
           await orderRepository.revertEscrowStatus(order.id).catch((revertErr) => {
-            logger.error({ event: 'PAYMENT_REVERT_ESCROW_STATUS_FAILED', orderId: order.id, error: revertErr.message }, '[payments] Failed to revert escrow status');
+            logger.error('[payments] Failed to revert escrow status:', revertErr.message);
           });
           return res.status(409).json({
             error: 'Payment locked but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
@@ -478,7 +449,7 @@ router.post(
           `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
           'order_update',
           { orderId: order.id, orderDisplayId: pending.order_display_id }
-        ).catch((err) => logger.error({ event: 'PAYMENT_FCM_DRIVER_NOTIFICATION_FAILED', orderId: order.id, driverId: pending.driver_id, error: err.message }, `[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
+        ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
 
         sendPushNotification(
           pending.driver_id,
@@ -486,7 +457,7 @@ router.post(
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
-        ).catch(err => logger.warn({ event: 'PAYMENT_DRIVER_FCM_PUSH_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: err.message }, '[payments] Driver FCM push failed'));
+        ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       } else if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
@@ -494,10 +465,10 @@ router.post(
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
-        ).catch(err => logger.warn({ event: 'PAYMENT_DRIVER_FCM_PUSH_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: err.message }, '[payments] Driver FCM push failed'));
+        ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       }
 
-      invalidateBookingCaches().catch(err => logger.error({ event: 'PAYMENT_CACHE_INVALIDATION_FAILED', error: err?.message }, 'Failed to invalidate cache on payment lock'));
+      invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache on payment lock'));
 
       return res.status(201).json({
         message: 'Payment successfully locked in escrow. It will be released to the driver upon delivery confirmation.',
@@ -510,7 +481,7 @@ router.post(
       console.error('OUTER PAYMENT LOCK ERROR:', err);
       if (err instanceof LockAcquisitionError) {
         // Redis is down — do NOT proceed with the payment mutation.
-        logger.error({ event: 'PAYMENT_REDIS_UNAVAILABLE', orderId: order_id, error: err.message }, '[payments] Redis unavailable — refusing payment lock');
+        logger.error('[payments] Redis unavailable — refusing payment lock:', err.message);
         return res.status(503).json({
           error: 'Payment service temporarily unavailable. Please retry in a moment.',
         });
@@ -553,10 +524,7 @@ router.get(
       );
 
       if (error) {
-        logger.error(
-          { event: 'PAYMENT_STATUS_FETCH_ERROR', orderId: req.params.orderId, error: error?.message || error },
-          '[payments] Failed to fetch payment status'
-        );
+        logger.error({ error }, '[payments] Failed to fetch payment status');
         return res.status(500).json({ error: 'Failed to fetch payment status.' });
       }
 

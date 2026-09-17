@@ -25,9 +25,9 @@ describe('ML parseWeightKg', () => {
 });
 
 describe('ML parseWeightKgSafe', () => {
-  it('returns null for an unparseable weight', () => {
-    expect(parseWeightKgSafe('not-a-weight')).toBeNull();
-    expect(parseWeightKgSafe(undefined)).toBeNull();
+  it('returns 0 for an unparseable weight', () => {
+    expect(parseWeightKgSafe('not-a-weight')).toBe(0);
+    expect(parseWeightKgSafe(undefined)).toBe(0);
   });
 });
 

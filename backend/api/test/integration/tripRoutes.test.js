@@ -120,7 +120,7 @@ describe('Trip Routes', () => {
             });
 
         expect(res.status).toBe(200);
-        expect(res.body.message).toBe('Empty batch received, nothing to process.');
+        expect(res.body.error).toBe('Empty batch received, nothing to process.');
     });
 
     it('POST /events/batch returns 202 when batch was already processed', async () => {
@@ -136,7 +136,7 @@ describe('Trip Routes', () => {
             .send(validPayload);
 
         expect(res.status).toBe(202);
-        expect(res.body.message).toBe('Batch already processed.');
+        expect(res.body.error).toBe('Batch already processed.');
     });
 
     it('POST /events/batch inserts trip events and logs processed batch', async () => {
@@ -185,7 +185,7 @@ describe('Trip Routes', () => {
             expect.objectContaining({
                 event_id: 'event-1',
                 user_id: 'driver-1',
-                trip_id: 'ORDER1',
+                trip_id: 'TX-ORDER1',
                 event_type: 'location_update',
                 latitude: 19.076,
                 longitude: 72.8777,
@@ -525,7 +525,7 @@ describe('GET /api/trips/:id/events', () => {
     process.env.NODE_ENV = 'test';
     m.store.trip_events = [];
     m.store.orders = [
-      { id: '11111111-1111-4111-a111-111111111111', order_display_id: '11111111-1111-4111-a111-111111111111', driver_id: 'driver-1', customer_id: 'customer-1' },
+      { id: '11111111-1111-4111-a111-111111111111', driver_id: 'driver-1', customer_id: 'customer-1' },
     ];
     m.calls.length = 0;
   });
@@ -585,7 +585,7 @@ describe('GET /api/trips/:id/events', () => {
     m.store.trip_events.push(
       { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
     );
-    m.store.orders.push({ id: '11111111-1111-4111-a111-111111111111', order_display_id: '11111111-1111-4111-a111-111111111111', driver_id: 'driver-1', customer_id: 'customer-1' });
+    m.store.orders.push({ id: '11111111-1111-4111-a111-111111111111', driver_id: 'driver-1', customer_id: 'customer-1' });
 
     const res = await request(buildEventsApp())
       .get('/api/trips/11111111-1111-4111-a111-111111111111/events')

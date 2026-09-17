@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.hoisted(() => {
-  process.env.SHARD_PASSWORD_NORTH = 'mock';
-  process.env.SHARD_PASSWORD_SOUTH = 'mock';
-  process.env.SHARD_PASSWORD_EAST = 'mock';
-  process.env.SHARD_PASSWORD_WEST = 'mock';
-});
-
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: vi.fn() },
   redisClient: vi.fn(),
@@ -30,15 +23,15 @@ describe('ShardManager - Parallel Cross-Shard Query Engine', () => {
       shard.pool = { query: mockQuery };
     }
 
-    const response = await ShardManager.executeCrossShardQuery({ query: 'SELECT * FROM test' });
+    const results = await ShardManager.executeCrossShardQuery({ query: 'SELECT * FROM test' });
 
     const activeShardsCount = Array.from(ShardManager.shards.values()).filter(s => s.pool).length;
     expect(mockQuery).toHaveBeenCalledTimes(activeShardsCount);
 
-    expect(response.results).toHaveLength(activeShardsCount);
-    expect(response.results[0]).toHaveProperty('shard');
-    expect(response.results[0]).toHaveProperty('data');
-    expect(response.results[0].data).toEqual([{ id: 1, val: 'foo' }]);
+    expect(results).toHaveLength(activeShardsCount);
+    expect(results[0]).toHaveProperty('shard');
+    expect(results[0]).toHaveProperty('data');
+    expect(results[0].data).toEqual([{ id: 1, val: 'foo' }]);
   });
 
   it('flattens, sorts, and paginates combined results when mergeResults is true', async () => {

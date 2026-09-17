@@ -23,11 +23,6 @@ export class EbpfTelemetryLoader {
       const child = spawn('ip', ['link', 'set', 'dev', this.iface, 'xdp', 'obj', this.ebpfObjPath, 'sec', 'xdp']);
       
       return new Promise((resolve) => {
-        child.on('error', (err) => {
-          console.error('[eBPF Loader] Error attaching XDP filter:', err.message);
-          resolve(false);
-        });
-
         child.on('exit', (code) => {
           if (code === 0) {
             this.isLoaded = true;

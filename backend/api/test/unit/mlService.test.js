@@ -6,35 +6,35 @@ describe('mlService handleResponse error context', () => {
     const mockResponse = {
       status: 500,
       ok: false,
-      text: async () => JSON.stringify({ error: 'Internal Server Error' }),
+      json: async () => ({ error: 'Internal Server Error' }),
     };
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST'))
       .rejects
-      .toThrow(/500.*POST.*https:\/\/api\.ml\.com\/predict/);
+      .toThrow(/POST.*https:\/\/api\.ml\.com\/predict.*500/);
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {
     const mockResponse = {
       status: 401,
       ok: false,
-      text: async () => JSON.stringify({ error: 'Unauthorized' }),
+      json: async () => ({ error: 'Unauthorized' }),
     };
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET'))
       .rejects
-      .toThrow(/401.*GET.*https:\/\/api\.ml\.com\/embed/);
+      .toThrow(/GET.*https:\/\/api\.ml\.com\/embed.*401/);
   });
 
   it('should include method, url, and status 403 for forbidden', async () => {
     const mockResponse = {
       status: 403,
       ok: false,
-      text: async () => JSON.stringify({ error: 'Forbidden' }),
+      json: async () => ({ error: 'Forbidden' }),
     };
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT'))
       .rejects
-      .toThrow(/403.*PUT.*https:\/\/api\.ml\.com\/train/);
+      .toThrow(/PUT.*https:\/\/api\.ml\.com\/train.*403/);
   });
 });

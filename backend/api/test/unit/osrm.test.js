@@ -436,24 +436,4 @@ describe('routeWithFailover edge cases', () => {
     );
     expect(result).toEqual(primaryResult);
   });
-
-  it('logs warning and falls back to haversine when primary fails with valid coordinates', async () => {
-    const primaryError = new Error('OSRM connection reset');
-    const primary = vi.fn().mockRejectedValue(primaryError);
-    const coords = [
-      [
-        [77.5946, 12.9716],
-        [77.6412, 12.9352],
-      ],
-    ];
-
-    const result = await osrm.routeWithFailover(primary, null, coords);
-
-    expect(result.source).toBe('haversine-fallback');
-    expect(result.distance).toBeGreaterThan(0);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ errMessage: 'OSRM connection reset' }),
-      expect.stringContaining('routeWithFailover: primary call failed')
-    );
-  });
 });

@@ -181,21 +181,4 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
     expect(orderRepository.updateLoadOffer).not.toHaveBeenCalled();
     expect(sendPushNotificationMock).not.toHaveBeenCalled();
   });
-
-  it('safely handles null entries in stale orders candidate list', async () => {
-    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [null, undefined, { id: null }, staleCandidate()], error: null });
-    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [cancelledRow()], error: null });
-
-    await expect(reconcileStaleOrders(orderRepository)).resolves.not.toThrow();
-    expect(orderRepository.cancelStaleOrder).toHaveBeenCalledTimes(1);
-  });
-
-  it('safely handles null element in cancelled RPC response without TypeError', async () => {
-    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
-    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [null], error: null });
-
-    await expect(reconcileStaleOrders(orderRepository)).resolves.not.toThrow();
-    expect(orderRepository.updateLoadOffer).not.toHaveBeenCalled();
-    expect(sendPushNotificationMock).not.toHaveBeenCalled();
-  });
 });

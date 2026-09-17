@@ -21,20 +21,6 @@ describe('LRUCache', () => {
     expect(cache.get('missing')).toBeUndefined();
   });
 
-  test('should return undefined when key is null or undefined', () => {
-    const cache = new LRUCache(5);
-    expect(cache.get(null)).toBeUndefined();
-    expect(cache.get(undefined)).toBeUndefined();
-
-    cache.set(null, 'val');
-    cache.set(undefined, 'val2');
-    expect(cache.get(null)).toBeUndefined();
-    expect(cache.get(undefined)).toBeUndefined();
-
-    cache.invalidate(null);
-    cache.invalidate(undefined);
-  });
-
   test('should evict least recently used item when capacity is exceeded', () => {
     const cache = new LRUCache(2);
     

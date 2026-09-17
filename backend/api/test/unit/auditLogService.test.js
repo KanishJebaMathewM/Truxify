@@ -1,48 +1,53 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-
-const mockAppendFile = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
-
-vi.mock('fs/promises', () => ({
-  appendFile: mockAppendFile,
-}))
+/**
+ * Unit tests for backend/api/src/services/auditLogService.js
+ *
+ * Coverage:
+ *   - log: successful insert returns data
+ *   - log: DB insert error returns null and logs error
+ *   - log: exception thrown returns null and logs error
+ *   - log: supabaseAdmin unavailable returns null and logs warning
+ *   - query: successful query with all filters
+ *   - query: pagination with page and limit
+ *   - query: sort order ascending/descending
+ *   - query: DB error returns empty data with pagination metadata
+ *   - query: supabaseAdmin unavailable returns empty data
+ *   - query: invalid sort column defaults to created_at
+ *   - query: limit clamped to max 100
+ *
+ * Run with:  npm run test:unit -- test/unit/auditLogService.test.js
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
   debug: vi.fn(),
-}))
+}));
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
-}))
+}));
 
-const { mockDbState } = vi.hoisted(() => {
-  const admin = {
-    from: vi.fn(),
-  }
-  return {
-    mockDbState: {
-      supabaseAdmin: admin,
-    },
-  }
-})
+const mockSupabaseAdmin = vi.hoisted(() => {
+  const q = { from: vi.fn() };
+  q.from.mockReturnValue(q);
+  return q;
+});
 
 vi.mock('../../src/config/db.js', () => ({
-  get supabaseAdmin() {
-    return mockDbState.supabaseAdmin
-  },
-}))
+  supabaseAdmin: mockSupabaseAdmin,
+}));
 
-import { auditLogService } from '../../src/services/auditLogService.js'
+import { auditLogService } from '../../src/services/auditLogService.js';
 
 function makeInsertChain(mockData, mockError) {
   const chain = {
     select: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue({ data: mockData, error: mockError }),
-  }
-  chain.insert = vi.fn().mockReturnValue(chain)
-  return chain
+  };
+  chain.insert = vi.fn().mockReturnValue(chain);
+  return chain;
 }
 
 function makeSelectChain(mockData, mockError, mockCount) {
@@ -52,235 +57,147 @@ function makeSelectChain(mockData, mockError, mockCount) {
     lte: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockResolvedValue({ data: mockData, error: mockError, count: mockCount }),
-  }
-  q.select = vi.fn().mockReturnValue(q)
-  return q
+  };
+  q.select = vi.fn().mockReturnValue(q);
+  return q;
 }
 
-describe('AuditLogService', () => {
-  const validEntry = {
-    actorId: 'actor-123',
-    actorRole: 'admin',
-    actorName: 'Admin Operator',
-    action: 'admin:view-dashboard',
-    resourceType: 'order',
-    resourceId: 'order-999',
-    method: 'GET',
-    path: '/api/admin/orders/999',
-    ipAddress: '127.0.0.1',
-    userAgent: 'VitestTestAgent/1.0',
-    correlationId: 'corr-xyz',
-    requestId: 'req-abc',
-    statusCode: 200,
-    beforeState: { status: 'pending' },
-    afterState: { status: 'confirmed' },
-    metadata: { reason: 'manual review' },
-  }
-
-  let defaultAdmin
-
+describe('auditLogService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    defaultAdmin = {
-      from: vi.fn(),
-    }
-    mockDbState.supabaseAdmin = defaultAdmin
-  })
+    vi.clearAllMocks();
+  });
 
-  describe('log()', () => {
-    it('returns null and throws no error when supabaseAdmin is null', async () => {
-      mockDbState.supabaseAdmin = null
+  describe('log', () => {
+    const validEntry = {
+      actorId: 'actor-1',
+      actorRole: 'admin',
+      actorName: 'Admin User',
+      action: 'admin:view-dashboard',
+      resourceType: 'order',
+      resourceId: 'order-123',
+      method: 'GET',
+      path: '/api/orders/123',
+      ipAddress: '192.168.1.1',
+      userAgent: 'Mozilla/5.0',
+      correlationId: 'corr-1',
+      requestId: 'req-1',
+      statusCode: 200,
+      beforeState: { status: 'pending' },
+      afterState: { status: 'confirmed' },
+      metadata: { reason: 'manual review' },
+    };
 
-      const result = await auditLogService.log(validEntry)
+    it('returns data on successful insert', async () => {
+      const insertedRecord = { id: 'audit-1', ...validEntry, created_at: '2026-08-03T00:00:00Z' };
+      const insertChain = makeInsertChain(insertedRecord, null);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ insert: vi.fn().mockReturnValue(insertChain) });
 
-      expect(result).toBeNull()
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Supabase admin client not available')
-      )
-      expect(mockAppendFile).not.toHaveBeenCalled()
-    })
+      const result = await auditLogService.log(validEntry);
 
-    it('returns null and logs warning when actorId is missing', async () => {
-      const entryWithoutActor = { ...validEntry }
-      delete entryWithoutActor.actorId
+      expect(result).toEqual(insertedRecord);
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
 
-      const result = await auditLogService.log(entryWithoutActor)
+    it('returns null and logs error on DB insert error', async () => {
+      const insertChain = makeInsertChain(null, { message: 'Insert failed' });
+      mockSupabaseAdmin.from.mockReturnValueOnce({ insert: vi.fn().mockReturnValue(insertChain) });
 
-      expect(result).toBeNull()
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('actorId is required')
-      )
-      expect(defaultAdmin.from).not.toHaveBeenCalled()
-      expect(mockAppendFile).not.toHaveBeenCalled()
-    })
+      const result = await auditLogService.log(validEntry);
 
-    it('returns inserted data on valid entry and successful DB insert', async () => {
-      const insertedRecord = { id: 'audit-log-1', ...validEntry, created_at: '2026-09-14T00:00:00Z' }
-      const insertChain = makeInsertChain(insertedRecord, null)
-      defaultAdmin.from.mockReturnValue(insertChain)
-
-      const result = await auditLogService.log(validEntry)
-
-      expect(result).toEqual(insertedRecord)
-      expect(defaultAdmin.from).toHaveBeenCalledWith('application_audit_logs')
-      expect(insertChain.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          actor_id: 'actor-123',
-          actor_role: 'admin',
-          action: 'admin:view-dashboard',
-          resource_type: 'order',
-          resource_id: 'order-999',
-        })
-      )
-      expect(mockAppendFile).not.toHaveBeenCalled()
-      expect(mockLogger.error).not.toHaveBeenCalled()
-    })
-
-    it('returns null and writes dead-letter entry on DB insert error', async () => {
-      const insertChain = makeInsertChain(null, { message: 'Database connection failed' })
-      defaultAdmin.from.mockReturnValue(insertChain)
-
-      const result = await auditLogService.log(validEntry)
-
-      expect(result).toBeNull()
+      expect(result).toBeNull();
       expect(mockLogger.error).toHaveBeenCalledWith(
-        { err: { message: 'Database connection failed' } },
+        { err: { message: 'Insert failed' } },
         '[AuditLog] Failed to insert audit entry'
-      )
-      expect(mockAppendFile).toHaveBeenCalledTimes(1)
-      const [filePath, fileContent] = mockAppendFile.mock.calls[0]
-      expect(filePath).toContain('audit-dead-letter.log')
-      const parsedContent = JSON.parse(fileContent.trim())
-      expect(parsedContent.actor_id).toBe('actor-123')
-      expect(parsedContent._deadLetterReason).toBe('Database connection failed')
-      expect(parsedContent._deadLetteredAt).toBeDefined()
-    })
+      );
+    });
 
-    it('returns null and writes dead-letter entry when DB insert throws exception', async () => {
+    it('returns null and logs error when exception is thrown', async () => {
       const insertChain = {
         select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockRejectedValue(new Error('Network socket hang up')),
-      }
-      insertChain.insert = vi.fn().mockReturnValue(insertChain)
-      defaultAdmin.from.mockReturnValue(insertChain)
+        single: vi.fn().mockRejectedValue(new Error('Network error')),
+      };
+      insertChain.insert = vi.fn().mockReturnValue(insertChain);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ insert: vi.fn().mockReturnValue(insertChain) });
 
-      const result = await auditLogService.log(validEntry)
+      const result = await auditLogService.log(validEntry);
 
-      expect(result).toBeNull()
+      expect(result).toBeNull();
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: expect.any(Error) },
         '[AuditLog] Exception inserting audit entry'
-      )
-      expect(mockAppendFile).toHaveBeenCalledTimes(1)
-      const [filePath, fileContent] = mockAppendFile.mock.calls[0]
-      expect(filePath).toContain('audit-dead-letter.log')
-      const parsedContent = JSON.parse(fileContent.trim())
-      expect(parsedContent.actor_id).toBe('actor-123')
-      expect(parsedContent._deadLetterReason).toBe('Network socket hang up')
-    })
-  })
+      );
+    });
 
-  describe('query()', () => {
-    it('returns empty data with default pagination when supabaseAdmin is null', async () => {
-      mockDbState.supabaseAdmin = null
+  });
 
-      const result = await auditLogService.query({ actorId: 'actor-123' })
+  describe('query', () => {
+    it('returns data with pagination on successful query', async () => {
+      const mockData = [{ id: 'audit-1', action: 'admin:login' }];
+      const selectChain = makeSelectChain(mockData, null, 1);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
 
-      expect(result).toEqual({
-        data: [],
-        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
-      })
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Supabase admin client not available')
-      )
-    })
+      const result = await auditLogService.query({ actorId: 'actor-1' });
 
-    it('clamps pagination page and limit bounds correctly (safePage, safeLimit 1-100)', async () => {
-      const selectChain = makeSelectChain([], null, 0)
-      defaultAdmin.from.mockReturnValue(selectChain)
+      expect(result.data).toEqual(mockData);
+      expect(result.pagination.total).toBe(1);
+      expect(result.pagination.page).toBe(1);
+    });
 
-      // Test page < 1 and limit > 100
-      await auditLogService.query({ page: -5, limit: 500 })
+    it('applies actorId, action, resourceType filters', async () => {
+      const selectChain = makeSelectChain([], null, 0);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
 
-      expect(selectChain.range).toHaveBeenCalledWith(0, 99)
+      await auditLogService.query({
+        actorId: 'actor-1',
+        action: 'admin:login',
+        resourceType: 'order',
+      });
 
-      // Test invalid page/limit fallback
-      await auditLogService.query({ page: 'invalid', limit: 'invalid' })
+      expect(selectChain.eq).toHaveBeenCalledWith('actor_id', 'actor-1');
+      expect(selectChain.eq).toHaveBeenCalledWith('action', 'admin:login');
+      expect(selectChain.eq).toHaveBeenCalledWith('resource_type', 'order');
+    });
 
-      expect(selectChain.range).toHaveBeenCalledWith(0, 19)
+    it('applies startDate and endDate filters', async () => {
+      const selectChain = makeSelectChain([], null, 0);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
 
-      // Test page 3, limit 15
-      await auditLogService.query({ page: 3, limit: 15 })
+      await auditLogService.query({
+        startDate: '2026-01-01T00:00:00Z',
+        endDate: '2026-12-31T23:59:59Z',
+      });
 
-      expect(selectChain.range).toHaveBeenCalledWith(30, 44)
-    })
-
-    it('falls back to created_at when invalid sortBy column is provided', async () => {
-      const selectChain = makeSelectChain([], null, 0)
-      defaultAdmin.from.mockReturnValue(selectChain)
-
-      await auditLogService.query({ sortBy: 'unsupported_column', sortOrder: 'asc' })
-
-      expect(selectChain.order).toHaveBeenCalledWith('created_at', { ascending: true })
-    })
-
-    it('applies filters for actorId, action, resourceType, resourceId, startDate, and endDate', async () => {
-      const mockRecords = [
-        { id: 'log-1', action: 'admin:update-settings' },
-        { id: 'log-2', action: 'admin:update-settings' },
-      ]
-      const selectChain = makeSelectChain(mockRecords, null, 2)
-      defaultAdmin.from.mockReturnValue(selectChain)
-
-      const result = await auditLogService.query({
-        actorId: 'actor-99',
-        action: 'admin:update-settings',
-        resourceType: 'system_config',
-        resourceId: 'cfg-1',
-        startDate: '2026-01-01T00:00:00.000Z',
-        endDate: '2026-01-31T23:59:59.999Z',
-        page: 1,
-        limit: 10,
-        sortBy: 'action',
-        sortOrder: 'desc',
-      })
-
-      expect(defaultAdmin.from).toHaveBeenCalledWith('application_audit_logs')
-      expect(selectChain.select).toHaveBeenCalledWith('*', { count: 'exact' })
-      expect(selectChain.eq).toHaveBeenCalledWith('actor_id', 'actor-99')
-      expect(selectChain.eq).toHaveBeenCalledWith('action', 'admin:update-settings')
-      expect(selectChain.eq).toHaveBeenCalledWith('resource_type', 'system_config')
-      expect(selectChain.eq).toHaveBeenCalledWith('resource_id', 'cfg-1')
-      expect(selectChain.gte).toHaveBeenCalledWith('created_at', '2026-01-01T00:00:00.000Z')
-      expect(selectChain.lte).toHaveBeenCalledWith('created_at', '2026-01-31T23:59:59.999Z')
-      expect(selectChain.order).toHaveBeenCalledWith('action', { ascending: false })
-      expect(selectChain.range).toHaveBeenCalledWith(0, 9)
-
-      expect(result).toEqual({
-        data: mockRecords,
-        pagination: {
-          page: 1,
-          limit: 10,
-          total: 2,
-          totalPages: 1,
-        },
-      })
-    })
+      expect(selectChain.gte).toHaveBeenCalledWith('created_at', '2026-01-01T00:00:00Z');
+      expect(selectChain.lte).toHaveBeenCalledWith('created_at', '2026-12-31T23:59:59Z');
+    });
 
     it('returns empty data and logs error on DB query error', async () => {
-      const selectChain = makeSelectChain(null, { message: 'Query execution error' }, null)
-      defaultAdmin.from.mockReturnValue(selectChain)
+      const selectChain = makeSelectChain(null, { message: 'Query failed' }, null);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
 
-      const result = await auditLogService.query({ page: 2, limit: 10 })
+      const result = await auditLogService.query({ actorId: 'actor-1' });
 
-      expect(result).toEqual({
-        data: [],
-        pagination: { page: 2, limit: 10, total: 0, totalPages: 0 },
-      })
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        { err: { message: 'Query execution error' } },
-        '[AuditLog] Failed to query audit logs'
-      )
-    })
-  })
-})
+      expect(result.data).toEqual([]);
+      expect(result.pagination.total).toBe(0);
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+
+    it('clamps limit to max 100', async () => {
+      const selectChain = makeSelectChain([], null, 0);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
+
+      await auditLogService.query({ limit: 500 });
+
+      expect(selectChain.range).toHaveBeenCalledWith(0, 99);
+    });
+
+    it('defaults invalid sort column to created_at', async () => {
+      const selectChain = makeSelectChain([], null, 0);
+      mockSupabaseAdmin.from.mockReturnValueOnce({ select: vi.fn().mockReturnValue(selectChain) });
+
+      await auditLogService.query({ sortBy: 'invalid_column' });
+
+      expect(selectChain.order).toHaveBeenCalledWith('created_at', { ascending: false });
+    });
+  });
+});

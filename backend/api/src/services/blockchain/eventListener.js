@@ -16,7 +16,6 @@ let isListening = false;
 let currentProvider = null;
 let currentContract = null;
 let reconnectAttempt = 0;
-let liveEventQueue = Promise.resolve();
 const MAX_RECONNECT_DELAY_MS = 30000;
 
 export async function getLastProcessedBlock() {
@@ -39,29 +38,13 @@ export async function saveLastProcessedBlock(blockNumber) {
   }
 }
 
-/**
- * Serialize live blockchain events so database synchronization and cursor updates
- * cannot overlap across concurrent ethers event callbacks.
- */
-export function enqueueLiveEvent(handler, eventPayload) {
-  liveEventQueue = liveEventQueue
-    .then(() => handler(eventPayload))
-    .catch((err) => {
-      logger.error(`[EventListener] Live event processing error: ${err.message}`);
-    });
-
-  return liveEventQueue;
-}
-
 export async function handlePaymentLockedEvent({ bookingId, amount, customer, blockNumber }) {
   const orderIdStr = String(bookingId);
   logger.info(`[EventListener] Processing PaymentLocked for bookingId: ${orderIdStr}, amount: ${amount}`);
 
-  let dbSyncFailed = false;
-
   if (supabaseAdmin) {
     try {
-      const { error: orderError } = await supabaseAdmin
+      await supabaseAdmin
         .from('orders')
         .update({
           payment_status: 'locked',
@@ -70,25 +53,16 @@ export async function handlePaymentLockedEvent({ bookingId, amount, customer, bl
         })
         .or(`id.eq.${orderIdStr},order_display_id.eq.${orderIdStr}`);
 
-      if (orderError) throw orderError;
-
-      const { error: tripError } = await supabaseAdmin
+      await supabaseAdmin
         .from('trips')
         .update({
           payment_status: 'locked',
           updated_at: new Date().toISOString(),
         })
         .or(`id.eq.${orderIdStr},trip_display_id.eq.${orderIdStr}`);
-
-      if (tripError) throw tripError;
     } catch (err) {
-      dbSyncFailed = true;
       logger.error(`[EventListener] Error updating PaymentLocked in DB: ${err.message}`);
     }
-  }
-
-  if (dbSyncFailed) {
-    return { success: false, event: 'PaymentLocked', bookingId: orderIdStr };
   }
 
   if (blockNumber) {
@@ -104,23 +78,20 @@ export async function handlePaymentReleasedEvent({ bookingId, amount, driver, bl
 
   let customerId = null;
   let driverId = null;
-  let dbSyncFailed = false;
 
   if (supabaseAdmin) {
     try {
-      const { data: order, error: orderLookupError } = await supabaseAdmin
+      const { data: order } = await supabaseAdmin
         .from('orders')
         .select('id, customer_id, driver_id, order_display_id, total_amount')
         .or(`id.eq.${orderIdStr},order_display_id.eq.${orderIdStr}`)
         .maybeSingle();
 
-      if (orderLookupError) throw orderLookupError;
-
       if (order) {
         customerId = order.customer_id;
         driverId = order.driver_id;
 
-        const { error: orderUpdateError } = await supabaseAdmin
+        await supabaseAdmin
           .from('orders')
           .update({
             payment_status: 'released',
@@ -128,11 +99,9 @@ export async function handlePaymentReleasedEvent({ bookingId, amount, driver, bl
             updated_at: new Date().toISOString(),
           })
           .eq('id', order.id);
-
-        if (orderUpdateError) throw orderUpdateError;
       }
 
-      const { error: tripError } = await supabaseAdmin
+      await supabaseAdmin
         .from('trips')
         .update({
           payment_status: 'released',
@@ -140,16 +109,9 @@ export async function handlePaymentReleasedEvent({ bookingId, amount, driver, bl
           updated_at: new Date().toISOString(),
         })
         .or(`id.eq.${orderIdStr},trip_display_id.eq.${orderIdStr}`);
-
-      if (tripError) throw tripError;
     } catch (err) {
-      dbSyncFailed = true;
       logger.error(`[EventListener] Error updating PaymentReleased in DB: ${err.message}`);
     }
-  }
-
-  if (dbSyncFailed) {
-    return { success: false, event: 'PaymentReleased', bookingId: orderIdStr };
   }
 
   // Trigger FCM Notifications to Customer and Driver
@@ -179,11 +141,9 @@ export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber 
   const orderIdStr = String(bookingId);
   logger.info(`[EventListener] Processing DisputeOpened for bookingId: ${orderIdStr}, reason: ${reason}`);
 
-  let dbSyncFailed = false;
-
   if (supabaseAdmin) {
     try {
-      const { error: orderError } = await supabaseAdmin
+      await supabaseAdmin
         .from('orders')
         .update({
           payment_status: 'disputed',
@@ -192,25 +152,16 @@ export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber 
         })
         .or(`id.eq.${orderIdStr},order_display_id.eq.${orderIdStr}`);
 
-      if (orderError) throw orderError;
-
-      const { error: tripError } = await supabaseAdmin
+      await supabaseAdmin
         .from('trips')
         .update({
           payment_status: 'disputed',
           updated_at: new Date().toISOString(),
         })
         .or(`id.eq.${orderIdStr},trip_display_id.eq.${orderIdStr}`);
-
-      if (tripError) throw tripError;
     } catch (err) {
-      dbSyncFailed = true;
       logger.error(`[EventListener] Error updating DisputeOpened in DB: ${err.message}`);
     }
-  }
-
-  if (dbSyncFailed) {
-    return { success: false, event: 'DisputeOpened', bookingId: orderIdStr };
   }
 
   // Fire n8n dispute resolution webhook
@@ -243,34 +194,31 @@ export async function queryAndProcessHistoricalEvents(fromBlock, toBlock) {
   try {
     const lockedEvents = await currentContract.queryFilter(currentContract.filters.PaymentLocked(), fromBlock, toBlock);
     for (const ev of lockedEvents) {
-      const result = await handlePaymentLockedEvent({
+      await handlePaymentLockedEvent({
         bookingId: ev.args?.bookingId,
         amount: ev.args?.amount,
         customer: ev.args?.customer,
         blockNumber: ev.blockNumber,
       });
-      if (!result?.success) return;
     }
 
     const releasedEvents = await currentContract.queryFilter(currentContract.filters.PaymentReleased(), fromBlock, toBlock);
     for (const ev of releasedEvents) {
-      const result = await handlePaymentReleasedEvent({
+      await handlePaymentReleasedEvent({
         bookingId: ev.args?.bookingId,
         amount: ev.args?.amount,
         driver: ev.args?.driver,
         blockNumber: ev.blockNumber,
       });
-      if (!result?.success) return;
     }
 
     const disputeEvents = await currentContract.queryFilter(currentContract.filters.DisputeOpened(), fromBlock, toBlock);
     for (const ev of disputeEvents) {
-      const result = await handleDisputeOpenedEvent({
+      await handleDisputeOpenedEvent({
         bookingId: ev.args?.bookingId,
         reason: ev.args?.reason,
         blockNumber: ev.blockNumber,
       });
-      if (!result?.success) return;
     }
   } catch (err) {
     logger.error(`[EventListener] Historical event processing error: ${err.message}`);
@@ -299,10 +247,9 @@ export async function startEventListener() {
       }
     }
 
-    // Subscribe to live contract events. Handlers are serialized through the queue
-    // so overlapping callbacks cannot mutate DB state or the block cursor concurrently.
+    // Subscribe to live contract events
     currentContract.on('PaymentLocked', (bookingId, amount, customer, event) => {
-      void enqueueLiveEvent(handlePaymentLockedEvent, {
+      handlePaymentLockedEvent({
         bookingId,
         amount,
         customer,
@@ -311,7 +258,7 @@ export async function startEventListener() {
     });
 
     currentContract.on('PaymentReleased', (bookingId, amount, driver, event) => {
-      void enqueueLiveEvent(handlePaymentReleasedEvent, {
+      handlePaymentReleasedEvent({
         bookingId,
         amount,
         driver,
@@ -320,7 +267,7 @@ export async function startEventListener() {
     });
 
     currentContract.on('DisputeOpened', (bookingId, reason, event) => {
-      void enqueueLiveEvent(handleDisputeOpenedEvent, {
+      handleDisputeOpenedEvent({
         bookingId,
         reason,
         blockNumber: event?.log?.blockNumber ?? event?.blockNumber,

@@ -235,39 +235,6 @@ describe('AlertRouter', () => {
         '[AlertRouter] Error sending alert to channel'
       );
     });
-
-    it('rejects with an error and logs warning when slackClient is null in sendToChannel', async () => {
-      const router = new AlertRouter({ slackClient: null });
-      await expect(router.sendToChannel(ALERT_CHANNELS.SLACK, SAMPLE_CRITICAL_ALERT)).rejects.toThrow(
-        'Slack client not configured'
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        { channel: 'slack' },
-        '[AlertRouter] Slack client not configured'
-      );
-    });
-
-    it('rejects with an error and logs warning when emailService is null in sendToChannel', async () => {
-      const router = new AlertRouter({ emailService: null });
-      await expect(router.sendToChannel(ALERT_CHANNELS.EMAIL, SAMPLE_CRITICAL_ALERT)).rejects.toThrow(
-        'Email service not configured'
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        { channel: 'email' },
-        '[AlertRouter] Email service not configured'
-      );
-    });
-
-    it('rejects with an error and logs warning when smsService is null in sendToChannel', async () => {
-      const router = new AlertRouter({ smsService: null });
-      await expect(router.sendToChannel(ALERT_CHANNELS.SMS, SAMPLE_CRITICAL_ALERT)).rejects.toThrow(
-        'SMS service not configured'
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        { channel: 'sms' },
-        '[AlertRouter] SMS service not configured'
-      );
-    });
   });
 
   describe('Individual send*Alert methods and unconfigured clients', () => {

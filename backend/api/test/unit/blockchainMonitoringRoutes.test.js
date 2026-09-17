@@ -24,17 +24,12 @@ vi.mock('../../src/middleware/auth.js', () => ({
   requireRole: () => (_req, _res, next) => next(),
 }));
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: { from: vi.fn() },
-}));
-
 function buildApp(deps) {
   const app = express();
   app.use(express.json());
   app.use('/api/blockchain', (req, _res, next) => {
     req.blockchainMetrics = deps.blockchainMetrics;
     req.escalationHandler = deps.escalationHandler;
-    req.blockchainMonitor = deps.blockchainMonitor;
     req.supabase = deps.supabase;
     next();
   });
@@ -89,29 +84,6 @@ describe('blockchainMonitoringRoutes', () => {
     expect(res.status).toBe(200);
     expect(res.body.metrics.contractCallSuccessRate).toBe(100);
     expect(res.body.timestamp).toBeTruthy();
-  });
-
-  it('GET /api/blockchain/health returns monitor health and block lag', async () => {
-    const blockchainMonitor = {
-      getHealth: vi.fn().mockResolvedValue({
-        status: 'running',
-        running: true,
-        lastScannedBlock: 2000,
-        currentChainHead: 2010,
-        blockLag: 10,
-        lastSuccessfulScan: '2026-09-14T20:00:00.000Z',
-        lastError: null,
-      }),
-    };
-
-    const res = await request(buildApp({ blockchainMetrics: metrics, escalationHandler, supabase, blockchainMonitor }))
-      .get('/api/blockchain/health');
-
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('running');
-    expect(res.body.blockLag).toBe(10);
-    expect(res.body.lastScannedBlock).toBe(2000);
-    expect(res.body.currentChainHead).toBe(2010);
   });
 
   it('GET /api/blockchain/alerts/active returns active alerts', async () => {

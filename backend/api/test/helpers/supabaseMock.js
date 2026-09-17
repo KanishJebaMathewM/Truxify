@@ -307,6 +307,9 @@ class SupabaseQueryBuilder {
       if (this._single) {
         return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
       }
+      if (this._maybeSingle) {
+        return { data: updatedRows[0] ?? null, error: null };
+      }
       return { data: updatedRows, error: null };
     }
 
@@ -323,7 +326,7 @@ class SupabaseQueryBuilder {
         }
       }
       this._store[this._table] = remaining;
-      return { data: deleted, error: null };
+      return { data: deleted, error: null, count: deleted.length };
     }
 
     if (this._mode === 'select' || this._mode === null) {

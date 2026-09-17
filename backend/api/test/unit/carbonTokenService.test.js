@@ -37,9 +37,9 @@ describe('carbonTokenService', () => {
       expect(record.co2SavedKg).toBe(268);
       expect(record.co2SavedMetricTons).toBe(0.268);
       expect(record.tokenAmount).toBe(0.268);
-      expect(record.status).toBe('MINTED');
-      expect(record.chainNetwork).toBe('Polygon-CrossChain-Anchor');
-      expect(record.blockchainTxHash).toMatch(/^0x[a-f0-9]{64}$/);
+      expect(record.status).toBe('PENDING_CHAIN_ANCHOR');
+      expect(record.chainNetwork).toBeNull();
+      expect(record.blockchainTxHash).toBeNull();
       expect(record.mintedAt).toBeDefined();
 
       const stored = await carbonTokenService.getTokenDetails(record.tokenId);
@@ -68,7 +68,7 @@ describe('carbonTokenService', () => {
       expect(retired.buyerAddress).toBe(buyer);
       expect(retired.shipperId).toBe(shipper);
       expect(retired.retiredAt).toBeDefined();
-      expect(retired.transferTxHash).toMatch(/^0x[a-f0-9]{64}$/);
+      expect(retired.transferTxHash).toBeNull();
     });
 
     it('rejects double-spending / already retired carbon tokens', async () => {

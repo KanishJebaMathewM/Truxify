@@ -8,6 +8,7 @@ import telemetryBuffer from './telemetryBuffer.js';
 import GpsLog from '../models/GpsLog.js';
 import { scheduleEtaRecalculationOnLocationUpdate } from '../services/order/etaService.js';
 import DeliveryDelayService from '../services/order/deliveryDelayService.js';
+import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -151,7 +152,7 @@ let locationEventBus = null;
 // =====================================================================
 // CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
 // =====================================================================
-const CLOCK_SKEW_TOLERANCE_MS = parseInt(process.env.CLOCK_SKEW_TOLERANCE_MS, 10) || 300000; // default ±5 min
+export const CLOCK_SKEW_TOLERANCE_MS = parseInt(process.env.CLOCK_SKEW_TOLERANCE_MS, 10) || 300000; // default ±5 min
 const MAX_CONSECUTIVE_DROPS = 10;
 const consecutiveDropCount = new Map();
 
@@ -388,7 +389,7 @@ async function authenticateWs(ws, token) {
     try {
       decoded = jwt.decode(token);
     } catch (err) {
-      // ignore decoding errors
+      logger.warn({ err: err?.message || err }, '[Tracker] Failed to decode JWT token structure');
     }
 
     const isSupabaseToken = decoded &&
@@ -1217,7 +1218,6 @@ export async function handleLocationPing(ws, data, req) {
     } catch (err) {
       logger.error('Failed to resolve order details in tracker:', err.message);
     }
-  }
   }
 
   // Recalculate ETA only after the authenticated driver/order ownership check

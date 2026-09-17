@@ -271,6 +271,16 @@ router.post(
       }
 
       if (!tx_hash && (req.body.amount || req.body.upiReference)) {
+        const requestedAmountPaisa = Number(req.body.amount);
+        const expectedAmountPaisa = Number(order.total_amount);
+        if (!Number.isSafeInteger(requestedAmountPaisa) || requestedAmountPaisa <= 0 ||
+            !Number.isSafeInteger(expectedAmountPaisa) || requestedAmountPaisa !== expectedAmountPaisa) {
+          return res.status(400).json({
+            error: 'Payment amount must exactly match the order total.',
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+          });
+        }
+
         const driverId = order.driver_id;
         if (!driverId) {
           return res.status(422).json({ error: 'No driver is assigned to this order yet.' });

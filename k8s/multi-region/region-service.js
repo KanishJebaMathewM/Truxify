@@ -276,6 +276,10 @@ export class RegionService {
             
             const data = await this.fetchDataFromRegion(this.primaryRegion);
             if (this._stopped) return;
+            if (data === null) {
+                logger.warn(`Skipping replication because no data was fetched from primary region ${this.primaryRegion.name}`);
+                return;
+            }
             
             // Replicate to other regions
             for (const region of this.regions) {

@@ -997,7 +997,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         final isLast = i == timelineData.length - 1;
         
         final color = isCurrent ? TruxifyColors.accent : completed ? TruxifyColors.accentDark : TruxifyColors.border;
-        final timestamp = step['timestamp']?.toString();
+        final timestamp = step['milestone_time']?.toString() ?? step['timestamp']?.toString();
 
         return IntrinsicHeight(
           child: Row(

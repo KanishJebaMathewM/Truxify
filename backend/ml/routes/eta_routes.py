@@ -170,10 +170,12 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
             # The LSTM is trained on traffic_speed (m/s) (see train_model), so
             # its raw output is a predicted speed, not a duration. Keep the
             # dimension explicit and convert it to seconds below.
+            route_signature = TrafficPipeline.build_route_signature(destination)
             predicted_speed_mps = await run_inference(
                 traffic_pipeline.predict_eta,
                 features,
-                f"order_{request.order_id}"
+                f"order_{request.order_id}",
+                route_signature,
             )
 
             if predicted_speed_mps:
@@ -217,8 +219,12 @@ async def update_eta(order_id: str, request: ETAUpdateRequest, _auth=Depends(ver
     if not _order_is_assigned(order_id):
         raise HTTPException(status_code=404, detail="Order not found or not assigned to a driver")
 
+    order_route = _get_order_route(order_id)
+    if order_route is None:
+        raise HTTPException(status_code=404, detail="Order route coordinates unavailable")
+
     current_location = {'lat': request.current_lat, 'lng': request.current_lng}
-    destination = {'lat': request.dest_lat, 'lng': request.dest_lng}
+    destination = {'lat': order_route['dest_lat'], 'lng': order_route['dest_lng']}
 
     result = await traffic_pipeline.update_eta_realtime(
         order_id,

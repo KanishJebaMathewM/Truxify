@@ -1,46 +1,109 @@
-import { describe, it, expect } from 'vitest';
-import hmacService, {
-  isNonceValid,
-  isTimestampValid,
-  generateSignature,
-  verifySignature,
-} from '../../src/services/hmacService.js';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+
+const sharedRedisNonces = new Map();
+
+vi.mock('ioredis', () => ({
+  default: class MockRedis {
+    constructor() {}
+
+    async set(key, value, nx, ex, ttl) {
+      if (nx !== 'NX' || ex !== 'EX' || ttl !== 300) {
+        throw new Error('Unexpected Redis SET arguments');
+      }
+      if (sharedRedisNonces.has(key)) {
+        return null;
+      }
+      sharedRedisNonces.set(key, value);
+      return 'OK';
+    }
+  },
+}));
+
+const configuredSecret = 'a'.repeat(64);
+process.env.REDIS_URL = 'redis://mock-hmac-test';
+process.env.NODE_ENV = 'test';
+process.env.HMAC_SECRET = configuredSecret;
+
+const serviceA = await import('../../src/services/hmacService.js?instance=A');
+const serviceB = await import('../../src/services/hmacService.js?instance=B');
+
+afterEach(() => {
+  process.env.HMAC_SECRET = configuredSecret;
+});
+
+afterAll(() => {
+  delete process.env.REDIS_URL;
+});
 
 describe('hmacService', () => {
-  describe('isNonceValid', () => {
-    it('accepts a new unique nonce and rejects replay with the same nonce', async () => {
-      const nonce = `test-nonce-${Date.now()}-${Math.random()}`;
-      expect(await isNonceValid(nonce)).toBe(true);
-      expect(await isNonceValid(nonce)).toBe(false);
+  beforeEach(() => {
+    sharedRedisNonces.clear();
+  });
+
+  describe('distributed nonce protection', () => {
+    it('accepts a new nonce once and rejects the same nonce on another service instance', async () => {
+      const nonce = `distributed-${Date.now()}-${Math.random()}`;
+      expect(await serviceA.isNonceValid(nonce)).toBe(true);
+      expect(await serviceB.isNonceValid(nonce)).toBe(false);
+    });
+
+    it('uses an atomic NX reservation with a five-minute expiration', async () => {
+      const nonce = `ttl-${Date.now()}-${Math.random()}`;
+      expect(await serviceA.isNonceValid(nonce)).toBe(true);
+      expect(sharedRedisNonces.has(`truxify:hmac:nonce:${nonce}`)).toBe(true);
     });
   });
 
   describe('isTimestampValid', () => {
-    it('accepts timestamps within the 5-minute tolerance window', () => {
+    it('accepts timestamps within the five-minute tolerance window', () => {
       const now = Date.now();
-      expect(isTimestampValid(now)).toBe(true);
-      expect(isTimestampValid(now - 2 * 60 * 1000)).toBe(true); // 2 mins ago
-      expect(isTimestampValid(now + 2 * 60 * 1000)).toBe(true); // 2 mins future
+      expect(serviceA.isTimestampValid(now)).toBe(true);
+      expect(serviceA.isTimestampValid(now - 2 * 60 * 1000)).toBe(true);
+      expect(serviceA.isTimestampValid(now + 2 * 60 * 1000)).toBe(true);
     });
 
-    it('rejects timestamps older than 5 minutes or too far in the future', () => {
+    it('rejects timestamps outside the five-minute tolerance window', () => {
       const now = Date.now();
-      expect(isTimestampValid(now - 6 * 60 * 1000)).toBe(false); // 6 mins ago
-      expect(isTimestampValid(now + 6 * 60 * 1000)).toBe(false); // 6 mins future
+      expect(serviceA.isTimestampValid(now - 6 * 60 * 1000)).toBe(false);
+      expect(serviceA.isTimestampValid(now + 6 * 60 * 1000)).toBe(false);
     });
 
     it('handles numeric string timestamps safely', () => {
-      const nowStr = String(Date.now());
-      expect(isTimestampValid(nowStr)).toBe(true);
+      expect(serviceA.isTimestampValid(String(Date.now()))).toBe(true);
     });
   });
 
-  describe('generateSignature', () => {
+  describe('secret configuration', () => {
+    it('rejects a missing secret instead of using a hardcoded fallback', () => {
+      delete process.env.HMAC_SECRET;
+      expect(() => serviceA.generateSignature('payload', Date.now(), 'nonce')).toThrow(/HMAC_SECRET is required/);
+    });
+
+    it('rejects secrets shorter than the minimum length', () => {
+      process.env.HMAC_SECRET = 'too-short';
+      expect(() => serviceA.generateSignature('payload', Date.now(), 'nonce')).toThrow(/at least 32 bytes/);
+    });
+
+    it('fails closed during production startup when the secret is missing', async () => {
+      const { execFileSync } = await import('node:child_process');
+      expect(() => execFileSync(
+        process.execPath,
+        ['--input-type=module', '-e', "await import('./src/services/hmacService.js')"],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, NODE_ENV: 'production', HMAC_SECRET: '' },
+          stdio: 'pipe',
+        }
+      )).toThrow();
+    });
+  });
+
+  describe('signature generation and verification', () => {
     it('generates a 64-character hex sha256 HMAC signature', () => {
       const payload = JSON.stringify({ amount: 500, bookingId: 'bk-123' });
       const timestamp = Date.now();
       const nonce = 'unique-nonce-1';
-      const sig = generateSignature(payload, timestamp, nonce);
+      const sig = serviceA.generateSignature(payload, timestamp, nonce);
 
       expect(typeof sig).toBe('string');
       expect(sig).toHaveLength(64);
@@ -51,57 +114,45 @@ describe('hmacService', () => {
       const payload = 'order-payload';
       const timestamp = 1700000000000;
       const nonce = 'nonce-abc';
-      const sig1 = generateSignature(payload, timestamp, nonce);
-      const sig2 = generateSignature(payload, timestamp, nonce);
-
-      expect(sig1).toBe(sig2);
+      expect(serviceA.generateSignature(payload, timestamp, nonce)).toBe(
+        serviceA.generateSignature(payload, timestamp, nonce)
+      );
     });
-  });
 
-  describe('verifySignature', () => {
     it('returns true when the signature matches the payload, timestamp, and nonce', () => {
       const payload = 'payment-confirmation';
       const timestamp = Date.now();
       const nonce = 'nonce-xyz';
-      const signature = generateSignature(payload, timestamp, nonce);
-
-      expect(verifySignature(signature, payload, timestamp, nonce)).toBe(true);
+      const signature = serviceA.generateSignature(payload, timestamp, nonce);
+      expect(serviceA.verifySignature(signature, payload, timestamp, nonce)).toBe(true);
     });
 
-    it('returns false when the payload is tampered', () => {
-      const payload = 'payment-confirmation';
-      const timestamp = Date.now();
-      const nonce = 'nonce-xyz';
-      const signature = generateSignature(payload, timestamp, nonce);
-
-      expect(verifySignature(signature, 'tampered-payload', timestamp, nonce)).toBe(false);
-    });
-
-    it('returns false when the timestamp or nonce is altered', () => {
+    it('returns false when the payload, timestamp, or nonce is altered', () => {
       const payload = 'escrow-lock';
       const timestamp = Date.now();
       const nonce = 'nonce-test';
-      const signature = generateSignature(payload, timestamp, nonce);
+      const signature = serviceA.generateSignature(payload, timestamp, nonce);
 
-      expect(verifySignature(signature, payload, timestamp + 100, nonce)).toBe(false);
-      expect(verifySignature(signature, payload, timestamp, 'wrong-nonce')).toBe(false);
+      expect(serviceA.verifySignature(signature, 'tampered-payload', timestamp, nonce)).toBe(false);
+      expect(serviceA.verifySignature(signature, payload, timestamp + 100, nonce)).toBe(false);
+      expect(serviceA.verifySignature(signature, payload, timestamp, 'wrong-nonce')).toBe(false);
     });
 
-    it('returns false when signature length or encoding is malformed without crashing', () => {
+    it('returns false for malformed signatures without crashing', () => {
       const payload = 'data';
       const timestamp = Date.now();
       const nonce = 'nonce-1';
-
-      expect(verifySignature('invalid-sig', payload, timestamp, nonce)).toBe(false);
-      expect(verifySignature('', payload, timestamp, nonce)).toBe(false);
-      expect(verifySignature('123456', payload, timestamp, nonce)).toBe(false);
+      expect(serviceA.verifySignature('invalid-sig', payload, timestamp, nonce)).toBe(false);
+      expect(serviceA.verifySignature('', payload, timestamp, nonce)).toBe(false);
+      expect(serviceA.verifySignature('123456', payload, timestamp, nonce)).toBe(false);
     });
 
-    it('exports default service object matching named functions', () => {
-      expect(hmacService.isNonceValid).toBe(isNonceValid);
-      expect(hmacService.isTimestampValid).toBe(isTimestampValid);
-      expect(hmacService.generateSignature).toBe(generateSignature);
-      expect(hmacService.verifySignature).toBe(verifySignature);
+    it('exports a default service object matching the named functions', async () => {
+      const { default: hmacService } = await import('../../src/services/hmacService.js?instance=C');
+      expect(hmacService.isNonceValid).toBe(serviceA.isNonceValid);
+      expect(hmacService.isTimestampValid).toBe(serviceA.isTimestampValid);
+      expect(hmacService.generateSignature).toBe(serviceA.generateSignature);
+      expect(hmacService.verifySignature).toBe(serviceA.verifySignature);
     });
   });
 });

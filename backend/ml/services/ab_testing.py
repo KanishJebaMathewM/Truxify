@@ -105,11 +105,17 @@ class ABTestModel:
 
             results = {}
             logged_versions = df['model_version'].unique()
-            shadow_version = next(
-                (v for v in logged_versions if v != 'production'),
+            test_state = self._test_states.get(test_id, {})
+            prod_version = test_state.get('production_version') or self.get_production_version()
+            shadow_version = test_state.get('shadow_version') or next(
+                (v for v in logged_versions if v not in {prod_version, 'production'}),
                 'shadow'
             )
-            prod_version = 'production'
+
+            # Keep evaluating legacy tests whose metrics used the old literal
+            # production label, while new tests compare real generations.
+            if prod_version not in logged_versions and 'production' in logged_versions:
+                prod_version = 'production'
 
             for metric in df['metric_name'].unique():
                 metric_df = df[df['metric_name'] == metric]

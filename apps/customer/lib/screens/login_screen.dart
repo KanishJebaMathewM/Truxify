@@ -86,18 +86,9 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!mounted) return;
 
         final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_authenticated', true);
         if (!mounted) return;
-        final bool hasSession = prefs.getBool('is_authenticated') ?? false;
-
-        if (hasSession) {
-          _navigateToShell();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No active session found. Please log in using OTP first.'),
-            ),
-          );
-        }
+        _navigateToShell();
       }
     } catch (_) {
       // Gracefully fall back to standard OTP form if biometrics are cancelled/fail

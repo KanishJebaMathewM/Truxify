@@ -157,8 +157,13 @@ def _previous_ptr_path(model_name: str) -> str:
     return os.path.join(MODEL_STORAGE_DIR, f"{model_name}_previous_active.json")
 
 
-def _generate_generation_id() -> str:
+def _generate_generation_id(model_name: Optional[str] = None) -> str:
     return f"gen_{datetime.now().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:8]}"
+
+
+def _unique_temp(final_path: str) -> str:
+    """Return a unique temporary path beside a final artifact."""
+    return f"{final_path}.{uuid.uuid4().hex}.tmp"
 
 
 def _read_pointer(path: str) -> Optional[str]:
@@ -202,6 +207,16 @@ def _mirror_to_flat(model_name: str, generation: str) -> None:
             destination_file.flush()
             os.fsync(destination_file.fileno())
         os.replace(temporary_path, destination)
+
+
+def _prune_generations(model_name: str, keep: set[str]) -> None:
+    root = _generations_root(model_name)
+    if not os.path.isdir(root):
+        return
+    for generation in os.listdir(root):
+        if generation in keep:
+            continue
+        shutil.rmtree(_generation_dir(model_name, generation), ignore_errors=True)
 
 
 def _artifact_signature_path(path: str) -> str:
@@ -307,14 +322,16 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
         metrics: Optional metrics dict.
         training_meta: Optional training metadata (source, timestamp, feature_hash, etc.).
     """
+    _raise_if_cancelled(model_name)
     with _get_write_lock(model_name):
-        generation = _generate_generation_id()
+        _raise_if_cancelled(model_name)
+        generation = _generate_generation_id(model_name)
         generation_dir = _generation_dir(model_name, generation)
         os.makedirs(generation_dir, exist_ok=True)
         model_path = _generation_model_path(model_name, generation)
         meta_path = _generation_meta_path(model_name, generation)
-        model_tmp = f"{model_path}.{uuid.uuid4().hex}.tmp"
-        meta_tmp = f"{meta_path}.{uuid.uuid4().hex}.tmp"
+        model_tmp = _unique_temp(model_path)
+        meta_tmp = _unique_temp(meta_path)
         meta = {
             "model_name": model_name,
             "generation": generation,
@@ -335,6 +352,7 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
             with open(model_tmp, "rb") as file:
                 if pickle.load(file) is None:
                     raise ValueError(f"Generated artifact for '{model_name}' is empty")
+            _raise_if_cancelled(model_name)
             os.replace(model_tmp, model_path)
             os.replace(meta_tmp, meta_path)
             _sign_artifact(model_path)
@@ -346,6 +364,7 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
             _atomic_write_json(active_path, {"generation": generation})
             _mirror_to_flat(model_name, generation)
             _sign_artifact(get_model_path(model_name))
+            _prune_generations(model_name, {generation, current} - {None})
         finally:
             for temporary_path in (model_tmp, meta_tmp):
                 try:
@@ -506,6 +525,18 @@ def cleanup_stale_training_artifacts(model_name: Optional[str] = None) -> None:
                     os.remove(os.path.join(MODEL_STORAGE_DIR, entry))
                 except OSError:
                     pass
+
+
+def _cleanup_generation_temps(model_name: str, generation: str) -> None:
+    generation_dir = _generation_dir(model_name, generation)
+    if not os.path.isdir(generation_dir):
+        return
+    for entry in os.listdir(generation_dir):
+        if entry.endswith(".tmp"):
+            try:
+                os.remove(os.path.join(generation_dir, entry))
+            except OSError:
+                pass
 
 
 async def ensure_model_loaded(model_name: str, train_fn, *args, **kwargs) -> Optional[Any]:

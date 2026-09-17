@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { __testing } from '../../../src/services/ml.js';
+import { __testing } from '../../src/services/ml.js';
 
 const { parseWeightKg } = __testing;
 
@@ -27,24 +27,25 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg('1T')).toBe(1000);
   });
 
-  it('returns NaN for unparseable strings', () => {
-    expect(Number.isNaN(parseWeightKg('abc'))).toBe(true);
-    expect(Number.isNaN(parseWeightKg(''))).toBe(true);
-    expect(Number.isNaN(parseWeightKg('kg'))).toBe(true);
+  it('returns null for unparseable strings', () => {
+    expect(parseWeightKg('abc')).toBeNull();
+    expect(parseWeightKg('')).toBeNull();
+    expect(parseWeightKg('kg')).toBeNull();
   });
 
-  it('returns NaN for null and undefined', () => {
-    expect(Number.isNaN(parseWeightKg(null))).toBe(true);
-    expect(Number.isNaN(parseWeightKg(undefined))).toBe(true);
+  it('returns null for null and undefined', () => {
+    expect(parseWeightKg(null)).toBeNull();
+    expect(parseWeightKg(undefined)).toBeNull();
   });
 
-  it('returns NaN for non-finite numbers', () => {
-    expect(Number.isNaN(parseWeightKg(NaN))).toBe(true);
-    expect(Number.isNaN(parseWeightKg(Infinity))).toBe(true);
+  it('returns null for non-finite numbers', () => {
+    expect(parseWeightKg(NaN)).toBeNull();
+    expect(parseWeightKg(Infinity)).toBeNull();
   });
 
-  it('returns NaN for objects and arrays', () => {
-    expect(Number.isNaN(parseWeightKg({}))).toBe(true);
-    expect(Number.isNaN(parseWeightKg([]))).toBe(true);
+  it('returns null for booleans, objects and arrays', () => {
+    expect(parseWeightKg(true)).toBeNull();
+    expect(parseWeightKg({})).toBeNull();
+    expect(parseWeightKg([])).toBeNull();
   });
 });

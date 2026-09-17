@@ -510,6 +510,26 @@ export const requireScopes = (...requiredScopes) => {
   };
 };
 
+export const requireEscrowOperatorKey = (req, res, next) => {
+  const configuredKeys = (process.env.ESCROW_OPERATOR_API_KEYS || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+  const presentedKey = req.apiKeyMetadata?.rawKey;
+
+  if (!configuredKeys.length) {
+    return res.status(503).json({
+      error: 'Service Unavailable: escrow operator authentication is not configured.',
+    });
+  }
+
+  if (!presentedKey || !configuredKeys.some((key) => safeCompare(presentedKey, key))) {
+    return res.status(403).json({ error: 'Forbidden: escrow operator key required.' });
+  }
+
+  next();
+};
+
 // ============================================================================
 // FILE: src/middleware/ipWhitelist.js
 // Description: IP Restriction Filter

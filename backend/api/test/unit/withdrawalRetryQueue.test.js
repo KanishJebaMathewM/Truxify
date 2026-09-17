@@ -39,16 +39,24 @@ const {
 } = await import('../../src/workers/withdrawalSettlementWorker.js');
 
 function mockPendingWithdrawals(rows) {
-  const query = {
-    select: vi.fn().mockReturnThis(),
+  const selectQuery = {
     eq: vi.fn().mockReturnThis(),
     is: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue({ data: rows, error: null }),
-    update: vi.fn().mockReturnThis(),
   };
-  admin.from.mockReturnValue(query);
-  return query;
+  const updateQuery = {
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    select: vi.fn().mockResolvedValue({
+      data: [{ id: 'w-timeout-1' }, { id: 'w-dlq-1' }, { id: 'w-success-1' }, { id: 'w1' }],
+      error: null,
+    }),
+  };
+  admin.from.mockImplementation(() => ({
+    select: vi.fn().mockReturnValue(selectQuery),
+    update: vi.fn().mockReturnValue(updateQuery),
+  }));
 }
 
 describe('Withdrawal Retry Queue & DLQ Processing', () => {

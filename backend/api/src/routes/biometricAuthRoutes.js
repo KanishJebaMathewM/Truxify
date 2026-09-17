@@ -184,7 +184,7 @@ router.post('/verify', authenticate, userLimiter, (req, res) => {
         return res.status(400).json({ error: 'method is required' });
     }
 
-    const result = verifyBiometric(challenge_id, biometric_token, method);
+    const result = verifyBiometric(challenge_id, biometric_token, method, req.user.id);
 
     if (!result.success) {
         return res.status(400).json({ error: result.error });
@@ -223,7 +223,7 @@ router.post('/fallback', authenticate, userLimiter, (req, res) => {
         return res.status(400).json({ error: 'otp is required' });
     }
 
-    const result = verifyFallbackOtp(challenge_id, String(otp));
+    const result = verifyFallbackOtp(challenge_id, String(otp), req.user.id);
 
     if (!result.success) {
         return res.status(400).json({ error: result.error });

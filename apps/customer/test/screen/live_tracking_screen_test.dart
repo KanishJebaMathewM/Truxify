@@ -71,8 +71,8 @@ void main() {
 
     when(() => mockOrderService.fetchOrderTimeline(any())).thenAnswer((_) async => [
       {
-        'status': 'Booked',
-        'timestamp': '2026-08-03T00:00:00Z',
+        'milestone': 'Booking Confirmed',
+        'milestone_time': '2026-08-03T00:00:00Z',
         'completed': true,
       }
     ]);
@@ -146,6 +146,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('45 mins'), findsOneWidget);
+    });
+
+    testWidgets('displays formatted milestone timestamp using milestone_time', (tester) async {
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final dt = DateTime.parse('2026-08-03T00:00:00Z').toLocal();
+      final expectedTimestamp =
+          '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      expect(find.text(expectedTimestamp), findsWidgets);
     });
 
     testWidgets('refreshes authoritative state after reconnect', (tester) async {

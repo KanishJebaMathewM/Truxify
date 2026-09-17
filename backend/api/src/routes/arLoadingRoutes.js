@@ -18,6 +18,7 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
     }
 
     const plan = await arLoadingOptimizerService.generateLoadingPlan({
+      ownerId: req.user.id,
       container: container || {},
       pallets
     });
@@ -38,7 +39,10 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
 router.get('/plan/:planId', authenticate, userLimiter, async (req, res) => {
   try {
     const { planId } = req.params;
-    const plan = await arLoadingOptimizerService.getLoadingPlan(planId);
+    const plan = await arLoadingOptimizerService.getLoadingPlan(
+      planId,
+      req.user.role === 'admin' ? null : req.user.id
+    );
 
     if (!plan) {
       return res.status(404).json({ error: 'AR loading plan not found' });

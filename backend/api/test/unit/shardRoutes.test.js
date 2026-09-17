@@ -222,7 +222,60 @@ describe('shardRoutes', () => {
   });
 
   describe('GET /api/shards/all/orders', () => {
-    it('aggregates total orders across shards and returns per-shard data', async () => {
+    it('returns 200 OK when all shards succeed', async () => {
+      const allSuccessResults = {
+        results: [
+          { shard: 'north', data: [{ total: '15' }] },
+          { shard: 'south', data: [{ total: '25' }] },
+        ],
+        failed: [],
+        healthy: ['north', 'south'],
+        unhealthy: [],
+        partial: false,
+      };
+
+      const customApp = makeApp((req, _res, next) => {
+        req.executeCrossShard = vi.fn().mockResolvedValue(allSuccessResults);
+        next();
+      });
+
+      const res = await request(customApp).get('/api/shards/all/orders');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.total).toBe(40);
+      expect(res.body.data.shards).toEqual(allSuccessResults.results);
+      expect(res.body.data.healthy).toEqual(['north', 'south']);
+      expect(res.body.data.failedShards).toEqual([]);
+      expect(res.body.data.partial).toBe(false);
+    });
+
+    it('returns 200 OK when healthy shards return zero rows (not 503)', async () => {
+      const zeroRowResults = {
+        results: [
+          { shard: 'north', data: [] },
+          { shard: 'south', data: [{ total: '0' }] },
+        ],
+        failed: [],
+        healthy: ['north', 'south'],
+        unhealthy: [],
+        partial: false,
+      };
+
+      const customApp = makeApp((req, _res, next) => {
+        req.executeCrossShard = vi.fn().mockResolvedValue(zeroRowResults);
+        next();
+      });
+
+      const res = await request(customApp).get('/api/shards/all/orders');
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.total).toBe(0);
+      expect(res.body.data.healthy).toEqual(['north', 'south']);
+      expect(res.body.data.failedShards).toEqual([]);
+      expect(res.body.data.partial).toBe(false);
+    });
+
+    it('aggregates total orders across shards and returns per-shard data when results are a raw array', async () => {
       const mockCrossShardResults = [
         { shard: 'shard-1', data: [{ total: '15' }] },
         { shard: 'shard-2', data: [{ total: '25' }] },
@@ -239,6 +292,58 @@ describe('shardRoutes', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.total).toBe(40);
       expect(res.body.data.shards).toEqual(mockCrossShardResults);
+    });
+
+    it('returns 207 Multi-Status with partial flag and Retry-After when one or more shards fail while at least one shard succeeds', async () => {
+      const partialCrossShardResults = {
+        results: [
+          { shard: 'north', data: [{ total: '15' }] },
+          { shard: 'south', data: [{ total: '25' }] },
+        ],
+        failed: ['east', 'west'],
+        healthy: ['north', 'south'],
+        unhealthy: ['east', 'west'],
+        partial: true,
+      };
+
+      const customApp = makeApp((req, _res, next) => {
+        req.executeCrossShard = vi.fn().mockResolvedValue(partialCrossShardResults);
+        next();
+      });
+
+      const res = await request(customApp).get('/api/shards/all/orders');
+      expect(res.status).toBe(207);
+      expect(res.body.success).toBe(false);
+      expect(res.body.warning).toBe('results partially unavailable');
+      expect(res.body.data.total).toBe(40);
+      expect(res.body.data.failedShards).toEqual(['east', 'west']);
+      expect(res.body.data.healthy).toEqual(['north', 'south']);
+      expect(res.body.data.unhealthy).toEqual(['east', 'west']);
+      expect(res.body.data.partial).toBe(true);
+      expect(res.headers['retry-after']).toBe('30');
+    });
+
+    it('returns 503 Service Unavailable with Retry-After when all shards fail', async () => {
+      const allFailedResults = {
+        results: [],
+        failed: ['north', 'south', 'east', 'west'],
+        healthy: [],
+        unhealthy: ['north', 'south', 'east', 'west'],
+        partial: true,
+      };
+
+      const customApp = makeApp((req, _res, next) => {
+        req.executeCrossShard = vi.fn().mockResolvedValue(allFailedResults);
+        next();
+      });
+
+      const res = await request(customApp).get('/api/shards/all/orders');
+      expect(res.status).toBe(503);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBe('All database shards are unavailable');
+      expect(res.body.data.partial).toBe(true);
+      expect(res.body.data.failedShards).toEqual(['north', 'south', 'east', 'west']);
+      expect(res.headers['retry-after']).toBe('30');
     });
 
     it('returns 500 when executeCrossShard throws an error', async () => {

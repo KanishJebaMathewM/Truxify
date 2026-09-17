@@ -41,11 +41,11 @@ export function getTrackingTokenStatus(token, now = new Date()) {
     return 'active';
   }
   const expiryDate = token.expires_at instanceof Date ? token.expires_at : new Date(token.expires_at);
-  if (Number.isNaN(expiryDate.getTime())) {
+  if (!Number.isFinite(expiryDate.getTime())) {
     return 'invalid';
   }
   const currentDate = now instanceof Date ? now : new Date(now);
-  if (Number.isNaN(currentDate.getTime())) {
+  if (!Number.isFinite(currentDate.getTime())) {
     return 'invalid';
   }
   if (expiryDate.getTime() <= currentDate.getTime()) {

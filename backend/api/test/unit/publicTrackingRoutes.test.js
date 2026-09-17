@@ -30,6 +30,14 @@ vi.mock('../../src/services/trackingTokenService.js', () => ({
   },
 }));
 
+const gpsLogMock = vi.hoisted(() => ({
+  find: vi.fn(),
+}));
+
+vi.mock('../../src/models/GpsLog.js', () => ({
+  default: gpsLogMock,
+}));
+
 const supabaseMock = vi.hoisted(() => ({
   from: vi.fn(),
 }));
@@ -135,5 +143,34 @@ describe('publicTrackingRoutes', () => {
 
     const res = await request(makeApp()).get('/api/public/tracking/valid-token/route');
     expect(res.status).toBe(422);
+  });
+
+  it('GET /tracking/:token/history returns bounded GPS points', async () => {
+    tokenServiceMock.validateToken.mockResolvedValue({ valid: true, orderDisplayId: ORDER.order_display_id });
+    const lean = vi.fn().mockResolvedValue([
+      { lat: 19.1, lng: 73.1, speed: 42, heading: 90, timestamp: '2026-08-11T10:00:00.000Z' },
+    ]);
+    const limit = vi.fn().mockReturnValue({ lean });
+    const sort = vi.fn().mockReturnValue({ limit });
+    gpsLogMock.find.mockReturnValue({ sort });
+
+    const res = await request(makeApp()).get('/api/public/tracking/valid-token/history?limit=10');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      points: [{ latitude: 19.1, longitude: 73.1, speed: 42, heading: 90, timestamp: '2026-08-11T10:00:00.000Z' }],
+      count: 1,
+      limit: 10,
+    });
+    expect(gpsLogMock.find).toHaveBeenCalledWith({ bookingId: ORDER.order_display_id });
+  });
+
+  it('GET /tracking/:token/history rejects invalid query bounds', async () => {
+    tokenServiceMock.validateToken.mockResolvedValue({ valid: true, orderDisplayId: ORDER.order_display_id });
+
+    const res = await request(makeApp()).get('/api/public/tracking/valid-token/history?limit=501');
+
+    expect(res.status).toBe(422);
+    expect(tokenServiceMock.validateToken).not.toHaveBeenCalled();
   });
 });

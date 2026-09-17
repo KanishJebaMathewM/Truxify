@@ -16,6 +16,10 @@ function createMockSupabase(store) {
             this._filters.push({ column, value })
             return this
           },
+          gte(column, value) {
+            this._filters.push({ column, value, op: 'gte' })
+            return this
+          },
           select() {
             return this
           },
@@ -42,7 +46,11 @@ function createMockSupabase(store) {
 
               let rows = [...(store[this._table] || [])]
               for (const filter of this._filters) {
-                rows = rows.filter((row) => row[filter.column] === filter.value)
+                if (filter.op === 'gte') {
+                  rows = rows.filter((row) => row[filter.column] >= filter.value)
+                } else {
+                  rows = rows.filter((row) => row[filter.column] === filter.value)
+                }
               }
 
               if (this._maybeSingle) {

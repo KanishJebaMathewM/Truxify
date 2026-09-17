@@ -6,22 +6,24 @@ const R2_ENDPOINT = process.env.CLOUDFLARE_R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || `https://${R2_BUCKET_NAME}.${R2_ENDPOINT.split('https://')[1]}`;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || (R2_ENDPOINT && R2_BUCKET_NAME ? `https://${R2_BUCKET_NAME}.${R2_ENDPOINT.replace(/^https?:\/\//, '')}` : '');
 
 if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME) {
     console.warn('Warning: Cloudflare R2 environment variables are not fully configured. R2 uploads will fail.');
 }
 
-// Initialize S3 Client for Cloudflare R2
-const r2Client = new S3Client({
-    region: 'auto', // R2 uses 'auto' for region
-    endpoint: R2_ENDPOINT,
-    credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY,
-    },
-    forcePathStyle: true, // Required for some R2 configurations
-});
+// Initialize S3 Client for Cloudflare R2 safely
+const r2Client = (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY)
+    ? new S3Client({
+        region: 'auto', // R2 uses 'auto' for region
+        endpoint: R2_ENDPOINT,
+        credentials: {
+            accessKeyId: R2_ACCESS_KEY_ID,
+            secretAccessKey: R2_SECRET_ACCESS_KEY,
+        },
+        forcePathStyle: true, // Required for some R2 configurations
+    })
+    : null;
 
 /**
  * Uploads a file buffer to Cloudflare R2
@@ -31,6 +33,9 @@ const r2Client = new S3Client({
  */
 const uploadToR2 = async (file, objectKey) => {
     try {
+        if (!r2Client) {
+            throw new Error('Cloudflare R2 is not configured. Please set R2 environment variables.');
+        }
         if (!file || !file.buffer) {
             throw new Error('Invalid file object provided for upload');
         }

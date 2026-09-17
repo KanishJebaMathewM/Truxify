@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -233,8 +233,7 @@ export async function uploadDriverDocument(req, res) {
   }
 }
 
-const documentService = require('../services/documentService');
-
+/*
 const uploadDocument = async (req, res) => {
   try {
     const userId = req.user.uid;
@@ -317,3 +316,4 @@ module.exports = {
   listDocuments,
   removeDocument,
 };
+*/

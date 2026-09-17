@@ -19,7 +19,7 @@
     },
     {
       "parameters": {
-        "url": "http://ml-engine:8000/ab-testing/status",
+        "url": "http://ml-engine:8000/models/demand/status",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -34,12 +34,12 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [200, 0],
-      "id": "check-active-tests",
-      "name": "Check Active Demand Test"
+      "id": "check-demand-model",
+      "name": "Check Active Demand Model"
     },
     {
       "parameters": {
-        "url": "={{$node[\"Check Active Demand Test\"].json.active_test ? 'http://ml-engine:8000/ab-testing/evaluate/' + $node[\"Check Active Demand Test\"].json.active_test.test_id : 'http://ml-engine:8000/ab-testing/status'}}",
+        "url": "http://ml-engine:8000/models/demand/status",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -54,13 +54,13 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [400, 0],
-      "id": "evaluate-test",
-      "name": "Evaluate Demand Test"
+      "id": "evaluate-demand-model",
+      "name": "Evaluate Demand Model"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const data = $input.item.json;\nconst shouldRollback = Boolean(data.should_rollback || (data.metrics && data.metrics.degradation > 0.15));\nreturn {\n  test_id: data.test_id || 'test-default',\n  should_rollback: shouldRollback,\n  action: shouldRollback ? 'rollback' : 'promote',\n  evaluated_at: new Date().toISOString()\n};"
+        "jsCode": "const data = $input.item.json;\nreturn {\n  model: data.model,\n  active_version: data.active_version,\n  previous_version: data.previous_version,\n  should_rollback: Boolean(data.should_rollback),\n  action: data.should_rollback ? 'rollback' : 'keep_active',\n  evaluated_at: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -88,7 +88,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://ml-engine:8000/train/demand/rollback?test_id={{$node[\"Demand Rollback Decision\"].json.test_id}}",
+        "url": "http://ml-engine:8000/train/demand/rollback",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -109,9 +109,9 @@
     {
       "parameters": {
         "toEmail": "ml-alerts@truxify.org",
-        "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.test_id}}",
+        "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.active_version}}",
         "htmlFormat": true,
-        "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Demand Rollback Decision\"].json.test_id}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
+        "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",
@@ -126,25 +126,25 @@
       "main": [
         [
           {
-            "node": "check-active-tests",
+            "node": "check-demand-model",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "check-active-tests": {
+    "check-demand-model": {
       "main": [
         [
           {
-            "node": "evaluate-test",
+            "node": "evaluate-demand-model",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "evaluate-test": {
+    "evaluate-demand-model": {
       "main": [
         [
           {

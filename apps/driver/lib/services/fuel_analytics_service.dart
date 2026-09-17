@@ -1,7 +1,10 @@
 import 'trip_service.dart';
 
 class FuelAnalyticsService {
-  final TripService _tripService = TripService();
+  final TripService _tripService;
+
+  FuelAnalyticsService({TripService? tripService})
+      : _tripService = tripService ?? TripService();
 
   Future<Map<String, dynamic>> calculateAnalytics(double averageMpg) async {
     try {

@@ -247,8 +247,13 @@ Having problems with local setup or development?
 Note: Truxify is in active development (Phase 2). The core platform features are the current focus.
 
 ### Prerequisites
-- Flutter SDK 3.x
+- Flutter SDK `>= 3.19.0`
+- Node.js `>= 20.x` (LTS)
+- Python `>= 3.11.x`
+- Docker Engine and Docker Compose
 - Git
+
+These versions match the contributor setup requirements in `CONTRIBUTING.md`.
 
 ### Run the Customer App
 ```bash
@@ -321,7 +326,7 @@ Once the stack is running, you can reach the local services here:
 
 ## 🤝 Contributor Notes
 - Verify that `backend/api/.env` exists before starting the backend or Docker Compose services.
-- Run `npm test` before opening a pull request to catch regressions early.
+- Run the relevant test commands before opening a pull request; see the repository testing guide in `CONTRIBUTING.md`.
 - Prefer Docker Compose when you want the full local development environment with API, PostgreSQL/PostGIS, MongoDB, and Redis together.
 
 ## 📊 Impact Metrics (Projected)
@@ -400,4 +405,3 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
-

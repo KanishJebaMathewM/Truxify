@@ -1,4 +1,4 @@
-﻿import crypto from 'crypto'
+import crypto from 'crypto'
 
 /**
  * Hash an OTP with scrypt and a per-OTP random salt. The salt is
@@ -52,6 +52,9 @@ export function verifyOtpHash(otp, otpRecord) {
  */
 export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') {
+    return false
+  }
+  if (!/^[0-9a-fA-F]*$/.test(a) || !/^[0-9a-fA-F]*$/.test(b)) {
     return false
   }
 

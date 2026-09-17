@@ -58,6 +58,9 @@ const parsedAmount = claimedAmount !== undefined && claimedAmount !== null
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       throw new Error('claimedAmount must be a positive number');
     }
+    if (parsedAmount > escrow.estimatedFeeAmount) {
+      throw new Error('claimedAmount cannot exceed the estimated escrow amount');
+    }
     
     escrow.status = 'RELEASED';
     escrow.releasedAmount = parsedAmount;

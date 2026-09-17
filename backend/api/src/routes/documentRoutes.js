@@ -90,37 +90,3 @@ router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) =>
 });
 
 export default router;
-
-const express = require('express');
-const router = express.Router();
-const multer = require('multer');
-const documentController = require('../controllers/documentController');
-const authMiddleware = require('../middleware/authMiddleware');
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, 
-  },
-});
-
-router.post(
-  '/upload',
-  authMiddleware,
-  upload.single('document'),
-  documentController.uploadDocument
-);
-
-router.get(
-  '/',
-  authMiddleware,
-  documentController.listDocuments
-);
-
-router.delete(
-  '/:documentId',
-  authMiddleware,
-  documentController.removeDocument
-);
-
-module.exports = router;

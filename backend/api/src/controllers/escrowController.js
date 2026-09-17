@@ -10,20 +10,21 @@ const depositEscrow = async (req, res) => {
                 error: 'Missing required fields',
                 message: 'bookingId, amount, and driverWalletAddress are required'
             });
-.
-const result = await escrowService.initiateEscrowDeposit(
-    userId,
-    bookingId,
-    amount,
-    driverWalletAddress
-);
+        }
 
-return res.status(200).json({
-    success: true,
-    message: 'Escrow deposit initiated successfully',
-    data: result,
-});
-  } catch (error) {
+        const result = await escrowService.initiateEscrowDeposit(
+            userId,
+            bookingId,
+            amount,
+            driverWalletAddress
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: 'Escrow deposit initiated successfully',
+            data: result,
+        });
+    } catch (error) {
     if (error.message.includes('greater than zero') || error.message.includes('valid number')) {
         return res.status(400).json({ error: error.message });
     }

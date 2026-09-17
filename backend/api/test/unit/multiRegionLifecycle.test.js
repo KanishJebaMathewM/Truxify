@@ -228,6 +228,29 @@ describe('RegionService lifecycle', () => {
         expect(secondary.primary).toBe(false);
     });
 
+    it('does not propagate a null payload after the primary fetch fails', async () => {
+        const primary = { name: 'primary' };
+        const secondary = { name: 'secondary' };
+        const service = Object.create(RegionService.prototype);
+        service._stopped = false;
+        service.primaryRegion = primary;
+        service.regions = [primary, secondary];
+        service.fetchDataFromRegion = vi.fn().mockResolvedValue(null);
+        service.replicateToRegion = vi.fn();
+        service.redis = {
+            incr: vi.fn(),
+            set: vi.fn()
+        };
+
+        await service.replicateData();
+
+        expect(service.fetchDataFromRegion).toHaveBeenCalledOnce();
+        expect(service.fetchDataFromRegion).toHaveBeenCalledWith(primary);
+        expect(service.replicateToRegion).not.toHaveBeenCalled();
+        expect(service.redis.incr).not.toHaveBeenCalled();
+        expect(service.redis.set).not.toHaveBeenCalled();
+    });
+
     it('does not perform Redis work from a callback that resumes after stop', async () => {
         let resolveFetch;
         const fetchPromise = new Promise(resolve => {

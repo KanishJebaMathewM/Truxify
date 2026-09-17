@@ -9,7 +9,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from .base import save_model, load_model, model_exists, get_model_meta, restore_previous_model
+from .base import (
+    save_model,
+    load_model,
+    model_exists,
+    get_model_meta,
+    get_active_generation,
+    restore_previous_model,
+)
 from ..execution import is_training_cancelled, TrainingCancelled
 
 logger = logging.getLogger(__name__)
@@ -183,6 +190,7 @@ def train_demand_forecast_model() -> dict:
         else:
             logger.info("Demand forecast model trained but NOT promoted. %s", reason)
 
+        metrics["production_version"] = get_active_generation(MODEL_NAME) or "production"
         return metrics
 
 
@@ -201,10 +209,18 @@ def rollback_demand_forecast_model() -> dict:
         reset_model_cache()
         meta = get_model_meta(MODEL_NAME) or {}
         logger.warning("Demand forecast model rolled back to previous version.")
-        return {"rolled_back": True, "metrics": meta.get("metrics", {})}
+        return {
+            "rolled_back": True,
+            "production_version": get_active_generation(MODEL_NAME) or "production",
+            "metrics": meta.get("metrics", {}),
+        }
 
     logger.warning("Demand forecast rollback requested but no previous version exists.")
-    return {"rolled_back": False, "reason": "No previous version available to roll back to."}
+    return {
+        "rolled_back": False,
+        "production_version": get_active_generation(MODEL_NAME) or "production",
+        "reason": "No previous version available to roll back to.",
+    }
 
 
 def predict_demand(features: List[float]) -> Optional[float]:

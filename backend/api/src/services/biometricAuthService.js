@@ -203,11 +203,14 @@ export function createChallenge(userId, shipmentId, freightValuePaisa) {
  * @param {string} biometricToken  – Base64url-encoded proof payload from device
  * @param {'fingerprint'|'face_recognition'} method
  */
-export function verifyBiometric(challengeId, biometricToken, method) {
+export function verifyBiometric(challengeId, biometricToken, method, userId) {
     const session = challengeSessions.get(challengeId);
 
     if (!session) {
         return { success: false, error: 'Challenge not found or already consumed' };
+    }
+    if (userId && session.userId !== userId) {
+        return { success: false, error: 'Challenge does not belong to the authenticated user' };
     }
     if (session.status !== 'pending') {
         return { success: false, error: `Challenge already ${session.status}` };
@@ -249,11 +252,14 @@ export function verifyBiometric(challengeId, biometricToken, method) {
  * Fallback: verify a one-time OTP instead of biometrics.
  * The OTP is delivered out-of-band (SMS / in-app notification) by the caller.
  */
-export function verifyFallbackOtp(challengeId, otp) {
+export function verifyFallbackOtp(challengeId, otp, userId) {
     const session = challengeSessions.get(challengeId);
 
     if (!session) {
         return { success: false, error: 'Challenge not found or already consumed' };
+    }
+    if (userId && session.userId !== userId) {
+        return { success: false, error: 'Challenge does not belong to the authenticated user' };
     }
     if (session.status !== 'pending') {
         return { success: false, error: `Challenge already ${session.status}` };

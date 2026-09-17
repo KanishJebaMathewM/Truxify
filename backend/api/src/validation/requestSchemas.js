@@ -181,6 +181,11 @@ export const verifyDeliverySchema = z.object({
   )
 });
 
+export const confirmStopSchema = z.object({
+  stopId: z.string().min(1, 'stopId is required'),
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
 export const changeDropSchema = z.object({
   drop_address: z.string().min(3, 'Drop address must be at least 3 characters'),
   drop_lat: coerceNumber(
@@ -222,9 +227,10 @@ export const registerDeviceSchema = z.object({
 }).strict();
 
 export const unregisterDeviceSchema = z.object({
-  fcmToken: z.string()
+  fcmToken: z.string({ required_error: 'fcmToken is required', invalid_type_error: 'fcmToken must be a string' })
     .min(10, { message: 'fcmToken must be at least 10 characters' })
     .max(4096, { message: 'fcmToken is too long' }),
+  userId: z.string().optional(),
 }).strict();
 
 export const updateFcmTokenSchema = z.object({

@@ -28,6 +28,7 @@ Ensure you have the following secrets ready before deployment:
 * `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (or the `serviceAccountKey.json`)
 * `BLOCKCHAIN_RPC_URL` and `ESCROW_PRIVATE_KEY` (For the relayer wallet)
 * `VALID_API_KEYS` (Comma separated list for zero-downtime rotation)
+* `ESCROW_OPERATOR_API_KEY` (Dedicated escrow operator key; required in addition to a key from `VALID_API_KEYS` to close the escrow circuit breaker — see `docs/API_KEY_AUTH.md`)
 * `SENTRY_DSN` (For error tracking)
 
 ### Storing Secrets

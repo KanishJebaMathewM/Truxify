@@ -834,7 +834,12 @@ async function handleGetDriverEarnings(req, res) {
 }
 
 router.get('/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
-router.get('/:driverId/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
+router.get('/:driverId/earnings', authenticate, userLimiter, (req, res, next) => {
+  if (req.user.role !== 'admin' && req.user.id !== req.params.driverId) {
+    return res.status(403).json({ error: 'You can only view your own earnings.' });
+  }
+  return next();
+}, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
 
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)

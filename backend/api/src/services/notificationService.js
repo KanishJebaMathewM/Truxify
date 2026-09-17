@@ -1,4 +1,4 @@
-import { supabaseAdmin, firebaseAdmin } from '../config/db.js';
+import { supabaseAdmin, firebaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
@@ -850,6 +850,29 @@ export async function sendToDevice(token, payload) {
 // ============================================================================
 
 /**
+ * Publish a notification event to Redis channel with structured error logging.
+ *
+ * @param {object} payload - Notification payload
+ * @returns {Promise<boolean>} Whether the publish succeeded
+ */
+export async function publishNotification(payload) {
+  if (!redisClient) return false;
+  try {
+    await redisClient.publish('notifications', JSON.stringify(payload));
+    return true;
+  } catch (error) {
+    logger.error('Failed to publish notification to Redis:', {
+      error: error.message,
+      stack: error.stack,
+      payload,
+    });
+    return false;
+  }
+}
+
+export const publishNotificationEvent = publishNotification;
+
+/**
  * Send notification to a user with detailed per-device results.
  * Similar to sendFcmNotification but returns granular results for each device.
  *
@@ -859,6 +882,18 @@ export async function sendToDevice(token, payload) {
  */
 export async function sendNotification(userId, payload) {
   return measureExecution('NotificationService.sendNotification', async () => {
+    if (redisClient) {
+      try {
+        await redisClient.publish('notifications', JSON.stringify(payload));
+      } catch (error) {
+        logger.error('Failed to publish notification to Redis:', {
+          error: error.message,
+          stack: error.stack,
+          payload,
+        });
+      }
+    }
+
     const tokensSent = new Set();
     const results = [];
 
@@ -927,4 +962,6 @@ export default {
   pruneStaleDevices,
   sendToDevice,
   sendNotification,
+  publishNotification,
+  publishNotificationEvent,
 };

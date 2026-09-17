@@ -509,3 +509,231 @@ describe("OracleService.logOracleResult", () => {
     );
   });
 });
+
+describe("OracleService.getPriceFeed blockchain price feed", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it("returns default fallback price for MATIC/USD when no overrides or live feed provided", async () => {
+    const service = makeService();
+    const feed = await service.getPriceFeed("MATIC/USD");
+
+    expect(feed).toMatchObject({
+      pair: "MATIC/USD",
+      price: 0.75,
+      source: "fallback",
+      fallback: true,
+    });
+    expect(feed.timestamp).toEqual(expect.any(String));
+  });
+
+  it("returns default fallback prices for known tokens (ETH/USD, USDC/USD, FUEL/USD)", async () => {
+    const service = makeService();
+    const ethFeed = await service.getPriceFeed("ETH/USD");
+    const usdcFeed = await service.getPriceFeed("USDC/USD");
+    const fuelFeed = await service.getPriceFeed("FUEL/USD");
+
+    expect(ethFeed.price).toBe(3000.0);
+    expect(usdcFeed.price).toBe(1.0);
+    expect(fuelFeed.price).toBe(3.90);
+  });
+
+  it("normalizes lowercase and whitespace in pair names", async () => {
+    const service = makeService();
+    const feed = await service.getPriceFeed("  matic/usd  ");
+
+    expect(feed.pair).toBe("MATIC/USD");
+    expect(feed.price).toBe(0.75);
+  });
+
+  it("uses custom fallbackPrice option when provided for an unknown pair", async () => {
+    const service = makeService();
+    const feed = await service.getPriceFeed("SOL/USD", { fallbackPrice: 150.25 });
+
+    expect(feed).toMatchObject({
+      pair: "SOL/USD",
+      price: 150.25,
+      source: "fallback",
+      fallback: true,
+    });
+  });
+
+  it("falls back to 1.0 for unknown pair when no custom fallbackPrice is provided", async () => {
+    const service = makeService();
+    const feed = await service.getPriceFeed("UNKNOWN/TOKEN");
+
+    expect(feed.price).toBe(1.0);
+    expect(feed.fallback).toBe(true);
+  });
+
+  it("respects environment variable price override (ORACLE_PRICE_...)", async () => {
+    process.env.ORACLE_PRICE_MATIC_USD = "1.45";
+    const service = makeService();
+    const feed = await service.getPriceFeed("MATIC/USD");
+
+    expect(feed).toMatchObject({
+      pair: "MATIC/USD",
+      price: 1.45,
+      source: "env_override",
+      fallback: false,
+    });
+  });
+
+  it("ignores invalid or non-positive environment variable price override", async () => {
+    process.env.ORACLE_PRICE_MATIC_USD = "-5";
+    const service = makeService();
+    const feed = await service.getPriceFeed("MATIC/USD");
+
+    expect(feed.price).toBe(0.75);
+    expect(feed.source).toBe("fallback");
+  });
+
+  it("fetches live price when CHAINLINK_ENABLED is true and fetchPriceFn is provided", async () => {
+    process.env.CHAINLINK_ENABLED = "true";
+    const service = makeService();
+    const mockFetchFn = vi.fn().mockResolvedValue(0.82);
+
+    const feed = await service.getPriceFeed("MATIC/USD", {
+      fetchPriceFn: mockFetchFn,
+    });
+
+    expect(mockFetchFn).toHaveBeenCalledWith("MATIC/USD");
+    expect(feed).toMatchObject({
+      pair: "MATIC/USD",
+      price: 0.82,
+      source: "chainlink",
+      fallback: false,
+    });
+  });
+
+  it("falls back to default price and logs warning when live Chainlink fetch throws an error", async () => {
+    process.env.CHAINLINK_ENABLED = "true";
+    const service = makeService();
+    const mockFetchFn = vi.fn().mockRejectedValue(new Error("RPC timeout"));
+
+    const feed = await service.getPriceFeed("MATIC/USD", {
+      fetchPriceFn: mockFetchFn,
+    });
+
+    expect(feed).toMatchObject({
+      pair: "MATIC/USD",
+      price: 0.75,
+      source: "fallback",
+      fallback: true,
+    });
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ pair: "MATIC/USD" }),
+      expect.stringContaining("Failed to fetch live price feed"),
+    );
+  });
+
+  it("falls back when live Chainlink fetch returns non-finite or non-positive value", async () => {
+    process.env.CHAINLINK_ENABLED = "true";
+    const service = makeService();
+    const mockFetchFn = vi.fn().mockResolvedValue(NaN);
+
+    const feed = await service.getPriceFeed("MATIC/USD", {
+      fetchPriceFn: mockFetchFn,
+    });
+
+    expect(feed.price).toBe(0.75);
+    expect(feed.source).toBe("fallback");
+  });
+});
+
+describe("OracleService.verifyCrossChain", () => {
+  const validTxHash = "0x" + "a".repeat(64);
+  const orderId = "order-crosschain-1";
+
+  it("rejects invalid blockchain transaction hash format", async () => {
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, "invalid-hash");
+
+    expect(result).toMatchObject({
+      verified: false,
+      error: "Invalid blockchain transaction hash",
+      code: "INVALID_BLOCKCHAIN_HASH",
+    });
+  });
+
+  it("verifies successfully when blockchain hash matches and escrow is funded", async () => {
+    configureQueries({
+      data: {
+        id: orderId,
+        blockchain_tx_hash: validTxHash,
+        escrow_status: "funded",
+      },
+      error: null,
+    });
+
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, validTxHash);
+
+    expect(result.verified).toBe(true);
+    expect(result.blockchainHash).toBe(validTxHash);
+    expect(result.verificationUrl).toBe(`https://polygonscan.com/tx/${validTxHash}`);
+  });
+
+  it("verifies successfully when escrow is released", async () => {
+    configureQueries({
+      data: {
+        id: orderId,
+        blockchain_tx_hash: validTxHash,
+        escrow_status: "released",
+      },
+      error: null,
+    });
+
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, validTxHash);
+
+    expect(result.verified).toBe(true);
+  });
+
+  it("does not verify when hash does not match stored transaction hash", async () => {
+    const differentTxHash = "0x" + "b".repeat(64);
+    configureQueries({
+      data: {
+        id: orderId,
+        blockchain_tx_hash: differentTxHash,
+        escrow_status: "funded",
+      },
+      error: null,
+    });
+
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, validTxHash);
+
+    expect(result.verified).toBe(false);
+  });
+
+  it("does not verify when order is not found in database", async () => {
+    configureQueries({
+      data: null,
+      error: null,
+    });
+
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, validTxHash);
+
+    expect(result.verified).toBe(false);
+    expect(result.error).toBe("Order not found");
+  });
+
+  it("handles database query errors gracefully", async () => {
+    configureQueries({
+      data: null,
+      error: { message: "DB timeout" },
+    });
+
+    const service = makeService();
+    const result = await service.verifyCrossChain(orderId, validTxHash);
+
+    expect(result.verified).toBe(false);
+    expect(result.error).toBe("DB timeout");
+    expect(mocks.logger.warn).toHaveBeenCalled();
+  });
+});

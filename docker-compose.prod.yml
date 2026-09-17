@@ -34,6 +34,8 @@ services:
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ML_ENGINE_URL: http://ml-engine:8000
+      # API key auth for backend-to-backend endpoints (n8n workflows)
+      VALID_API_KEYS: ${VALID_API_KEYS:?VALID_API_KEYS is required}
       # Malware scanning
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"

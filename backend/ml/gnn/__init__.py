@@ -1,2 +1,3 @@
 from . import _inference_eval_patch
 from . import _duplicate_node_id_patch
+from . import _pareto_resource_budget_patch

@@ -14,16 +14,10 @@ def _positive_env_int(name, default):
     return max(1, value)
 
 
-DEFAULT_PARETO_MAX_LABELS_PER_NODE = _positive_env_int(
-    "GNN_PARETO_MAX_LABELS_PER_NODE", 256
-)
+DEFAULT_PARETO_MAX_LABELS_PER_NODE = _positive_env_int("GNN_PARETO_MAX_LABELS_PER_NODE", 256)
 DEFAULT_PARETO_MAX_LABELS = _positive_env_int("GNN_PARETO_MAX_LABELS", 10000)
-DEFAULT_PARETO_MAX_EXPANSIONS = _positive_env_int(
-    "GNN_PARETO_MAX_EXPANSIONS", 50000
-)
-DEFAULT_PARETO_MAX_SECONDS = max(
-    0.001, float(os.getenv("GNN_PARETO_MAX_SECONDS", "30"))
-)
+DEFAULT_PARETO_MAX_EXPANSIONS = _positive_env_int("GNN_PARETO_MAX_EXPANSIONS", 50000)
+DEFAULT_PARETO_MAX_SECONDS = max(0.001, float(os.getenv("GNN_PARETO_MAX_SECONDS", "30")))
 
 
 class ParetoSearchLimitExceeded(RuntimeError):
@@ -76,14 +70,12 @@ def _find_pareto_routes(self, start, end, graph_data, objectives, constraints=No
         except (TypeError, ValueError):
             pass
 
-    metrics.update(
-        {
-            "max_labels_per_node": max_labels_per_node,
-            "max_labels": max_labels,
-            "max_expansions": max_expansions,
-            "max_seconds": max_seconds,
-        }
-    )
+    metrics.update({
+        "max_labels_per_node": max_labels_per_node,
+        "max_labels": max_labels,
+        "max_expansions": max_expansions,
+        "max_seconds": max_seconds,
+    })
 
     try:
         if not hasattr(graph_data, "graph"):
@@ -110,7 +102,6 @@ def _find_pareto_routes(self, start, end, graph_data, objectives, constraints=No
             current_values, current_time, current_path = heapq.heappop(queue)
             metrics["labels_expanded"] += 1
             current_node = current_path[-1]
-
             if current_node == end:
                 continue
 
@@ -143,20 +134,12 @@ def _find_pareto_routes(self, start, end, graph_data, objectives, constraints=No
                 dominated = False
                 survivors = []
                 for existing_values, existing_time, existing_path in existing_labels:
-                    existing_result = self._route_result_for_path(
-                        existing_path, graph_data
-                    )
-                    if self._pareto_dominates(
-                        existing_result, candidate_result, objectives
-                    ):
+                    existing_result = self._route_result_for_path(existing_path, graph_data)
+                    if self._pareto_dominates(existing_result, candidate_result, objectives):
                         dominated = True
-                        survivors.append(
-                            (existing_values, existing_time, existing_path)
-                        )
+                        survivors.append((existing_values, existing_time, existing_path))
                         continue
-                    if self._pareto_dominates(
-                        candidate_result, existing_result, objectives
-                    ):
+                    if self._pareto_dominates(candidate_result, existing_result, objectives):
                         metrics["labels_pruned"] += 1
                         continue
                     survivors.append((existing_values, existing_time, existing_path))
@@ -170,8 +153,7 @@ def _find_pareto_routes(self, start, end, graph_data, objectives, constraints=No
                 metrics["labels_stored"] -= removed
                 if len(survivors) + 1 > max_labels_per_node:
                     raise ParetoSearchLimitExceeded(
-                        f"Pareto label limit exceeded for node '{neighbor}' "
-                        f"({max_labels_per_node} labels)"
+                        f"Pareto label limit exceeded for node '{neighbor}' ({max_labels_per_node} labels)"
                     )
                 if metrics["labels_stored"] + 1 > max_labels:
                     raise ParetoSearchLimitExceeded(
@@ -198,9 +180,7 @@ def _find_pareto_routes(self, start, end, graph_data, objectives, constraints=No
 
 def multi_objective_optimization(self, start, end, graph_data, constraints=None):
     objectives = ["time", "cost", "fuel"]
-    frontier = self._find_pareto_routes(
-        start, end, graph_data, objectives, constraints
-    )
+    frontier = self._find_pareto_routes(start, end, graph_data, objectives, constraints)
     if not frontier:
         return None
     weights = {"time": 0.5, "cost": 0.3, "fuel": 0.2}
@@ -218,23 +198,51 @@ def multi_objective_optimization(self, start, end, graph_data, constraints=None)
     return result
 
 
-_original_multi_objective_endpoint = _gnn_routes.multi_objective_optimize
+def _build_multi_objective_response(result):
+    if result:
+        return {
+            "success": True,
+            "data": result,
+            "timestamp": _gnn_routes.datetime.now().isoformat(),
+        }
+    return {
+        "success": False,
+        "error": "Multi-objective route optimization failed",
+        "timestamp": _gnn_routes.datetime.now().isoformat(),
+    }
 
 
 async def _multi_objective_optimize_with_budget(request):
+    _gnn_routes.validate_route_objectives(request.objectives)
     try:
-        return await _original_multi_objective_endpoint(request)
+        graph = _gnn_routes.builder.build_road_network(
+            [node.dict() for node in request.nodes],
+            [edge.dict() for edge in request.edges],
+        )
+        graph_data = _gnn_routes.builder.get_pytorch_data()
+        result = _gnn_routes._multi_objective_optimization(
+            request.start_node,
+            request.end_node,
+            graph_data,
+            objectives=request.objectives,
+            constraints=request.constraints,
+        )
+        return _build_multi_objective_response(result)
     except ParetoSearchLimitExceeded as exc:
         _gnn_routes.logger.warning(f"Pareto search budget exceeded: {exc}")
-        from fastapi import HTTPException
-
-        raise HTTPException(
+        raise _gnn_routes.HTTPException(
             status_code=503,
             detail=(
-                "Multi-objective route optimization exceeded its resource "
-                f"budget: {exc}"
+                "Multi-objective route optimization exceeded its resource budget: "
+                f"{exc}"
             ),
         )
+    except _gnn_routes.HTTPException:
+        raise
+    except Exception as exc:
+        _gnn_routes.logger.error(f"Multi-objective optimization failed: {exc}")
+        _gnn_routes.logger.error(f"Internal error: {exc}")
+        raise _gnn_routes.HTTPException(status_code=500, detail="Internal server error")
 
 
 _models.ParetoSearchLimitExceeded = ParetoSearchLimitExceeded
@@ -245,6 +253,9 @@ _gnn_routes.ParetoSearchLimitExceeded = ParetoSearchLimitExceeded
 _gnn_routes.multi_objective_optimize = _multi_objective_optimize_with_budget
 
 for route in _gnn_routes.router.routes:
-    if getattr(route, "path", None) == "/gnn/multi-objective" and "POST" in getattr(route, "methods", set()):
+    if (
+        getattr(route, "path", None) == "/gnn/multi-objective"
+        and "POST" in getattr(route, "methods", set())
+    ):
         route.endpoint = _multi_objective_optimize_with_budget
         break

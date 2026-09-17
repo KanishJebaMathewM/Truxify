@@ -13,9 +13,10 @@ export class ZkDidVerifier {
     return ethers.keccak256(ethers.toUtf8Bytes(serialized));
   }
 
-  verifyZkProofOffChain(didUri, proofHash, nullifierHash) {
+  verifyZkProofOffChain(didUri, zkProof, publicInputs, nullifierHash) {
     if (!didUri.startsWith('did:truxify:')) return false;
-    if (!proofHash || proofHash === ethers.ZeroHash) return false;
+    if (!zkProof || zkProof === '0x') return false;
+    if (!publicInputs || !Array.isArray(publicInputs) || publicInputs.length === 0) return false;
     if (!nullifierHash || nullifierHash === ethers.ZeroHash) return false;
 
     return true;

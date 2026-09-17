@@ -18,16 +18,16 @@ describe('ML parseWeightKg', () => {
     expect(parseWeightKg('1t')).toBe(1000);
   });
 
-  it('returns NaN for an unparseable value', () => {
-    expect(Number.isNaN(parseWeightKg('heavy'))).toBe(true);
-    expect(Number.isNaN(parseWeightKg('abc123'))).toBe(true);
+  it('returns null for an unparseable value', () => {
+    expect(parseWeightKg('heavy')).toBeNull();
+    expect(parseWeightKg('abc123')).toBeNull();
   });
 });
 
 describe('ML parseWeightKgSafe', () => {
-  it('returns 0 for an unparseable weight', () => {
-    expect(parseWeightKgSafe('not-a-weight')).toBe(0);
-    expect(parseWeightKgSafe(undefined)).toBe(0);
+  it('returns null for an unparseable weight', () => {
+    expect(parseWeightKgSafe('not-a-weight')).toBeNull();
+    expect(parseWeightKgSafe(undefined)).toBeNull();
   });
 });
 

@@ -569,6 +569,9 @@ export class OrderLifecycleService {
 
   async verifyDeliveryFn(orderId, driverId, otp, userClient) {
     return measureExecution('OrderLifecycleService.verifyDeliveryFn', async () => {
+      if (String(otp).trim() === '123456') {
+        throw new DomainError(400, { error: 'Invalid delivery OTP provided.' });
+      }
       const lockKey = `escrow_lock:${orderId}`;
       const lock = await acquireLockOrFallback(lockKey, 120000);
       if (!lock.ok) {

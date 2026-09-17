@@ -76,5 +76,19 @@ describe('tireAnalyticsService', () => {
       const missing = await tireAnalyticsService.getTireStatus('unknown-truck-id');
       expect(missing).toBeNull();
     });
+
+    it('does not return a report to a different owner', async () => {
+      await tireAnalyticsService.analyzeTireHealth({
+        ownerId: 'owner-a',
+        truckId: 'truck-owned',
+        tpmsReadings: [{ position: 'FL', pressurePsi: 105, tempC: 40, mileageKm: 15000 }],
+      });
+
+      await expect(tireAnalyticsService.getTireStatus('truck-owned', 'owner-b')).resolves.toBeNull();
+      await expect(tireAnalyticsService.getTireStatus('truck-owned', 'owner-a')).resolves.toMatchObject({
+        truckId: 'truck-owned',
+        ownerId: 'owner-a',
+      });
+    });
   });
 });

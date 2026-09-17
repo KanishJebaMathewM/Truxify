@@ -42,9 +42,29 @@ describe('escrowCircuitBreaker', () => {
     expect(await isEscrowPaused()).toBe(false);
   });
 
-  it('isEscrowPaused fails open when Redis is unavailable', async () => {
+  it('isEscrowPaused fails closed when a Redis read throws (outage = paused)', async () => {
     redisMock.get.mockRejectedValue(new Error('down'));
-    expect(await isEscrowPaused()).toBe(false);
+    expect(await isEscrowPaused()).toBe(true);
+  });
+
+  // Uses a scoped re-mock (vi.doMock + fresh module graph) so redisClient can be
+  // null without disturbing the shared redisMock used by the rest of this file.
+  it('isEscrowPaused fails closed when no Redis client is configured', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/middleware/logger.js', () => ({
+      default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+    }));
+    vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+    try {
+      const { isEscrowPaused: isEscrowPausedWithoutClient } = await import(
+        '../../src/services/escrowCircuitBreaker.js'
+      );
+      expect(await isEscrowPausedWithoutClient()).toBe(true);
+    } finally {
+      vi.doUnmock('../../src/config/db.js');
+      vi.doUnmock('../../src/middleware/logger.js');
+      vi.resetModules();
+    }
   });
 
   it('setEscrowPaused(true) opens the circuit and persists a timestamp', async () => {
@@ -79,7 +99,7 @@ describe('escrowCircuitBreaker', () => {
     expect(state).toEqual({ paused: true, pausedAt: '2026-08-11T00:00:00.000Z' });
   });
 
-  it('getPauseState defaults to not paused', async () => {
+  it('getPauseState reports an unknown Redis state as paused', async () => {
     const state = await getPauseState();
     expect(state).toEqual({ paused: false, pausedAt: null });
   });

@@ -1,5 +1,5 @@
 import logger from '../middleware/logger.js';
-import { validatePricePrediction, convertToPaisa, RejectionReason } from '../lib/predictionValidator.js';
+import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
 
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
@@ -30,26 +30,39 @@ function guardMlApiKey() {
 
 /**
  * Parse the free-text `weight` column of load_offers (e.g. '3 tonnes') into
- * kilograms. Returns NaN when the value cannot be interpreted.
+ * kilograms. Returns null when the value cannot be interpreted, consistent
+ * with the rest of the ML service API.
  */
 function parseWeightKg(weight) {
-  if (typeof weight !== 'string') {
-    const num = Number(weight);
-    return Number.isFinite(num) ? num : NaN;
+  if (weight == null || typeof weight === 'boolean' || Array.isArray(weight)) {
+    return null;
   }
-  const match = weight.toLowerCase().match(/([\d.]+)\s*(kg|ton|tonne|t)\b/);
-  if (!match) return NaN;
+  if (typeof weight === 'number') {
+    return Number.isFinite(weight) ? weight : null;
+  }
+  if (typeof weight !== 'string') {
+    return null;
+  }
+  const trimmed = weight.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.toLowerCase().match(/([\d.]+)\s*(kg|tons?|tonnes?|t)\b/);
+  if (!match) {
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
   const value = Number(match[1]);
-  return match[2] === 'kg' ? value : value * 1000;
+  if (!Number.isFinite(value)) return null;
+  return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
 function parseWeightKgSafe(weight) {
-  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
+  if (weight == null || weight === '') {
     logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
     return null;
   }
   const result = parseWeightKg(weight);
-  if (Number.isNaN(result)) {
+  if (result == null) {
     logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
     return null;
   }
@@ -98,7 +111,7 @@ async function handleResponse(response, url = '', method = 'GET') {
         throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
+        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
     }
 
     try {
@@ -199,12 +212,12 @@ export async function predictPrice({
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
   // Only forward min_price/max_price keys when the raw response actually
-  // carried them — injecting undefined values trips the response validator.
+  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
-      ...(typeof raw?.min_price === 'number' ? { min_price: raw.min_price * safeMultiplier } : {}),
-      ...(typeof raw?.max_price === 'number' ? { max_price: raw.max_price * safeMultiplier } : {}),
+      ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
+      ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
@@ -628,4 +641,24 @@ export const __testing = {
   priceCache,
   _haversineKm,
   parseWeightKg,
+  parseWeightKgSafe,
+  parseDimensions,
+  getHeaders,
+  handleResponse,
+  getBaseUrl,
+  guardMlApiKey,
+};
+
+export default {
+  predictDemand,
+  predictPrice,
+  predictEta,
+  predictCancellationPenalty,
+  predictDriverProfit,
+  matchDeadhead,
+  matchEnRouteLoads,
+  getAbTestingStatus,
+  rollbackAbTest,
+  handleResponse,
+  __testing,
 };

@@ -615,6 +615,9 @@ app.use('/api/blockchain', (req, _res, next) => {
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
 //   POST /api/internal/defensive-pause
+// Closing the escrow circuit breaker (pause-escrow with {"paused": false}) is
+// additionally gated inside the route on the dedicated ESCROW_OPERATOR_API_KEY
+// (403 for other valid keys; fails closed when unconfigured).
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 

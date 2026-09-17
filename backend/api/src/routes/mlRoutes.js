@@ -60,7 +60,12 @@ router.get(
     const latBucket = lat ? lat.toFixed(4) : '';
     const lngBucket = lng ? lng.toFixed(4) : '';
     const gpsBucket = `${latBucket},${lngBucket}`;
-    return `${tripId}:${gpsBucket}`;
+    const routeDistance = req.query.routeDistance || '10';
+    const timeOfDay = req.query.timeOfDay || '12';
+    const dayOfWeek = req.query.dayOfWeek || '1';
+    const routeType = req.query.routeType || 'highway';
+    const historicalSpeed = req.query.historicalSpeed || '60';
+    return `${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
   }),
   async (req, res) => {
     const { routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = req.query;

@@ -29,7 +29,7 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
-import { reverseGeocode, clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
+import { reverseGeocode, clampGeohashPrecision, getTimeoutMs } from '../../src/lib/reverseGeocode.js';
 
 describe('reverseGeocode - Comprehensive Edge Cases', () => {
   beforeEach(() => {
@@ -379,6 +379,18 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
       const fetchOptions = mockFetch.mock.calls[0][1];
       expect(fetchOptions.signal).toBeDefined();
+    });
+
+    it('getTimeoutMs guards against null, undefined, NaN, negative, and non-numeric inputs', () => {
+      expect(getTimeoutMs(null)).toBe(5000);
+      expect(getTimeoutMs(undefined)).toBe(5000);
+      expect(getTimeoutMs(NaN)).toBe(5000);
+      expect(getTimeoutMs('NaN')).toBe(5000);
+      expect(getTimeoutMs('invalid')).toBe(5000);
+      expect(getTimeoutMs(0)).toBe(5000);
+      expect(getTimeoutMs(-500)).toBe(5000);
+      expect(getTimeoutMs(2500)).toBe(2500);
+      expect(getTimeoutMs('2500')).toBe(2500);
     });
   });
 

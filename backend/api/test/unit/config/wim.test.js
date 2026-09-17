@@ -1,14 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { getWimSigningSecret, hasWimSigningSecret, getWimCredentialTtlMs, getMaxWimMeasurementAgeMs, validateWimConfig } =
-  await import('../../../src/config/wim.js');
+const {
+  getWimSigningSecret,
+  hasWimSigningSecret,
+  getWimCredentialTtlMs,
+  getMaxWimMeasurementAgeMs,
+  validateWimConfig,
+} = await import('../../../src/config/wim.js');
 
 describe('wim.js config', () => {
+  const originalSecret = process.env.WIM_SIGNING_SECRET;
+  const originalTtl = process.env.WIM_CREDENTIAL_TTL_MS;
+  const originalAge = process.env.MAX_WIM_MEASUREMENT_AGE_MS;
+
   beforeEach(() => {
     delete process.env.WIM_SIGNING_SECRET;
     delete process.env.WIM_CREDENTIAL_TTL_MS;
     delete process.env.MAX_WIM_MEASUREMENT_AGE_MS;
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalSecret === undefined) delete process.env.WIM_SIGNING_SECRET;
+    else process.env.WIM_SIGNING_SECRET = originalSecret;
+
+    if (originalTtl === undefined) delete process.env.WIM_CREDENTIAL_TTL_MS;
+    else process.env.WIM_CREDENTIAL_TTL_MS = originalTtl;
+
+    if (originalAge === undefined) delete process.env.MAX_WIM_MEASUREMENT_AGE_MS;
+    else process.env.MAX_WIM_MEASUREMENT_AGE_MS = originalAge;
   });
 
   describe('getWimSigningSecret', () => {

@@ -5,7 +5,6 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { orderRepository, orderLifecycleService, logger } from '../core/container.js';
 import { sendFcmNotification, storeDeliveryOtp } from '../services/notificationService.js';
-import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -49,43 +48,13 @@ router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmO
       return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     }
 
-    let isGeofenced = false;
-    let distance = null;
-
-    // 2. Check if driver is within 500m of the drop location
-    if (latitude !== undefined && longitude !== undefined && orderData.drop_lat !== null && orderData.drop_lng !== null) {
-      distance = calculateHaversineDistance(
-        latitude,
-        longitude,
-        Number(orderData.drop_lat),
-        Number(orderData.drop_lng)
-      );
-      if (distance <= 500) {
-        isGeofenced = true;
-        logger.info(`[confirm-otp] Geofence matched for order ${orderData.order_display_id}: driver is at ${distance.toFixed(1)}m from drop.`);
-      }
+    // GPS coordinates submitted by the caller are untrusted, so delivery
+    // confirmation must always use the server-verified OTP.
+    if (!otp) {
+      return res.status(400).json({ error: 'OTP is required to confirm delivery.' });
     }
 
-    let otpToVerify = otp;
-
-    // 3. Handle geofence auto-confirm
-    if (isGeofenced) {
-      // Auto-generate and store a special 'GEOF' OTP as pre-verified/active to bypass manual entry
-      otpToVerify = 'GEOF';
-      const success = await storeDeliveryOtp(orderData.id, 'GEOF', 5); // 5 minutes TTL
-      if (!success) {
-        logger.error(`[confirm-otp] Failed to store geofence bypass OTP for order ${orderData.id}`);
-        return res.status(500).json({ error: 'Failed to initiate geofence bypass verification.' });
-      }
-    } else {
-      // If not geofenced, OTP is strictly required
-      if (!otp) {
-        return res.status(400).json({
-          error: 'OTP is required. You are outside the 500m geofence range.',
-          distanceMeters: distance
-        });
-      }
-    }
+    const otpToVerify = otp;
 
     // 4. Trigger delivery completion and escrow payment release
     // This calls verifyDelivery under the hood which releases smart contract payments

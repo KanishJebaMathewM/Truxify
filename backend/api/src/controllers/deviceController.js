@@ -155,9 +155,9 @@ export async function registerDeviceToken(req, res, next) {
 export async function unregisterDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
-    // Support both 'fcmToken' and 'fcm_token'
-    const { fcmToken, fcm_token } = req.body;
-    const finalToken = fcmToken || fcm_token;
+    // Support 'fcmToken', 'fcm_token', and 'token'
+    const { fcmToken, fcm_token, token } = req.body;
+    const finalToken = fcmToken || fcm_token || token;
 
     if (!userId) {
       return next(new UnauthorizedError('User not authenticated'));

@@ -15,3 +15,7 @@ graph TD
 - Real-time 1-minute velocity monitoring
 - Automated call execution to `TruxifyEscrow.pause()`
 - Alert notifications dispatched to system admins
+
+## Availability behavior
+
+The backend circuit breaker fails closed. A Redis outage or unreadable pause flag blocks new escrow submissions and must be treated as an active emergency pause until the state can be verified. The workflow must not interpret a backend read failure as a safe-to-release condition.

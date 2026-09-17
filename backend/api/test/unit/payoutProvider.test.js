@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   isPayoutProviderConfigured,
   dispatchPayout,
+  isValidSettlementRef,
   getPayoutRecord,
   getPayoutStatus,
   getPayoutById,
@@ -9,6 +10,7 @@ import {
   fetchPayout,
   fetchPayoutRecord,
 } from '../../src/services/wallet/payoutProvider.js'
+import { dispatchPayout as dispatchPayoutPayment, isValidSettlementRef as isValidSettlementRefPayment } from '../../src/services/payment/dispatchPayout.js'
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -76,6 +78,51 @@ describe('payoutProvider', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: '9', amount: 500 } }))
       .rejects.toThrow(/settlement_ref or reference/)
+    vi.unstubAllGlobals()
+  })
+
+  it('fails and warns when settlement_ref format does not match expected pattern', async () => {
+    process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ settlement_ref: 'invalid ref with spaces and !@#$' }),
+    }))
+    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 500 } }))
+      .rejects.toThrow(/invalid settlement_ref pattern/)
+    vi.unstubAllGlobals()
+  })
+
+  it('fails when settlement_ref is null, undefined string, or object string', async () => {
+    process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ settlement_ref: '[object Object]' }),
+    }))
+    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 500 } }))
+      .rejects.toThrow(/invalid settlement_ref pattern/)
+    vi.unstubAllGlobals()
+  })
+
+  it('enforces custom settlement ref pattern when configured', async () => {
+    process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL = 'https://example.com/payout'
+    process.env.WITHDRAWAL_SETTLEMENT_REF_PATTERN = '^UTR[0-9]{8}$'
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ settlement_ref: 'ref-1' }),
+    }))
+    await expect(dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 500 } }))
+      .rejects.toThrow(/invalid settlement_ref pattern/)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ settlement_ref: 'UTR12345678' }),
+    }))
+    const result = await dispatchPayout({ driverId: 'd1', withdrawal: { id: 'w1', amount: 500 } })
+    expect(result.success).toBe(true)
+    expect(result.settlementRef).toBe('UTR12345678')
+
+    delete process.env.WITHDRAWAL_SETTLEMENT_REF_PATTERN
     vi.unstubAllGlobals()
   })
 
@@ -244,4 +291,34 @@ describe('payoutProvider', () => {
       expect(await fetchPayoutRecord('missing', mockClient)).toEqual({ error: 'Payout record not found' })
     })
   })
+
+  describe('isValidSettlementRef', () => {
+    it('returns true for valid standard settlement references', () => {
+      expect(isValidSettlementRef('ref-123')).toBe(true)
+      expect(isValidSettlementRef('SETTLE_2026_09')).toBe(true)
+      expect(isValidSettlementRef('0xabcdef1234567890')).toBe(true)
+      expect(isValidSettlementRef('UTR123456789')).toBe(true)
+      expect(isValidSettlementRef('w1')).toBe(true)
+      expect(isValidSettlementRefPayment('ref-123')).toBe(true)
+    })
+
+    it('returns false for null, undefined, non-strings, or empty strings', () => {
+      expect(isValidSettlementRef(null)).toBe(false)
+      expect(isValidSettlementRef(undefined)).toBe(false)
+      expect(isValidSettlementRef('')).toBe(false)
+      expect(isValidSettlementRef('   ')).toBe(false)
+      expect(isValidSettlementRef(12345)).toBe(false)
+      expect(isValidSettlementRef({})).toBe(false)
+      expect(isValidSettlementRef('null')).toBe(false)
+      expect(isValidSettlementRef('undefined')).toBe(false)
+      expect(isValidSettlementRef('[object Object]')).toBe(false)
+    })
+
+    it('returns false for references containing whitespace or invalid symbols', () => {
+      expect(isValidSettlementRef('ref with spaces')).toBe(false)
+      expect(isValidSettlementRef('<script>bad()</script>')).toBe(false)
+      expect(isValidSettlementRef('ref$invalid%chars')).toBe(false)
+    })
+  })
 })
+

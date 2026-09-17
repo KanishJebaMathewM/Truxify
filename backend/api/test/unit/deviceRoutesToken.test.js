@@ -4,6 +4,7 @@ import request from 'supertest';
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => next(),
+  requireRole: () => (_req, _res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
@@ -18,6 +19,7 @@ vi.mock('../../src/controllers/deviceController.js', () => ({
   registerDeviceToken: (req, res) => res.status(200).json({ success: true, message: 'registered' }),
   unregisterDeviceToken: (req, res) => res.status(200).json({ success: true, message: 'unregistered' }),
   getDevicePlatforms: (req, res) => res.status(200).json({ success: true, data: [] }),
+  pruneDevices: (req, res) => res.status(200).json({ success: true, pruned: 0 }),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

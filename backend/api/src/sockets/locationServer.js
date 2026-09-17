@@ -1,10 +1,9 @@
-﻿code backend/api/src/sockets/tracker.jscode backend/api/src/sockets/tracker.jsimport { Server } from "socket.io";
+import { Server } from "socket.io";
 import logger from "../middleware/logger.js";
 import { verifyAuthToken } from "../middleware/auth.js";
-import { supabase } from "../config/db.js";
+import { supabase, redisClient } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
-import { scheduleEtaRecalculationOnLocationUpdate } from "../services/order/etaService.js";
-import { OrderRepository } from "../repositories/orderRepository.js";
+import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
 
 let io = null;
 let _orderRepository = null;
@@ -110,6 +109,92 @@ export function getActiveDriverCount() {
 export function parseGpsTimestamp(timestamp) {
   const parsed = timestamp ? new Date(timestamp) : new Date();
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/**
+ * Atomic compare-and-set for the driver sequence gate.
+ *
+ * KEYS[1] = driver:sequence:{driverId}
+ * ARGV[1] = incoming GPS epoch (ms since Unix epoch)
+ *
+ * Returns 1 when the incoming epoch is accepted (key advanced or first
+ * write), 0 when rejected (stale or duplicate). Runs as a single Redis
+ * command, so concurrent callers can never race a stale read past a newer
+ * write.
+ */
+const SEQUENCE_GATE_LUA = `
+local key      = KEYS[1]
+local incoming = tonumber(ARGV[1])
+
+-- Defensive: a non-numeric ARGV would make incoming nil; accept (fail-open)
+-- rather than erroring inside the script and failing the caller closed.
+if not incoming then
+  return 1
+end
+
+local current = tonumber(redis.call('GET', key))
+
+if current and incoming <= current then
+  return 0
+end
+
+redis.call('SET', key, tostring(incoming), 'EX', 86400)
+return 1
+`;
+
+/**
+ * Idempotency / out-of-order sequence gate for the Socket.IO location path.
+ *
+ * Mirrors the ordering guarantee of the tracker path so both live-location
+ * WebSocket paths drop stale/duplicate GPS points against the SAME key
+ * (`driver:sequence:{driverId}`): a driver switching between WS transports
+ * cannot replay stale points on either connection.
+ *
+ * Concurrency: the read-compare-write is a single atomic Lua script (EVAL),
+ * not a GET→compare→SET round-trip. GET→SET is a TOCTOU race — two callers
+ * can read the same stale snapshot and the older GPS timestamp can overwrite
+ * a newer one. A Lua script executes as one uninterruptible Redis command,
+ * so the compare-and-set cannot interleave with another caller's.
+ *
+ * Semantics:
+ *  - Key: `driver:sequence:{driverId}` (24h TTL, refreshed on each write).
+ *  - Incoming epoch > stored epoch (or no stored epoch) → store and accept.
+ *  - Incoming epoch ≤ stored epoch → reject (stale or exact duplicate).
+ *  - Redis unavailable or errored → fail-open (accept) so an outage never
+ *    blocks live location broadcasting.
+ *
+ * @param {string} driverId
+ * @param {Date}   gpsTimestamp - the parsed client GPS timestamp
+ * @returns {Promise<boolean>} true → accept; false → drop (stale/duplicate)
+ */
+export async function applySequenceGate(driverId, gpsTimestamp) {
+  if (!redisClient) return true; // fail-open: no Redis configured
+
+  try {
+    const seqKey = `driver:sequence:${driverId}`;
+    const incomingEpoch = gpsTimestamp.getTime();
+
+    // Atomic compare-and-set: the script runs as ONE uninterruptible Redis
+    // command. Concurrent location_update frames cannot interleave between
+    // the read and the write, so an older GPS timestamp can never overwrite
+    // a newer one (the race the previous GET→SET version allowed).
+    // ioredis signature: eval(script, numKeys, key, ...args).
+    const result = await redisClient.eval(SEQUENCE_GATE_LUA, 1, seqKey, incomingEpoch);
+
+    if (result === 0) {
+      logger.warn(
+        { driverId, incomingEpoch },
+        '[WS][locationServer] Out-of-order/duplicate GPS point dropped'
+      );
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    // Redis error: fail-open so a transient outage never blocks broadcasting.
+    logger.error({ driverId, err: err.message }, '[WS][locationServer] Sequence gate Redis error — failing open');
+    return true;
+  }
 }
 
 // ─── Server init ─────────────────────────────────────────────────────────────
@@ -218,7 +303,7 @@ export function initLocationServer(httpServer) {
      * live `driver_location` broadcast proceeds immediately without waiting on
      * any MongoDB round-trip.
      */
-    socket.on("location_update", (payload) => {
+    socket.on("location_update", async (payload) => {
       // Treat any incoming data as proof-of-life (avoids evicting an active
       // driver who sends location updates but whose pong was dropped).
       const entry = activeDrivers.get(socket.id);
@@ -236,8 +321,33 @@ export function initLocationServer(httpServer) {
         return;
       }
 
-      // Ensure timestamp is properly parsed via helper
+      // Parse the client GPS timestamp. This is the canonical ordering key:
+      // newer GPS timestamps represent newer positions so we compare them
+      // against the driver's stored sequence to detect stale/duplicate updates.
       const gpsTimestamp = parseGpsTimestamp(timestamp);
+
+      // Clock skew validation — mirrors tracker.js::handleLocationPing (#596).
+      // A device clock outside the allowed window would poison the ordering
+      // key, so drop the frame BEFORE the sequence gate: a rejected timestamp
+      // must never advance the Redis `driver:sequence:{driverId}` key.
+      // Same rule as tracker.js: symmetric absolute skew, rejected only when
+      // STRICTLY greater than CLOCK_SKEW_TOLERANCE_MS (the exact boundary is
+      // accepted); parseGpsTimestamp() already falls back to server time for
+      // missing or malformed timestamps.
+      const skewMs = Math.abs(gpsTimestamp.getTime() - Date.now());
+      if (skewMs > CLOCK_SKEW_TOLERANCE_MS) {
+        logger.warn(
+          { driverId, skewMs, toleranceMs: CLOCK_SKEW_TOLERANCE_MS },
+          `[WS][locationServer] GPS timestamp clock skew ${skewMs}ms exceeds tolerance ${CLOCK_SKEW_TOLERANCE_MS}ms — ignoring update.`
+        );
+        return;
+      }
+
+      // Out-of-order / duplicate guard (mirrors tracker.js::handleLocationPing).
+      // Fails open when Redis is unavailable so a Redis outage never blocks
+      // live location broadcasting.
+      const accepted = await applySequenceGate(driverId, gpsTimestamp);
+      if (!accepted) return;
 
       // 1. Buffer GPS point into the shared telemetry pipeline. Synchronous and
       //    fail-open — a slow or unavailable MongoDB must never delay the

@@ -12,6 +12,12 @@ class WebRTCSignalingServer {
     this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: Number.isFinite(MAX_WS_PAYLOAD_BYTES) ? MAX_WS_PAYLOAD_BYTES : 4096 });
     const parsedMaxMeshes = parseInt(process.env.WS_MAX_MESHES, 10);
     this.maxMeshes = Number.isFinite(parsedMaxMeshes) && parsedMaxMeshes > 0 ? parsedMaxMeshes : 10000;
+    const parsedRelayRadius = parseFloat(process.env.WEBRTC_LOCATION_RELAY_RADIUS_KM);
+    this.locationRelayRadius = Number.isFinite(parsedRelayRadius) && parsedRelayRadius > 0 ? parsedRelayRadius : 50;
+    const parsedMaxRadius = parseFloat(process.env.WEBRTC_MAX_RELAY_RADIUS_KM);
+    this.maxRelayRadius = Number.isFinite(parsedMaxRadius) && parsedMaxRadius > 0 ? parsedMaxRadius : 200;
+    const parsedRateLimit = parseInt(process.env.WEBRTC_LOCATION_RATE_LIMIT_MS, 10);
+    this.locationRateLimitMs = Number.isFinite(parsedRateLimit) && parsedRateLimit > 0 ? parsedRateLimit : 1000;
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -20,6 +26,63 @@ class WebRTCSignalingServer {
     this.startDiscovery();
     
     logger.info('WebRTC Signaling Server initialized');
+  }
+
+  async isUserAuthorizedForMesh(userId, meshId, userRole) {
+    if (!userId || !meshId) return false;
+    if (userRole === 'admin') return true;
+
+    for (const peer of this.peers.values()) {
+      if (peer.meshId === meshId && peer.userId === userId) {
+        return true;
+      }
+    }
+
+    if (supabase && typeof supabase.from === 'function') {
+      try {
+        const { data: trip } = await supabase
+          .from('trips')
+          .select('id')
+          .eq('id', meshId)
+          .or(`driver_id.eq.${userId},customer_id.eq.${userId}`)
+          .maybeSingle();
+
+        if (trip) return true;
+
+        const { data: order } = await supabase
+          .from('orders')
+          .select('id')
+          .eq('id', meshId)
+          .or(`driver_id.eq.${userId},customer_id.eq.${userId}`)
+          .maybeSingle();
+
+        if (order) return true;
+
+        const { data: convoy } = await supabase
+          .from('convoys')
+          .select('id')
+          .eq('id', meshId)
+          .or(`lead_driver_id.eq.${userId},driver_id.eq.${userId}`)
+          .maybeSingle();
+
+        if (convoy) return true;
+      } catch (err) {
+        logger.warn({ err: err.message, userId, meshId }, '[WebRTC] Error verifying mesh authorization');
+      }
+    }
+
+    return false;
+  }
+
+  capPrecision(location, decimals = 2) {
+    if (!location) return null;
+    const factor = Math.pow(10, decimals);
+    return {
+      ...location,
+      lat: Math.round(Number(location.lat) * factor) / factor,
+      lng: Math.round(Number(location.lng) * factor) / factor,
+      precision: 'coarse'
+    };
   }
 
   setupWebSocket() {
@@ -53,12 +116,27 @@ class WebRTCSignalingServer {
 
       const peerId = this.generatePeerId();
 
-      // Security fix #4973 & CodeRabbit: Prevent arbitrary client meshId and reuse authorized active mesh
+      // Security: Validate caller authorization for requested mesh instead of trusting client
+      const requestedMeshId = url.searchParams.get('meshId') || req.headers['x-mesh-id'];
       let meshId = null;
-      for (const [existingPeerId, peer] of this.peers.entries()) {
-        if (peer.userId === decoded.id && peer.meshId && this.meshes.has(peer.meshId)) {
-          meshId = peer.meshId;
-          break;
+
+      if (requestedMeshId) {
+        const isAuthorized = await this.isUserAuthorizedForMesh(decoded.id, requestedMeshId, decoded.role);
+        if (isAuthorized) {
+          meshId = requestedMeshId;
+        } else {
+          logger.warn(`WebRTC connection rejected: user ${decoded.id} unauthorized for requested mesh ${requestedMeshId}`);
+          ws.close(4003, 'Unauthorized for requested mesh');
+          return;
+        }
+      }
+
+      if (!meshId) {
+        for (const [existingPeerId, peer] of this.peers.entries()) {
+          if (peer.userId === decoded.id && peer.meshId && this.meshes.has(peer.meshId)) {
+            meshId = peer.meshId;
+            break;
+          }
         }
       }
 
@@ -86,7 +164,8 @@ class WebRTCSignalingServer {
         location: null,
         meshId,
         connectedAt: Date.now(),
-        lastPing: Date.now()
+        lastPing: Date.now(),
+        lastLocationRelay: 0
       });
 
       // Add to mesh
@@ -149,7 +228,7 @@ class WebRTCSignalingServer {
           );
         }
         // Relay location to nearby peers
-        this.relayLocation(peerId, peer.location);
+        await this.relayLocation(peerId, peer.location);
         break;
 
       case 'webrtc-offer':
@@ -182,20 +261,54 @@ class WebRTCSignalingServer {
     const peer = this.peers.get(peerId);
     if (!peer) return;
 
+    const rateLimitMs = this.locationRateLimitMs || 1000;
+    const now = Date.now();
+    if (peer.lastLocationRelay && (now - peer.lastLocationRelay) < rateLimitMs) {
+      logger.warn(`WebRTC location relay rate limited for peer ${peerId}`);
+      return;
+    }
+    peer.lastLocationRelay = now;
+
     const meshId = peer.meshId;
     const peersInMesh = this.meshes.get(meshId) || new Set();
+    const relayRadius = this.locationRelayRadius || 50;
+    const maxRadius = this.maxRelayRadius || 200;
+
+    const sourceLoc = peer.location || (this.isValidLocation(location) ? this.normalizeLocation(location) : null);
 
     for (const targetPeerId of peersInMesh) {
       if (targetPeerId === peerId) continue;
       const targetPeer = this.peers.get(targetPeerId);
-      if (targetPeer && targetPeer.ws.readyState === 1) {
-        this.sendToPeer(targetPeerId, {
-          type: 'peer-location',
-          peerId,
-          location,
-          timestamp: Date.now()
-        });
+      if (!targetPeer || targetPeer.ws.readyState !== 1) continue;
+
+      let payloadLocation;
+
+      if (sourceLoc && targetPeer.location && this.isValidLocation(targetPeer.location)) {
+        const distance = this.calculateDistance(
+          sourceLoc.lat,
+          sourceLoc.lng,
+          targetPeer.location.lat,
+          targetPeer.location.lng
+        );
+
+        if (distance <= relayRadius) {
+          payloadLocation = sourceLoc;
+        } else if (distance <= maxRadius) {
+          payloadLocation = this.capPrecision(sourceLoc, 2);
+        } else {
+          // Beyond max radius: drop
+          continue;
+        }
+      } else {
+        payloadLocation = this.capPrecision(sourceLoc || location, 2);
       }
+
+      this.sendToPeer(targetPeerId, {
+        type: 'peer-location',
+        peerId,
+        location: payloadLocation,
+        timestamp: Date.now()
+      });
     }
   }
 

@@ -7,8 +7,6 @@ import { processEscrowWebhookEvent } from '../services/webhook/escrowWebhookProc
 
 const router = express.Router();
 
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-
 // Replay defense: reject webhooks whose timestamp is outside this window. The
 // nonce is stored for a TTL that is at least as long as this window so a
 // captured-but-expired request is always caught by the nonce store.
@@ -71,7 +69,8 @@ function buildSigningPayload(timestamp, nonce, rawBody) {
  * the X-Webhook-Signature header.
  */
 async function verifyWebhookSignature(req, res, next) {
-  if (!WEBHOOK_SECRET) {
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+  if (!webhookSecret) {
     // Fail closed: never accept unsigned webhook traffic when the shared
     // secret is missing from the environment.
     logger.error('[Webhook] WEBHOOK_SECRET not set — rejecting webhook request');
@@ -107,7 +106,7 @@ async function verifyWebhookSignature(req, res, next) {
   }
 
   const expectedSignature = crypto
-    .createHmac('sha256', WEBHOOK_SECRET)
+    .createHmac('sha256', webhookSecret)
     .update(buildSigningPayload(timestampHeader, nonce, rawBody))
     .digest('hex');
 

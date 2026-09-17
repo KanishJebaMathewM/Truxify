@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @openapi
  * components:
  *   schemas:
@@ -77,7 +77,7 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
-import { uuidParamSchema } from '../validation/requestSchemas.js';
+import { confirmStopSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -296,7 +296,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 
   if (events.length === 0) {
     // Flutter expects 200 or 202 for success.
-    return res.status(200).json({ error: 'Empty batch received, nothing to process.' });
+    return res.status(200).json({ message: 'Empty batch received, nothing to process.' });
   }
 
   try {
@@ -384,7 +384,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     if (existingBatch) {
       logger.info('[SyncEngine] Ignored duplicate batch:', idempotencyKey);
       // Return 202 Accepted so the Flutter app marks them as synced locally
-      return res.status(202).json({ error: 'Batch already processed.' });
+      return res.status(202).json({ message: 'Batch already processed.' });
     }
 
     const recordsToInsert = events.map(event => {
@@ -533,6 +533,9 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
+    if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
+    return res.status(400).json({ error: 'Invalid sort parameter. Must be either asc or desc.' });
+  }
   const isAscending = sort === 'asc';
   const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
   const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
@@ -662,6 +665,10 @@ function canAccessTrip(user, trip) {
 // orders.order_display_id or an orders.id. Returns { trip }, { order } or
 // { error }.
 async function findTripContext(ref) {
+  if (!ref || typeof ref !== 'string' || ref.trim().length === 0 || ref.length > 100) {
+    return { error: { status: 400, message: 'Invalid or malformed trip reference identifier.' } };
+  }
+
   let { data: trip, error: tripErr } = await supabaseAdmin
     .from('trips')
     .select('id, trip_display_id, driver_id, order_id, status')
@@ -738,18 +745,31 @@ async function requireOwnedTrip(req, res, ctx) {
 router.get('/:id/items', authenticate, userLimiter, async (req, res) => {
   try {
     const ctx = await findTripContext(req.params.id);
-    if (ctx.error) return res.status(500).json({ error: 'Internal Server Error', details: ctx.error.message });
+    if (ctx.error) return res.status(ctx.error.status || 500).json(ctx.error.body || { error: ctx.error.message });
     const owned = await requireOwnedTrip(req, res, ctx);
     if (owned.error) return res.status(owned.error.status).json(owned.error.body);
 
-    const { data: items, error: itemsErr } = await supabaseAdmin
+    const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+    const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+    if (parsedPage.error || parsedLimit.error) {
+      return res.status(400).json({ error: parsedPage.error || parsedLimit.error });
+    }
+    const page = parsedPage.value;
+    const limit = parsedLimit.value;
+    const offset = (page - 1) * limit;
+
+    const { data: items, error: itemsErr, count } = await supabaseAdmin
       .from('trip_items')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('trip_display_id', owned.trip.trip_display_id)
-      .order('sort_order', { ascending: true });
+      .order('sort_order', { ascending: true })
+      .range(offset, offset + limit - 1);
 
     if (itemsErr) return res.status(500).json({ error: 'Failed to fetch trip items.', details: itemsErr.message });
-    return res.json(items || []);
+    return res.json({
+      items: items || [],
+      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+    });
   } catch (err) {
     logger.error('[Trips] Fetch trip items error:', err);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -763,18 +783,31 @@ router.get('/:id/items', authenticate, userLimiter, async (req, res) => {
 router.get('/:id/stops', authenticate, userLimiter, async (req, res) => {
   try {
     const ctx = await findTripContext(req.params.id);
-    if (ctx.error) return res.status(500).json({ error: 'Internal Server Error', details: ctx.error.message });
+    if (ctx.error) return res.status(ctx.error.status || 500).json(ctx.error.body || { error: ctx.error.message });
     const owned = await requireOwnedTrip(req, res, ctx);
     if (owned.error) return res.status(owned.error.status).json(owned.error.body);
 
-    const { data: stops, error: stopsErr } = await supabaseAdmin
+    const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+    const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+    if (parsedPage.error || parsedLimit.error) {
+      return res.status(400).json({ error: parsedPage.error || parsedLimit.error });
+    }
+    const page = parsedPage.value;
+    const limit = parsedLimit.value;
+    const offset = (page - 1) * limit;
+
+    const { data: stops, error: stopsErr, count } = await supabaseAdmin
       .from('trip_stops')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('trip_display_id', owned.trip.trip_display_id)
-      .order('sort_order', { ascending: true });
+      .order('sort_order', { ascending: true })
+      .range(offset, offset + limit - 1);
 
     if (stopsErr) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: stopsErr.message });
-    return res.json(stops || []);
+    return res.json({
+      stops: stops || [],
+      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+    });
   } catch (err) {
     logger.error('[Trips] Fetch trip stops error:', err);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -788,18 +821,31 @@ router.get('/:id/stops', authenticate, userLimiter, async (req, res) => {
 router.get('/:id/route-points', authenticate, userLimiter, async (req, res) => {
   try {
     const ctx = await findTripContext(req.params.id);
-    if (ctx.error) return res.status(500).json({ error: 'Internal Server Error', details: ctx.error.message });
+    if (ctx.error) return res.status(ctx.error.status || 500).json(ctx.error.body || { error: ctx.error.message });
     const owned = await requireOwnedTrip(req, res, ctx);
     if (owned.error) return res.status(owned.error.status).json(owned.error.body);
 
-    const { data: points, error: pointsErr } = await supabaseAdmin
+    const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+    const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+    if (parsedPage.error || parsedLimit.error) {
+      return res.status(400).json({ error: parsedPage.error || parsedLimit.error });
+    }
+    const page = parsedPage.value;
+    const limit = parsedLimit.value;
+    const offset = (page - 1) * limit;
+
+    const { data: points, error: pointsErr, count } = await supabaseAdmin
       .from('route_map_points')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('trip_display_id', owned.trip.trip_display_id)
-      .order('sort_order', { ascending: true });
+      .order('sort_order', { ascending: true })
+      .range(offset, offset + limit - 1);
 
     if (pointsErr) return res.status(500).json({ error: 'Failed to fetch route points.', details: pointsErr.message });
-    return res.json(points || []);
+    return res.json({
+      route_points: points || [],
+      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+    });
   } catch (err) {
     logger.error('[Trips] Fetch route points error:', err);
     return res.status(500).json({ error: 'Internal Server Error' });
@@ -992,11 +1038,9 @@ router.put('/:id/stops/:stopId/complete', authenticate, userLimiter, async (req,
 router.post('/:id/confirm-stop', authenticate, userLimiter, async (req, res) => {
   try {
     const { stopId, otp } = req.body || {};
-    if (!stopId || typeof stopId !== 'string') {
-      return res.status(400).json({ error: 'stopId is required.' });
-    }
-    if (!otp || typeof otp !== 'string' || otp.trim().length !== 6) {
-      return res.status(400).json({ error: 'A valid 6-digit OTP is required.' });
+    const parsedBody = confirmStopSchema.safeParse({ stopId, otp });
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: parsedBody.error.issues[0]?.message || 'Invalid confirmation payload.' });
     }
 
     const ctx = await findTripContext(req.params.id);
@@ -1015,8 +1059,8 @@ router.post('/:id/confirm-stop', authenticate, userLimiter, async (req, res) => 
     if (!stop) return res.status(404).json({ error: 'Stop not found on this trip.' });
     if (stop.is_completed) return res.status(409).json({ error: 'Stop has already been confirmed.' });
 
-    // Validate OTP against linked order or default mock OTP (123456)
-    let expectedOtp = '123456';
+    // Validate only against the OTP issued for the linked order.
+    let expectedOtp = null;
     if (owned.trip.order_id) {
       const { data: linkedOrder } = await supabaseAdmin
         .from('orders')
@@ -1029,7 +1073,7 @@ router.post('/:id/confirm-stop', authenticate, userLimiter, async (req, res) => 
     }
 
     const cleanedSubmittedOtp = otp.trim();
-    if (cleanedSubmittedOtp !== expectedOtp && cleanedSubmittedOtp !== '123456') {
+    if (!expectedOtp || cleanedSubmittedOtp !== expectedOtp) {
       return res.status(400).json({ error: 'Invalid delivery OTP provided.' });
     }
 
@@ -1112,3 +1156,5 @@ router.post('/:id/confirm-stop', authenticate, userLimiter, async (req, res) => 
 });
 
 export default router;
+
+

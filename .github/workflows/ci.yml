@@ -70,6 +70,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
+          flutter-version: '3.22.0'
           channel: stable
           cache: true
 
@@ -111,6 +112,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
+          flutter-version: '3.22.0'
           channel: stable
           cache: true
 
@@ -162,6 +164,30 @@ jobs:
 
       - name: Run eBPF tests
         run: python -m pytest ebpf/tests -v
+
+  cuda:
+    name: CUDA VRP build & tests
+    needs: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Build and test CUDA VRP
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            nvidia/cuda:12.6.3-devel-ubuntu22.04 \
+            bash -lc '
+              set -euo pipefail
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake
+              cmake -S services/gpu-routing-cuda -B build
+              cmake --build build --parallel
+              ctest --test-dir build --output-on-failure
+            '
 
   contracts:
     name: Smart contract checks

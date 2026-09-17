@@ -78,6 +78,14 @@ class DIDService {
         logger.info('✅ DID Service initialized');
     }
 
+    _validateCredentialData(data) {
+        if (!data.credentialId) throw new Error('credentialId is required');
+        if (!data.subject) throw new Error('subject is required');
+        if (!data.credentialType) throw new Error('credentialType is required');
+        if (!data.issuedAt) data.issuedAt = new Date().toISOString();
+        return data;
+    }
+
     async createDID(userAddress, publicKey) {
         try {
             const did = `did:truxify:${uuidv4()}`;
@@ -363,19 +371,30 @@ class DIDService {
     }
 
     async storeCredential(data) {
-        const { error } = await (supabaseAdmin || supabase)
-            .from('credentials')
-            .insert([{
-                credential_id: data.credentialId,
-                subject: data.subject,
-                credential_type: data.credentialType,
-                schema: data.schema,
-                issued_at: data.issuedAt,
-                valid_until: data.validUntil,
-                tx_hash: data.txHash,
-                proof: data.proof
-            }]);
-        if (error) throw error;
+        try {
+            const validatedData = this._validateCredentialData(data);
+
+            const { error } = await supabase
+                .from('credentials')
+                .insert([{
+                    credential_id: validatedData.credentialId,
+                    subject: validatedData.subject,
+                    credential_type: validatedData.credentialType,
+                    schema: validatedData.schema || null,
+                    issued_at: validatedData.issuedAt,
+                    valid_until: validatedData.validUntil || null,
+                    tx_hash: validatedData.txHash || null,
+                    proof: validatedData.proof || null,
+                    revoked: false,
+                    revoked_at: null
+                }]);
+
+            if (error) throw error;
+            return { success: true, credentialId: validatedData.credentialId };
+        } catch (err) {
+            logger.error({ err }, 'Failed to store credential');
+            throw err;
+        }
     }
 
     async updateCredentialStatus(credentialId, revoked) {

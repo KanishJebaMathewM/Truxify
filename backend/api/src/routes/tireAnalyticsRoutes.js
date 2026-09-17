@@ -18,6 +18,7 @@ router.post('/analyze', authenticate, userLimiter, async (req, res) => {
     }
 
     const report = await tireAnalyticsService.analyzeTireHealth({
+      ownerId: req.user.id,
       truckId: truck_id,
       tpmsReadings: tpms_readings
     });
@@ -38,7 +39,10 @@ router.post('/analyze', authenticate, userLimiter, async (req, res) => {
 router.get('/status/:truckId', authenticate, userLimiter, async (req, res) => {
   try {
     const { truckId } = req.params;
-    const report = await tireAnalyticsService.getTireStatus(truckId);
+    const report = await tireAnalyticsService.getTireStatus(
+      truckId,
+      req.user.role === 'admin' ? null : req.user.id
+    );
 
     if (!report) {
       return res.status(404).json({ error: 'No tire analytics report found for specified truck' });

@@ -1,34 +1,64 @@
+import Redis from 'ioredis';
 import crypto from 'crypto';
 import { redisClient } from '../config/db.js';
 
-const HMAC_SECRET = process.env.HMAC_SECRET || 'default-hmac-secret-key';
+const MIN_HMAC_SECRET_BYTES = 32;
 const MAX_TIMESTAMP_DIFF_MS = 5 * 60 * 1000; // 5 minutes tolerance
+const NONCE_TTL_SECONDS = 5 * 60;
+const NONCE_KEY_PREFIX = 'truxify:hmac:nonce:';
+let redisClient;
 
-const fallbackNonces = new Map();
-
-// Cleans up expired nonces from the fallback map
-const cleanupFallbackNonces = () => {
-  const now = Date.now();
-  for (const [nonce, expiresAt] of fallbackNonces.entries()) {
-    if (now > expiresAt) {
-      fallbackNonces.delete(nonce);
-    }
+const getHmacSecret = () => {
+  const secret = process.env.HMAC_SECRET;
+  if (!secret) {
+    throw new Error('HMAC_SECRET is required; refusing to sign or verify HMAC requests without a configured secret.');
   }
+
+  if (Buffer.byteLength(secret, 'utf8') < MIN_HMAC_SECRET_BYTES) {
+    throw new Error(`HMAC_SECRET must contain at least ${MIN_HMAC_SECRET_BYTES} bytes.`);
+  }
+
+  return secret;
 };
 
-export const isNonceValid = async (nonce) => {
-  if (redisClient) {
-    try {
-      const key = `hmac:nonce:${nonce}`;
-      const result = await redisClient.set(key, '1', 'NX', 'PX', MAX_TIMESTAMP_DIFF_MS);
-      return result === 'OK';
-    } catch (err) {
-      // If Redis fails, fall back to in-memory check to prevent blocking traffic
+// Fail during application startup in production rather than silently running
+// with an insecure or missing authentication secret.
+if (process.env.NODE_ENV === 'production') {
+  getHmacSecret();
+}
+
+const getRedisClient = () => {
+  const redisUrl = process.env.HMAC_NONCE_REDIS_URL || process.env.REDIS_URL;
+  if (!redisUrl) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Redis is required for distributed HMAC nonce replay protection in production.');
     }
+    return null;
   }
-  
-  cleanupFallbackNonces();
-  if (fallbackNonces.has(nonce)) {
+
+  if (!redisClient) {
+    redisClient = new Redis(redisUrl);
+  }
+
+  return redisClient;
+};
+
+const usedNonces = new Set();
+
+export const isNonceValid = async (nonce) => {
+  const client = getRedisClient();
+  if (client) {
+    const result = await client.set(
+      `${NONCE_KEY_PREFIX}${nonce}`,
+      '1',
+      'NX',
+      'EX',
+      NONCE_TTL_SECONDS
+    );
+    return result === 'OK';
+  }
+
+  if (usedNonces.has(nonce)) {
     return false;
   }
   fallbackNonces.set(nonce, Date.now() + MAX_TIMESTAMP_DIFF_MS);
@@ -43,7 +73,7 @@ export const isTimestampValid = (timestamp) => {
 
 export const generateSignature = (payload, timestamp, nonce) => {
   const dataToSign = `${timestamp}.${nonce}.${payload}`;
-  return crypto.createHmac('sha256', HMAC_SECRET).update(dataToSign).digest('hex');
+  return crypto.createHmac('sha256', getHmacSecret()).update(dataToSign).digest('hex');
 };
 
 export const verifySignature = (signature, payload, timestamp, nonce) => {

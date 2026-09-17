@@ -57,6 +57,7 @@ import refreshTokenService, {
   revokeToken,
   revokeAllUserTokens,
   generateRefreshToken,
+  hashRefreshToken,
 } from '../../src/services/refreshTokenService.js';
 
 describe('refreshTokenService', () => {
@@ -73,12 +74,18 @@ describe('refreshTokenService', () => {
     });
   });
 
+  it('hashes refresh tokens before persistence lookups', () => {
+    expect(hashRefreshToken('token')).toBe(
+      '3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0',
+    );
+  });
+
   describe('createRefreshToken', () => {
     it('inserts a new refresh token record into supabase and returns data', async () => {
       const mockRecord = {
         id: 'rt-1',
         user_id: 'usr-1',
-        token: 'mock-token-hex',
+        token_hash: expect.any(String),
         device_id: 'dev-1',
         device_info: 'Chrome / Win11',
         is_revoked: false,
@@ -86,9 +93,11 @@ describe('refreshTokenService', () => {
       mockInsertSingle.mockResolvedValue({ data: mockRecord, error: null });
 
       const result = await createRefreshToken('usr-1', 'dev-1', 'Chrome / Win11');
-      expect(result).toEqual(mockRecord);
+      expect(result).toMatchObject(mockRecord);
+      expect(result.token).toMatch(/^[0-9a-f]{80}$/);
       expect(mockFrom).toHaveBeenCalledWith('refresh_tokens');
       expect(mockInsert).toHaveBeenCalledTimes(1);
+      expect(mockInsert.mock.calls[0][0].token_hash).not.toBe('mock-token-hex');
     });
 
     it('throws error when database insert fails', async () => {
@@ -113,7 +122,7 @@ describe('refreshTokenService', () => {
       mockSelectSingle.mockResolvedValue({
         data: {
           user_id: 'victim-user',
-          token: 'compromised-token',
+          token_hash: hashRefreshToken('compromised-token'),
           is_revoked: true,
         },
         error: null,
@@ -129,7 +138,7 @@ describe('refreshTokenService', () => {
       mockSelectSingle.mockResolvedValue({
         data: {
           user_id: 'usr-1',
-          token: 'old-expired-token',
+          token_hash: hashRefreshToken('old-expired-token'),
           is_revoked: false,
           expires_at: pastDate.toISOString(),
         },
@@ -146,7 +155,7 @@ describe('refreshTokenService', () => {
       mockSelectSingle.mockResolvedValue({
         data: {
           user_id: 'usr-1',
-          token: 'valid-active-token',
+          token_hash: hashRefreshToken('valid-active-token'),
           is_revoked: false,
           expires_at: futureDate.toISOString(),
         },
@@ -155,7 +164,7 @@ describe('refreshTokenService', () => {
 
       const newRecord = {
         user_id: 'usr-1',
-        token: 'new-active-token',
+        token_hash: hashRefreshToken('new-active-token'),
         device_id: 'dev-2',
         device_info: 'Android',
         is_revoked: false,
@@ -163,7 +172,8 @@ describe('refreshTokenService', () => {
       mockInsertSingle.mockResolvedValue({ data: newRecord, error: null });
 
       const result = await rotateRefreshToken('valid-active-token', 'dev-2', 'Android');
-      expect(result).toEqual(newRecord);
+      expect(result).toMatchObject(newRecord);
+      expect(result.token).toMatch(/^[0-9a-f]{80}$/);
     });
   });
 

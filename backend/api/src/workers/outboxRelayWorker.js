@@ -44,6 +44,15 @@ async function relayOnce() {
         // publishAsync(), publishAndReport awaits adapter delivery and reports
         // whether an adapter actually consumed the event, so we only mark the
         // outbox row published when it truly was delivered (issue #11209).
+        //
+        // emitSafe (called internally by publishAndReport) swallows all
+        // listener errors and returns a bare boolean when no listeners are
+        // registered, so a plain `await eventBus.emitSafe(...)` can never
+        // distinguish a successful publish from a silently-failed one
+        // (issue #13582). publishAndReport therefore always resolves to a
+        // structured outcome object regardless of emitSafe's boolean/Promise
+        // result; the `delivered` gate below is what prevents marking a row
+        // published when no adapter actually consumed the event.
         const baseEvent = new BaseEvent({
           eventType: event.event_type,
           payload: {

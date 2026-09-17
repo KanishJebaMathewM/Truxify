@@ -83,6 +83,33 @@ class TestOptimisePacking:
         assert result["packing_arrangement"][0]["fits"] is False
         assert result["unpacked_packages"] == [0]
 
+    @pytest.mark.parametrize(
+        "truck_dimensions",
+        [
+            (1.0, 2.0, 3.0),
+            (1.0, 3.0, 2.0),
+            (2.0, 1.0, 3.0),
+            (2.0, 3.0, 1.0),
+            (3.0, 1.0, 2.0),
+            (3.0, 2.0, 1.0),
+        ],
+    )
+    def test_package_can_use_all_axis_aligned_orientations(self, truck_dimensions):
+        """Each permutation of L/W/H must be considered as a valid orientation."""
+        truck = make_truck(
+            length=truck_dimensions[0],
+            width=truck_dimensions[1],
+            height=truck_dimensions[2],
+        )
+        package = [{"length": 1.0, "width": 2.0, "height": 3.0, "weight": 100.0}]
+
+        result = optimise_packing(package, truck, make_addresses(1))
+
+        arrangement = result["packing_arrangement"][0]
+        assert arrangement["fits"] is True
+        assert result["unpacked_packages"] == []
+        assert result["stop_sequence"] == [0]
+
     def test_utilization_is_non_negative(self):
         """The reported utilisation must be within 0..100."""
         result = optimise_packing(make_packages(3), make_truck(), make_addresses(3))

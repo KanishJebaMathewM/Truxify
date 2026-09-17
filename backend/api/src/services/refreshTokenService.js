@@ -11,11 +11,14 @@ export const generateRefreshToken = () => {
   return crypto.randomBytes(40).toString('hex');
 };
 
+export const hashRefreshToken = (token) =>
+  crypto.createHash('sha256').update(token).digest('hex');
+
 export const revokeToken = async (token) => {
   await supabase
     .from('refresh_tokens')
     .update({ is_revoked: true, revoked_at: new Date().toISOString() })
-    .eq('token', token);
+    .eq('token_hash', hashRefreshToken(token));
 };
 
 export const revokeAllUserTokens = async (userId) => {
@@ -28,6 +31,7 @@ export const revokeAllUserTokens = async (userId) => {
 
 export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
   const token = generateRefreshToken();
+  const tokenHash = hashRefreshToken(token);
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
@@ -35,7 +39,7 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
     .from('refresh_tokens')
     .insert({
       user_id: userId,
-      token: token,
+      token_hash: tokenHash,
       device_id: deviceId,
       device_info: deviceInfo,
       expires_at: expiresAt.toISOString(),
@@ -46,14 +50,14 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo) => {
     .single();
 
   if (error) throw new Error('Failed to create refresh token', { cause: error });
-  return data;
+  return { ...data, token };
 };
 
 export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
   const { data: tokenRecord, error } = await supabase
     .from('refresh_tokens')
     .select('*')
-    .eq('token', oldToken)
+    .eq('token_hash', hashRefreshToken(oldToken))
     .single();
 
   if (error || !tokenRecord) {

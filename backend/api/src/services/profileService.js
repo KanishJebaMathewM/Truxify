@@ -149,7 +149,60 @@ export async function updateProfile(userId, updateData) {
   return measureExecution('ProfileService.updateProfile', async () => {
   if (!supabaseAdmin) throw new Error('Supabase client not configured');
   const { data, error } = await supabaseAdmin.from('profiles').update(updateData).eq('id', userId).select().single();
-  if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
+  if (error) { logger.error("[ProfileService] updateProfile error:", error?.message || error); throw error; }
   return data;
   });
 }
+
+export async function deleteProfile(userId) {
+  return measureExecution('ProfileService.deleteProfile', async () => {
+  if (!supabaseAdmin) throw new Error('Supabase client not configured');
+  const { data, error } = await supabaseAdmin.from('profiles').delete().eq('id', userId).select().maybeSingle();
+  if (error) { logger.error("[ProfileService] deleteProfile error:", error?.message || error); throw error; }
+  return data;
+  });
+}
+
+export async function getProfileById(userId) {
+  if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+    return null;
+  }
+  return getProfile(userId);
+}
+
+export function sanitizeProfilePii(profile) {
+  if (!profile) return null;
+  const sanitized = { ...profile };
+  if (sanitized.phone && typeof sanitized.phone === 'string') {
+    sanitized.phone = sanitized.phone.length > 4
+      ? sanitized.phone.slice(0, -4).replace(/./g, '*') + sanitized.phone.slice(-4)
+      : '****';
+  }
+  if (sanitized.email && typeof sanitized.email === 'string') {
+    const [name, domain] = sanitized.email.split('@');
+    if (domain) {
+      const maskedName = name.length > 2
+        ? name[0] + '*'.repeat(name.length - 2) + name[name.length - 1]
+        : '*'.repeat(name.length);
+      sanitized.email = `${maskedName}@${domain}`;
+    }
+  }
+  if (sanitized.kyc_doc_number) {
+    sanitized.kyc_doc_number = '********';
+  }
+  return sanitized;
+}
+
+export const ProfileService = {
+  getProfile,
+  getProfileById,
+  getCustomerStats,
+  getDriverDetails,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  sanitizeProfilePii,
+};
+
+export default ProfileService;
+

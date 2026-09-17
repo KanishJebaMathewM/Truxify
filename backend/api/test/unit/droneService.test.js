@@ -9,6 +9,7 @@ describe('droneService', () => {
   describe('launchDroneDelivery', () => {
     it('initializes and dispatches a new drone mission with telemetry metadata', async () => {
       const launchParams = {
+        ownerId: 'user-101',
         tripId: 'TRIP-DRN-101',
         parcelId: 'PARCEL-MED-44',
         safeZoneGps: { lat: 39.7392, lng: -104.9903 },
@@ -36,6 +37,7 @@ describe('droneService', () => {
   describe('getDroneTelemetry', () => {
     it('retrieves telemetry with updated timestamp for an active mission', async () => {
       const mission = await droneService.launchDroneDelivery({
+        ownerId: 'user-202',
         tripId: 'TRIP-DRN-202',
         parcelId: 'PARCEL-URGENT-88',
         safeZoneGps: { lat: 40.7128, lng: -74.006 },
@@ -48,6 +50,21 @@ describe('droneService', () => {
       expect(telemetry.missionId).toBe(mission.missionId);
       expect(telemetry.droneId).toBe(mission.droneId);
       expect(telemetry.lastTelemetryUpdate).toBeDefined();
+    });
+
+    it('does not return telemetry to a different owner', async () => {
+      const mission = await droneService.launchDroneDelivery({
+        ownerId: 'user-owner',
+        tripId: 'TRIP-DRN-203',
+        parcelId: 'PARCEL-203',
+        safeZoneGps: { lat: 40.7128, lng: -74.006 },
+        destinationGps: { lat: 40.7306, lng: -73.9352 },
+      });
+
+      await expect(droneService.getDroneTelemetry(mission.missionId, 'user-other')).resolves.toBeNull();
+      await expect(droneService.getDroneTelemetry(mission.missionId, 'user-owner')).resolves.toMatchObject({
+        missionId: mission.missionId,
+      });
     });
 
     it('returns null for an unknown or nonexistent mission ID', async () => {

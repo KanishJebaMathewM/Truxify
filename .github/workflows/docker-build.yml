@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   api:
-    name: Build and push API image
+    name: Build and smoke test API image
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -54,18 +54,53 @@ jobs:
           tags: |
             ghcr.io/kanishjebamathewm/truxify-api:canary
 
-      - name: Build and push API
+      - name: Build API image for smoke test
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: backend/api
           target: production
-          push: true
-          tags: |
-            ghcr.io/kanishjebamathewm/truxify-api:latest
-            ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
+          load: true
+          tags: truxify-api:ci-${{ github.sha }}
+
+      - name: Smoke test API container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name truxify-api-smoke -p 5000:5000 \
+            -e PORT=5000 \
+            -e NODE_ENV=test \
+            -e BYPASS_AUTH=true \
+            -e DEV_ACCESS_TOKEN=test-access-token \
+            -e JWT_SECRET=ci-test-jwt-secret \
+            -e ML_API_KEY=ci-test-ml-key \
+            truxify-api:ci-${{ github.sha }}
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:5000/api/health/live >/tmp/api-health.json; then
+              cat /tmp/api-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs truxify-api-smoke
+          exit 1
+
+      - name: Push API image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag truxify-api:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-api:latest
+          docker tag truxify-api:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
+          docker push ghcr.io/kanishjebamathewm/truxify-api:latest
+          docker push ghcr.io/kanishjebamathewm/truxify-api:${{ github.sha }}
+
+      - name: Cleanup API smoke container
+        if: always()
+        run: docker rm -f truxify-api-smoke || true
 
   ml:
-    name: Build and push ML image
+    name: Build and smoke test ML image
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -81,11 +116,41 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
 
-      - name: Build and push ML
+      - name: Build ML image for smoke test
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: backend/ml
-          push: true
-          tags: |
-            ghcr.io/kanishjebamathewm/truxify-ml:latest
-            ghcr.io/kanishjebamathewm/truxify-ml:${{ github.sha }}
+          load: true
+          tags: truxify-ml:ci-${{ github.sha }}
+
+      - name: Smoke test ML container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name truxify-ml-smoke -p 8001:8001 \
+            -e ML_API_KEY=ci-test-ml-key \
+            truxify-ml:ci-${{ github.sha }}
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:8001/health >/tmp/ml-health.json; then
+              cat /tmp/ml-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs truxify-ml-smoke
+          exit 1
+
+      - name: Push ML image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker tag truxify-ml:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-ml:latest
+          docker tag truxify-ml:ci-${{ github.sha }} ghcr.io/kanishjebamathewm/truxify-ml:${{ github.sha }}
+          docker push ghcr.io/kanishjebamathewm/truxify-ml:latest
+          docker push ghcr.io/kanishjebamathewm/truxify-ml:${{ github.sha }}
+
+      - name: Cleanup ML smoke container
+        if: always()
+        run: docker rm -f truxify-ml-smoke || true

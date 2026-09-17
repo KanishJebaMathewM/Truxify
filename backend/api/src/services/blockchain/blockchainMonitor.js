@@ -517,7 +517,7 @@ class BlockchainMonitor {
       severity: 'MEDIUM',
       driver,
       amount: amount.toString(),
-      timestamp: parseInt(timestamp),
+      timestamp: parseInt(timestamp, 10),
       txHash: log.transactionHash,
       logIndex: log.index !== undefined ? log.index : (log.logIndex ?? 0),
       blockNumber: log.blockNumber,

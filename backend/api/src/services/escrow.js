@@ -69,7 +69,10 @@ const ESCROW_ABI = [
   'function raiseDispute(uint256 bookingId) external',
   'function resolveDispute(uint256 bookingId, uint256 driverAmount) external',
   'function resolveDisputeTimeout(uint256 bookingId) external',
-  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, bool started, uint256 createdAt, uint256 disputedAt)'
+  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, bool started, uint256 createdAt, uint256 disputedAt)',
+  'function pause() external',
+  'function unpause() external',
+  'function paused() external view returns (bool)'
 ]
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;
@@ -96,15 +99,15 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     relayerWallet = new ethers.Wallet(relayerPrivateKey, provider);
     escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayerWallet);
-    logger.info('✅ Polygon Escrow contract client initialised.');
-    logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
+    logger.info('Polygon Escrow contract client initialised.');
+    logger.info(`Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
     logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
   logger.warn(
-    '⚠️  POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
+    'POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
     'not set. Escrow payments disabled.'
   )
 }
@@ -138,13 +141,13 @@ export async function validateEscrowSetup () {
     const code = await provider.getCode(address)
     if (code === '0x') {
       logger.error(
-        `[escrow] ❌ No contract deployed at ${address}. ` +
+        `[escrow] No contract deployed at ${address}. ` +
         'Check ESCROW_CONTRACT_ADDRESS in your .env.'
       )
       escrowContract = null
       return false
     }
-    logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
+    logger.info(`[escrow] Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
     logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     escrowContract = null
@@ -157,10 +160,10 @@ export async function validateEscrowSetup () {
   try {
     const probeContract = new ethers.Contract(address, ESCROW_ABI, provider)
     await probeContract.bookings(0)
-    logger.info('[escrow] ✅ Contract ABI verified — read-only eth_call succeeded.')
+    logger.info('[escrow] Contract ABI verified — read-only eth_call succeeded.')
   } catch (err) {
     logger.error(
-      `[escrow] ❌ Contract at ${address} does not respond to 'bookings(uint256)'. ` +
+      `[escrow] Contract at ${address} does not respond to 'bookings(uint256)'. ` +
       'This likely means it is NOT TruxifyEscrow.sol. ' +
       'Check that ESCROW_CONTRACT_ADDRESS points to the active TruxifyEscrow contract, ' +
       'not the deprecated Escrow.sol.'
@@ -311,12 +314,41 @@ export async function checkEscrowHealth() {
 }
 
 /**
- * Derive a deterministic booking ID from an order's display ID.
- * @param {string} orderDisplayId — e.g. "#FF20260521"
- * @returns {string} bytes32 hex string
+ * Retrieves a full escrow booking record by its ID.
+ * Used by the funding reconciliation sweeper to verify on-chain deposits.
+ * Resolves Issue #7340.
+ * 
+ * @param {string} escrowBookingId - The UUID of the escrow booking
+ * @returns {Promise<object|null>} The booking record or null if not found
+ * @throws {Error} If database query fails
  */
-export function getEscrowBookingId (orderDisplayId) {
-  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`])
+export async function getEscrowBooking(escrowBookingId) {
+  if (!escrowBookingId || typeof escrowBookingId !== 'string' || !escrowBookingId.trim()) {
+    return null;
+  }
+
+  if (!supabaseAdmin) {
+    logger.error('supabaseAdmin not configured for getEscrowBooking');
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('escrow_bookings')
+      .select('*')
+      .eq('id', escrowBookingId.trim())
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ err: error, escrowBookingId }, 'Failed to fetch escrow booking');
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    logger.error({ err, escrowBookingId }, 'Unexpected error in getEscrowBooking');
+    throw err;
+  }
 }
 
 /**
@@ -1004,3 +1036,45 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
   })
 }
 export const lockPayment = escrowLockPayment;
+
+/**
+ * Open or close the on-chain escrow circuit breaker (Pausable).
+ * Called by internalRoutes when an emergency pause is triggered via n8n.
+ *
+ * @param {boolean} paused
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string, alreadyInState?: boolean}>}
+ */
+export async function setEscrowContractPaused(paused) {
+  return measureExecution('EscrowService.setEscrowContractPaused', async () => {
+    if (!escrowContract) {
+      return { error: 'Escrow contract is not initialised' };
+    }
+
+    try {
+      const isCurrentlyPaused = await escrowContract.paused();
+      if (isCurrentlyPaused === paused) {
+        logger.info(`[escrow] On-chain pause state is already ${paused} — skipping transaction.`);
+        return { success: true, alreadyInState: true };
+      }
+
+      const tx = await withTimeout(paused ? escrowContract.pause() : escrowContract.unpause());
+      logger.info(`[escrow] On-chain ${paused ? 'pause' : 'unpause'} tx submitted: ${tx.hash}`);
+
+      const receipt = await tx.wait(1);
+      if (!receipt || receipt.status === 0) {
+        return { error: 'Transaction reverted or not found on chain' };
+      }
+
+      const isNowPaused = await escrowContract.paused();
+      if (isNowPaused !== paused) {
+        return { error: `Transaction succeeded but contract paused() is still ${isNowPaused}` };
+      }
+
+      logger.info(`[escrow] On-chain ${paused ? 'pause' : 'unpause'} confirmed in block ${receipt.blockNumber}`);
+      return { success: true, txHash: receipt.hash };
+    } catch (err) {
+      logger.error(`[escrow] Failed to ${paused ? 'pause' : 'unpause'} on-chain: ${err?.message ?? String(err)}`);
+      return { error: err?.message ?? String(err) };
+    }
+  });
+}

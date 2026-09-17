@@ -28,7 +28,7 @@ describe('buildPagination', () => {
 
   it('floors non-integer page and limit', () => {
     const result = buildPagination({ page: 2.7, limit: 15.3 });
-    expect(result.page).toBe(3);
+    expect(result.page).toBe(2);
     expect(result.limit).toBe(15);
   });
 

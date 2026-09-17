@@ -256,9 +256,10 @@ router.get('/token/asset/:assetId', async (req, res) => {
 });
 
 // Get fractional ownership
-router.get('/token/ownership/:assetId/:userAddress', async (req, res) => {
+router.get('/token/ownership/:assetId', authenticate, async (req, res) => {
     try {
-        const { assetId, userAddress } = req.params;
+        const { assetId } = req.params;
+        const userAddress = await resolveVerifiedUserAddress(req);
         const ownership = await tokenService.getFractionalOwnership(assetId, userAddress);
         res.json({ success: true, data: ownership });
     } catch (error) {

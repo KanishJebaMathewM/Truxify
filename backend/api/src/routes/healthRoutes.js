@@ -140,8 +140,9 @@ function checkPolygon() {
 }
 
 const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
-// Optional services treat 'not_configured' as healthy — only actual failures are critical.
-const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
+// MongoDB is optional telemetry storage: only a configured-but-unreachable
+// instance should affect dependency health.
+const CRITICAL_UNHEALTHY_MONGO = new Set(['failed']);
 
 /**
  * @openapi
@@ -149,7 +150,7 @@ const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
  *   get:
  *     tags: [Health]
  *     summary: Full system health check
- *     description: Returns the status of all dependent services (Supabase, MongoDB, Redis, Firebase, Polygon). Returns 503 when a critical service fails.
+ *     description: Returns the status of all dependent services (Supabase, optional MongoDB telemetry, Redis, Firebase, Polygon). Returns 503 when a critical service fails.
  *     security:
  *       - {}
  *     responses:
@@ -188,7 +189,7 @@ router.get('/', healthLimiter, async (req, res) => {
   // health. Supabase and MongoDB remain critical.
   const criticalFailed =
     CRITICAL_UNHEALTHY.has(supabaseStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+    CRITICAL_UNHEALTHY_MONGO.has(mongoStatus);
 
   const status = criticalFailed ? 'degraded' : 'ok';
   const httpStatus = criticalFailed ? 503 : 200;
@@ -228,7 +229,7 @@ router.get('/live', healthLimiter, (req, res) => {
  *   get:
  *     tags: [Health]
  *     summary: Kubernetes readiness probe
- *     description: Returns 200 when all critical services (Supabase, MongoDB) are reachable. Returns 503 if any critical dependency is down.
+ *     description: Returns 200 when Supabase is reachable and optional MongoDB telemetry is either reachable or disabled. Returns 503 if Supabase is unavailable or configured MongoDB is down.
  *     security:
  *       - {}
  *     responses:
@@ -260,7 +261,7 @@ router.get('/ready', healthLimiter, async (req, res) => {
 
   const criticalFailed =
     CRITICAL_UNHEALTHY.has(supabaseStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+    CRITICAL_UNHEALTHY_MONGO.has(mongoStatus);
 
   if (criticalFailed) {
     return res.status(503).json({ status: 'not_ready', services });

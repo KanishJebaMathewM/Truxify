@@ -49,3 +49,78 @@ export function roundPrice(value, decimals = 2) {
   const factor = Math.pow(10, decimals);
   return Math.round(value * factor) / factor;
 }
+
+
+// === ENTERPRISE PRICE EXTENSIONS (Issue #14102 Expansion) ===
+
+/**
+ * Formats paisa directly into a localized INR currency string (e.g., "?1,234.50").
+ * 
+ * @param {number} paisa - Price in integer paisa
+ * @returns {string} Formatted currency string
+ */
+export function formatCurrencyInr(paisa) {
+  const inr = toInr(paisa);
+  if (inr === null) {
+    return '?0.00';
+  }
+  return `?${inr.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Calculates tax percentage on an amount in paisa and rounds securely.
+ * 
+ * @param {number} paisa - Base amount in paisa
+ * @param {number} taxRatePercent - Tax percentage (e.g., 18 for GST)
+ * @returns {object} Object containing base, taxPaisa, and totalPaisa
+ */
+export function calculateTaxAndRound(paisa, taxRatePercent) {
+  if (typeof paisa !== 'number' || !Number.isFinite(paisa) || paisa < 0 ||
+      typeof taxRatePercent !== 'number' || !Number.isFinite(taxRatePercent) || taxRatePercent < 0) {
+    return { base: 0, taxPaisa: 0, totalPaisa: 0 };
+  }
+  
+  const taxRaw = (paisa * taxRatePercent) / 100;
+  const taxPaisa = Math.round(taxRaw + Number.EPSILON);
+  const totalPaisa = paisa + taxPaisa;
+  
+  return {
+    base: paisa,
+    taxPaisa,
+    totalPaisa
+  };
+}
+
+/**
+ * Safely splits a total paisa amount into equal parts with remainder penny distribution.
+ * 
+ * @param {number} totalPaisa - Total amount in paisa
+ * @param {number} parts - Number of splits
+ * @returns {number[]} Array of paisa amounts summing up exactly to totalPaisa
+ */
+export function splitAmountEqually(totalPaisa, parts) {
+  if (typeof totalPaisa !== 'number' || !Number.isFinite(totalPaisa) || totalPaisa <= 0 ||
+      typeof parts !== 'number' || !Number.isInteger(parts) || parts <= 0) {
+    return [];
+  }
+  
+  const baseShare = Math.floor(totalPaisa / parts);
+  const remainder = totalPaisa % parts;
+  const result = new Array(parts).fill(baseShare);
+  
+  for (let i = 0; i < remainder; i++) {
+    result[i] += 1;
+  }
+  
+  return result;
+}
+
+// Unified module export object for enterprise consumers
+export const priceRounding = {
+  toPaisa,
+  toInr,
+  roundPrice,
+  formatCurrencyInr,
+  calculateTaxAndRound,
+  splitAmountEqually
+};

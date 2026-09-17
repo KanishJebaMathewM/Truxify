@@ -85,6 +85,49 @@ class TestFindMidTripLoads:
             "priority_score", "pickup_location", "dropoff_location",
         }
 
+    def test_full_remaining_route_is_used_for_detour(self):
+        """A load matching a later stop should not be penalized for that stop being later."""
+        load = {
+            "load_id": "L-later-stop",
+            "pickup_lat": 12.0, "pickup_lng": 77.99,
+            "dropoff_lat": 12.0, "dropoff_lng": 78.0,
+            "weight_kg": 500, "length_m": 2, "width_m": 1, "height_m": 1,
+            "payment_inr": 2000,
+            "pickup_deadline": (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat(),
+        }
+        result = find_mid_trip_loads(
+            {"lat": 12.0, "lng": 77.0},
+            [
+                {"lat": 12.0, "lng": 77.01},
+                {"lat": 12.0, "lng": 78.0},
+            ],
+            {"weight_kg": 1000, "length_m": 10, "width_m": 2, "height_m": 2},
+            [load],
+        )
+        assert len(result["recommendations"]) == 1
+        assert result["recommendations"][0]["detour_km"] == 0.0
+
+    def test_pickup_deadline_uses_insertion_route_distance(self):
+        """Pickup feasibility must include remaining waypoints before the insertion."""
+        load = {
+            "load_id": "L-deadline-route",
+            "pickup_lat": 13.0, "pickup_lng": 78.0,
+            "dropoff_lat": 13.0, "dropoff_lng": 78.1,
+            "weight_kg": 500, "length_m": 2, "width_m": 1, "height_m": 1,
+            "payment_inr": 2000,
+            "pickup_deadline": (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat(),
+        }
+        result = find_mid_trip_loads(
+            {"lat": 12.0, "lng": 77.0},
+            [
+                {"lat": 13.0, "lng": 77.0},
+                {"lat": 13.0, "lng": 78.0},
+            ],
+            {"weight_kg": 1000, "length_m": 10, "width_m": 2, "height_m": 2},
+            [load],
+        )
+        assert result["recommendations"] == []
+
     def test_results_are_sorted_by_priority_desc(self):
         """Recommendations must be sorted by priority_score descending."""
         now = datetime.now(timezone.utc)

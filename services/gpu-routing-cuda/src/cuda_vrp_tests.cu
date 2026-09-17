@@ -1,6 +1,7 @@
 #include "cuda_vrp.cuh"
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 using TruxifyCuda::Location;
@@ -81,6 +82,46 @@ int main() {
         VrpSolution s = TruxifyCuda::CudaVrpSolver::solveParallelVRP(depot, {}, 5);
         check(s.isValid, "empty stops is valid");
         check(s.routeCount == 0 && s.totalDistance == 0.0f, "empty stops has zero routes/distance");
+    }
+
+    // Invalid coordinates must be rejected before route calculations.
+    {
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float inf = std::numeric_limits<float>::infinity();
+        const std::vector<Location> invalidStops = {
+            {nan, 0.0f},
+            {inf, 0.0f},
+            {-inf, 0.0f},
+            {181.0f, 0.0f},
+            {-181.0f, 0.0f},
+            {0.0f, 91.0f},
+            {0.0f, -91.0f},
+        };
+
+        for (const auto& invalidStop : invalidStops) {
+            VrpSolution s =
+                TruxifyCuda::CudaVrpSolver::solveParallelVRP(depot, {invalidStop}, 1);
+            check(!s.isValid, "invalid stop coordinate is rejected");
+            check(s.routeCount == 0, "invalid stop coordinate reports zero routes");
+            check(s.totalDistance == 0.0f, "invalid stop coordinate reports zero distance");
+        }
+
+        VrpSolution invalidDepot =
+            TruxifyCuda::CudaVrpSolver::solveParallelVRP({181.0f, 0.0f}, stops, 1);
+        check(!invalidDepot.isValid, "invalid depot coordinate is rejected");
+        check(invalidDepot.totalDistance == 0.0f, "invalid depot reports zero distance");
+    }
+
+    // Valid coordinate boundaries remain accepted.
+    {
+        const std::vector<Location> boundaryStops = {
+            {-180.0f, -90.0f},
+            {180.0f, 90.0f},
+        };
+        VrpSolution s =
+            TruxifyCuda::CudaVrpSolver::solveParallelVRP({0.0f, 0.0f}, boundaryStops, 1);
+        check(s.isValid, "valid coordinate boundaries are accepted");
+        check(std::isfinite(s.totalDistance), "valid boundary distance is finite");
     }
 
     // capacity >= stops.size(): one out-and-back tour visiting every stop,

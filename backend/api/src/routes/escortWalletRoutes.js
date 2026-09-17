@@ -2,6 +2,7 @@ import express from 'express';
 import { loadCredential, resolveCredentialSubject, handshake } from '../controllers/escortWalletController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ const allowRoles = (...roles) => (req, res, next) => {
 router.post(
     '/credential',
     authenticate,
+    userLimiter,
     (req, res, next) => {
         const { subject, credentialType, schema, validUntil } = req.body || {};
 
@@ -49,6 +51,7 @@ router.post(
 router.post(
     '/handshake',
     authenticate,
+    userLimiter,
     allowRoles('driver', 'fleet_manager'),
     (req, res, next) => {
         const { escorts } = req.body || {};

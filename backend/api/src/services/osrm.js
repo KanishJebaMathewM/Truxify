@@ -57,7 +57,8 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 export async function getRouteEstimate(input = {}) {
-  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
+  if (!input) return null;
+  const { pickupLat, pickupLng, dropLat, dropLng } = input;
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||

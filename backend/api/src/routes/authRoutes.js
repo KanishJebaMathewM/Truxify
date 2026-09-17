@@ -58,6 +58,7 @@ import {
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
+import { refreshToken } from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -73,6 +74,11 @@ const authLimiter = rateLimit({
 });
 
 router.use(authLimiter);
+
+/**
+ * Exchange a valid rotating refresh token for a backend JWT and a new refresh token.
+ */
+router.post("/refresh", refreshToken);
 
 export function withTimeout(operation, timeoutMs, message) {
   let timer;
@@ -255,6 +261,57 @@ const verifyOtpSchema = z.object({
   otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
 }).strict();
 
+import { requestOtp } from '../services/otpService.js';
+
+/**
+ * POST /api/auth/request-otp
+ * Generates and delivers an OTP for phone number verification.
+ * Resolves Issue #10471 - the producer half of the OTP flow.
+ */
+router.post('/request-otp', 
+  rateLimit({ 
+    windowMs: 15 * 60 * 1000, 
+    max: 10,
+    message: 'Too many OTP requests from this IP'
+  }),
+  async (req, res) => {
+    try {
+      const { phone, channel, purpose } = req.body;
+
+      if (!phone) {
+        return res.status(400).json({ 
+          error: 'INVALID_REQUEST',
+          message: 'phone is required' 
+        });
+      }
+
+      const result = await requestOtp(phone, { channel, purpose });
+
+      if (!result.success) {
+        const statusCode = result.error === 'RATE_LIMIT_EXCEEDED' ? 429 : 400;
+        return res.status(statusCode).json({
+          error: result.error,
+          message: result.message,
+          retryAfter: result.retryAfter
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        otpId: result.otpId,
+        expiresAt: result.expiresAt,
+        ttlMinutes: result.ttlMinutes
+      });
+    } catch (err) {
+      logger.error({ err }, 'request-otp handler error');
+      return res.status(500).json({ 
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to process OTP request'
+      });
+    }
+  }
+);
+
 /**
  * @openapi
  * /api/auth/verify-otp:
@@ -357,7 +414,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
   }
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 /**
  * @openapi
@@ -377,43 +434,115 @@ router.post("/verify", async (req, res) => {
     const { idToken, token, email, role, phone, uid } = req.body || {};
     const inputToken = idToken || token;
 
-    if (!inputToken && !email) {
-      return res.status(400).json({
-        success: false,
-        error: "idToken or email is required for authentication verification.",
-      });
+    if (!inputToken) {
+      if (process.env.NODE_ENV === "production" || (!process.env.ENABLE_TEST_AUTH && process.env.NODE_ENV !== "test")) {
+        return res.status(400).json({
+          success: false,
+          error: "idToken is required for authentication verification.",
+        });
+      }
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          error: "idToken or email is required for authentication verification.",
+        });
+      }
     }
 
     let verifiedUid = uid || `uid-${Date.now()}`;
     let verifiedEmail = email || "user@truxify.com";
-    let verifiedRole = role || "customer";
+    let verifiedRole = (process.env.NODE_ENV === "test" && role) ? role : "customer";
 
-    if (inputToken && firebaseAdmin) {
-      try {
-        const decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
-        verifiedUid = decoded.uid || verifiedUid;
-        verifiedEmail = decoded.email || verifiedEmail;
-      } catch (err) {
-        logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
+    if (inputToken) {
+      let tokenVerified = false;
+      if (firebaseAdmin) {
+        try {
+          const decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
+          verifiedUid = decoded.uid;
+          if (decoded.email) verifiedEmail = decoded.email;
+          tokenVerified = true;
+        } catch (err) {
+          logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
+          if (process.env.NODE_ENV === "production" || !supabase) {
+            return res.status(401).json({
+              success: false,
+              error: "Invalid or expired authentication token.",
+            });
+          }
+        }
+      }
+
+      if (!tokenVerified && supabase) {
+        try {
+          const { data: { user }, error: authErr } = await supabase.auth.getUser(inputToken);
+          if (authErr || !user) {
+            return res.status(401).json({
+              success: false,
+              error: "Invalid or expired authentication token.",
+            });
+          }
+          verifiedUid = user.id;
+          if (user.email) verifiedEmail = user.email;
+          tokenVerified = true;
+        } catch (err) {
+          return res.status(401).json({
+            success: false,
+            error: "Invalid or expired authentication token.",
+          });
+        }
+      }
+
+      if (!tokenVerified && (firebaseAdmin || supabase)) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired authentication token.",
+        });
       }
     }
 
-    let userId = `usr-${verifiedUid.slice(-8)}`;
+    let userId = null;
     if (supabase) {
       try {
-        const { data: profile } = await supabase
+        const { data: profile, error: profileErr } = await supabase
           .from("profiles")
-          .select("id, role, full_name, phone")
+          .select("id, role, full_name, phone, is_active")
           .or(`firebase_uid.eq.${verifiedUid},email.eq.${verifiedEmail}`)
           .maybeSingle();
 
+        if (profileErr) {
+          logger.error(`[auth/verify] Supabase profile query error: ${profileErr.message}`);
+          return res.status(500).json({ success: false, error: "Database error during authentication." });
+        }
+
         if (profile) {
+          if (profile.is_active === false) {
+            return res.status(403).json({
+              success: false,
+              error: "User account is inactive or deactivated.",
+            });
+          }
           userId = profile.id;
           verifiedRole = profile.role || verifiedRole;
+        } else if (process.env.NODE_ENV !== "test") {
+          return res.status(401).json({
+            success: false,
+            error: "User profile not found. Please complete profile registration before signing in.",
+            code: "PROFILE_NOT_FOUND",
+          });
         }
       } catch (dbErr) {
-        logger.warn(`[auth/verify] Supabase profile lookup skipped: ${dbErr.message}`);
+        logger.error(`[auth/verify] Supabase profile lookup failed: ${dbErr.message}`);
+        return res.status(500).json({ success: false, error: "Internal server error." });
       }
+    }
+
+    if (!userId) {
+      userId = `usr-${verifiedUid.slice(-8)}`;
+    }
+
+    if (!JWT_SECRET) {
+      logger.error('[auth/verify] JWT_SECRET is not configured');
+      return res.status(503).json({ success: false, error: 'Authentication service is temporarily unavailable.' });
     }
 
     const backendJwt = jwt.sign(

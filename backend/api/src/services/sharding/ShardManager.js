@@ -268,20 +268,76 @@ class ShardManager {
     }
   }
 
-  async executeCrossShardQuery(queries) {
-    // Execute same query across all shards and combine results
+  async executeCrossShardQuery(queries, options = {}) {
+    // Execute same query across all shards in parallel and combine results
     const results = [];
+    const failedShards = [];
+    const healthyShards = [];
+
+    const promises = [];
     for (const [name, shard] of this.shards) {
       if (shard.pool) {
-        try {
-          const result = await shard.pool.query(queries.query, queries.params || []);
-          results.push({ shard: name, data: result.rows });
-        } catch (error) {
-          logger.error(`Error querying shard ${name}:`, error);
-        }
+        promises.push(
+          shard.pool
+            .query(queries.query, queries.params || [])
+            .then((result) => ({
+              shard: name,
+              success: true,
+              data: result.rows,
+            }))
+            .catch((error) => {
+              logger.error(`Error querying shard ${name}:`, error);
+              return { shard: name, success: false, error };
+            })
+        );
+      } else {
+        logger.error(`Shard ${name} is unavailable or uninitialized`);
+        promises.push(
+          Promise.resolve({
+            shard: name,
+            success: false,
+            error: new Error('Shard connection pool uninitialized'),
+          })
+        );
       }
     }
-    return results;
+
+    const settled = await Promise.all(promises);
+    for (const item of settled) {
+      if (item.success) {
+        results.push({ shard: item.shard, data: item.data });
+        healthyShards.push(item.shard);
+      } else {
+        failedShards.push(item.shard);
+      }
+    }
+
+    if (options && options.mergeResults) {
+      let merged = results.flatMap((r) => r.data || []);
+      if (options.sortField) {
+        const field = options.sortField;
+        const order = options.sortOrder === 'desc' ? -1 : 1;
+        merged.sort((a, b) => {
+          if (a[field] < b[field]) return -1 * order;
+          if (a[field] > b[field]) return 1 * order;
+          return 0;
+        });
+      }
+      if (options.offset !== undefined || options.limit !== undefined) {
+        const offset = options.offset || 0;
+        const limit = options.limit !== undefined ? offset + options.limit : undefined;
+        merged = merged.slice(offset, limit);
+      }
+      return merged;
+    }
+
+    return {
+      results,
+      failed: failedShards,
+      healthy: healthyShards,
+      unhealthy: failedShards,
+      partial: failedShards.length > 0,
+    };
   }
 
   async healthCheck() {

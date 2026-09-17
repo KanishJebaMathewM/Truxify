@@ -204,8 +204,10 @@ import {
 } from '../controllers/orderController.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 
 const router = express.Router();
+const MAX_GEOFENCE_RADIUS_M = 500;
 
 const milestoneStore = createStore('rl:milestone:');
 const milestoneLimiter = rateLimit({
@@ -483,8 +485,8 @@ router.post(
       let geofenceRadiusM = 500;
       if (geofence_radius_m !== undefined && geofence_radius_m !== null && geofence_radius_m !== '') {
         const parsedRadius = parseFloat(geofence_radius_m);
-        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
-          return res.status(400).json({ error: 'geofence_radius_m must be a finite positive number.' });
+        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0 || parsedRadius > MAX_GEOFENCE_RADIUS_M) {
+          return res.status(400).json({ error: `geofence_radius_m must be between 0 and ${MAX_GEOFENCE_RADIUS_M} meters.` });
         }
         geofenceRadiusM = parsedRadius;
       }
@@ -754,12 +756,83 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       await lock.release().catch(() => {});
     }
   }
-});
+}); 
+router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
+     const orderId = req.params.id;
+     
+     try {
+       const result = await escrowLockManager.withLock(orderId, async (ctx) => {
+         // SINGLE READ - no more duplicate readOrder() calls
+         const { data: order, error } = await orderRepository.findOrderById(orderId);
+         if (error || !order) {
+           throw new DomainError(404, { error: 'Order not found' });
+         }
+         
+         // Resolve expected deposit amount once
+         const expectedAmount = resolveExpectedDepositAmount(order);
+         
+         // Transition to confirming state
+         const transitionResult = await ctx.transition('confirming');
+         if (!transitionResult.success) {
+           throw new DomainError(409, { error: 'Invalid state transition' });
+         }
+         
+         // Verify on-chain deposit
+         const depositTx = await recordDepositTx(order, expectedAmount);
+         
+         try {
+           // Execute acceptance RPC (may take time)
+           await finalizeAcceptance(order, depositTx);
+           
+           // Transition to funded
+           await ctx.transition('funded');
+           
+           // Update DB atomically
+           await orderRepository.updateOrder(orderId, {
+             escrow_status: 'funded',
+             deposit_tx_hash: depositTx.hash
+           });
+           
+           return { success: true, txHash: depositTx.hash };
+         } catch (rpcError) {
+           // EXTEND LOCK for refund processing
+           await ctx.extend();
+           
+           // Transition to refund_pending
+           await ctx.transition('refund_pending');
+           
+           // Execute refund WHILE HOLDING LOCK
+           const refundResult = await submitEscrowRefund(orderId, depositTx);
+           
+           // Transition to refunded
+           await ctx.transition('refunded');
+           
+           await orderRepository.updateOrder(orderId, {
+             escrow_status: 'refunded',
+             refund_tx_hash: refundResult.txHash
+           });
+           
+           throw new DomainError(500, { 
+             error: 'Acceptance failed, refund processed',
+             refundTxHash: refundResult.txHash 
+           });
+         }
+       }, { 
+         expectedState: 'funding',
+         targetState: 'confirming'
+       });
+       
+       res.json(result);
+     } catch (err) {
+       next(err);
+     }
+   });
 
-// ============================================================================
-// 18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
-// 18b. VIEW BIDS FOR AN ORDER (CUSTOMER) — GET /api/orders/:id/bids
-// 18c. ACCEPT A BID (CUSTOMER) — POST /api/orders/:id/bids/:bidId/accept
+
+//  ============================================================================
+//  18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
+//  18b. VIEW BIDS FOR AN ORDER (CUSTOMER) — GET /api/orders/:id/bids
+//  18c. ACCEPT A BID (CUSTOMER) — POST /api/orders/:id/bids/:bidId/accept
 // ============================================================================
 /**
  * @openapi

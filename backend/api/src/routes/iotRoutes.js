@@ -68,6 +68,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       let isAuthorized = false;
 
       if (req.user.role === 'iot_device') {
+        isAuthorized = load.device_id === req.user.id;
         // Look up the device-to-load assignment via the iot_device_loads table.
         // The previous check (device_id === load_id) was semantically wrong since
         // a device UUID and a load UUID are never meaningfully comparable.
@@ -191,7 +192,7 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
   try {
     const { data: load, error: loadErr } = await supabaseAdmin
       .from('load_offers')
-      .select('customer_id, order_display_id')
+      .select('id, customer_id, device_id, order_display_id, required_temp_min, required_temp_max')
       .eq('id', loadId)
       .maybeSingle();
 
@@ -218,8 +219,12 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
         isAuthorized = order?.driver_id === req.user.id;
       }
 
+      if (!isAuthorized && req.user.role === 'iot_device') {
+        isAuthorized = load.device_id === req.user.id;
+      }
+
       if (!isAuthorized) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied for this load telemetry' });
       }
     }
 

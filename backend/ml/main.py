@@ -55,7 +55,14 @@ from app.models.trust_scorer import trust_scorer
 from app.models.deadhead_eliminator import find_return_loads
 from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.ocr_verifier import ocr_verifier
-from app.models.base import model_exists, get_model_meta
+from app.models.base import (
+    model_exists,
+    get_model_meta,
+    get_active_generation,
+    get_previous_generation,
+    get_generation_meta,
+    get_model_lock,
+)
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
 from routes import register_ml_routers, verify_api_key
@@ -722,7 +729,7 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
 
 
 @app.post("/train/demand/rollback")
-async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
+async def rollback_demand_endpoint(test_id: Optional[str] = None, _auth=Depends(verify_api_key)):
     """Roll back the demand-forecast model to its previously-promoted version.
 
     This is the real rollback path for the model actually retrained by
@@ -734,10 +741,37 @@ async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
     async with get_model_lock(DEMAND_MODEL_NAME):
         try:
             result = await asyncio.to_thread(rollback_demand_forecast_model)
+            if result.get("rolled_back") and test_id:
+                from routes.ab_testing import ab_service
+                ab_service.mark_test_terminal(test_id, "rolled_back")
             return result
         except Exception as e:
             logger.error("Demand model rollback failed: %s", e)
             raise HTTPException(status_code=500, detail="Rollback failed")
+
+
+@app.get("/models/demand/status")
+async def demand_model_status(_auth=Depends(verify_api_key)):
+    """Compare the active demand model with its rollback candidate."""
+    active_version = get_active_generation(DEMAND_MODEL_NAME)
+    previous_version = get_previous_generation(DEMAND_MODEL_NAME)
+    active_meta = get_generation_meta(DEMAND_MODEL_NAME, active_version) if active_version else None
+    previous_meta = get_generation_meta(DEMAND_MODEL_NAME, previous_version) if previous_version else None
+    active_mae = (active_meta or {}).get("metrics", {}).get("mae")
+    previous_mae = (previous_meta or {}).get("metrics", {}).get("mae")
+
+    return {
+        "model": DEMAND_MODEL_NAME,
+        "active_version": active_version or "production",
+        "previous_version": previous_version,
+        "active_metrics": (active_meta or {}).get("metrics", {}),
+        "previous_metrics": (previous_meta or {}).get("metrics", {}),
+        "should_rollback": (
+            active_mae is not None
+            and previous_mae is not None
+            and active_mae > previous_mae
+        ),
+    }
 
 
 @app.post("/train/price", response_model=TrainResponse)

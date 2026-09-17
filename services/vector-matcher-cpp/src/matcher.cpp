@@ -25,6 +25,51 @@ bool fitsBed(const Placement& p, const Box3D& bed) {
            p.z + p.dz <= bed.height + 1e-4f;
 }
 
+std::vector<std::array<float, 3>> generateAnchors(
+    const std::vector<Placement>& placed
+) {
+    std::vector<float> xCoordinates{ 0.0f };
+    std::vector<float> yCoordinates{ 0.0f };
+    std::vector<float> zCoordinates{ 0.0f };
+
+    xCoordinates.reserve(placed.size() + 1);
+    yCoordinates.reserve(placed.size() + 1);
+    zCoordinates.reserve(placed.size() + 1);
+
+    for (const auto& placement : placed) {
+        xCoordinates.push_back(placement.x + placement.dx);
+        yCoordinates.push_back(placement.y + placement.dy);
+        zCoordinates.push_back(placement.z + placement.dz);
+    }
+
+    auto deduplicate = [](std::vector<float>& coordinates) {
+        std::sort(coordinates.begin(), coordinates.end());
+        coordinates.erase(
+            std::unique(coordinates.begin(), coordinates.end()),
+            coordinates.end()
+        );
+    };
+
+    deduplicate(xCoordinates);
+    deduplicate(yCoordinates);
+    deduplicate(zCoordinates);
+
+    std::vector<std::array<float, 3>> anchors;
+    anchors.reserve(
+        xCoordinates.size() * yCoordinates.size() * zCoordinates.size()
+    );
+
+    for (float x : xCoordinates) {
+        for (float y : yCoordinates) {
+            for (float z : zCoordinates) {
+                anchors.push_back({ x, y, z });
+            }
+        }
+    }
+
+    return anchors;
+}
+
 } // namespace
 
 VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
@@ -50,6 +95,7 @@ VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
 
     for (const auto& box : cargoBoxes) {
         const float dims[3] = { box.length, box.width, box.height };
+        const auto anchors = generateAnchors(placed);
         bool placedBox = false;
 
         for (int i = 0; i < 6 && !placedBox; ++i) {
@@ -58,30 +104,23 @@ VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
             cand.dy = dims[permutations[i][1]];
             cand.dz = dims[permutations[i][2]];
 
-            // Candidate anchor positions: the origin plus the three "positive"
-            // corners of every already-placed box (extreme-point heuristic).
-            std::vector<std::array<float, 3>> anchors;
-            anchors.push_back({ 0.0f, 0.0f, 0.0f });
-            for (const auto& p : placed) {
-                anchors.push_back({ p.x + p.dx, p.y, p.z });
-                anchors.push_back({ p.x, p.y + p.dy, p.z });
-                anchors.push_back({ p.x, p.y, p.z + p.dz });
-            }
+            for (const auto& anchor : anchors) {
+                cand.x = anchor[0];
+                cand.y = anchor[1];
+                cand.z = anchor[2];
 
-            for (const auto& a : anchors) {
-                cand.x = a[0];
-                cand.y = a[1];
-                cand.z = a[2];
                 if (!fitsBed(cand, truckBed)) {
                     continue;
                 }
+
                 bool ok = true;
-                for (const auto& p : placed) {
-                    if (overlaps(cand, p)) {
+                for (const auto& placement : placed) {
+                    if (overlaps(cand, placement)) {
                         ok = false;
                         break;
                     }
                 }
+
                 if (ok) {
                     placed.push_back(cand);
                     totalCargoVolume += box.volume();
@@ -92,7 +131,6 @@ VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
         }
 
         if (!placedBox) {
-            // This box cannot be placed without overlap: the load is infeasible.
             return { false, 0.0f, placed.size(), {} };
         }
     }

@@ -72,6 +72,7 @@ import escortWalletRoutes from './routes/escortWalletRoutes.js'
 import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
+import arLoadingRoutes from './routes/arLoadingRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -169,6 +170,10 @@ import { startStaleOrderWorker, stopStaleOrderWorker } from './workers/staleOrde
 import { startDevicePruningWorker, stopDevicePruningWorker } from './workers/devicePruningWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
+import AlertRouter from './services/blockchain/alertRouter.js'
+import BlockchainMonitor from './services/blockchain/blockchainMonitor.js'
+import StateDivergenceDetector from './services/blockchain/stateDivergenceDetector.js'
+import BatchCallBuilder from './services/blockchain/batchCallBuilder.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
@@ -202,6 +207,19 @@ CacheManager.init(redisClient)
 // ============================================================================
 const blockchainMetrics = new BlockchainMetrics()
 const escalationHandler = new EscalationHandler({})
+const alertRouter = new AlertRouter()
+const blockchainMonitor = new BlockchainMonitor({
+  alertRouter,
+  metricsService: blockchainMetrics,
+  escalationHandler,
+})
+const batchCallBuilder = new BatchCallBuilder({})
+const stateDivergenceDetector = new StateDivergenceDetector({
+  disableMonitoring: true, // started explicitly below in server.listen()
+  alertRouter,
+  escalationHandler,
+  batchCallBuilder,
+})
 
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
@@ -504,6 +522,7 @@ app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysis
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
+app.use('/api/drone', droneRoutes)
 // Mounted here, with the other REST routes, so it sits behind the full
 // middleware chain — body parsers, correlation/request IDs, HPP protection,
 // content-type enforcement, fraud detection and the /api rate limiter.
@@ -558,6 +577,7 @@ app.use('/api/oracle', oracleRoutes)
 app.use('/api/carbon-credits', carbonTokenRoutes)
 app.use('/api/ml', mlRoutes)
 app.use('/api/tire-analytics', tireAnalyticsRoutes)
+app.use('/api/ar-loading', arLoadingRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES
@@ -584,6 +604,7 @@ blockchainMonitoringRoutes[BLOCKCHAIN_MONITORING_MOUNTED] = true;
 app.use('/api/blockchain', (req, _res, next) => {
   req.blockchainMetrics = blockchainMetrics
   req.escalationHandler = escalationHandler
+  req.blockchainMonitor = blockchainMonitor
   req.supabase = supabaseAdmin
   next()
 }, blockchainMonitoringRoutes)
@@ -594,6 +615,9 @@ app.use('/api/blockchain', (req, _res, next) => {
 //   GET  /api/internal/escrow-velocity
 //   POST /api/internal/pause-escrow
 //   POST /api/internal/defensive-pause
+// Closing the escrow circuit breaker (pause-escrow with {"paused": false}) is
+// additionally gated inside the route on the dedicated ESCROW_OPERATOR_API_KEY
+// (403 for other valid keys; fails closed when unconfigured).
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
@@ -780,6 +804,30 @@ server.listen(PORT, () => {
   startWithdrawalSettlementWorker()
   startOutboxRelayWorker()
 
+  // Start BlockchainMonitor during API startup.
+  // Worker health flag is set only after successful initialization.
+  let blockchainMonitorStarted = false
+  blockchainMonitor.initialize().then((initialized) => {
+    if (initialized) {
+      return blockchainMonitor.startListening()
+    }
+  }).then(() => {
+    blockchainMonitorStarted = true
+    globalThis.__truxify_workers = {
+      ...globalThis.__truxify_workers,
+      blockchainMonitor: true,
+    }
+  }).catch((err) => {
+    logger.error({ err }, '[BlockchainMonitor] Failed to initialize or start listening')
+    globalThis.__truxify_workers = {
+      ...globalThis.__truxify_workers,
+      blockchainMonitor: false,
+    }
+  })
+
+  // Start StateDivergenceDetector after blockchain monitor warms up.
+  stateDivergenceDetector.startMonitoring()
+
   // Register worker states for health aggregation
   globalThis.__truxify_workers = {
     escrowRefundReconciliation: true,
@@ -791,6 +839,8 @@ server.listen(PORT, () => {
     devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
+    // blockchainMonitor flag is set async above after successful startup
+    blockchainMonitor: blockchainMonitorStarted,
   }
 })
 
@@ -824,6 +874,8 @@ async function shutdown(signal) {
   stopWithdrawalSettlementWorker()
   stopOutboxRelayWorker()
   stopStaleOrderWorker()
+  await blockchainMonitor.stopListening()
+  stateDivergenceDetector.stopMonitoring()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

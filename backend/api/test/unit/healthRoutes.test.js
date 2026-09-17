@@ -191,6 +191,17 @@ describe('healthRoutes', () => {
       expect(response.body.services.redis).toBe('failed');
     });
 
+    it('returns 200 when optional MongoDB is not configured', async () => {
+      mockDbState.mongoDb = null;
+
+      const app = makeApp();
+      const response = await request(app).get('/health');
+
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe('ok');
+      expect(response.body.services.mongodb).toBe('not_configured');
+    });
+
     it('handles not_configured states gracefully', async () => {
       mockDbState.supabaseAdmin = null;
       mockDbState.supabase = null;
@@ -258,6 +269,23 @@ describe('healthRoutes', () => {
         services: {
           supabase: 'failed',
           mongodb: 'connected',
+          redis: 'connected',
+        },
+      });
+    });
+
+    it('returns 200 and status ready when optional MongoDB is not configured', async () => {
+      mockDbState.mongoDb = null;
+
+      const app = makeApp();
+      const response = await request(app).get('/health/ready');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        status: 'ready',
+        services: {
+          supabase: 'connected',
+          mongodb: 'not_configured',
           redis: 'connected',
         },
       });

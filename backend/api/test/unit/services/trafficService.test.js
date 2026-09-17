@@ -5,7 +5,10 @@
  * API error handling, rush-hour fallback, and multiplier boundary conditions.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getLiveTrafficMultiplier } from '../../../src/services/trafficService.js';
+import {
+  getLiveTrafficMultiplier,
+  getLiveTrafficMultiplierEnterprise,
+} from '../../../src/services/trafficService.js';
 
 describe('getLiveTrafficMultiplier', () => {
   beforeEach(() => {
@@ -62,5 +65,31 @@ describe('getLiveTrafficMultiplier', () => {
 
   it('is a function', () => {
     expect(typeof getLiveTrafficMultiplier).toBe('function');
+  });
+});
+
+describe('getLiveTrafficMultiplierEnterprise', () => {
+  beforeEach(() => {
+    delete process.env.TOMTOM_API_KEY;
+    delete process.env.GOOGLE_MAPS_API_KEY;
+  });
+
+  it('returns 1.0 for non-finite (NaN / Infinity) coordinates before calculating', async () => {
+    expect(await getLiveTrafficMultiplierEnterprise(NaN, 10)).toBe(1.0);
+    expect(await getLiveTrafficMultiplierEnterprise(Infinity, 10)).toBe(1.0);
+    expect(await getLiveTrafficMultiplierEnterprise(28.6, -Infinity)).toBe(1.0);
+  });
+
+  it('rejects non-numeric and overflow coordinate inputs', async () => {
+    expect(await getLiveTrafficMultiplierEnterprise('abc', 'xyz')).toBe(1.0);
+    expect(await getLiveTrafficMultiplierEnterprise('Infinity', '10')).toBe(1.0);
+    expect(await getLiveTrafficMultiplierEnterprise(Number.MAX_VALUE * 2, 10)).toBe(1.0);
+  });
+
+  it('returns a finite multiplier between 1.0 and 2.5 for valid coordinates', async () => {
+    const result = await getLiveTrafficMultiplierEnterprise(28.6139, 77.209);
+    expect(result).toBeGreaterThanOrEqual(1.0);
+    expect(result).toBeLessThanOrEqual(2.5);
+    expect(Number.isFinite(result)).toBe(true);
   });
 });

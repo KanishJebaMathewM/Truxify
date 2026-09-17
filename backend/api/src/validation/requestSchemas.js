@@ -436,6 +436,24 @@ export const reportGripDataSchema = z.object({
   ).optional().default(0),
 }).strict();
 
+export const nearbyGripQuerySchema = z.object({
+  lat: coerceNumber(
+    z.number({ invalid_type_error: 'latitude must be a finite number' })
+      .min(-90, 'latitude must be >= -90')
+      .max(90, 'latitude must be <= 90')
+  ),
+  lng: coerceNumber(
+    z.number({ invalid_type_error: 'longitude must be a finite number' })
+      .min(-180, 'longitude must be >= -180')
+      .max(180, 'longitude must be <= 180')
+  ),
+  radius_miles: coerceNumber(
+    z.number({ invalid_type_error: 'radius_miles must be a number' })
+      .min(0.01, 'radius_miles must be greater than 0')
+      .max(1000, 'radius_miles must be at most 1000')
+  ).default(50),
+}).strict();
+
 /**
  * Schema for POST /api/driver/weigh-stations/sync-weight.
  * NOTE: defined once above (truck_id + string axle position); the driver

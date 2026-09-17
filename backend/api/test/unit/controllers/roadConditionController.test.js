@@ -15,9 +15,12 @@ vi.mock('../../../src/validation/requestSchemas.js', () => ({
   reportGripDataSchema: {
     safeParse: vi.fn(),
   },
+  nearbyGripQuerySchema: {
+    safeParse: vi.fn(),
+  },
 }));
 
-const { reportGripDataSchema } = await import('../../../src/validation/requestSchemas.js');
+const { reportGripDataSchema, nearbyGripQuerySchema } = await import('../../../src/validation/requestSchemas.js');
 
 function buildSupabaseAdminMock() {
   const chain = {
@@ -97,18 +100,21 @@ describe('roadConditionController', () => {
 
   describe('getNearbyGripData', () => {
     it('rejects missing coordinates with 400', async () => {
+      nearbyGripQuerySchema.safeParse.mockReturnValue({ success: false, error: { issues: [{ path: ['lat'], message: 'Required' }] } });
       const res = mockRes();
       await getNearbyGripData({ query: {} }, res);
       expect(res.status).toHaveBeenCalledWith(400);
     });
 
     it('rejects out-of-range latitude with 400', async () => {
+      nearbyGripQuerySchema.safeParse.mockReturnValue({ success: false, error: { issues: [{ path: ['lat'], message: 'Invalid latitude' }] } });
       const res = mockRes();
       await getNearbyGripData({ query: { lat: 95, lng: 77 } }, res);
       expect(res.status).toHaveBeenCalledWith(400);
     });
 
     it('rejects invalid radius with 400', async () => {
+      nearbyGripQuerySchema.safeParse.mockReturnValue({ success: false, error: { issues: [{ path: ['radius_miles'], message: 'Invalid radius_miles' }] } });
       const res = mockRes();
       await getNearbyGripData({ query: { lat: 12, lng: 77, radius_miles: -5 } }, res);
       expect(res.status).toHaveBeenCalledWith(400);
@@ -117,6 +123,7 @@ describe('roadConditionController', () => {
      it('returns nearby grip data', async () => {
       supabaseAdmin.from = vi.fn(() => supabaseAdmin);
       supabaseAdmin.limit.mockResolvedValue({ data: [{ id: 'r1' }], error: null });
+      nearbyGripQuerySchema.safeParse.mockReturnValue({ success: true, data: { lat: 12.9, lng: 77.5, radius_miles: 50 } });
 
       const req = { query: { lat: '12.9', lng: '77.5', radius_miles: '50' } };
       const res = mockRes();
@@ -129,6 +136,7 @@ describe('roadConditionController', () => {
     it('clamps the latitude bounding box to the valid range near the poles', async () => {
       supabaseAdmin.from = vi.fn(() => supabaseAdmin);
       supabaseAdmin.limit.mockResolvedValue({ data: [], error: null });
+      nearbyGripQuerySchema.safeParse.mockReturnValue({ success: true, data: { lat: 89.9, lng: 0, radius_miles: 1000 } });
 
       const req = { query: { lat: '89.9', lng: '0', radius_miles: '1000' } };
       const res = mockRes();

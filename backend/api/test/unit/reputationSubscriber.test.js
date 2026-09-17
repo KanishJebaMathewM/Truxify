@@ -48,15 +48,17 @@ vi.mock('@opentelemetry/api', () => ({
   SpanStatusCode: { OK: 0, ERROR: 1 },
 }))
 
-await import('../../src/subscribers/reputationSubscriber.js')
-
-const handler = mocks.subscribe.mock.calls[0][1]
+let handler;
 
 describe('reputationSubscriber', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mocks.awardReputationPoints.mockClear()
     mocks.insertReputationFailure.mockClear()
     mocks.logger.warn.mockClear()
+    mocks.subscribe.mockClear()
+    vi.resetModules()
+    await import('../../src/subscribers/reputationSubscriber.js')
+    handler = mocks.subscribe.mock.calls[0]?.[1]
   })
 
   it('registers a handler for the rating:submitted event', () => {
@@ -65,13 +67,13 @@ describe('reputationSubscriber', () => {
 
   it('awards reputation points on a valid rating event', async () => {
     mocks.awardReputationPoints.mockResolvedValue(undefined)
-    const h = handler
     await handler({ payload: { driverWallet: '0x1', stars: 5, orderDisplayId: '#o1' } })
-    expect(mocks.awardReputationPoints).toHaveBeenCalledWith('0x1', 5)
+    expect(mocks.awardReputationPoints).toHaveBeenCalledWith('0x1', 5, {
+      awardKey: 'order:#o1:rating:driver',
+    })
   })
 
   it('skips when the driver wallet is missing', async () => {
-    const h = handler
     await handler({ payload: { stars: 5, orderDisplayId: '#o1' } })
     expect(mocks.awardReputationPoints).not.toHaveBeenCalled()
     expect(mocks.logger.warn).toHaveBeenCalled()
@@ -80,8 +82,14 @@ describe('reputationSubscriber', () => {
   it('logs a reputation failure to the DB when the on-chain update fails', async () => {
     mocks.awardReputationPoints.mockRejectedValue(new Error('chain down'))
     mocks.insertReputationFailure.mockResolvedValue(undefined)
-    const h = handler
     await handler({ payload: { driverWallet: '0x1', stars: 4, orderDisplayId: '#o2' } })
-    expect(mocks.insertReputationFailure).toHaveBeenCalled()
+    expect(mocks.insertReputationFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driver_wallet: '0x1',
+        stars: 4,
+        award_key: 'order:#o2:rating:driver',
+        status: 'pending',
+      })
+    )
   })
 })

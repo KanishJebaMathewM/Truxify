@@ -13,7 +13,37 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check for duplicate migration contents
+        shell: bash
+        run: |
+          duplicates=$(find supabase/migrations -type f -name '*.sql' -print0 |
+            xargs -0 sha256sum |
+            sort |
+            awk '
+              {
+                hash=$1
+                file=$2
+                if (hash == previous) {
+                  print previous_file
+                  print file
+                  found=1
+                }
+                previous=hash
+                previous_file=file
+              }
+              END {
+                if (found) exit 1
+              }
+            ')
+
+          if [ -n "$duplicates" ]; then
+            echo "Duplicate migration contents found:"
+            echo "$duplicates"
+            exit 1
+          fi
+
+          echo "No duplicate migration contents found."
 
       - name: Check for duplicate CREATE TABLE definitions across migrations
         run: |
@@ -31,9 +61,9 @@ jobs:
         run: python3 scripts/check-definer-search-path.py
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v3
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520
         with:
-          version: latest
+          version: 2.117.0
 
       - name: Start Supabase locally and run migrations
         run: supabase start

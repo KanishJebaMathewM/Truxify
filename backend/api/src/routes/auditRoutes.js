@@ -3,7 +3,6 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { supabaseAdmin } from '../config/db.js';
-import { auditLog } from '../middleware/auditLog.js';
 import { auditLogService } from '../services/auditLogService.js';
 import { validateQuery } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';

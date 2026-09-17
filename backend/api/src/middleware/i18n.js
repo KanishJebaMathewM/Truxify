@@ -49,3 +49,6 @@ export const errorTranslationInterceptor = (req, res, next) => {
   };
   next();
 };
+
+export default errorTranslationInterceptor;
+

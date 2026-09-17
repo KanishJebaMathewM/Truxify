@@ -5,6 +5,13 @@ import { gql } from 'graphql-tag';
 import DataLoader from 'dataloader';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
+function requireUser(user) {
+    if (!user?.id) {
+        throw new Error('Authentication required');
+    }
+    return user;
+}
 
 const typeDefs = gql`
     extend type Query {
@@ -35,7 +42,8 @@ const typeDefs = gql`
 
 const resolvers = {
     Query: {
-        logisticsRoute: async (_, { id }) => {
+        logisticsRoute: async (_, { id }, context) => {
+    requireUser(context.user);
             const { data, error } = await supabase.from('trips').select('*').eq('id', id).single();
             if (error) throw error;
             return {
@@ -46,7 +54,8 @@ const resolvers = {
                 routeLabel: data.route_label,
             };
         },
-        logisticsRoutes: async (_, { limit = 50, offset = 0 }) => {
+        logisticsRoutes: async (_, { limit = 50, offset = 0 }, context) => {
+    requireUser(context.user);
             const { data, error } = await supabase.from('trips').select('*').range(offset, offset + limit - 1);
             if (error) throw error;
             return data.map(row => ({
@@ -107,8 +116,9 @@ async function startLogisticsService() {
 
     const { url } = await startStandaloneServer(server, {
         listen: { port: 4004 },
-        context: async () => {
+        context: async ({ req }) => {
             return {
+                user: resolveUserFromTrustedHeaders(req.headers),
                 checkpointLoader: new DataLoader(keys => batchCheckpoints(keys))
             };
         }

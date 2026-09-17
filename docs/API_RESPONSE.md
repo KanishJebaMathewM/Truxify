@@ -1,3 +1,18 @@
+# Refresh Token Response
+
+`POST /api/auth/refresh` rotates a valid refresh token and returns a signed backend JWT.
+
+```json
+{
+	"success": true,
+	"accessToken": "<signed-jwt>",
+	"refreshToken": "<new-refresh-token>",
+	"expiresAt": "<iso-8601 timestamp>"
+}
+```
+
+The access token uses the same `JWT_SECRET` and issuer as `/api/auth/verify`. Clients must replace both stored tokens after a successful rotation.
+
 # API Response Helpers
 
 ## Overview

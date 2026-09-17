@@ -17,9 +17,25 @@ contract TaxSplitter is Ownable {
 
     constructor() Ownable(msg.sender) {}
 
+    mapping(address => bool) public authorizedRelayers;
+
+    event RelayerUpdated(address indexed relayer, bool authorized);
+
+    modifier onlyAuthorized() {
+        require(msg.sender == owner() || authorizedRelayers[msg.sender], "Not authorized to split payout");
+        _;
+    }
+
+    function setRelayer(address _relayer, bool _authorized) external onlyOwner {
+        require(_relayer != address(0), "Invalid relayer");
+        authorizedRelayers[_relayer] = _authorized;
+        emit RelayerUpdated(_relayer, _authorized);
+    }
+
     /**
      * @dev Calculates and executes payout splits.
      * Enforces dynamic GST and TDS tax allocations.
+     * Restricted to owner or authorized relayers to prevent front-running DoS.
      */
     function splitPayout(
         bytes32 _payoutId,
@@ -28,7 +44,7 @@ contract TaxSplitter is Ownable {
         uint256 _totalAmount,
         uint256 _gstRatePct,
         uint256 _tdsRatePct
-    ) external payable returns (uint256 netPayout) {
+    ) external payable onlyAuthorized returns (uint256 netPayout) {
         require(!processedPayouts[_payoutId], "Payout already processed");
         require(_totalAmount > 0, "Total amount must be > 0");
         require(msg.value >= _totalAmount, "Insufficient value sent for tax split");

@@ -18,6 +18,7 @@ router.post('/launch', authenticate, userLimiter, async (req, res) => {
     }
 
     const mission = await droneService.launchDroneDelivery({
+      ownerId: req.user.id,
       tripId: trip_id,
       parcelId: parcel_id,
       safeZoneGps: safe_zone_gps,
@@ -40,7 +41,10 @@ router.post('/launch', authenticate, userLimiter, async (req, res) => {
 router.get('/telemetry/:missionId', authenticate, userLimiter, async (req, res) => {
   try {
     const { missionId } = req.params;
-    const telemetry = await droneService.getDroneTelemetry(missionId);
+    const telemetry = await droneService.getDroneTelemetry(
+      missionId,
+      req.user.role === 'admin' ? null : req.user.id
+    );
 
     if (!telemetry) {
       return res.status(404).json({ error: 'Drone mission not found or inactive' });

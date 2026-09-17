@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -367,10 +367,13 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         order.buyer = msg.sender;
         order.isActive = false;
 
-        // Transfer payment
+        // Transfer payment to seller (push with fallback to claimable balance)
         {
             (bool paid, ) = payable(order.seller).call{value: totalCost}("");
-            require(paid, "Payment to seller failed");
+            if (!paid) {
+                claimableBalances[order.seller] += totalCost;
+                emit PayoutAccrued(assetId, order.seller, totalCost);
+            }
         }
 
         // Refund excess payment
@@ -386,8 +389,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     function cancelTradeOrder(
         uint256 assetId,
         uint256 orderIndex
-    ) external {
-        require(isCompliant[msg.sender], "Seller not compliant");
+    ) external nonReentrant {
         require(assetExists[assetId], "Asset not found");
         require(orderIndex < tradeOrders[assetId].length, "Order not found");
 

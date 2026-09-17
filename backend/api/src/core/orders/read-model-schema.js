@@ -72,6 +72,31 @@ export function assertOrderReadModelRow(row) {
 }
 
 /**
+ * Canonical, exhaustive list of order statuses stored in the `status` column
+ * of `orders_read_model`. Values are always lowercase. Both the eventsourcing
+ * write-side projection and the Kafka CQRS read-model must restrict their
+ * status column writes to values that round-trip through this set.
+ *
+ * The write-side aggregate reducer still emits uppercase constants
+ * (CREATED / ASSIGNED / CANCELLED) for internal state; `deriveOrderStatus`
+ * normalizes them to lowercase before they reach the database.
+ */
+export const ORDER_STATUSES = Object.freeze([
+  'pending',
+  'created',
+  'truck_assigned',
+  'assigned',
+  'en_route_pickup',
+  'arrived_pickup',
+  'picked_up',
+  'in_transit',
+  'arriving',
+  'delivered',
+  'payment_released',
+  'cancelled',
+]);
+
+/**
  * Normalizes a state/snapshot status into the shared `status` column value.
  * The eventsourcing aggregate reducer produces uppercase statuses (CREATED,
  * ASSIGNED, CANCELLED) while the Kafka snapshot builder produces lowercase

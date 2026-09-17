@@ -27,7 +27,7 @@ describe("zkEVMBridge", function () {
   });
 
   it("rejects withdrawals larger than the caller's deposited amount", async function () {
-    const { bridge, zkEVM, user } = await deployBridge();
+    const { bridge, user } = await deployBridge();
     await bridge.connect(user).depositToL2({ value: ethers.parseEther("1") });
     const proof = ethers.randomBytes(65);
     await assertRejectsWith(
@@ -37,7 +37,7 @@ describe("zkEVMBridge", function () {
   });
 
   it("rejects a zero-amount withdrawal", async function () {
-    const { bridge, zkEVM, user } = await deployBridge();
+    const { bridge, user } = await deployBridge();
     await bridge.connect(user).depositToL2({ value: ethers.parseEther("1") });
     await assertRejectsWith(
       bridge.connect(user).withdrawFromL2(0, ethers.randomBytes(65)),
@@ -54,18 +54,44 @@ describe("zkEVMBridge", function () {
     );
   });
 
+  it("preserves the original user address in the L2 balance", async function () {
+    const { bridge, zkEVM, user } = await deployBridge();
+    const fee = await bridge.bridgeFee();
+    const amount = ethers.parseEther("1");
+
+    await bridge.connect(user).depositToL2({ value: amount });
+
+    assert.equal(
+      await bridge.depositedAmount(user.address),
+      amount - fee
+    );
+    assert.equal(
+      await zkEVM.getBalance(user.address),
+      amount - fee
+    );
+    assert.equal(
+      await zkEVM.getBalance(await bridge.getAddress()),
+      0n,
+      "the bridge itself should not receive the user's L2 balance"
+    );
+  });
+
   it("credits and debits the per-user deposited amount", async function () {
-    const { bridge, user } = await deployBridge();
+    const { bridge, zkEVM, user } = await deployBridge();
     const fee = await bridge.bridgeFee();
     await bridge.connect(user).depositToL2({ value: ethers.parseEther("1") });
-    assert.equal(
-      await bridge.depositedAmount(user.address),
-      ethers.parseEther("1") - fee
+
+    await bridge.connect(user).withdrawFromL2(
+      ethers.parseEther("0.3"),
+      ethers.randomBytes(65)
     );
 
-    await bridge.connect(user).withdrawFromL2(ethers.parseEther("0.3"), ethers.randomBytes(65));
     assert.equal(
       await bridge.depositedAmount(user.address),
+      ethers.parseEther("1") - fee - ethers.parseEther("0.3")
+    );
+    assert.equal(
+      await zkEVM.getBalance(user.address),
       ethers.parseEther("1") - fee - ethers.parseEther("0.3")
     );
   });

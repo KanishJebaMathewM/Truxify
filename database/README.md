@@ -1,3 +1,7 @@
+# Security-sensitive migrations
+
+Run migrations in filename order. The refresh-token migration must be applied before API instances that query `refresh_tokens.token_hash` are deployed, because it backfills existing plaintext rows and then removes the legacy column.
+
 # 🗄️ Liquibase Database Migration Subsystem
 
 This directory contains the **Liquibase Database Schema Version Control** configuration and migration scripts for managing PostgreSQL schema evolution, indexes, and versioned changelogs across Truxify environments.

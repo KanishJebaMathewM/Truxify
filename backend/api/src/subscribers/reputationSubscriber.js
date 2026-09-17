@@ -30,9 +30,11 @@ eventBus.subscribe('rating:submitted', async (payload) => {
         return;
       }
 
+      const awardKey = orderDisplayId ? `order:${orderDisplayId}:rating:driver` : null;
+
       try {
         logger.info(`[reputation] Processing 'rating:submitted' event for order ${orderDisplayId}`);
-        await awardReputationPoints(driverWallet, stars);
+        await awardReputationPoints(driverWallet, stars, { awardKey });
       } catch (repErr) {
         logger.error('[reputation] On-chain reputation update failed from event bus:', repErr.message);
         
@@ -42,6 +44,9 @@ eventBus.subscribe('rating:submitted', async (payload) => {
           await orderRepository.insertReputationFailure({
             driver_wallet: driverWallet,
             stars,
+            award_key: awardKey,
+            status: repErr?.txHash ? 'submitted' : 'pending',
+            tx_hash: repErr?.txHash || null,
             failed_at: new Date().toISOString(),
             retry_count: 0,
             last_error: repErr.message,

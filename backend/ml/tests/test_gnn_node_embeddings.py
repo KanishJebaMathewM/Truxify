@@ -5,7 +5,7 @@ pytest.importorskip("torch_geometric")
 
 from torch_geometric.data import Data
 
-from gnn.models import GNNRouteModel, RouteOptimizer
+from gnn.models import GNNRouteModel, GraphNetworkBuilder, RouteOptimizer
 
 
 def test_node_embeddings_and_graph_predictions_have_explicit_shapes():
@@ -27,6 +27,46 @@ def test_node_embeddings_and_graph_predictions_have_explicit_shapes():
     assert graph_predictions.shape == (2,)
     assert serving_output.shape == (4, 16)
     assert torch.equal(node_embeddings, serving_output)
+
+
+def test_route_inference_uses_per_node_embeddings():
+    builder = GraphNetworkBuilder()
+    builder.build_road_network(
+        [
+            {"id": "A", "lat": 12.97, "lng": 77.59},
+            {"id": "B", "lat": 12.98, "lng": 77.60},
+            {"id": "C", "lat": 12.99, "lng": 77.61},
+        ],
+        [
+            {"source": "A", "target": "B", "distance": 1.0, "time": 1.0},
+            {"source": "B", "target": "C", "distance": 1.0, "time": 1.0},
+        ],
+    )
+    graph_data = builder.get_pytorch_data()
+    optimizer = RouteOptimizer(allow_untrained=True)
+
+    captured = []
+
+    def capture_embeddings(start, end, embeddings, graph_data, objectives, constraints):
+        captured.append(torch.as_tensor(embeddings))
+        return [
+            {
+                "from": "A",
+                "to": "B",
+                "distance": 1.0,
+                "time": 1.0,
+                "cost": 0.0,
+                "fuel": 0.0,
+                "congestion": 0.0,
+            }
+        ]
+
+    optimizer._find_optimal_route = capture_embeddings
+    result = optimizer.optimize_route("A", "B", graph_data, objectives=["time"])
+
+    assert result["success"] is True
+    assert len(captured) == 1
+    assert captured[0].shape == (3, optimizer.model.hidden_dim)
 
 
 def test_single_graph_training_uses_the_graph_prediction_head():

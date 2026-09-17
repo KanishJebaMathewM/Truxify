@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies
 vi.mock('../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: {},
   mongoDb: null,
 }));

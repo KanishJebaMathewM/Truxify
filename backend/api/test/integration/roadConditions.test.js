@@ -8,6 +8,9 @@ import { generateTestToken } from '../../helpers/auth.js';
 
 // Mock DB
 vi.mock('../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: {
     from: vi.fn().mockReturnThis(),
     insert: vi.fn(),

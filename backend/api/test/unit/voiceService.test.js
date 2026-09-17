@@ -34,6 +34,9 @@ vi.mock('axios');
 const mockSupabaseFrom = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: {
     from: mockSupabaseFrom,
   },

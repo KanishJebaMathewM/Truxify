@@ -3,6 +3,9 @@ import express from 'express';
 import request from 'supertest';
 
 vi.mock('../../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: {
     from: vi.fn(() => ({
       insert: vi.fn(() => Promise.resolve({ error: null })),

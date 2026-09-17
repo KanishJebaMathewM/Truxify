@@ -47,6 +47,9 @@ const supabaseMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: supabaseMock,
   supabaseAdmin: supabaseMock,
 }));

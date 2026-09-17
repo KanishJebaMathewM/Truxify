@@ -43,6 +43,9 @@ const { dbMock, svcMock, dlMock, policyMock } = vi.hoisted(() => ({
 
 vi.mock('../../src/core/container.js', () => svcMock);
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabase() { return dbMock.supabase; },
   get supabaseAdmin() { return dbMock.supabaseAdmin; },
   createUserClient: (token) => dbMock.createUserClient(token),

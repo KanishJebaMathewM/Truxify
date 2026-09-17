@@ -34,6 +34,9 @@ const { anonFrom } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: anonFrom },
   supabaseAdmin: { from: vi.fn() },
 }));

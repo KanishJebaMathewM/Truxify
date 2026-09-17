@@ -8,10 +8,10 @@ import hmacService, {
 
 describe('hmacService', () => {
   describe('isNonceValid', () => {
-    it('accepts a new unique nonce and rejects replay with the same nonce', () => {
+    it('accepts a new unique nonce and rejects replay with the same nonce', async () => {
       const nonce = `test-nonce-${Date.now()}-${Math.random()}`;
-      expect(isNonceValid(nonce)).toBe(true);
-      expect(isNonceValid(nonce)).toBe(false);
+      expect(await isNonceValid(nonce)).toBe(true);
+      expect(await isNonceValid(nonce)).toBe(false);
     });
   });
 

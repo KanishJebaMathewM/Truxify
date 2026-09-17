@@ -1,15 +1,37 @@
 import crypto from 'crypto';
+import { redisClient } from '../config/db.js';
 
 const HMAC_SECRET = process.env.HMAC_SECRET || 'default-hmac-secret-key';
 const MAX_TIMESTAMP_DIFF_MS = 5 * 60 * 1000; // 5 minutes tolerance
-const usedNonces = new Set();
 
-// In production, replace this in-memory Set with Redis to support multi-instance deployments
-export const isNonceValid = (nonce) => {
-  if (usedNonces.has(nonce)) {
+const fallbackNonces = new Map();
+
+// Cleans up expired nonces from the fallback map
+const cleanupFallbackNonces = () => {
+  const now = Date.now();
+  for (const [nonce, expiresAt] of fallbackNonces.entries()) {
+    if (now > expiresAt) {
+      fallbackNonces.delete(nonce);
+    }
+  }
+};
+
+export const isNonceValid = async (nonce) => {
+  if (redisClient) {
+    try {
+      const key = `hmac:nonce:${nonce}`;
+      const result = await redisClient.set(key, '1', 'NX', 'PX', MAX_TIMESTAMP_DIFF_MS);
+      return result === 'OK';
+    } catch (err) {
+      // If Redis fails, fall back to in-memory check to prevent blocking traffic
+    }
+  }
+  
+  cleanupFallbackNonces();
+  if (fallbackNonces.has(nonce)) {
     return false;
   }
-  usedNonces.add(nonce);
+  fallbackNonces.set(nonce, Date.now() + MAX_TIMESTAMP_DIFF_MS);
   return true;
 };
 

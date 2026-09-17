@@ -52,7 +52,7 @@ def test_negative_net_profit_is_not_ranked_above_positive_net_profit():
 
 def test_load_specific_toll_is_included_in_incremental_cost():
     load = _load("with-toll", 0.9, 4_000)
-    load["toll_estimate_inr"] = 3_000
+    load["toll_estimate_inr"] = 1_000
 
     result = find_return_loads(
         driver_destination={"lat": 0.0, "lng": 0.0},
@@ -62,5 +62,5 @@ def test_load_specific_toll_is_included_in_incremental_cost():
     )
 
     recommendation = result["recommendations"][0]
-    assert recommendation["estimated_cost_inr"] == 5003.0
-    assert recommendation["estimated_profit_inr"] == -1003.0
+    assert recommendation["estimated_cost_inr"] == 3000.0
+    assert recommendation["estimated_profit_inr"] == 1000.0

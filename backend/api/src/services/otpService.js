@@ -88,6 +88,8 @@ export function verifyOtpHash(providedOtp, storedHash, storedSalt) {
 /**
  * Checks rate limiting for OTP requests per phone number.
  * Prevents abuse by limiting OTPs to MAX_OTPS_PER_WINDOW per RATE_LIMIT_WINDOW_MINUTES.
+ * Only counts OTPs that are still active (is_active = true) so that invalidated
+ * superseded OTPs do not inflate the rate-limit counter.
  * 
  * @param {string} phone - Phone number in E.164 format
  * @returns {Promise<{allowed: boolean, retryAfter?: number, reason?: string}>}
@@ -105,6 +107,7 @@ export async function checkOtpRateLimit(phone) {
       .from('phone_otps')
       .select('id, created_at')
       .eq('phone', phone)
+      .eq('is_active', true)
       .gte('created_at', windowStart.toISOString());
 
     if (error) {
@@ -168,6 +171,10 @@ export async function requestOtp(phone, options = {}) {
     };
   }
 
+  // Supersede any previously active OTPs for this phone before creating a new one.
+  // Must be called before the insert so the new OTP itself is not caught by the filter.
+  await invalidatePreviousOtps(phone);
+
   // Generate OTP and salt
   const plaintextOtp = generateOtp();
   const salt = generateSalt();
@@ -186,7 +193,8 @@ export async function requestOtp(phone, options = {}) {
   }
 
   try {
-    // Insert OTP record into phone_otps table
+    // Insert OTP record into phone_otps table.
+    // is_active:true marks this as the current valid OTP for the phone.
     const { data, error } = await supabaseAdmin
       .from('phone_otps')
       .insert([{
@@ -194,6 +202,7 @@ export async function requestOtp(phone, options = {}) {
         otp_hash: otpHash,
         otp_salt: salt,
         expires_at: expiresAt.toISOString(),
+        is_active: true,
         verified: false,
         verified_at: null,
         channel,
@@ -271,10 +280,21 @@ async function deliverOtp(phone, otp, channel) {
 }
 
 /**
- * Invalidates all unverified OTPs for a phone number.
- * Called when a new OTP is requested to prevent multiple valid OTPs.
- * 
- * @param {string} phone - Phone number
+ * Deactivates all currently active OTPs for a phone number without touching
+ * the `verified` column.
+ *
+ * Previously this function set `verified = true` to "cancel" superseded OTPs,
+ * which corrupted the audit trail by making them indistinguishable from OTPs
+ * the user actually verified (fixes #16055).
+ *
+ * The `verified` column is now reserved exclusively for OTPs that the user
+ * successfully entered. Superseded OTPs are identified by:
+ *   - `is_active = false`              — the OTP is no longer usable
+ *   - `invalidated_reason = 'superseded'` — explains why it was deactivated
+ *   - `invalidated_at`                 — timestamp when it was superseded
+ *   - `verified` remains `false`       — the user never entered this OTP
+ *
+ * @param {string} phone - Phone number in E.164 format
  */
 export async function invalidatePreviousOtps(phone) {
   if (!supabaseAdmin) return;
@@ -282,12 +302,13 @@ export async function invalidatePreviousOtps(phone) {
   try {
     await supabaseAdmin
       .from('phone_otps')
-      .update({ 
-        verified: true, 
-        verified_at: new Date().toISOString(),
-        invalidated_reason: 'superseded'
+      .update({
+        is_active: false,
+        invalidated_reason: 'superseded',
+        invalidated_at: new Date().toISOString(),
       })
       .eq('phone', phone)
+      .eq('is_active', true)
       .eq('verified', false);
   } catch (err) {
     logger.error({ err, phone }, 'Failed to invalidate previous OTPs');
@@ -295,7 +316,8 @@ export async function invalidatePreviousOtps(phone) {
 }
 
 /**
- * Marks an OTP as verified after successful verification.
+ * Marks an OTP as verified after successful verification and deactivates it
+ * so it cannot be reused.
  * 
  * @param {string} otpId - The OTP record ID
  */
@@ -307,7 +329,9 @@ export async function markOtpVerified(otpId) {
       .from('phone_otps')
       .update({ 
         verified: true, 
-        verified_at: new Date().toISOString()
+        verified_at: new Date().toISOString(),
+        // Deactivate after successful use — a verified OTP must not be reusable.
+        is_active: false,
       })
       .eq('id', otpId);
   } catch (err) {

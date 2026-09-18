@@ -1,17 +1,18 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
 from datetime import datetime
 import logging
 import asyncio
+from fastapi import APIRouter, HTTPException
 from transformers.model import (
     DemandForecastTransformer,
     TrafficForecastTransformer,
     PriceForecastTransformer,
     TransformerTrainer
 )
+from app.execution import run_training_job, run_inference
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/transformer", tags=["Time Series Transformers"])
@@ -42,6 +43,12 @@ class TrainRequest(BaseModel):
     val_data: Optional[List[List[List[float]]]] = None
     val_labels: Optional[List[List[float]]] = None
 
+    @model_validator(mode="after")
+    def validate_validation_pair(self):
+        if (self.val_data is None) != (self.val_labels is None):
+            raise ValueError("val_data and val_labels must be provided together")
+        return self
+
 @router.post("/demand/forecast")
 async def forecast_demand(request: ForecastRequest):
     """Forecast demand using transformer"""
@@ -51,8 +58,9 @@ async def forecast_demand(request: ForecastRequest):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)  # Add batch dimension
         
-        # Predict
-        predictions = demand_trainer.predict(x)
+        async with demand_lock:
+            # Predict
+            predictions = await run_inference(demand_trainer.predict, x)
         
         return {
             'success': True,
@@ -75,7 +83,8 @@ async def forecast_traffic(request: ForecastRequest):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
         
-        predictions = traffic_trainer.predict(x)
+        async with traffic_lock:
+            predictions = await run_inference(traffic_trainer.predict, x)
         
         return {
             'success': True,
@@ -98,7 +107,8 @@ async def forecast_price(request: ForecastRequest):
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
         
-        predictions = price_trainer.predict(x)
+        async with price_lock:
+            predictions = await run_inference(price_trainer.predict, x)
         
         return {
             'success': True,
@@ -127,7 +137,9 @@ async def train_demand(request: TrainRequest):
                 val_data = torch.tensor(request.val_data, dtype=torch.float32)
                 val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
             
-            results = demand_trainer.train(
+            results = await run_training_job(
+                "demand",
+                demand_trainer.train,
                 train_data, train_labels,
                 epochs=request.epochs,
                 batch_size=request.batch_size,
@@ -158,7 +170,9 @@ async def train_traffic(request: TrainRequest):
                 val_data = torch.tensor(request.val_data, dtype=torch.float32)
                 val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
             
-            results = traffic_trainer.train(
+            results = await run_training_job(
+                "traffic",
+                traffic_trainer.train,
                 train_data, train_labels,
                 epochs=request.epochs,
                 batch_size=request.batch_size,
@@ -189,7 +203,9 @@ async def train_price(request: TrainRequest):
                 val_data = torch.tensor(request.val_data, dtype=torch.float32)
                 val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
             
-            results = price_trainer.train(
+            results = await run_training_job(
+                "price",
+                price_trainer.train,
                 train_data, train_labels,
                 epochs=request.epochs,
                 batch_size=request.batch_size,

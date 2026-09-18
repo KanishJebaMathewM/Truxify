@@ -15,7 +15,7 @@ class TestTimeSeriesTransformer:
         assert model is not None
         assert hasattr(model, 'forward')
         
-    def test_immutable_training_swap(self):
+    def test_immutable_training_swap_success(self):
         # Test that training doesn't immediately mutate the serving model until it succeeds
         model = DemandForecastTransformer(seq_len=10, pred_len=2, d_model=16, num_layers=1, num_heads=2)
         trainer = TransformerTrainer(model, device='cpu')
@@ -29,13 +29,42 @@ class TestTimeSeriesTransformer:
         train_labels = torch.randn(5, 2)
         
         # During this, it deepcopies the model
-        res = trainer.train(train_data, train_labels, epochs=2, batch_size=2)
+        res = trainer.train(train_data, train_labels, epochs=1, batch_size=2)
         
         # The atomic swap should have updated the weights
         post_pred = trainer.predict(test_input)
         
         # It should differ from the initial pred since weights changed and were swapped
         assert not np.allclose(initial_pred, post_pred), "Model weights did not update after training atomic swap"
+
+    def test_immutable_training_swap_failure(self):
+        model = DemandForecastTransformer(seq_len=10, pred_len=2, d_model=16, num_layers=1, num_heads=2)
+        trainer = TransformerTrainer(model, device='cpu')
+        
+        train_data = torch.randn(5, 10, 8)
+        train_labels = torch.randn(5, 2)
+        
+        class FailOnSecondLoss:
+            def __init__(self):
+                self.calls = 0
+                self.loss = torch.nn.MSELoss()
+            def __call__(self, predictions, targets):
+                self.calls += 1
+                if self.calls == 2:
+                    raise RuntimeError("forced training failure")
+                return self.loss(predictions, targets)
+                
+        initial_state = {
+            name: value.detach().clone() for name, value in trainer.model.state_dict().items()
+        }
+        
+        trainer.criterion = FailOnSecondLoss()
+        with pytest.raises(RuntimeError, match="forced training failure"):
+            trainer.train(train_data, train_labels, epochs=1, batch_size=2)
+            
+        assert all(
+            torch.equal(initial_state[name], value) for name, value in trainer.model.state_dict().items()
+        )
 
     def test_pydantic_train_request_constraints(self):
         # Test valid request

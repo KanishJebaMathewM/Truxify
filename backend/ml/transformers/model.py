@@ -291,10 +291,17 @@ class TransformerTrainer:
         """Full training loop"""
         import copy
         
+        if epochs < 1:
+            raise ValueError("epochs must be >= 1")
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
         if train_data.size(0) == 0:
             raise ValueError("Training data cannot be empty")
+        if train_data.size(0) != train_labels.size(0):
+            raise ValueError("Training data and labels must have equal sample counts")
+        if val_data is not None and val_labels is not None:
+            if val_data.size(0) != val_labels.size(0):
+                raise ValueError("Validation data and labels must have equal sample counts")
             
         losses = []
         val_losses = []
@@ -303,7 +310,11 @@ class TransformerTrainer:
         
         # Isolate training by copying the model
         working_model = copy.deepcopy(self.model)
-        working_optimizer = torch.optim.AdamW(working_model.parameters(), lr=self.optimizer.param_groups[0]['lr'])
+        working_optimizer = torch.optim.AdamW(
+            working_model.parameters(),
+            lr=self.optimizer.param_groups[0]['lr']
+        )
+        working_optimizer.load_state_dict(copy.deepcopy(self.optimizer.state_dict()))
         
         for epoch in range(epochs):
             epoch_loss = 0
@@ -350,6 +361,10 @@ class TransformerTrainer:
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
                 
         # Atomic swap of weights back to the production model
+        from app.execution import is_training_cancelled, TrainingCancelled
+        if is_training_cancelled():
+            raise TrainingCancelled("Training timed out, aborting swap")
+            
         self.model.load_state_dict(working_model.state_dict())
         self.optimizer.load_state_dict(working_optimizer.state_dict())
         

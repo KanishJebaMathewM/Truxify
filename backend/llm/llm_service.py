@@ -1,7 +1,7 @@
 import torch
 from transformers import (
-    AutoTokenizer, 
-    AutoModelForCausalLM, 
+    AutoTokenizer,
+    AutoModelForCausalLM,
     pipeline,
     BitsAndBytesConfig
 )
@@ -17,6 +17,11 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+from prompt_security import (
+    build_mistral_fallback_prompt,
+    escape_mistral_control_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,25 +199,65 @@ class LLMService:
     async def generate_response(self, query: str, context: List[str]) -> str:
         """Generate response using LLM"""
         try:
-            # Prepare prompt with context
+            # Trusted system instructions. Never include user-controlled data here.
             system_prompt = """You are Truxify Assistant, a helpful AI assistant for truck drivers.
             Provide accurate, concise, and helpful responses. Be friendly and professional.
             If you don't know something, say so honestly."""
-            
-            context_str = "\n".join(context) if context else "No specific context available."
-            
-            prompt = f"""<s>[INST] <<SYS>>
-            {system_prompt}
-            <</SYS>>
-            
-            Context information:
-            {context_str}
-            
-            Question: {query}
-            
-            Answer: [/INST]"""
-            
-            # Generate response
+
+            # Treat retrieved context and the user query as untrusted data.
+            safe_context = [
+                escape_mistral_control_tokens(item)
+                for item in context
+            ]
+            safe_query = escape_mistral_control_tokens(query)
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Context information:\n"
+                        + (
+                            "\n".join(safe_context)
+                            if safe_context
+                            else "No specific context available."
+                        )
+                        + "\n\nQuestion: "
+                        + safe_query
+                        + "\n\nAnswer:"
+                    ),
+                },
+            ]
+
+            # Prefer tokenizer-managed chat serialization when available.
+            chat_template = getattr(
+                self.tokenizer,
+                "chat_template",
+                None
+            )
+            apply_chat_template = getattr(
+                self.tokenizer,
+                "apply_chat_template",
+                None
+            )
+
+            if callable(apply_chat_template) and chat_template:
+                prompt = apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            else:
+                # Controlled fallback for tokenizers without a chat template.
+                prompt = build_mistral_fallback_prompt(
+                    system_prompt,
+                    context,
+                    query,
+                )
+
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 self.executor,
@@ -220,16 +265,16 @@ class LLMService:
                     prompt,
                     max_new_tokens=512,
                     temperature=0.7,
-                    do_sample=True
+                    do_sample=True,
+                    return_full_text=False
                 )
             )
-            
-            # Extract response text
-            generated_text = response[0]['generated_text']
-            answer = generated_text.split('[/INST]')[-1].strip()
-            
+
+            generated_text = response[0]["generated_text"]
+            answer = generated_text.strip()
+
             return answer
-            
+
         except Exception as e:
             logger.error(f"Response generation failed: {e}")
             return "I apologize, but I'm having trouble processing your request. Please try again."

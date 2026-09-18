@@ -108,23 +108,33 @@ class QuantumService:
     
     def _extract_route(self, qubo_result: Dict, node_ids: List) -> List:
         """Decode the QUBO edge-selection solution into an ordered route"""
-        solution = qubo_result.get('solution') or []
+        solution = qubo_result.get('solution')
         variables = qubo_result.get('variables') or []
-        if not solution or len(solution) != len(variables):
+        edge_mapping = qubo_result.get('edge_mapping')
+
+        if solution is None or len(solution) != len(variables):
             return None
 
         selected = []
-        for var, bit in zip(variables, solution):
-            if bit and str(var).startswith('x_'):
-                parts = str(var)[2:].split('_')
-                if len(parts) == 2:
-                    selected.append((parts[0], parts[1]))
+        if edge_mapping is not None and len(edge_mapping) == len(variables):
+            for bit, edge in zip(solution, edge_mapping):
+                if bit:
+                    if not isinstance(edge, (list, tuple)) or len(edge) != 3:
+                        return None
+                    selected.append(tuple(edge))
+        else:
+            for var, bit in zip(variables, solution):
+                if bit and str(var).startswith('x_'):
+                    parts = str(var)[2:].split('_')
+                    if len(parts) == 2:
+                        selected.append((parts[0], parts[1]))
 
         if not selected:
             return None
 
         adjacency = {}
-        for u, v in selected:
+        selected_pairs = [(edge[0], edge[1]) for edge in selected]
+        for u, v in selected_pairs:
             adjacency.setdefault(u, []).append(v)
             adjacency.setdefault(v, []).append(u)
 
@@ -142,8 +152,8 @@ class QuantumService:
 
         # Order the selected edges into a traversal
         route = []
-        stack = [selected[0][0]]
-        remaining = list(selected)
+        stack = [selected_pairs[0][0]]
+        remaining = list(selected_pairs)
         while stack:
             u = stack[-1]
             edge = next((e for e in remaining if u in e), None)

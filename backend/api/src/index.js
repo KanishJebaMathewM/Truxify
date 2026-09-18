@@ -516,7 +516,6 @@ app.use('/api/users', userRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
 app.use('/api/maintenance', maintenancePhotoRoutes)
-app.use('/api/webhooks', webhookRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
@@ -529,6 +528,7 @@ app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
+app.use('/api/tolls', tollOptimizationRouter)
 
 // ============================================================================
 // 🆕 WEB3 SUBSYSTEM ROUTES
@@ -924,5 +924,3 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
-
-app.use('/api/tolls', tollOptimizationRouter);

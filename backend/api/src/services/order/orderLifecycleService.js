@@ -1,8 +1,9 @@
 import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
-import { acquireLock, releaseLock } from '../../lib/redisLock.js';
+import { acquireLock, releaseLock, acquireDistributedLock } from '../../lib/redisLock.js';
 import { acquireLockOrFallback } from '../../lib/lockFallback.js';
+import { freightAuctionService } from '../auction/FreightAuctionService.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { supabaseAdmin } from '../../config/db.js';
 import {
@@ -345,11 +346,20 @@ export class OrderLifecycleService {
     });
   }
 
-  async submitBid(loadOfferId, driverId, bidAmount) {
+  async submitBid(loadOfferId, driverId, bidAmount, options = {}) {
     return measureExecution('OrderLifecycleService.submitBid', async () => {
-      const lockKey = `lock:submitBid:${driverId}:${loadOfferId}`;
-      const lockValue = await acquireLock(lockKey, 5000);
-      if (!lockValue) throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
+      // 1. Acquire Load-Level Distributed Lock to serialize concurrent bids from any driver on this load
+      const loadLockKey = `lock:auction:load:${loadOfferId}`;
+      const loadLock = await acquireLockOrFallback(loadLockKey, 10000);
+      if (!loadLock.ok) throw new DomainError(409, { error: 'Concurrent bid processing in progress on this load. Please retry.' });
+
+      // 2. Acquire Driver-Specific Bid Lock
+      const driverLockKey = `lock:submitBid:${driverId}:${loadOfferId}`;
+      const driverLockValue = await acquireLock(driverLockKey, 5000);
+      if (!driverLockValue) {
+        await loadLock.release();
+        throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
+      }
 
       try {
         const { data: offer, error: offerErr } = await this.orderRepository.findLoadOfferById(loadOfferId, 'id, status, customer_id');
@@ -369,6 +379,26 @@ export class OrderLifecycleService {
         if (existingBidErr) throw new DomainError(500, { error: 'Failed to verify existing bids.', details: existingBidErr.message });
         if (existingBid) throw new DomainError(409, { error: 'You already have a pending bid for this load.' });
 
+        // 3. Driver Solvency & Capacity Reservation Lock
+        const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
+        const collateralLock = await acquireDistributedLock(collateralKey, 1800);
+        if (!collateralLock.acquired) {
+          throw new DomainError(409, { error: 'Driver already has an active capacity or collateral lock for this load.' });
+        }
+
+        // 4. If auction exists in FreightAuctionService, process through anti-sniping engine
+        const auctionStatus = freightAuctionService.getAuctionStatus(loadOfferId);
+        let auctionResult = null;
+        if (auctionStatus) {
+          auctionResult = await freightAuctionService.submitBid({
+            loadOfferId,
+            driverId,
+            bidAmount,
+            driverRating: options.driverRating || 80,
+            detourKm: options.detourKm || 0,
+          });
+        }
+
         const { data: bid, error: bidErr } = await this.orderRepository.createBid({
           load_id: loadOfferId,
           driver_id: driverId,
@@ -386,9 +416,16 @@ export class OrderLifecycleService {
           { loadOfferId, bidId: bid.id }
         ).catch(err => logger.error(`[FCM] Failed to notify customer of new bid: ${err.message}`));
 
-        return { message: 'Bid submitted successfully.', bid };
+        return {
+          message: auctionResult?.antiSnipingTriggered
+            ? 'Bid submitted and auction extended under anti-sniping protection.'
+            : 'Bid submitted successfully.',
+          bid,
+          auction: auctionResult,
+        };
       } finally {
-        await releaseLock(lockKey, lockValue);
+        await releaseLock(driverLockKey, driverLockValue);
+        await loadLock.release();
       }
     });
   }

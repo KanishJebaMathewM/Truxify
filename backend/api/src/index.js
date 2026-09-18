@@ -73,6 +73,7 @@ import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
 import arLoadingRoutes from './routes/arLoadingRoutes.js'
+import auctionRoutes from './routes/auctionRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -519,6 +520,7 @@ app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMi
 // long-haul loads. Sits behind authenticate + per-route policy checks.
 app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
+app.use('/api/auctions', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, auctionRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)

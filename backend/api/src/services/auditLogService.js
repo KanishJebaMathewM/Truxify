@@ -1,8 +1,7 @@
-import { supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { appendFile } from 'fs/promises';
 import path from 'path';
-import { createClient } from 'redis';
 
 const TABLE = 'application_audit_logs';
 
@@ -10,20 +9,7 @@ const DEAD_LETTER_PATH =
   process.env.AUDIT_DEAD_LETTER_FILE ||
   path.join(process.cwd(), 'audit-dead-letter.log');
 
-// Redis configuration
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const STREAM_NAME = 'truxify:audit_events';
-
-let redisClient;
-try {
-  redisClient = createClient({ url: redisUrl });
-  
-  redisClient.on('error', (err) => {
-    logger.error({ err }, '[AuditLog] Redis Client Error');
-  });
-} catch (err) {
-  logger.error({ err }, '[AuditLog] Failed to initialize Redis client');
-}
 
 /**
  * Connect to Redis if not already connected

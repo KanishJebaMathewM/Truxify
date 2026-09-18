@@ -145,62 +145,75 @@ class QUBOFormatter:
                 name=f'degree_{node}',
             )
 
-        # Connectivity constraints use a single-commodity flow formulation.
-        # Each non-root node consumes one unit of flow. A selected route edge
-        # can carry at most n-1 units in either direction. This prevents
-        # disconnected cycles without enumerating all node subsets.
-        root = nodes[0]
-        flow_vars = {}
-        for u, v in graph.edges():
-            forward = f'flow_{u}_{v}'
-            reverse = f'flow_{v}_{u}'
-            qubo.integer_var(name=forward, lowerbound=0, upperbound=len(nodes) - 1)
-            qubo.integer_var(name=reverse, lowerbound=0, upperbound=len(nodes) - 1)
-            flow_vars[(u, v)] = (forward, reverse)
-
-            capacity = len(nodes) - 1
-            qubo.linear_constraint(
-                linear={forward: 1, edge_vars[(u, v)]: -capacity},
-                sense='<=',
-                rhs=0,
-                name=f'flow_capacity_{u}_{v}_forward',
-            )
-            qubo.linear_constraint(
-                linear={reverse: 1, edge_vars[(u, v)]: -capacity},
-                sense='<=',
-                rhs=0,
-                name=f'flow_capacity_{u}_{v}_reverse',
-            )
-
-        for node in nodes:
-            outgoing = []
-            incoming = []
-            for (u, v), (forward, reverse) in flow_vars.items():
-                if u == node:
-                    outgoing.append(forward)
-                    incoming.append(reverse)
-                elif v == node:
-                    outgoing.append(reverse)
-                    incoming.append(forward)
-
-            conservation = {var: 1 for var in incoming}
-            for var in outgoing:
-                conservation[var] = conservation.get(var, 0) - 1
-
-            if node == root:
-                qubo.linear_constraint(
-                    linear=conservation,
-                    sense='==',
-                    rhs=-(len(nodes) - 1),
-                    name='flow_conservation_root',
+        # A simple undirected graph with fewer than 6 nodes cannot contain
+        # two disjoint cycles while every node has degree exactly 2. Therefore,
+        # degree constraints alone already guarantee connectivity for these
+        # small cases. Starting at 6 nodes, disconnected 2-regular components
+        # become possible, so add single-commodity flow constraints there.
+        if len(nodes) >= 6:
+            # Each non-root node consumes one unit of flow. A selected route edge
+            # can carry at most n-1 units in either direction. This prevents
+            # disconnected cycles without enumerating all node subsets.
+            root = nodes[0]
+            flow_vars = {}
+            for u, v in graph.edges():
+                forward = f'flow_{u}_{v}'
+                reverse = f'flow_{v}_{u}'
+                qubo.integer_var(
+                    name=forward,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
                 )
-            else:
-                qubo.linear_constraint(
-                    linear=conservation,
-                    sense='==',
-                    rhs=1,
-                    name=f'flow_conservation_{node}',
+                qubo.integer_var(
+                    name=reverse,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
                 )
+                flow_vars[(u, v)] = (forward, reverse)
+
+                capacity = len(nodes) - 1
+                qubo.linear_constraint(
+                    linear={forward: 1, edge_vars[(u, v)]: -capacity},
+                    sense='<=',
+                    rhs=0,
+                    name=f'flow_capacity_{u}_{v}_forward',
+                )
+                qubo.linear_constraint(
+                    linear={reverse: 1, edge_vars[(u, v)]: -capacity},
+                    sense='<=',
+                    rhs=0,
+                    name=f'flow_capacity_{u}_{v}_reverse',
+                )
+
+            for node in nodes:
+                outgoing = []
+                incoming = []
+                for (u, v), (forward, reverse) in flow_vars.items():
+                    if u == node:
+                        outgoing.append(forward)
+                        incoming.append(reverse)
+                    elif v == node:
+                        outgoing.append(reverse)
+                        incoming.append(forward)
+
+                conservation = {var: 1 for var in incoming}
+                for var in outgoing:
+                    conservation[var] = conservation.get(var, 0) - 1
+
+                if node == root:
+                    qubo.linear_constraint(
+                        linear=conservation,
+                        sense='==',
+                        rhs=-(len(nodes) - 1),
+                        name='flow_conservation_root',
+                    )
+                else:
+                    qubo.linear_constraint(
+                        linear=conservation,
+                        sense='==',
+                        rhs=1,
+                        name=f'flow_conservation_{node}',
+                    )
 
         self.qubo = qubo
         self.variables = list(edge_vars.values())

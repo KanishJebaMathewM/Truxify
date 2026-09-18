@@ -9,7 +9,6 @@ from qiskit_algorithms.minimum_eigensolvers import QAOA
 from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
 from typing import Dict, List, Tuple, Any, Optional
-import itertools
 import logging
 
 logger = logging.getLogger(__name__)
@@ -110,14 +109,22 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
-        # Add binary variables for each edge
+        nodes = list(graph.nodes())
+        if len(nodes) < 3:
+            raise ValueError("Route optimization requires at least 3 nodes")
+        if not nx.is_connected(graph):
+            raise ValueError("Route optimization requires a connected graph")
+        if any(graph.degree(node) < 2 for node in nodes):
+            raise ValueError("Every node must have at least two incident edges")
+
+        # Add binary variables for each edge.
         edge_vars = {}
-        for i, (u, v) in enumerate(graph.edges()):
+        for u, v in graph.edges():
             var_name = f'x_{u}_{v}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
 
-        # Objective: minimize total distance
+        # Objective: minimize total distance.
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
@@ -126,13 +133,11 @@ class QUBOFormatter:
         qubo.minimize(quadratic=objective)
 
         # Degree constraints: each node must have degree exactly 2.
-        for node in graph.nodes():
+        for node in nodes:
             incident = [
                 var for (u, v), var in edge_vars.items()
                 if u == node or v == node
             ]
-            if not incident:
-                continue
             qubo.linear_constraint(
                 linear={var: 1 for var in incident},
                 sense='==',
@@ -140,28 +145,62 @@ class QUBOFormatter:
                 name=f'degree_{node}',
             )
 
-        # Connectivity / subtour-elimination constraints: for every proper
-        # non-empty subset S of nodes, the number of selected edges entirely
-        # inside S must be <= |S| - 1. This forbids disconnected cycles and
-        # guarantees the selected edges form a single connected cycle. Only
-        # applied for small graphs to avoid the exponential subset blow-up.
-        nodes = list(graph.nodes())
-        if len(nodes) <= 8:
-            for size in range(2, len(nodes)):
-                for subset in itertools.combinations(nodes, size):
-                    s = set(subset)
-                    inner = [
-                        var for (u, v), var in edge_vars.items()
-                        if u in s and v in s
-                    ]
-                    if len(inner) <= size - 1:
-                        continue
-                    qubo.linear_constraint(
-                        linear={var: 1 for var in inner},
-                        sense='<=',
-                        rhs=size - 1,
-                        name=f'subtour_{size}_{"_".join(str(n) for n in subset)}',
-                    )
+        # Connectivity constraints use a single-commodity flow formulation.
+        # Each non-root node consumes one unit of flow. A selected route edge
+        # can carry at most n-1 units in either direction. This prevents
+        # disconnected cycles without enumerating all node subsets.
+        root = nodes[0]
+        flow_vars = {}
+        for u, v in graph.edges():
+            forward = f'flow_{u}_{v}'
+            reverse = f'flow_{v}_{u}'
+            qubo.integer_var(name=forward, lowerbound=0, upperbound=len(nodes) - 1)
+            qubo.integer_var(name=reverse, lowerbound=0, upperbound=len(nodes) - 1)
+            flow_vars[(u, v)] = (forward, reverse)
+
+            capacity = len(nodes) - 1
+            qubo.linear_constraint(
+                linear={forward: 1, edge_vars[(u, v)]: -capacity},
+                sense='<=',
+                rhs=0,
+                name=f'flow_capacity_{u}_{v}_forward',
+            )
+            qubo.linear_constraint(
+                linear={reverse: 1, edge_vars[(u, v)]: -capacity},
+                sense='<=',
+                rhs=0,
+                name=f'flow_capacity_{u}_{v}_reverse',
+            )
+
+        for node in nodes:
+            outgoing = []
+            incoming = []
+            for (u, v), (forward, reverse) in flow_vars.items():
+                if u == node:
+                    outgoing.append(forward)
+                    incoming.append(reverse)
+                elif v == node:
+                    outgoing.append(reverse)
+                    incoming.append(forward)
+
+            conservation = {var: 1 for var in incoming}
+            for var in outgoing:
+                conservation[var] = conservation.get(var, 0) - 1
+
+            if node == root:
+                qubo.linear_constraint(
+                    linear=conservation,
+                    sense='==',
+                    rhs=-(len(nodes) - 1),
+                    name='flow_conservation_root',
+                )
+            else:
+                qubo.linear_constraint(
+                    linear=conservation,
+                    sense='==',
+                    rhs=1,
+                    name=f'flow_conservation_{node}',
+                )
 
         self.qubo = qubo
         self.variables = list(edge_vars.values())
@@ -183,10 +222,14 @@ class QUBOFormatter:
 
             # Solve
             result = optimizer.solve(qubo)
+            qubo_variable_names = qubo.variables.get_names()
+            values_by_name = {
+                name: value for name, value in zip(qubo_variable_names, result.x)
+            }
             
             return {
                 'success': True,
-                'solution': result.x,
+                'solution': [values_by_name[name] for name in self.variables],
                 'objective': result.fval,
                 'variables': self.variables
             }

@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 import numpy as np
 from typing import List, Optional
@@ -8,7 +9,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from .base import save_model, load_model, model_exists, get_model_meta, restore_previous_model
+from .base import (
+    save_model,
+    load_model,
+    model_exists,
+    get_model_meta,
+    get_active_generation,
+    restore_previous_model,
+)
 from ..execution import is_training_cancelled, TrainingCancelled
 
 logger = logging.getLogger(__name__)
@@ -169,37 +177,20 @@ def train_demand_forecast_model() -> dict:
         metrics["promotion_reason"] = reason
 
         if promoted:
-            # save_model() atomically publishes a new generation. The cache is
-            # invalidated only after publication succeeded, so concurrent
-            # predictions keep serving the previous valid model until then.
-            save_model((model, scaler), MODEL_NAME, metrics)
+            # Publish only after evaluation succeeds; save_model preserves the
+            # previous active generation for a later rollback.
+            training_meta = {
+                "source": "module_trained",
+                "training_timestamp": time.time(),
+                "feature_hash": str(hash(tuple(FEATURE_NAMES))),
+            }
+            save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
             reset_model_cache()
             logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
         else:
-            promoted = False
-            reason = (
-                f"New model MAE {mae:.4f} did not improve on production MAE {current_mae:.4f} "
-                f"by the required {PROMOTION_MAE_IMPROVEMENT_THRESHOLD:.0%} threshold "
-                f"(delta {improvement:.2%}); keeping existing production model."
-            )
+            logger.info("Demand forecast model trained but NOT promoted. %s", reason)
 
-    metrics["promoted"] = promoted
-    metrics["promotion_reason"] = reason
-
-    if promoted:
-        training_meta = {
-            "source": "module_trained",
-            "training_timestamp": time.time(),
-            "feature_hash": str(hash(tuple(FEATURE_NAMES))),
-        }
-        save_model((model, scaler), MODEL_NAME, metrics, training_meta=training_meta)
-        # Invalidate the in-memory cache so the next predict_demand call
-        # loads the newly trained model instead of the stale cached copy
-        reset_model_cache()
-        logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
-    else:
-        logger.info("Demand forecast model trained but NOT promoted. %s", reason)
-
+        metrics["production_version"] = get_active_generation(MODEL_NAME) or "production"
         return metrics
 
 
@@ -218,10 +209,18 @@ def rollback_demand_forecast_model() -> dict:
         reset_model_cache()
         meta = get_model_meta(MODEL_NAME) or {}
         logger.warning("Demand forecast model rolled back to previous version.")
-        return {"rolled_back": True, "metrics": meta.get("metrics", {})}
+        return {
+            "rolled_back": True,
+            "production_version": get_active_generation(MODEL_NAME) or "production",
+            "metrics": meta.get("metrics", {}),
+        }
 
     logger.warning("Demand forecast rollback requested but no previous version exists.")
-    return {"rolled_back": False, "reason": "No previous version available to roll back to."}
+    return {
+        "rolled_back": False,
+        "production_version": get_active_generation(MODEL_NAME) or "production",
+        "reason": "No previous version available to roll back to.",
+    }
 
 
 def predict_demand(features: List[float]) -> Optional[float]:

@@ -14,9 +14,18 @@ describe('authenticate middleware - non bypass flow', () => {
       supabase: null,
     }));
 
+    const mockLoggerWarn = vi.fn();
+    vi.doMock('../../src/middleware/logger.js', () => ({
+      default: {
+        warn: mockLoggerWarn,
+        error: vi.fn(),
+        info: vi.fn(),
+      },
+    }));
+
     const { authenticate } = await import('../../src/middleware/auth.js');
 
-    const req = { headers: {} };
+    const req = { headers: {}, requestId: 'test-req-id' };
     const res = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -25,6 +34,13 @@ describe('authenticate middleware - non bypass flow', () => {
     await authenticate(req, res, vi.fn());
 
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      {
+        event: 'AUTH_NO_TOKEN',
+        requestId: 'test-req-id',
+      },
+      'Missing or malformed Bearer Authorization header',
+    );
   });
 
   it('returns 500 when supabase missing for supabase token', async () => {

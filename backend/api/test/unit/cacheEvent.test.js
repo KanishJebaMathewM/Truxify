@@ -56,9 +56,9 @@ describe('CacheEvent', () => {
 
   describe('createCacheEvent', () => {
     it('creates INVALIDATE_KEY event with correct structure', () => {
-      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-        namespace: 'profile',
-        key: 'user:profile:sb:123',
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, { 
+        namespace: 'profile', 
+      key: 'user:profile:sb:123',
       });
 
       expect(event).toHaveProperty('id');

@@ -1,1 +1,0 @@
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS release_tx_hash TEXT;

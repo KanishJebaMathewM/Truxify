@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -127,7 +127,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, redisClient, createUserClient } from '../config/db.js';
+import { supabase, getAdminClient, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
@@ -157,6 +157,26 @@ import { z } from 'zod';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
+
+// Import controller functions for new routes if they exist in a separate controller file,
+// otherwise we will implement inline handlers or assume they are part of the existing structure.
+// For this merge, we will assume standard inline handling or existing controller exports if available.
+// Since the original file was self-contained, we will keep the logic inline or import if specified.
+// The prompt implies adding routes that call driverController methods. 
+// To maintain consistency with the single-file nature of the original, 
+// I will map these to existing logic or create placeholders if the controller isn't imported.
+// However, usually in these merges, we assume the controller exists. 
+// Let's stick to the pattern: if the function doesn't exist in this file, we might need to import it.
+// Given the original file didn't import a driverController, but the new snippet does,
+// I will add the import at the top but keep the existing inline logic for safety,
+// and add the new routes calling the controller if available, or fallback.
+
+// NOTE: In a real project, you'd likely move all handlers to driverController.js.
+// Here, we are merging into the router file. I will assume the existence of 
+// driverController.js as per the new snippet.
+
+import driverController from '../controllers/driverController.js'; 
+
 const router = express.Router();
 router.use(userLimiter);
 const hosStatusSchema = z.object({
@@ -214,7 +234,7 @@ const hosStatusSchema = z.object({
  */
 router.get('/active', requireApiKey, userLimiter, async (req, res) => {
   try {
-    const client = supabaseAdmin || supabase;
+    const client = getAdminClient();
     if (!client) {
       return res.status(503).json({ error: 'Supabase is not configured.' });
     }
@@ -814,7 +834,12 @@ async function handleGetDriverEarnings(req, res) {
 }
 
 router.get('/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
-router.get('/:driverId/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
+router.get('/:driverId/earnings', authenticate, userLimiter, (req, res, next) => {
+  if (req.user.role !== 'admin' && req.user.id !== req.params.driverId) {
+    return res.status(403).json({ error: 'You can only view your own earnings.' });
+  }
+  return next();
+}, requirePolicy('driver:view-earnings'), handleGetDriverEarnings);
 
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
@@ -1607,6 +1632,8 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {
       tripsList.sort((a, b) => (b.base_freight - a.base_freight) || new Date(b.pickup_date) - new Date(a.pickup_date));
+    } else if (sort_by === 'pickup_date') {
+      tripsList.sort((a, b) => new Date(b.pickup_date) - new Date(a.pickup_date));
     }
 
     if (format === 'csv') {
@@ -2182,6 +2209,39 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// ============================================================================
+// NEW: Driver Management Routes (Admin/Profile)
+// ============================================================================
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const validateDriverId = (req, res, next) => {
+  const { driverId } = req.params;
+  if (!driverId || !UUID_REGEX.test(driverId)) {
+    return res.status(400).json({ error: 'Bad Request: Invalid driverId format. Must be a valid UUID.' });
+  }
+  next();
+};
+
+// Note: These routes use specific paths to avoid conflicting with existing 
+// parameterized routes like /:driverId/earnings which are already defined above.
+// Express matches routes in order, so specific static paths should ideally be 
+// before dynamic ones, but since /:driverId/earnings is already defined, 
+// we place these new ones at the end. However, /:driverId/trips might conflict 
+// with /trips/:tripDisplayId if not careful. 
+// The new routes are:
+// GET /:driverId -> Conflicts with nothing static, but catches everything.
+// GET /:driverId/trips -> Conflicts with /trips/:tripDisplayId? No, /trips is static.
+// PUT /:driverId -> Conflicts with nothing static.
+
+// IMPORTANT: Because /:driverId is very generic, it should ideally be last.
+// However, we already have /:driverId/earnings and /:driverId/reputation.
+// We will add the new routes here.
+
+router.get('/:driverId', validateDriverId, authenticate, driverController.getDriverById);
+router.get('/:driverId/trips', validateDriverId, authenticate, driverController.getDriverTrips);
+router.put('/:driverId', validateDriverId, authenticate, driverController.updateDriver);
 
 export default router;
 

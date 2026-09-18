@@ -71,3 +71,11 @@ describe('escrowWebhookProcessor', () => {
     await expect(processEscrowWebhookEvent('PaymentReleased', { orderId: 'o1' })).rejects.toThrow('Failed to load order');
   });
 });
+
+/**
+ * Unit Tests for escrowWebhookGuards.js
+ * 
+ * Verifies payload validation, order state updates, and idempotency.
+ * Updated to reflect current implementation where payload validation
+ * (orderId check) runs before any legacy simulation branches.
+ */

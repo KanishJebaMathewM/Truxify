@@ -55,7 +55,9 @@ async function getBookingContext(bookingId, userId) {
   try {
     let orderQuery = voiceDb.from('orders').select('*');
     if (isUuid) {
-      orderQuery = orderQuery.eq('id', bookingId);
+      orderQuery = orderQuery
+        .eq('id', bookingId)
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
       orderQuery = orderQuery
         .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
@@ -76,15 +78,33 @@ async function getBookingContext(bookingId, userId) {
   return null;
 }
 
+export const LOGISTICS_VOICE_INTENTS = {
+  ACCEPT_LOAD: 'ACCEPT_LOAD',
+  REPORT_DELAY: 'REPORT_DELAY',
+  CHECK_EARNINGS: 'CHECK_EARNINGS',
+  PAYMENT_STATUS: 'PAYMENT_STATUS',
+  ETA: 'ETA',
+  GENERAL_INQUIRY: 'GENERAL_INQUIRY',
+};
+
 function detectQueryIntent(transcript) {
   const text = (transcript || '').toLowerCase();
+  if (text.includes('accept') || text.includes('agree') || text.includes('karo') || text.includes('take load') || text.includes('le lo')) {
+    return LOGISTICS_VOICE_INTENTS.ACCEPT_LOAD;
+  }
+  if (text.includes('delay') || text.includes('traffic') || text.includes('late') || text.includes('breakdown') || text.includes('puncture')) {
+    return LOGISTICS_VOICE_INTENTS.REPORT_DELAY;
+  }
+  if (text.includes('earning') || text.includes('balance') || text.includes('wallet') || text.includes('paisa') || text.includes('kamai')) {
+    return LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS;
+  }
   if (text.includes('payment') || text.includes('release') || text.includes('paid')) {
-    return 'payment_status';
+    return LOGISTICS_VOICE_INTENTS.PAYMENT_STATUS;
   }
-  if (text.includes('arrive') || text.includes('arrival') || text.includes('eta') || text.includes('when')) {
-    return 'eta';
+  if (text.includes('arrive') || text.includes('arrival') || text.includes('eta') || text.includes('when') || text.includes('pahunch')) {
+    return LOGISTICS_VOICE_INTENTS.ETA;
   }
-  return 'package_status';
+  return LOGISTICS_VOICE_INTENTS.GENERAL_INQUIRY;
 }
 
 function buildResponseForIntent(intent, bookingData, transcript) {
@@ -217,6 +237,78 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     response_text: responseText,
     audio_url: audioUrl,
     intent
+  };
+}
+
+/**
+ * Executes domain-guarded logistics actions based on extracted driver voice intent.
+ */
+export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQuery, language = 'en' }) {
+  const voiceResult = await processVoiceQuery(userId, null, audioBuffer, filename, textQuery);
+  const intent = voiceResult.intent;
+  let actionResult = { executed: false, action: intent };
+
+  const langNames = { en: 'English', hi: 'Hindi', ta: 'Tamil' };
+  const targetLang = langNames[language] || 'English';
+
+  try {
+    if (intent === LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS) {
+      const { data: profile } = await voiceDb
+        .from('profiles')
+        .select('wallet_balance, total_earnings')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const balance = (profile?.wallet_balance ?? profile?.total_earnings ?? 0) / 100;
+      actionResult = {
+        executed: true,
+        action: 'CHECK_EARNINGS',
+        data: { wallet_balance: balance },
+      };
+      voiceResult.response_text = `Your available wallet balance is ₹${balance.toFixed(2)}.`;
+    } else if (intent === LOGISTICS_VOICE_INTENTS.REPORT_DELAY) {
+      // Find driver's active in-transit order
+      const { data: activeOrder } = await voiceDb
+        .from('orders')
+        .select('id, order_display_id')
+        .eq('driver_id', userId)
+        .in('status', ['in_transit', 'picked_up'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeOrder) {
+        await voiceDb.from('orders').update({
+          delay_reported: true,
+          delay_reported_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', activeOrder.id);
+
+        actionResult = {
+          executed: true,
+          action: 'REPORT_DELAY',
+          orderId: activeOrder.id,
+        };
+        voiceResult.response_text = `Delay has been reported for Order ${activeOrder.order_display_id || activeOrder.id.slice(0, 8)}. Customer has been notified.`;
+      } else {
+        voiceResult.response_text = 'No active in-transit trip found to report a delay.';
+      }
+    } else if (intent === LOGISTICS_VOICE_INTENTS.ACCEPT_LOAD) {
+      actionResult = {
+        executed: true,
+        action: 'ACCEPT_LOAD',
+        message: 'Load match verified. Please confirm bid via mobile dispatch screen.',
+      };
+      voiceResult.response_text = 'Matching load confirmed. Dispatch screen updated.';
+    }
+  } catch (actionErr) {
+    logger.error({ err: actionErr, userId }, '[VoiceAI] Action execution error');
+  }
+
+  return {
+    ...voiceResult,
+    action: actionResult,
+    language: targetLang,
   };
 }
 

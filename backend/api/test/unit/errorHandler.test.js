@@ -15,7 +15,10 @@ describe('errorHandler Middleware', () => {
 
     errorHandler(err, mockReq, res, next);
     expect(res.status).toHaveBeenCalledWith(413);
-    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Payload too large' });
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: { code: 'PAYLOAD_TOO_LARGE', message: 'Payload too large', details: {} }
+    });
   });
 
   it('handles SyntaxError with 400', () => {
@@ -30,11 +33,14 @@ describe('errorHandler Middleware', () => {
 
     errorHandler(err, mockReq, res, next);
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Malformed JSON payload' });
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: { code: 'MALFORMED_JSON', message: 'Malformed JSON payload', details: {} }
+    });
   });
 
   it('handles AppError with custom statusCode', () => {
-    const err = new AppError('Unauthorized access', 401);
+    const err = new AppError('Unauthorized access', 401, 'UNAUTHORIZED', { reason: 'expired' });
     const res = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -43,6 +49,38 @@ describe('errorHandler Middleware', () => {
 
     errorHandler(err, mockReq, res, next);
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Unauthorized access' });
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized access', details: { reason: 'expired' } }
+    });
+  });
+
+  it('handles ZodError with zod v4 issues property', () => {
+    const err = {
+      name: 'ZodError',
+      issues: [
+        { path: ['email'], message: 'Invalid email address' },
+        { path: ['nested', 'field'], message: 'Field is required' },
+      ],
+    };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    errorHandler(err, mockReq, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: {
+          'email': 'Invalid email address',
+          'nested.field': 'Field is required'
+        }
+      }
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createSupabaseMock, MockQueryBuilder } from '../helpers/supabaseQueryMock.js';
 
 const { dbMock } = vi.hoisted(() => ({
   dbMock: { supabaseAdmin: { from: vi.fn() } },
@@ -19,7 +20,14 @@ import FraudDetectionService from '../../src/services/fraud/FraudDetectionServic
 describe('FraudDetectionService stats', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dbMock.supabaseAdmin = { from: vi.fn() };
+    dbMock.supabaseAdmin = { from: vi.fn() } ;
+    const mockClient = createSupabaseMock({
+      tables: {
+       fraud_stats: generateMockFraudEvents(50),
+       users: [{ id: 'user-1', risk_score: 10 }]
+      }
+    });
+    dbConfig.supabaseAdmin = mockClient;
   });
 
   describe('getFraudStats', () => {
@@ -59,5 +67,11 @@ describe('FraudDetectionService stats', () => {
       const stats = await FraudDetectionService.getFraudStats();
       expect(stats.total).toBe(0);
     });
+
+    it('regression #10103: getFraudStats must not throw when .range() is called', async () => {
+     const service = new FraudDetectionService();
+     // This previously threw: TypeError: ...range is not a function
+     await expect(service.getFraudStats({ page: 1, limit: 20 })).resolves.not.toThrow();
+   });
   });
 });

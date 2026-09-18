@@ -247,8 +247,13 @@ Having problems with local setup or development?
 Note: Truxify is in active development (Phase 2). The core platform features are the current focus.
 
 ### Prerequisites
-- Flutter SDK 3.x
+- Flutter SDK `>= 3.19.0`
+- Node.js `>= 20.x` (LTS)
+- Python `>= 3.11.x`
+- Docker Engine and Docker Compose
 - Git
+
+These versions match the contributor setup requirements in `CONTRIBUTING.md`.
 
 ### Run the Customer App
 ```bash
@@ -287,6 +292,49 @@ npm run dev
 - `npm start` starts the production server.
 - `npm test` runs the backend test suite.
 
+## 🧪 Testing
+
+Run the test suite for the component you changed before opening a pull request. From the repository root:
+
+### Backend API
+```bash
+cd backend/api
+npm test
+```
+
+### Customer Flutter app
+```bash
+cd apps/customer
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### Driver Flutter app
+```bash
+cd apps/driver
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### ML service
+```bash
+cd backend/ml
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+### Smart contracts
+```bash
+cd blockchain
+npm ci
+npx hardhat compile
+npx hardhat test
+```
+
+For CI-reproducible lint checks, see the linting commands in `CONTRIBUTING.md`.
+
 ## 🔧 Environment Configuration
 The backend uses `backend/api/.env.example` as the template for local configuration. Copy it to `.env` before running the service and fill in the required values for your environment.
 
@@ -321,7 +369,7 @@ Once the stack is running, you can reach the local services here:
 
 ## 🤝 Contributor Notes
 - Verify that `backend/api/.env` exists before starting the backend or Docker Compose services.
-- Run `npm test` before opening a pull request to catch regressions early.
+- Run the component-specific tests documented above before opening a pull request.
 - Prefer Docker Compose when you want the full local development environment with API, PostgreSQL/PostGIS, MongoDB, and Redis together.
 
 ## 📊 Impact Metrics (Projected)
@@ -400,4 +448,3 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
-

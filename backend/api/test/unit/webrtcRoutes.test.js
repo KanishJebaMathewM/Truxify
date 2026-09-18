@@ -8,6 +8,7 @@ vi.mock('../../src/middleware/auth.js', () => ({
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (_req, _res, next) => next(),
+  nearbyLimiter: (_req, _res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/requirePolicy.js', () => ({
@@ -82,12 +83,12 @@ describe('webrtcRoutes', () => {
   describe('GET /webrtc/offline/:peerId', () => {
     it('returns 403 when access is denied', async () => {
       signalingMock.canUserAccessPeer.mockReturnValue(false);
-      const res = await request(makeApp()).get('/webrtc/offline/p1');
+      const res = await request(makeApp()).get('/webrtc/offline/p1').query({ since: 0 });
       expect(res.status).toBe(403);
     });
 
     it('returns offline data when allowed', async () => {
-      const res = await request(makeApp()).get('/webrtc/offline/p1');
+      const res = await request(makeApp()).get('/webrtc/offline/p1').query({ since: 0 });
       expect(res.status).toBe(200);
       expect(res.body.data.points).toEqual([]);
     });
@@ -95,7 +96,7 @@ describe('webrtcRoutes', () => {
 
   describe('POST /webrtc/sync/:peerId', () => {
     it('returns success after syncing', async () => {
-      const res = await request(makeApp()).post('/webrtc/sync/p1');
+      const res = await request(makeApp()).post('/webrtc/sync/p1').send({ ackedIds: ['1'] });
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
     });

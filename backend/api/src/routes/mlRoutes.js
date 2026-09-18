@@ -1,10 +1,10 @@
-﻿import express from 'express';
+import express from 'express';
 import crypto from 'crypto';
 import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
 // Verified single import for predictEta to prevent SyntaxError (#14873)
-import { predictDemand, predictPrice, predictEta, matchEnRouteLoads } from '../services/ml.js';
+import { predictDemand, predictPrice, predictEta, matchEnRouteLoads, getAbTestingStatus, rollbackAbTest } from '../services/ml.js';
 import { supabase } from '../config/db.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { haversineKm } from '../lib/pricing.js';
@@ -60,15 +60,20 @@ router.get(
     const latBucket = lat ? lat.toFixed(4) : '';
     const lngBucket = lng ? lng.toFixed(4) : '';
     const gpsBucket = `${latBucket},${lngBucket}`;
-    return `${tripId}:${gpsBucket}`;
+    const routeDistance = req.query.routeDistance || '10';
+    const timeOfDay = req.query.timeOfDay || '12';
+    const dayOfWeek = req.query.dayOfWeek || '1';
+    const routeType = req.query.routeType || 'highway';
+    const historicalSpeed = req.query.historicalSpeed || '60';
+    return `${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
   }),
   async (req, res) => {
     const { routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = req.query;
     try {
       const result = await predictEta({
         routeDistance: parseFloat(routeDistance || '10'),
-        timeOfDay: parseInt(timeOfDay || '12'),
-        dayOfWeek: parseInt(dayOfWeek || '1'),
+        timeOfDay: parseInt(timeOfDay || '12', 10),
+        dayOfWeek: parseInt(dayOfWeek || '1', 10),
         routeType: routeType || 'highway',
         historicalSpeed: parseFloat(historicalSpeed || '60')
       });
@@ -95,12 +100,16 @@ router.get(
   async (req, res) => {
     const { lat, lng, maxDetour } = req.query;
     try {
-      const currentLat = parseFloat(lat);
-      const currentLng = parseFloat(lng);
+      const currentLat = parseCoord(lat, -90, 90);
+      const currentLng = parseCoord(lng, -180, 180);
       const maxDetourKm = parseFloat(maxDetour || '10');
 
-      if (isNaN(currentLat) || isNaN(currentLng)) {
-        return res.status(400).json({ error: 'Valid lat and lng query parameters are required.' });
+      if (currentLat === null || currentLng === null) {
+        return res.status(400).json({ error: 'Valid lat (-90 to 90) and lng (-180 to 180) query parameters are required.' });
+      }
+
+      if (isNaN(maxDetourKm) || maxDetourKm <= 0 || maxDetourKm > 500) {
+        return res.status(400).json({ error: 'maxDetour must be a positive number between 0.1 and 500 km.' });
       }
 
       // 1. Fetch available load offers
@@ -152,6 +161,39 @@ router.get(
     } catch (err) {
       logger.error({ err: err.message }, '[ML] En-route loads error');
       return res.status(500).json({ error: 'An error occurred during en-route loads matching.' });
+    }
+  }
+);
+// ============================================================================
+// 5. A/B TESTING STATUS & ROLLBACK (ADMIN PROXIED)
+// ============================================================================
+router.get(
+  '/ab-testing/status',
+  authenticate,
+  requireRole(['admin']),
+  async (req, res) => {
+    try {
+      const status = await getAbTestingStatus();
+      return res.json(status);
+    } catch (err) {
+      logger.error({ err: err.message }, '[ML] Failed to fetch A/B testing status');
+      return res.status(502).json({ error: 'Failed to fetch A/B testing status from ML engine.' });
+    }
+  }
+);
+
+router.post(
+  '/ab-testing/rollback/:testId',
+  authenticate,
+  requireRole(['admin']),
+  async (req, res) => {
+    try {
+      const { testId } = req.params;
+      const result = await rollbackAbTest(testId);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err: err.message }, '[ML] Failed to rollback A/B test');
+      return res.status(502).json({ error: 'Failed to trigger rollback on ML engine.' });
     }
   }
 );

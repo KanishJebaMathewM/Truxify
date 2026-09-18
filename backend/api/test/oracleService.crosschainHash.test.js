@@ -1,4 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../src/services/order/deliveryVerificationService.js', () => ({
+  DeliveryVerificationService: vi.fn().mockImplementation(() => ({
+    assertDriverAtDropoff: vi.fn().mockResolvedValue(true),
+  })),
+}));
+
+vi.mock('../src/config/db.js', () => ({
+  supabase: { from: vi.fn() },
+  supabaseAdmin: { from: vi.fn() },
+}));
+
 import OracleService from '../src/oracle/OracleService.js';
 
 describe('OracleService.verifyCrossChain blockchain hash validation', () => {

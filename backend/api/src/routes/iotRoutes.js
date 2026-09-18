@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import coldChainAnomalyService from '../services/coldChainAnomalyService.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
@@ -68,6 +69,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       let isAuthorized = false;
 
       if (req.user.role === 'iot_device') {
+        isAuthorized = load.device_id === req.user.id;
         // Look up the device-to-load assignment via the iot_device_loads table.
         // The previous check (device_id === load_id) was semantically wrong since
         // a device UUID and a load UUID are never meaningfully comparable.
@@ -154,27 +156,22 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       return res.status(500).json({ error: 'Database error' });
     }
 
-    // Notify only on the out-of-range transition: the previous frame was in
-    // range (or absent) and the new frame is out of range. Continuing
-    // out-of-range frames are skipped, so a single excursion produces one
-    // notification instead of one per frame.
-    if (isOutOfRange && !prevErr && !prevOutOfRange) {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: load.customer_id,
-        title: 'Temperature Alert',
-        body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        notif_type: 'system',
-        metadata: {
-          load_id: loadId,
-          temperature,
-          target_temperature_min: load.target_temperature_min,
-          target_temperature_max: load.target_temperature_max,
-          cold_chain_alert: true
-        }
-      }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
-    }
+    // Evaluate sliding-window cumulative excursions & MKT degradation
+    const analysis = await coldChainAnomalyService.processTelemetry({
+      loadId,
+      orderId: load.order_display_id,
+      temperature,
+      targetMin: load.target_temperature_min,
+      targetMax: load.target_temperature_max,
+      customerId: load.customer_id,
+      driverId: req.user?.id,
+    });
 
-    return res.status(201).json({ success: true, message: 'Telemetry recorded' });
+    return res.status(201).json({
+      success: true,
+      message: 'Telemetry recorded',
+      analysis,
+    });
   } catch (err) {
     logger.error({ event: 'IOT_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Internal server error in IoT telemetry route');
     return res.status(500).json({ error: 'Internal server error' });
@@ -191,7 +188,7 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
   try {
     const { data: load, error: loadErr } = await supabaseAdmin
       .from('load_offers')
-      .select('customer_id, order_display_id')
+      .select('id, customer_id, device_id, order_display_id, required_temp_min, required_temp_max')
       .eq('id', loadId)
       .maybeSingle();
 
@@ -218,8 +215,12 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
         isAuthorized = order?.driver_id === req.user.id;
       }
 
+      if (!isAuthorized && req.user.role === 'iot_device') {
+        isAuthorized = load.device_id === req.user.id;
+      }
+
       if (!isAuthorized) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied for this load telemetry' });
       }
     }
 

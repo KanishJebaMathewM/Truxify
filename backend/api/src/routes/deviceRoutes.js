@@ -35,8 +35,13 @@
  */
 
 import express from 'express';
-import { registerDeviceToken, unregisterDeviceToken, getDevicePlatforms } from '../controllers/deviceController.js';
-import { authenticate } from '../middleware/auth.js';
+import { 
+  registerDeviceToken, 
+  unregisterDeviceToken, 
+  getDevicePlatforms,
+  pruneDevices 
+} from '../controllers/deviceController.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { registerDeviceSchema, unregisterDeviceSchema } from '../validation/requestSchemas.js';
 import { deviceLimiter } from '../middleware/rateLimiter.js';
@@ -111,6 +116,42 @@ router.post('/unregister', authenticate, deviceLimiter, validateBody(unregisterD
 // GET /api/devices/platforms
 router.get('/platforms', authenticate, getDevicePlatforms);
 
-export default router;
+/**
+ * @openapi
+ * /api/devices/prune:
+ *   post:
+ *     tags: [Devices]
+ *     summary: Prune stale inactive devices
+ *     description: Removes device records that have been deactivated for longer than 30 days (or specified days). Admin/Maintenance operation.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *         description: Number of days after deactivation before pruning
+ *     responses:
+ *       200:
+ *         description: Stale devices pruned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 pruned:
+ *                   type: integer
+ *                   description: Number of devices removed
+ *       400:
+ *         description: Invalid days parameter
+ *       500:
+ *         description: Server error
+ */
+router.post('/prune', authenticate, requireRole(['admin']), pruneDevices);
 
-// Resolves #2058: Rate limit device registration
+export default router;

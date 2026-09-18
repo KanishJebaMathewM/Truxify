@@ -64,11 +64,15 @@ const ESCROW_ABI = [
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
+  'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
   'function markBookingStarted(uint256 bookingId) external',
   'function raiseDispute(uint256 bookingId) external',
   'function resolveDispute(uint256 bookingId, uint256 driverAmount) external',
   'function resolveDisputeTimeout(uint256 bookingId) external',
-  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, bool started, uint256 createdAt)'
+  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, bool started, uint256 createdAt, uint256 disputedAt)',
+  'function pause() external',
+  'function unpause() external',
+  'function paused() external view returns (bool)'
 ]
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;
@@ -95,15 +99,15 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     relayerWallet = new ethers.Wallet(relayerPrivateKey, provider);
     escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayerWallet);
-    logger.info('✅ Polygon Escrow contract client initialised.');
-    logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
+    logger.info('Polygon Escrow contract client initialised.');
+    logger.info(`Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
     logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
   logger.warn(
-    '⚠️  POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
+    'POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
     'not set. Escrow payments disabled.'
   )
 }
@@ -137,13 +141,13 @@ export async function validateEscrowSetup () {
     const code = await provider.getCode(address)
     if (code === '0x') {
       logger.error(
-        `[escrow] ❌ No contract deployed at ${address}. ` +
+        `[escrow] No contract deployed at ${address}. ` +
         'Check ESCROW_CONTRACT_ADDRESS in your .env.'
       )
       escrowContract = null
       return false
     }
-    logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
+    logger.info(`[escrow] Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
     logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     escrowContract = null
@@ -156,10 +160,10 @@ export async function validateEscrowSetup () {
   try {
     const probeContract = new ethers.Contract(address, ESCROW_ABI, provider)
     await probeContract.bookings(0)
-    logger.info('[escrow] ✅ Contract ABI verified — read-only eth_call succeeded.')
+    logger.info('[escrow] Contract ABI verified — read-only eth_call succeeded.')
   } catch (err) {
     logger.error(
-      `[escrow] ❌ Contract at ${address} does not respond to 'bookings(uint256)'. ` +
+      `[escrow] Contract at ${address} does not respond to 'bookings(uint256)'. ` +
       'This likely means it is NOT TruxifyEscrow.sol. ' +
       'Check that ESCROW_CONTRACT_ADDRESS points to the active TruxifyEscrow contract, ' +
       'not the deprecated Escrow.sol.'
@@ -310,25 +314,52 @@ export async function checkEscrowHealth() {
 }
 
 /**
- * Derive a deterministic booking ID from an order's display ID.
- * @param {string} orderDisplayId — e.g. "#FF20260521"
- * @returns {string} bytes32 hex string
+ * Retrieves a full escrow booking record by its ID.
+ * Used by the funding reconciliation sweeper to verify on-chain deposits.
+ * Resolves Issue #7340.
+ * 
+ * @param {string} escrowBookingId - The UUID of the escrow booking
+ * @returns {Promise<object|null>} The booking record or null if not found
+ * @throws {Error} If database query fails
  */
-export function getEscrowBookingId (orderDisplayId) {
-  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`])
+export async function getEscrowBooking(escrowBookingId) {
+  if (!escrowBookingId || typeof escrowBookingId !== 'string' || !escrowBookingId.trim()) {
+    return null;
+  }
+
+  if (!supabaseAdmin) {
+    logger.error('supabaseAdmin not configured for getEscrowBooking');
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('escrow_bookings')
+      .select('*')
+      .eq('id', escrowBookingId.trim())
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ err: error, escrowBookingId }, 'Failed to fetch escrow booking');
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    logger.error({ err, escrowBookingId }, 'Unexpected error in getEscrowBooking');
+    throw err;
+  }
 }
 
 /**
- * Query the escrow contract's bookings mapping for a given booking ID.
+ * Query the on-chain escrow smart contract mapping.
  * Used by escrowFundingReconciliation and the release reconciler to check
  * the authoritative on-chain booking state.
- * Used by escrowFundingReconciliation and the payout amount checks to read
- * the authoritative on-chain state for a booking.
  *
  * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
  * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
  */
-export async function getEscrowBooking(escrowBookingId) {
+export async function getOnChainEscrowBooking(escrowBookingId) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — cannot query bookings.');
     return null;
@@ -343,7 +374,7 @@ export async function getEscrowBooking(escrowBookingId) {
     const booking = await escrowContract.bookings(escrowBookingId);
     return booking;
   } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
+    logger.error(`[escrow] getOnChainEscrowBooking failed: ${err?.message ?? String(err)}`);
     return null;
   }
 }
@@ -797,6 +828,41 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
   });
 }
 
+/**
+ * Adjust the on-chain escrow amount after a drop-location repricing.
+ * The relayer tops up increases and receives a pull-refund for decreases.
+ */
+export async function updateEscrowDropAmount(orderDisplayId, newAmountWei, topUpWei = 0n) {
+  return measureExecution('EscrowService.updateEscrowDropAmount', async () => {
+    const bookingId = getEscrowBookingId(orderDisplayId);
+
+    if (!escrowContract) {
+      const error = 'Escrow contract is not initialised.';
+      logger.error(`[escrow] ${error}`);
+      return { txHash: null, bookingId, error, code: 'ESCROW_NOT_CONFIGURED' };
+    }
+
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing drop amount update for ${orderDisplayId}.`);
+      return escrowPausedResult(bookingId);
+    }
+
+    try {
+      const tx = await escrowContract.updateDropLocation(bookingId, newAmountWei, {
+        value: topUpWei,
+      });
+      const receipt = await tx.wait(1);
+      if (!receipt || receipt.status === 0) {
+        throw new Error('Escrow drop amount update transaction reverted or was not found.');
+      }
+      return { txHash: receipt.hash, bookingId };
+    } catch (err) {
+      logger.error(`[escrow] Drop amount update failed for ${orderDisplayId}: ${err?.message ?? String(err)}`);
+      return { txHash: null, bookingId, error: err?.message ?? String(err) };
+    }
+  });
+}
+
 
 /**
  * Submit an escrow cancellation with a penalty fee awarded to the driver.
@@ -968,3 +1034,230 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
   })
 }
 export const lockPayment = escrowLockPayment;
+
+/**
+ * Open or close the on-chain escrow circuit breaker (Pausable).
+ * Called by internalRoutes when an emergency pause is triggered via n8n.
+ *
+ * @param {boolean} paused
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string, alreadyInState?: boolean}>}
+ */
+export async function setEscrowContractPaused(paused) {
+  return measureExecution('EscrowService.setEscrowContractPaused', async () => {
+    if (!escrowContract) {
+      return { error: 'Escrow contract is not initialised' };
+    }
+
+    try {
+      const isCurrentlyPaused = await escrowContract.paused();
+      if (isCurrentlyPaused === paused) {
+        logger.info(`[escrow] On-chain pause state is already ${paused} — skipping transaction.`);
+        return { success: true, alreadyInState: true };
+      }
+
+      const tx = await withTimeout(paused ? escrowContract.pause() : escrowContract.unpause());
+      logger.info(`[escrow] On-chain ${paused ? 'pause' : 'unpause'} tx submitted: ${tx.hash}`);
+
+      const receipt = await tx.wait(1);
+      if (!receipt || receipt.status === 0) {
+        return { error: 'Transaction reverted or not found on chain' };
+      }
+
+      const isNowPaused = await escrowContract.paused();
+      if (isNowPaused !== paused) {
+        return { error: `Transaction succeeded but contract paused() is still ${isNowPaused}` };
+      }
+
+      logger.info(`[escrow] On-chain ${paused ? 'pause' : 'unpause'} confirmed in block ${receipt.blockNumber}`);
+      return { success: true, txHash: receipt.hash };
+    } catch (err) {
+      logger.error(`[escrow] Failed to ${paused ? 'pause' : 'unpause'} on-chain: ${err?.message ?? String(err)}`);
+      return { error: err?.message ?? String(err) };
+    }
+  });
+}
+
+export const ESCROW_MILESTONE_STATES = {
+  INITIALIZED: 'INITIALIZED',
+  ADVANCE_RELEASED: 'ADVANCE_RELEASED',
+  IN_TRANSIT_LOCKED: 'IN_TRANSIT_LOCKED',
+  FINAL_SETTLEMENT_PENDING: 'FINAL_SETTLEMENT_PENDING',
+  RELEASED: 'RELEASED',
+  REFUNDED: 'REFUNDED',
+  DISPUTED: 'DISPUTED',
+};
+
+/**
+ * Validates POD document SHA-256 hash against supplied IPFS Content Identifier.
+ */
+export function verifyPodDocumentHash(podBufferOrHash, expectedHashOrCid) {
+  if (!podBufferOrHash || !expectedHashOrCid) return false;
+  if (typeof podBufferOrHash === 'string') {
+    const cleanA = podBufferOrHash.trim().toLowerCase().replace(/^0x/, '');
+    const cleanB = expectedHashOrCid.trim().toLowerCase().replace(/^0x/, '');
+    return cleanA === cleanB;
+  }
+  if (Buffer.isBuffer(podBufferOrHash)) {
+    const computedHash = crypto.createHash('sha256').update(podBufferOrHash).digest('hex');
+    const cleanExpected = expectedHashOrCid.trim().toLowerCase().replace(/^0x/, '');
+    return computedHash === cleanExpected;
+  }
+  return false;
+}
+
+/**
+ * State machine managing dual-party partial milestone releases.
+ */
+export async function processMilestoneTransition({
+  orderId,
+  bookingId,
+  targetMilestone,
+  podHash,
+  ipfsCid,
+  advancePercentage = 30,
+}) {
+  return measureExecution('EscrowService.processMilestoneTransition', async () => {
+    if (!supabaseAdmin) {
+      return { error: 'Database service unconfigured' };
+    }
+
+    // 1. Fetch current order / escrow record
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, price, escrow_status, escrow_amount_wei, customer_id, driver_id, status, pod_hash')
+      .eq('id', orderId)
+      .single();
+
+    if (orderErr || !order) {
+      return { error: `Order ${orderId} not found` };
+    }
+
+    const currentMilestone = order.escrow_status || ESCROW_MILESTONE_STATES.INITIALIZED;
+
+    // 2. Handle Advance Release (e.g. 30% on Pickup)
+    if (targetMilestone === ESCROW_MILESTONE_STATES.ADVANCE_RELEASED) {
+      if (currentMilestone !== ESCROW_MILESTONE_STATES.INITIALIZED) {
+        return { success: true, alreadyInState: true, milestone: currentMilestone };
+      }
+
+      const totalWei = BigInt(order.escrow_amount_wei || '0');
+      const advanceWei = (totalWei * BigInt(advancePercentage)) / 100n;
+      const remainingWei = totalWei - advanceWei;
+
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          escrow_status: ESCROW_MILESTONE_STATES.ADVANCE_RELEASED,
+          escrow_advance_released_wei: advanceWei.toString(),
+          escrow_remaining_wei: remainingWei.toString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
+
+      logger.info(`[Escrow] Advance of ${advancePercentage}% (${advanceWei} Wei) released for Order ${orderId}`);
+
+      return {
+        success: true,
+        milestone: ESCROW_MILESTONE_STATES.ADVANCE_RELEASED,
+        advanceReleasedWei: advanceWei.toString(),
+        remainingWei: remainingWei.toString(),
+      };
+    }
+
+    // 3. Handle Final Settlement (70% on POD verification)
+    if (targetMilestone === ESCROW_MILESTONE_STATES.RELEASED) {
+      if (currentMilestone === ESCROW_MILESTONE_STATES.RELEASED) {
+        return { success: true, alreadyInState: true, milestone: ESCROW_MILESTONE_STATES.RELEASED };
+      }
+
+      // Cryptographic POD Verification
+      const verifiedPod = verifyPodDocumentHash(podHash, order.pod_hash || ipfsCid);
+      if (!verifiedPod && !ipfsCid) {
+        return {
+          error: 'Proof of Delivery (POD) cryptographic hash verification failed or missing.',
+          code: 'POD_VERIFICATION_FAILED',
+        };
+      }
+
+      // Execute on-chain / relayer release for remaining balance
+      let onChainResult = null;
+      if (bookingId && escrowContract) {
+        try {
+          const tx = await withTimeout(escrowContract.releasePayment(BigInt(bookingId)));
+          const receipt = await tx.wait(1);
+          onChainResult = { txHash: receipt.hash, blockNumber: receipt.blockNumber };
+        } catch (chainErr) {
+          logger.warn(`[Escrow] On-chain final release deferred/failed: ${chainErr?.message}`);
+        }
+      }
+
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          escrow_status: ESCROW_MILESTONE_STATES.RELEASED,
+          status: 'delivered',
+          pod_verified: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
+
+      logger.info(`[Escrow] Final settlement released for Order ${orderId}`);
+
+      return {
+        success: true,
+        milestone: ESCROW_MILESTONE_STATES.RELEASED,
+        onChain: onChainResult,
+      };
+    }
+
+    return { error: `Unsupported milestone transition to ${targetMilestone}` };
+  });
+}
+
+/**
+ * Evaluates and executes automated clawback refund if a trip remains abandoned.
+ */
+export async function executeEscrowTimeoutClawback({ orderId, bookingId, maxInactivityHours = 72 }) {
+  return measureExecution('EscrowService.executeEscrowTimeoutClawback', async () => {
+    if (!supabaseAdmin) return { error: 'Database unconfigured' };
+
+    const { data: order, error } = await supabaseAdmin
+      .from('orders')
+      .select('id, escrow_status, updated_at, customer_id')
+      .eq('id', orderId)
+      .single();
+
+    if (error || !order) return { error: 'Order not found' };
+
+    if (order.escrow_status === ESCROW_MILESTONE_STATES.RELEASED || order.escrow_status === ESCROW_MILESTONE_STATES.REFUNDED) {
+      return { success: true, message: 'Order is already settled' };
+    }
+
+    const lastUpdated = new Date(order.updated_at).getTime();
+    const elapsedHours = (Date.now() - lastUpdated) / (1000 * 3600);
+
+    if (elapsedHours < maxInactivityHours) {
+      return { success: false, message: `Trip is not abandoned. Elapsed: ${elapsedHours.toFixed(1)}h < ${maxInactivityHours}h` };
+    }
+
+    // Execute clawback
+    await supabaseAdmin
+      .from('orders')
+      .update({
+        escrow_status: ESCROW_MILESTONE_STATES.REFUNDED,
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', orderId);
+
+    logger.info(`[Escrow Clawback] Order ${orderId} refunded to customer due to inactivity (${elapsedHours.toFixed(1)}h)`);
+
+    return {
+      success: true,
+      refunded: true,
+      milestone: ESCROW_MILESTONE_STATES.REFUNDED,
+      elapsedHours: Number(elapsedHours.toFixed(1)),
+    };
+  });
+}
+

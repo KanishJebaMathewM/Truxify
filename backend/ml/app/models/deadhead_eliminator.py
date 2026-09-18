@@ -1,9 +1,16 @@
 import logging
 import math
-from datetime import datetime, timedelta
-from typing import Dict, List
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List
+
+import requests
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
+_OSRM_TIMEOUT_SECONDS = 1.5
+_FALLBACK_AVG_SPEED_KMH = 40.0
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -20,7 +27,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     Returns:
         Distance in kilometres.
     """
-    R = 6371.0  # Earth radius in km
+    R = 6371.0
 
     lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
     lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
@@ -38,19 +45,66 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _to_naive(dt: datetime) -> datetime:
-    """Strip tzinfo so all datetimes in this module compare consistently.
+    """Normalize a datetime to UTC while preserving its absolute instant.
 
-    ``pickup_deadline`` / ``arrival_time`` strings may or may not carry a
-    UTC offset depending on the caller. Mixing an aware and a naive
-    datetime in a comparison raises TypeError, so we normalise everything
-    to naive (local-time) datetimes right after parsing.
+    Naive datetimes are interpreted as UTC for backward-compatible API
+    inputs. Aware datetimes are converted to UTC instead of discarding their
+    offset, so equivalent instants remain equivalent during comparisons.
     """
-    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
-# Maximum detour threshold as a fraction of the total trip distance.
-# Loads whose detour exceeds this fraction of (distance_to_pickup + load_distance)
-# are filtered out to prevent profit-negative recommendations.
+def _osrm_enabled() -> bool:
+    return os.getenv("TRUXIFY_ML_USE_OSRM", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _fetch_pickup_route_durations(
+    driver_destination: Dict[str, float],
+    available_loads: List[Dict[str, Any]],
+) -> List[float | None] | None:
+    """Fetch road travel durations from the driver's destination to load pickups."""
+    if not _osrm_enabled() or not available_loads:
+        return None
+
+    coordinates = [
+        f"{driver_destination['lng']},{driver_destination['lat']}"
+    ] + [
+        f"{load['origin_lng']},{load['origin_lat']}"
+        for load in available_loads
+    ]
+    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
+    url = f"{base_url}/table/v1/driving/{';'.join(coordinates)}"
+    destination_indexes = ";".join(str(index) for index in range(1, len(coordinates)))
+
+    try:
+        response = requests.get(
+            url,
+            params={
+                "sources": "0",
+                "destinations": destination_indexes,
+                "annotations": "duration",
+            },
+            timeout=_OSRM_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        durations = payload.get("durations") if isinstance(payload, dict) else None
+        if (
+            not isinstance(durations, list)
+            or len(durations) != 1
+            or not isinstance(durations[0], list)
+            or len(durations[0]) != len(available_loads)
+        ):
+            logger.warning("OSRM returned an invalid deadhead duration matrix")
+            return None
+        return durations[0]
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning("OSRM deadhead duration lookup failed: %s", exc)
+        return None
+
+
 MAX_DETOUR_FRACTION = 0.5
 
 
@@ -98,16 +152,16 @@ def find_return_loads(
         arrival_dt = _to_naive(datetime.fromisoformat(arrival_time))
     except (ValueError, TypeError):
         logger.warning("Invalid arrival_time '%s'; using current time", arrival_time)
-        arrival_dt = datetime.now()
+        arrival_dt = datetime.now(timezone.utc)
 
-    # Average truck speed assumption for time feasibility
-    avg_speed_kmh = 40.0
-
+    route_durations = _fetch_pickup_route_durations(
+        {"lat": dest_lat, "lng": dest_lng},
+        available_loads,
+    )
     recommendations = []
 
-    for load in available_loads:
+    for index, load in enumerate(available_loads):
         try:
-            # --- Capacity check ---
             if load.get("weight_kg", 0) > max_weight:
                 continue
             if load.get("length_m", 0) > max_length:
@@ -117,7 +171,6 @@ def find_return_loads(
             if load.get("height_m", 0) > max_height:
                 continue
 
-            # --- Distance calculations ---
             origin_lat = load.get("origin_lat", 0.0)
             origin_lng = load.get("origin_lng", 0.0)
             load_dest_lat = load.get("dest_lat", 0.0)
@@ -125,38 +178,51 @@ def find_return_loads(
 
             distance_to_pickup = _haversine(dest_lat, dest_lng, origin_lat, origin_lng)
             load_distance = _haversine(origin_lat, origin_lng, load_dest_lat, load_dest_lng)
-            detour_km = distance_to_pickup  # Extra distance to reach the load's origin
+            detour_km = distance_to_pickup
 
-            # --- Time feasibility ---
             try:
-                deadline_dt = _to_naive(datetime.fromisoformat(load.get("pickup_deadline", "")))
+                deadline_dt = _to_naive(
+                    datetime.fromisoformat(load.get("pickup_deadline", ""))
+                )
             except (ValueError, TypeError):
-                # Skip loads with unparseable deadlines
                 continue
 
-            travel_hours = distance_to_pickup / avg_speed_kmh if avg_speed_kmh > 0 else float("inf")
+            route_duration_seconds = None
+            if route_durations is not None:
+                candidate_duration = route_durations[index]
+                if candidate_duration is None:
+                    route_duration_seconds = float("inf")
+                elif isinstance(candidate_duration, (int, float)) and math.isfinite(candidate_duration):
+                    route_duration_seconds = max(0.0, float(candidate_duration))
+                else:
+                    route_duration_seconds = float("inf")
+
+            travel_hours = (
+                route_duration_seconds / 3600.0
+                if route_duration_seconds is not None
+                else distance_to_pickup / _FALLBACK_AVG_SPEED_KMH
+            )
             estimated_arrival = arrival_dt + timedelta(hours=travel_hours)
             if estimated_arrival > deadline_dt:
-                continue  # Cannot reach in time
+                continue
 
-            # --- Detour threshold ---
             total_trip_km = distance_to_pickup + load_distance
             if total_trip_km > 0 and detour_km / total_trip_km > MAX_DETOUR_FRACTION:
                 continue
 
-            # --- Scoring ---
             payment = load.get("payment_inr", 0.0)
 
-            # Proximity score: inversely proportional to pickup distance (max 40 pts)
             max_proximity_km = 200.0
-            proximity_score = max(0.0, 1.0 - distance_to_pickup / max_proximity_km) * 40.0
+            proximity_score = max(
+                0.0, 1.0 - distance_to_pickup / max_proximity_km
+            ) * 40.0
 
-            # Earnings per km (max 35 pts)
             earnings_per_km = payment / total_trip_km if total_trip_km > 0 else 0.0
-            earnings_score = min(earnings_per_km / 30.0, 1.0) * 35.0  # 30 INR/km = full score
+            earnings_score = min(earnings_per_km / 30.0, 1.0) * 35.0
 
-            # Time buffer score: more buffer = better (max 25 pts)
-            time_buffer_hours = (deadline_dt - estimated_arrival).total_seconds() / 3600.0
+            time_buffer_hours = (
+                deadline_dt - estimated_arrival
+            ).total_seconds() / 3600.0
             time_score = min(time_buffer_hours / 12.0, 1.0) * 25.0
 
             match_score = proximity_score + earnings_score + time_score
@@ -170,9 +236,10 @@ def find_return_loads(
             })
 
         except Exception as e:
-            logger.warning("Error scoring load '%s': %s", load.get("load_id", "unknown"), e)
+            logger.warning(
+                "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
+            )
             continue
 
-    # Sort by match_score descending, return top 10
     recommendations.sort(key=lambda x: x["match_score"], reverse=True)
     return {"recommendations": recommendations[:10]}

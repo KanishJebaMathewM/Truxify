@@ -28,6 +28,8 @@ import { measureExecution } from "../core/performanceMetrics.js";
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
   "function increaseReputation(address driver, uint256 points) external",
+  "function increaseReputationWithIdempotency(address driver, uint256 points, bytes32 awardId) external",
+  "function isAwardExecuted(bytes32 awardId) external view returns (bool)",
   "function decreaseReputation(address driver, uint256 points) external",
   "function getReputation(address driver) external view returns (uint256)",
 ];
@@ -54,13 +56,14 @@ export function initReputationContract() {
       );
       logger.info("Polygon Reputation contract client initialised.");
     } catch (err) {
+      const errorMessage = err?.message ?? String(err);
       logger.error(
-        { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: err && (err.message || String(err)) },
+        { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: errorMessage },
         '[Reputation] Blockchain call failed during contract init',
       );
       reputationContract = null;
       logger.error(
-        { event: 'REPUTATION_INIT_ERROR', error: err && err.message },
+        { event: 'REPUTATION_INIT_ERROR', error: errorMessage },
         'Failed to initialise Reputation contract client',
       );
     }
@@ -88,7 +91,8 @@ initReputationContract();
  *
  * @param {string} driverWalletAddress  — 0x-prefixed Polygon address of the driver
  * @param {number} stars                — Rating value (1–5)
- * @returns {Promise<void>}
+ * @param {Object|string} [options]     — Optional configuration: { awardKey, existingTxHash } or awardKey string
+ * @returns {Promise<{ txHash?: string, receipt?: any, confirmed: boolean, alreadyExecuted?: boolean }|void>}
  */
 const REPUTATION_RETRY_MAX = 3;
 const REPUTATION_RETRY_DELAY_MS = 2000;
@@ -113,7 +117,7 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
   }
 }
 
-export async function awardReputationPoints(driverWalletAddress, stars) {
+export async function awardReputationPoints(driverWalletAddress, stars, options = {}) {
   return measureExecution(
     "ReputationService.awardReputationPoints",
     async () => {
@@ -135,32 +139,88 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
         );
         return;
       }
+
+      const opts = typeof options === 'string' ? { awardKey: options } : (options || {});
+      const { awardKey, existingTxHash } = opts;
+      const provider =
+        reputationContract.provider ||
+        reputationContract.runner?.provider;
+
+      // 1. If an existing transaction was previously submitted, resolve it before creating a new one
+      if (existingTxHash && provider) {
+        try {
+          const receipt = await provider.getTransactionReceipt(existingTxHash);
+          if (receipt) {
+            if (receipt.status === 1) {
+              logger.info(`[reputation] Existing transaction ${existingTxHash} confirmed for driver ${driverWalletAddress}.`);
+              return { txHash: existingTxHash, receipt, confirmed: true };
+            }
+            if (receipt.status === 0) {
+              logger.warn(`[reputation] Existing transaction ${existingTxHash} reverted on chain.`);
+            }
+          }
+        } catch (err) {
+          logger.warn(`[reputation] Failed checking receipt for existing transaction ${existingTxHash}: ${err.message}`);
+        }
+      }
+
+      // 2. If awardKey provided, check if contract has already executed it
+      let awardId = null;
+      if (awardKey) {
+        awardId = ethers.isHexString(awardKey, 32)
+          ? awardKey
+          : ethers.keccak256(ethers.toUtf8Bytes(String(awardKey)));
+
+        if (typeof reputationContract.isAwardExecuted === 'function') {
+          try {
+            const executed = await reputationContract.isAwardExecuted(awardId);
+            if (executed) {
+              logger.info(`[reputation] Award ${awardKey} (${awardId}) has already been executed on-chain.`);
+              return { awardId, confirmed: true, alreadyExecuted: true };
+            }
+          } catch (err) {
+            logger.warn(`[reputation] isAwardExecuted check failed for ${awardId}: ${err.message}`);
+          }
+        }
+      }
+
+      let tx = null;
       try {
-        // Submit the transaction ONCE — retrying submission would re-award the
-        // points if a previous tx was already mined but its confirmation wait timed
-        // out. Only the confirmation wait is retried below.
-        const tx = await reputationContract.increaseReputation(
-          driverWalletAddress,
-          stars,
-        );
-        logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+        if (awardId && typeof reputationContract.increaseReputationWithIdempotency === 'function') {
+          tx = await reputationContract.increaseReputationWithIdempotency(
+            driverWalletAddress,
+            stars,
+            awardId,
+          );
+        } else {
+          tx = await reputationContract.increaseReputation(
+            driverWalletAddress,
+            stars,
+          );
+        }
+
+        const txHash = tx?.hash;
+        logger.info(`[reputation] increaseReputation tx submitted: ${txHash}`);
+
+        let confirmedReceipt = null;
         await retryWithBackoff(
           async () => {
-            const provider =
+            const currentProvider =
               reputationContract.provider ||
               reputationContract.runner?.provider;
-            const receipt = provider
-              ? await provider.waitForTransaction(
-                  tx.hash,
+            const receipt = currentProvider
+              ? await currentProvider.waitForTransaction(
+                  txHash,
                   1,
                   REPUTATION_TX_CONFIRM_TIMEOUT_MS,
                 )
               : await tx?.wait?.(1);
             if (!receipt || receipt.status === 0) {
               throw new Error(
-                `increaseReputation transaction ${tx.hash} reverted or was not found on chain.`,
+                `increaseReputation transaction ${txHash} reverted or was not found on chain.`,
               );
             }
+            confirmedReceipt = receipt;
             logger.info(
               `[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`,
             );
@@ -168,9 +228,14 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
           REPUTATION_RETRY_MAX,
           REPUTATION_RETRY_DELAY_MS,
         );
+
+        return { txHash, receipt: confirmedReceipt, confirmed: true };
       } catch (err) {
+        if (tx?.hash) {
+          err.txHash = tx.hash;
+        }
         logger.error(
-          { event: 'REPUTATION_INCREASE_ERROR', driverWalletAddress, error: err && (err.message || String(err)) },
+          { event: 'REPUTATION_INCREASE_ERROR', driverWalletAddress, txHash: tx?.hash, error: err && (err.message || String(err)) },
           `[Reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries`,
         );
         throw err;

@@ -1,5 +1,6 @@
-﻿import logger from '../../middleware/logger.js';
+import logger from '../../middleware/logger.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
+import { withLock } from '../../lib/redisLock.js';
 
 const CONNECTION_PAGE_SIZE = 1000;
 
@@ -23,7 +24,15 @@ class FraudDetectionService {
     this._cleanupInterval.unref?.();
     
     this.pendingUpserts = new Map();
-    this._flushInterval = setInterval(() => this._flushPendingUpserts(), 5000); // flush every 5 seconds
+    this.pendingRetries = new Map();
+    this.maxFlushRetries = parseInt(process.env.FRAUD_FLUSH_MAX_RETRIES || '5', 10);
+    this.dlq = [];
+    this.maxDlqSize = 1000;
+    this._consecutiveFlushFailures = 0;
+    this._baseFlushInterval = 5000;
+    this._maxFlushBackoff = 60000;
+    this._nextFlushAllowedAt = 0;
+    this._flushInterval = setInterval(() => this._flushTimerTick(), 5000); // flush every 5 seconds
     this._flushInterval.unref?.();
     
     // Initialize ML models (in production, load from FastAPI)
@@ -39,84 +48,96 @@ class FraudDetectionService {
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
     if (!userId) return null;
-    try {
-      if (!supabaseAdmin) return null;
-      const profile = await this.getOrCreateProfile(userId);
-      
-      // Update behavioral metrics
-      profile.events.push({
-        type: eventData.type,
-        timestamp: Date.now(),
-        data: eventData
-      });
+    if (!supabaseAdmin) return null;
 
-      // Keep last 100 events
-      if (profile.events.length > 100) {
-        profile.events.shift();
-      }
-
-      // Update behavioral patterns
-      this.updateBehavioralPatterns(profile, eventData);
-      
-      // Store in Redis
-      if (this.redis) {
-        await this.redis.setex(
-          `behavior:${userId}`,
-          3600,
-          JSON.stringify(profile)
-        );
-      } else {
-        this.behavioralProfiles.set(userId, profile);
-      }
-
-      // Persist behavioral profile to Supabase to prevent 1-hour amnesia write-hole (#4142)
+    const lockKey = `lock:fraud:behavior:${userId}`;
+    return await withLock(lockKey, async () => {
       try {
-        const { error: dbErr } = await supabaseAdmin
-          .from('behavioral_profiles')
-          .upsert({
-            user_id: userId,
-            events: profile.events,
-            patterns: profile.patterns,
-            last_activity: new Date(profile.lastActivity || Date.now()).toISOString(),
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
+        const profile = await this.getOrCreateProfile(userId);
+        if (!profile) return null;
 
-        if (dbErr) {
-          logger.error('[FraudDetection] Failed to persist behavioral profile to DB:', dbErr.message);
+        // Update behavioral metrics
+        profile.events.push({
+          type: eventData.type,
+          timestamp: Date.now(),
+          data: eventData
+        });
+
+        // Keep last 100 events
+        if (profile.events.length > 100) {
+          profile.events.shift();
         }
-      } catch (persistenceErr) {
-        logger.error('[FraudDetection] Exception during profile DB persistence:', persistenceErr.message);
-      }
 
-      // Queue for batch upsert instead of awaiting individual upsert to prevent event loop blocking
-      this.pendingUpserts.set(userId, {
-        user_id: userId,
-        events: profile.events,
-        patterns: profile.patterns,
-        last_activity: new Date(profile.lastActivity).toISOString(),
-        updated_at: new Date().toISOString()
-      });
+        // Update behavioral patterns
+        this.updateBehavioralPatterns(profile, eventData);
 
-      // Calculate risk score
-      const riskScore = await this.calculateBehavioralRisk(profile);
-      this.riskScores.set(userId, riskScore);
-
-      if (this.riskScores.size > this._maxRiskScores) {
-        this._evictStale();
-      }
-
-      return {
-        userId,
-        riskScore,
-        profile: {
-          eventCount: profile.events.length,
-          lastActivity: profile.lastActivity
+        // Store in Redis
+        if (this.redis) {
+          await this.redis.setex(
+            `behavior:${userId}`,
+            3600,
+            JSON.stringify(profile)
+          );
+        } else {
+          this.behavioralProfiles.set(userId, profile);
         }
-      };
-    } catch (error) {
-      logger.error('Behavior tracking error:', error);
-      return null;
-    }
+
+        // Persist behavioral profile to Supabase to prevent 1-hour amnesia write-hole (#4142)
+        let persisted = false;
+        try {
+          const { error: dbErr } = await supabaseAdmin
+            .from('behavioral_profiles')
+            .upsert({
+              user_id: userId,
+              events: profile.events,
+              patterns: profile.patterns,
+              last_activity: new Date(profile.lastActivity || Date.now()).toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+
+          if (dbErr) {
+            logger.error('[FraudDetection] Failed to persist behavioral profile to DB:', dbErr.message);
+          } else {
+            persisted = true;
+          }
+        } catch (persistenceErr) {
+          logger.error('[FraudDetection] Exception during profile DB persistence:', persistenceErr.message);
+        }
+
+        // Queue for batch upsert instead of awaiting individual upsert to prevent event loop blocking
+        const pendingRecord = {
+          user_id: userId,
+          events: [...profile.events],
+          patterns: profile.patterns,
+          last_activity: new Date(profile.lastActivity || Date.now()).toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        this.pendingUpserts.set(userId, pendingRecord);
+        this.pendingRetries.delete(userId);
+
+        // Calculate risk score
+        const riskScore = await this.calculateBehavioralRisk(profile);
+        this.riskScores.set(userId, riskScore);
+
+        if (this.riskScores.size > this._maxRiskScores) {
+          this._evictStale();
+        }
+
+        return {
+          userId,
+          riskScore,
+          profile: {
+            eventCount: profile.events.length,
+            lastActivity: profile.lastActivity
+          },
+          acknowledged: true,
+          persisted
+        };
+      } catch (error) {
+        logger.error('Behavior tracking error:', error);
+        return null;
+      }
+    }, { ttlSeconds: 5, retryDelayMs: 50, maxRetries: 10 });
   }
 
   async getOrCreateProfile(userId) {
@@ -136,6 +157,24 @@ class FraudDetectionService {
     // Check in-memory cache (written by trackBehavior during Redis outages)
     const inMemory = this.behavioralProfiles.get(userId);
     if (inMemory) return inMemory;
+
+    // Check pending upserts (unflushed in-memory updates)
+    const pending = this.pendingUpserts.get(userId);
+    if (pending) {
+      return {
+        userId,
+        events: pending.events ? [...pending.events] : [],
+        patterns: pending.patterns || {
+          typingSpeed: [],
+          mouseMovements: [],
+          deviceFingerprint: null,
+          locationHistory: [],
+          transactionPatterns: []
+        },
+        lastActivity: pending.last_activity ? new Date(pending.last_activity).getTime() : Date.now(),
+        createdAt: Date.now()
+      };
+    }
 
     // Check database
     const { data } = await supabaseAdmin
@@ -168,12 +207,19 @@ class FraudDetectionService {
     };
   }
 
+  async _flushTimerTick() {
+    if (Date.now() < this._nextFlushAllowedAt) return;
+    await this._flushPendingUpserts();
+  }
+
   async _flushPendingUpserts() {
     if (this.pendingUpserts.size === 0 || !supabaseAdmin) return;
     
-    // Extract records and clear the map for the next batch
-    const records = Array.from(this.pendingUpserts.values());
-    this.pendingUpserts.clear();
+    // Capture the current batch without clearing the map yet. The map must
+    // not be emptied before the write succeeds, otherwise a failed/interrupted
+    // upsert silently loses the pending risk-score updates.
+    const snapshot = Array.from(this.pendingUpserts.entries());
+    const records = snapshot.map(([, record]) => record);
 
     try {
       const { error: dbErr } = await supabaseAdmin
@@ -182,10 +228,80 @@ class FraudDetectionService {
 
       if (dbErr) {
         logger.error('[FraudDetection] Failed to batch persist behavioral profiles to DB:', dbErr.message);
+        await this._handleFlushFailure(snapshot, dbErr);
+        return; // keep pending entries queued for retry
+      }
+
+      // Success: reset failure backoff state
+      this._consecutiveFlushFailures = 0;
+      this._nextFlushAllowedAt = 0;
+
+      // Only drop the entries we actually persisted. A newer update for the
+      // same user may have arrived during the await and replaced the map value
+      // with a fresh object reference — that entry is still pending and must be
+      // kept for the next flush.
+      for (const [key, record] of snapshot) {
+        if (this.pendingUpserts.get(key) === record) {
+          this.pendingUpserts.delete(key);
+          this.pendingRetries.delete(key);
+        }
       }
     } catch (error) {
       logger.error('[FraudDetection] Batch upsert error:', error);
+      await this._handleFlushFailure(snapshot, error);
     }
+  }
+
+  async _handleFlushFailure(snapshot, error) {
+    this._consecutiveFlushFailures++;
+    const backoffDelay = Math.min(
+      this._baseFlushInterval * Math.pow(2, this._consecutiveFlushFailures - 1),
+      this._maxFlushBackoff
+    );
+    this._nextFlushAllowedAt = Date.now() + backoffDelay;
+
+    for (const [key, record] of snapshot) {
+      if (this.pendingUpserts.get(key) === record) {
+        const retries = (this.pendingRetries.get(key) || 0) + 1;
+        this.pendingRetries.set(key, retries);
+
+        if (retries >= this.maxFlushRetries) {
+          await this._routeToDlq(key, record, error, retries);
+          this.pendingUpserts.delete(key);
+          this.pendingRetries.delete(key);
+        }
+      }
+    }
+  }
+
+  async _routeToDlq(userId, record, error, retries) {
+    const dlqItem = {
+      userId,
+      record,
+      error: error?.message || String(error),
+      retries,
+      timestamp: Date.now()
+    };
+
+    // 1. Maintain in-memory DLQ buffer (capped to prevent memory growth)
+    this.dlq.push(dlqItem);
+    if (this.dlq.length > this.maxDlqSize) {
+      this.dlq.shift();
+    }
+
+    // 2. Push to Redis dead-letter list if Redis is available
+    if (this.redis && typeof this.redis.rpush === 'function') {
+      try {
+        await this.redis.rpush('fraud_profile_dlq', JSON.stringify(dlqItem));
+      } catch (redisErr) {
+        logger.error({ err: redisErr, userId }, '[FraudDetection] Failed to push behavioral profile to Redis DLQ');
+      }
+    }
+
+    logger.error(
+      { userId, retries, err: error?.message || error },
+      `[FraudDetection] Behavioral profile for user ${userId} exceeded max flush retries (${retries}); routed to Dead Letter Queue (DLQ)`
+    );
   }
 
   updateBehavioralPatterns(profile, eventData) {
@@ -228,8 +344,9 @@ class FraudDetectionService {
 
     // Track transactions
     if (eventData.type === 'transaction') {
+      const amount = eventData.amount != null ? parseFloat(eventData.amount) || 0 : 0;
       patterns.transactionPatterns.push({
-        amount: eventData.amount,
+        amount,
         type: eventData.transactionType,
         timestamp: Date.now()
       });
@@ -291,7 +408,7 @@ class FraudDetectionService {
 
     // 3. Check transaction patterns
     if (patterns.transactionPatterns.length > 10) {
-      const amounts = patterns.transactionPatterns.map(t => t.amount);
+      const amounts = patterns.transactionPatterns.map(t => (t.amount != null ? parseFloat(t.amount) || 0 : 0));
       const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
       const maxAmount = Math.max(...amounts);
       
@@ -607,9 +724,12 @@ class FraudDetectionService {
 
   calculateTransactionRisk(data) {
     let risk = 0;
+    if (!data) return risk;
+
+    const amount = data.amount != null ? parseFloat(data.amount) || 0 : 0;
 
     // Check transaction amount
-    if (data.amount > 100000) {
+    if (amount > 100000) {
       risk += 0.3;
     }
 

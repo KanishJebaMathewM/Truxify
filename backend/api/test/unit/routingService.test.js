@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
@@ -17,7 +17,9 @@ import {
   optimizeWaypoints,
   optimizeLtlRoute,
   getHaversineDistance,
+  getDriverRoute,
 } from '../../src/services/routingService.js';
+import { DomainError } from '../../src/services/order/domainError.js';
 
 const mockAxiosGet = vi.mocked(axios.get);
 
@@ -261,5 +263,64 @@ describe('routingService - non-finite getHaversineDistance guard', () => {
     expect(() => getHaversineDistance(NaN, 77.2090, 27.1767, 78.0081)).toThrow(TypeError);
     expect(() => getHaversineDistance(28.6139, Infinity, 27.1767, 78.0081)).toThrow(TypeError);
     expect(() => getHaversineDistance(28.6139, 77.2090, undefined, 78.0081)).toThrow(TypeError);
+  });
+});
+
+describe('routingService - getDriverRoute', () => {
+  it('returns null early for null, undefined, empty, or non-string driverId', async () => {
+    expect(await getDriverRoute(null)).toBeNull();
+    expect(await getDriverRoute(undefined)).toBeNull();
+    expect(await getDriverRoute('')).toBeNull();
+    expect(await getDriverRoute('   ')).toBeNull();
+    expect(await getDriverRoute(12345)).toBeNull();
+  });
+
+  it('throws DomainError when throwOnError option is set and driverId is null/invalid', async () => {
+    await expect(getDriverRoute(null, { throwOnError: true })).rejects.toThrow(DomainError);
+    await expect(getDriverRoute(undefined, { throwOnError: true })).rejects.toThrow(/driverId is required/);
+    await expect(getDriverRoute('', { throwOnError: true })).rejects.toThrow(DomainError);
+  });
+
+  it('fetches driver active route using provided supabase client', async () => {
+    const mockOrder = {
+      id: 'order-123',
+      order_display_id: 'TRX-100',
+      status: 'in_transit',
+      pickup_address: 'Delhi',
+      drop_address: 'Jaipur',
+      pickup_lat: 28.61,
+      pickup_lng: 77.20,
+      drop_lat: 26.91,
+      drop_lng: 75.78,
+    };
+
+    const mockChain = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: mockOrder, error: null }),
+    };
+
+    const result = await getDriverRoute('driver-456', { supabaseClient: mockChain });
+    expect(result).toEqual(mockOrder);
+    expect(mockChain.eq).toHaveBeenCalledWith('driver_id', 'driver-456');
+  });
+
+  it('handles database error gracefully when throwOnError is false', async () => {
+    const mockChain = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB connection error' } }),
+    };
+
+    const result = await getDriverRoute('driver-456', { supabaseClient: mockChain });
+    expect(result).toBeNull();
   });
 });

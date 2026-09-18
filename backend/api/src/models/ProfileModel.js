@@ -1,8 +1,10 @@
+import { supabaseAdmin } from '../config/db.js';
+
 export class ProfileModel {
     /**
      * Normalize raw profile data into a consistent object
      */
-    static fromProfile(profile = {}) {
+    static fromProfile(profile) {
         if (!profile) return null;
 
         return {
@@ -25,7 +27,7 @@ export class ProfileModel {
     /**
      * Map customer stats safely
      */
-    static fromCustomerStats(stats = {}) {
+    static fromCustomerStats(stats) {
         if (!stats) return null;
 
         return {
@@ -38,7 +40,7 @@ export class ProfileModel {
     /**
      * Map driver details safely
      */
-    static fromDriverDetails(details = {}) {
+    static fromDriverDetails(details) {
         if (!details) return null;
 
         const totalTrips = details.total_trips ?? 0;
@@ -76,5 +78,80 @@ export class ProfileModel {
             customerStats: ProfileModel.fromCustomerStats(stats),
             driverDetails: ProfileModel.fromDriverDetails(driverDetails),
         };
+    }
+
+    /**
+     * Find a profile by ID
+     */
+    static async findById(id, client = supabaseAdmin) {
+        if (!id) return null;
+        if (!client) throw new Error('Supabase client not configured');
+
+        const { data, error } = await client
+            .from('profiles')
+            .select('*')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (error) throw error;
+        return data ? ProfileModel.fromProfile(data) : null;
+    }
+
+    /**
+     * Create a new profile
+     */
+    static async create(profileData, client = supabaseAdmin) {
+        if (!profileData || typeof profileData !== 'object') {
+            throw new Error('Invalid profile data');
+        }
+        if (!client) throw new Error('Supabase client not configured');
+
+        const { data, error } = await client
+            .from('profiles')
+            .insert(profileData)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data ? ProfileModel.fromProfile(data) : null;
+    }
+
+    /**
+     * Update an existing profile by ID
+     */
+    static async update(id, updateData, client = supabaseAdmin) {
+        if (!id) throw new Error('Profile id is required');
+        if (!updateData || typeof updateData !== 'object') {
+            throw new Error('Invalid update data');
+        }
+        if (!client) throw new Error('Supabase client not configured');
+
+        const { data, error } = await client
+            .from('profiles')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data ? ProfileModel.fromProfile(data) : null;
+    }
+
+    /**
+     * Delete a profile by ID
+     */
+    static async delete(id, client = supabaseAdmin) {
+        if (!id) throw new Error('Profile id is required');
+        if (!client) throw new Error('Supabase client not configured');
+
+        const { data, error } = await client
+            .from('profiles')
+            .delete()
+            .eq('id', id)
+            .select()
+            .maybeSingle();
+
+        if (error) throw error;
+        return data ? ProfileModel.fromProfile(data) : null;
     }
 }

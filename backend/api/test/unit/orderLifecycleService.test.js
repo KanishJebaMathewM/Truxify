@@ -61,25 +61,6 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
     service = new OrderLifecycleService({
       orderRepository,
       orderTimelineService,
-const mockOrderRepository = {
-  findOrderById: vi.fn(),
-  updateOrderWithFilter: vi.fn(),
-};
-
-vi.mock('../../src/core/container.js', () => ({
-  orderRepository: mockOrderRepository,
-}));
-
-describe('orderLifecycleService', () => {
-  let orderLifecycleService;
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    const { OrderLifecycleService } = await import('../../src/services/order/orderLifecycleService.js');
-    orderLifecycleService = new OrderLifecycleService({
-      orderRepository: mockOrderRepository,
-      orderTimelineService: {},
       bidAcceptanceService: {},
       deliveryVerificationService: {},
       trackingTokenService: null,
@@ -102,22 +83,6 @@ describe('orderLifecycleService', () => {
       p_status: 'cancelled',
       p_not_statuses: ['delivered', 'payment_released', 'cancelled'],
       p_event_type: 'ORDER_CANCELLED',
-    orderLifecycleService = (await import('../../src/services/order/orderLifecycleService.js')).default;
-  });
-
-  describe('startOrder', () => {
-    it('starts an order in pending state', async () => {
-      const order = { id: 'order-1', status: 'pending', escrow_status: 'pending' };
-      mockOrderRepository.findOrderById.mockResolvedValue(order);
-      mockOrderRepository.updateOrderWithFilter.mockResolvedValue({ error: null });
-
-      const result = await orderLifecycleService.startOrder('order-1', 'driver-1');
-      expect(mockOrderRepository.updateOrderWithFilter).toHaveBeenCalled();
-    });
-
-    it('throws when order not found', async () => {
-      mockOrderRepository.findOrderById.mockResolvedValue(null);
-      await expect(orderLifecycleService.startOrder('order-nonexistent', 'driver-1')).rejects.toThrow();
     });
     expect(result.status).toBe(200);
     expect(orderTimelineService.insertCancelEvent).toHaveBeenCalledWith('ORD-1');
@@ -145,22 +110,6 @@ describe('orderLifecycleService', () => {
     orderRepository.executeRpc.mockResolvedValue({
       data: [{ ...funded, status: 'cancelled', escrow_status: 'refund_pending' }],
       error: null,
-  describe('getOrderHistory', () => {
-    it('returns paginated history', async () => {
-      mockOrderRepository.findOrdersWithCount.mockResolvedValue({
-        data: [{ id: 'order-1' }],
-        error: null,
-        count: 1,
-      });
-
-      const result = await orderLifecycleService.getOrderHistory('cust-1', 1, 10);
-  describe('completeOrder', () => {
-    it('completes an order in_transit', async () => {
-      const order = { id: 'order-1', status: 'in_transit', escrow_status: 'funded' };
-      mockOrderRepository.findOrderById.mockResolvedValue(order);
-      mockOrderRepository.updateOrderWithFilter.mockResolvedValue({ error: null });
-
-      await expect(orderLifecycleService.completeOrder('order-1')).resolves.not.toThrow();
     });
     escrow.submitEscrowCancelWithPenalty.mockRejectedValue(new Error('chain down'));
 
@@ -173,13 +122,15 @@ describe('orderLifecycleService', () => {
     expect(firstCall[1]).toMatchObject({
       p_event_type: 'ORDER_CANCELLED',
       p_escrow_status: 'refund_pending',
-    it('throws when the history query fails', async () => {
-      mockOrderRepository.findOrdersWithCount.mockResolvedValue({ data: null, error: { message: 'DB down' }, count: 0 });
-      await expect(orderLifecycleService.getOrderHistory('cust-1', 1, 10)).rejects.toThrow();
-    it('throws when trying to complete delivered order', async () => {
-      const order = { id: 'order-1', status: 'delivered' };
-      mockOrderRepository.findOrderById.mockResolvedValue(order);
-      await expect(orderLifecycleService.completeOrder('order-1')).rejects.toThrow();
     });
   });
+  it('rejects null or undefined orderId when updating milestone', async () => {
+    await expect(
+        service.updateMilestone(null, 'In Transit', 'driver-1')
+    ).rejects.toThrow('orderId is required.');
+
+    await expect(
+        service.updateMilestone(undefined, 'In Transit', 'driver-1')
+    ).rejects.toThrow('orderId is required.');
+});
 });

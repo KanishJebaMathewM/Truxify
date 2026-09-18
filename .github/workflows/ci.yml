@@ -2,6 +2,10 @@ name: Truxify CI
 
 on:
   pull_request:
+    paths:
+      - 'apps/**'
+      - 'blockchain/**'
+      - 'backend/ml/**'
   push:
     branches:
       - main
@@ -150,9 +154,12 @@ jobs:
           cache: pip
           cache-dependency-path: backend/ml/requirements.txt
 
-      - name: Install dependencies
-        working-directory: backend/ml
-        run: pip install -r requirements.txt
+        - name: Install system dependencies
+          run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev
+
+        - name: Install dependencies
+          working-directory: backend/ml
+          run: pip install -r requirements.txt
 
       - name: Run tests
         working-directory: backend/ml

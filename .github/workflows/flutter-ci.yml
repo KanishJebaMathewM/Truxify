@@ -4,12 +4,12 @@ on:
   pull_request:
     paths:
       - 'apps/**'
-      - 'packages/**'
+
   push:
     branches: [main]
     paths:
       - 'apps/**'
-      - 'packages/**'
+
 
 jobs:
   test:

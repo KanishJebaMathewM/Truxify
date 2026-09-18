@@ -7,6 +7,8 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'apps/**'
 
 jobs:
   test_and_build:

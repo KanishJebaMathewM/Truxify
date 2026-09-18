@@ -13,7 +13,7 @@ from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # no
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    for var_name, value in zip(result["variables"], result["solution"]):
         if value is not None and abs(value - 1) < 1e-6:
             _, u, v = var_name.split('_')
             selected.add((u, v))
@@ -93,10 +93,11 @@ def test_route_qubo_scales_connectivity_without_subset_cutoff():
 
     constraint_names = {constraint.name for constraint in qubo.linear_constraints}
     assert "flow_conservation_root" in constraint_names
-    assert all(
-        any(name.startswith("flow_capacity_") for name in constraint_names)
-        for _ in [0]
-    )
+    capacity_constraints = [
+        name for name in constraint_names
+        if name.startswith("flow_capacity_")
+    ]
+    assert len(capacity_constraints) == 2 * len(graph.edges())
 
 
 def test_route_qubo_rejects_disconnected_graph():

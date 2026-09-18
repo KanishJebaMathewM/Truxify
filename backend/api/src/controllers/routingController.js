@@ -71,15 +71,21 @@ const getDistanceMatrix = async (req, res) => {
         const formattedCoords = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
         const url = `${process.env.OSRM_BASE_URL || 'http://localhost:5000'}/table/v1/driving/${formattedCoords}`;
 
-        const response = await require('axios').get(url, { timeout: 5000 });
+        const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
 
-        if (response.data.code !== 'Ok') {
-            throw new Error(`OSRM table returned error code: ${response.data.code}`);
+        if (!response.ok) {
+            throw new Error(`OSRM table HTTP error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.code !== 'Ok') {
+            throw new Error(`OSRM table returned error code: ${data.code}`);
         }
 
         return res.status(200).json({
             success: true,
-            data: response.data.durations,
+            data: data.durations,
         });
     } catch (error) {
         console.error('Distance matrix controller error:', error.message);

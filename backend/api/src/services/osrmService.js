@@ -1,4 +1,3 @@
-const axios = require('axios');
 const ExponentialBackoff = require('../utils/exponentialBackoff');
 const CircuitBreaker = require('../utils/circuitBreaker');
 
@@ -22,15 +21,21 @@ const osrmCircuitBreaker = new CircuitBreaker({
 const fetchRouteFromOSRM = async (startLon, startLat, endLon, endLat) => {
     const url = `${OSRM_BASE_URL}/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
 
-    const response = await axios.get(url, {
-        timeout: OSRM_TIMEOUT,
+    const response = await fetch(url, {
+        signal: AbortSignal.timeout(OSRM_TIMEOUT),
     });
 
-    if (response.data.code !== 'Ok') {
-        throw new Error(`OSRM returned error code: ${response.data.code}`);
+    if (!response.ok) {
+        throw new Error(`OSRM HTTP error: ${response.status} ${response.statusText}`);
     }
 
-    return response.data.routes[0];
+    const data = await response.json();
+
+    if (data.code !== 'Ok') {
+        throw new Error(`OSRM returned error code: ${data.code}`);
+    }
+
+    return data.routes[0];
 };
 
 const getRouteWithResilience = async (startLon, startLat, endLon, endLat) => {

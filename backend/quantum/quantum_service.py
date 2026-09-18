@@ -44,16 +44,24 @@ class QuantumService:
     def solve_route_optimization(self, nodes: List[Dict], edges: List[Dict]) -> Dict:
         """Solve route optimization using quantum computing"""
         try:
-            # Build graph
-            graph = nx.Graph()
+            # Build a multigraph so distinct roads between the same locations
+            # remain independently selectable.
+            graph = nx.MultiGraph()
             
             # Add nodes
             for node in nodes:
                 graph.add_node(node['id'], **node)
             
-            # Add edges
-            for edge in edges:
-                graph.add_edge(edge['source'], edge['target'], weight=edge.get('distance', 1))
+            # Add edges with stable per-input identity.
+            for index, edge in enumerate(edges):
+                graph.add_edge(
+                    edge['source'],
+                    edge['target'],
+                    key=index,
+                    weight=edge.get('distance', 1),
+                    edge_id=edge.get('id'),
+                    edge_index=index,
+                )
             
             # Formulate QUBO
             qubo = self.qubo_formatter.formulate_route_optimization(graph)

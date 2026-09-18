@@ -51,9 +51,20 @@ class QuantumService:
             for node in nodes:
                 graph.add_node(node['id'], **node)
             
-            # Add edges
+            declared_node_ids = {node['id'] for node in nodes}
             for edge in edges:
-                graph.add_edge(edge['source'], edge['target'], weight=edge.get('distance', 1))
+                source = edge.get('source')
+                target = edge.get('target')
+                if source not in declared_node_ids or target not in declared_node_ids:
+                    return {
+                        'success': False,
+                        'error': (
+                            'Edge endpoint must reference a declared node: '
+                            f'{source!r} -> {target!r}'
+                        )
+                    }
+
+                graph.add_edge(source, target, weight=edge.get('distance', 1))
             
             # Formulate QUBO
             qubo = self.qubo_formatter.formulate_route_optimization(graph)

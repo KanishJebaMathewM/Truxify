@@ -16,8 +16,43 @@ let isListening = false;
 let currentProvider = null;
 let currentContract = null;
 let reconnectAttempt = 0;
-let liveEventQueue = Promise.resolve();
+let reconnectTimer = null;
 const MAX_RECONNECT_DELAY_MS = 30000;
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+/**
+ * Detach listeners and release the provider from a previous session. Called
+ * before every (re)connect and on stop so a reconnect can never leave the old
+ * contract's listeners attached — otherwise the same on-chain event would be
+ * processed twice (duplicate order updates / notifications).
+ */
+function cleanupCurrentListener() {
+  if (currentContract) {
+    try {
+      currentContract.removeAllListeners();
+    } catch (err) {
+      logger.warn(`[EventListener] Failed to remove contract listeners: ${err.message}`);
+    }
+    currentContract = null;
+  }
+
+  if (currentProvider) {
+    try {
+      if (typeof currentProvider.destroy === 'function') {
+        currentProvider.destroy();
+      }
+    } catch (err) {
+      logger.warn(`[EventListener] Failed to destroy provider: ${err.message}`);
+    }
+    currentProvider = null;
+  }
+}
 
 export async function getLastProcessedBlock() {
   if (!redisClient) return null;
@@ -286,7 +321,18 @@ export async function startEventListener() {
     return false;
   }
 
+  // Guard against a duplicate start creating a second contract with its own
+  // listeners on the same provider (every event would fire twice).
+  if (isListening) {
+    logger.warn('[EventListener] startEventListener called while already listening — ignoring.');
+    return true;
+  }
+
+  clearReconnectTimer();
+
   try {
+    cleanupCurrentListener();
+
     currentProvider = new ethers.JsonRpcProvider(rpcUrl);
     currentContract = new ethers.Contract(contractAddress, ESCROW_EVENTS_ABI, currentProvider);
 
@@ -333,6 +379,7 @@ export async function startEventListener() {
     return true;
   } catch (err) {
     logger.error(`[EventListener] Failed to start listener: ${err.message}`);
+    isListening = false;
     scheduleReconnect();
     return false;
   }
@@ -342,18 +389,21 @@ function scheduleReconnect() {
   reconnectAttempt++;
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), MAX_RECONNECT_DELAY_MS);
   logger.info(`[EventListener] Reconnecting in ${delay}ms (attempt ${reconnectAttempt})...`);
-  setTimeout(() => {
+  // Keep a handle to the pending timer so stopEventListener() can cancel it;
+  // otherwise a shutdown could be undone by a reconnect that fires moments
+  // later and re-opens the listener.
+  clearReconnectTimer();
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
     startEventListener();
   }, delay);
 }
 
 export function stopEventListener() {
-  if (currentContract) {
-    try {
-      currentContract.removeAllListeners();
-    } catch (_) {}
-  }
+  clearReconnectTimer();
+  cleanupCurrentListener();
   isListening = false;
+  reconnectAttempt = 0;
   logger.info('[EventListener] Event listener stopped.');
 }
 

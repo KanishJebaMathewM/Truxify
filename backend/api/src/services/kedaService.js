@@ -101,13 +101,18 @@ class KEDAService {
                 timestamp: timestamp(),
             };
         } catch (error) {
-            logger.error(
-                { event: 'KEDA_SCALED_OBJECT_STATUS_ERROR', error: error?.message },
+            const errorMessage = error?.message ?? String(error);
+            logger.warn(
+                {
+                    event: 'KEDA_SCALED_OBJECT_STATUS_ERROR',
+                    error: errorMessage,
+                    stack: error?.stack,
+                },
                 'KEDA scaled object status request failed',
             );
             return {
                 success: false,
-                error: error?.message ?? String(error),
+                error: errorMessage,
                 ...(error?.response?.status ? { statusCode: error.response.status } : {}),
                 timestamp: timestamp(),
             };
@@ -182,10 +187,14 @@ class KEDAService {
                 timestamp: new Date().toISOString()
             };
         } catch (error) {
-            logger.error({ event: 'KEDA_METRICS_FETCH_ERROR', error: error?.message }, 'Metrics fetch failed');
+            const errorMessage = error?.message ?? String(error);
+            logger.warn(
+                { event: 'KEDA_METRICS_FETCH_ERROR', error: errorMessage, stack: error?.stack },
+                'Metrics fetch failed',
+            );
             return {
                 success: false,
-                error: error?.message ?? String(error),
+                error: errorMessage,
                 timestamp: new Date().toISOString()
             };
         }
@@ -239,10 +248,14 @@ class KEDAService {
             const query = `sum(rate(container_cpu_usage_seconds_total{namespace="${ns}",pod=~"${dep}-.*"}[5m]))`;
             return await this.getMetrics('cpu_usage', query);
         } catch (error) {
-            logger.error({ event: 'KEDA_CPU_FETCH_ERROR', error: error?.message }, 'CPU usage fetch failed');
+            const errorMessage = error?.message ?? String(error);
+            logger.warn(
+                { event: 'KEDA_CPU_FETCH_ERROR', error: errorMessage, stack: error?.stack },
+                'CPU usage fetch failed',
+            );
             return {
                 success: false,
-                error: error?.message ?? String(error),
+                error: errorMessage,
                 timestamp: new Date().toISOString()
             };
         }
@@ -255,10 +268,14 @@ class KEDAService {
             const query = `sum(container_memory_usage_bytes{namespace="${ns}",pod=~"${dep}-.*"})`;
             return await this.getMetrics('memory_usage', query);
         } catch (error) {
-            logger.error({ event: 'KEDA_MEMORY_FETCH_ERROR', error: error?.message }, 'Memory usage fetch failed');
+            const errorMessage = error?.message ?? String(error);
+            logger.warn(
+                { event: 'KEDA_MEMORY_FETCH_ERROR', error: errorMessage, stack: error?.stack },
+                'Memory usage fetch failed',
+            );
             return {
                 success: false,
-                error: error?.message ?? String(error),
+                error: errorMessage,
                 timestamp: new Date().toISOString()
             };
         }
@@ -271,10 +288,14 @@ class KEDAService {
             const query = `kube_deployment_status_replicas{namespace="${ns}",deployment="${dep}"}`;
             return await this.getMetrics('replica_count', query);
         } catch (error) {
-            logger.error({ event: 'KEDA_REPLICA_FETCH_ERROR', error: error?.message }, 'Replica count fetch failed');
+            const errorMessage = error?.message ?? String(error);
+            logger.warn(
+                { event: 'KEDA_REPLICA_FETCH_ERROR', error: errorMessage, stack: error?.stack },
+                'Replica count fetch failed',
+            );
             return {
                 success: false,
-                error: error?.message ?? String(error),
+                error: errorMessage,
                 timestamp: new Date().toISOString()
             };
         }
@@ -354,7 +375,10 @@ class KEDAService {
             };
         } catch (error) {
             const errorMessage = error?.message ?? String(error);
-            logger.error({ event: 'KEDA_DIAGNOSTICS_ERROR', error: errorMessage }, 'Health diagnostics failed');
+            logger.warn(
+                { event: 'KEDA_DIAGNOSTICS_ERROR', error: errorMessage, stack: error?.stack },
+                'Health diagnostics failed',
+            );
             return {
                 status: 'UNHEALTHY',
                 error: errorMessage,

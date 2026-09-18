@@ -305,7 +305,26 @@ async function loadRecoveryFile() {
     if (fs.existsSync(RECOVERY_FILE_PATH)) {
       const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
       if (content) {
-        const records = content.split('\n').filter(Boolean).map((line) => JSON.parse(line));
+        // Parse line-by-line and skip corrupt records instead of failing the
+        // whole batch. A single malformed line used to throw out of this map,
+        // hit the outer catch, and delete the recovery file — losing every
+        // other (valid) record the file existed to preserve.
+        let skipped = 0;
+        const records = content
+          .split('\n')
+          .filter(Boolean)
+          .flatMap((line) => {
+            try {
+              return [JSON.parse(line)];
+            } catch (parseErr) {
+              skipped++;
+              logger.warn(`[TRUXIFY RECOVERY] Skipping malformed telemetry record: ${parseErr.message}`);
+              return [];
+            }
+          });
+        if (skipped > 0) {
+          logger.warn(`[TRUXIFY RECOVERY] Skipped ${skipped} malformed telemetry record(s).`);
+        }
         if (records.length > 0) {
           buffer.prepend(records);
           logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${buffer.length}`);

@@ -64,3 +64,52 @@ def test_route_optimization_non_empty_route():
     # Every node must have degree exactly 2 -> a single cycle.
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def _nine_node_graph():
+    graph = nx.Graph()
+    cheap_cycle = ["n0", "n1", "n2"]
+    for u, v in zip(cheap_cycle, cheap_cycle[1:] + cheap_cycle[:1]):
+        graph.add_edge(u, v, weight=1.0)
+
+    second_cycle = ["n3", "n4", "n5", "n6", "n7", "n8"]
+    for u, v in zip(second_cycle, second_cycle[1:] + second_cycle[:1]):
+        graph.add_edge(u, v, weight=1.0)
+
+    graph.add_edge("n2", "n3", weight=100.0)
+    graph.add_edge("n8", "n0", weight=100.0)
+    return graph
+
+
+def test_route_qubo_scales_connectivity_without_subset_cutoff():
+    formatter = QUBOFormatter()
+    graph = _nine_node_graph()
+
+    qubo = formatter.formulate_route_optimization(graph)
+
+    variable_names = set(qubo.variables.get_names())
+    assert any(name.startswith("flow_") for name in variable_names)
+    assert len(variable_names) == len(graph.edges()) + (2 * len(graph.edges()))
+
+    constraint_names = {constraint.name for constraint in qubo.linear_constraints}
+    assert "flow_conservation_root" in constraint_names
+    assert all(
+        any(name.startswith("flow_capacity_") for name in constraint_names)
+        for _ in [0]
+    )
+
+
+def test_route_qubo_rejects_disconnected_graph():
+    formatter = QUBOFormatter()
+    graph = nx.Graph()
+    graph.add_edges_from([
+        ("a", "b"),
+        ("b", "c"),
+        ("c", "a"),
+        ("d", "e"),
+        ("e", "f"),
+        ("f", "d"),
+    ])
+
+    with pytest.raises(ValueError, match="connected graph"):
+        formatter.formulate_route_optimization(graph)

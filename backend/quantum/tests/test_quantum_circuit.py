@@ -119,3 +119,27 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_extract_route_preserves_underscored_node_ids():
+    from quantum_service import QuantumService
+
+    service = QuantumService.__new__(QuantumService)
+    result = {
+        "solution": [1, 1, 1],
+        "variables": ["x_0", "x_1", "x_2"],
+        "edge_mapping": [
+            ("truck_1", "stop_2"),
+            ("stop_2", "stop_3"),
+            ("stop_3", "truck_1"),
+        ],
+    }
+
+    route = service._extract_route(
+        result,
+        ["truck_1", "stop_2", "stop_3"],
+    )
+
+    assert set(route) == {"truck_1", "stop_2", "stop_3"}
+    assert route[0] == "truck_1"
+    assert route[-1] == "truck_1"

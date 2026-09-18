@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -79,6 +79,7 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { confirmStopSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
 const DEFAULT_EVENTS_LIMIT = 100;
@@ -623,15 +624,13 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
 
     const filteredEvents = events || [];
 
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     return res.json({
       trip_id: tripId,
       events: events || [],
-      pagination: {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limit) : 0,
-      },
+      data: events || [],
+      pagination
     });
   } catch (err) {
     return res.status(500).json({ error: 'Internal Server Error', details: err?.message });
@@ -766,9 +765,12 @@ router.get('/:id/items', authenticate, userLimiter, async (req, res) => {
       .range(offset, offset + limit - 1);
 
     if (itemsErr) return res.status(500).json({ error: 'Failed to fetch trip items.', details: itemsErr.message });
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     return res.json({
       items: items || [],
-      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+      data: items || [],
+      pagination
     });
   } catch (err) {
     logger.error('[Trips] Fetch trip items error:', err);
@@ -804,9 +806,12 @@ router.get('/:id/stops', authenticate, userLimiter, async (req, res) => {
       .range(offset, offset + limit - 1);
 
     if (stopsErr) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: stopsErr.message });
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     return res.json({
       stops: stops || [],
-      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+      data: stops || [],
+      pagination
     });
   } catch (err) {
     logger.error('[Trips] Fetch trip stops error:', err);
@@ -842,9 +847,12 @@ router.get('/:id/route-points', authenticate, userLimiter, async (req, res) => {
       .range(offset, offset + limit - 1);
 
     if (pointsErr) return res.status(500).json({ error: 'Failed to fetch route points.', details: pointsErr.message });
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     return res.json({
       route_points: points || [],
-      pagination: { page, limit, total: count || 0, totalPages: count ? Math.ceil(count / limit) : 0 }
+      data: points || [],
+      pagination
     });
   } catch (err) {
     logger.error('[Trips] Fetch route points error:', err);

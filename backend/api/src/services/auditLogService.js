@@ -3,6 +3,7 @@ import logger from '../middleware/logger.js';
 import { appendFile } from 'fs/promises';
 import path from 'path';
 import { createClient } from 'redis';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const TABLE = 'application_audit_logs';
 
@@ -284,19 +285,15 @@ class AuditLogService {
 
     if (error) {
       logger.error({ err: error }, '[AuditLog] Failed to query audit logs');
-      return { data: [], pagination: { page: safePage, limit: safeLimit, total: 0, totalPages: 0 } };
+      return {
+        data: [],
+        pagination: formatPaginationMeta(0, safePage, safeLimit)
+      };
     }
-
-    const total = count || 0;
 
     return {
       data: data || [],
-      pagination: {
-        page: safePage,
-        limit: safeLimit,
-        total,
-        totalPages: Math.ceil(total / safeLimit),
-      },
+      pagination: formatPaginationMeta(count || 0, safePage, safeLimit)
     };
   }
 

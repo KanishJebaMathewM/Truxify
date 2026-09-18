@@ -15,6 +15,35 @@ const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10
 // default 120s gives a comfortable margin. Overridable per deployment.
 const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
 
+export const LUA_RELEASE_LOCK =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+/**
+ * Safely releases a Redis lock using Lua compare-and-delete.
+ * Only deletes the key if the caller holds the matching ownership token.
+ */
+export async function releaseRedisLock(client, lockKey, lockToken) {
+  if (!client || !lockKey || !lockToken) return false;
+  if (typeof client.eval === 'function') {
+    try {
+      const res = await client.eval(LUA_RELEASE_LOCK, 1, lockKey, lockToken);
+      return res === 1 || res === '1';
+    } catch (err) {
+      logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
+      return false;
+    }
+  } else if (typeof client.del === 'function') {
+    try {
+      await client.del(lockKey);
+      return true;
+    } catch (err) {
+      logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
+      return false;
+    }
+  }
+  return false;
+}
+
 // Validation regex for X-Idempotency-Key
 const IDEMPOTENCY_KEY_REGEX = /^[a-zA-Z0-9_-]{1,255}$/;
 
@@ -124,7 +153,8 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
       if (redisClient) {
         const lockKey = `${key}:lock`;
-        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+        let lockToken = crypto.randomUUID();
+        const lockAcquired = await redisClient.set(lockKey, lockToken, 'NX', 'PX', LOCK_TTL_MS);
 
         if (!lockAcquired) {
           let retries = 600; // Poll for up to 120 seconds (matches lock TTL)
@@ -157,8 +187,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
             return res.status(409).json({ error: 'Duplicate request being processed' });
           }
 
-          // Re-acquire lock and process if previous request crashed
-          const newLockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+          // Re-acquire lock with a new unique token if previous request crashed or released without caching
+          lockToken = crypto.randomUUID();
+          const newLockAcquired = await redisClient.set(lockKey, lockToken, 'NX', 'PX', LOCK_TTL_MS);
           if (!newLockAcquired) {
             return res.status(409).json({ error: 'Duplicate request being processed' });
           }
@@ -168,17 +199,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
         const releaseLock = () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.eval(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-            1,
-            lockKey,
-            '1'
-          ).catch(err => {
-            logger.error(
-              { err, lockKey },
-              '[Idempotency] Failed to release Redis lock.'
-            );
-          });
+          const tokenToRelease = lockToken;
+          if (!tokenToRelease) return;
+          void releaseRedisLock(redisClient, lockKey, tokenToRelease);
         };
 
         // Ensure the success response is cached BEFORE the lock is released, so

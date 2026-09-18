@@ -18,12 +18,14 @@ const DEFAULT_TRUCK_MAX_WIDTH_M = 2.5;
 const DEFAULT_TRUCK_MAX_HEIGHT_M = 4;
 
 // Startup validation
-if (!process.env.ML_API_KEY) {
+const initialApiKey = (process.env.ML_API_KEY || '').trim();
+if (!initialApiKey) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
 }
 
 function guardMlApiKey() {
-  if (!process.env.ML_API_KEY) {
+  const apiKey = (process.env.ML_API_KEY || '').trim();
+  if (!apiKey) {
     throw new Error("[ML] ML_API_KEY is not configured. All ML endpoints will return 503. Set ML_API_KEY to enable ML features.");
   }
 }
@@ -95,8 +97,9 @@ function getHeaders() {
   const headers = {
     'Content-Type': 'application/json',
   };
-  if (process.env.ML_API_KEY) {
-    headers['X-API-Key'] = process.env.ML_API_KEY;
+  const apiKey = (process.env.ML_API_KEY || '').trim();
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
   }
   return headers;
 }

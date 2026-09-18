@@ -289,10 +289,21 @@ class TransformerTrainer:
         val_labels: Optional[torch.Tensor] = None
     ) -> Dict:
         """Full training loop"""
+        import copy
+        
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        if train_data.size(0) == 0:
+            raise ValueError("Training data cannot be empty")
+            
         losses = []
         val_losses = []
         
         num_batches = (train_data.size(0) + batch_size - 1) // batch_size
+        
+        # Isolate training by copying the model
+        working_model = copy.deepcopy(self.model)
+        working_optimizer = torch.optim.AdamW(working_model.parameters(), lr=self.optimizer.param_groups[0]['lr'])
         
         for epoch in range(epochs):
             epoch_loss = 0
@@ -306,19 +317,41 @@ class TransformerTrainer:
                 batch_x = train_data_shuffled[i:i+batch_size]
                 batch_y = train_labels_shuffled[i:i+batch_size]
                 
-                loss = self.train_step(batch_x, batch_y)
-                epoch_loss += loss
+                # Single training step
+                working_model.train()
+                working_optimizer.zero_grad()
+                
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+                
+                predictions = working_model(batch_x)
+                loss = self.criterion(predictions, batch_y)
+                
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(working_model.parameters(), 1.0)
+                working_optimizer.step()
+                
+                epoch_loss += loss.item()
             
             avg_loss = epoch_loss / num_batches
             losses.append(avg_loss)
             
             # Validation
             if val_data is not None and val_labels is not None:
-                val_loss = self.validate(val_data, val_labels)
+                working_model.eval()
+                with torch.no_grad():
+                    val_x = val_data.to(self.device)
+                    val_y = val_labels.to(self.device)
+                    val_preds = working_model(val_x)
+                    val_loss = self.criterion(val_preds, val_y).item()
                 val_losses.append(val_loss)
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Val Loss={val_loss:.4f}")
             else:
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
+                
+        # Atomic swap of weights back to the production model
+        self.model.load_state_dict(working_model.state_dict())
+        self.optimizer.load_state_dict(working_optimizer.state_dict())
         
         return {
             'train_losses': losses,

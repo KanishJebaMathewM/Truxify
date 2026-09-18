@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
 from datetime import datetime
 import logging
+import asyncio
 from transformers.model import (
     DemandForecastTransformer,
     TrafficForecastTransformer,
@@ -24,13 +25,22 @@ demand_trainer = TransformerTrainer(demand_model)
 traffic_trainer = TransformerTrainer(traffic_model)
 price_trainer = TransformerTrainer(price_model)
 
+# Concurrency locks
+demand_lock = asyncio.Lock()
+traffic_lock = asyncio.Lock()
+price_lock = asyncio.Lock()
+
 class ForecastRequest(BaseModel):
     data: List[List[float]]
     horizon: int = 24
 
 class TrainRequest(BaseModel):
-    epochs: int = 50
-    batch_size: int = 32
+    epochs: int = Field(50, ge=1, le=500)
+    batch_size: int = Field(32, ge=1, le=1024)
+    train_data: List[List[List[float]]]
+    train_labels: List[List[float]]
+    val_data: Optional[List[List[List[float]]]] = None
+    val_labels: Optional[List[List[float]]] = None
 
 @router.post("/demand/forecast")
 async def forecast_demand(request: ForecastRequest):
@@ -55,8 +65,6 @@ async def forecast_demand(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Demand forecast failed: {e}")
-        logger.error(f"Internal error: {e}")
-
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/traffic/forecast")
@@ -80,8 +88,6 @@ async def forecast_traffic(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Traffic forecast failed: {e}")
-        logger.error(f"Internal error: {e}")
-
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/price/forecast")
@@ -105,94 +111,100 @@ async def forecast_price(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Price forecast failed: {e}")
-        logger.error(f"Internal error: {e}")
-
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/demand/train")
 async def train_demand(request: TrainRequest):
     """Train demand forecast transformer"""
-    try:
-        # Generate synthetic training data
-        train_data = torch.randn(1000, demand_model.transformer.seq_len, demand_model.input_dim)
-        train_labels = torch.randn(1000, demand_model.transformer.pred_len)
-        val_data = torch.randn(200, demand_model.transformer.seq_len, demand_model.input_dim)
-        val_labels = torch.randn(200, demand_model.transformer.pred_len)
-        
-        results = demand_trainer.train(
-            train_data, train_labels,
-            epochs=request.epochs,
-            batch_size=request.batch_size,
-            val_data=val_data,
-            val_labels=val_labels
-        )
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
+    async with demand_lock:
+        try:
+            train_data = torch.tensor(request.train_data, dtype=torch.float32)
+            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
+            
+            val_data = None
+            val_labels = None
+            if request.val_data is not None and request.val_labels is not None:
+                val_data = torch.tensor(request.val_data, dtype=torch.float32)
+                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            
+            results = demand_trainer.train(
+                train_data, train_labels,
+                epochs=request.epochs,
+                batch_size=request.batch_size,
+                val_data=val_data,
+                val_labels=val_labels
+            )
+            
+            return {
+                'success': True,
+                'data': results,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Training failed: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/traffic/train")
 async def train_traffic(request: TrainRequest):
     """Train traffic forecast transformer"""
-    try:
-        train_data = torch.randn(1000, traffic_model.transformer.seq_len, traffic_model.input_dim)
-        train_labels = torch.randn(1000, traffic_model.transformer.pred_len)
-        val_data = torch.randn(200, traffic_model.transformer.seq_len, traffic_model.input_dim)
-        val_labels = torch.randn(200, traffic_model.transformer.pred_len)
-        
-        results = traffic_trainer.train(
-            train_data, train_labels,
-            epochs=request.epochs,
-            batch_size=request.batch_size,
-            val_data=val_data,
-            val_labels=val_labels
-        )
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
+    async with traffic_lock:
+        try:
+            train_data = torch.tensor(request.train_data, dtype=torch.float32)
+            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
+            
+            val_data = None
+            val_labels = None
+            if request.val_data is not None and request.val_labels is not None:
+                val_data = torch.tensor(request.val_data, dtype=torch.float32)
+                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            
+            results = traffic_trainer.train(
+                train_data, train_labels,
+                epochs=request.epochs,
+                batch_size=request.batch_size,
+                val_data=val_data,
+                val_labels=val_labels
+            )
+            
+            return {
+                'success': True,
+                'data': results,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Training failed: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/price/train")
 async def train_price(request: TrainRequest):
     """Train price forecast transformer"""
-    try:
-        train_data = torch.randn(1000, price_model.transformer.seq_len, price_model.input_dim)
-        train_labels = torch.randn(1000, price_model.transformer.pred_len)
-        val_data = torch.randn(200, price_model.transformer.seq_len, price_model.input_dim)
-        val_labels = torch.randn(200, price_model.transformer.pred_len)
-        
-        results = price_trainer.train(
-            train_data, train_labels,
-            epochs=request.epochs,
-            batch_size=request.batch_size,
-            val_data=val_data,
-            val_labels=val_labels
-        )
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
+    async with price_lock:
+        try:
+            train_data = torch.tensor(request.train_data, dtype=torch.float32)
+            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
+            
+            val_data = None
+            val_labels = None
+            if request.val_data is not None and request.val_labels is not None:
+                val_data = torch.tensor(request.val_data, dtype=torch.float32)
+                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            
+            results = price_trainer.train(
+                train_data, train_labels,
+                epochs=request.epochs,
+                batch_size=request.batch_size,
+                val_data=val_data,
+                val_labels=val_labels
+            )
+            
+            return {
+                'success': True,
+                'data': results,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Training failed: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():

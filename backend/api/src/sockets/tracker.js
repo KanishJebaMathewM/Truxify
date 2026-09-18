@@ -326,7 +326,7 @@ export async function isWebSocketUpgradeAllowed(request) {
 
     return attempts <= WS_UPGRADE_RATE_LIMIT;
   } catch (err) {
-    logger.error('Redis WebSocket upgrade rate limit error:', err.message);
+    logger.error({ err }, 'Redis WebSocket upgrade rate limit error');
     return enforceWsUpgradeMemoryLimit(ipAddress);
   }
 }
@@ -895,7 +895,7 @@ export async function handleTrackingMessage(ws, message, req) {
         ws.send(JSON.stringify({ warning: `Unknown event type: ${event}` }));
     }
   } catch (err) {
-    logger.error('WS Message parsing error:', err.message);
+    logger.error({ err }, 'WS Message parsing error');
     ws.send(JSON.stringify({ error: 'Invalid JSON payload structure.' }));
   }
 }
@@ -940,7 +940,7 @@ async function enqueueGpsLogDlq(doc) {
       await redisClient.rpush(GPS_LOG_DLQ_KEY, JSON.stringify({ doc, retries: 0 }));
       return;
     } catch (err) {
-      logger.error('[GpsLog] Failed to enqueue GPS log to Redis DLQ:', err.message);
+      logger.error({ err }, '[GpsLog] Failed to enqueue GPS log to Redis DLQ');
     }
   }
   logger.error('[GpsLog] Redis unavailable — GPS log permanently lost (could not enqueue to DLQ):', JSON.stringify(doc));
@@ -956,7 +956,7 @@ async function reconcileGpsLogDlqEntry(raw) {
   try {
     entry = JSON.parse(raw);
   } catch (err) {
-    logger.error('[GpsLog] Dropping malformed DLQ entry:', err.message);
+    logger.error({ err }, '[GpsLog] Dropping malformed DLQ entry');
     return true;
   }
 
@@ -979,7 +979,7 @@ async function reconcileGpsLogDlqEntry(raw) {
         await redisClient.rpush(GPS_LOG_DLQ_KEY, JSON.stringify({ doc, retries: retries + 1 }));
         return true;
       } catch (redisErr) {
-        logger.error('[GpsLog] Failed to re-enqueue DLQ entry:', redisErr.message);
+        logger.error({ err: redisErr }, '[GpsLog] Failed to re-enqueue DLQ entry');
         return false;
       }
     }
@@ -1008,7 +1008,7 @@ async function reconcileGpsLogDlq() {
       }
     }
   } catch (err) {
-    logger.error('[GpsLog] DLQ reconciliation error:', err.message);
+    logger.error({ err }, '[GpsLog] DLQ reconciliation error');
   }
 }
 
@@ -1163,7 +1163,7 @@ export async function handleLocationPing(ws, data, req) {
           : lastRecordedEpoch + 1;
       await redisClient.set(seqKey, nextSequence.toString(), 'EX', 86400);
     } catch (err) {
-      logger.error('Redis sequence verification cache error:', err.message);
+      logger.error({ err }, 'Redis sequence verification cache error');
     }
   }
 
@@ -1216,7 +1216,7 @@ export async function handleLocationPing(ws, data, req) {
       orderDisplayId = verifiedOrder.order_display_id;
       await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
     } catch (err) {
-      logger.error('Failed to resolve order details in tracker:', err.message);
+      logger.error({ err }, 'Failed to resolve order details in tracker');
     }
   }
 
@@ -1264,7 +1264,7 @@ export async function handleLocationPing(ws, data, req) {
         120
       );
     } catch (err) {
-      logger.error('Redis cache telemetry error:', err.message);
+      logger.error({ err }, 'Redis cache telemetry error');
     }
   }
 
@@ -1388,7 +1388,7 @@ export async function handleLocationPing(ws, data, req) {
         timestamp: new Date(serverNow).toISOString()
       }
     }).catch((err) => {
-      logger.error('Failed to broadcast realtime location to Supabase:', err.message);
+      logger.error({ err }, 'Failed to broadcast realtime location to Supabase');
     });
   }
 }
@@ -1446,7 +1446,7 @@ export async function closeWebSocketServer() {
       try {
         client.close(1001, 'Server shutting down');
       } catch (err) {
-        logger.error('[shutdown] Failed to close WebSocket client:', err.message);
+        logger.error({ err }, '[shutdown] Failed to close WebSocket client');
       }
     });
 
@@ -1540,7 +1540,7 @@ export async function handleSubscribe(ws, data) {
         await redisClient.persist(`user:subscriptions:${subscriberId}`);
       }
     } catch (err) {
-      logger.error('Redis subscription persistence error:', err.message);
+      logger.error({ err }, 'Redis subscription persistence error');
     }
   }
 
@@ -1615,7 +1615,7 @@ async function handleUnsubscribe(ws, data) {
           await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
         }
       } catch (err) {
-        logger.error('Redis subscription cleanup error:', err.message);
+        logger.error({ err }, 'Redis subscription cleanup error');
       }
     }
 
@@ -1704,7 +1704,7 @@ async function removeClientFromAllSubscriptions(ws) {
         try {
           await redisClient.expire(`user:subscriptions:${subscriberId}`, 3600);
         } catch (err) {
-          logger.error('Redis subscription expire error on disconnect:', err.message);
+          logger.error({ err }, 'Redis subscription expire error on disconnect');
         }
         // Invalidate the driver→order cache when the last socket for this
         // driver disconnects so a stale mapping does not persist.
@@ -1770,7 +1770,7 @@ async function restoreSubscriptions(ws) {
       ws.subscriptionTargets.add(targetId);
     }
   } catch (err) {
-    logger.error('Subscription restoration error:', err.message);
+    logger.error({ err }, 'Subscription restoration error');
   }
 }
 

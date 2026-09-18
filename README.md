@@ -292,6 +292,49 @@ npm run dev
 - `npm start` starts the production server.
 - `npm test` runs the backend test suite.
 
+## 🧪 Testing
+
+Run the test suite for the component you changed before opening a pull request. From the repository root:
+
+### Backend API
+```bash
+cd backend/api
+npm test
+```
+
+### Customer Flutter app
+```bash
+cd apps/customer
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### Driver Flutter app
+```bash
+cd apps/driver
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### ML service
+```bash
+cd backend/ml
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+### Smart contracts
+```bash
+cd blockchain
+npm ci
+npx hardhat compile
+npx hardhat test
+```
+
+For CI-reproducible lint checks, see the linting commands in `CONTRIBUTING.md`.
+
 ## 🔧 Environment Configuration
 The backend uses `backend/api/.env.example` as the template for local configuration. Copy it to `.env` before running the service and fill in the required values for your environment.
 
@@ -326,7 +369,7 @@ Once the stack is running, you can reach the local services here:
 
 ## 🤝 Contributor Notes
 - Verify that `backend/api/.env` exists before starting the backend or Docker Compose services.
-- Run the relevant test commands before opening a pull request; see the repository testing guide in `CONTRIBUTING.md`.
+- Run the component-specific tests documented above before opening a pull request.
 - Prefer Docker Compose when you want the full local development environment with API, PostgreSQL/PostGIS, MongoDB, and Redis together.
 
 ## 📊 Impact Metrics (Projected)
@@ -389,7 +432,7 @@ git push origin feature/your-feature-name
 ## 👥 Contributors
 Thanks to all contributors ❤️
 
-[![Contributors](https://contrib.rocks/image?repo=KanishJebaMathewM/Truxify&max=500)](https://github.com/KanishJebaMathewM/Truxify/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=KanishJebaMathewM/Truxify&max=100)](https://github.com/KanishJebaMathewM/Truxify/graphs/contributors)
 
 ## 📄 License
 [MIT License](LICENSE) — Truxify is intentionally open source so any state transport department, NGO, or logistics cooperative can self-host it for free.

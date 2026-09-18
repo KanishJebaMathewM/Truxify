@@ -106,11 +106,4 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
         logger.info("Registered ML router: %s [%s]", description, module_name)
 
     return registered
-
-
-# Apply route-specific compatibility patches after the registry is defined so
-# importing this package also loads the patched gnn router before registration.
-try:
-    from . import _gnn_current_position_patch  # noqa: F401,E402
-except Exception as exc:
-    logger.warning("Unable to load GNN current-position patch: %s", exc)
+from . import _gnn_current_position_patch

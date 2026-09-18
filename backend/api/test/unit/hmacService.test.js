@@ -40,7 +40,7 @@ describe('hmacService', () => {
     sharedRedisNonces.clear();
   });
 
-  describe('distributed nonce protection', () => {
+  describe('distributed and bounded nonce protection', () => {
     it('accepts a new nonce once and rejects the same nonce on another service instance', async () => {
       const nonce = `distributed-${Date.now()}-${Math.random()}`;
       expect(await serviceA.isNonceValid(nonce)).toBe(true);
@@ -51,6 +51,12 @@ describe('hmacService', () => {
       const nonce = `ttl-${Date.now()}-${Math.random()}`;
       expect(await serviceA.isNonceValid(nonce)).toBe(true);
       expect(sharedRedisNonces.has(`truxify:hmac:nonce:${nonce}`)).toBe(true);
+    });
+
+    it('rejects empty, non-string, and oversized nonces', async () => {
+      expect(await serviceA.isNonceValid('')).toBe(false);
+      expect(await serviceA.isNonceValid(null)).toBe(false);
+      expect(await serviceA.isNonceValid('x'.repeat(257))).toBe(false);
     });
   });
 

@@ -94,6 +94,7 @@ class QUBOFormatter:
     def __init__(self):
         self.qubo = None
         self.variables = []
+        self.edge_mapping = []
         
         logger.info("✅ QUBO Formatter initialized")
     
@@ -165,6 +166,7 @@ class QUBOFormatter:
 
         self.qubo = qubo
         self.variables = list(edge_vars.values())
+        self.edge_mapping = list(edge_vars.keys())
 
         return qubo
 
@@ -188,7 +190,8 @@ class QUBOFormatter:
                 'success': True,
                 'solution': result.x,
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': self.variables,
+                'edge_mapping': self.edge_mapping
             }
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")

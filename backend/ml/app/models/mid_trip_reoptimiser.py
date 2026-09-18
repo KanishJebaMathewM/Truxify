@@ -99,22 +99,19 @@ def _sequence_total(matrix: List[List[float]], sequence: List[int]) -> float:
     return sum(matrix[sequence[index]][sequence[index + 1]] for index in range(len(sequence) - 1))
 
 
-def _best_route_insertion_with_matrix(
+def _route_insertion_options_with_matrix(
     base_route_indices: List[int],
     pickup_index: int,
     dropoff_index: int,
     distance_matrix: List[List[float]],
     duration_matrix: List[List[float]],
-) -> tuple[float, float, float, float]:
-    """Find the best pickup/dropoff insertion using road distance and duration matrices."""
+) -> List[tuple[float, float, float, float]]:
+    """Return distance/duration data for every valid pickup/dropoff insertion."""
     baseline_distance = _sequence_total(distance_matrix, base_route_indices)
     baseline_duration = _sequence_total(duration_matrix, base_route_indices)
     route_length = len(base_route_indices) - 1
 
-    best_extra_distance = float("inf")
-    best_extra_duration = float("inf")
-    best_pickup_distance = float("inf")
-    best_pickup_duration = float("inf")
+    options: List[tuple[float, float, float, float]] = []
 
     for pickup_position in range(route_length + 1):
         augmented = (
@@ -145,24 +142,35 @@ def _best_route_insertion_with_matrix(
             candidate_duration = _sequence_total(duration_matrix, candidate)
             extra_distance = max(candidate_distance - baseline_distance, 0.0)
             extra_duration = max(candidate_duration - baseline_duration, 0.0)
-
-            if (
-                extra_distance < best_extra_distance
-                or (
-                    math.isclose(extra_distance, best_extra_distance)
-                    and extra_duration < best_extra_duration
+            options.append(
+                (
+                    extra_distance,
+                    extra_duration,
+                    pickup_distance,
+                    pickup_duration,
                 )
-            ):
-                best_extra_distance = extra_distance
-                best_extra_duration = extra_duration
-                best_pickup_distance = pickup_distance
-                best_pickup_duration = pickup_duration
+            )
 
-    return (
-        best_extra_distance,
-        best_extra_duration,
-        best_pickup_distance,
-        best_pickup_duration,
+    return options
+
+
+def _best_route_insertion_with_matrix(
+    base_route_indices: List[int],
+    pickup_index: int,
+    dropoff_index: int,
+    distance_matrix: List[List[float]],
+    duration_matrix: List[List[float]],
+) -> tuple[float, float, float, float]:
+    """Return the minimum-distance matrix insertion for compatibility."""
+    return min(
+        _route_insertion_options_with_matrix(
+            base_route_indices,
+            pickup_index,
+            dropoff_index,
+            distance_matrix,
+            duration_matrix,
+        ),
+        key=lambda option: (option[0], option[1], option[2], option[3]),
     )
 
 
@@ -235,14 +243,12 @@ def find_mid_trip_loads(
             pickup_idx = pickup_offset + load_index
             dropoff_idx = dropoff_offset + load_index
 
-            detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = (
-                _best_route_insertion_with_matrix(
-                    base_route_indices,
-                    pickup_idx,
-                    dropoff_idx,
-                    distance_matrix,
-                    duration_matrix,
-                )
+            insertion_options = _route_insertion_options_with_matrix(
+                base_route_indices,
+                pickup_idx,
+                dropoff_idx,
+                distance_matrix,
+                duration_matrix,
             )
 
             deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
@@ -251,9 +257,24 @@ def find_mid_trip_loads(
             else:
                 deadline_dt = deadline_dt.astimezone(timezone.utc)
 
-            estimated_pickup_time = now + timedelta(minutes=pickup_route_minutes)
-            if estimated_pickup_time > deadline_dt:
+            feasible_options = []
+            for option in insertion_options:
+                estimated_pickup_time = now + timedelta(minutes=option[3])
+                if estimated_pickup_time <= deadline_dt:
+                    feasible_options.append((option, estimated_pickup_time))
+
+            if not feasible_options:
                 continue
+
+            (detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes), estimated_pickup_time = min(
+                feasible_options,
+                key=lambda item: (
+                    item[0][0],
+                    item[0][1],
+                    item[0][2],
+                    item[0][3],
+                ),
+            )
 
             dist_cur_pickup = distance_matrix[0][pickup_idx]
             payment = load.get("payment_inr", 0.0)

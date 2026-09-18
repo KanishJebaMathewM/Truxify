@@ -50,7 +50,10 @@ def test_formulation_adds_constraints():
 def test_route_optimization_non_empty_route():
     """The optimizer must return a non-empty, valid route (not all x_i = 0)."""
     formatter = QUBOFormatter()
-    graph = _square_graph()
+    graph = nx.Graph()
+    graph.add_edge('A', 'B', weight=1.0)
+    graph.add_edge('B', 'C', weight=1.0)
+    graph.add_edge('C', 'A', weight=1.0)
 
     qubo = formatter.formulate_route_optimization(graph)
     result = formatter.solve_qubo(qubo, eigensolver=NumPyMinimumEigensolver())

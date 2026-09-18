@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from prompt_security import (
     build_mistral_fallback_prompt,
-    escape_mistral_control_tokens,
+    serialize_untrusted_content,
 )
 
 logger = logging.getLogger(__name__)
@@ -205,11 +205,10 @@ class LLMService:
             If you don't know something, say so honestly."""
 
             # Treat retrieved context and the user query as untrusted data.
-            safe_context = [
-                escape_mistral_control_tokens(item)
-                for item in context
-            ]
-            safe_query = escape_mistral_control_tokens(query)
+            user_content = serialize_untrusted_content(
+                context,
+                query,
+)
 
             messages = [
                 {
@@ -218,17 +217,7 @@ class LLMService:
                 },
                 {
                     "role": "user",
-                    "content": (
-                        "Context information:\n"
-                        + (
-                            "\n".join(safe_context)
-                            if safe_context
-                            else "No specific context available."
-                        )
-                        + "\n\nQuestion: "
-                        + safe_query
-                        + "\n\nAnswer:"
-                    ),
+                    "content": user_content + "\n\nAnswer:",
                 },
             ]
 

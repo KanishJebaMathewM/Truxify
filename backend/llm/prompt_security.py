@@ -13,14 +13,14 @@ def escape_mistral_control_tokens(text: str) -> str:
     )
 
 
-def build_mistral_fallback_prompt(
-    system_prompt: str,
+def serialize_untrusted_content(
     context: list[str],
     query: str,
 ) -> str:
-    """Build a Mistral prompt when tokenizer chat templates are unavailable."""
+    """Serialize untrusted context and query using explicit boundaries."""
     safe_context = [
-        escape_mistral_control_tokens(item) for item in context
+        escape_mistral_control_tokens(item)
+        for item in context
     ]
     safe_query = escape_mistral_control_tokens(query)
 
@@ -30,13 +30,28 @@ def build_mistral_fallback_prompt(
         else "No specific context available."
     )
 
+    return (
+        "<CONTEXT>\n"
+        f"{context_str}\n"
+        "</CONTEXT>\n\n"
+        "<QUERY>\n"
+        f"{safe_query}\n"
+        "</QUERY>"
+    )
+
+
+def build_mistral_fallback_prompt(
+    system_prompt: str,
+    context: list[str],
+    query: str,
+) -> str:
+    """Build a Mistral prompt when tokenizer chat templates are unavailable."""
+    user_content = serialize_untrusted_content(context, query)
+
     return f"""<s>[INST] <<SYS>>
 {system_prompt}
 <</SYS>>
 
-Context information:
-{context_str}
-
-Question: {safe_query}
+{user_content}
 
 Answer: [/INST]"""

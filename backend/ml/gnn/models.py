@@ -607,6 +607,13 @@ class RouteOptimizer:
         # inference use exactly the same statistics.
         self.feature_scaler.fit(train_data)
 
+        if not train_data:
+            raise ValueError("Training dataset cannot be empty")
+
+        # Fit once on the complete training set so every training batch and later
+        # inference use exactly the same statistics.
+        self.feature_scaler.fit(train_data)
+
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         criterion = nn.MSELoss()
         

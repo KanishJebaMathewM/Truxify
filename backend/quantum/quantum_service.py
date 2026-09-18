@@ -77,10 +77,26 @@ class QuantumService:
                     }
                 }
 
+            selected_edges = []
+            edge_mapping = result.get('edge_mapping') or []
+            solution = result.get('solution')
+            if solution is not None and len(solution) == len(edge_mapping):
+                for bit, (u, v, key) in zip(solution, edge_mapping):
+                    if bit:
+                        data = graph[u][v][key]
+                        selected_edges.append({
+                            'source': u,
+                            'target': v,
+                            'edge_index': data.get('edge_index', key),
+                            'id': data.get('edge_id'),
+                            'distance': data.get('weight', 1),
+                        })
+
             return {
                 'success': True,
                 'data': {
                     'route': route,
+                    'selected_edges': selected_edges,
                     'objective': result.get('objective'),
                     'num_nodes': len(nodes),
                     'num_edges': len(edges)

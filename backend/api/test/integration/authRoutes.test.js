@@ -5,11 +5,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 
-const invalidateCachedProfileMock = vi.fn().mockResolvedValue(undefined);
-const invalidateCachedSupabaseProfileMock = vi.fn().mockResolvedValue(undefined);
-const revokeRefreshTokensMock = vi.fn().mockResolvedValue(undefined);
-const rotateRefreshTokenMock = vi.fn();
+const {
+  invalidateCachedProfileMock,
+  invalidateCachedSupabaseProfileMock,
+  revokeRefreshTokensMock,
+  rotateRefreshTokenMock,
+} = vi.hoisted(() => ({
+  invalidateCachedProfileMock: vi.fn().mockResolvedValue(undefined),
+  invalidateCachedSupabaseProfileMock: vi.fn().mockResolvedValue(undefined),
+  revokeRefreshTokensMock: vi.fn().mockResolvedValue(undefined),
+  rotateRefreshTokenMock: vi.fn(),
+}));
 
 vi.mock('../../src/services/refreshTokenService.js', () => ({
   default: {
@@ -196,6 +204,12 @@ describe('POST /api/auth/refresh', () => {
     expect(res.body.refreshToken).toBe('rotated-refresh-token');
     expect(res.body.accessToken).not.toContain('placeholder');
     expect(res.body.accessToken.split('.')).toHaveLength(3);
+
+    const decoded = jwt.verify(res.body.accessToken, 'test-refresh-secret');
+    expect(decoded.id).toBe('user-1');
+    expect(decoded.uid).toBe('user-1');
+    expect(decoded.iss).toBe('truxify-backend-api');
+
     expect(rotateRefreshTokenMock).toHaveBeenCalledWith('current-token', 'device-1', 'test');
   });
 

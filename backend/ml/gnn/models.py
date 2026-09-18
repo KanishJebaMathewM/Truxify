@@ -101,14 +101,35 @@ RouteGNN = GNNRouteModel
 
 class GraphNetworkBuilder:
     """Build directed road network graphs for GNN route optimization."""
-    
+
     def __init__(self):
         """Initialize a directed road network graph and feature mappings."""
         self.graph = nx.DiGraph()
         self.node_features = {}
         self.edge_features = {}
-        
+        self.node_map = {}
+
+    def clear(self):
+        """Reset internal graph and feature structures."""
+        self.graph = nx.DiGraph()
+        self.node_features = {}
+        self.edge_features = {}
+        self.node_map = {}
+
+    def reset(self):
+        """Alias for clear()."""
+        self.clear()
+
     def build_road_network(self, nodes, edges):
+        """Build road network from nodes and directed source-to-target edges.
+
+        Every invocation starts with a fresh nx.DiGraph instance to prevent
+        cross-request accumulation and graph contamination.
+        """
+        self.graph = nx.DiGraph()
+        self.node_features = {}
+        self.edge_features = {}
+        self.node_map = {}
         """Build road network after validating every edge endpoint."""
         node_ids = {node['id'] for node in nodes}
         for edge in edges:
@@ -131,7 +152,7 @@ class GraphNetworkBuilder:
                 road_type=node.get('road_type', 'local'),
                 speed_limit=node.get('speed_limit', 50)
             )
-            
+
         # Add edges
         for edge in edges:
             self.graph.add_edge(
@@ -146,18 +167,19 @@ class GraphNetworkBuilder:
                 max_weight=edge.get('max_weight'),
                 max_height=edge.get('max_height')
             )
-            
+
         return self.graph
-    
-    def extract_features(self):
-        """Extract node and edge features"""
+
+    def extract_features(self, graph=None):
+        """Extract node and edge features from the given graph (or self.graph)."""
+        target_graph = graph if graph is not None else self.graph
         node_features = []
         edge_indices = []
         edge_features = []
-        
+
         # Node features
         node_map = {}
-        for i, (node, data) in enumerate(self.graph.nodes(data=True)):
+        for i, (node, data) in enumerate(target_graph.nodes(data=True)):
             node_map[node] = i
             features = [
                 data.get('lat', 0),
@@ -167,9 +189,9 @@ class GraphNetworkBuilder:
                 data.get('speed_limit', 50) / 100
             ]
             node_features.append(features)
-        
+
         # Edge features
-        for u, v, data in self.graph.edges(data=True):
+        for u, v, data in target_graph.edges(data=True):
             edge_indices.append([node_map[u], node_map[v]])
             edge_features.append([
                 data.get('distance', 0) / 100,
@@ -193,9 +215,10 @@ class GraphNetworkBuilder:
         return {
             'node_features': torch.tensor(node_features, dtype=torch.float),
             'edge_indices': edge_index,
-            'edge_features': edge_attr
+            'edge_features': edge_attr,
+            'node_map': node_map
         }
-    
+
     def _road_type_encoding(self, road_type):
         """Encode road type to one-hot"""
         types = ['highway', 'arterial', 'collector', 'local', 'street']
@@ -203,17 +226,18 @@ class GraphNetworkBuilder:
         if road_type in types:
             encoding[types.index(road_type)] = 1
         return encoding
-    
-    def get_pytorch_data(self):
-        """Convert to PyTorch Geometric Data object"""
-        features = self.extract_features()
+
+    def get_pytorch_data(self, graph=None):
+        """Convert to PyTorch Geometric Data object for the given graph (or self.graph)."""
+        target_graph = graph if graph is not None else self.graph
+        features = self.extract_features(target_graph)
         data = Data(
             x=features['node_features'],
             edge_index=features['edge_indices'],
             edge_attr=features['edge_features']
         )
-        data.graph = self.graph
-        data.node_map = self.node_map
+        data.graph = target_graph
+        data.node_map = features.get('node_map', self.node_map)
         return data
 
 class RouteOptimizer:
@@ -258,6 +282,10 @@ class RouteOptimizer:
                 raise ValueError(
                     f"Node feature dim mismatch: model expects {self.model.input_dim}, got {data.x.shape[1]}"
                 )
+
+            # Ensure model is in eval mode so BatchNorm layers do not update running stats during inference
+            if self.model is not None:
+                self.model.eval()
 
             # Get node embeddings
             with torch.no_grad():

@@ -102,23 +102,19 @@ class AppLocalizationsTa extends AppLocalizations {
   String get loginWithBiometrics => 'பயோமெட்ரிக்ஸ் மூலம் உள்நுழையுங்கள்';
 
   @override
-  String get biometricsNotSupported =>
-      'இந்த சாதனத்தில் பயோமெட்ரிக்ஸ் ஆதரிக்கப்படவில்லை';
+  String get biometricsNotSupported => 'இந்த சாதனத்தில் பயோமெட்ரிக்ஸ் ஆதரிக்கப்படவில்லை';
 
   @override
-  String get biometricAuthSuccessful =>
-      'பயோமெட்ரிக் அங்கீகாரம் வெற்றிகரமாக முடிந்தது';
+  String get biometricAuthSuccessful => 'பயோமெட்ரிக் அங்கீகாரம் வெற்றிகரமாக முடிந்தது';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'சேமிக்கப்பட்ட அமர்வு எதுவும் கிடைக்கவில்லை. முதலில் உங்கள் தொலைபேசி எண்ணுடன் உள்நுழையவும்.';
+  String get biometricAuthRequiresSession => 'சேமிக்கப்பட்ட அமர்வு எதுவும் கிடைக்கவில்லை. முதலில் உங்கள் தொலைபேசி எண்ணுடன் உள்நுழையவும்.';
 
   @override
   String get pleaseEnterPhone => 'உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்';
 
   @override
-  String get phoneDigitsOnly =>
-      'தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்';
+  String get phoneDigitsOnly => 'தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்';
 
   @override
   String phoneMustBeExactDigits(int digitCount) {
@@ -126,24 +122,19 @@ class AppLocalizationsTa extends AppLocalizations {
   }
 
   @override
-  String get phoneMustBeDigits =>
-      'தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்';
+  String get phoneMustBeDigits => 'தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்';
 
   @override
-  String get verificationFailed =>
-      'சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.';
+  String get verificationFailed => 'சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.';
 
   @override
-  String get phoneVerificationFailed =>
-      'தொலைபேசி சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.';
+  String get phoneVerificationFailed => 'தொலைபேசி சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.';
 
   @override
-  String get autoVerificationFailed =>
-      'தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. OTP-ஐ கைமுறையாக உள்ளிடவும்.';
+  String get autoVerificationFailed => 'தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. OTP-ஐ கைமுறையாக உள்ளிடவும்.';
 
   @override
-  String get failedToSendOtp =>
-      'OTP அனுப்ப முடியவில்லை. மீண்டும் முயற்சிக்கவும்.';
+  String get failedToSendOtp => 'OTP அனுப்ப முடியவில்லை. மீண்டும் முயற்சிக்கவும்.';
 
   @override
   String get enterOtp => 'OTP உள்ளிடவும்';
@@ -157,8 +148,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get invalidOtp => 'தவறான OTP. சரிபார்த்து மீண்டும் முயற்சிக்கவும்.';
 
   @override
-  String get verificationSessionExpired =>
-      'சரிபார்ப்பு அமர்வு காலாவதியாகிவிட்டது. புதிய OTP கோருங்கள்.';
+  String get verificationSessionExpired => 'சரிபார்ப்பு அமர்வு காலாவதியாகிவிட்டது. புதிய OTP கோருங்கள்.';
 
   @override
   String get invalidVerificationCode => 'தவறான சரிபார்ப்புக் குறியீடு.';
@@ -290,12 +280,10 @@ class AppLocalizationsTa extends AppLocalizations {
   String get tomorrow => 'நாளை';
 
   @override
-  String get selectPickupOnMap =>
-      'வரைபடத்தில் ஏற்றும் இடத்தைத் தேர்ந்தெடுக்கவும்';
+  String get selectPickupOnMap => 'வரைபடத்தில் ஏற்றும் இடத்தைத் தேர்ந்தெடுக்கவும்';
 
   @override
-  String get selectDropOnMap =>
-      'வரைபடத்தில் இறக்கும் இடத்தைத் தேர்ந்தெடுக்கவும்';
+  String get selectDropOnMap => 'வரைபடத்தில் இறக்கும் இடத்தைத் தேர்ந்தெடுக்கவும்';
 
   @override
   String get temperatureControl => 'வெப்பநிலை கட்டுப்பாடு';
@@ -440,8 +428,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get saveChanges => 'மாற்றங்களைச் சேமியுங்கள்';
 
   @override
-  String get profileUpdatedSuccessfully =>
-      'சுயவிவரம் வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது';
+  String get profileUpdatedSuccessfully => 'சுயவிவரம் வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது';
 
   @override
   String get failedToLoadProfile => 'சுயவிவரத்தை ஏற்ற முடியவில்லை';
@@ -459,12 +446,10 @@ class AppLocalizationsTa extends AppLocalizations {
   String get unableToShare => 'பகிர முடியவில்லை';
 
   @override
-  String get linkExpired =>
-      'இந்தக் கண்காணிப்பு இணைப்பு காலாவதியாகிவிட்டது அல்லது இனி செல்லுபடியாகாது.';
+  String get linkExpired => 'இந்தக் கண்காணிப்பு இணைப்பு காலாவதியாகிவிட்டது அல்லது இனி செல்லுபடியாகாது.';
 
   @override
-  String get trackingRevoked =>
-      'அனைத்து கண்காணிப்பு இணைப்புகளும் ரத்து செய்யப்பட்டன.';
+  String get trackingRevoked => 'அனைத்து கண்காணிப்பு இணைப்புகளும் ரத்து செய்யப்பட்டன.';
 
   @override
   String get copyLink => 'இணைப்பை நகலெடு';

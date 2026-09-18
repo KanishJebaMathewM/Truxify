@@ -48,9 +48,6 @@ dependencies:
   sentry_flutter: ^8.14.1
 
 dev_dependencies:
-  record: ^5.0.5
-  audioplayers: ^5.2.1
-  pointycastle: ^3.7.3
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter

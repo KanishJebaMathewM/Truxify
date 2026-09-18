@@ -108,8 +108,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get biometricAuthSuccessful => 'बायोमेट्रिक प्रमाणीकरण यशस्वी';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'सेव्ह केलेले सत्र सापडले नाही. कृपया प्रथम तुम्ही तुमच्या फोन नंबरने साइन इन करा.';
+  String get biometricAuthRequiresSession => 'सेव्ह केलेले सत्र सापडले नाही. कृपया प्रथम तुम्ही तुमच्या फोन नंबरने साइन इन करा.';
 
   @override
   String get pleaseEnterPhone => 'कृपया तुमचा फोन नंबर प्रविष्ट करा';
@@ -129,16 +128,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String get verificationFailed => 'तपासणी अयशस्वी. कृपया पुन्हा प्रयत्न करा.';
 
   @override
-  String get phoneVerificationFailed =>
-      'फोन तपासणी अयशस्वी. कृपया पुन्हा प्रयत्न करा.';
+  String get phoneVerificationFailed => 'फोन तपासणी अयशस्वी. कृपया पुन्हा प्रयत्न करा.';
 
   @override
-  String get autoVerificationFailed =>
-      'स्वयं-तपासणी अयशस्वी. कृपया OTP मॅन्युअली प्रविष्ट करा.';
+  String get autoVerificationFailed => 'स्वयं-तपासणी अयशस्वी. कृपया OTP मॅन्युअली प्रविष्ट करा.';
 
   @override
-  String get failedToSendOtp =>
-      'OTP पाठवण्यात अयशस्वी. कृपया पुन्हा प्रयत्न करा.';
+  String get failedToSendOtp => 'OTP पाठवण्यात अयशस्वी. कृपया पुन्हा प्रयत्न करा.';
 
   @override
   String get enterOtp => 'OTP प्रविष्ट करा';
@@ -152,8 +148,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get invalidOtp => 'अवैध OTP. कृपया तपासा आणि पुन्हा प्रयत्न करा.';
 
   @override
-  String get verificationSessionExpired =>
-      'तपासणी सत्र कालबाह्य झाले. कृपया नवीन OTP विनंती करा.';
+  String get verificationSessionExpired => 'तपासणी सत्र कालबाह्य झाले. कृपया नवीन OTP विनंती करा.';
 
   @override
   String get invalidVerificationCode => 'अवैध तपासणी कोड.';
@@ -433,8 +428,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get saveChanges => 'बदल जतन करा';
 
   @override
-  String get profileUpdatedSuccessfully =>
-      'प्रोफाइल यशस्वीरित्या अद्ययावत झाली';
+  String get profileUpdatedSuccessfully => 'प्रोफाइल यशस्वीरित्या अद्ययावत झाली';
 
   @override
   String get failedToLoadProfile => 'प्रोफाइल लोड करण्यात अयशस्वी';
@@ -452,8 +446,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get unableToShare => 'शेअर करता आले नाही';
 
   @override
-  String get linkExpired =>
-      'हा ट्रॅकिंग लिंक कालबाह्य झाला आहे किंवा तो वैध नाही.';
+  String get linkExpired => 'हा ट्रॅकिंग लिंक कालबाह्य झाला आहे किंवा तो वैध नाही.';
 
   @override
   String get trackingRevoked => 'सर्व ट्रॅकिंग लिंक रद्द करण्यात आले आहेत.';

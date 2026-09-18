@@ -102,15 +102,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loginWithBiometrics => 'Login with Biometrics';
 
   @override
-  String get biometricsNotSupported =>
-      'Biometrics not supported on this device';
+  String get biometricsNotSupported => 'Biometrics not supported on this device';
 
   @override
   String get biometricAuthSuccessful => 'Biometric authentication successful';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'No saved session found. Please sign in with your phone number first.';
+  String get biometricAuthRequiresSession => 'No saved session found. Please sign in with your phone number first.';
 
   @override
   String get pleaseEnterPhone => 'Please enter your phone number';
@@ -130,12 +128,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get verificationFailed => 'Verification failed. Please try again.';
 
   @override
-  String get phoneVerificationFailed =>
-      'Phone verification failed. Please try again.';
+  String get phoneVerificationFailed => 'Phone verification failed. Please try again.';
 
   @override
-  String get autoVerificationFailed =>
-      'Auto-verification failed. Please enter the OTP manually.';
+  String get autoVerificationFailed => 'Auto-verification failed. Please enter the OTP manually.';
 
   @override
   String get failedToSendOtp => 'Failed to send OTP. Please try again.';
@@ -152,8 +148,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invalidOtp => 'Invalid OTP. Please check and try again.';
 
   @override
-  String get verificationSessionExpired =>
-      'Verification session has expired. Please request a new OTP.';
+  String get verificationSessionExpired => 'Verification session has expired. Please request a new OTP.';
 
   @override
   String get invalidVerificationCode => 'Invalid verification code.';
@@ -451,8 +446,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get unableToShare => 'Unable to share';
 
   @override
-  String get linkExpired =>
-      'This tracking link has expired or is no longer valid.';
+  String get linkExpired => 'This tracking link has expired or is no longer valid.';
 
   @override
   String get trackingRevoked => 'All tracking links have been revoked.';

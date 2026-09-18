@@ -2,7 +2,7 @@ import express from 'express';
 import { getWebRTCSignaling } from '../sockets/webrtc.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, nearbyLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -36,7 +36,7 @@ router.get('/webrtc/stats', authenticate, userLimiter, requirePolicy('webrtc:vie
 });
 
 // Get nearby peers
-router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:view-nearby'), async (req, res) => {
+router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePolicy('webrtc:view-nearby'), async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
     const parsedLat = parseFiniteNumber(lat);
@@ -75,7 +75,8 @@ router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:vi
     const peers = await signaling.getPeersNearLocation(
       parsedLat,
       parsedLng,
-      parsedRadius
+      parsedRadius,
+      req.user
     );
 
     res.json({
@@ -84,7 +85,7 @@ router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:vi
       count: peers.length
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       error: error.message
     });

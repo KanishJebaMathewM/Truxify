@@ -1,0 +1,2 @@
+# Development-only quality tooling
+ruff==0.16.8

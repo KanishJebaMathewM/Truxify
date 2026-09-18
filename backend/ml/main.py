@@ -199,8 +199,8 @@ class DriverItem(BaseModel):
     max_length_m: float = Field(..., gt=0)
     max_width_m: float = Field(..., gt=0)
     max_height_m: float = Field(..., gt=0)
-    preferred_dest_lat: float = Field(0.0, ge=-90, le=90)
-    preferred_dest_lng: float = Field(0.0, ge=-180, le=180)
+    preferred_dest_lat: Optional[float] = Field(None, ge=-90, le=90)
+    preferred_dest_lng: Optional[float] = Field(None, ge=-180, le=180)
     rating: float = Field(3.0, ge=1, le=5)
 
 
@@ -266,6 +266,7 @@ class PackingInput(BaseModel):
     packages: List[PackageItem]
     truck: TruckDimensions
     delivery_addresses: List[DeliveryAddress]
+    route_start: DeliveryAddress
 
 
 class PackingOutput(BaseModel):
@@ -568,9 +569,16 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
         packages = [pkg.model_dump() for pkg in input.packages]
         truck = input.truck.model_dump()
         addresses = [addr.model_dump() for addr in input.delivery_addresses]
+        route_start = input.route_start.model_dump()
         # 3-D bin packing and nearest-neighbour sequencing are CPU-bound; run
         # off the event loop so large packing jobs cannot stall the service.
-        result = await run_inference(optimise_packing, packages, truck, addresses)
+        result = await run_inference(
+            optimise_packing,
+            packages,
+            truck,
+            addresses,
+            route_start,
+        )
         return PackingOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

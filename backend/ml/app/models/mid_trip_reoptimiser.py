@@ -3,9 +3,12 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
+from utils.osrm_client import get_route_matrix_with_duration
+
 logger = logging.getLogger(__name__)
 
-# Average truck speed assumption for detour time estimation
+# Average speed is retained only by the legacy geometric fallback helper. The
+# recommender itself uses OSRM road durations whenever the route engine is available.
 _AVG_SPEED_KMH = 35.0
 
 
@@ -27,7 +30,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def _route_distance(
     current_location: tuple[float, float], route: List[tuple[float, float]]
 ) -> float:
-    """Return the total distance from the current location through the route."""
+    """Return total geometric distance from current location through route."""
     total_distance = 0.0
     previous = current_location
     for waypoint in route:
@@ -42,7 +45,7 @@ def _best_route_insertion(
     pickup_location: tuple[float, float],
     dropoff_location: tuple[float, float],
 ) -> tuple[float, float]:
-    """Return the minimum route increase and travel distance to the pickup."""
+    """Legacy geometric insertion helper retained for compatibility."""
     baseline_distance = _route_distance(current_location, remaining_route)
     best_extra_distance = float("inf")
     best_pickup_distance = float("inf")
@@ -81,10 +84,7 @@ def _best_route_insertion(
                 dropoff_delta += _haversine(*dropoff_location, *dropoff_after)
                 dropoff_delta -= _haversine(*dropoff_before, *dropoff_after)
 
-            extra_distance = max(
-                baseline_distance + pickup_delta + dropoff_delta - baseline_distance,
-                0.0,
-            )
+            extra_distance = max(pickup_delta + dropoff_delta, 0.0)
             if extra_distance < best_extra_distance:
                 best_extra_distance = extra_distance
                 best_pickup_distance = pickup_distance
@@ -93,6 +93,77 @@ def _best_route_insertion(
         return 0.0, _route_distance(current_location, [pickup_location])
 
     return best_extra_distance, best_pickup_distance
+
+
+def _sequence_total(matrix: List[List[float]], sequence: List[int]) -> float:
+    return sum(matrix[sequence[index]][sequence[index + 1]] for index in range(len(sequence) - 1))
+
+
+def _best_route_insertion_with_matrix(
+    base_route_indices: List[int],
+    pickup_index: int,
+    dropoff_index: int,
+    distance_matrix: List[List[float]],
+    duration_matrix: List[List[float]],
+) -> tuple[float, float, float, float]:
+    """Find the best pickup/dropoff insertion using road distance and duration matrices."""
+    baseline_distance = _sequence_total(distance_matrix, base_route_indices)
+    baseline_duration = _sequence_total(duration_matrix, base_route_indices)
+    route_length = len(base_route_indices) - 1
+
+    best_extra_distance = float("inf")
+    best_extra_duration = float("inf")
+    best_pickup_distance = float("inf")
+    best_pickup_duration = float("inf")
+
+    for pickup_position in range(route_length + 1):
+        augmented = (
+            base_route_indices[: pickup_position + 1]
+            + [pickup_index]
+            + base_route_indices[pickup_position + 1 :]
+        )
+        pickup_position_in_augmented = pickup_position + 1
+        pickup_distance = _sequence_total(
+            distance_matrix,
+            augmented[: pickup_position_in_augmented + 1],
+        )
+        pickup_duration = _sequence_total(
+            duration_matrix,
+            augmented[: pickup_position_in_augmented + 1],
+        )
+
+        for dropoff_position in range(
+            pickup_position_in_augmented + 1,
+            len(augmented) + 1,
+        ):
+            candidate = (
+                augmented[:dropoff_position]
+                + [dropoff_index]
+                + augmented[dropoff_position:]
+            )
+            candidate_distance = _sequence_total(distance_matrix, candidate)
+            candidate_duration = _sequence_total(duration_matrix, candidate)
+            extra_distance = max(candidate_distance - baseline_distance, 0.0)
+            extra_duration = max(candidate_duration - baseline_duration, 0.0)
+
+            if (
+                extra_distance < best_extra_distance
+                or (
+                    math.isclose(extra_distance, best_extra_distance)
+                    and extra_duration < best_extra_duration
+                )
+            ):
+                best_extra_distance = extra_distance
+                best_extra_duration = extra_duration
+                best_pickup_distance = pickup_distance
+                best_pickup_duration = pickup_duration
+
+    return (
+        best_extra_distance,
+        best_extra_duration,
+        best_pickup_distance,
+        best_pickup_duration,
+    )
 
 
 def find_mid_trip_loads(
@@ -107,7 +178,6 @@ def find_mid_trip_loads(
 
     cur_lat = current_location.get("lat", 0.0)
     cur_lng = current_location.get("lng", 0.0)
-
     cap_weight = available_capacity.get("weight_kg", 0.0)
     cap_length = available_capacity.get("length_m", 0.0)
     cap_width = available_capacity.get("width_m", 0.0)
@@ -118,66 +188,83 @@ def find_mid_trip_loads(
         for waypoint in remaining_route
     ]
 
+    candidate_loads = []
+    for load in nearby_loads:
+        if load.get("weight_kg", 0) > cap_weight:
+            continue
+        if load.get("length_m", 0) > cap_length:
+            continue
+        if load.get("width_m", 0) > cap_width:
+            continue
+        if load.get("height_m", 0) > cap_height:
+            continue
+        payment = load.get("payment_inr", 0.0)
+        try:
+            payment = float(payment)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(payment) or payment <= 0.0:
+            continue
+
+        candidate_loads.append(load)
+
+    if not candidate_loads:
+        return {"recommendations": []}
+
+    pickup_locations = [
+        (load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0))
+        for load in candidate_loads
+    ]
+    dropoff_locations = [
+        (load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0))
+        for load in candidate_loads
+    ]
+
+    locations = [
+        (cur_lat, cur_lng),
+        *remaining_route_points,
+        *pickup_locations,
+        *dropoff_locations,
+    ]
+    distance_matrix, duration_matrix = get_route_matrix_with_duration(locations)
+
+    remaining_route_indices = list(range(1, len(remaining_route_points) + 1))
+    base_route_indices = [0] + remaining_route_indices
+    pickup_offset = 1 + len(remaining_route_points)
+    dropoff_offset = pickup_offset + len(candidate_loads)
+
     now = datetime.now(timezone.utc)
     recommendations = []
 
-    for load in nearby_loads:
+    for load_index, load in enumerate(candidate_loads):
         try:
-            if load.get("weight_kg", 0) > cap_weight:
-                continue
-            if load.get("length_m", 0) > cap_length:
-                continue
-            if load.get("width_m", 0) > cap_width:
-                continue
-            if load.get("height_m", 0) > cap_height:
-                continue
+            pickup_lat, pickup_lng = pickup_locations[load_index]
+            dropoff_lat, dropoff_lng = dropoff_locations[load_index]
+            pickup_idx = pickup_offset + load_index
+            dropoff_idx = dropoff_offset + load_index
 
-            payment = load.get("payment_inr", 0.0)
-            try:
-                payment = float(payment)
-            except (TypeError, ValueError):
-                continue
-            if not math.isfinite(payment) or payment <= 0.0:
-                continue
-
-            pickup_lat = load.get("pickup_lat", 0.0)
-            pickup_lng = load.get("pickup_lng", 0.0)
-            dropoff_lat = load.get("dropoff_lat", 0.0)
-            dropoff_lng = load.get("dropoff_lng", 0.0)
-            pickup_location = (pickup_lat, pickup_lng)
-            dropoff_location = (dropoff_lat, dropoff_lng)
-
-            dist_cur_pickup = _haversine(cur_lat, cur_lng, pickup_lat, pickup_lng)
-            detour_km, pickup_route_distance = _best_route_insertion(
-                (cur_lat, cur_lng),
-                remaining_route_points,
-                pickup_location,
-                dropoff_location,
-            )
-            detour_minutes = (
-                detour_km / _AVG_SPEED_KMH * 60.0
-                if _AVG_SPEED_KMH > 0
-                else 0.0
-            )
-
-            try:
-                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
-                if deadline_dt.tzinfo is None:
-                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
-                else:
-                    deadline_dt = deadline_dt.astimezone(timezone.utc)
-
-                travel_hours_to_pickup = (
-                    pickup_route_distance / _AVG_SPEED_KMH
-                    if _AVG_SPEED_KMH > 0
-                    else float("inf")
+            detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = (
+                _best_route_insertion_with_matrix(
+                    base_route_indices,
+                    pickup_idx,
+                    dropoff_idx,
+                    distance_matrix,
+                    duration_matrix,
                 )
-                estimated_pickup_time = now + timedelta(hours=travel_hours_to_pickup)
-                if estimated_pickup_time > deadline_dt:
-                    continue
-            except (ValueError, TypeError):
+            )
+
+            deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+            if deadline_dt.tzinfo is None:
+                deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+            else:
+                deadline_dt = deadline_dt.astimezone(timezone.utc)
+
+            estimated_pickup_time = now + timedelta(minutes=pickup_route_minutes)
+            if estimated_pickup_time > deadline_dt:
                 continue
 
+            dist_cur_pickup = distance_matrix[0][pickup_idx]
+            payment = float(load.get("payment_inr", 0.0))
             if detour_km > 0:
                 earnings_per_km = payment / detour_km
             else:
@@ -207,6 +294,8 @@ def find_mid_trip_loads(
                 }
             )
 
+        except (ValueError, TypeError, KeyError):
+            continue
         except Exception as e:
             logger.warning(
                 "Error scoring load '%s': %s", load.get("load_id", "unknown"), e

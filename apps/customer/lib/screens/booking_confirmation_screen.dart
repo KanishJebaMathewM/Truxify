@@ -556,8 +556,8 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
                                           : _createOrderAndInitiatePayment,
                                     ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -627,8 +627,8 @@ class _UpiPaymentSheet extends StatelessWidget {
                                 context))),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -986,9 +986,7 @@ class _VerificationPendingSheet extends StatelessWidget {
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              id: 'btn_check_payment_status',
-              onPressed: isChecking ? null : onCheckAgain,
+            child: ElevatedButton.icon(              onPressed: isChecking ? null : onCheckAgain,
               icon: isChecking
                   ? const SizedBox(
                       width: 16,
@@ -1008,9 +1006,7 @@ class _VerificationPendingSheet extends StatelessWidget {
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
-              id: 'btn_back_to_bookings',
-              onPressed: isChecking ? null : onBackToBookings,
+            child: OutlinedButton.icon(              onPressed: isChecking ? null : onBackToBookings,
               icon: const Icon(Icons.arrow_back_rounded, size: 18),
               label: const Text('Back to bookings'),
               style: OutlinedButton.styleFrom(
@@ -1095,9 +1091,7 @@ class _UpiIntentErrorSheet extends StatelessWidget {
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              id: 'btn_retry_payment',
-              onPressed: isRetrying ? null : onRetry,
+            child: ElevatedButton.icon(              onPressed: isRetrying ? null : onRetry,
               icon: isRetrying
                   ? const SizedBox(
                       width: 16,

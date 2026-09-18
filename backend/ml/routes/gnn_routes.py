@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.params import Depends as DependsClass
 from pydantic import BaseModel, confloat
 from typing import List, Dict, Any, Optional
 import networkx as nx
@@ -12,9 +13,38 @@ import os
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gnn", tags=["Graph Neural Networks"])
 
-# Initialize GNN components
+# Module-level components for backward-compatibility with tests that monkeypatch them
 builder = GraphNetworkBuilder()
 optimizer = RouteOptimizer()
+_default_module_builder = builder
+_default_module_optimizer = optimizer
+
+
+def get_graph_builder() -> GraphNetworkBuilder:
+    """Provide a fresh, request-scoped GraphNetworkBuilder per request."""
+    return GraphNetworkBuilder()
+
+
+def get_route_optimizer() -> RouteOptimizer:
+    """Provide the shared serving RouteOptimizer instance."""
+    return optimizer
+
+
+def _resolve_builder(builder_arg=None) -> GraphNetworkBuilder:
+    """Resolve the active builder, supporting FastAPI injection, direct test calls, and monkeypatching."""
+    if builder_arg is not None and not isinstance(builder_arg, DependsClass):
+        return builder_arg
+    if builder is not _default_module_builder:
+        return builder
+    return GraphNetworkBuilder()
+
+
+def _resolve_optimizer(optimizer_arg=None) -> RouteOptimizer:
+    """Resolve the active optimizer, supporting FastAPI injection, direct test calls, and monkeypatching."""
+    if optimizer_arg is not None and not isinstance(optimizer_arg, DependsClass):
+        return optimizer_arg
+    return optimizer
+
 
 SUPPORTED_ROUTE_OBJECTIVES = frozenset({
     "time",
@@ -88,15 +118,16 @@ class TrainRequest(BaseModel):
     learning_rate: float = 0.001
 
 
-def _multi_objective_optimization(start, end, graph_data, objectives=None, constraints=None):
+def _multi_objective_optimization(start, end, graph_data, objectives=None, constraints=None, route_optimizer=None):
     """Select a representative route from the optimizer's Pareto frontier."""
+    opt = _resolve_optimizer(route_optimizer)
     requested_objectives = list(objectives) if objectives else ["time", "cost", "fuel"]
     allowed_objectives = {"time", "cost", "fuel", "distance", "congestion"}
     invalid_objectives = [objective for objective in requested_objectives if objective not in allowed_objectives]
     if invalid_objectives:
         raise ValueError(f"Unsupported objectives: {', '.join(invalid_objectives)}")
 
-    frontier = optimizer._find_pareto_routes(
+    frontier = opt._find_pareto_routes(
         start,
         end,
         graph_data,
@@ -127,7 +158,11 @@ def _multi_objective_optimization(start, end, graph_data, objectives=None, const
     return result
 
 @router.post("/build-graph")
-async def build_graph(nodes: List[Node], edges: List[Edge]):
+async def build_graph(
+    nodes: List[Node],
+    edges: List[Edge],
+    graph_builder: GraphNetworkBuilder = Depends(get_graph_builder),
+):
     """Build road network graph"""
     if not nodes:
         raise HTTPException(
@@ -136,11 +171,12 @@ async def build_graph(nodes: List[Node], edges: List[Edge]):
         )
 
     try:
-        graph = builder.build_road_network(
+        active_builder = _resolve_builder(graph_builder)
+        graph = active_builder.build_road_network(
             [node.dict() for node in nodes],
             [edge.dict() for edge in edges]
         )
-        
+
         return {
             'success': True,
             'data': {
@@ -157,25 +193,35 @@ async def build_graph(nodes: List[Node], edges: List[Edge]):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/optimize-route")
-async def optimize_route(request: RouteRequest):
+async def optimize_route(
+    request: RouteRequest,
+    graph_builder: GraphNetworkBuilder = Depends(get_graph_builder),
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     """Optimize route using GNN"""
     validate_route_objectives(request.objectives)
     try:
-        graph = builder.build_road_network(
+        active_builder = _resolve_builder(graph_builder)
+        active_optimizer = _resolve_optimizer(route_optimizer)
+
+        graph = active_builder.build_road_network(
             [node.dict() for node in request.nodes],
             [edge.dict() for edge in request.edges]
         )
-        
-        graph_data = builder.get_pytorch_data()
-        
-        result = optimizer.optimize_route(
+
+        try:
+            graph_data = active_builder.get_pytorch_data(graph)
+        except TypeError:
+            graph_data = active_builder.get_pytorch_data()
+
+        result = active_optimizer.optimize_route(
             request.start_node,
             request.end_node,
             graph_data,
             request.objectives,
             request.constraints
         )
-        
+
         if result:
             return {
                 'success': True,
@@ -195,25 +241,45 @@ async def optimize_route(request: RouteRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/multi-objective")
-async def multi_objective_optimize(request: RouteRequest):
+async def multi_objective_optimize(
+    request: RouteRequest,
+    graph_builder: GraphNetworkBuilder = Depends(get_graph_builder),
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     """Multi-objective route optimization"""
     validate_route_objectives(request.objectives)
     try:
-        graph = builder.build_road_network(
+        active_builder = _resolve_builder(graph_builder)
+        active_optimizer = _resolve_optimizer(route_optimizer)
+
+        graph = active_builder.build_road_network(
             [node.dict() for node in request.nodes],
             [edge.dict() for edge in request.edges]
         )
-        
-        graph_data = builder.get_pytorch_data()
-        
-        result = _multi_objective_optimization(
-            request.start_node,
-            request.end_node,
-            graph_data,
-            objectives=request.objectives,
-            constraints=request.constraints
-        )
-        
+
+        try:
+            graph_data = active_builder.get_pytorch_data(graph)
+        except TypeError:
+            graph_data = active_builder.get_pytorch_data()
+
+        try:
+            result = _multi_objective_optimization(
+                request.start_node,
+                request.end_node,
+                graph_data,
+                objectives=request.objectives,
+                constraints=request.constraints,
+                route_optimizer=active_optimizer,
+            )
+        except TypeError:
+            result = _multi_objective_optimization(
+                request.start_node,
+                request.end_node,
+                graph_data,
+                objectives=request.objectives,
+                constraints=request.constraints,
+            )
+
         if result:
             return {
                 'success': True,
@@ -233,19 +299,23 @@ async def multi_objective_optimize(request: RouteRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
-async def train_model(request: TrainRequest):
+async def train_model(
+    request: TrainRequest,
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     """Train GNN model"""
     try:
+        active_optimizer = _resolve_optimizer(route_optimizer)
         train_data = []
         val_data = []
-        
-        loss = optimizer.train(
+
+        loss = active_optimizer.train(
             train_data,
             val_data,
             request.epochs,
             request.learning_rate
         )
-        
+
         return {
             'success': True,
             'data': {
@@ -261,15 +331,24 @@ async def train_model(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/update-route")
-async def update_route(request: RouteUpdateRequest):
+async def update_route(
+    request: RouteUpdateRequest,
+    graph_builder: GraphNetworkBuilder = Depends(get_graph_builder),
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     """Update route with real-time traffic and reroute over the updated network."""
     try:
-        request_builder = GraphNetworkBuilder()
-        request_builder.build_road_network(
+        active_builder = _resolve_builder(graph_builder)
+        active_optimizer = _resolve_optimizer(route_optimizer)
+
+        graph = active_builder.build_road_network(
             [node.dict() for node in request.nodes],
             [edge.dict() for edge in request.edges]
         )
-        graph_data = request_builder.get_pytorch_data()
+        try:
+            graph_data = active_builder.get_pytorch_data(graph)
+        except TypeError:
+            graph_data = active_builder.get_pytorch_data()
 
         start = request.route[0].get('from') if request.route else None
         end = request.route[-1].get('to') if request.route else None
@@ -279,7 +358,7 @@ async def update_route(request: RouteUpdateRequest):
                 detail="Route must contain at least one edge with 'from' and 'to' fields"
             )
 
-        updated_route = optimizer.real_time_update(
+        updated_route = active_optimizer.real_time_update(
             request.route,
             request.traffic_data,
             graph_data=graph_data,
@@ -301,15 +380,18 @@ async def update_route(request: RouteUpdateRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model/status")
-async def get_model_status():
+async def get_model_status(
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     """Get GNN model status"""
     try:
+        active_optimizer = _resolve_optimizer(route_optimizer)
         return {
             'success': True,
             'data': {
-                'model_loaded': optimizer.model is not None,
-                'device': str(optimizer.device),
-                'parameters': sum(p.numel() for p in optimizer.model.parameters()) if optimizer.model else 0
+                'model_loaded': active_optimizer.model is not None,
+                'device': str(active_optimizer.device),
+                'parameters': sum(p.numel() for p in active_optimizer.model.parameters()) if active_optimizer.model else 0
             },
             'timestamp': datetime.now().isoformat()
         }
@@ -320,11 +402,15 @@ async def get_model_status():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/model/save")
-async def save_model(path: str = "models/gnn_route.pth"):
+async def save_model(
+    path: str = "models/gnn_route.pth",
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     path = os.path.join("models", os.path.basename(path))
     """Save GNN model"""
     try:
-        optimizer.save_model(path)
+        active_optimizer = _resolve_optimizer(route_optimizer)
+        active_optimizer.save_model(path)
         return {
             'success': True,
             'message': f'Model saved to {path}',
@@ -337,11 +423,15 @@ async def save_model(path: str = "models/gnn_route.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/model/load")
-async def load_model(path: str = "models/gnn_route.pth"):
+async def load_model(
+    path: str = "models/gnn_route.pth",
+    route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
+):
     path = os.path.join("models", os.path.basename(path))
     """Load GNN model"""
     try:
-        optimizer.load_model(path)
+        active_optimizer = _resolve_optimizer(route_optimizer)
+        active_optimizer.load_model(path)
         return {
             'success': True,
             'message': f'Model loaded from {path}',

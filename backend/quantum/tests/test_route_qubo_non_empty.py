@@ -90,7 +90,7 @@ def test_route_qubo_scales_connectivity_without_subset_cutoff():
 
     qubo = formatter.formulate_route_optimization(graph)
 
-    variable_names = set(qubo.variables.get_names())
+    variable_names = {variable.name for variable in qubo.variables}
     assert any(name.startswith("flow_") for name in variable_names)
     assert len(variable_names) == len(graph.edges()) + (2 * len(graph.edges()))
 

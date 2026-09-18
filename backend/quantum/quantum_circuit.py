@@ -222,14 +222,10 @@ class QUBOFormatter:
 
             # Solve
             result = optimizer.solve(qubo)
-            qubo_variable_names = qubo.variables.get_names()
-            values_by_name = {
-                name: value for name, value in zip(qubo_variable_names, result.x)
-            }
             
             return {
                 'success': True,
-                'solution': [values_by_name[name] for name in self.variables],
+                'solution': result.x[:len(self.variables)],
                 'objective': result.fval,
                 'variables': self.variables
             }

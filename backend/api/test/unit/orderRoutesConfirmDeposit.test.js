@@ -71,6 +71,20 @@ vi.mock('../../src/lib/redisLock.js', () => ({
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 
+vi.mock('../../src/lib/escrow/escrowLockManager.js', () => ({
+  escrowLockManager: {
+    withLock: vi.fn(async (_orderId, fn) => {
+      const ctx = {
+        currentState: 'funding',
+        transition: vi.fn(async () => ({ success: true })),
+        extend: vi.fn(async () => {}),
+      };
+      return fn(ctx);
+    }),
+    setInitialState: vi.fn(async () => {}),
+  },
+}));
+
 vi.mock('../../src/middleware/auditLog.js', () => ({
   auditLog: () => (_req, _res, next) => next(),
 }));

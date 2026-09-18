@@ -569,177 +569,194 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const orderId = req.params.id;
   const { txHash } = req.body;
 
-  const lockKey = `escrow_lock:${orderId}`;
-  const lock = await acquireLockOrFallback(lockKey, 120000);
-  if (!lock.ok) {
-    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-  }
-
-  let lockValue = null;
   try {
-    // acquireLock throws LockAcquisitionError when Redis is unavailable and
-    // returns null when the lock is already held by another request.
-    lockValue = await acquireLock(lockKey, 120000);
-    if (!lockValue) {
-      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-    }
-
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertCustomerOwnership(order, req.user.id);
-    orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
-    if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
-
-    const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
-    const customerWallet = customerProfile?.polygon_wallet_address ?? null;
-    const bookingId = order.escrow_booking_id || (order.order_display_id ? getEscrowBookingId(order.order_display_id) : orderId);
-
-    // Two-phase acceptance (#5724): once the deposit is verified on-chain we
-    // finalize the driver assignment via accept_bid_tx. If that cannot be
-    // completed the deposit is refunded and the order stays pending.
-    const finalizeAcceptance = async () => {
-      const pending = order.pending_bid_acceptance;
-      if (!pending) return;
-      const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
-        p_bid_id: pending.bid_id,
-        p_order_id: orderId,
-        p_load_id: pending.load_id,
-        p_driver_id: pending.driver_id,
-        p_truck_id: pending.truck_id,
-        p_driver_name: pending.driver_name,
-        p_driver_rating: pending.driver_rating,
-        p_truck_number: pending.truck_number,
-        p_bid_amount: pending.bid_amount,
-        p_order_display_id: pending.order_display_id,
-        p_expected_version: pending.version,
-        p_escrow_booking_id: bookingId,
-      }, req.token ? createUserClient(req.token) ?? supabaseAdmin : supabaseAdmin);
-      if (acceptErr) {
-        logger.error('[confirm-deposit] accept_bid_tx failed:', acceptErr.message);
-        // The refund is authoritative: only claim the deposit was refunded once
-        // the on-chain refund was actually submitted. submitEscrowRefund resolves to
-        // { txHash, bookingId, waitForConfirmation } on success or
-        // { txHash: null, bookingId, error } when the submit fails.
-        let refundResult;
-        try {
-          refundResult = await submitEscrowRefund(order.order_display_id);
-        } catch (refundErr) {
-          logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
-          refundResult = { error: refundErr.message };
-        }
-        let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
-        if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
-          try {
-            await refundResult.waitForConfirmation();
-          } catch (confirmErr) {
-            logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
-            refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
-            refundConfirmed = false;
-          }
-        } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
-          refundConfirmed = false;
-          refundResult = {
-            error: refundResult.error || 'escrow refund confirmation is unavailable',
-            txHash: refundResult.txHash,
-          };
-        }
-
-        if (!refundConfirmed) {
-          // The deposit is still locked on-chain. Keep escrow_booking_id and
-          // pending_bid_acceptance intact and return the order to the 'funding'
-          // state so escrowFundingReconciliation reclaims the deposit; report a
-          // retryable error instead of a false "refunded" success.
-          const refundError = refundResult?.error || 'escrow refund was not submitted';
-          await orderRepository.updateOrder(orderId, {
-            escrow_status: 'funding',
-            escrow_funding_error: `escrow refund pending: ${refundError}`,
-          }).catch((stateErr) => {
-            logger.error('[confirm-deposit] Failed to mark escrow refund pending:', stateErr.message);
-          });
-          throw new DomainError(503, {
-            error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
-            details: `${acceptErr.message}; escrow refund: ${refundError}`,
-          });
-        }
-
-        // Refund confirmed on-chain — safe to release the escrow booking reference.
-        // Also clear pending_bid_acceptance so the order can accept a new bid.
-        await orderRepository.updateOrder(orderId, {
-          pending_bid_acceptance: null,
-        }).catch((clearErr) => {
-          logger.error('[confirm-deposit] Failed to clear pending_bid_acceptance:', clearErr.message);
-        });
-        await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
-          logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
-        });
-        throw new DomainError(409, {
-          error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
-          details: acceptErr.message,
-        });
+    const result = await escrowLockManager.withLock(orderId, async (ctx) => {
+      const order = await orderValidationService.findOrderByIdOrDisplayId(
+        orderId,
+        'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount'
+      );
+      orderValidationService.assertOrderFound(order);
+      orderValidationService.assertCustomerOwnership(order, req.user.id);
+      orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
+      if (order.status === 'cancelled') {
+        throw new DomainError(409, { error: 'Order is already cancelled. Cannot confirm deposit.' });
       }
-      sendPushNotification(
-        pending.driver_id,
-        'Bid Accepted!',
-        `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
-        'order_update',
-        { orderId, orderDisplayId: pending.order_display_id }
-      ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err?.message}`));
-    };
 
-    // Resolve the authoritative expected deposit amount for this order and
-    // cross-check it against the server-written bid context. This must happen
-    // BEFORE any client-supplied value is trusted: the on-chain deposit is
-    // only accepted if it matches the amount the app actually recorded.
-    const resolvedAmount = resolveExpectedDepositAmount(order);
-    if (resolvedAmount.error) {
-      return res.status(422).json({ error: resolvedAmount.error, code: resolvedAmount.code });
-    }
-    const expectedAmountWei = resolvedAmount.expectedAmountWei;
+      // Initialize initial state in Redis state machine if not already tracked
+      if (!ctx.currentState) {
+        await escrowLockManager.setInitialState(orderId, 'funding');
+      }
 
-    const result = await recordDepositTx(
-      bookingId,
-      txHash,
-      customerWallet,
-      order.escrow_driver_wallet ?? null,
-      expectedAmountWei
-    );
+      // Transition to confirming state in the state machine
+      const transitionResult = await ctx.transition('confirming');
+      if (!transitionResult.success) {
+        throw new DomainError(409, { error: 'Invalid state transition. Deposit confirmation already in progress or completed.' });
+      }
 
-    if (result.alreadyFunded) {
+      const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+      const customerWallet = customerProfile?.polygon_wallet_address ?? null;
+      const bookingId = order.escrow_booking_id || (order.order_display_id ? getEscrowBookingId(order.order_display_id) : orderId);
+
+      // Two-phase acceptance (#5724): once the deposit is verified on-chain we
+      // finalize the driver assignment via accept_bid_tx. If that cannot be
+      // completed the deposit is refunded and the order stays pending.
+      const finalizeAcceptance = async () => {
+        const pending = order.pending_bid_acceptance;
+        if (!pending) return;
+
+        // Extend lock TTL for the duration of accept_bid_tx and potential refunds
+        await ctx.extend();
+
+        const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
+          p_bid_id: pending.bid_id,
+          p_order_id: orderId,
+          p_load_id: pending.load_id,
+          p_driver_id: pending.driver_id,
+          p_truck_id: pending.truck_id,
+          p_driver_name: pending.driver_name,
+          p_driver_rating: pending.driver_rating,
+          p_truck_number: pending.truck_number,
+          p_bid_amount: pending.bid_amount,
+          p_order_display_id: pending.order_display_id,
+          p_expected_version: pending.version,
+          p_escrow_booking_id: bookingId,
+        }, req.token ? createUserClient(req.token) ?? supabaseAdmin : supabaseAdmin);
+
+        if (acceptErr) {
+          logger.error('[confirm-deposit] accept_bid_tx failed:', acceptErr.message);
+
+          // Extend lock and transition to refund_pending while holding the lock
+          await ctx.extend();
+          await ctx.transition('refund_pending');
+
+          let refundResult;
+          try {
+            refundResult = await submitEscrowRefund(order.order_display_id);
+          } catch (refundErr) {
+            logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
+            refundResult = { error: refundErr.message };
+          }
+          let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+          if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
+            try {
+              await refundResult.waitForConfirmation();
+            } catch (confirmErr) {
+              logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
+              refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
+              refundConfirmed = false;
+            }
+          } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
+            refundConfirmed = false;
+            refundResult = {
+              error: refundResult.error || 'escrow refund confirmation is unavailable',
+              txHash: refundResult.txHash,
+            };
+          }
+
+          if (!refundConfirmed) {
+            await ctx.transition('failed');
+            const refundError = refundResult?.error || 'escrow refund was not submitted';
+            await orderRepository.updateOrder(orderId, {
+              escrow_status: 'funding',
+              escrow_funding_error: `escrow refund pending: ${refundError}`,
+            }).catch((stateErr) => {
+              logger.error('[confirm-deposit] Failed to mark escrow refund pending:', stateErr.message);
+            });
+            throw new DomainError(503, {
+              error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
+              details: `${acceptErr.message}; escrow refund: ${refundError}`,
+            });
+          }
+
+          // Refund confirmed on-chain — transition to refunded
+          await ctx.transition('refunded');
+          await orderRepository.updateOrder(orderId, {
+            pending_bid_acceptance: null,
+          }).catch((clearErr) => {
+            logger.error('[confirm-deposit] Failed to clear pending_bid_acceptance:', clearErr.message);
+          });
+          await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
+            logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
+          });
+          throw new DomainError(409, {
+            error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
+            details: acceptErr.message,
+          });
+        }
+
+        // Acceptance successful: transition state machine to funded
+        await ctx.transition('funded');
+
+        orderRepository.updateOrderWithFilter(order.id, {
+          pending_bid_acceptance: null,
+        }, [{ op: 'eq', column: 'id', value: order.id }], 'id').catch((err) => {
+          logger.error('[confirm-deposit] Failed to clear pending_bid_acceptance:', err.message);
+        });
+
+        sendPushNotification(
+          pending.driver_id,
+          'Bid Accepted!',
+          `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
+          'order_update',
+          { orderId, orderDisplayId: pending.order_display_id }
+        ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err?.message}`));
+      };
+
+      const resolvedAmount = resolveExpectedDepositAmount(order);
+      if (resolvedAmount.error) {
+        throw new DomainError(422, { error: resolvedAmount.error, code: resolvedAmount.code });
+      }
+      const expectedAmountWei = resolvedAmount.expectedAmountWei;
+
+      const recordResult = await recordDepositTx(
+        bookingId,
+        txHash,
+        customerWallet,
+        order.escrow_driver_wallet ?? null,
+        expectedAmountWei
+      );
+
+      if (recordResult.alreadyFunded) {
+        const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+          escrow_status: 'funded',
+        }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+
+        if (!updateErr && updatedData) {
+          await finalizeAcceptance();
+          return { status: 200, payload: { message: 'Escrow deposit confirmed (recovered).', txHash: recordResult.txHash } };
+        }
+        return { status: 202, payload: { message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: recordResult.txHash } };
+      }
+
+      if (recordResult.error) {
+        throw new DomainError(422, { error: recordResult.error, code: recordResult.code });
+      }
+
       const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
         escrow_status: 'funded',
       }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
-      if (!updateErr && updatedData) {
-        await finalizeAcceptance();
-        return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
+      if (updateErr) {
+        logger.error('[confirm-deposit] DB update failed:', updateErr.message);
+        throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
       }
-      return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
-    }
 
-    if (result.error) {
-      return res.status(422).json({ error: result.error, code: result.code });
-    }
+      if (!updatedData) {
+        logger.error('[confirm-deposit] No row updated — escrow_status may not have been "funding"');
+        throw new DomainError(409, { error: 'Order was not in funding state. Please refresh and try again.' });
+      }
 
-    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-      escrow_status: 'funded',
-    }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+      await finalizeAcceptance();
+      invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache on confirm deposit'));
+      return { status: 200, payload: { message: 'Escrow deposit confirmed', txHash: recordResult.txHash } };
+    });
 
-    if (updateErr) {
-      logger.error('[confirm-deposit] DB update failed:', updateErr.message);
-      return res.status(500).json({ error: 'Database update failed after deposit confirmation. Please contact support.' });
-    }
-
-    if (!updatedData) {
-      logger.error('[confirm-deposit] No row updated — escrow_status may not have been "funding"');
-      return res.status(409).json({ error: 'Order was not in funding state. Please refresh and try again.' });
-    }
-
-    await finalizeAcceptance();
-    invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache on confirm deposit'));
-    res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
+    return res.status(result.status || 200).json(result.payload);
   } catch (err) {
-    if (err instanceof LockAcquisitionError) {
-      // Redis is down — do NOT proceed with the deposit mutation.
+    if (err.code === 'LOCK_UNAVAILABLE' || err.code === 'STATE_MISMATCH' || err.message?.includes('Failed to acquire escrow lock')) {
+      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
+    }
+    if (err instanceof LockAcquisitionError || err.code === 'REDIS_UNAVAILABLE') {
       logger.error('[confirm-deposit] Redis unavailable — refusing deposit confirmation:', err.message);
       return res.status(503).json({ error: 'Payment service temporarily unavailable. Please retry in a moment.' });
     }
@@ -748,85 +765,8 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     }
     logger.error('[confirm-deposit] Exception:', err?.message);
     return res.status(500).json({ error: 'Internal Server Error' });
-  } finally {
-    if (lockValue) {
-      await releaseLock(lockKey, lockValue).catch(() => {});
-    }
-    if (lock && typeof lock.release === 'function') {
-      await lock.release().catch(() => {});
-    }
   }
-}); 
-router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
-     const orderId = req.params.id;
-     
-     try {
-       const result = await escrowLockManager.withLock(orderId, async (ctx) => {
-         // SINGLE READ - no more duplicate readOrder() calls
-         const { data: order, error } = await orderRepository.findOrderById(orderId);
-         if (error || !order) {
-           throw new DomainError(404, { error: 'Order not found' });
-         }
-         
-         // Resolve expected deposit amount once
-         const expectedAmount = resolveExpectedDepositAmount(order);
-         
-         // Transition to confirming state
-         const transitionResult = await ctx.transition('confirming');
-         if (!transitionResult.success) {
-           throw new DomainError(409, { error: 'Invalid state transition' });
-         }
-         
-         // Verify on-chain deposit
-         const depositTx = await recordDepositTx(order, expectedAmount);
-         
-         try {
-           // Execute acceptance RPC (may take time)
-           await finalizeAcceptance(order, depositTx);
-           
-           // Transition to funded
-           await ctx.transition('funded');
-           
-           // Update DB atomically
-           await orderRepository.updateOrder(orderId, {
-             escrow_status: 'funded',
-             deposit_tx_hash: depositTx.hash
-           });
-           
-           return { success: true, txHash: depositTx.hash };
-         } catch (rpcError) {
-           // EXTEND LOCK for refund processing
-           await ctx.extend();
-           
-           // Transition to refund_pending
-           await ctx.transition('refund_pending');
-           
-           // Execute refund WHILE HOLDING LOCK
-           const refundResult = await submitEscrowRefund(orderId, depositTx);
-           
-           // Transition to refunded
-           await ctx.transition('refunded');
-           
-           await orderRepository.updateOrder(orderId, {
-             escrow_status: 'refunded',
-             refund_tx_hash: refundResult.txHash
-           });
-           
-           throw new DomainError(500, { 
-             error: 'Acceptance failed, refund processed',
-             refundTxHash: refundResult.txHash 
-           });
-         }
-       }, { 
-         expectedState: 'funding',
-         targetState: 'confirming'
-       });
-       
-       res.json(result);
-     } catch (err) {
-       next(err);
-     }
-   });
+});
 
 
 //  ============================================================================

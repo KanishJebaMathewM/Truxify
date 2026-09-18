@@ -16,7 +16,7 @@ const requireAuthorization = (resourceType, action, idParam = 'id') => {
             return res.status(400).json({ error: 'Resource ID is required for authorization check' });
         }
 
-        let resource = null;
+        let resource;
 
         try {
             if (resourceType === 'orders') {

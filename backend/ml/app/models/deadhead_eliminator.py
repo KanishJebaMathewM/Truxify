@@ -56,6 +56,25 @@ def _to_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _validate_coordinate(value: object, field_name: str, minimum: float, maximum: float) -> float:
+    """Return a finite coordinate or raise a structured validation error."""
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"{field_name} must be finite")
+    if numeric_value < minimum or numeric_value > maximum:
+        raise ValueError(
+            f"{field_name} must be between {minimum} and {maximum}"
+        )
+    return numeric_value
+
+
 def _osrm_enabled() -> bool:
     return os.getenv("TRUXIFY_ML_USE_OSRM", "true").strip().lower() not in {"0", "false", "no", "off"}
 
@@ -141,8 +160,12 @@ def find_return_loads(
     if not available_loads:
         return {"recommendations": []}
 
-    dest_lat = driver_destination.get("lat", 0.0)
-    dest_lng = driver_destination.get("lng", 0.0)
+    dest_lat = _validate_coordinate(
+        driver_destination.get("lat"), "driver_destination.lat", -90.0, 90.0
+    )
+    dest_lng = _validate_coordinate(
+        driver_destination.get("lng"), "driver_destination.lng", -180.0, 180.0
+    )
     max_weight = truck_specs.get("max_weight_kg", 0.0)
     max_length = truck_specs.get("max_length_m", 0.0)
     max_width = truck_specs.get("max_width_m", 0.0)
@@ -153,6 +176,26 @@ def find_return_loads(
     except (ValueError, TypeError):
         logger.warning("Invalid arrival_time '%s'; using current time", arrival_time)
         arrival_dt = datetime.now(timezone.utc)
+
+    validated_loads = []
+    for load in available_loads:
+        load_id = load.get("load_id", "unknown")
+        validated_load = dict(load)
+        validated_load["origin_lat"] = _validate_coordinate(
+            load.get("origin_lat"), f"load {load_id}.origin_lat", -90.0, 90.0
+        )
+        validated_load["origin_lng"] = _validate_coordinate(
+            load.get("origin_lng"), f"load {load_id}.origin_lng", -180.0, 180.0
+        )
+        validated_load["dest_lat"] = _validate_coordinate(
+            load.get("dest_lat"), f"load {load_id}.dest_lat", -90.0, 90.0
+        )
+        validated_load["dest_lng"] = _validate_coordinate(
+            load.get("dest_lng"), f"load {load_id}.dest_lng", -180.0, 180.0
+        )
+        validated_loads.append(validated_load)
+
+    available_loads = validated_loads
 
     route_durations = _fetch_pickup_route_durations(
         {"lat": dest_lat, "lng": dest_lng},
@@ -171,10 +214,10 @@ def find_return_loads(
             if load.get("height_m", 0) > max_height:
                 continue
 
-            origin_lat = load.get("origin_lat", 0.0)
-            origin_lng = load.get("origin_lng", 0.0)
-            load_dest_lat = load.get("dest_lat", 0.0)
-            load_dest_lng = load.get("dest_lng", 0.0)
+            origin_lat = load["origin_lat"]
+            origin_lng = load["origin_lng"]
+            load_dest_lat = load["dest_lat"]
+            load_dest_lng = load["dest_lng"]
 
             distance_to_pickup = _haversine(dest_lat, dest_lng, origin_lat, origin_lng)
             load_distance = _haversine(origin_lat, origin_lng, load_dest_lat, load_dest_lng)

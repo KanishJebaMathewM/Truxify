@@ -1,10 +1,16 @@
 import logging
 import math
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
+from typing import Any, Dict, List
+
+import requests
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
+_OSRM_TIMEOUT_SECONDS = 1.5
+_FALLBACK_AVG_SPEED_KMH = 40.0
 _EARTH_RADIUS_KM = 6371.0
 
 _DEFAULT_FUEL_PRICE_INR_PER_L = 100.0
@@ -47,6 +53,57 @@ def _positive_cost(value: object, name: str, default: float, *, allow_zero: bool
     return numeric_value
 
 
+def _osrm_enabled() -> bool:
+    return os.getenv("TRUXIFY_ML_USE_OSRM", "true").strip().lower() not in {
+        "0", "false", "no", "off"
+    }
+
+
+def _fetch_pickup_route_durations(
+    driver_destination: Dict[str, float],
+    available_loads: List[Dict[str, Any]],
+) -> List[float | None] | None:
+    """Fetch road travel durations from the driver's destination to load pickups."""
+    if not _osrm_enabled() or not available_loads:
+        return None
+
+    coordinates = [
+        f"\${driver_destination['lng']},\${driver_destination['lat']}"
+    ] + [
+        f"\${load['origin_lng']},\${load['origin_lat']}"
+        for load in available_loads
+    ]
+    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
+    url = f"\${base_url}/table/v1/driving/{';'.join(coordinates)}"
+    destination_indexes = ";".join(str(index) for index in range(1, len(coordinates)))
+
+    try:
+        response = requests.get(
+            url,
+            params={
+                "sources": "0",
+                "destinations": destination_indexes,
+                "annotations": "duration",
+            },
+            timeout=_OSRM_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        durations = payload.get("durations") if isinstance(payload, dict) else None
+        if (
+            not isinstance(durations, list)
+            or len(durations) != 1
+            or not isinstance(durations[0], list)
+            or len(durations[0]) != len(available_loads)
+        ):
+            logger.warning("OSRM returned an invalid deadhead duration matrix")
+            return None
+        return durations[0]
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning("OSRM deadhead duration lookup failed: %s", exc)
+        return None
+
+
 MAX_DETOUR_FRACTION = 0.5
 
 
@@ -56,12 +113,7 @@ def find_return_loads(
     arrival_time: str,
     available_loads: List[Dict],
 ) -> dict:
-    """Find return loads and rank them by incremental net profit.
-
-    The ranking contract is based on incremental economics, not gross revenue:
-    ``net_profit = payment - fuel - toll - operating_cost``. A load with a
-    non-positive incremental profit is not recommended.
-    """
+    """Find return loads and rank them by incremental net profit."""
     if not available_loads:
         return {"recommendations": []}
 
@@ -101,10 +153,13 @@ def find_return_loads(
         logger.warning("Invalid arrival_time '%s'; using current time", arrival_time)
         arrival_dt = datetime.now(timezone.utc)
 
-    avg_speed_kmh = 40.0
+    route_durations = _fetch_pickup_route_durations(
+        {"lat": dest_lat, "lng": dest_lng},
+        available_loads,
+    )
     recommendations = []
 
-    for load in available_loads:
+    for index, load in enumerate(available_loads):
         try:
             if load.get("weight_kg", 0) > max_weight:
                 continue
@@ -120,8 +175,12 @@ def find_return_loads(
             load_dest_lat = load.get("dest_lat", 0.0)
             load_dest_lng = load.get("dest_lng", 0.0)
 
-            distance_to_pickup = _haversine(dest_lat, dest_lng, origin_lat, origin_lng)
-            load_distance = _haversine(origin_lat, origin_lng, load_dest_lat, load_dest_lng)
+            distance_to_pickup = _haversine(
+                dest_lat, dest_lng, origin_lat, origin_lng
+            )
+            load_distance = _haversine(
+                origin_lat, origin_lng, load_dest_lat, load_dest_lng
+            )
             detour_km = distance_to_pickup
 
             try:
@@ -131,7 +190,21 @@ def find_return_loads(
             except (ValueError, TypeError):
                 continue
 
-            travel_hours = distance_to_pickup / avg_speed_kmh
+            route_duration_seconds = None
+            if route_durations is not None:
+                candidate_duration = route_durations[index]
+                if candidate_duration is None:
+                    route_duration_seconds = float("inf")
+                elif isinstance(candidate_duration, (int, float)) and math.isfinite(candidate_duration):
+                    route_duration_seconds = max(0.0, float(candidate_duration))
+                else:
+                    route_duration_seconds = float("inf")
+
+            travel_hours = (
+                route_duration_seconds / 3600.0
+                if route_duration_seconds is not None
+                else distance_to_pickup / _FALLBACK_AVG_SPEED_KMH
+            )
             estimated_arrival = arrival_dt + timedelta(hours=travel_hours)
             if estimated_arrival > deadline_dt:
                 continue
@@ -163,33 +236,35 @@ def find_return_loads(
             proximity_score = max(
                 0.0, 1.0 - distance_to_pickup / max_proximity_km
             ) * 30.0
-
-            profit_per_km = incremental_profit / total_trip_km if total_trip_km > 0 else 0.0
+            profit_per_km = (
+                incremental_profit / total_trip_km if total_trip_km > 0 else 0.0
+            )
             profitability_score = min(profit_per_km / 30.0, 1.0) * 45.0
-
             time_buffer_hours = (
                 deadline_dt - estimated_arrival
             ).total_seconds() / 3600.0
             time_score = min(time_buffer_hours / 12.0, 1.0) * 25.0
-
             match_score = profitability_score + proximity_score + time_score
 
-            recommendations.append({
-                "load_id": load.get("load_id", ""),
-                "distance_to_pickup_km": round(distance_to_pickup, 2),
-                "match_score": round(match_score, 2),
-                "detour_km": round(detour_km, 2),
-                "estimated_earnings": round(payment, 2),
-                "estimated_cost_inr": round(incremental_cost, 2),
-                "estimated_profit_inr": round(incremental_profit, 2),
-                "profit_per_km": round(profit_per_km, 2),
-            })
-
+            recommendations.append(
+                {
+                    "load_id": load.get("load_id", ""),
+                    "distance_to_pickup_km": round(distance_to_pickup, 2),
+                    "match_score": round(match_score, 2),
+                    "detour_km": round(detour_km, 2),
+                    "estimated_earnings": round(payment, 2),
+                    "estimated_cost_inr": round(incremental_cost, 2),
+                    "estimated_profit_inr": round(incremental_profit, 2),
+                    "profit_per_km": round(profit_per_km, 2),
+                }
+            )
         except ValueError:
             raise
         except Exception as e:
             logger.warning(
-                "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
+                "Error scoring load '%s': %s",
+                load.get("load_id", "unknown"),
+                e,
             )
             continue
 

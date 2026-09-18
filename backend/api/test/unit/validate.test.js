@@ -88,6 +88,46 @@ describe('validateBody', () => {
 
     expect(req.body).toEqual({ name: 'Bob', age: 25 });
   });
+
+  it('returns 400 when request body is missing', () => {
+    const mw = validateBody(testSchema);
+    const req = { body: undefined, requestId: 'req-1' };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    mw(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Request body is required',
+    });
+  });
+
+  it('returns custom schema error messages', () => {
+    const schema = z.object({
+      name: z.string({
+        error: 'Name must be a string',
+      }),
+    });
+    const mw = validateBody(schema);
+    const req = { body: { name: 123 }, requestId: 'req-1' };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    mw(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Validation failed',
+      details: expect.arrayContaining([
+        expect.objectContaining({
+          message: 'Name must be a string',
+        }),
+      ]),
+    }));
+  });
 });
 
 describe('validateParams', () => {
@@ -188,6 +228,63 @@ describe('validateArray', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       error: 'Array validation failed',
+    }));
+  });
+
+  it('validates nested objects recursively', () => {
+    const itemSchema = z.object({
+      name: z.string(),
+      tags: z.array(z.string()),
+    });
+    const mw = validateArray(itemSchema);
+    const req = {
+      body: [
+        { name: 'Alice', tags: ['admin', 'user'] },
+        { name: 'Bob', tags: ['user'] },
+      ],
+    };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    mw(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(req.body).toEqual([
+      { name: 'Alice', tags: ['admin', 'user'] },
+      { name: 'Bob', tags: ['user'] },
+    ]);
+  });
+
+  it('returns nested field errors for invalid array items', () => {
+    const itemSchema = z.object({
+      name: z.string(),
+      tags: z.array(z.object({
+        label: z.string(),
+      })),
+    });
+    const mw = validateArray(itemSchema);
+    const req = {
+      body: [
+        {
+          name: 'Alice',
+          tags: [{ label: 123 }],
+        },
+      ],
+    };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    mw(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'Array validation failed',
+      details: expect.arrayContaining([
+        expect.objectContaining({
+          field: 'tags.0.label',
+        }),
+      ]),
     }));
   });
 });

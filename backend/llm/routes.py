@@ -27,7 +27,6 @@ llm_service = LLMService()
 class QueryRequest(BaseModel):
     query: str
     language: Optional[str] = 'en'
-    user_id: Optional[str] = None
 
 class DocumentRequest(BaseModel):
     documents: List[str]
@@ -36,15 +35,14 @@ class DocumentRequest(BaseModel):
 @router.post("/query")
 async def process_query(
     request: QueryRequest,
-    current_user_id: str = Depends(require_user)
+    current_user_id: str = Depends(require_rag_read)
 ):
     """Process driver query with LLM"""
     try:
-        user_id = request.user_id or current_user_id
         result = await llm_service.process_query(
             request.query,
             request.language,
-            user_id
+            current_user_id
         )
         return {
             'success': True,

@@ -278,6 +278,16 @@ describe('Load Offers Routes Integration Tests', () => {
       expect(res.body.error).toBe('destination too long (max 200 chars)');
     });
 
+    it('rejects repeated pickup_location filters instead of taking the first value', async () => {
+      const res = await request(buildApp())
+        .get('/api/loads?pickup_location=Chennai&pickup_location=Mumbai')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Repeated pickup_location parameters are not allowed');
+      expect(m.calls.find(call => call.table === 'load_offers')).toBeUndefined();
+    });
+
     it('rejects repeated numeric filters instead of accepting an array', async () => {
       const res = await request(buildApp())
         .get('/api/loads?min_price=100&min_price=200')

@@ -94,7 +94,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { getAdminClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -111,7 +111,7 @@ router.use(userLimiter);
 // anon-key client resolves every read to empty and every write to a denial.
 // User-scoped handlers query through the caller's authenticated client;
 // admin handlers use the service-role client so they can see all tickets.
-const adminDb = supabaseAdmin || supabase;
+const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
 
 

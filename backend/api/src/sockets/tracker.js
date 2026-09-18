@@ -805,15 +805,15 @@ export async function isMessageRateLimited(ws) {
 }
 
 export async function handleTrackingMessage(ws, message, req) {
+  // Any incoming message means the connection is alive
+  ws.isAlive = true;
+
   if (await isMessageRateLimited(ws)) {
     ws.send(JSON.stringify({ error: 'Rate limit exceeded: too many messages per second', code: 429, retryAfter: 1 }));
     return;
   }
 
   const messageText = message.toString();
-  
-  // Any incoming message means the connection is alive
-  ws.isAlive = true;
 
   if (messageText === 'ping') {
     ws.isAlive = true;

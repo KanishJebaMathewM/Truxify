@@ -52,6 +52,7 @@ ML_ROUTE_MODULES: list[tuple[str, str]] = [
 
 
 
+
 def register_ml_routers(app: "FastAPI") -> list[str]:
     """Dynamically import and register ML route modules on *app*.
 

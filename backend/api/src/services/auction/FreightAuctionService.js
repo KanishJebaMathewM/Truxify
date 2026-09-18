@@ -2,7 +2,13 @@ import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import { acquireLockOrFallback } from '../../lib/lockFallback.js';
 import { acquireDistributedLock } from '../../lib/redisLock.js';
-import { redisClient } from '../../config/db.js';
+import { redisClient, supabaseAdmin } from '../../config/db.js';
+import { OrderRepository } from '../../repositories/orderRepository.js';
+
+// Redis key prefix for persisted auction records.
+// Each auction is stored as a JSON string at key: AUCTION_KEY_PREFIX + loadOfferId
+const AUCTION_KEY_PREFIX = 'auction:state:';
+const AUCTION_TTL_S = 24 * 60 * 60; // 24 hours
 
 export const AUCTION_STATES = Object.freeze({
   AUCTION_OPEN: 'AUCTION_OPEN',
@@ -26,8 +32,48 @@ export const AUCTION_CONFIG = Object.freeze({
 
 export class FreightAuctionService {
   constructor(options = {}) {
-    this.auctions = new Map(); // In-memory state store (backed by Redis cache when available)
-    this.orderRepository = options.orderRepository || null;
+    // Process-local map used ONLY when Redis is unavailable (single-instance fallback).
+    // When Redis is configured, all state is read/written there so every instance
+    // observes the same auction — preventing split-brain double-settlement.
+    this._localAuctions = new Map();
+    this.orderRepository =
+      options.orderRepository ||
+      (supabaseAdmin ? new OrderRepository(supabaseAdmin) : null);
+  }
+
+  get auctions() {
+    return this._localAuctions;
+  }
+
+  // ─── Redis-backed state helpers ───────────────────────────────────────────
+
+  async _getAuction(loadOfferId) {
+    if (redisClient) {
+      try {
+        const raw = await redisClient.get(AUCTION_KEY_PREFIX + loadOfferId);
+        return raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        logger.warn({ err, loadOfferId }, '[FreightAuction] Redis read failed; using local fallback');
+      }
+    }
+    return this._localAuctions.get(loadOfferId) ?? null;
+  }
+
+  async _setAuction(loadOfferId, auction) {
+    if (redisClient) {
+      try {
+        await redisClient.set(
+          AUCTION_KEY_PREFIX + loadOfferId,
+          JSON.stringify(auction),
+          'EX',
+          AUCTION_TTL_S
+        );
+        return;
+      } catch (err) {
+        logger.warn({ err, loadOfferId }, '[FreightAuction] Redis write failed; using local fallback');
+      }
+    }
+    this._localAuctions.set(loadOfferId, auction);
   }
 
   /**
@@ -48,7 +94,10 @@ export class FreightAuctionService {
     const priceRatio = Math.max(0, 1 - (bidAmount / reservePrice));
     
     // Normalized driver reputation component (0 to 1)
-    const clampedRating = Math.max(0, Math.min(100, Number(driverRating) || 80));
+    // Use Number.isFinite to distinguish a genuine 0 rating from undefined/NaN,
+    // so a 0-rated driver doesn't silently receive the 80-point default.
+    const numericRating = Number(driverRating);
+    const clampedRating = Math.max(0, Math.min(100, Number.isFinite(numericRating) ? numericRating : 80));
     const reputationScore = clampedRating / 100;
     
     // Non-linear proximity penalty curve (1 at 0km detour, decreases with distance)
@@ -86,8 +135,8 @@ export class FreightAuctionService {
     }
 
     try {
-      if (this.auctions.has(loadOfferId)) {
-        const existing = this.auctions.get(loadOfferId);
+      const existing = await this._getAuction(loadOfferId);
+      if (existing) {
         if ([AUCTION_STATES.AUCTION_OPEN, AUCTION_STATES.SOFT_CLOSE_EXTENDED].includes(existing.status)) {
           throw new Error(`Auction for load ${loadOfferId} is already open`);
         }
@@ -114,7 +163,7 @@ export class FreightAuctionService {
         settlementPrice: null,
       };
 
-      this.auctions.set(loadOfferId, auctionRecord);
+      await this._setAuction(loadOfferId, auctionRecord);
       logger.info({ loadOfferId, reservePrice, scheduledCloseAt }, '[FreightAuction] Auction opened successfully');
       return auctionRecord;
     } finally {
@@ -143,7 +192,7 @@ export class FreightAuctionService {
     }
 
     try {
-      const auction = this.auctions.get(loadOfferId);
+      const auction = await this._getAuction(loadOfferId);
       if (!auction) {
         throw new Error(`No active auction found for load ${loadOfferId}`);
       }
@@ -163,16 +212,7 @@ export class FreightAuctionService {
         throw new Error('Driver already has an active bid in this auction');
       }
 
-      // 2. Driver Solvency & Capacity Reservation Lock
-      // Atomically lock driver capacity for this load with TTL covering the remaining auction window
-      const remainingSeconds = Math.max(60, Math.ceil((auction.currentCloseAt - now) / 1000));
-      const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
-      const collateralLock = await acquireDistributedLock(collateralKey, remainingSeconds);
-      if (!collateralLock.acquired) {
-        throw new Error('Driver already has a conflicting collateral or capacity reservation for this auction');
-      }
-
-      // 3. Compute multi-criteria utility score
+      // 2. Compute multi-criteria utility score
       const utilityScore = this.calculateUtilityScore({
         bidAmount,
         reservePrice: auction.reservePrice,
@@ -180,11 +220,15 @@ export class FreightAuctionService {
         detourKm,
       });
 
-      // 4. Anti-Sniping Soft-Close Window Evaluation
+      // 3. Anti-Sniping Soft-Close Window Evaluation
+      // Pre-compute whether an extension is warranted so the collateral lock TTL
+      // covers the fully extended closing time (addressing CodeRabbit comment 7).
       let antiSnipingTriggered = false;
+      let effectiveCloseAt = auction.currentCloseAt;
+      let newExtensionsCount = auction.extensionsCount;
       const timeRemainingMs = auction.currentCloseAt - now;
+
       if (timeRemainingMs <= auction.antiSnipingWindowMs) {
-        // Evaluate if this bid is competitive (beats the current best bid or improves pricing)
         const currentBestBid = auction.bids.length > 0
           ? auction.bids.reduce((prev, curr) => (curr.utilityScore > prev.utilityScore ? curr : prev), auction.bids[0])
           : null;
@@ -195,16 +239,31 @@ export class FreightAuctionService {
           const extendedCloseAt = Math.min(auction.currentCloseAt + auction.extensionMs, maxAllowedClose);
 
           if (extendedCloseAt > auction.currentCloseAt) {
-            auction.currentCloseAt = extendedCloseAt;
-            auction.status = AUCTION_STATES.SOFT_CLOSE_EXTENDED;
-            auction.extensionsCount += 1;
+            effectiveCloseAt = extendedCloseAt;
+            newExtensionsCount += 1;
             antiSnipingTriggered = true;
-            logger.info(
-              { loadOfferId, driverId, extendedCloseAt, extensionsCount: auction.extensionsCount },
-              '[FreightAuction] Anti-sniping soft-close window extended'
-            );
           }
         }
+      }
+
+      // 4. Driver Solvency & Capacity Reservation Lock
+      // Acquire lock with TTL covering the (potentially extended) auction close time.
+      const remainingSeconds = Math.max(60, Math.ceil((effectiveCloseAt - now) / 1000));
+      const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
+      const collateralLock = await acquireDistributedLock(collateralKey, remainingSeconds);
+      if (!collateralLock.acquired) {
+        throw new Error('Driver already has a conflicting collateral or capacity reservation for this auction');
+      }
+
+      // Apply anti-sniping state update now that driver collateral is locked
+      if (antiSnipingTriggered) {
+        auction.currentCloseAt = effectiveCloseAt;
+        auction.status = AUCTION_STATES.SOFT_CLOSE_EXTENDED;
+        auction.extensionsCount = newExtensionsCount;
+        logger.info(
+          { loadOfferId, driverId, extendedCloseAt: effectiveCloseAt, extensionsCount: auction.extensionsCount },
+          '[FreightAuction] Anti-sniping soft-close window extended'
+        );
       }
 
       const bidRecord = {
@@ -221,9 +280,40 @@ export class FreightAuctionService {
 
       auction.bids.push(bidRecord);
 
+      // 5. Durable Bid Persistence: coordinate with orderRepository (load_bids table)
+      // If persistence fails, roll back the in-memory/cache auction bid and release collateral lock.
+      let dbBid = null;
+      if (this.orderRepository) {
+        try {
+          const { data, error: persistErr } = await this.orderRepository.createBid({
+            load_id: loadOfferId,
+            driver_id: driverId,
+            bid_amount: bidAmount,
+            status: 'pending',
+          });
+
+          if (persistErr) {
+            auction.bids.pop();
+            await collateralLock.release();
+            throw new Error(`Failed to persist bid to database: ${persistErr.message || 'Database error'}`);
+          }
+          dbBid = data;
+          if (data?.id) {
+            bidRecord.dbBidId = data.id;
+          }
+        } catch (err) {
+          auction.bids.pop();
+          await collateralLock.release();
+          throw err;
+        }
+      }
+
+      await this._setAuction(loadOfferId, auction);
+
       return {
         success: true,
         bid: bidRecord,
+        dbBid,
         auctionStatus: auction.status,
         currentCloseAt: auction.currentCloseAt,
         antiSnipingTriggered,
@@ -245,7 +335,7 @@ export class FreightAuctionService {
     }
 
     try {
-      const auction = this.auctions.get(loadOfferId);
+      const auction = await this._getAuction(loadOfferId);
       if (!auction) {
         throw new Error(`Auction for load ${loadOfferId} not found`);
       }
@@ -288,19 +378,30 @@ export class FreightAuctionService {
       const winningBid = sortedBids[0];
 
       // Second-Price Reverse Auction Settlement:
-      // Winning carrier receives either the second-best price (incentivizing truthful bidding)
-      // or their own bid if only 1 bidder or if second bid is higher.
+      // The winner pays the second-lowest price (critical price), not their own bid.
+      // Critical price = the lowest qualifying bid price among all non-winning bids,
+      // capped at the reserve ceiling. We sort by bidAmount ASC to find this, which
+      // is independent of the utility-ranking used to choose the winner.
       let settlementPrice = winningBid.bidAmount;
       if (sortedBids.length >= 2) {
-        const secondBestBid = sortedBids[1];
-        // Settle at second-lowest bid or reserve ceiling
-        settlementPrice = Math.min(auction.reservePrice, Math.max(winningBid.bidAmount, secondBestBid.bidAmount));
+        // Select the second-lowest bid AMOUNT (price-ranked), not sortedBids[1]
+        // which is utility-ranked and may not be the cheapest remaining bid.
+        const losingBidAmounts = sortedBids.slice(1).map(b => b.bidAmount);
+        const secondLowestPrice = Math.min(...losingBidAmounts);
+        // Winner pays whichever is lower: reserve ceiling or the second-lowest competitor price.
+        // winningBid.bidAmount is the floor (winner cannot pay less than their own bid).
+        settlementPrice = Math.min(
+          auction.reservePrice,
+          Math.max(winningBid.bidAmount, secondLowestPrice)
+        );
       }
 
       auction.winningBid = winningBid;
       auction.settlementPrice = settlementPrice;
       auction.status = AUCTION_STATES.SETTLED;
       auction.settledAt = now;
+
+      await this._setAuction(loadOfferId, auction);
 
       // Release collateral locks for all losing carriers
       const losingBids = sortedBids.slice(1);
@@ -327,7 +428,9 @@ export class FreightAuctionService {
    * Fetch current public state of the auction.
    */
   getAuctionStatus(loadOfferId) {
-    const auction = this.auctions.get(loadOfferId);
+    // Note: this is a synchronous read from the local map for fast status checks.
+    // Callers requiring cross-instance consistency should use _getAuction() instead.
+    const auction = this._localAuctions.get(loadOfferId);
     if (!auction) return null;
 
     const now = Date.now();

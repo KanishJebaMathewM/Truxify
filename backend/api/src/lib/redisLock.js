@@ -206,17 +206,49 @@ export async function withLockRenewal(resourceKey, lockValue, ttlMs, asyncFn, in
 
   const renewalIntervalMs = Math.max(Math.min(intervalMs, Math.floor(ttlMs / 2)), 1_000);
 
-  const timer = setInterval(() => {
-    void renewLock(resourceKey, lockValue, ttlMs);
+  // AbortController lets us signal the protected operation to stop if the lock
+  // is lost mid-execution (renewal returns false = another holder now owns it).
+  const ac = new AbortController();
+  const { signal } = ac;
+
+  const timer = setInterval(async () => {
+    const renewed = await renewLock(resourceKey, lockValue, ttlMs);
+    if (!renewed) {
+      // Lock ownership lost — stop the renewal loop and abort the operation.
+      clearInterval(timer);
+      logger.error(
+        { resourceKey },
+        '[RedisLock] Lock renewal failed: ownership lost. Aborting protected operation.'
+      );
+      ac.abort();
+    }
   }, renewalIntervalMs);
   timer.unref?.();
 
   try {
-    return await asyncFn();
+    const result = await asyncFn(signal);
+    // If the lock was lost after asyncFn resolved, surface it before returning.
+    if (signal.aborted) {
+      throw new LockAcquisitionError(
+        resourceKey,
+        'Lock ownership was lost during execution \u2014 protected operation aborted'
+      );
+    }
+    return result;
+  } catch (err) {
+    if (signal.aborted && !(err instanceof LockAcquisitionError)) {
+      // Wrap the raw AbortError in a domain-specific error.
+      throw new LockAcquisitionError(
+        resourceKey,
+        'Lock ownership was lost during execution \u2014 protected operation aborted'
+      );
+    }
+    throw err;
   } finally {
     clearInterval(timer);
   }
 }
+
 
 /**
  * Releases a distributed lock **only if** we still own it.

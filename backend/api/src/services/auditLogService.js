@@ -12,16 +12,14 @@ const DEAD_LETTER_PATH =
 const STREAM_NAME = 'truxify:audit_events';
 
 /**
- * Connect to Redis if not already connected
+ * Returns true if the shared ioredis client is ready to accept commands.
+ * ioredis manages reconnection automatically — no manual connect() call needed.
  */
-async function connectRedis() {
-  if (redisClient && !redisClient.isOpen) {
-    try {
-      await redisClient.connect();
-    } catch (err) {
-      logger.error({ err }, '[AuditLog] Failed to connect to Redis');
-    }
-  }
+function isRedisReady() {
+  if (!redisClient) return false;
+  // ioredis exposes .status ('connecting'|'connect'|'ready'|'end'|etc.)
+  // node-redis exposes .isOpen — check for ioredis 'ready' status.
+  return redisClient.status === 'ready';
 }
 
 /**
@@ -53,9 +51,7 @@ async function deadLetterAuditEntry(record, reason) {
  */
 async function logToRedisStream(eventData) {
   try {
-    await connectRedis();
-    
-    if (!redisClient || !redisClient.isOpen) {
+    if (!isRedisReady()) {
       logger.warn('[AuditLog] Redis client not available — skipping stream write');
       return;
     }
@@ -70,7 +66,11 @@ async function logToRedisStream(eventData) {
       idempotencyKey: eventData.idempotencyKey || `${Date.now()}-${Math.random()}`,
     };
 
-    await redisClient.xAdd(STREAM_NAME, '*', payload);
+    // ioredis xadd: xadd(key, id, field, value, [field, value, ...])
+    await redisClient.xadd(
+      STREAM_NAME, '*',
+      ...Object.entries(payload).flat()
+    );
   } catch (err) {
     logger.error(
       { err },
@@ -295,33 +295,37 @@ class AuditLogService {
    */
   async readFromStream(consumerGroup = 'audit-processors', consumerName = 'worker-1', count = 10) {
     try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen) {
+      if (!isRedisReady()) {
         logger.warn('[AuditLog] Redis client not available for stream reading');
         return [];
       }
 
-      // Try to read from consumer group first
+      // ioredis xreadgroup: XREADGROUP GROUP group consumer COUNT count STREAMS key id
       try {
-        const messages = await redisClient.xReadGroup(
-          consumerGroup,
-          consumerName,
-          { key: STREAM_NAME, id: '>' },
-          { COUNT: count }
+        const messages = await redisClient.xreadgroup(
+          'GROUP', consumerGroup, consumerName,
+          'COUNT', count,
+          'STREAMS', STREAM_NAME, '>'
         );
         
         if (messages && messages[0]) {
-          return messages[0].messages.map(msg => ({
-            id: msg.id,
-            data: msg.message,
+          const [, entries] = messages[0];
+          return entries.map(([id, fields]) => ({
+            id,
+            data: Object.fromEntries(
+              fields.reduce((acc, v, i) => {
+                if (i % 2 === 0) acc.push([v, fields[i + 1]]);
+                return acc;
+              }, [])
+            ),
           }));
         }
       } catch (groupErr) {
         // If consumer group doesn't exist, create it and try again
         if (groupErr.message.includes('NOGROUP')) {
           try {
-            await redisClient.xGroupCreate(STREAM_NAME, consumerGroup, '0', { MKSTREAM: true });
+            // ioredis xgroup: XGROUP CREATE key group id [MKSTREAM]
+            await redisClient.xgroup('CREATE', STREAM_NAME, consumerGroup, '0', 'MKSTREAM');
             logger.info('[AuditLog] Created consumer group:', consumerGroup);
           } catch (createErr) {
             logger.error({ err: createErr }, '[AuditLog] Failed to create consumer group');
@@ -329,11 +333,16 @@ class AuditLogService {
         }
       }
 
-      // Fallback to simple read if group read fails
-      const messages = await redisClient.xRange(STREAM_NAME, '-', '+', { COUNT: count });
-      return messages.map(msg => ({
-        id: msg.id,
-        data: msg.message,
+      // Fallback to simple XRANGE read
+      const rawMessages = await redisClient.xrange(STREAM_NAME, '-', '+', 'COUNT', count);
+      return rawMessages.map(([id, fields]) => ({
+        id,
+        data: Object.fromEntries(
+          fields.reduce((acc, v, i) => {
+            if (i % 2 === 0) acc.push([v, fields[i + 1]]);
+            return acc;
+          }, [])
+        ),
       }));
     } catch (err) {
       logger.error({ err }, '[AuditLog] Failed to read from Redis stream');
@@ -348,13 +357,12 @@ class AuditLogService {
    */
   async acknowledgeMessages(consumerGroup = 'audit-processors', messageIds = []) {
     try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen || messageIds.length === 0) {
+      if (!isRedisReady() || messageIds.length === 0) {
         return;
       }
 
-      await redisClient.xAck(STREAM_NAME, consumerGroup, messageIds);
+      // ioredis xack: XACK key group id [id ...]
+      await redisClient.xack(STREAM_NAME, consumerGroup, ...messageIds);
     } catch (err) {
       logger.error({ err }, '[AuditLog] Failed to acknowledge Redis stream messages');
     }
@@ -366,20 +374,25 @@ class AuditLogService {
    */
   async getStreamInfo() {
     try {
-      await connectRedis();
-      
-      if (!redisClient || !redisClient.isOpen) {
+      if (!isRedisReady()) {
         return { error: 'Redis client not available' };
       }
 
-      const info = await redisClient.xInfoStream(STREAM_NAME);
-      const groups = await redisClient.xInfoGroups(STREAM_NAME);
+      // ioredis xinfo: XINFO STREAM key / XINFO GROUPS key
+      const info = await redisClient.xinfo('STREAM', STREAM_NAME);
+      const groups = await redisClient.xinfo('GROUPS', STREAM_NAME);
       
+      // ioredis returns XINFO STREAM as a flat array of key-value pairs
+      const infoMap = {};
+      for (let i = 0; i < info.length; i += 2) {
+        infoMap[info[i]] = info[i + 1];
+      }
+
       return {
         streamName: STREAM_NAME,
-        length: info.length,
-        radixTreeKeys: info['radix-tree-keys'],
-        radixTreeNodes: info['radix-tree-nodes'],
+        length: infoMap['length'],
+        radixTreeKeys: infoMap['radix-tree-keys'],
+        radixTreeNodes: infoMap['radix-tree-nodes'],
         groups: groups || [],
       };
     } catch (err) {

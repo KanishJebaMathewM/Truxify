@@ -6,4 +6,4 @@ networkx==3.1
 numpy==1.26.4
 fastapi==0.104.1
 uvicorn==0.24.0
-python-multipart==0.0.32
+python-multipart==0.0.32pytest==9.0.3

@@ -265,12 +265,13 @@ class LLMService:
                     prompt,
                     max_new_tokens=512,
                     temperature=0.7,
-                    do_sample=True
+                    do_sample=True,
+                    return_full_text=False
                 )
             )
 
-            generated_text = response[0]['generated_text']
-            answer = generated_text.split('[/INST]')[-1].strip()
+            generated_text = response[0]["generated_text"]
+            answer = generated_text.strip()
 
             return answer
 

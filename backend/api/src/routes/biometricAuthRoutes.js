@@ -10,7 +10,7 @@
  *       properties:
  *         shipment_id:
  *           type: string
- *           description: Shipment or order identifier requiring biometric auth
+ *           description: Shipment or order identifier requiring biometric auth (alphanumeric, 1-64 chars)
  *         freight_value_paisa:
  *           type: integer
  *           description: Freight value in paisa used to evaluate threshold
@@ -23,6 +23,7 @@
  *       properties:
  *         challenge_id:
  *           type: string
+ *           description: 32-character hex challenge identifier
  *         biometric_token:
  *           type: string
  *           description: Base64url-encoded signed proof from device biometric
@@ -37,6 +38,7 @@
  *       properties:
  *         challenge_id:
  *           type: string
+ *           description: 32-character hex challenge identifier
  *         otp:
  *           type: string
  *           description: 6-digit fallback OTP
@@ -66,6 +68,49 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+export const ALLOWED_BIOMETRIC_METHODS = Object.freeze(['fingerprint', 'face_recognition']);
+export const CHALLENGE_ID_REGEX = /^[a-fA-F0-9]{32}$/;
+export const SHIPMENT_ID_REGEX = /^[a-zA-Z0-9_\-:]{1,64}$/;
+export const OTP_REGEX = /^\d{6}$/;
+export const BASE64URL_TOKEN_REGEX = /^[A-Za-z0-9_-]{16,4096}$/;
+export const MAX_FREIGHT_VALUE_PAISA = 100_000_000_00; // ₹10,000,000 max
+
+/**
+ * Validates biometric authentication method enum.
+ */
+export const isValidBiometricMethod = (method) => {
+    return typeof method === 'string' && ALLOWED_BIOMETRIC_METHODS.includes(method.toLowerCase());
+};
+
+/**
+ * Validates 6-digit fallback OTP.
+ */
+export const isValidOtpFormat = (otp) => {
+    if (typeof otp === 'number') otp = String(otp);
+    return typeof otp === 'string' && OTP_REGEX.test(otp.trim());
+};
+
+/**
+ * Validates base64url signed biometric proof token structure.
+ */
+export const isValidBiometricToken = (token) => {
+    return typeof token === 'string' && BASE64URL_TOKEN_REGEX.test(token.trim());
+};
+
+/**
+ * Validates 32-character hex challenge ID.
+ */
+export const isValidChallengeId = (challengeId) => {
+    return typeof challengeId === 'string' && CHALLENGE_ID_REGEX.test(challengeId.trim());
+};
+
+/**
+ * Validates shipment identifier format.
+ */
+export const isValidShipmentId = (shipmentId) => {
+    return typeof shipmentId === 'string' && SHIPMENT_ID_REGEX.test(shipmentId.trim());
+};
+
 /**
  * @openapi
  * /api/biometric-auth/check:
@@ -92,8 +137,17 @@ const router = express.Router();
 router.post('/check', authenticate, userLimiter, (req, res) => {
     const { freight_value_paisa } = req.body;
 
-    if (freight_value_paisa === undefined || typeof freight_value_paisa !== 'number' || !Number.isInteger(freight_value_paisa) || freight_value_paisa < 0) {
+    if (
+        freight_value_paisa === undefined ||
+        typeof freight_value_paisa !== 'number' ||
+        !Number.isInteger(freight_value_paisa) ||
+        freight_value_paisa < 0
+    ) {
         return res.status(400).json({ error: 'freight_value_paisa must be a non-negative integer' });
+    }
+
+    if (freight_value_paisa > MAX_FREIGHT_VALUE_PAISA) {
+        return res.status(400).json({ error: `freight_value_paisa exceeds maximum allowed limit of ₹${MAX_FREIGHT_VALUE_PAISA / 100}` });
     }
 
     const required = requiresBiometricAuth(req.user.id, freight_value_paisa);
@@ -128,11 +182,21 @@ router.post('/check', authenticate, userLimiter, (req, res) => {
 router.post('/challenge', authenticate, userLimiter, (req, res) => {
     const { shipment_id, freight_value_paisa } = req.body;
 
-    if (!shipment_id || typeof shipment_id !== 'string' || shipment_id.trim().length === 0) {
-        return res.status(400).json({ error: 'shipment_id is required' });
+    if (!isValidShipmentId(shipment_id)) {
+        return res.status(400).json({ error: 'shipment_id must be a valid non-empty string between 1 and 64 alphanumeric characters' });
     }
-    if (freight_value_paisa === undefined || typeof freight_value_paisa !== 'number' || !Number.isInteger(freight_value_paisa) || freight_value_paisa < 0) {
+
+    if (
+        freight_value_paisa === undefined ||
+        typeof freight_value_paisa !== 'number' ||
+        !Number.isInteger(freight_value_paisa) ||
+        freight_value_paisa < 0
+    ) {
         return res.status(400).json({ error: 'freight_value_paisa must be a non-negative integer' });
+    }
+
+    if (freight_value_paisa > MAX_FREIGHT_VALUE_PAISA) {
+        return res.status(400).json({ error: `freight_value_paisa exceeds maximum limit of ₹${MAX_FREIGHT_VALUE_PAISA / 100}` });
     }
 
     if (!requiresBiometricAuth(req.user.id, freight_value_paisa)) {
@@ -174,17 +238,20 @@ router.post('/challenge', authenticate, userLimiter, (req, res) => {
 router.post('/verify', authenticate, userLimiter, (req, res) => {
     const { challenge_id, biometric_token, method } = req.body;
 
-    if (!challenge_id || typeof challenge_id !== 'string') {
-        return res.status(400).json({ error: 'challenge_id is required' });
-    }
-    if (!biometric_token || typeof biometric_token !== 'string') {
-        return res.status(400).json({ error: 'biometric_token is required' });
-    }
-    if (!method || typeof method !== 'string') {
-        return res.status(400).json({ error: 'method is required' });
+    if (!isValidChallengeId(challenge_id)) {
+        return res.status(400).json({ error: 'challenge_id must be a valid 32-character hexadecimal identifier' });
     }
 
-    const result = verifyBiometric(challenge_id, biometric_token, method, req.user.id);
+    if (!isValidBiometricToken(biometric_token)) {
+        return res.status(400).json({ error: 'biometric_token must be a valid Base64URL-encoded proof token between 16 and 4096 characters' });
+    }
+
+    if (!isValidBiometricMethod(method)) {
+        return res.status(400).json({ error: `Invalid method. Must be one of: ${ALLOWED_BIOMETRIC_METHODS.join(', ')}` });
+    }
+
+    const normalizedMethod = method.toLowerCase();
+    const result = verifyBiometric(challenge_id.trim(), biometric_token.trim(), normalizedMethod, req.user.id);
 
     if (!result.success) {
         return res.status(400).json({ error: result.error });
@@ -216,14 +283,16 @@ router.post('/verify', authenticate, userLimiter, (req, res) => {
 router.post('/fallback', authenticate, userLimiter, (req, res) => {
     const { challenge_id, otp } = req.body;
 
-    if (!challenge_id || typeof challenge_id !== 'string') {
-        return res.status(400).json({ error: 'challenge_id is required' });
-    }
-    if (otp === undefined || otp === null) {
-        return res.status(400).json({ error: 'otp is required' });
+    if (!isValidChallengeId(challenge_id)) {
+        return res.status(400).json({ error: 'challenge_id must be a valid 32-character hexadecimal identifier' });
     }
 
-    const result = verifyFallbackOtp(challenge_id, String(otp), req.user.id);
+    if (!isValidOtpFormat(otp)) {
+        return res.status(400).json({ error: 'otp must be a valid 6-digit numeric string' });
+    }
+
+    const normalizedOtp = String(otp).trim();
+    const result = verifyFallbackOtp(challenge_id.trim(), normalizedOtp, req.user.id);
 
     if (!result.success) {
         return res.status(400).json({ error: result.error });
@@ -249,13 +318,19 @@ router.post('/fallback', authenticate, userLimiter, (req, res) => {
  *     responses:
  *       200:
  *         description: Challenge status
+ *       400:
+ *         description: Invalid challengeId
  *       404:
  *         description: Challenge not found
  */
 router.get('/status/:challengeId', authenticate, userLimiter, (req, res) => {
     const { challengeId } = req.params;
 
-    const status = getChallengeStatus(challengeId, req.user.id);
+    if (!isValidChallengeId(challengeId)) {
+        return res.status(400).json({ error: 'challengeId must be a valid 32-character hexadecimal identifier' });
+    }
+
+    const status = getChallengeStatus(challengeId.trim(), req.user.id);
     if (!status) {
         return res.status(404).json({ error: 'Challenge not found' });
     }
@@ -302,8 +377,17 @@ router.get('/threshold', authenticate, userLimiter, (req, res) => {
 router.put('/threshold', authenticate, userLimiter, (req, res) => {
     const { threshold_paisa } = req.body;
 
-    if (threshold_paisa === undefined) {
-        return res.status(400).json({ error: 'threshold_paisa is required' });
+    if (
+        threshold_paisa === undefined ||
+        typeof threshold_paisa !== 'number' ||
+        !Number.isInteger(threshold_paisa) ||
+        threshold_paisa <= 0
+    ) {
+        return res.status(400).json({ error: 'threshold_paisa must be a positive integer' });
+    }
+
+    if (threshold_paisa > MAX_FREIGHT_VALUE_PAISA) {
+        return res.status(400).json({ error: `threshold_paisa cannot exceed maximum limit of ₹${MAX_FREIGHT_VALUE_PAISA / 100}` });
     }
 
     try {

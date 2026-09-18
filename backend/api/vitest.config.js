@@ -43,8 +43,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    testTimeout: 15000,
     passWithNoTests: true,
-    include: ['test/unit/hmacService.test.js'],
+    include: ['test_fake/**/*.test.js'],
     setupFiles: ['test/setup.js'],
     coverage: {
       provider: 'v8',

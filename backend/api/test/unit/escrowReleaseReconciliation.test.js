@@ -64,7 +64,7 @@ vi.mock('../../src/lib/redisLock.js', () => ({
 
 vi.mock('../../src/services/escrow.js', () => ({
   escrowRelease: mockEscrowRelease,
-  getEscrowBooking: mockGetEscrowBooking,
+  getOnChainEscrowBooking: mockGetEscrowBooking,
   getEscrowBookingId: (displayId) => displayId,
   resolveExpectedDepositAmount: mockResolveExpectedDepositAmount,
 }));

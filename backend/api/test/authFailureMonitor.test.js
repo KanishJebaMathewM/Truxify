@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -7,6 +7,8 @@ const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
 vi.mock('../src/middleware/logger.js', () => ({
   default: {
     warn: warnMock,
+    error: vi.fn(),
+    info: vi.fn(),
   },
 }));
 

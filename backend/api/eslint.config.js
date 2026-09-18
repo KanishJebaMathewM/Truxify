@@ -11,15 +11,11 @@ export default [
       'src/services/voiceAiService.js',
       'src/services/wallet/walletService.js',
       'src/utils/escrowValidator.js',
-      'test/unit/trafficService.test.js',
       'test/changeDrop.escrowRebalance.test.js',
-      'test/unit/audioValidation.test.js',
-      'test/unit/escrowWebhookGuards.test.js',
-      'test/unit/fraudDetectionService.pagination.test.js',
-      'test/unit/fraudDetectionServiceGuard.test.js',
       'test/unit/lib/redisLock.test.js',
       'test/unit/profileService.test.js',
       'test/unit/redisLock.test.js',
+      'test/unit/trafficService.test.js'
     ]
   },
   js.configs.recommended,

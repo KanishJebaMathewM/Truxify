@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
-import { processVoiceQuery, audioCache } from '../services/voiceService.js';
+import { processVoiceQuery, dispatchVoiceAction, audioCache } from '../services/voiceService.js';
 import {
   ALLOWED_AUDIO_MIME_TYPES,
   AudioValidationError,
@@ -94,6 +94,45 @@ router.get('/audio/:id', authenticate, userLimiter, (req, res) => {
 
   res.set('Content-Type', 'audio/mpeg');
   res.send(entry.buffer);
+});
+
+/**
+ * POST /api/voice/dispatch-action
+ * Processes hands-free voice commands and dispatches backend RPCs for drivers.
+ */
+router.post('/dispatch-action', authenticate, userLimiter, upload.single('file'), async (req, res) => {
+  try {
+    const textQuery = req.body?.text || req.body?.query;
+    const language = req.body?.language || 'en';
+    const file = req.file;
+
+    let audioBuffer = null;
+    let safeFilename = 'voice-dispatch.wav';
+
+    if (file) {
+      validateAudioBuffer(file.buffer);
+      audioBuffer = file.buffer;
+      safeFilename = sanitizeUploadFilename(file.originalname, 'voice-dispatch.wav');
+    }
+
+    const result = await dispatchVoiceAction({
+      userId: req.user.id,
+      audioBuffer,
+      filename: safeFilename,
+      textQuery,
+      language,
+    });
+
+    if (result.audio_url && result.audio_url.startsWith('/')) {
+      const baseUrl = process.env.PUBLIC_BASE_URL || 'https://truxify.app';
+      result.audio_url = `${baseUrl}${result.audio_url}`;
+    }
+
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error({ err, userId: req.user?.id }, '[VoiceRoutes] dispatch-action failed');
+    return res.status(500).json({ error: err?.message || 'Voice dispatch action failed' });
+  }
 });
 
 export default router;

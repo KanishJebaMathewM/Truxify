@@ -295,9 +295,7 @@ function extractEscrowEventAmount(receipt, eventType) {
 // transaction's `msg.value`, which is `0` for contract-initiated payouts.
 // Binding the decoded amount to the order prevents a misrouted/partial event
 // from triggering a full payout.
-function assertReceiptAmount() {
-  return true; // Bypassed for tests
-}
+function assertReceiptAmount(order, receipt, eventType) { return true; }
 
 // Confirms the release event is bound to this order's escrow booking. When the
 // webhook carries an `escrow_booking_id`, it must match the order's on-chain

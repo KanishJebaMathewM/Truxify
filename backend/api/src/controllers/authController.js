@@ -1,15 +1,6 @@
 import refreshTokenService from '../services/refreshTokenService.js';
 import jwt from 'jsonwebtoken';
-
-const createAccessToken = (tokenRecord) => jwt.sign(
-  {
-    id: tokenRecord.user_id,
-    uid: tokenRecord.user_id,
-    iss: 'truxify-backend-api',
-  },
-  process.env.JWT_SECRET || 'truxify-jwt-secret-key',
-  { expiresIn: '7d' },
-);
+import { AppError, UnauthorizedError, ValidationError } from '../middleware/errorHandler.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
 

@@ -9,8 +9,9 @@ import { FraudDetectionService } from '../../src/services/fraud/FraudDetectionSe
 import { createSupabaseMock } from '../helpers/supabaseQueryMock.js';
 
 // Mock the db config module to inject our robust mock
+let mockSupabaseAdmin = null;
 vi.mock('../../src/config/db.js', () => ({
-    supabaseAdmin: null // Will be overridden in beforeEach
+    get supabaseAdmin() { return mockSupabaseAdmin; }
 }));
 
 import * as dbConfig from '../../src/config/db.js';
@@ -35,7 +36,7 @@ describe('FraudDetectionService.getFraudStats Pagination (#10103)', () => {
             }
         });
 
-        dbConfig.supabaseAdmin = mockClient;
+        mockSupabaseAdmin = mockClient;
         service = new FraudDetectionService();
     });
 
@@ -112,7 +113,7 @@ describe('FraudDetectionService.getFraudStats Pagination (#10103)', () => {
             tables: { fraud_stats: [] },
             errors: { fraud_stats: { code: '42P01', message: 'relation "fraud_stats" does not exist' } }
         });
-        dbConfig.supabaseAdmin = errorClient;
+        mockSupabaseAdmin = errorClient;
 
         const errorService = new FraudDetectionService();
         const result = await errorService.getFraudStats({ page: 1, limit: 50 });

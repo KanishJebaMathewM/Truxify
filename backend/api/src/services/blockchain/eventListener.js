@@ -78,6 +78,7 @@ export async function saveLastProcessedBlock(blockNumber) {
  * Serialize live blockchain events so database synchronization and cursor updates
  * cannot overlap across concurrent ethers event callbacks.
  */
+let liveEventQueue = Promise.resolve();
 export function enqueueLiveEvent(handler, eventPayload) {
   liveEventQueue = liveEventQueue
     .then(() => handler(eventPayload))

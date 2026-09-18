@@ -35,7 +35,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { getAdminClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -47,7 +47,7 @@ const router = express.Router();
 // Dashboard aggregates span every profile/order, so they must be read with a
 // client that bypasses per-row RLS. Fall back to the anon client only when no
 // service-role key is configured (e.g. tests), matching the repo convention.
-const dashboardDb = supabaseAdmin || supabase;
+const dashboardDb = getAdminClient();
 
 /**
  * @openapi

@@ -5,7 +5,15 @@ Run with: python3 -m pytest tests/test_deadhead_eliminator.py -v --no-header
 """
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models.deadhead_eliminator import _haversine, _to_naive, find_return_loads
+
+
+@pytest.fixture(autouse=True)
+def disable_external_routing(monkeypatch):
+    """Keep the unit suite offline; routing-specific tests opt in explicitly."""
+    monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "false")
 
 
 class TestHaversine:
@@ -198,3 +206,79 @@ class TestFindReturnLoads:
         )
         assert len(result["recommendations"]) == 1
         assert result["recommendations"][0]["load_id"] == "L-TZ-WALL-CLOCK"
+
+    def test_road_eta_is_used_for_pickup_deadline(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[7200.0]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.deadhead_eliminator.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-08-10T08:00:00",
+            available_loads=[{
+                "load_id": "L-OSRM",
+                "origin_lat": 12.97001,
+                "origin_lng": 77.62001,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
+                "weight_kg": 5000,
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T09:00:00",
+                "payment_inr": 3000,
+            }],
+        )
+        assert result["recommendations"] == []
+
+    def test_unreachable_road_route_is_not_replaced_by_haversine_fallback(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[None]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.deadhead_eliminator.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-08-10T08:00:00",
+            available_loads=[{
+                "load_id": "L-OSRM-UNREACHABLE",
+                "origin_lat": 12.97001,
+                "origin_lng": 77.62001,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
+                "weight_kg": 5000,
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T14:00:00",
+                "payment_inr": 3000,
+            }],
+        )
+        assert result["recommendations"] == []

@@ -198,7 +198,13 @@ async function checkAuthOtpLockout(phone) {
       const isLocked = await redisClient.get(`auth_otp_lockout:${phoneKey}`);
       return !!isLocked;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in checkAuthOtpLockout, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_LOCKOUT_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in checkAuthOtpLockout, falling back to memory"
+      );
     }
   }
   const record = authOtpFailedAttempts.get(phoneKey);
@@ -223,7 +229,13 @@ async function recordAuthOtpFailure(phone) {
       }
       return count;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in recordAuthOtpFailure, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_FAILURE_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in recordAuthOtpFailure, falling back to memory"
+      );
     }
   }
 
@@ -250,7 +262,13 @@ async function clearAuthOtpFailures(phone) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in clearAuthOtpFailures, falling back to memory"
+      );
     }
   }
   authOtpFailedAttempts.delete(phoneKey);
@@ -359,7 +377,13 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .maybeSingle();
 
     if (fetchErr) {
-      logger.error("[auth/verify-otp] DB fetch error:", fetchErr.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_DB_FETCH_ERROR",
+          error: fetchErr.message,
+        },
+        "DB fetch error"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
@@ -401,20 +425,46 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .eq("id", otpRecord.id);
 
     if (updateErr) {
-      logger.error("[auth/verify-otp] Failed to mark OTP as verified:", updateErr.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_VERIFICATION_UPDATE_ERROR",
+          error: updateErr.message,
+        },
+        "Failed to mark OTP as verified"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
     await clearAuthOtpFailures(phone);
-    logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
+    logger.info(
+      {
+        event: "OTP_VERIFIED",
+        phone,
+      },
+      "OTP verified"
+    );
     return res.status(200).json({ success: true, message: "OTP verified successfully." });
   } catch (err) {
-    logger.error("[auth/verify-otp] Unexpected error:", err.message);
+    logger.error(
+      {
+        event: "AUTH_OTP_UNEXPECTED_ERROR",
+        error: err.message,
+      },
+      "Unexpected error"
+    );
     return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
 
-const JWT_SECRET = process.env.JWT_SECRET;
+// Development-only fallback: this literal is public, so it must never protect
+// a production deployment. validateConfig() refuses to boot production without
+// JWT_SECRET (see config/db.js); this warning covers non-production runtimes.
+const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+if (!process.env.JWT_SECRET) {
+  logger.warn(
+    '[auth/verify] JWT_SECRET is not set. Falling back to the built-in development secret — never use this in production.',
+  );
+}
 
 /**
  * @openapi

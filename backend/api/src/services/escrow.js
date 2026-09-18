@@ -62,6 +62,8 @@ const ESCROW_ABI = [
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
   'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
+  'function releasePayment(uint256 bookingId, bytes32 idempotencyKey) external',
+  'function releaseIdempotencyKeys(bytes32 key) external view returns (bool)',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
   'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
@@ -314,41 +316,12 @@ export async function checkEscrowHealth() {
 }
 
 /**
- * Retrieves a full escrow booking record by its ID.
- * Used by the funding reconciliation sweeper to verify on-chain deposits.
- * Resolves Issue #7340.
- * 
- * @param {string} escrowBookingId - The UUID of the escrow booking
- * @returns {Promise<object|null>} The booking record or null if not found
- * @throws {Error} If database query fails
+ * Derive a deterministic booking ID from an order's display ID.
+ * @param {string} orderDisplayId — e.g. "#FF20260521"
+ * @returns {string} bytes32 hex string
  */
-export async function getEscrowBooking(escrowBookingId) {
-  if (!escrowBookingId || typeof escrowBookingId !== 'string' || !escrowBookingId.trim()) {
-    return null;
-  }
-
-  if (!supabaseAdmin) {
-    logger.error('supabaseAdmin not configured for getEscrowBooking');
-    return null;
-  }
-
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('escrow_bookings')
-      .select('*')
-      .eq('id', escrowBookingId.trim())
-      .maybeSingle();
-
-    if (error) {
-      logger.error({ err: error, escrowBookingId }, 'Failed to fetch escrow booking');
-      throw error;
-    }
-
-    return data;
-  } catch (err) {
-    logger.error({ err, escrowBookingId }, 'Unexpected error in getEscrowBooking');
-    throw err;
-  }
+export function getEscrowBookingId (orderDisplayId) {
+  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`]);
 }
 
 /**
@@ -646,7 +619,7 @@ export async function markEscrowBookingStarted (orderDisplayId) {
  * @param {string|bigint|null} [expectedAmountWei] - authoritative app amount
  * @returns {Promise<{txHash: string|null, bookingId: string, alreadyReleased?: boolean, error?: string, code?: string}>}
  */
-export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
+export async function escrowRelease (orderDisplayId, expectedAmountWei = null, releaseIdempotencyKey = null) {
   return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -707,7 +680,12 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   }
 
   try {
-    const tx = await escrowContract.releasePayment(bookingId)
+    let tx
+    if (releaseIdempotencyKey && typeof escrowContract['releasePayment(uint256,bytes32)'] === 'function') {
+      tx = await escrowContract['releasePayment(uint256,bytes32)'](bookingId, releaseIdempotencyKey)
+    } else {
+      tx = await escrowContract.releasePayment(bookingId)
+    }
     logger.info(`[escrow] releasePayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     const receipt = await tx.wait(1)
     if (!receipt || receipt.status === 0) {
@@ -717,6 +695,16 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
     logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
     return { txHash: receipt.hash, bookingId }
   } catch (err) {
+    // Handle concurrent or already-mined release
+    try {
+      const confirmedBooking = await escrowContract.bookings(bookingId)
+      if (confirmedBooking && confirmedBooking.paid === true) {
+        logger.info(`[escrow] releasePayment caught error but booking ${orderDisplayId} is already paid on-chain.`)
+        return { txHash: null, bookingId, alreadyReleased: true }
+      }
+    } catch (checkErr) {
+      logger.warn(`[escrow] Failed to re-verify booking state after release error: ${checkErr?.message}`)
+    }
     logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
     return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }

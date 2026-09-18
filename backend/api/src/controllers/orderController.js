@@ -65,7 +65,7 @@ async function fetchLoadOffers(req, res, next, { isEnRoute, label }) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (error) return next(new AppError(`Failed to fetch ${label}.`, details: error.message, 500, "INTERNAL_ERROR"));
+    if (error) return next(new AppError(`Failed to fetch ${label}.`, 500, "INTERNAL_ERROR", { details: error.message }));
     res.json(offers);
   } catch (err) {
     logger.error(`[orderController] Failed to fetch ${label}:`, err.message);
@@ -183,14 +183,21 @@ export const verifyDeliveryController = async (req, res, next) => {
     const result = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp);
     if (result && result.escrowUpdateFailed) {
       return res.status(202).json({
-        message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
+        message: result.message || 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
         payment_released: true,
+        amount_inr: result.amount_inr,
+        order_display_id: result.order_display_id,
       });
     }
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    res.json({
+      message: result?.message || 'Delivery confirmed and verified successfully! Payment released to driver.',
+      payment_released: true,
+      amount_inr: result?.amount_inr,
+      order_display_id: result?.order_display_id,
+    });
   } catch (err) {
-    if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));
+    if (err instanceof DomainError) return res.status(err.status).json(err.payload);
     logger.error('[verify-delivery] Exception:', err.message);
     next(new AppError('Internal Server Error', 500, "INTERNAL_ERROR"));
   }
@@ -201,7 +208,7 @@ export const resendOtp = async (req, res, next) => {
     const result = await orderLifecycleService.resendOtpFn(req.params.id, req.user.id);
     res.json({ message: 'New delivery OTP sent.', ...result });
   } catch (err) {
-    if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));
+    if (err instanceof DomainError) return res.status(err.status).json(err.payload);
     logger.error('[orderController] Resend OTP error:', err.message);
     next(new AppError('Internal Server Error', 500, "INTERNAL_ERROR"));
   }

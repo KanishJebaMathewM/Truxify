@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { ethers } from "ethers";
 import { supabase, supabaseAdmin, redisClient, mongoDb } from "../../config/db.js";
 import { DomainError } from "./domainError.js";
 import { measureExecution } from "../../core/performanceMetrics.js";
@@ -7,6 +8,9 @@ import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
+  getConsumedDeliveryOtp,
+  consumeDeliveryOtpAtomic,
+  resetDeliveryOtpConsumption,
   verifyDeliveryOtp,
   verifyDeliveryOtpHash,
   sendPushNotification,
@@ -62,6 +66,9 @@ export class DeliveryVerificationService {
       sendDeliveryOtpNotification,
       storeDeliveryOtp,
       getActiveDeliveryOtp,
+      getConsumedDeliveryOtp,
+      consumeDeliveryOtpAtomic,
+      resetDeliveryOtpConsumption,
       verifyDeliveryOtp,
       verifyDeliveryOtpHash,
     };
@@ -91,7 +98,7 @@ export class DeliveryVerificationService {
         const { data: order, error: orderErr } =
           await this.orderRepository.findOrderById(
             orderId,
-            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_amount_wei, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount, pending_bid_acceptance",
+            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_amount_wei, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount, pending_bid_acceptance, escrow_disabled, delivery_verification_status",
           );
 
         if (orderErr || !order) {
@@ -108,6 +115,30 @@ export class DeliveryVerificationService {
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
+        const isAlreadyCompleted =
+          order.status === "payment_released" && !isRetryForStuckEscrow;
+
+        // If order already completed, check if consumed OTP matches for idempotent replay
+        if (isAlreadyCompleted) {
+          const consumedOtp =
+            await this.notificationService.getConsumedDeliveryOtp(orderId);
+          if (consumedOtp) {
+            const isMatch = this.notificationService.verifyDeliveryOtpHash(
+              otp,
+              consumedOtp,
+            );
+            if (!isMatch) {
+              throw new DomainError(409, {
+                error:
+                  "Delivery OTP has already been verified and consumed for this order.",
+                code: "OTP_ALREADY_USED",
+              });
+            }
+            return { order, otpRecord: consumedOtp, alreadyCompleted: true };
+          }
+          return { order, otpRecord: null, alreadyCompleted: true };
+        }
+
         if (
           !DELIVERY_OTP_READY_STATUSES.has(order.status) &&
           !isRetryForStuckEscrow
@@ -118,9 +149,29 @@ export class DeliveryVerificationService {
           });
         }
 
+        // Check if an OTP was already consumed for an in-flight or retried order
+        const consumedOtp =
+          await this.notificationService.getConsumedDeliveryOtp(orderId);
+        if (consumedOtp) {
+          const isMatch = this.notificationService.verifyDeliveryOtpHash(
+            otp,
+            consumedOtp,
+          );
+          if (!isMatch) {
+            throw new DomainError(409, {
+              error:
+                "Delivery OTP has already been verified and consumed for this order.",
+              code: "OTP_ALREADY_USED",
+            });
+          }
+        }
+
         const otpRecord =
           await this.notificationService.getActiveDeliveryOtp(orderId);
         if (!otpRecord) {
+          if (consumedOtp) {
+            return { order, otpRecord: consumedOtp, alreadyConsumed: true };
+          }
           throw new DomainError(400, {
             error:
               "OTP not available or has expired. Please request a new delivery OTP.",
@@ -143,7 +194,7 @@ export class DeliveryVerificationService {
           throw new DomainError(400, { error: message });
         }
 
-        return { order, otpRecord };
+        return { order, otpRecord, alreadyCompleted: false };
       },
     );
   }
@@ -481,38 +532,98 @@ export class DeliveryVerificationService {
     return measureExecution(
       "DeliveryVerificationService.verifyDelivery",
       async () => {
-        const { order, otpRecord } = await this.validateDeliveryOtp({
-          orderId,
-          driverId,
-          otp,
-        });
+        const { order, otpRecord, alreadyCompleted, alreadyConsumed } =
+          await this.validateDeliveryOtp({
+            orderId,
+            driverId,
+            otp,
+          });
+
+        if (alreadyCompleted) {
+          return {
+            success: true,
+            message:
+              "Delivery confirmed and verified successfully! Payment released to driver.",
+            payment_released: true,
+            amount_inr: (order.total_amount || 0) / 100,
+            order_display_id: order.order_display_id,
+            escrowUpdateFailed: false,
+          };
+        }
 
         const isRetryForStuckEscrow =
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
-        // Geofence must still apply on the stuck-escrow retry path. The retry
-        // flag only relaxes OTP-readiness and the Postgres RPC guard below; it
-        // must never bypass the driver-at-dropoff control, which would let a
-        // release be re-attempted without physical presence at the drop-off
-        // location (issue #11670).
+        // Atomic OTP consumption BEFORE external blockchain interaction
+        if (!alreadyConsumed && otpRecord && otpRecord.id) {
+          const consumed =
+            await this.notificationService.consumeDeliveryOtpAtomic(
+              otpRecord.id,
+              orderId,
+            );
+          if (!consumed) {
+            // Check if concurrent request already completed the order
+            const { data: latestOrder } =
+              await this.orderRepository.findOrderById(
+                orderId,
+                "status, total_amount, order_display_id",
+              );
+            if (latestOrder && latestOrder.status === "payment_released") {
+              return {
+                success: true,
+                message:
+                  "Delivery verified and confirmed successfully! Payment released to driver.",
+                payment_released: true,
+                amount_inr: (latestOrder.total_amount || 0) / 100,
+                order_display_id: latestOrder.order_display_id,
+                escrowUpdateFailed: false,
+              };
+            }
+            throw new DomainError(409, {
+              error:
+                "Delivery OTP has already been verified and consumed for this order.",
+              code: "OTP_ALREADY_USED",
+            });
+          }
+        }
+
+        await this._writeRepository
+          .updateOrder(orderId, {
+            delivery_verification_status: "verifying",
+            updated_at: new Date().toISOString(),
+          })
+          .catch((err) =>
+            logger.warn(
+              "[verify-delivery] Failed to set status verifying:",
+              err.message,
+            ),
+          );
+
+        // Geofence must still apply on the stuck-escrow retry path.
         await this.assertDriverAtDropoff(order);
+
+        // Derive release idempotency key
+        const otpHash = crypto
+          .createHash("sha256")
+          .update(String(otp).trim())
+          .digest("hex");
+        const releaseIdempotencyKey = ethers.keccak256(
+          ethers.toUtf8Bytes(`release:${order.order_display_id}:${otpHash}`),
+        );
 
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;
 
+        const isEscrowBacked =
+          !order.escrow_disabled && Boolean(order.escrow_status);
+
         // 1. Execute Blockchain Release FIRST to fail-safe if network errors occur
         if (
-          order.escrow_status === "funded" ||
-          order.escrow_status === "release_failed"
+          isEscrowBacked &&
+          (order.escrow_status === "funded" ||
+            order.escrow_status === "release_failed")
         ) {
-          // Payout defense-in-depth: resolve the authoritative escrow amount
-          // (the value deposited at bid acceptance, escrow_amount_wei) and use
-          // it directly for the on-chain release. The actual on-chain booking
-          // amount is then enforced by escrowReleaseFn against this same figure,
-          // so the driver is always paid out exactly what was escrowed. We must
-          // NOT compare against total_amount here, since that includes the
-          // platform fee + toll and differs from the escrowed bid amount.
           let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
@@ -521,9 +632,12 @@ export class DeliveryVerificationService {
             if (order.total_amount != null) {
               expectedAmountWei = paisaToMaticWei(order.total_amount);
             } else if (order.pending_bid_acceptance?.bid_amount != null) {
-              expectedAmountWei = paisaToMaticWei(order.pending_bid_acceptance.bid_amount);
+              expectedAmountWei = paisaToMaticWei(
+                order.pending_bid_acceptance.bid_amount,
+              );
             } else {
-              const details = "Order is missing authoritative escrow amount (no escrow_amount_wei, total_amount, or pending_bid_acceptance.bid_amount)";
+              const details =
+                "Order is missing authoritative escrow amount (no escrow_amount_wei, total_amount, or pending_bid_acceptance.bid_amount)";
               logger.error(
                 "[escrow] Missing authoritative escrow amount before release for order",
                 orderId,
@@ -534,6 +648,7 @@ export class DeliveryVerificationService {
                 .updateOrder(orderId, {
                   escrow_status: "release_failed",
                   escrow_release_error: `ESCROW_AMOUNT_MISSING: ${details}`,
+                  delivery_verification_status: "failed",
                   updated_at: new Date().toISOString(),
                 })
                 .catch((err) =>
@@ -542,6 +657,11 @@ export class DeliveryVerificationService {
                     err.message,
                   ),
                 );
+              if (otpRecord && otpRecord.id) {
+                await this.notificationService
+                  .resetDeliveryOtpConsumption(otpRecord.id, orderId)
+                  .catch(() => {});
+              }
               throw new DomainError(409, {
                 error: "Escrow amount missing. Payment cannot be released.",
                 code: "ESCROW_AMOUNT_MISSING",
@@ -555,6 +675,7 @@ export class DeliveryVerificationService {
             const releaseResult = await this.escrowReleaseFn(
               order.order_display_id,
               expectedAmountWei,
+              releaseIdempotencyKey,
             );
             if (releaseResult.txHash) {
               releaseTxHash = releaseResult.txHash;
@@ -566,6 +687,7 @@ export class DeliveryVerificationService {
                 .updateOrder(orderId, {
                   escrow_status: "release_failed",
                   escrow_release_error: String(releaseResult.error).slice(0, 1000),
+                  delivery_verification_status: "failed",
                   updated_at: new Date().toISOString(),
                 })
                 .catch((err) =>
@@ -574,6 +696,11 @@ export class DeliveryVerificationService {
                     err.message,
                   ),
                 );
+              if (otpRecord && otpRecord.id) {
+                await this.notificationService
+                  .resetDeliveryOtpConsumption(otpRecord.id, orderId)
+                  .catch(() => {});
+              }
               throw new DomainError(409, {
                 error:
                   releaseResult.error ||
@@ -595,6 +722,7 @@ export class DeliveryVerificationService {
             await this._writeRepository
               .updateOrder(orderId, {
                 escrow_release_error: String(releaseErr.message).slice(0, 1000),
+                delivery_verification_status: "failed",
                 updated_at: new Date().toISOString(),
               })
               .catch((err) =>
@@ -603,6 +731,11 @@ export class DeliveryVerificationService {
                   err.message,
                 ),
               );
+            if (otpRecord && otpRecord.id) {
+              await this.notificationService
+                .resetDeliveryOtpConsumption(otpRecord.id, orderId)
+                .catch(() => {});
+            }
             throw new DomainError(503, {
               error:
                 "Blockchain escrow release failed. Payment cannot be processed. Please retry.",
@@ -610,10 +743,6 @@ export class DeliveryVerificationService {
             });
           }
 
-          // Persist the confirmed release outcome immediately so a later
-          // complete_trip_tx failure is recoverable: escrow_status becomes
-          // 'released' before the RPC runs, so the SQL gate no longer blocks
-          // retries with a NULL release hash.
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
               await this._writeRepository.updateOrder(orderId, {
@@ -631,22 +760,17 @@ export class DeliveryVerificationService {
             }
           }
         } else if (order.escrow_status === "released") {
-          // Release was confirmed in a previous attempt — reuse the persisted hash.
           releaseTxHash = order.release_tx_hash || null;
         }
 
-        // Re-check that the escrow actually released after this attempt. This
-        // is what makes the stuck-escrow retry safe: token revocation and the
-        // "Payment Released" push below only run once releaseTxHash /
-        // escrowAlreadyReleased confirm the on-chain release, or the order was
-        // already "released". If the release failed again, the driver is told
-        // the retry failed instead of being notified that they are paid while
-        // the funds remain stuck on-chain.
-        const releaseConfirmed = Boolean(
-          releaseTxHash ||
-            escrowAlreadyReleased ||
-            order.escrow_status === "released",
-        );
+        const releaseConfirmed =
+          !isEscrowBacked ||
+          Boolean(
+            releaseTxHash ||
+              escrowAlreadyReleased ||
+              order.escrow_status === "released",
+          );
+
         if (!releaseConfirmed) {
           logger.error(
             `[verify-delivery] On-chain escrow release not confirmed for order ${orderId} (escrow_status=${order.escrow_status}) — aborting before notification.`,
@@ -654,6 +778,7 @@ export class DeliveryVerificationService {
           await this.orderRepository
             .updateOrder(orderId, {
               escrow_release_error: `ESCROW_NOT_RELEASED: on-chain release not confirmed (escrow_status=${order.escrow_status})`,
+              delivery_verification_status: "failed",
               updated_at: new Date().toISOString(),
             })
             .catch((err) =>
@@ -662,6 +787,11 @@ export class DeliveryVerificationService {
                 err.message,
               ),
             );
+          if (otpRecord && otpRecord.id) {
+            await this.notificationService
+              .resetDeliveryOtpConsumption(otpRecord.id, orderId)
+              .catch(() => {});
+          }
           throw new DomainError(503, {
             error:
               "On-chain escrow release was not confirmed. Payment cannot be processed. Please retry.",
@@ -674,11 +804,15 @@ export class DeliveryVerificationService {
         let tripData;
 
         if (!isRetryForStuckEscrow) {
-          const guardResult = await this._writeRepository.updateOrderGuardStatus(
-            orderId,
-            { updated_at: new Date().toISOString() },
-            ["cancelled", "payment_released"],
-          );
+          const guardResult =
+            await this._writeRepository.updateOrderGuardStatus(
+              orderId,
+              {
+                delivery_verification_status: "verifying",
+                updated_at: new Date().toISOString(),
+              },
+              ["cancelled", "payment_released"],
+            );
 
           if (guardResult.error) {
             const pgCode = guardResult.error.code;
@@ -749,15 +883,6 @@ export class DeliveryVerificationService {
             `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
 
-          // The order is already `payment_released` (that is what defines a
-          // stuck-escrow retry), but `complete_trip_tx` may never have run —
-          // e.g. the original call failed after the on-chain release landed —
-          // leaving the driver's wallet uncredited. Call `complete_trip_tx`
-          // (service_role, no OTP) now: it is idempotent on
-          // `status = 'payment_released'`, so an already-finalized order
-          // short-circuits without double-crediting the wallet, while a
-          // never-finalized order gets its wallet credited exactly once
-          // (issue #11188).
           const retryRpcResult = await this.orderRepository.executeRpc(
             "complete_trip_tx",
             {
@@ -783,25 +908,20 @@ export class DeliveryVerificationService {
           }
           tripData = retryRpcResult.data;
 
-          // The verified OTP is consumed on the retry path too so it cannot be
-          // replayed by a later attempt. It is only consumed after the release
-          // is confirmed, so a failed release leaves the OTP intact for the
-          // next retry instead of force-rotating it.
-          await this.completeDeliveryOtp({
-            otpRecordId: otpRecord.id,
-            orderId,
-          });
+          if (otpRecord && otpRecord.id) {
+            await this.completeDeliveryOtp({
+              otpRecordId: otpRecord.id,
+              orderId,
+            });
+          }
         }
 
-        // The trip is complete (payment_released) — kill any active public
-        // tracking tokens so a shared link can no longer broadcast the driver's
-        // live location. Best-effort: revokeAllForOrder never throws.
         await this.trackingTokenService?.revokeAllForOrder(
           order.order_display_id,
         );
 
-        // --- Fire FCM push to driver: "Payment Released ✓" ---
-        const resolvedDriverIdForPush = tripData?.driver_id || order.driver_id;
+        const resolvedDriverIdForPush =
+          tripData?.driver_id || order.driver_id;
         if (resolvedDriverIdForPush) {
           const amountInr = order.total_amount
             ? `₹${(order.total_amount / 100).toFixed(0)}`
@@ -829,6 +949,7 @@ export class DeliveryVerificationService {
               escrow_release_error: null,
               escrow_released_at: new Date().toISOString(),
               release_tx_hash: releaseTxHash,
+              delivery_verification_status: "delivered",
             });
 
           if (releaseUpdateErr) {
@@ -838,7 +959,8 @@ export class DeliveryVerificationService {
             );
             escrowUpdateFailed = true;
           } else {
-            const resolvedDriverId = tripData?.driver_id || order.driver_id;
+            const resolvedDriverId =
+              tripData?.driver_id || order.driver_id;
             const resolvedDisplayId =
               tripData?.order_display_id || order.order_display_id;
             if (resolvedDriverId) {
@@ -857,9 +979,24 @@ export class DeliveryVerificationService {
               }
             }
           }
+        } else {
+          await this._writeRepository
+            .updateOrder(orderId, {
+              delivery_verification_status: "delivered",
+              updated_at: new Date().toISOString(),
+            })
+            .catch(() => {});
         }
 
-        return { escrowUpdateFailed };
+        return {
+          success: true,
+          message:
+            "Delivery confirmed and verified successfully! Payment released to driver.",
+          payment_released: true,
+          amount_inr: (order.total_amount || 0) / 100,
+          order_display_id: order.order_display_id,
+          escrowUpdateFailed,
+        };
       },
     );
   }

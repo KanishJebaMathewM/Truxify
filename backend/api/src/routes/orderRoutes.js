@@ -399,17 +399,24 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
  */
 router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
-    const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
+    const result = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
 
-    if (escrowUpdateFailed) {
+    if (result && result.escrowUpdateFailed) {
       return res.status(202).json({
-        message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
+        message: result.message || 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
         payment_released: true,
+        amount_inr: result.amount_inr,
+        order_display_id: result.order_display_id,
       });
     }
 
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    res.json({
+      message: result?.message || 'Delivery confirmed and verified successfully! Payment released to driver.',
+      payment_released: true,
+      amount_inr: result?.amount_inr,
+      order_display_id: result?.order_display_id,
+    });
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);

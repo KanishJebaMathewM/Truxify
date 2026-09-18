@@ -155,3 +155,175 @@ describe('validateAudioBuffer', () => {
     }
   });
 });
+
+/**
+ * Unit Tests for audioValidation.js
+ * 
+ * Tests magic-byte inspection, valid/invalid format detection,
+ * truncated headers, oversized payloads, and error handling.
+ */
+import { describe, it, expect } from 'vitest';
+import { 
+  detectAudioMimeType, 
+  validateAudioBuffer, 
+  AudioValidationError,
+  ALLOWED_AUDIO_MIME_TYPES 
+} from '../../src/lib/audioValidation.js';
+import {
+  createValidWavBuffer,
+  createValidMp3Id3Buffer,
+  createValidBareMp3Buffer,
+  createValidM4aBuffer,
+  createValidOggBuffer,
+  createValidWebmBuffer,
+  createValidAacBuffer,
+  createInvalidRiffBuffer,
+  createInvalidGarbageBuffer,
+  createTruncatedBuffer,
+  createOversizedBuffer,
+} from '../fixtures/audioValidationFixtures.js';
+
+describe('audioValidation', () => {
+  describe('ALLOWED_AUDIO_MIME_TYPES', () => {
+    it('should be a frozen array of expected MIME types', () => {
+      expect(ALLOWED_AUDIO_MIME_TYPES).toBeInstanceOf(Array);
+      expect(Object.isFrozen(ALLOWED_AUDIO_MIME_TYPES)).toBe(true);
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/wav');
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/mpeg');
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/mp4');
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/ogg');
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/webm');
+      expect(ALLOWED_AUDIO_MIME_TYPES).toContain('audio/aac');
+    });
+  });
+
+  describe('detectAudioMimeType', () => {
+    it('should return null for null or undefined input', () => {
+      expect(detectAudioMimeType(null)).toBeNull();
+      expect(detectAudioMimeType(undefined)).toBeNull();
+    });
+
+    it('should return null for non-Buffer input', () => {
+      expect(detectAudioMimeType('string')).toBeNull();
+      expect(detectAudioMimeType({})).toBeNull();
+      expect(detectAudioMimeType(123)).toBeNull();
+    });
+
+    it('should return null for empty buffer', () => {
+      expect(detectAudioMimeType(Buffer.alloc(0))).toBeNull();
+    });
+
+    it('should detect valid WAV buffer', () => {
+      const buffer = createValidWavBuffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/wav');
+    });
+
+    it('should detect valid MP3 buffer with ID3 tag', () => {
+      const buffer = createValidMp3Id3Buffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/mpeg');
+    });
+
+    it('should detect valid bare MP3 buffer without ID3 tag', () => {
+      const buffer = createValidBareMp3Buffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/mpeg');
+    });
+
+    it('should detect valid M4A/MP4 buffer', () => {
+      const buffer = createValidM4aBuffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/mp4');
+    });
+
+    it('should detect valid OGG buffer', () => {
+      const buffer = createValidOggBuffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/ogg');
+    });
+
+    it('should detect valid WebM buffer', () => {
+      const buffer = createValidWebmBuffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/webm');
+    });
+
+    it('should detect valid AAC buffer', () => {
+      const buffer = createValidAacBuffer();
+      expect(detectAudioMimeType(buffer)).toBe('audio/aac');
+    });
+
+    it('should reject invalid RIFF container (e.g., AVI)', () => {
+      const buffer = createInvalidRiffBuffer();
+      expect(detectAudioMimeType(buffer)).toBeNull();
+    });
+
+    it('should reject garbage bytes', () => {
+      const buffer = createInvalidGarbageBuffer();
+      expect(detectAudioMimeType(buffer)).toBeNull();
+    });
+
+    it('should handle truncated buffers gracefully', () => {
+      const buffer = createTruncatedBuffer();
+      expect(detectAudioMimeType(buffer)).toBeNull();
+    });
+
+    it('should handle oversized buffers efficiently', () => {
+      const buffer = createOversizedBuffer();
+      // Should not throw or hang, and should detect the valid header
+      expect(detectAudioMimeType(buffer)).toBe('audio/ogg');
+    });
+  });
+
+  describe('validateAudioBuffer', () => {
+    it('should throw AudioValidationError for null input', () => {
+      expect(() => validateAudioBuffer(null)).toThrow(AudioValidationError);
+      expect(() => validateAudioBuffer(null)).toThrow('Audio file is empty or unreadable.');
+    });
+
+    it('should throw AudioValidationError for empty buffer', () => {
+      expect(() => validateAudioBuffer(Buffer.alloc(0))).toThrow(AudioValidationError);
+      expect(() => validateAudioBuffer(Buffer.alloc(0))).toThrow('Audio file is empty or unreadable.');
+    });
+
+    it('should throw AudioValidationError for invalid audio type', () => {
+      const buffer = createInvalidGarbageBuffer();
+      expect(() => validateAudioBuffer(buffer)).toThrow(AudioValidationError);
+      expect(() => validateAudioBuffer(buffer)).toThrow('Invalid audio type: unknown.');
+    });
+
+    it('should return verified MIME type for valid WAV', () => {
+      const buffer = createValidWavBuffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/wav');
+    });
+
+    it('should return verified MIME type for valid MP3', () => {
+      const buffer = createValidBareMp3Buffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/mpeg');
+    });
+
+    it('should return verified MIME type for valid M4A', () => {
+      const buffer = createValidM4aBuffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/mp4');
+    });
+
+    it('should return verified MIME type for valid OGG', () => {
+      const buffer = createValidOggBuffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/ogg');
+    });
+
+    it('should return verified MIME type for valid WebM', () => {
+      const buffer = createValidWebmBuffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/webm');
+    });
+
+    it('should return verified MIME type for valid AAC', () => {
+      const buffer = createValidAacBuffer();
+      expect(validateAudioBuffer(buffer)).toBe('audio/aac');
+    });
+  });
+
+  describe('AudioValidationError', () => {
+    it('should be an instance of Error', () => {
+      const error = new AudioValidationError('Test message');
+      expect(error).toBeInstanceOf(Error);
+      expect(error.name).toBe('AudioValidationError');
+      expect(error.message).toBe('Test message');
+    });
+  });
+});

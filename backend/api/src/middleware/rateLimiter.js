@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
+import { checkRateLimit } from "../utils/redisSlidingWindow.js";
 
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
@@ -42,6 +43,7 @@ class DeferredRedisStore {
     this.memoryStore = new MemoryStore();
     this.redisStore = null;
     this.redisInitFailed = false;
+    this.redisHealthy = true;
     // Timestamp of the last (failed) Redis promotion attempt, used to back
     // off retries so a transient init error isn't retried on every request.
     this.lastRedisAttempt = 0;
@@ -54,7 +56,7 @@ class DeferredRedisStore {
 
   activeStore() {
     // Already promoted and Redis is still healthy: keep using it.
-    if (this.redisStore && isRedisReady()) return this.redisStore;
+    if (this.redisStore && isRedisReady() && this.redisHealthy) return this.redisStore;
 
     // Redis is not ready (down, or not yet connected). Serve from the
     // in-memory fallback so local rate limiting still works, and so a dead
@@ -67,7 +69,7 @@ class DeferredRedisStore {
     // error can't pin the limiter to the in-memory store for the life of
     // the process (see issue #11213).
     const now = Date.now();
-    if (this.redisInitFailed && now - this.lastRedisAttempt < REDIS_PROMOTE_RETRY_MS) {
+    if ((this.redisInitFailed || !this.redisHealthy) && now - this.lastRedisAttempt < REDIS_PROMOTE_RETRY_MS) {
       return this.memoryStore;
     }
     this.lastRedisAttempt = now;
@@ -80,10 +82,12 @@ class DeferredRedisStore {
       store.init(this.options);
       this.redisStore = store;
       this.redisInitFailed = false;
+      this.redisHealthy = true;
       logger.info(`Rate limiter "${this.prefix}" now backed by Redis.`);
       return store;
     } catch (err) {
       this.redisInitFailed = true;
+      this.redisHealthy = false;
       logger.error(
         { err },
         `Failed to initialise Redis rate limiter store "${this.prefix}". Using in-memory fallback.`,
@@ -92,24 +96,86 @@ class DeferredRedisStore {
     }
   }
 
-  increment(key) {
-    return this.activeStore().increment(key);
+  async increment(key) {
+    const store = this.activeStore();
+    if (store === this.redisStore) {
+      try {
+        return await store.increment(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.increment failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+        return this.memoryStore.increment(key);
+      }
+    }
+    return store.increment(key);
   }
 
-  decrement(key) {
-    return this.activeStore().decrement(key);
+  async decrement(key) {
+    const store = this.activeStore();
+    if (store === this.redisStore) {
+      try {
+        return await store.decrement(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.decrement failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+        return this.memoryStore.decrement(key);
+      }
+    }
+    return store.decrement(key);
   }
 
-  resetKey(key) {
-    return this.activeStore().resetKey(key);
+  async resetKey(key) {
+    const store = this.activeStore();
+    if (store === this.redisStore) {
+      try {
+        return await store.resetKey(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.resetKey failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+        return this.memoryStore.resetKey(key);
+      }
+    }
+    return store.resetKey(key);
   }
 
-  resetAll() {
-    return this.activeStore().resetAll?.();
+  async resetAll() {
+    const store = this.activeStore();
+    if (store === this.redisStore) {
+      try {
+        return await store.resetAll?.();
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+        return this.memoryStore.resetAll?.();
+      }
+    }
+    return store.resetAll?.();
   }
 
-  get(key) {
-    return this.activeStore().get?.(key);
+  async get(key) {
+    const store = this.activeStore();
+    if (store === this.redisStore) {
+      try {
+        return await store.get?.(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+        return this.memoryStore.get?.(key);
+      }
+    }
+    return store.get?.(key);
   }
 }
 
@@ -274,6 +340,26 @@ export const globalLimiter = rateLimit({
   handler: sentryAlertHandler("globalLimiter"),
   message: { error: "Rate limit exceeded", retryAfter: 900 },
   skip: (req) => req.path === "/health" || req.path.startsWith("/health/"),
+});
+
+const WEBRTC_NEARBY_WINDOW_MS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const WEBRTC_NEARBY_MAX_REQUESTS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+export const nearbyLimiter = rateLimit({
+  windowMs: WEBRTC_NEARBY_WINDOW_MS,
+  max: WEBRTC_NEARBY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:webrtc-nearby:"),
+  handler: sentryAlertHandler("nearbyLimiter"),
+  message: {
+    error: "Too many nearby peer discovery requests. Please try again later.",
+    retryAfter: 60,
+  },
 });
 
 export const userLimiter = rateLimit({
@@ -530,3 +616,49 @@ export function createStore(prefix) {
 }
 
 export const __testing = { DeferredRedisStore, isRedisReady };
+
+const WINDOW_MS = 60 * 1000; 
+const MAX_REQUESTS = 30; 
+
+const memoryFallback = new Map();
+
+export const slidingWindowRateLimiter = (options = {}) => {
+  const windowMs = options.windowMs || WINDOW_MS;
+  const maxRequests = options.maxRequests || MAX_REQUESTS;
+  const keyPrefix = options.keyPrefix || 'rl';
+
+  return async (req, res, next) => {
+    const identifier = req.user?.uid || req.ip || req.socket.remoteAddress;
+    const endpoint = req.path;
+    const key = `${keyPrefix}:${identifier}:${endpoint}`;
+
+    try {
+      const isAllowed = await checkRateLimit(key, windowMs, maxRequests);
+
+      if (!isAllowed) {
+        res.set('Retry-After', Math.ceil(windowMs / 1000));
+        return res.status(429).json({
+          error: 'Too Many Requests',
+          message: 'You have exceeded the rate limit for this endpoint. Please try again later.',
+        });
+      }
+      next();
+    } catch (err) {
+      console.error('Rate limiter middleware error:', err.message);
+      
+      const now = Date.now();
+      if (!memoryFallback.has(key)) memoryFallback.set(key, []);
+      const timestamps = memoryFallback.get(key).filter(t => now - t < windowMs);
+      
+      if (timestamps.length >= maxRequests) {
+         return res.status(429).json({ error: 'Too Many Requests (Memory Fallback)' });
+      }
+      timestamps.push(now);
+      memoryFallback.set(key, timestamps);
+      next();
+    }
+  };
+};
+
+export default slidingWindowRateLimiter;
+

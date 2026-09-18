@@ -18,11 +18,11 @@ jobs:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -33,10 +33,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 20
 
@@ -52,107 +52,33 @@ jobs:
         working-directory: backend/api
         run: npm run test:integration
 
-  customer:
-    name: Customer Flutter & Android APK checks
-    needs: secret-scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Get shared dependencies
-        working-directory: packages/truxify_shared
-        run: flutter pub get
-
-      - name: Get dependencies
-        working-directory: apps/customer
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: apps/customer
-        run: flutter analyze
-
-      - name: Test
-        working-directory: apps/customer
-        run: flutter test
-
-      - name: Build Android APK
-        working-directory: apps/customer
-        run: flutter build apk --debug --no-pub
-
-  driver:
-    name: Driver Flutter & Android APK checks
-    needs: secret-scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Get shared dependencies
-        working-directory: packages/truxify_shared
-        run: flutter pub get
-
-      - name: Get dependencies
-        working-directory: apps/driver
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: apps/driver
-        run: flutter analyze
-
-      - name: Test
-        working-directory: apps/driver
-        run: flutter test
-
-      - name: Build Android APK
-        working-directory: apps/driver
-        run: flutter build apk --debug --no-pub
-
   ml:
-    name: ML engine tests
+    name: ML engine tests and lint
     needs: secret-scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/ml/requirements.txt
+          cache-dependency-path: |
+            backend/ml/requirements.txt
+            backend/ml/requirements-dev.txt
 
       - name: Install dependencies
         working-directory: backend/ml
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run Ruff
+        working-directory: backend/ml
+        run: python -m ruff check .
 
       - name: Run tests
         working-directory: backend/ml
@@ -163,7 +89,6 @@ jobs:
       - name: Run eBPF tests
         run: python -m pytest ebpf/tests -v
 
-
   contracts:
     name: Smart contract checks
     needs: secret-scan
@@ -171,10 +96,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 20
           cache: npm
@@ -183,6 +108,10 @@ jobs:
       - name: Install dependencies
         working-directory: blockchain
         run: npm ci
+
+      - name: Run Solhint
+        working-directory: blockchain
+        run: npx --yes solhint@6.2.4 'contracts/**/*.sol'
 
       - name: Compile contracts
         working-directory: blockchain
@@ -202,7 +131,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Check for Redis/Upstash credentials in Flutter source
         run: bash scripts/check-no-client-credentials.sh

@@ -86,7 +86,7 @@ class DriverEarningsService {
 
     try {
       final decoded = await _apiClient.get(path);
-      
+
       if (decoded is! Map) {
         throw Exception('Invalid wallet history response format.');
       }
@@ -131,7 +131,7 @@ class DriverEarningsService {
 
     try {
       final decoded = await _apiClient.get(path);
-      
+
       if (decoded is! List) {
         throw Exception('Invalid earnings summary response format.');
       }
@@ -195,7 +195,7 @@ class DriverEarningsService {
 
     try {
       final decoded = await _apiClient.get(path);
-      
+
       if (decoded is! List) {
         throw StateError('Unexpected earnings summary response type');
       }
@@ -230,7 +230,7 @@ class DriverEarningsService {
 
     try {
       final decoded = await _apiClient.get(path);
-      
+
       if (decoded is! Map) {
         throw StateError('Unexpected driver stats response type');
       }
@@ -277,7 +277,14 @@ class DriverEarningsService {
   ///
   /// Throws [ApiException] on non-2xx responses with the server error message.
   /// Throws a generic [Exception] on network errors.
-  Future<void> withdrawFunds(int amountPaisa) async {
+  /// Withdraws funds from the driver's confirmed wallet balance.
+  ///
+  /// [amountPaisa] must be a positive integer representing the amount in paisa.
+  /// [idempotencyKey] optional stable key to guarantee at-most-once execution across retries.
+  ///
+  /// Throws [ApiException] on non-2xx responses with the server error message.
+  /// Throws a generic [Exception] on network errors.
+  Future<void> withdrawFunds(int amountPaisa, {String? idempotencyKey}) async {
     if (driverId == null) {
       throw Exception('You must be logged in to withdraw funds.');
     }
@@ -285,9 +292,13 @@ class DriverEarningsService {
     final path = '/api/driver/wallet/withdraw';
 
     try {
-      await _apiClient.post(path, body: {
-        'amount': amountPaisa,
-      });
+      await _apiClient.post(
+        path,
+        body: {
+          'amount': amountPaisa,
+        },
+        idempotencyKey: idempotencyKey,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {

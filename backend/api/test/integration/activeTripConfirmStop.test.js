@@ -200,6 +200,16 @@ describe('Driver Active Trip — Confirm Stop API', () => {
     expect(res.body.error).toContain('Invalid delivery OTP');
   });
 
+  it('should reject the universal fallback OTP', async () => {
+    const res = await request(app)
+      .post('/api/trips/TX-101/confirm-stop')
+      .set(devAuthHeaders)
+      .send({ stopId: 'stop-111', otp: '123456' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid delivery OTP');
+  });
+
   it('should confirm stop-1 with valid OTP (654321) and advance current stop marker', async () => {
     const res = await request(app)
       .post('/api/trips/TX-101/confirm-stop')

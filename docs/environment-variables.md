@@ -1,6 +1,8 @@
 # Environment Variables Reference
 
-This document lists all environment variables used in the Truxify backend API (`backend/api/`), organized by category. All variables are optional unless marked **required**.
+This document lists configuration used by the Truxify backend API (`backend/api/`) and identifies shared/root-level variables used by Docker Compose and the Flutter applications. Keep the root `.env.example` and component-specific `.env.example` files as the concrete configuration templates.
+
+> **Source of truth:** configuration names should match the current application source and the checked-in `.env.example` files. Older names such as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` must not be introduced in new deployments; the current root template uses `REDIS_REST_URL` and `REDIS_REST_TOKEN`.
 
 ## Database
 
@@ -11,6 +13,8 @@ This document lists all environment variables used in the Truxify backend API (`
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | - | Supabase service role key (admin access) |
 | `DATABASE_URL` | - | - | PostgreSQL connection string (alternative to Supabase) |
 | `REDIS_URL` | - | - | Redis connection string for caching and pub/sub |
+| `MONGODB_URI` | - | - | MongoDB connection URI for telemetry/event storage |
+| `MONGODB_DB_NAME` | - | `truxify_telemetry` | MongoDB database name |
 
 ## Supabase Retry / Resilience
 
@@ -28,6 +32,7 @@ This document lists all environment variables used in the Truxify backend API (`
 | `BYPASS_AUTH` | - | `false` | Set to `true` to skip auth in development |
 | `ENABLE_TEST_AUTH` | - | `false` | Enable test authentication endpoints |
 | `DEV_ACCESS_TOKEN` | - | - | Development-only access token |
+| `TRUXIFY_API_BASE_URL` | - | `http://localhost:5000` | Backend base URL used by Flutter apps |
 
 ## Blockchain / Escrow
 
@@ -43,6 +48,8 @@ This document lists all environment variables used in the Truxify backend API (`
 | `ESCROW_MATIC_PER_PAISA` | - | `0.00025` | MATIC to paisa conversion rate |
 | `POLYGON_RPC_URL` | - | - | Polygon RPC node URL |
 | `POLYGON_RPC_NODES` | - | - | Comma-separated list of Polygon RPC URLs |
+| `ESCROW_RELEASE_CONFIRMATIONS` | - | `1` | Required confirmations for escrow-release webhook validation |
+| `ESCROW_VERIFICATION_RPC_TIMEOUT_MS` | - | `10000` | Timeout for escrow verification RPC calls |
 
 ## ML Service
 
@@ -61,6 +68,7 @@ This document lists all environment variables used in the Truxify backend API (`
 | `OSRM_TIMEOUT_MS` | - | `5000` | Timeout for OSRM requests (ms) |
 | `OSRM_MAX_RETRIES` | - | `3` | Max retries for OSRM requests |
 | `OSRM_RETRY_BASE_DELAY_MS` | - | `500` | Base delay for OSRM retries (ms) |
+| `ROUTING_API_KEY` | - | - | External routing provider key where configured |
 
 ## Pricing Configuration
 
@@ -122,6 +130,15 @@ This document lists all environment variables used in the Truxify backend API (`
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | - | - | Firebase service account JSON for FCM |
+| `FIREBASE_PROJECT_ID` | - | - | Firebase project identifier |
+| `FIREBASE_API_KEY` | - | - | Firebase client API key where required |
+| `FIREBASE_MESSAGING_SENDER_ID` | - | - | Firebase Cloud Messaging sender ID |
+| `FIREBASE_CUSTOMER_APP_ID` | - | - | Customer app Firebase application ID |
+| `FIREBASE_DRIVER_APP_ID` | - | - | Driver app Firebase application ID |
+| `FIREBASE_STORAGE_BUCKET` | - | - | Firebase storage bucket |
+| `FIREBASE_AUTH_DOMAIN` | - | - | Firebase authentication domain |
+| `FIREBASE_CLIENT_EMAIL` | - | - | Firebase service account client email |
+| `FIREBASE_PRIVATE_KEY` | - | - | Firebase service account private key |
 
 ## External APIs
 
@@ -143,6 +160,11 @@ This document lists all environment variables used in the Truxify backend API (`
 | `AWS_SECRET_KEY` | - | - | AWS secret key |
 | `AZURE_CONNECTION_STRING` | - | - | Azure Blob Storage connection string |
 | `GCP_PROJECT_ID` | - | - | Google Cloud project ID |
+| `R2_ACCOUNT_ID` | - | - | Cloudflare R2 account identifier |
+| `R2_ACCESS_KEY_ID` | - | - | Cloudflare R2 access key |
+| `R2_SECRET_ACCESS_KEY` | - | - | Cloudflare R2 secret key |
+| `R2_BUCKET_NAME` | - | - | Cloudflare R2 bucket |
+| `R2_PUBLIC_URL_PREFIX` | - | - | Public URL prefix for R2 assets |
 
 ## Server Configuration
 
@@ -177,7 +199,7 @@ This document lists all environment variables used in the Truxify backend API (`
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `APP_VERSION` | - | - | App version string |
-| `PUBLIC_TRACKING_URL` | - | - | Public tracking URL for customers |
+| `PUBLIC_TRACKING_URL` | Required in production | `https://track.example.com` | Fixed public origin for customer tracking links. The API never falls back to the request Host header. |
 | `PLATFORM_UPI_ID` | - | - | Platform UPI ID for payments |
 | `UPI_GATEWAY` | - | - | UPI gateway URL |
 | `FRAUD_THRESHOLD` | - | `0.8` | Fraud detection score threshold |
@@ -195,3 +217,42 @@ This document lists all environment variables used in the Truxify backend API (`
 | `COMPRESSION_ENABLED` | - | `true` | Enable response compression |
 | `COMPRESSION_THRESHOLD_BYTES` | - | `1024` | Min response size for compression |
 | `COMPRESSION_LEVEL` | - | `6` | gzip compression level (1-9) |
+
+## Root `.env.example` / Docker Compose Variables
+
+The root `.env.example` also contains values consumed by Docker Compose and the Flutter applications. These are intentionally separated from API-only settings so contributors do not confuse service-local configuration with client build configuration.
+
+### Local database/container credentials
+
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_USER` | PostgreSQL container user |
+| `POSTGRES_PASSWORD` | PostgreSQL container password |
+| `POSTGRES_DB` | PostgreSQL database name |
+| `DB_PASSWORD` | Primary database service password |
+| `SHARD_PASSWORD` | Shared password for geographic database shards |
+| `MONGO_ROOT_USER` | MongoDB container root user |
+| `MONGO_ROOT_PASSWORD` | MongoDB container root password |
+| `REDIS_PASSWORD` | Redis `requirepass` value |
+| `LOCAL_DATABASE_URL` | Direct host-side PostgreSQL connection string |
+
+### Redis / cache
+
+| Variable | Purpose |
+|---|---|
+| `REDIS_REST_URL` | Redis REST endpoint for HTTP clients |
+| `REDIS_REST_TOKEN` | Redis REST authentication token |
+
+### n8n automation
+
+| Variable | Purpose |
+|---|---|
+| `N8N_ENCRYPTION_KEY` | n8n encryption key |
+| `N8N_USER_MANAGEMENT_JWT_SECRET` | n8n authentication secret |
+| `N8N_DB_PASSWORD` | Password for the dedicated n8n database |
+| `BACKEND_API_URL` | API URL reachable from the n8n container |
+| `ADMIN_ALERT_EMAIL` | Operator mailbox for dispute/escalation alerts |
+
+### Production guidance
+
+Never copy placeholder credentials into a production deployment. Keep `.env` files out of source control, use runtime secrets for private keys/API tokens, and keep the variable names in this document synchronized with `.env.example` and component-specific examples.

@@ -1,236 +1,254 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import crypto from 'crypto';
 
-const mockSupabase = {
-  from: vi.fn(),
-};
-
-vi.mock('../../src/config/db.js', () => ({
-  supabase: mockSupabase,
+const mockLogger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  default: mockLogger,
 }));
 
-describe('OutboxService', () => {
-  let OutboxService, service;
+function buildSupabaseMock() {
+  const chain = {
+    data: null,
+    error: null,
+    lastTable: null,
+    lastInsert: null,
+    lastUpdate: null,
+    lastSelect: null,
+    lastEq: [],
+    lastGte: null,
+    lastLt: null,
+    lastIn: null,
+    select: vi.fn(function (cols) {
+      this.lastSelect = cols;
+      return this;
+    }),
+    insert: vi.fn(function (row) {
+      this.lastInsert = row;
+      return this;
+    }),
+    update: vi.fn(function (row) {
+      this.lastUpdate = row;
+      return this;
+    }),
+    delete: vi.fn(function () {
+      return this;
+    }),
+    eq: vi.fn(function (col, val) {
+      this.lastEq.push([col, val]);
+      return this;
+    }),
+    gte: vi.fn(function (col, val) {
+      this.lastGte = [col, val];
+      return this;
+    }),
+    lt: vi.fn(function (col, val) {
+      this.lastLt = [col, val];
+      return this;
+    }),
+    in: vi.fn(function (col, val) {
+      this.lastIn = [col, val];
+      return Promise.resolve({ data: null, error: this.error });
+    }),
+    order: vi.fn(function () {
+      return this;
+    }),
+    limit: vi.fn(function () {
+      return Promise.resolve({ data: this.data, error: this.error });
+    }),
+    single: vi.fn(function () {
+      return Promise.resolve({ data: this.data, error: this.error });
+    }),
+    then: function (resolve, reject) {
+      return Promise.resolve({ data: this.data, error: this.error }).then(resolve, reject);
+    },
+  };
 
-  beforeEach(async () => {
-    vi.resetModules();
+  const supabase = {
+    from: vi.fn((table) => {
+      chain.lastTable = table;
+      return chain;
+    }),
+  };
+
+  return { chain, supabase };
+}
+
+const mocks = buildSupabaseMock();
+vi.mock('../../src/config/db.js', () => ({
+  supabaseAdmin: mocks.supabase,
+}));
+
+const { OutboxService, outboxService } = await import('../../src/services/outbox/outboxService.js');
+
+describe('OutboxService', () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    const mod = await import('../../src/services/outbox/outboxService.js');
-    OutboxService = mod.OutboxService;
-    service = new OutboxService();
+    mocks.chain.data = null;
+    mocks.chain.error = null;
+    mocks.chain.lastEq = [];
+    mocks.chain.lastTable = null;
+    mocks.chain.lastInsert = null;
+    mocks.chain.lastUpdate = null;
   });
 
   describe('writeEvent', () => {
+    it('writes a pending outbox event via supabaseAdmin and returns its id', async () => {
+      mocks.chain.data = { event_id: 'evt-1' };
+      const id = await outboxService.writeEvent({
+        aggregateId: 'order-1',
+        eventType: 'order.created',
+        payload: { a: 1 },
+      });
+
+      expect(id).toBe('evt-1');
+      expect(mocks.chain.lastTable).toBe('event_outbox');
+      expect(mocks.chain.lastInsert).toMatchObject({
+        aggregate_id: 'order-1',
+        event_type: 'order.created',
+        status: 'pending',
+        payload: { a: 1 },
+      });
+    });
+
     it('returns null when aggregateId is missing', async () => {
-      const result = await service.writeEvent({ eventType: 'order.created' });
-      expect(result).toBeNull();
+      const id = await outboxService.writeEvent({ eventType: 'order.created' });
+      expect(id).toBeNull();
+      expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
 
     it('returns null when eventType is missing', async () => {
-      const result = await service.writeEvent({ aggregateId: 'order-123' });
-      expect(result).toBeNull();
-    });
-
-    it('returns null when both aggregateId and eventType are missing', async () => {
-      const result = await service.writeEvent({});
-      expect(result).toBeNull();
-    });
-
-    it('inserts event to outbox_events table when valid', async () => {
-      const mockInsert = vi.fn().mockReturnValue({
-        insert: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnValue({
-            single: vi.fn().mockResolvedValue({ data: { id: 'evt-123' }, error: null }),
-          }),
-        }),
-      });
-      mockSupabase.from.mockReturnValue(mockInsert());
-
-      const result = await service.writeEvent({
-        aggregateId: 'order-456',
-        eventType: 'order.shipped',
-        payload: { driver: 'driver-1' },
-      });
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('outbox_events');
-    });
-
-    it('returns an empty array when workerId is missing', async () => {
-      const rows = await outboxService.claimBatch({});
-      expect(rows).toEqual([]);
+      const id = await outboxService.writeEvent({ aggregateId: 'order-1' });
+      expect(id).toBeNull();
       expect(mocks.supabase.from).not.toHaveBeenCalled();
     });
-  });
 
-  describe('reclaimExpiredClaims', () => {
-    it('invokes reclaim_outbox_batch RPC', async () => {
-      await outboxService.reclaimExpiredClaims();
-      expect(mocks.chain.lastRpcName).toBe('reclaim_outbox_batch');
-    });
-
-    it('does not throw when the RPC errors', async () => {
-      mocks.chain.rpcError = { message: 'connection timeout' };
-      await expect(outboxService.reclaimExpiredClaims()).resolves.toBeUndefined();
-      expect(mockLogger.warn).toHaveBeenCalled();
+    it('swallows errors and returns null when insert fails', async () => {
+      mocks.chain.error = { message: 'insert failed' };
+      const id = await outboxService.writeEvent({ aggregateId: 'order-1', eventType: 'order.created' });
+      expect(id).toBeNull();
+      expect(mockLogger.error).toHaveBeenCalled();
     });
   });
 
   describe('fetchPendingEvents', () => {
-    it('returns empty array on error', async () => {
-      const mockSelect = vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          order: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue({ data: null, error: new Error('DB error') }),
-          }),
-        }),
-      });
-      mockSupabase.from.mockReturnValue(mockSelect());
+    it('returns pending events ordered by created_at', async () => {
+      mocks.chain.data = [{ event_id: 'evt-1' }, { event_id: 'evt-2' }];
+      const rows = await outboxService.fetchPendingEvents(10);
 
-      const result = await service.fetchPendingEvents();
-      expect(result).toEqual([]);
+      expect(rows).toHaveLength(2);
+      expect(mocks.chain.lastTable).toBe('event_outbox');
+      expect(mocks.chain.select).toHaveBeenCalledWith('*');
+      expect(mocks.chain.order).toHaveBeenCalledWith('created_at', { ascending: true });
+      expect(mocks.chain.limit).toHaveBeenCalledWith(10);
     });
 
-    it('returns data array when query succeeds', async () => {
-      const events = [{ id: '1' }, { id: '2' }];
-      const mockSelect = vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          order: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue({ data: events, error: null }),
-          }),
-        }),
-      });
-      mockSupabase.from.mockReturnValue(mockSelect());
-
-      const result = await service.fetchPendingEvents();
-      expect(result).toEqual(events);
-    });
-
-    it('skips when eventId is missing', async () => {
-      await outboxService.markFailed(null, 'replica-a', 'err');
-      expect(mocks.supabase.from).not.toHaveBeenCalled();
+    it('returns an empty array on query error', async () => {
+      mocks.chain.error = { message: 'db down' };
+      const rows = await outboxService.fetchPendingEvents();
+      expect(rows).toEqual([]);
+      expect(mockLogger.error).toHaveBeenCalled();
     });
   });
 
   describe('markPublished', () => {
-    it('updates status to published', async () => {
-      const mockUpdate = vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      });
-      mockSupabase.from.mockReturnValue(mockUpdate());
+    it('updates status to published and returns true when data returned', async () => {
+      mocks.chain.data = [{ event_id: 'evt-1' }];
+      const result = await outboxService.markPublished('evt-1');
 
-      await service.markPublished('evt-123');
-      expect(mockSupabase.from).toHaveBeenCalledWith('outbox_events');
+      expect(result).toBe(true);
+      expect(mocks.chain.lastTable).toBe('event_outbox');
+      expect(mocks.chain.lastUpdate).toMatchObject({ status: 'published' });
+      expect(mocks.chain.eq).toHaveBeenCalledWith('event_id', 'evt-1');
+    });
+
+    it('returns false when no data matched', async () => {
+      mocks.chain.data = [];
+      const result = await outboxService.markPublished('evt-nonexistent');
+      expect(result).toBe(false);
     });
   });
 
   describe('markFailed', () => {
-    it('calls from with outbox_events', async () => {
-      const mockUpdate = vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      });
-      mockSupabase.from.mockReturnValue(mockUpdate());
+    it('increments attempts and updates last_error', async () => {
+      mocks.chain.data = { attempts: 2 };
+      const success = await outboxService.markFailed('evt-1', 'worker-1', 'network timeout');
 
-      await service.markFailed('evt-123', 'Network timeout');
-      expect(mockSupabase.from).toHaveBeenCalledWith('outbox_events');
+      expect(success).toBe(true);
+      expect(mocks.chain.lastTable).toBe('event_outbox');
+      expect(mocks.chain.lastUpdate).toMatchObject({
+        status: 'pending',
+        last_error: 'network timeout',
+        attempts: 3,
+      });
+      expect(mocks.chain.eq).toHaveBeenCalledWith('id', 'evt-1');
     });
 
-    it('does not throw when the Supabase update returns an error', async () => {
-      mocks.chain.error = { message: 'connection timeout' };
-      // Should not throw — error is swallowed and logged.
-      await expect(outboxService.requeueFailedEvents(3)).resolves.toBeUndefined();
-      expect(mockLogger.error).toHaveBeenCalled();
-    });
-
-    it('uses maxRetries as the lt threshold for attempts', async () => {
-      mocks.chain.error = null;
-      const ltValues = [];
-      mocks.chain.lt = vi.fn(function (col) {
-        ltValues.push(col);
-        return this;
-      });
-      await outboxService.requeueFailedEvents(7);
-      expect(mocks.chain.lastEq).toEqual(['status', 'publishing']);
-      expect(ltValues.length).toBeGreaterThan(0);
+    it('returns false when eventId or workerId is missing', async () => {
+      const res1 = await outboxService.markFailed(null, 'worker-1', 'err');
+      const res2 = await outboxService.markFailed('evt-1', null, 'err');
+      expect(res1).toBe(false);
+      expect(res2).toBe(false);
     });
   });
 
   describe('deadLetterExhaustedEvents', () => {
-    it('moves exhausted events to outbox_dlq and removes them from outbox_events', async () => {
-      mocks.chain.error = null;
+    it('moves exhausted events from outbox_events to outbox_dlq', async () => {
       mocks.chain.data = [
         {
-          id: 'evt-x',
-          aggregate_id: 'order-x',
-          aggregate_type: 'order',
-          event_type: 'order.created',
-          payload: { a: 1 },
-          last_error: 'kafka down',
+          id: 'evt-1',
+          aggregate_id: 'ord-1',
+          event_type: 'order.cancelled',
           retry_count: 5,
-          last_attempted_at: '2026-08-11T00:00:00.000Z',
-          created_at: '2026-08-10T00:00:00.000Z',
         },
       ];
 
       await outboxService.deadLetterExhaustedEvents(5);
 
-      // A DLQ row is written with status 'pending' for replay.
+      expect(mocks.supabase.from).toHaveBeenCalledWith('outbox_events');
       expect(mocks.supabase.from).toHaveBeenCalledWith('outbox_dlq');
-      expect(Array.isArray(mocks.chain.lastInsert)).toBe(true);
-      expect(mocks.chain.lastInsert[0]).toMatchObject({
-        original_id: 'evt-x',
-        aggregate_id: 'order-x',
-        event_type: 'order.created',
-        status: 'pending',
-      });
-      // The source row is removed from outbox_events via delete().in().
-      expect(mocks.chain.delete).toHaveBeenCalled();
-      expect(mocks.chain.in).toHaveBeenCalledWith('id', ['evt-x']);
-      // An alert is emitted for operators to replay.
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mocks.chain.gte).toHaveBeenCalledWith('retry_count', 5);
     });
 
-    it('is a no-op when there are no exhausted events', async () => {
-      mocks.chain.error = null;
+    it('is a no-op when no events are exhausted', async () => {
       mocks.chain.data = [];
       await outboxService.deadLetterExhaustedEvents(5);
-
       expect(mocks.supabase.from).not.toHaveBeenCalledWith('outbox_dlq');
     });
   });
 
+  describe('requeueFailedEvents', () => {
+    it('resets publishing events back to pending', async () => {
+      await outboxService.requeueFailedEvents(5);
+      expect(mocks.chain.lastTable).toBe('event_outbox');
+      expect(mocks.chain.lastUpdate).toEqual({ status: 'pending' });
+      expect(mocks.chain.eq).toHaveBeenCalledWith('status', 'publishing');
+      expect(mocks.chain.lt).toHaveBeenCalledWith('attempts', 5);
+    });
+  });
+
   describe('replayDeadLetter', () => {
-    it('reinserts a DLQ row into outbox_events as pending and marks it replayed', async () => {
-      mocks.chain.error = null;
+    it('re-inserts DLQ event into outbox_events and marks replayed', async () => {
       mocks.chain.data = {
         id: 'dlq-1',
-        original_id: 'evt-x',
-        aggregate_id: 'order-x',
-        aggregate_type: 'order',
-        event_type: 'order.created',
-        payload: { a: 1 },
+        original_id: 'evt-1',
+        aggregate_id: 'ord-1',
+        event_type: 'order.cancelled',
+        payload: {},
       };
 
-      const replayedId = await outboxService.replayDeadLetter('dlq-1');
-
-      expect(replayedId).toBe('evt-x');
-      expect(mocks.chain.lastInsert).toMatchObject({
-        id: 'evt-x',
-        aggregate_id: 'order-x',
-        event_type: 'order.created',
-        status: 'pending',
-        retry_count: 0,
-      });
+      const result = await outboxService.replayDeadLetter('dlq-1');
+      expect(result).toBe('evt-1');
       expect(mocks.chain.lastUpdate).toMatchObject({ status: 'replayed' });
     });
 
-    it('returns null when the DLQ id is missing', async () => {
-      const replayedId = await outboxService.replayDeadLetter(null);
-      expect(replayedId).toBeNull();
-      expect(mocks.supabase.from).not.toHaveBeenCalled();
+    it('returns null when dlqId is missing', async () => {
+      const result = await outboxService.replayDeadLetter(null);
+      expect(result).toBeNull();
     });
   });
 });

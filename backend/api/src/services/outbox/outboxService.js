@@ -82,6 +82,29 @@ export class OutboxService {
   }
 
   /**
+   * Atomically claim a batch of pending outbox events via the
+   * claim_outbox_events RPC (supabase/migrations/20260810000000_...). The RPC
+   * uses SELECT ... FOR UPDATE SKIP LOCKED and moves the claimed rows to
+   * 'publishing' with `attempts` incremented and a 1-minute visibility
+   * timeout, so concurrent relay replicas can never claim the same row and
+   * publish it twice (issue #14680).
+   *
+   * `workerId`/`leaseMs` are accepted for call-site compatibility but are not
+   * used: event_outbox tracks the lease via next_attempt_at, not owner columns.
+   */
+  async claimBatch({ batchSize = 50 } = {}) {
+    const { data, error } = await supabaseAdmin.rpc('claim_outbox_events', {
+      p_limit: batchSize,
+    });
+
+    if (error) {
+      logger.error('[OutboxService] Failed to claim outbox batch:', error.message);
+      return [];
+    }
+    return data ?? [];
+  }
+
+  /**
    * Reset 'publishing' rows whose lease expired (crashed worker) back to
    * 'pending' so any replica can reclaim them.
    */
@@ -131,7 +154,7 @@ export class OutboxService {
         attempts: currentAttempts + 1,
         next_attempt_at: new Date().toISOString(),
       })
-      .eq('id', eventId);
+      .eq('event_id', eventId);
     if (error) {
       logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });
       return false;
@@ -205,8 +228,12 @@ export class OutboxService {
   /**
    * Reset failed events back to pending for retry (up to maxRetries).
    * Clears any stale claim metadata so the row can be re-claimed.
+   * If a delay is specified, awaits a Promise-based timeout before requeueing.
    */
-  async requeueFailedEvents(maxRetries = 5) {
+  async requeueFailedEvents(maxRetries = 5, delay = 0) {
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
     const { error } = await supabaseAdmin
       .from('event_outbox')
       .update({ status: 'pending' })

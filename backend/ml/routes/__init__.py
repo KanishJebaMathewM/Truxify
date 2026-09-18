@@ -32,6 +32,7 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
 ML_ROUTE_MODULES: list[tuple[str, str]] = [
     ("ab_testing", "A/B Testing"),
     ("anomaly_routes", "Anomaly Detection"),
+    ("cancellation_routes", "Cancellation Penalty"),
     ("diffusion_routes", "Diffusion Models"),
     ("federated_routes", "Federated Learning"),
     ("foundation_routes", "Foundation Model"),
@@ -105,3 +106,5 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
         logger.info("Registered ML router: %s [%s]", description, module_name)
 
     return registered
+
+from . import _gnn_event_loop_isolation_patch

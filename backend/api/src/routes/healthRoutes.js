@@ -58,7 +58,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { getAdminClient, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
@@ -82,11 +82,11 @@ function withTimeout(promise) {
   ]).finally(() => clearTimeout(timer));
 }
 
-async function checkSupabase() {
+async function checkSupabase(req) {
   // Probe through the service-role client: anon privileges on profiles are
   // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
   // report 42501 permission denied even when Supabase is reachable.
-  const client = supabaseAdmin || supabase;
+  const client = getAdminClient();
   if (!client) return 'not_configured';
   try {
     const { error } = await withTimeout(
@@ -94,29 +94,29 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error({ err }, '[health] Supabase check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] Supabase check failed');
     return 'failed';
   }
 }
 
-async function checkMongo() {
+async function checkMongo(req) {
   if (!mongoDb) return 'not_configured';
   try {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error({ err }, '[health] MongoDB check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] MongoDB check failed');
     return 'failed';
   }
 }
 
-async function checkRedis() {
+async function checkRedis(req) {
   if (!redisClient) return 'not_configured';
   try {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error({ err }, '[health] Redis check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] Redis check failed');
     return 'failed';
   }
 }
@@ -125,12 +125,12 @@ function checkFirebase() {
   return firebaseAdmin ? 'configured' : 'not_configured';
 }
 
-async function checkEscrow() {
+async function checkEscrow(req) {
   try {
     const result = await checkEscrowHealth();
     return result.status;
   } catch (err) {
-    logger.error({ err }, '[Health] checkEscrow failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[Health] checkEscrow failed');
     return 'failed';
   }
 }
@@ -140,8 +140,9 @@ function checkPolygon() {
 }
 
 const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
-// Optional services treat 'not_configured' as healthy — only actual failures are critical.
-const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
+// MongoDB is optional telemetry storage: only a configured-but-unreachable
+// instance should affect dependency health.
+const CRITICAL_UNHEALTHY_MONGO = new Set(['failed']);
 
 /**
  * @openapi
@@ -149,7 +150,7 @@ const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
  *   get:
  *     tags: [Health]
  *     summary: Full system health check
- *     description: Returns the status of all dependent services (Supabase, MongoDB, Redis, Firebase, Polygon). Returns 503 when a critical service fails.
+ *     description: Returns the status of all dependent services (Supabase, optional MongoDB telemetry, Redis, Firebase, Polygon). Returns 503 when a critical service fails.
  *     security:
  *       - {}
  *     responses:
@@ -168,10 +169,10 @@ const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
  */
 router.get('/', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus, escrowStatus] = await Promise.all([
-    checkSupabase(),
-    checkMongo(),
-    checkRedis(),
-    checkEscrow(),
+    checkSupabase(req),
+    checkMongo(req),
+    checkRedis(req),
+    checkEscrow(req),
   ]);
 
   const services = {
@@ -188,7 +189,7 @@ router.get('/', healthLimiter, async (req, res) => {
   // health. Supabase and MongoDB remain critical.
   const criticalFailed =
     CRITICAL_UNHEALTHY.has(supabaseStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+    CRITICAL_UNHEALTHY_MONGO.has(mongoStatus);
 
   const status = criticalFailed ? 'degraded' : 'ok';
   const httpStatus = criticalFailed ? 503 : 200;
@@ -228,7 +229,7 @@ router.get('/live', healthLimiter, (req, res) => {
  *   get:
  *     tags: [Health]
  *     summary: Kubernetes readiness probe
- *     description: Returns 200 when all critical services (Supabase, MongoDB) are reachable. Returns 503 if any critical dependency is down.
+ *     description: Returns 200 when Supabase is reachable and optional MongoDB telemetry is either reachable or disabled. Returns 503 if Supabase is unavailable or configured MongoDB is down.
  *     security:
  *       - {}
  *     responses:
@@ -247,9 +248,9 @@ router.get('/live', healthLimiter, (req, res) => {
  */
 router.get('/ready', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
-    checkSupabase(),
-    checkMongo(),
-    checkRedis(),
+    checkSupabase(req),
+    checkMongo(req),
+    checkRedis(req),
   ]);
 
   const services = {
@@ -260,7 +261,7 @@ router.get('/ready', healthLimiter, async (req, res) => {
 
   const criticalFailed =
     CRITICAL_UNHEALTHY.has(supabaseStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+    CRITICAL_UNHEALTHY_MONGO.has(mongoStatus);
 
   if (criticalFailed) {
     return res.status(503).json({ status: 'not_ready', services });

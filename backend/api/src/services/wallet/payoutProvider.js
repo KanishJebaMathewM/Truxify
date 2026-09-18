@@ -1,4 +1,5 @@
 import logger from '../../middleware/logger.js';
+import { supabaseAdmin, supabase } from '../../config/db.js';
 
 /**
  * Payout dispatcher for driver wallet withdrawals.
@@ -29,6 +30,26 @@ export function isPayoutProviderConfigured() {
     process.env.WITHDRAWAL_PAYOUT_PROVIDER ||
     process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL
   );
+}
+
+const DEFAULT_SETTLEMENT_REF_PATTERN = /^[A-Za-z0-9_\-.:#/]{2,128}$/;
+
+export function isValidSettlementRef(ref) {
+  if (!ref || typeof ref !== 'string') return false;
+  const trimmed = ref.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined' || trimmed === '[object Object]') {
+    return false;
+  }
+  const customPattern = process.env.WITHDRAWAL_SETTLEMENT_REF_PATTERN || process.env.WITHDRAWAL_PAYOUT_REF_PATTERN;
+  if (customPattern) {
+    try {
+      const regex = new RegExp(customPattern);
+      return regex.test(trimmed);
+    } catch (err) {
+      logger.warn(`[PayoutProvider] Invalid custom settlement ref regex "${customPattern}": ${err.message}`);
+    }
+  }
+  return DEFAULT_SETTLEMENT_REF_PATTERN.test(trimmed);
 }
 
 export async function dispatchPayout({ driverId, withdrawal }) {
@@ -79,12 +100,22 @@ export async function dispatchPayout({ driverId, withdrawal }) {
     const settlementRef = body && typeof body === 'object'
       ? (body.settlement_ref || body.reference)
       : null;
-    if (!settlementRef) {
+    if (!settlementRef || typeof settlementRef !== 'string') {
+      logger.warn('[PayoutProvider] Payout webhook returned HTTP 200 but body contains no settlement_ref or reference.');
       throw new Error('Payout webhook returned HTTP 200 but body contains no settlement_ref or reference.');
     }
+
+    if (!isValidSettlementRef(settlementRef)) {
+      logger.warn(
+        { settlementRef, driverId, withdrawalId: withdrawal?.id },
+        `[PayoutProvider] Payout webhook returned invalid settlement_ref pattern: "${settlementRef}". Treating as failed payout.`
+      );
+      throw new Error(`Payout webhook returned invalid settlement_ref pattern: "${settlementRef}".`);
+    }
+
     return {
       success: true,
-      settlementRef,
+      settlementRef: settlementRef.trim(),
     };
   }
 
@@ -131,7 +162,18 @@ export async function recoverSettlementRef({ withdrawalId }) {
       return null;
     }
 
-    return body.settlement_ref || body.reference || null;
+    const rawRef = body.settlement_ref || body.reference || null;
+    if (!rawRef || !isValidSettlementRef(rawRef)) {
+      if (rawRef) {
+        logger.warn(
+          { rawRef, withdrawalId },
+          `[PayoutProvider] Recovered settlement_ref does not match valid pattern: "${rawRef}"`
+        );
+      }
+      return null;
+    }
+
+    return rawRef.trim();
   } catch (err) {
     logger.error(
       `[PayoutProvider] Failed to recover settlement ref for withdrawal ${withdrawalId}: ${err.message}`,
@@ -139,3 +181,67 @@ export async function recoverSettlementRef({ withdrawalId }) {
     return null;
   }
 }
+
+/**
+ * Retrieves a payout record from Supabase with explicit null guards.
+ * Returns structured error response { error: 'Payout record not found' } instead of null.
+ */
+export async function getPayoutRecord(payoutId, client = supabaseAdmin || supabase) {
+  if (!payoutId) {
+    return { error: 'Payout record not found' };
+  }
+  if (!client) {
+    return { error: 'Payout record not found' };
+  }
+
+  try {
+    const { data: payout, error } = await client
+      .from('payouts')
+      .select('*')
+      .eq('id', payoutId)
+      .maybeSingle();
+
+    if (error || !payout) {
+      const { data: tx, error: txError } = await client
+        .from('wallet_transactions')
+        .select('*')
+        .eq('id', payoutId)
+        .maybeSingle();
+
+      if (txError || !tx) {
+        return { error: 'Payout record not found' };
+      }
+      return tx;
+    }
+
+    return payout;
+  } catch (err) {
+    logger.error(`[PayoutProvider] Failed to fetch payout record: ${err.message}`);
+    return { error: 'Payout record not found' };
+  }
+}
+
+export async function getPayoutStatus(payoutId, client = supabaseAdmin || supabase) {
+  const record = await getPayoutRecord(payoutId, client);
+  if (!record || record.error) {
+    return { error: 'Payout record not found' };
+  }
+  return record;
+}
+
+export async function getPayoutById(payoutId, client = supabaseAdmin || supabase) {
+  return getPayoutRecord(payoutId, client);
+}
+
+export async function getPayout(payoutId, client = supabaseAdmin || supabase) {
+  return getPayoutRecord(payoutId, client);
+}
+
+export async function fetchPayout(payoutId, client = supabaseAdmin || supabase) {
+  return getPayoutRecord(payoutId, client);
+}
+
+export async function fetchPayoutRecord(payoutId, client = supabaseAdmin || supabase) {
+  return getPayoutRecord(payoutId, client);
+}
+

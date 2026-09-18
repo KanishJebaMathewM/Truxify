@@ -32,6 +32,7 @@ const mockSendFcmNotification = vi.fn();
 // Register mocks BEFORE importing routes
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (req, res, next) => next(),
+  createStore: () => undefined,
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({
@@ -41,12 +42,24 @@ vi.mock('../../src/middleware/auth.js', () => ({
   },
 }));
 
+vi.mock('../../src/lib/redisLock.js', () => ({
+  acquireLock: vi.fn().mockResolvedValue('mock-lock-token'),
+  releaseLock: vi.fn().mockResolvedValue(),
+  LockAcquisitionError: class LockAcquisitionError extends Error {},
+}));
+
 vi.mock('../../src/core/container.js', () => ({
   orderRepository: {
     findOrderByAnyId: (...args) => mockOrderRepository.findOrderByAnyId(...args),
     findDriverWallet: (...args) => mockOrderRepository.findDriverWallet(...args),
     findCustomerWallet: (...args) => mockOrderRepository.findCustomerWallet(...args),
     updateOrder: (...args) => mockOrderRepository.updateOrder(...args),
+  },
+  orderValidationService: {
+    findOrderByIdOrDisplayId: async (...args) => {
+      const res = await mockOrderRepository.findOrderByAnyId(...args);
+      return res?.data || res;
+    },
   },
   orderLifecycleService: {
     verifyDeliveryFn: (...args) => mockOrderLifecycleService.verifyDeliveryFn(...args),

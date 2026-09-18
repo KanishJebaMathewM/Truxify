@@ -32,26 +32,18 @@ const mockRedisClient = vi.hoisted(() => ({
 }));
 
 function makeSupabaseMock() {
+  const queryBuilder = {
+    select: vi.fn(() => queryBuilder),
+    or: vi.fn(() => queryBuilder),
+    lt: vi.fn(() => queryBuilder),
+    limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
+    delete: vi.fn(() => queryBuilder),
+    eq: vi.fn(() => Promise.resolve({ data: [{ id: 'x' }], error: null })),
+    update: vi.fn(() => queryBuilder),
+    upsert: vi.fn(() => Promise.resolve({ error: null })),
+  };
   return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        lt: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
-        })),
-      })),
-      delete: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          select: vi.fn(() => Promise.resolve({ data: [{ id: 'x' }], error: null })),
-        })),
-      })),
-      update: vi.fn(() => ({
-        eq: vi.fn(() => Promise.resolve({ error: null })),
-      })),
-      upsert: vi.fn(() => Promise.resolve({ error: null })),
-      update: vi.fn(() => ({
-        eq: vi.fn(() => Promise.resolve({ error: null })),
-      })),
-    })),
+    from: vi.fn(() => queryBuilder),
   };
 }
 
@@ -92,42 +84,33 @@ describe('reputationReconciliation', () => {
   });
 
   function withFailedReputations(rows) {
+    const updateEqFn = vi.fn(() => Promise.resolve({ error: null }));
+    const deleteEqFn = vi.fn(() => Promise.resolve({ data: [{ id: 'row-id' }], error: null }));
     const queryBuilder = {
-      select: vi.fn(() => ({
-        lt: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
-        })),
-      })),
+      select: vi.fn(() => queryBuilder),
+      or: vi.fn(() => queryBuilder),
+      lt: vi.fn(() => queryBuilder),
+      limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
       delete: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          select: vi.fn(() => Promise.resolve({ data: [{ id: 'row-id' }], error: null })),
-        })),
+        eq: deleteEqFn,
       })),
       update: vi.fn(() => ({
-        eq: vi.fn(() => Promise.resolve({ error: null })),
+        eq: updateEqFn,
       })),
       upsert: vi.fn(() => Promise.resolve({ error: null })),
-      update: vi.fn(() => ({
-        eq: vi.fn(() => Promise.resolve({ error: null })),
-      })),
+      _updateEqFn: updateEqFn,
+      _deleteEqFn: deleteEqFn,
     };
     mockSupabaseAdmin.from = vi.fn(() => queryBuilder);
     return queryBuilder;
   }
 
   it('skips when supabaseAdmin is not available', async () => {
-    // Temporarily replace supabaseAdmin with null by changing the module
-    vi.resetModules();
-    const { supabaseAdmin } = await import('../../src/config/db.js');
-    // The mock returns a valid supabaseAdmin by default, so we test via the log warning path
-    // when the module is loaded normally the mock is always available
-    // Instead test that the skip path is hit by simulating a null check via the warning log
     mockRedisClient.set.mockResolvedValueOnce('lock-value');
     mockRedisClient.del.mockResolvedValueOnce(1);
 
     await reconcileFailedReputationUpdates();
 
-    // No warning should be logged about supabaseAdmin since the mock is available
     expect(mockLogger.warn).not.toHaveBeenCalledWith(
       expect.stringContaining('supabaseAdmin not available')
     );
@@ -167,51 +150,141 @@ describe('reputationReconciliation', () => {
     expect(mockAwardReputationPoints).not.toHaveBeenCalled();
   });
 
-  it('deletes row and awards reputation points on success', async () => {
+  it('marks row confirmed and deletes row on success with awardKey and txHash', async () => {
     mockRedisClient.set.mockResolvedValue('lock-value');
     mockRedisClient.del.mockResolvedValue(1);
-    const row = { id: 'row-1', driver_wallet: '0xwallet1', stars: 5, retry_count: 0 };
-    withFailedReputations([row]);
-    mockAwardReputationPoints.mockResolvedValueOnce({ txHash: '0xtxhash' });
+    const row = {
+      id: 'row-1',
+      driver_wallet: '0xwallet1',
+      stars: 5,
+      retry_count: 0,
+      award_key: 'order:101:rating:driver',
+      status: 'pending',
+    };
+    const qb = withFailedReputations([row]);
+    mockAwardReputationPoints.mockResolvedValueOnce({ txHash: '0xconfirmedtx', confirmed: true });
 
     await reconcileFailedReputationUpdates();
 
-    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet1', 5);
+    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet1', 5, {
+      awardKey: 'order:101:rating:driver',
+      existingTxHash: null,
+    });
+    expect(qb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'confirmed',
+        tx_hash: '0xconfirmedtx',
+      })
+    );
+    expect(qb._deleteEqFn).toHaveBeenCalledWith('id', 'row-1');
   });
 
-  it('upserts retry_count and last_error on awardReputationPoints failure', async () => {
+  it('resolves existing submitted tx_hash without duplicate submission', async () => {
     mockRedisClient.set.mockResolvedValue('lock-value');
     mockRedisClient.del.mockResolvedValue(1);
-    const row = { id: 'row-2', driver_wallet: '0xwallet2', stars: 3, retry_count: 2 };
-    withFailedReputations([row]);
-    mockAwardReputationPoints.mockRejectedValueOnce(new Error('Block RPC timeout'));
+    const row = {
+      id: 'row-submitted',
+      driver_wallet: '0xwallet_sub',
+      stars: 4,
+      retry_count: 1,
+      award_key: 'order:202:rating:driver',
+      tx_hash: '0xexistingtxhash',
+      status: 'submitted',
+    };
+    const qb = withFailedReputations([row]);
+    mockAwardReputationPoints.mockResolvedValueOnce({
+      txHash: '0xexistingtxhash',
+      confirmed: true,
+    });
 
     await reconcileFailedReputationUpdates();
 
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Award failed for 0xwallet2 after removing pending row')
+    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet_sub', 4, {
+      awardKey: 'order:202:rating:driver',
+      existingTxHash: '0xexistingtxhash',
+    });
+    expect(qb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'confirmed',
+        tx_hash: '0xexistingtxhash',
+      })
     );
   });
 
-  it('does NOT award on-chain points when the delete fails (#14692)', async () => {
+  it('updates status to submitted when error includes txHash (timeout during confirmation)', async () => {
     mockRedisClient.set.mockResolvedValue('lock-value');
     mockRedisClient.del.mockResolvedValue(1);
-    const row = { id: 'row-5', driver_wallet: '0xwallet5', stars: 4, retry_count: 0 };
-    const queryBuilder = withFailedReputations([row]);
-    // Simulate a delete failure: delete resolves but reports an error and no
-    // deleted rows, so the row remains and must NOT be re-awarded.
-    queryBuilder.delete.mockReturnValue({
-      eq: vi.fn(() => ({
-        select: vi.fn(() => Promise.resolve({ data: null, error: new Error('deadlock') })),
-      })),
-    });
-    mockAwardReputationPoints.mockResolvedValueOnce({ txHash: '0xtxhash' });
+    const row = {
+      id: 'row-timeout',
+      driver_wallet: '0xwallet_timeout',
+      stars: 3,
+      retry_count: 0,
+      status: 'pending',
+    };
+    const qb = withFailedReputations([row]);
+    const timeoutErr = new Error('Tx confirmation timed out');
+    timeoutErr.txHash = '0xbroadcasttx';
+    mockAwardReputationPoints.mockRejectedValueOnce(timeoutErr);
 
     await reconcileFailedReputationUpdates();
 
-    expect(mockAwardReputationPoints).not.toHaveBeenCalled();
+    expect(qb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'submitted',
+        tx_hash: '0xbroadcasttx',
+        retry_count: 1,
+      })
+    );
+  });
+
+  it('updates status to failed when retry_count reaches MAX_RETRIES', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+    const row = {
+      id: 'row-max',
+      driver_wallet: '0xwallet_max',
+      stars: 2,
+      retry_count: 9,
+      status: 'pending',
+    };
+    const qb = withFailedReputations([row]);
+    mockAwardReputationPoints.mockRejectedValueOnce(new Error('Persistent RPC failure'));
+
+    await reconcileFailedReputationUpdates();
+
+    expect(qb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        retry_count: 10,
+      })
+    );
+  });
+
+  it('logs warning if delete fails after marking confirmed without re-awarding', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+    const row = {
+      id: 'row-del-err',
+      driver_wallet: '0xwallet_del',
+      stars: 5,
+      retry_count: 0,
+      status: 'pending',
+    };
+    const qb = withFailedReputations([row]);
+    qb.delete = vi.fn(() => ({
+      eq: vi.fn(() => Promise.resolve({ error: new Error('DB connection drop') })),
+    }));
+    mockAwardReputationPoints.mockResolvedValueOnce({ txHash: '0xhash123', confirmed: true });
+
+    await reconcileFailedReputationUpdates();
+
+    expect(qb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'confirmed',
+      })
+    );
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Could not remove pending row row-5 before award')
+      expect.stringContaining('Failed to delete confirmed row row-del-err')
     );
   });
 
@@ -221,33 +294,27 @@ describe('reputationReconciliation', () => {
       .mockResolvedValueOnce(null); // claim key already taken
     mockRedisClient.del.mockResolvedValue(1);
     const rows = [
-      { id: 'row-3', driver_wallet: '0xwallet3', stars: 1, retry_count: 0 },
-      { id: 'row-4', driver_wallet: '0xwallet4', stars: 2, retry_count: 0 },
+      { id: 'row-3', driver_wallet: '0xwallet3', stars: 1, retry_count: 0, status: 'pending' },
+      { id: 'row-4', driver_wallet: '0xwallet4', stars: 2, retry_count: 0, status: 'pending' },
     ];
     withFailedReputations(rows);
-    mockAwardReputationPoints.mockResolvedValue({ txHash: '0xtxhash' });
+    mockAwardReputationPoints.mockResolvedValue({ txHash: '0xtxhash', confirmed: true });
 
     await reconcileFailedReputationUpdates();
 
     expect(mockLogger.info).toHaveBeenCalledWith(
-      expect.stringContaining('row-3 already claimed')
+      expect.stringContaining('Row row-3 already claimed, skipping.')
     );
     // row-4 should be processed
-    expect(mockAwardReputationPoints.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet4', 2, expect.any(Object));
   });
 
   it('returns early when redisClient is falsy (in-process mode)', async () => {
-    // When redisClient is falsy, the code skips the Redis lock section entirely
-    // and proceeds to the in-process guard. With reconciliationRunning initially
-    // false, it sets the flag to true and continues processing.
-    // This cannot be tested with a mock since redisClient is truthy in the mock.
-    // The behavior is: redisClient truthy + lock null → returns early.
     mockRedisClient.set.mockResolvedValue(null); // null = lock key already exists (NX)
     withFailedReputations([]);
 
     await reconcileFailedReputationUpdates();
 
-    // null NX result means another instance holds the lock
     expect(mockLogger.info).toHaveBeenCalledWith(
       '[reputation-reconciliation] Lock held by another instance, skipping.'
     );

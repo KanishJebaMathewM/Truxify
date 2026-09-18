@@ -838,3 +838,155 @@ func TestGeofenceHTTPRejectsOutOfRangeTarget(t *testing.T) {
 		t.Fatalf("expected 400 for out-of-range target, got %d", w.Code)
 	}
 }
+
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// TestConcurrentRateLimitEviction verifies that an in-flight request's rate 
+// window is not reset if its entry is evicted by a concurrent overflow sweep.
+func TestConcurrentRateLimitEviction(t *testing.T) {
+	// Reset global state for test isolation
+	geofenceRateLimit = sync.Map{}
+	geofenceRateTracked = 0
+	geofenceOrder.Init()
+	maxRateTracked = 10 // Force aggressive eviction
+	defer func() { maxRateTracked = 100000 }()
+
+	driverID := "driver-race-test-01"
+	var wg sync.WaitGroup
+	errors := make(chan error, 100)
+
+	// Spawn 50 concurrent requests for the same driver
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// allowGeofence acquires the entry, increments inUse, and holds it
+			if !allowGeofence(driverID) {
+				// Expected to hit rate limit, but should NOT panic or corrupt state
+				return 
+			}
+			// Simulate work while holding the entry
+			time.Sleep(10 * time.Millisecond)
+		}()
+	}
+
+	// Concurrently trigger eviction sweeps while requests are in-flight
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			evictGeofenceOverflow(100)
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		t.Errorf("Concurrent request failed: %v", err)
+	}
+
+	// Verify the entry is either retired safely or still valid, but never corrupted
+	val, ok := geofenceRateLimit.Load(driverID)
+	if ok {
+		entry := val.(*rateEntry)
+		if entry.inUse < 0 {
+			t.Fatal("inUse counter dropped below zero (corruption)")
+		}
+	}
+}
+
+// TestActiveDriverCapacityAtomicity ensures that concurrent insertions 
+// never exceed the configured maxActiveDrivers cap.
+func TestActiveDriverCapacityAtomicity(t *testing.T) {
+	activeDrivers = sync.Map{}
+	atomic.StoreUint64(&activeDriverCount, 0)
+	maxActiveDrivers = 100 // Strict cap
+	defer func() { maxActiveDrivers = 100000 }()
+
+	var wg sync.WaitGroup
+	successCount := uint64(0)
+	failureCount := uint64(0)
+
+	// Attempt to insert 500 unique drivers concurrently
+	for i := 0; i < 500; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			driverID := fmt.Sprintf("cap-test-driver-%d", id)
+			ping := TelemetryPing{DriverID: driverID, Timestamp: time.Now()}
+			
+			if storePing(driverID, ping) {
+				atomic.AddUint64(&successCount, 1)
+			} else {
+				atomic.AddUint64(&failureCount, 1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	finalCount := countActiveDrivers()
+	if finalCount > maxActiveDrivers {
+		t.Fatalf("Capacity cap violated: %d active drivers (max %d)", finalCount, maxActiveDrivers)
+	}
+	if successCount != uint64(maxActiveDrivers) {
+		t.Errorf("Expected exactly %d successes, got %d", maxActiveDrivers, successCount)
+	}
+}
+
+// TestSweepDriversRaceSafety ensures the background sweeper does not corrupt
+// the map while requests are actively storing pings.
+func TestSweepDriversRaceSafety(t *testing.T) {
+	activeDrivers = sync.Map{}
+	atomic.StoreUint64(&activeDriverCount, 0)
+	
+	var wg sync.WaitGroup
+	stopChan := make(chan struct{})
+
+	// Writer goroutines
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				driverID := fmt.Sprintf("sweep-driver-%d-%d", id, j)
+				storePing(driverID, TelemetryPing{DriverID: driverID, Timestamp: time.Now()})
+			}
+		}(i)
+	}
+
+	// Sweeper goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stopChan:
+				return
+			default:
+				sweepDrivers()
+				time.Sleep(1 * time.Millisecond)
+			}
+		}
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	close(stopChan)
+	wg.Wait()
+
+	// If we reach here without a race detector panic or segfault, the test passes
+	t.Log("Sweeper and writers operated concurrently without corruption")
+}

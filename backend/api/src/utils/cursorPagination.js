@@ -40,7 +40,7 @@ export function decodeCursor(cursor) {
     }
     return result;
   } catch (err) {
-    logger.warn('[cursorPagination] Failed to decode cursor:', err?.message);
+    logger.warn({ err: err?.message, cursorSnippet: cursor?.slice(0, 16) }, '[cursorPagination] Failed to decode cursor');
     return null;
   }
 }

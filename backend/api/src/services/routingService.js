@@ -1,7 +1,69 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import logger from '../middleware/logger.js';
+import { DomainError } from './order/domainError.js';
 
 import { predictWorkZoneDelays, generateBypassWaypoint } from './workZoneService.js';
+
+/**
+ * Retrieves the active route/order details for a driver.
+ * Guards against null, undefined, or empty driverId inputs.
+ *
+ * @param {string} driverId - Unique ID of the driver
+ * @param {Object} [options] - Options ({ throwOnError, supabaseClient })
+ * @returns {Promise<Object|null>} Driver route info or null
+ */
+export async function getDriverRoute(driverId, options = {}) {
+  const throwOnError = options?.throwOnError === true;
+
+  if (driverId == null || typeof driverId !== 'string' || !driverId.trim()) {
+    if (throwOnError) {
+      throw new DomainError(400, { error: 'driverId is required' });
+    }
+    return null;
+  }
+
+  let client = options?.supabaseClient;
+  if (!client) {
+    try {
+      const db = await import('../config/db.js');
+      client = db.supabaseAdmin || db.supabase;
+    } catch {
+      client = null;
+    }
+  }
+
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const { data: order, error } = await client
+      .from('orders')
+      .select('id, order_display_id, status, pickup_address, drop_address, pickup_lat, pickup_lng, drop_lat, drop_lng, waypoints')
+      .eq('driver_id', driverId.trim())
+      .in('status', ['active', 'in_transit', 'en_route_pickup', 'accepted'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ error: error.message, driverId }, '[routingService] Failed to fetch driver route');
+      if (throwOnError) {
+        throw new DomainError(500, { error: 'Failed to fetch driver route' });
+      }
+      return null;
+    }
+
+    return order || null;
+  } catch (err) {
+    if (err instanceof DomainError) throw err;
+    logger.error({ err: err?.message, driverId }, '[routingService] Error retrieving driver route');
+    if (throwOnError) {
+      throw new DomainError(500, { error: err?.message ?? 'Internal error retrieving driver route' });
+    }
+    return null;
+  }
+}
 
 /**
  * Optimizes the order of waypoints for a route using the OSRM Trip API.

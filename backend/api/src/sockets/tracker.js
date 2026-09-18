@@ -6,6 +6,9 @@ import crypto from 'crypto';
 import { createLocationEventBus } from './locationEventBus.js';
 import telemetryBuffer from './telemetryBuffer.js';
 import GpsLog from '../models/GpsLog.js';
+import { scheduleEtaRecalculationOnLocationUpdate } from '../services/order/etaService.js';
+import DeliveryDelayService from '../services/order/deliveryDelayService.js';
+import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -64,6 +67,7 @@ function sanitizeTelemetryData(data) {
 }
 
 let _orderRepository = null;
+let _deliveryDelayService = null;
 
 // In-memory mapping of active client subscriptions (process-local by design;
 // distributed fan-out across replicas is handled by the locationEventBus).
@@ -74,6 +78,7 @@ let redisSubClient = null;
 const TRACKER_CHANNELS = {
   LOCATION: 'tracker:location_updates',
   MILESTONE: 'tracker:milestone_updates',
+  ETA: 'tracker:eta_updates',
 };
 
 function deliverToLocalSubscribers(targetId, payload) {
@@ -91,7 +96,7 @@ function initRedisTrackerPubSub() {
 
   try {
     redisSubClient = redisClient.duplicate();
-    redisSubClient.subscribe(TRACKER_CHANNELS.LOCATION, TRACKER_CHANNELS.MILESTONE, (err) => {
+    redisSubClient.subscribe(TRACKER_CHANNELS.LOCATION, TRACKER_CHANNELS.MILESTONE, TRACKER_CHANNELS.ETA, (err) => {
       if (err) {
         logger.error({ err }, '[Tracker] Failed to subscribe to Redis tracker channels');
       } else {
@@ -107,6 +112,9 @@ function initRedisTrackerPubSub() {
           if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
           if (driver_id) deliverToLocalSubscribers(driver_id, payload);
         } else if (channel === TRACKER_CHANNELS.MILESTONE) {
+          const { orderDisplayId, payload } = parsed;
+          if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
+        } else if (channel === TRACKER_CHANNELS.ETA) {
           const { orderDisplayId, payload } = parsed;
           if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
         }
@@ -144,7 +152,7 @@ let locationEventBus = null;
 // =====================================================================
 // CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
 // =====================================================================
-const CLOCK_SKEW_TOLERANCE_MS = parseInt(process.env.CLOCK_SKEW_TOLERANCE_MS, 10) || 300000; // default ±5 min
+export const CLOCK_SKEW_TOLERANCE_MS = parseInt(process.env.CLOCK_SKEW_TOLERANCE_MS, 10) || 300000; // default ±5 min
 const MAX_CONSECUTIVE_DROPS = 10;
 const consecutiveDropCount = new Map();
 
@@ -318,7 +326,7 @@ export async function isWebSocketUpgradeAllowed(request) {
 
     return attempts <= WS_UPGRADE_RATE_LIMIT;
   } catch (err) {
-    logger.error('Redis WebSocket upgrade rate limit error:', err.message);
+    logger.error({ err }, 'Redis WebSocket upgrade rate limit error');
     return enforceWsUpgradeMemoryLimit(ipAddress);
   }
 }
@@ -381,7 +389,7 @@ async function authenticateWs(ws, token) {
     try {
       decoded = jwt.decode(token);
     } catch (err) {
-      // ignore decoding errors
+      logger.warn({ err: err?.message || err }, '[Tracker] Failed to decode JWT token structure');
     }
 
     const isSupabaseToken = decoded &&
@@ -584,6 +592,7 @@ export function initWebSocketServer(server, orderRepository) {
   }
 
   _orderRepository = orderRepository;
+  _deliveryDelayService = orderRepository ? new DeliveryDelayService({ orderRepository }) : null;
   const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
   wsServer = wss;
@@ -886,7 +895,7 @@ export async function handleTrackingMessage(ws, message, req) {
         ws.send(JSON.stringify({ warning: `Unknown event type: ${event}` }));
     }
   } catch (err) {
-    logger.error('WS Message parsing error:', err.message);
+    logger.error({ err }, 'WS Message parsing error');
     ws.send(JSON.stringify({ error: 'Invalid JSON payload structure.' }));
   }
 }
@@ -931,7 +940,7 @@ async function enqueueGpsLogDlq(doc) {
       await redisClient.rpush(GPS_LOG_DLQ_KEY, JSON.stringify({ doc, retries: 0 }));
       return;
     } catch (err) {
-      logger.error('[GpsLog] Failed to enqueue GPS log to Redis DLQ:', err.message);
+      logger.error({ err }, '[GpsLog] Failed to enqueue GPS log to Redis DLQ');
     }
   }
   logger.error('[GpsLog] Redis unavailable — GPS log permanently lost (could not enqueue to DLQ):', JSON.stringify(doc));
@@ -947,7 +956,7 @@ async function reconcileGpsLogDlqEntry(raw) {
   try {
     entry = JSON.parse(raw);
   } catch (err) {
-    logger.error('[GpsLog] Dropping malformed DLQ entry:', err.message);
+    logger.error({ err }, '[GpsLog] Dropping malformed DLQ entry');
     return true;
   }
 
@@ -970,7 +979,7 @@ async function reconcileGpsLogDlqEntry(raw) {
         await redisClient.rpush(GPS_LOG_DLQ_KEY, JSON.stringify({ doc, retries: retries + 1 }));
         return true;
       } catch (redisErr) {
-        logger.error('[GpsLog] Failed to re-enqueue DLQ entry:', redisErr.message);
+        logger.error({ err: redisErr }, '[GpsLog] Failed to re-enqueue DLQ entry');
         return false;
       }
     }
@@ -999,7 +1008,7 @@ async function reconcileGpsLogDlq() {
       }
     }
   } catch (err) {
-    logger.error('[GpsLog] DLQ reconciliation error:', err.message);
+    logger.error({ err }, '[GpsLog] DLQ reconciliation error');
   }
 }
 
@@ -1154,68 +1163,75 @@ export async function handleLocationPing(ws, data, req) {
           : lastRecordedEpoch + 1;
       await redisClient.set(seqKey, nextSequence.toString(), 'EX', 86400);
     } catch (err) {
-      logger.error('Redis sequence verification cache error:', err.message);
+      logger.error({ err }, 'Redis sequence verification cache error');
     }
   }
 
-  // Resolve order details from Supabase and verify driver ownership
+  // Resolve order details from Supabase and verify driver ownership with fail-closed security (#14789)
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
   if (_orderRepository && (orderUUID || orderDisplayId)) {
     try {
-      // ── Cache-first order resolution ────────────────────────────────
-      // Check Redis for a cached driver→order mapping before hitting the
-      // database.  This avoids repeated Supabase queries for the same
-      // driver during an active trip.
+      const idToLookup = orderUUID || orderDisplayId;
+      let verifiedOrder = null;
+
       const cached = await getCachedDriverOrder(driver_id);
-      if (cached) {
+      if (cached && (cached.orderId === idToLookup || cached.orderDisplayId === idToLookup)) {
         orderUUID = cached.orderId;
         orderDisplayId = cached.orderDisplayId;
-      } else {
-        const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
-        if (order) {
-          orderUUID = order.id;
-          orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
-        }
+        const { data: freshOrder } = await _orderRepository.findOrderByAnyId(orderUUID, 'id, order_display_id, driver_id');
+        verifiedOrder = freshOrder;
       }
 
-      // ── Authorization check (runs regardless of cache hit or miss) ─
-      // The authorization guard must always execute so that a stale cache entry
-      // for a previously-assigned driver cannot authorize a reassigned driver.
-      if (orderUUID && orderDisplayId) {
-        const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
-        if (order && order.driver_id !== driver_id) {
-          logger.warn({
-            event: 'UNAUTHORIZED_ORDER_TRACKING',
-            driverId: driver_id,
-            orderId: order.id,
-            orderDisplayId: order.order_display_id,
-            assignedDriverId: order.driver_id,
-          }, 'Driver attempted to submit location for order they are not assigned to');
-          // Drop the stale cache entry so a reassignment can never be silently
-          // reused to authorize a driver that is no longer assigned to this order.
-          await invalidateDriverOrderCache(driver_id);
-          return ws.send(JSON.stringify({
-            error: 'Not authorized to track this order',
-            orderId: orderDisplayId || orderUUID,
-          }));
-        }
-        // Keep the cache in sync with the authoritative assignment. If the order
-        // was reassigned (or the cached mapping went stale), this overwrites it
-        // with the current driver→order binding on every authorized ping.
-        if (order) {
-          orderUUID = order.id;
-          orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, order.id, order.order_display_id);
-        }
+      if (!verifiedOrder) {
+        const { data: foundOrder } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        verifiedOrder = foundOrder;
       }
+
+      // Fail-closed: If an order ID was supplied but could not be resolved, reject telemetry broadcast
+      if (!verifiedOrder) {
+        logger.warn({ event: 'UNRESOLVABLE_ORDER_TRACKING', driver_id, idToLookup }, 'Location ping rejected: unable to resolve order');
+        await invalidateDriverOrderCache(driver_id);
+        return ws.send(JSON.stringify({ error: 'Order not found or unresolvable', orderId: idToLookup }));
+      }
+
+      // Strict ownership check: driver_id must match
+      if (verifiedOrder.driver_id !== driver_id) {
+        logger.warn({
+          event: 'UNAUTHORIZED_ORDER_TRACKING',
+          driver_id,
+          orderId: verifiedOrder.id,
+          orderDisplayId: verifiedOrder.order_display_id,
+          assignedDriverId: verifiedOrder.driver_id,
+        }, 'Driver attempted to submit location for order they are not assigned to');
+        await invalidateDriverOrderCache(driver_id);
+        return ws.send(JSON.stringify({
+          error: 'Not authorized to track this order',
+          orderId: verifiedOrder.order_display_id || verifiedOrder.id,
+        }));
+      }
+
+      orderUUID = verifiedOrder.id;
+      orderDisplayId = verifiedOrder.order_display_id;
+      await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
     } catch (err) {
-      logger.error('Failed to resolve order details in tracker:', err.message);
+      logger.error({ err }, 'Failed to resolve order details in tracker');
     }
+  }
+
+  // Recalculate ETA only after the authenticated driver/order ownership check
+  // above has succeeded. This is best-effort and never blocks telemetry or
+  // location broadcasts.
+  if (_deliveryDelayService && orderUUID) {
+    void _deliveryDelayService.processLocation({
+      orderId: orderUUID,
+      driverId: driver_id,
+      latitude: sanitized.lat,
+      longitude: sanitized.lng,
+    }).catch((err) => {
+      logger.warn({ err, orderId: orderUUID, driverId: driver_id }, '[Tracker] Delivery ETA update failed');
+    });
   }
 
   // Buffer write with capacity limit. Synchronous, non-blocking enqueue into
@@ -1248,7 +1264,7 @@ export async function handleLocationPing(ws, data, req) {
         120
       );
     } catch (err) {
-      logger.error('Redis cache telemetry error:', err.message);
+      logger.error({ err }, 'Redis cache telemetry error');
     }
   }
 
@@ -1329,6 +1345,17 @@ export async function handleLocationPing(ws, data, req) {
   // client on this replica receives the update exactly once.
   deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
 
+  if (_orderRepository && orderUUID) {
+    scheduleEtaRecalculationOnLocationUpdate({
+      orderRepository: _orderRepository,
+      driverId: driver_id,
+      orderId: orderUUID,
+      orderDisplayId: orderDisplayId ?? null,
+      lat: sanitized.lat,
+      lng: sanitized.lng,
+    });
+  }
+
   // Publish to Supabase Realtime channel driver-location:{orderId}
   // Reuse cached channel to avoid creating a new channel per ping.
   if (supabase && orderUUID) {
@@ -1361,7 +1388,7 @@ export async function handleLocationPing(ws, data, req) {
         timestamp: new Date(serverNow).toISOString()
       }
     }).catch((err) => {
-      logger.error('Failed to broadcast realtime location to Supabase:', err.message);
+      logger.error({ err }, 'Failed to broadcast realtime location to Supabase');
     });
   }
 }
@@ -1419,7 +1446,7 @@ export async function closeWebSocketServer() {
       try {
         client.close(1001, 'Server shutting down');
       } catch (err) {
-        logger.error('[shutdown] Failed to close WebSocket client:', err.message);
+        logger.error({ err }, '[shutdown] Failed to close WebSocket client');
       }
     });
 
@@ -1458,6 +1485,31 @@ export function broadcastOrderMilestone(orderDisplayId, milestone, status) {
   }
 }
 
+export function broadcastOrderEta(orderDisplayId, eta) {
+  if (!orderDisplayId || !eta) return;
+
+  const payload = JSON.stringify({
+    event: 'eta_update',
+    data: {
+      order_display_id: orderDisplayId,
+      eta,
+      timestamp: new Date().toISOString(),
+    },
+  });
+
+  initRedisTrackerPubSub();
+
+  if (redisClient) {
+    const pubSubMessage = JSON.stringify({ orderDisplayId, payload });
+    redisClient.publish(TRACKER_CHANNELS.ETA, pubSubMessage).catch((err) => {
+      logger.error({ err }, '[Tracker] Redis publish error for ETA');
+      deliverToLocalSubscribers(orderDisplayId, payload);
+    });
+  } else {
+    deliverToLocalSubscribers(orderDisplayId, payload);
+  }
+}
+
 export async function handleSubscribe(ws, data) {
   const { order_display_id, driver_id } = data;
   const targetId = order_display_id || driver_id;
@@ -1488,7 +1540,7 @@ export async function handleSubscribe(ws, data) {
         await redisClient.persist(`user:subscriptions:${subscriberId}`);
       }
     } catch (err) {
-      logger.error('Redis subscription persistence error:', err.message);
+      logger.error({ err }, 'Redis subscription persistence error');
     }
   }
 
@@ -1563,7 +1615,7 @@ async function handleUnsubscribe(ws, data) {
           await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
         }
       } catch (err) {
-        logger.error('Redis subscription cleanup error:', err.message);
+        logger.error({ err }, 'Redis subscription cleanup error');
       }
     }
 
@@ -1652,7 +1704,7 @@ async function removeClientFromAllSubscriptions(ws) {
         try {
           await redisClient.expire(`user:subscriptions:${subscriberId}`, 3600);
         } catch (err) {
-          logger.error('Redis subscription expire error on disconnect:', err.message);
+          logger.error({ err }, 'Redis subscription expire error on disconnect');
         }
         // Invalidate the driver→order cache when the last socket for this
         // driver disconnects so a stale mapping does not persist.
@@ -1718,7 +1770,7 @@ async function restoreSubscriptions(ws) {
       ws.subscriptionTargets.add(targetId);
     }
   } catch (err) {
-    logger.error('Subscription restoration error:', err.message);
+    logger.error({ err }, 'Subscription restoration error');
   }
 }
 

@@ -1,6 +1,10 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
-const gpsLogSchema = new mongoose.Schema(
+const Schema = mongoose?.Schema || mongoose?.default?.Schema || class {};
+const models = mongoose?.models || mongoose?.default?.models || {};
+const model = (mongoose?.model || mongoose?.default?.model || (() => ({}))).bind(mongoose);
+
+const gpsLogSchema = new Schema(
   {
     bookingId: { type: String, required: true, index: true },
     driverId:  { type: String, required: true },
@@ -20,4 +24,7 @@ const gpsLogSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.models.GpsLog || mongoose.model("GpsLog", gpsLogSchema);
+const GpsLog = models.GpsLog || model("GpsLog", gpsLogSchema);
+
+export { GpsLog };
+export default GpsLog;

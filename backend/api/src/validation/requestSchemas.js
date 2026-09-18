@@ -181,6 +181,11 @@ export const verifyDeliverySchema = z.object({
   )
 });
 
+export const confirmStopSchema = z.object({
+  stopId: z.string().min(1, 'stopId is required'),
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
 export const changeDropSchema = z.object({
   drop_address: z.string().min(3, 'Drop address must be at least 3 characters'),
   drop_lat: coerceNumber(
@@ -196,7 +201,7 @@ export const changeDropSchema = z.object({
 });
 
 export const cancelOrderSchema = z.object({
-  reason: z.string().max(500).optional().nullable(),
+  reason: z.string().trim().min(1, 'Cancellation reason cannot be empty').max(500).optional().nullable(),
 }).strict();
 
 export const updateWalletSchema = z.object({
@@ -206,10 +211,16 @@ export const updateWalletSchema = z.object({
   ),
 }).strict();
 
+// Shared token shape for all device schemas. Mirrors the character allowlist
+// that deviceController.validateFcmToken enforces so malformed tokens are
+// rejected at the gateway (zod) layer before reaching the controller.
+export const fcmTokenSchema = z.string()
+  .min(10, { message: 'fcmToken must be at least 10 characters' })
+  .max(4096, { message: 'fcmToken is too long' })
+  .regex(/^[a-zA-Z0-9\-_:.%/+=]+$/, { message: 'fcmToken contains invalid characters' });
+
 export const registerDeviceSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
+  fcmToken: fcmTokenSchema,
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
@@ -222,16 +233,11 @@ export const registerDeviceSchema = z.object({
 }).strict();
 
 export const unregisterDeviceSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
+  fcmToken: fcmTokenSchema,
 }).strict();
 
 export const updateFcmTokenSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' })
-    .nullable(),
+  fcmToken: fcmTokenSchema.nullable(),
 }).strict();
 
 export const createTicketSchema = z.object({
@@ -435,6 +441,20 @@ export const reportGripDataSchema = z.object({
       .nonnegative({ message: 'slip_events_count must be >= 0' })
   ).optional().default(0),
 }).strict();
+
+// ── KEDA autoscaling metric query schemas ───────────────────────────────
+// Deliberately NOT .strict(): callers may append unrelated query params
+// (e.g. cache busters) and the previous handlers only read what they need.
+
+export const kedaNamespaceQuerySchema = z.object({
+  namespace: z.string().min(1, 'namespace is required'),
+  deployment: z.string().min(1, 'deployment is required'),
+});
+
+export const kedaKafkaLagQuerySchema = z.object({
+  topic: z.string().min(1, 'topic is required'),
+  consumerGroup: z.string().min(1, 'consumerGroup is required'),
+});
 
 /**
  * Schema for POST /api/driver/weigh-stations/sync-weight.

@@ -21,5 +21,9 @@ target_link_libraries(vector-matcher-cpp PRIVATE Threads::Threads)
 
 add_executable(test_content_length tests/test_content_length.cpp)
 
+add_executable(test_matcher test/test_matcher.cpp)
+target_link_libraries(test_matcher PRIVATE vector_matcher)
+
 enable_testing()
 add_test(NAME content_length COMMAND test_content_length)
+add_test(NAME vector_matcher_packing COMMAND test_matcher)

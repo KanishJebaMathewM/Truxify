@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,8 +71,8 @@ void main() {
 
     when(() => mockOrderService.fetchOrderTimeline(any())).thenAnswer((_) async => [
       {
-        'status': 'Booked',
-        'timestamp': '2026-08-03T00:00:00Z',
+        'milestone': 'Booking Confirmed',
+        'milestone_time': '2026-08-03T00:00:00Z',
         'completed': true,
       }
     ]);
@@ -143,6 +146,128 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('45 mins'), findsOneWidget);
+    });
+
+    testWidgets('displays formatted milestone timestamp using milestone_time', (tester) async {
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      final dt = DateTime.parse('2026-08-03T00:00:00Z').toLocal();
+      final expectedTimestamp =
+          '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      expect(find.text(expectedTimestamp), findsWidgets);
+    });
+
+    testWidgets('refreshes authoritative state after reconnect', (tester) async {
+      final messages = StreamController<dynamic>.broadcast();
+      addTearDown(messages.close);
+      when(() => mockSocket.stream).thenAnswer((_) => messages.stream);
+
+      var orderFetches = 0;
+      var timelineFetches = 0;
+      var locationFetches = 0;
+      when(() => mockOrderService.fetchOrderById(any())).thenAnswer((_) async {
+        orderFetches++;
+        return {
+          'id': 'order-123',
+          'order_display_id': 'TX1001',
+          'status': orderFetches == 1 ? 'In Transit' : 'Delivered',
+          'updated_at': orderFetches == 1
+              ? '2026-08-03T00:00:00Z'
+              : '2026-08-03T01:00:00Z',
+        };
+      });
+      when(() => mockOrderService.fetchOrderTimeline(any())).thenAnswer((_) async {
+        timelineFetches++;
+        return [
+          {
+            'milestone': timelineFetches == 1 ? 'In Transit' : 'Delivered',
+            'completed': true,
+          },
+        ];
+      });
+      when(() => mockOrderService.fetchDriverLocation(any())).thenAnswer((_) async {
+        locationFetches++;
+        return {
+          'lat': locationFetches == 1 ? 20.0 : 21.0,
+          'lng': 72.85,
+          'timestamp': locationFetches == 1
+              ? '2026-08-03T00:00:00Z'
+              : '2026-08-03T01:00:00Z',
+        };
+      });
+
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pumpAndSettle();
+
+      messages.add(jsonEncode({'status': 'authenticated'}));
+      await tester.pump();
+      messages.add(jsonEncode({'status': 'authenticated'}));
+      await tester.pumpAndSettle();
+      messages.add(jsonEncode({'status': 'authenticated'}));
+      await tester.pumpAndSettle();
+
+      expect(orderFetches, 2);
+      expect(timelineFetches, 2);
+      expect(locationFetches, 2);
+      expect(find.text('Delivered'), findsWidgets);
+    });
+
+    testWidgets('keeps a newer live location over an older reconnect snapshot', (tester) async {
+      final messages = StreamController<dynamic>.broadcast();
+      addTearDown(messages.close);
+      when(() => mockSocket.stream).thenAnswer((_) => messages.stream);
+
+      final reconnectLocation = Completer<Map<String, dynamic>>();
+      var locationFetches = 0;
+      when(() => mockOrderService.fetchDriverLocation(any())).thenAnswer((_) {
+        locationFetches++;
+        if (locationFetches == 1) {
+          return Future.value({
+            'lat': 20.0,
+            'lng': 72.85,
+            'timestamp': '2026-08-03T00:00:00Z',
+          });
+        }
+        return reconnectLocation.future;
+      });
+
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pumpAndSettle();
+
+      messages.add(jsonEncode({'status': 'authenticated'}));
+      await tester.pump();
+      messages.add(jsonEncode({'status': 'authenticated'}));
+      await tester.pump();
+      messages.add(jsonEncode({
+        'event': 'location_update',
+        'data': {
+          'latitude': 22.0,
+          'longitude': 72.85,
+          'timestamp': '2026-08-03T02:00:00Z',
+        },
+      }));
+      await tester.pump();
+
+      reconnectLocation.complete({
+        'lat': 21.0,
+        'lng': 72.85,
+        'timestamp': '2026-08-03T01:00:00Z',
+      });
+      await tester.pumpAndSettle();
+
+      verify(() => mockOrderService.fetchMlEta(
+            tripId: 'TX1001',
+            lat: 22.0,
+            lng: 72.85,
+          )).called(1);
+      verifyNever(() => mockOrderService.fetchMlEta(
+            tripId: 'TX1001',
+            lat: 21.0,
+            lng: 72.85,
+          ));
     });
   });
 

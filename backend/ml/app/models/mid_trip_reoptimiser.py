@@ -3,41 +3,167 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
+from utils.osrm_client import get_route_matrix_with_duration
+
 logger = logging.getLogger(__name__)
 
-# Average truck speed assumption for detour time estimation
+# Average speed is retained only by the legacy geometric fallback helper. The
+# recommender itself uses OSRM road durations whenever the route engine is available.
 _AVG_SPEED_KMH = 35.0
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate the great-circle distance between two points in kilometres.
-
-    Uses the Haversine formula with Earth's mean radius of 6371 km.
-
-    Args:
-        lat1: Latitude of point 1 in degrees.
-        lon1: Longitude of point 1 in degrees.
-        lat2: Latitude of point 2 in degrees.
-        lon2: Longitude of point 2 in degrees.
-
-    Returns:
-        Distance in kilometres.
-    """
-    R = 6371.0  # Earth radius in km
-
+    """Calculate the great-circle distance between two points in kilometres."""
+    R = 6371.0
     lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
     lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
-
     dlat = lat2_r - lat1_r
     dlon = lon2_r - lon1_r
-
     a = (
         math.sin(dlat / 2) ** 2
         + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(dlon / 2) ** 2
     )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return R * c
+
+
+def _route_distance(
+    current_location: tuple[float, float], route: List[tuple[float, float]]
+) -> float:
+    """Return total geometric distance from current location through route."""
+    total_distance = 0.0
+    previous = current_location
+    for waypoint in route:
+        total_distance += _haversine(*previous, *waypoint)
+        previous = waypoint
+    return total_distance
+
+
+def _best_route_insertion(
+    current_location: tuple[float, float],
+    remaining_route: List[tuple[float, float]],
+    pickup_location: tuple[float, float],
+    dropoff_location: tuple[float, float],
+) -> tuple[float, float]:
+    """Legacy geometric insertion helper retained for compatibility."""
+    baseline_distance = _route_distance(current_location, remaining_route)
+    best_extra_distance = float("inf")
+    best_pickup_distance = float("inf")
+    route_length = len(remaining_route)
+
+    for pickup_index in range(route_length + 1):
+        pickup_before = (
+            current_location if pickup_index == 0 else remaining_route[pickup_index - 1]
+        )
+        pickup_after = (
+            remaining_route[pickup_index] if pickup_index < route_length else None
+        )
+        pickup_delta = _haversine(*pickup_before, *pickup_location)
+        if pickup_after is not None:
+            pickup_delta += _haversine(*pickup_location, *pickup_after)
+            pickup_delta -= _haversine(*pickup_before, *pickup_after)
+
+        augmented_route = (
+            remaining_route[:pickup_index]
+            + [pickup_location]
+            + remaining_route[pickup_index:]
+        )
+        pickup_distance = _route_distance(
+            current_location, augmented_route[: pickup_index + 1]
+        )
+
+        for dropoff_index in range(pickup_index + 1, len(augmented_route) + 1):
+            dropoff_before = augmented_route[dropoff_index - 1]
+            dropoff_after = (
+                augmented_route[dropoff_index]
+                if dropoff_index < len(augmented_route)
+                else None
+            )
+            dropoff_delta = _haversine(*dropoff_before, *dropoff_location)
+            if dropoff_after is not None:
+                dropoff_delta += _haversine(*dropoff_location, *dropoff_after)
+                dropoff_delta -= _haversine(*dropoff_before, *dropoff_after)
+
+            extra_distance = max(pickup_delta + dropoff_delta, 0.0)
+            if extra_distance < best_extra_distance:
+                best_extra_distance = extra_distance
+                best_pickup_distance = pickup_distance
+
+    if best_extra_distance == float("inf"):
+        return 0.0, _route_distance(current_location, [pickup_location])
+
+    return best_extra_distance, best_pickup_distance
+
+
+def _sequence_total(matrix: List[List[float]], sequence: List[int]) -> float:
+    return sum(matrix[sequence[index]][sequence[index + 1]] for index in range(len(sequence) - 1))
+
+
+def _best_route_insertion_with_matrix(
+    base_route_indices: List[int],
+    pickup_index: int,
+    dropoff_index: int,
+    distance_matrix: List[List[float]],
+    duration_matrix: List[List[float]],
+) -> tuple[float, float, float, float]:
+    """Find the best pickup/dropoff insertion using road distance and duration matrices."""
+    baseline_distance = _sequence_total(distance_matrix, base_route_indices)
+    baseline_duration = _sequence_total(duration_matrix, base_route_indices)
+    route_length = len(base_route_indices) - 1
+
+    best_extra_distance = float("inf")
+    best_extra_duration = float("inf")
+    best_pickup_distance = float("inf")
+    best_pickup_duration = float("inf")
+
+    for pickup_position in range(route_length + 1):
+        augmented = (
+            base_route_indices[: pickup_position + 1]
+            + [pickup_index]
+            + base_route_indices[pickup_position + 1 :]
+        )
+        pickup_position_in_augmented = pickup_position + 1
+        pickup_distance = _sequence_total(
+            distance_matrix,
+            augmented[: pickup_position_in_augmented + 1],
+        )
+        pickup_duration = _sequence_total(
+            duration_matrix,
+            augmented[: pickup_position_in_augmented + 1],
+        )
+
+        for dropoff_position in range(
+            pickup_position_in_augmented + 1,
+            len(augmented) + 1,
+        ):
+            candidate = (
+                augmented[:dropoff_position]
+                + [dropoff_index]
+                + augmented[dropoff_position:]
+            )
+            candidate_distance = _sequence_total(distance_matrix, candidate)
+            candidate_duration = _sequence_total(duration_matrix, candidate)
+            extra_distance = max(candidate_distance - baseline_distance, 0.0)
+            extra_duration = max(candidate_duration - baseline_duration, 0.0)
+
+            if (
+                extra_distance < best_extra_distance
+                or (
+                    math.isclose(extra_distance, best_extra_distance)
+                    and extra_duration < best_extra_duration
+                )
+            ):
+                best_extra_distance = extra_distance
+                best_extra_duration = extra_duration
+                best_pickup_distance = pickup_distance
+                best_pickup_duration = pickup_duration
+
+    return (
+        best_extra_distance,
+        best_extra_duration,
+        best_pickup_distance,
+        best_pickup_duration,
+    )
 
 
 def find_mid_trip_loads(
@@ -46,147 +172,127 @@ def find_mid_trip_loads(
     available_capacity: Dict,
     nearby_loads: List[Dict],
 ) -> dict:
-    """Suggest additional pickups that can be added during an active trip.
-
-    For each nearby load the algorithm:
-      1. Filters by remaining truck capacity (weight and dimensions).
-      2. Calculates detour: dist(current→pickup) + dist(pickup→dropoff) +
-         dist(dropoff→next_waypoint) − dist(current→next_waypoint).
-      3. Scores by earnings/detour ratio, proximity, and deadline feasibility.
-      4. Returns the top 5 recommendations sorted by priority_score.
-
-    Args:
-        current_location: Dict with 'lat' and 'lng'.
-        remaining_route: List of waypoint dicts with 'lat' and 'lng'.
-        available_capacity: Dict with 'weight_kg', 'length_m', 'width_m',
-                            'height_m' of remaining truck capacity.
-        nearby_loads: List of load dicts, each with 'load_id', 'pickup_lat',
-                      'pickup_lng', 'dropoff_lat', 'dropoff_lng', 'weight_kg',
-                      'length_m', 'width_m', 'height_m', 'payment_inr',
-                      'pickup_deadline' (ISO string).
-
-    Returns:
-        Dict with 'recommendations': list of scored load dicts sorted by
-        priority_score descending (top 5).
-    """
+    """Suggest additional pickups that can be added during an active trip."""
     if not nearby_loads:
         return {"recommendations": []}
 
     cur_lat = current_location.get("lat", 0.0)
     cur_lng = current_location.get("lng", 0.0)
-
     cap_weight = available_capacity.get("weight_kg", 0.0)
     cap_length = available_capacity.get("length_m", 0.0)
     cap_width = available_capacity.get("width_m", 0.0)
     cap_height = available_capacity.get("height_m", 0.0)
 
-    # Next waypoint for detour calculation
-    if remaining_route:
-        next_wp = remaining_route[0]
-        next_lat = next_wp.get("lat", cur_lat)
-        next_lng = next_wp.get("lng", cur_lng)
-    else:
-        # No remaining route – treat current location as next waypoint
-        next_lat = cur_lat
-        next_lng = cur_lng
+    remaining_route_points = [
+        (waypoint.get("lat", cur_lat), waypoint.get("lng", cur_lng))
+        for waypoint in remaining_route
+    ]
 
-    # Baseline distance: current -> next waypoint (without detour)
-    baseline_dist = _haversine(cur_lat, cur_lng, next_lat, next_lng)
+    candidate_loads = []
+    for load in nearby_loads:
+        if load.get("weight_kg", 0) > cap_weight:
+            continue
+        if load.get("length_m", 0) > cap_length:
+            continue
+        if load.get("width_m", 0) > cap_width:
+            continue
+        if load.get("height_m", 0) > cap_height:
+            continue
+        candidate_loads.append(load)
+
+    if not candidate_loads:
+        return {"recommendations": []}
+
+    pickup_locations = [
+        (load.get("pickup_lat", 0.0), load.get("pickup_lng", 0.0))
+        for load in candidate_loads
+    ]
+    dropoff_locations = [
+        (load.get("dropoff_lat", 0.0), load.get("dropoff_lng", 0.0))
+        for load in candidate_loads
+    ]
+
+    locations = [
+        (cur_lat, cur_lng),
+        *remaining_route_points,
+        *pickup_locations,
+        *dropoff_locations,
+    ]
+    distance_matrix, duration_matrix = get_route_matrix_with_duration(locations)
+
+    remaining_route_indices = list(range(1, len(remaining_route_points) + 1))
+    base_route_indices = [0] + remaining_route_indices
+    pickup_offset = 1 + len(remaining_route_points)
+    dropoff_offset = pickup_offset + len(candidate_loads)
 
     now = datetime.now(timezone.utc)
     recommendations = []
 
-    for load in nearby_loads:
+    for load_index, load in enumerate(candidate_loads):
         try:
-            # --- 1. Capacity filter ---
-            if load.get("weight_kg", 0) > cap_weight:
-                continue
-            if load.get("length_m", 0) > cap_length:
-                continue
-            if load.get("width_m", 0) > cap_width:
-                continue
-            if load.get("height_m", 0) > cap_height:
-                continue
+            pickup_lat, pickup_lng = pickup_locations[load_index]
+            dropoff_lat, dropoff_lng = dropoff_locations[load_index]
+            pickup_idx = pickup_offset + load_index
+            dropoff_idx = dropoff_offset + load_index
 
-            pickup_lat = load.get("pickup_lat", 0.0)
-            pickup_lng = load.get("pickup_lng", 0.0)
-            dropoff_lat = load.get("dropoff_lat", 0.0)
-            dropoff_lng = load.get("dropoff_lng", 0.0)
-
-            # --- 2. Detour calculation ---
-            dist_cur_pickup = _haversine(cur_lat, cur_lng, pickup_lat, pickup_lng)
-            dist_pickup_dropoff = _haversine(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-            dist_dropoff_next = _haversine(dropoff_lat, dropoff_lng, next_lat, next_lng)
-
-            detour_km = (
-                dist_cur_pickup + dist_pickup_dropoff + dist_dropoff_next
-                - baseline_dist
+            detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = (
+                _best_route_insertion_with_matrix(
+                    base_route_indices,
+                    pickup_idx,
+                    dropoff_idx,
+                    distance_matrix,
+                    duration_matrix,
+                )
             )
-            detour_km = max(detour_km, 0.0)  # Floor at zero
 
-            detour_minutes = (detour_km / _AVG_SPEED_KMH) * 60.0 if _AVG_SPEED_KMH > 0 else 0.0
+            deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+            if deadline_dt.tzinfo is None:
+                deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+            else:
+                deadline_dt = deadline_dt.astimezone(timezone.utc)
 
-            # --- 3. Deadline feasibility ---
-            try:
-                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+            estimated_pickup_time = now + timedelta(minutes=pickup_route_minutes)
+            if estimated_pickup_time > deadline_dt:
+                continue
 
-                # Normalize every deadline to UTC so it can be compared with the
-                # UTC baseline. The API serializes deadlines as Z-suffixed ISO
-                # strings, but a naive deadline is treated as UTC as well.
-                if deadline_dt.tzinfo is None:
-                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
-                else:
-                    deadline_dt = deadline_dt.astimezone(timezone.utc)
-
-                travel_hours_to_pickup = dist_cur_pickup / _AVG_SPEED_KMH if _AVG_SPEED_KMH > 0 else float("inf")
-                estimated_pickup_time = now + timedelta(hours=travel_hours_to_pickup)
-
-                if estimated_pickup_time > deadline_dt:
-                    continue  # Cannot reach pickup in time
-            except (ValueError, TypeError):
-                continue  # Skip loads with unparseable deadlines
-
-            # --- 4. Scoring ---
+            dist_cur_pickup = distance_matrix[0][pickup_idx]
             payment = load.get("payment_inr", 0.0)
-
-            # Earnings per km of detour (max 40 pts)
             if detour_km > 0:
                 earnings_per_km = payment / detour_km
             else:
-                # Zero detour = perfect efficiency
                 earnings_per_km = payment if payment > 0 else 0.0
             earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
 
-            # Proximity score: closer pickups are better (max 30 pts)
             max_proximity_km = 100.0
-            proximity_score = max(0.0, 1.0 - dist_cur_pickup / max_proximity_km) * 30.0
+            proximity_score = max(
+                0.0, 1.0 - dist_cur_pickup / max_proximity_km
+            ) * 30.0
 
-            # Time buffer score (max 30 pts)
-            time_buffer_hours = (deadline_dt - estimated_pickup_time).total_seconds() / 3600.0
+            time_buffer_hours = (
+                deadline_dt - estimated_pickup_time
+            ).total_seconds() / 3600.0
             time_score = min(time_buffer_hours / 6.0, 1.0) * 30.0
-
             priority_score = earnings_score + proximity_score + time_score
 
-            recommendations.append({
-                "load_id": load.get("load_id", ""),
-                "detour_km": round(detour_km, 2),
-                "detour_minutes": round(detour_minutes, 2),
-                "additional_earnings": round(payment, 2),
-                "priority_score": round(priority_score, 2),
-                "pickup_location": {
-                    "lat": pickup_lat,
-                    "lng": pickup_lng,
-                },
-                "dropoff_location": {
-                    "lat": dropoff_lat,
-                    "lng": dropoff_lng,
-                },
-            })
+            recommendations.append(
+                {
+                    "load_id": load.get("load_id", ""),
+                    "detour_km": round(detour_km, 2),
+                    "detour_minutes": round(detour_minutes, 2),
+                    "additional_earnings": round(payment, 2),
+                    "priority_score": round(priority_score, 2),
+                    "pickup_location": {"lat": pickup_lat, "lng": pickup_lng},
+                    "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng},
+                }
+            )
 
+        except (ValueError, TypeError, KeyError):
+            continue
         except Exception as e:
-            logger.warning("Error scoring load '%s': %s", load.get("load_id", "unknown"), e)
+            logger.warning(
+                "Error scoring load '%s': %s", load.get("load_id", "unknown"), e
+            )
             continue
 
-    # Sort by priority_score descending, return top 5
     recommendations.sort(key=lambda x: x["priority_score"], reverse=True)
     return {"recommendations": recommendations[:5]}

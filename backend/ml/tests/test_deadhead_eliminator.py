@@ -3,58 +3,68 @@ Unit tests for backend/ml/app/models/deadhead_eliminator.py
 
 Run with: python3 -m pytest tests/test_deadhead_eliminator.py -v --no-header
 """
-import math
-from datetime import datetime, timezone, timedelta
-from app.models.deadhead_eliminator import (
-    _haversine,
-    _to_naive,
-    find_return_loads,
-    MAX_DETOUR_FRACTION,
-)
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from app.models.deadhead_eliminator import _haversine, _to_naive, find_return_loads
+
+
+@pytest.fixture(autouse=True)
+def disable_external_routing(monkeypatch):
+    """Keep the unit suite offline; routing-specific tests opt in explicitly."""
+    monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "false")
 
 
 class TestHaversine:
-    """Tests for the haversine distance calculation."""
-
     def test_same_point_returns_zero(self):
-        """Identical coordinates should give zero distance."""
         assert _haversine(0, 0, 0, 0) == 0.0
 
     def test_known_distance_delhi_to_mumbai(self):
-        """Delhi (28.6139, 77.2090) to Mumbai (19.0760, 72.8777) is approx 1152 km."""
         dist = _haversine(28.6139, 77.2090, 19.0760, 72.8777)
         assert 1100 < dist < 1200
 
     def test_short_distance(self):
-        """1 degree latitude ~= 111 km."""
         dist = _haversine(0, 0, 1, 0)
         assert 110 < dist < 112
 
     def test_antipodal_points(self):
-        """Antipodal points are roughly 20,000 km apart."""
         dist = _haversine(0, 0, 0, 180)
         assert 20000 - 100 < dist < 20000 + 100
 
 
 class TestToNaive:
-    """Tests for _to_naive datetime normalisation."""
-
-    def test_strips_timezone_info(self):
-        """Aware datetime should have tzinfo stripped."""
-        aware = datetime(2026, 8, 7, 10, 30, tzinfo=timezone.utc)
+    def test_aware_datetime_is_normalized_to_utc(self):
+        aware = datetime(
+            2026,
+            8,
+            7,
+            10,
+            30,
+            tzinfo=timezone(timedelta(hours=5, minutes=30)),
+        )
         result = _to_naive(aware)
-        assert result.tzinfo is None
-        assert result == datetime(2026, 8, 7, 10, 30)
+        assert result == datetime(2026, 8, 7, 5, 0, tzinfo=timezone.utc)
 
-    def test_preserves_naive_datetime(self):
-        """Already-naive datetime should be returned unchanged."""
+    def test_naive_datetime_is_treated_as_utc(self):
         naive = datetime(2026, 8, 7, 10, 30)
-        assert _to_naive(naive) == naive
+        result = _to_naive(naive)
+        assert result == datetime(2026, 8, 7, 10, 30, tzinfo=timezone.utc)
+
+    def test_equivalent_offsets_compare_identically(self):
+        first = datetime(
+            2026,
+            8,
+            7,
+            10,
+            30,
+            tzinfo=timezone(timedelta(hours=5, minutes=30)),
+        )
+        second = datetime(2026, 8, 7, 5, 0, tzinfo=timezone.utc)
+        assert _to_naive(first) == _to_naive(second)
 
 
 class TestFindReturnLoads:
-    """Tests for find_return_loads logic."""
-
     def test_empty_loads_returns_empty_recommendations(self):
         result = find_return_loads(
             driver_destination={"lat": 12.97, "lng": 77.62},
@@ -65,10 +75,14 @@ class TestFindReturnLoads:
         assert result["recommendations"] == []
 
     def test_oversized_load_is_filtered(self):
-        """Load exceeding truck weight should be excluded."""
         result = find_return_loads(
             driver_destination={"lat": 12.97, "lng": 77.62},
-            truck_specs={"max_weight_kg": 5000, "max_length_m": 6, "max_width_m": 2, "max_height_m": 2.5},
+            truck_specs={
+                "max_weight_kg": 5000,
+                "max_length_m": 6,
+                "max_width_m": 2,
+                "max_height_m": 2.5,
+            },
             arrival_time="2026-08-10T10:00:00",
             available_loads=[{
                 "load_id": "L001",
@@ -76,7 +90,7 @@ class TestFindReturnLoads:
                 "origin_lng": 77.63,
                 "dest_lat": 13.0,
                 "dest_lng": 77.7,
-                "weight_kg": 10000,  # exceeds 5000 kg limit
+                "weight_kg": 10000,
                 "length_m": 5,
                 "width_m": 2,
                 "height_m": 2,
@@ -87,10 +101,14 @@ class TestFindReturnLoads:
         assert result["recommendations"] == []
 
     def test_valid_load_is_recommended(self):
-        """Load within truck specs and time window should be recommended."""
         result = find_return_loads(
             driver_destination={"lat": 12.97, "lng": 77.62},
-            truck_specs={"max_weight_kg": 10000, "max_length_m": 10, "max_width_m": 2.5, "max_height_m": 3},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
             arrival_time="2026-08-10T08:00:00",
             available_loads=[{
                 "load_id": "L001",
@@ -102,7 +120,7 @@ class TestFindReturnLoads:
                 "length_m": 5,
                 "width_m": 2,
                 "height_m": 2,
-                "pickup_deadline": "2026-08-10T14:00:00",  # deadline allows 6 hours, trip is ~30 min
+                "pickup_deadline": "2026-08-10T14:00:00",
                 "payment_inr": 3000,
             }],
         )
@@ -110,10 +128,14 @@ class TestFindReturnLoads:
         assert result["recommendations"][0]["load_id"] == "L001"
 
     def test_load_past_deadline_is_filtered(self):
-        """Load whose pickup deadline is before estimated arrival should be excluded."""
         result = find_return_loads(
             driver_destination={"lat": 12.97, "lng": 77.62},
-            truck_specs={"max_weight_kg": 10000, "max_length_m": 10, "max_width_m": 2.5, "max_height_m": 3},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
             arrival_time="2026-08-10T12:00:00",
             available_loads=[{
                 "load_id": "L001",
@@ -125,7 +147,137 @@ class TestFindReturnLoads:
                 "length_m": 5,
                 "width_m": 2,
                 "height_m": 2,
-                "pickup_deadline": "2026-08-10T10:00:00",  # deadline already passed
+                "pickup_deadline": "2026-08-10T10:00:00",
+                "payment_inr": 3000,
+            }],
+        )
+        assert result["recommendations"] == []
+
+    def test_equivalent_timezone_offsets_preserve_load_feasibility(self):
+        result = find_return_loads(
+            driver_destination={"lat": 0.0, "lng": 0.0},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-09-17T10:00:00+05:30",
+            available_loads=[{
+                "load_id": "L-TZ",
+                "origin_lat": 0.0,
+                "origin_lng": 0.0,
+                "dest_lat": 0.1,
+                "dest_lng": 0.1,
+                "weight_kg": 100,
+                "length_m": 1,
+                "width_m": 1,
+                "height_m": 1,
+                "pickup_deadline": "2026-09-17T06:30:00+00:00",
+                "payment_inr": 1000,
+            }],
+        )
+        assert len(result["recommendations"]) == 1
+        assert result["recommendations"][0]["load_id"] == "L-TZ"
+
+    def test_timezone_offset_is_not_stripped_as_wall_clock_time(self):
+        result = find_return_loads(
+            driver_destination={"lat": 0.0, "lng": 0.0},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-09-17T10:00:00+05:30",
+            available_loads=[{
+                "load_id": "L-TZ-WALL-CLOCK",
+                "origin_lat": 0.0,
+                "origin_lng": 0.0,
+                "dest_lat": 0.1,
+                "dest_lng": 0.1,
+                "weight_kg": 100,
+                "length_m": 1,
+                "width_m": 1,
+                "height_m": 1,
+                "pickup_deadline": "2026-09-17T05:00:00+00:00",
+                "payment_inr": 1000,
+            }],
+        )
+        assert len(result["recommendations"]) == 1
+        assert result["recommendations"][0]["load_id"] == "L-TZ-WALL-CLOCK"
+
+    def test_road_eta_is_used_for_pickup_deadline(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[7200.0]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.deadhead_eliminator.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-08-10T08:00:00",
+            available_loads=[{
+                "load_id": "L-OSRM",
+                "origin_lat": 12.97001,
+                "origin_lng": 77.62001,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
+                "weight_kg": 5000,
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T09:00:00",
+                "payment_inr": 3000,
+            }],
+        )
+        assert result["recommendations"] == []
+
+    def test_unreachable_road_route_is_not_replaced_by_haversine_fallback(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[None]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.deadhead_eliminator.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        result = find_return_loads(
+            driver_destination={"lat": 12.97, "lng": 77.62},
+            truck_specs={
+                "max_weight_kg": 10000,
+                "max_length_m": 10,
+                "max_width_m": 2.5,
+                "max_height_m": 3,
+            },
+            arrival_time="2026-08-10T08:00:00",
+            available_loads=[{
+                "load_id": "L-OSRM-UNREACHABLE",
+                "origin_lat": 12.97001,
+                "origin_lng": 77.62001,
+                "dest_lat": 13.1,
+                "dest_lng": 77.8,
+                "weight_kg": 5000,
+                "length_m": 5,
+                "width_m": 2,
+                "height_m": 2,
+                "pickup_deadline": "2026-08-10T14:00:00",
                 "payment_inr": 3000,
             }],
         )

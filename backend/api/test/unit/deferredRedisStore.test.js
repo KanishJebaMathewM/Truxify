@@ -103,4 +103,53 @@ describe('DeferredRedisStore (issue #11213)', () => {
     expect(store.redisInitFailed).toBe(false);
     expect(store.activeStore()).toBe(store.redisStore);
   });
+
+  it('falls back to in-memory store when increment rejects and marks redisHealthy false', async () => {
+    redisState.status = 'ready';
+    const store = new DeferredRedisStore('rl:test:');
+    store.init({ windowMs: 60000 });
+
+    expect(store.activeStore()).toBe(store.redisStore);
+    expect(store.redisHealthy).toBe(true);
+
+    // Mock redisStore.increment to reject
+    vi.spyOn(store.redisStore, 'increment').mockRejectedValue(new Error('Redis connection lost'));
+    const memIncrementSpy = vi.spyOn(store.memoryStore, 'increment');
+
+    const result = await store.increment('user-1');
+    expect(store.redisHealthy).toBe(false);
+    expect(memIncrementSpy).toHaveBeenCalledWith('user-1');
+    expect(result).toHaveProperty('totalHits');
+
+    // Subsequent activeStore() call within cooldown falls back to memoryStore
+    expect(store.activeStore()).toBe(store.memoryStore);
+  });
+
+  it('falls back to in-memory store when decrement rejects', async () => {
+    redisState.status = 'ready';
+    const store = new DeferredRedisStore('rl:test:');
+    store.init({ windowMs: 60000 });
+    store.activeStore();
+
+    vi.spyOn(store.redisStore, 'decrement').mockRejectedValue(new Error('Redis timeout'));
+    const memDecrementSpy = vi.spyOn(store.memoryStore, 'decrement');
+
+    await store.decrement('user-1');
+    expect(store.redisHealthy).toBe(false);
+    expect(memDecrementSpy).toHaveBeenCalledWith('user-1');
+  });
+
+  it('falls back to in-memory store when resetKey rejects', async () => {
+    redisState.status = 'ready';
+    const store = new DeferredRedisStore('rl:test:');
+    store.init({ windowMs: 60000 });
+    store.activeStore();
+
+    vi.spyOn(store.redisStore, 'resetKey').mockRejectedValue(new Error('Redis timeout'));
+    const memResetKeySpy = vi.spyOn(store.memoryStore, 'resetKey');
+
+    await store.resetKey('user-1');
+    expect(store.redisHealthy).toBe(false);
+    expect(memResetKeySpy).toHaveBeenCalledWith('user-1');
+  });
 });

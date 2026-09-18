@@ -15,6 +15,7 @@ let mockRedis = null;
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   get redisClient() { return mockRedis; },
   mongoDb: null,

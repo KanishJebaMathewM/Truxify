@@ -75,6 +75,37 @@ describe('FraudDetectionService', () => {
       expect(typeof risk).toBe('number');
     });
 
+    it('handles null and undefined amounts gracefully without returning NaN', async () => {
+      const profile = {
+        user_id: 'user-null-amounts',
+        fraud_score: 0.1,
+        risk_level: 'low',
+        events: [],
+        patterns: {
+          typingSpeed: [],
+          locationHistory: [],
+          transactionPatterns: [
+            { amount: null, type: 'pay', timestamp: Date.now() },
+            { amount: undefined, type: 'pay', timestamp: Date.now() },
+            { amount: '100.50', type: 'pay', timestamp: Date.now() },
+            { amount: 50, type: 'pay', timestamp: Date.now() },
+            { amount: 20, type: 'pay', timestamp: Date.now() },
+            { amount: 30, type: 'pay', timestamp: Date.now() },
+            { amount: 40, type: 'pay', timestamp: Date.now() },
+            { amount: 50, type: 'pay', timestamp: Date.now() },
+            { amount: 60, type: 'pay', timestamp: Date.now() },
+            { amount: 70, type: 'pay', timestamp: Date.now() },
+            { amount: 80, type: 'pay', timestamp: Date.now() },
+            { amount: 900, type: 'pay', timestamp: Date.now() },
+          ],
+        },
+      };
+
+      const risk = await FraudDetectionService.calculateBehavioralRisk(profile);
+      expect(typeof risk).toBe('number');
+      expect(Number.isNaN(risk)).toBe(false);
+    });
+
     it('returns high risk when suspicious activity detected', async () => {
       const profile = {
         user_id: 'user-suspicious',
@@ -92,6 +123,7 @@ describe('FraudDetectionService', () => {
 
       const risk = await FraudDetectionService.calculateBehavioralRisk(profile);
       expect(typeof risk).toBe('number');
+      expect(Number.isNaN(risk)).toBe(false);
     });
   });
 

@@ -20,10 +20,9 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(result["variables"], result["solution"]):
+    for value, edge in zip(result["solution"], result["edge_mapping"]):
         if value is not None and abs(value - 1) < 1e-6:
-            _, u, v = var_name.split('_')
-            selected.add((u, v))
+            selected.add(tuple(edge))
     return selected
 
 
@@ -123,6 +122,20 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_formatter_uses_unique_variables_for_underscored_node_ids():
+    formatter = QUBOFormatter()
+    graph = nx.Graph()
+    graph.add_edge("A_B", "C", weight=1.0)
+    graph.add_edge("C", "A", weight=1.0)
+    graph.add_edge("A", "B_C", weight=1.0)
+    graph.add_edge("B_C", "A_B", weight=1.0)
+
+    qubo = formatter.formulate_route_optimization(graph)
+
+    assert len(qubo.variables) == len(graph.edges())
+    assert len({variable.name for variable in qubo.variables}) == len(graph.edges())
 
 
 def test_extract_route_preserves_underscored_node_ids():

@@ -20,10 +20,9 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    for edge, value in zip(result["edge_mapping"], result["solution"]):
         if value is not None and abs(value - 1) < 1e-6:
-            _, u, v = var_name.split('_')
-            selected.add((u, v))
+            selected.add(tuple(edge[:2]))
     return selected
 
 
@@ -119,3 +118,34 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_multigraph_keeps_parallel_edges_distinct():
+    formatter = QUBOFormatter()
+    graph = nx.MultiGraph()
+    graph.add_edge("A", "B", key="slow", weight=100.0)
+    graph.add_edge("A", "B", key="fast", weight=1.0)
+    graph.add_edge("B", "C", key="bc", weight=1.0)
+    graph.add_edge("C", "D", key="cd", weight=1.0)
+    graph.add_edge("D", "A", key="da", weight=1.0)
+    graph.add_edge("B", "D", key="bd", weight=5.0)
+    graph.add_edge("A", "C", key="ac", weight=5.0)
+
+    qubo = formatter.formulate_route_optimization(graph)
+    assert len(formatter.variables) == graph.number_of_edges()
+    assert len(set(formatter.variables)) == graph.number_of_edges()
+    assert len(set(formatter.edge_mapping)) == graph.number_of_edges()
+
+    result = formatter.solve_qubo(
+        qubo,
+        eigensolver=NumPyMinimumEigensolver(),
+    )
+
+    assert result["success"] is True
+    selected = {
+        tuple(edge)
+        for edge, value in zip(result["edge_mapping"], result["solution"])
+        if value is not None and abs(value - 1) < 1e-6
+    }
+    assert ("A", "B", "fast") in selected
+    assert ("A", "B", "slow") not in selected

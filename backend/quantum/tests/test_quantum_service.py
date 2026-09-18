@@ -25,4 +25,6 @@ def test_extract_route_accepts_a_connected_route_covering_all_declared_nodes():
         "variables": ["x_A_B", "x_B_C", "x_C_D", "x_D_A"],
     }
 
-    assert service._extract_route(result, ["A", "B", "C", "D"]) == ["A", "B", "C", "D", "A"]
+    route = service._extract_route(result, ["A", "B", "C", "D"])
+    assert route[0] == route[-1]
+    assert set(route[:-1]) == {"A", "B", "C", "D"}

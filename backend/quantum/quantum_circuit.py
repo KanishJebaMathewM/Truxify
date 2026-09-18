@@ -111,10 +111,12 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
-        # Add binary variables for each edge
+        # Add opaque binary variables for each edge. Encoding endpoint names
+        # directly into variable names is unsafe when node IDs contain
+        # underscores and can also create collisions between different edges.
         edge_vars = {}
         for i, (u, v) in enumerate(graph.edges()):
-            var_name = f'x_{u}_{v}'
+            var_name = f'x_{i}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
 

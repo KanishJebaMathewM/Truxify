@@ -87,9 +87,9 @@ export function verifyOtpHash(providedOtp, storedHash, storedSalt) {
 
 /**
  * Checks rate limiting for OTP requests per phone number.
- * Prevents abuse by limiting OTPs to MAX_OTPS_PER_WINDOW per RATE_LIMIT_WINDOW_MINUTES.
- * Only counts OTPs that are still active (is_active = true) so that invalidated
- * superseded OTPs do not inflate the rate-limit counter.
+ * Prevents abuse by limiting OTP requests to MAX_OTPS_PER_WINDOW per RATE_LIMIT_WINDOW_MINUTES.
+ * Counts all OTP creation attempts within the window regardless of active/verified status,
+ * ensuring callers cannot bypass rate limits by requesting new OTPs.
  * 
  * @param {string} phone - Phone number in E.164 format
  * @returns {Promise<{allowed: boolean, retryAfter?: number, reason?: string}>}
@@ -107,7 +107,6 @@ export async function checkOtpRateLimit(phone) {
       .from('phone_otps')
       .select('id, created_at')
       .eq('phone', phone)
-      .eq('is_active', true)
       .gte('created_at', windowStart.toISOString());
 
     if (error) {
@@ -173,7 +172,16 @@ export async function requestOtp(phone, options = {}) {
 
   // Supersede any previously active OTPs for this phone before creating a new one.
   // Must be called before the insert so the new OTP itself is not caught by the filter.
-  await invalidatePreviousOtps(phone);
+  try {
+    await invalidatePreviousOtps(phone);
+  } catch (invalErr) {
+    logger.error({ err: invalErr, phone }, 'Failed to invalidate prior OTPs before generating new one');
+    return {
+      success: false,
+      error: 'DATABASE_ERROR',
+      message: 'Failed to invalidate previous OTP'
+    };
+  }
 
   // Generate OTP and salt
   const plaintextOtp = generateOtp();
@@ -300,7 +308,7 @@ export async function invalidatePreviousOtps(phone) {
   if (!supabaseAdmin) return;
 
   try {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('phone_otps')
       .update({
         is_active: false,
@@ -310,8 +318,14 @@ export async function invalidatePreviousOtps(phone) {
       .eq('phone', phone)
       .eq('is_active', true)
       .eq('verified', false);
+
+    if (error) {
+      logger.error({ err: error, phone }, 'Failed to invalidate previous OTPs');
+      throw error;
+    }
   } catch (err) {
     logger.error({ err, phone }, 'Failed to invalidate previous OTPs');
+    throw err;
   }
 }
 

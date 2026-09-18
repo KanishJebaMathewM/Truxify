@@ -524,7 +524,7 @@ export async function getConsumedDeliveryOtp(orderId) {
       .from('delivery_otps')
       .select('id, otp_hash, otp_salt, used_at, verified')
       .eq('order_id', orderId)
-      .or('used_at.not.is.null,verified.eq.true')
+      .not('used_at', 'is', null)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();

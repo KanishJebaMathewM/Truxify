@@ -6,7 +6,7 @@ redis==5.0.0
 fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.31
-accelerate==0.24.0
+accelerate==1.15.0
 bitsandbytes==0.41.1
 peft==0.6.0
-python-jose==3.3.0
+python-jose==3.4.0

@@ -342,6 +342,26 @@ export const globalLimiter = rateLimit({
   skip: (req) => req.path === "/health" || req.path.startsWith("/health/"),
 });
 
+const WEBRTC_NEARBY_WINDOW_MS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const WEBRTC_NEARBY_MAX_REQUESTS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+export const nearbyLimiter = rateLimit({
+  windowMs: WEBRTC_NEARBY_WINDOW_MS,
+  max: WEBRTC_NEARBY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:webrtc-nearby:"),
+  handler: sentryAlertHandler("nearbyLimiter"),
+  message: {
+    error: "Too many nearby peer discovery requests. Please try again later.",
+    retryAfter: 60,
+  },
+});
+
 export const userLimiter = rateLimit({
   windowMs: USER_WINDOW_MS,
   max: USER_MAX_REQUESTS,

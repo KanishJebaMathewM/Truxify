@@ -11,6 +11,56 @@ from torch_geometric.nn import GATConv, GCNConv, SAGEConv, global_mean_pool
 
 logger = logging.getLogger(__name__)
 
+class FeatureScaler(nn.Module):
+    """Centralized feature scaler for GNN node and edge attributes."""
+    def __init__(self, node_cont_indices=None, edge_cont_indices=None):
+        super().__init__()
+        self.node_cont_indices = node_cont_indices or [0, 1, 2, 8]
+        self.edge_cont_indices = edge_cont_indices or [0, 1, 2, 3, 4]
+        
+        self.register_buffer('node_mean', torch.zeros(len(self.node_cont_indices)))
+        self.register_buffer('node_std', torch.ones(len(self.node_cont_indices)))
+        self.register_buffer('edge_mean', torch.zeros(len(self.edge_cont_indices)))
+        self.register_buffer('edge_std', torch.ones(len(self.edge_cont_indices)))
+        
+        # Buffer to keep track of fitted state in the state_dict
+        self.register_buffer('is_fitted', torch.tensor(False))
+
+    def fit(self, node_features, edge_features):
+        """Fit scaling statistics from raw feature tensors."""
+        if node_features is not None and node_features.size(0) > 0:
+            node_cont = node_features[:, self.node_cont_indices]
+            self.node_mean = node_cont.mean(dim=0)
+            self.node_std = node_cont.std(dim=0)
+            self.node_std[self.node_std < 1e-6] = 1.0
+            
+        if edge_features is not None and edge_features.size(0) > 0:
+            edge_cont = edge_features[:, self.edge_cont_indices]
+            self.edge_mean = edge_cont.mean(dim=0)
+            self.edge_std = edge_cont.std(dim=0)
+            self.edge_std[self.edge_std < 1e-6] = 1.0
+            
+        self.is_fitted.fill_(True)
+
+    def transform(self, node_features, edge_features):
+        """Standardize features using fitted statistics, returning new tensors."""
+        if not self.is_fitted.item():
+            return node_features, edge_features
+            
+        out_node = node_features
+        if node_features is not None and node_features.size(0) > 0:
+            out_node = node_features.clone()
+            node_cont = out_node[:, self.node_cont_indices]
+            out_node[:, self.node_cont_indices] = (node_cont - self.node_mean.to(node_features.device)) / self.node_std.to(node_features.device)
+            
+        out_edge = edge_features
+        if edge_features is not None and edge_features.size(0) > 0:
+            out_edge = edge_features.clone()
+            edge_cont = out_edge[:, self.edge_cont_indices]
+            out_edge[:, self.edge_cont_indices] = (edge_cont - self.edge_mean.to(edge_features.device)) / self.edge_std.to(edge_features.device)
+            
+        return out_node, out_edge
+
 # Per-node feature dimension produced by `extract_features` (lat, lng,
 # traffic, 5-element road-type one-hot, speed_limit -> 9 features).
 GNN_NODE_FEATURE_DIM = 9
@@ -34,6 +84,9 @@ class GNNRouteModel(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.edge_dim = edge_dim
+        
+        # Centralized feature scaling
+        self.scaler = FeatureScaler()
         
         # Graph convolution layers
         self.conv1 = GCNConv(input_dim, hidden_dim)
@@ -62,6 +115,9 @@ class GNNRouteModel(nn.Module):
     
     def forward(self, x, edge_index, edge_attr=None, batch=None):
         """Execute forward pass through GNN convolution, attention, and pooling layers."""
+        # Scale features
+        x, edge_attr = self.scaler.transform(x, edge_attr)
+
         # First GCN layer
         x = self.conv1(x, edge_index)
         x = F.relu(x)
@@ -462,6 +518,16 @@ class RouteOptimizer:
     
     def train(self, train_data, val_data=None, epochs=100):
         """Train GNN model"""
+        # Fit scaler on all training data first
+        all_x = []
+        all_edge_attr = []
+        for data in train_data:
+            all_x.append(data.x)
+            if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+                all_edge_attr.append(data.edge_attr)
+        if all_x:
+            self.model.scaler.fit(torch.cat(all_x, dim=0), torch.cat(all_edge_attr, dim=0) if all_edge_attr else None)
+
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
         criterion = nn.MSELoss()
         

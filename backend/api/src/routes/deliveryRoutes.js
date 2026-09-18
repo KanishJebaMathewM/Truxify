@@ -78,7 +78,7 @@ router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmO
         message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
         payment_released: true,
-        isGeofenced
+        isGeofenced: true
       });
     }
 
@@ -86,7 +86,7 @@ router.post('/:id/confirm-otp', authenticate, userLimiter, validateBody(confirmO
       success: true,
       message: 'Delivery verified successfully! Payment released to driver.',
       payment_released: true,
-      isGeofenced
+      isGeofenced: true
     });
   } catch (err) {
     logger.error('[confirm-otp] Exception:', err.message);

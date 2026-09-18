@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -208,7 +208,13 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
 
     // Filters
     if (req.query.pickup_location) {
-      const pickupLocation = (Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location).trim();
+      if (Array.isArray(req.query.pickup_location)) {
+        return res.status(400).json({ error: 'Repeated pickup_location parameters are not allowed' });
+      }
+      if (typeof req.query.pickup_location !== 'string') {
+        return res.status(400).json({ error: 'pickup_location must be a single string' });
+      }
+      const pickupLocation = req.query.pickup_location.trim();
       if (!pickupLocation) {
         return res.status(400).json({ error: 'pickup_location must not be empty' });
       }

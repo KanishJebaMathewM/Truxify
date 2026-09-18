@@ -3,12 +3,19 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { atomicSwapRelayer } from './swap_relayer.js';
 
 class AtomicSwapService {
     constructor() {
-        this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
-        this.swapAddress = process.env.ATOMIC_SWAP_ADDRESS;
+        const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
+        this.provider = new ethers.JsonRpcProvider(rpcUrl);
+        const privateKey = process.env.PRIVATE_KEY && /^0x?[0-9a-fA-F]{64}$/.test(process.env.PRIVATE_KEY)
+            ? process.env.PRIVATE_KEY
+            : ethers.Wallet.createRandom().privateKey;
+        this.wallet = new ethers.Wallet(privateKey, this.provider);
+        this.swapAddress = (process.env.ATOMIC_SWAP_ADDRESS && ethers.isAddress(process.env.ATOMIC_SWAP_ADDRESS))
+            ? process.env.ATOMIC_SWAP_ADDRESS
+            : ethers.ZeroAddress;
 
         this.swapABI = [
             'function openSwap(bytes32 swapId, address payable recipient, bytes32 hashLock, uint256 lockDuration) external payable returns (bytes32)',
@@ -35,8 +42,8 @@ class AtomicSwapService {
         return '0x' + crypto.randomBytes(32).toString('hex');
     }
 
-    generateHashLock(secret) {
-        return ethers.keccak256(ethers.toUtf8Bytes(secret));
+    generateHashLock(secret, algorithm = 'keccak256') {
+        return atomicSwapRelayer.hashPreimage(secret, algorithm);
     }
 
     generateSecret() {
@@ -47,12 +54,21 @@ class AtomicSwapService {
 
     async createSwap(counterparty, tokenAddress, amount, secret, initiator) {
         try {
+        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
+        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+
         // `initiator` is the server-verified signer (the funding wallet owner),
         // never the server wallet. Reject attempts to fund from the server
         // wallet, which would let a caller drain server funds.
-        if (!initiator || initiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
             throw new Error('Invalid initiator: funding wallet must be user-owned');
         }
+
+        const amountValidation = atomicSwapRelayer.validateAmount(amount);
+        if (!amountValidation.valid) {
+            throw new Error(amountValidation.error);
+        }
+
         const hashLock = this.generateHashLock(secret);
         if (await this.swap.usedHashLocks(hashLock)) {
             throw new Error('Hash lock already used');
@@ -144,9 +160,18 @@ class AtomicSwapService {
 
     async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret, initiator) {
         try {
-        if (!initiator || initiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
+        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+
+        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
             throw new Error('Invalid initiator: funding wallet must be user-owned');
         }
+
+        const amountValidation = atomicSwapRelayer.validateAmount(amount);
+        if (!amountValidation.valid) {
+            throw new Error(amountValidation.error);
+        }
+
         const hashLock = this.generateHashLock(secret);
         if (await this.swap.usedHashLocks(hashLock)) {
             throw new Error('Hash lock already used');

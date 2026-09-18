@@ -29,6 +29,29 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export let supabase = null;
 export let supabaseAdmin = null;
 
+/**
+ * Returns the service-role Supabase client when configured, falling back to
+ * the public (anon-key) client otherwise. Use for server-side operations that
+ * must bypass Row Level Security — plain service calls should prefer the anon
+ * client so RLS stays enforced.
+ *
+ * Replaces the bare `supabaseAdmin || supabase` idiom that was duplicated
+ * across services and routes, so the admin/anon precedence and the
+ * RLS rationale live in one documented place.
+ */
+export function getAdminClient() {
+  return supabaseAdmin || supabase;
+}
+
+/**
+ * Returns the public (anon-key) Supabase client. Prefer this for any
+ * operation that must respect Row Level Security. Returns null when the
+ * service is not configured.
+ */
+export function getAnonClient() {
+  return supabase;
+}
+
 // Connection health helpers
 export function isConnected() {
   return supabase !== null;
@@ -429,6 +452,19 @@ export function validateConfig() {
 
   if (missingRecommended.length > 0) {
     logger.warn(`Missing optional env vars (features disabled): ${missingRecommended.join(', ')}`);
+  }
+
+  // JWT_SECRET is only "recommended" so local dev and tests can run without it
+  // — the auth middleware falls back to a built-in default. That default is
+  // public, though, so a production process without JWT_SECRET would let anyone
+  // forge authentication tokens. Refuse to boot in that state instead of
+  // silently accepting forged credentials.
+  if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET?.trim()) {
+    const msg =
+      'JWT_SECRET is required in production. Without it the API falls back to a publicly-known ' +
+      'default secret, which allows authentication-token forgery. Set JWT_SECRET and restart.';
+    logger.error(msg);
+    throw new Error(msg);
   }
 
   // Pricing rate-card validation

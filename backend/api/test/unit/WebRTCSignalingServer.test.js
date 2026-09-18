@@ -256,6 +256,48 @@ describe('WebRTCSignalingServer', () => {
     it('is a no-op for an unknown peer', () => {
       expect(() => server.sendPeerList('nobody')).not.toThrow();
     });
+    
+    it('coarsens medium-distance peer locations using the relay precision policy', () => {
+      const ws = addPeer(server, 'peer-1', { location: { lat: 12.9716, lng: 77.5946 } });
+      addPeer(server, 'peer-2', { location: { lat: 12.2958, lng: 76.6394 } });
+
+      server.locationRelayRadius = 50;
+      server.maxRelayRadius = 200;
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0].location).toMatchObject({
+        lat: 12.3,
+        lng: 76.64,
+        precision: 'coarse',
+      });
+    });
+
+    it('omits peer location when the peer is beyond the maximum disclosure radius', () => {
+      const ws = addPeer(server, 'peer-1', { location: { lat: 12.9716, lng: 77.5946 } });
+      addPeer(server, 'peer-2', { location: { lat: 28.6139, lng: 77.2090 } });
+
+      server.locationRelayRadius = 50;
+      server.maxRelayRadius = 200;
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0]).not.toHaveProperty('location');
+    });
+
+    it('never includes exact target location when the recipient has no location', () => {
+      const ws = addPeer(server, 'peer-1', { location: null });
+      addPeer(server, 'peer-2', { location: { lat: 12.971598, lng: 77.594566 } });
+
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0].location).toMatchObject({
+        lat: 12.97,
+        lng: 77.59,
+        precision: 'coarse',
+      });
+    });
 
     it('skips mesh members whose peer record has already been removed', () => {
       const ws = addPeer(server, 'peer-1');
@@ -298,8 +340,14 @@ describe('WebRTCSignalingServer', () => {
       addPeer(server, 'no-location');
     });
 
+    it('does not treat a missing requester id as a peer identity match', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
+
+      expect(found).toHaveLength(1);
+      expect(found[0].peerId).toBe('near');
+    });
     it('returns only peers inside the radius, with their distance', async () => {
-      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10);
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
 
       expect(found).toHaveLength(1);
       expect(found[0].peerId).toBe('near');
@@ -307,19 +355,99 @@ describe('WebRTCSignalingServer', () => {
     });
 
     it('widens with the radius', async () => {
-      const found = await server.getPeersNearLocation(12.9716, 77.5946, 500);
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 500, { role: 'admin' });
       expect(found.map((p) => p.peerId).sort()).toEqual(['far', 'near']);
     });
 
     it('defaults to a 10km radius', async () => {
-      const found = await server.getPeersNearLocation(12.9716, 77.5946);
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
       expect(found.map((p) => p.peerId)).toEqual(['near']);
     });
 
     it('skips peers that have not reported a location', async () => {
-      const found = await server.getPeersNearLocation(12.9716, 77.5946, 100000);
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 100000, { role: 'admin' });
       expect(found.map((p) => p.peerId)).not.toContain('no-location');
     });
+
+    it('ignores caller-supplied coordinates and radius for non-admin users', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.9800, lng: 77.6000 } });
+      addPeer(server, 'near-2', { location: { lat: 12.9810, lng: 77.6010 } });
+      addPeer(server, 'near-3', { location: { lat: 12.9820, lng: 77.6020 } });
+      addPeer(server, 'far-target', { location: { lat: 28.6139, lng: 77.2090 } });
+      addPeer(server, 'other-mesh-target', {
+        meshId: 'other-mesh',
+        location: { lat: 12.9800, lng: 77.6000 },
+      });
+
+      const found = await server.getPeersNearLocation(28.6139, 77.2090, 500, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found.map((peer) => peer.peerId).sort()).toEqual(['near-1', 'near-2', 'near-3']);
+      expect(found.some((peer) => peer.peerId === 'far-target')).toBe(false);
+      expect(found.some((peer) => peer.peerId === 'other-mesh-target')).toBe(false);
+    });
+
+    it('requires an active location for non-admin discovery', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'peer-1', { location: { lat: 12.98, lng: 77.60 } });
+
+      await expect(
+        server.getPeersNearLocation(12.9716, 77.5946, 10, {
+          id: 'driver-1',
+          role: 'driver',
+        }),
+      ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it('requires an aggregation threshold before returning driver results', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.98, lng: 77.60 } });
+      addPeer(server, 'near-2', { location: { lat: 12.981, lng: 77.601 } });
+
+      const found = await server.getPeersNearLocation(0, 0, 1, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found).toEqual([]);
+    });
+
+    it('coarsens driver locations and buckets distances', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.971598, lng: 77.594566 } });
+      addPeer(server, 'near-2', { location: { lat: 12.981, lng: 77.601 } });
+      addPeer(server, 'near-3', { location: { lat: 12.982, lng: 77.602 } });
+
+      const found = await server.getPeersNearLocation(0, 0, 1, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found).toHaveLength(3);
+      expect(found[0].location.precision).toBe('coarse');
+      expect(found[0].location.lat).not.toBe(12.971598);
+      expect(found.every((peer) => Number.isInteger(peer.distance / 5))).toBe(true);
+    });
+
   });
 
   describe('getStats()', () => {

@@ -4,6 +4,30 @@ import { OpenAI } from 'openai';
 import axios from 'axios';
 import logger from '../../middleware/logger.js';
 
+const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 120;
+const DEFAULT_TTS_MAX_RESPONSE_CHARS = 800;
+
+function loadPositiveIntegerEnv(name, fallback) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue === '') return fallback;
+
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return value;
+}
+
+const LLM_MAX_OUTPUT_TOKENS = loadPositiveIntegerEnv(
+  'VOICE_AI_MAX_OUTPUT_TOKENS',
+  DEFAULT_LLM_MAX_OUTPUT_TOKENS
+);
+const TTS_MAX_RESPONSE_CHARS = loadPositiveIntegerEnv(
+  'VOICE_AI_MAX_RESPONSE_CHARS',
+  DEFAULT_TTS_MAX_RESPONSE_CHARS
+);
+
 class VoiceAiService {
   constructor() {
     this.openai = new OpenAI({
@@ -65,17 +89,27 @@ class VoiceAiService {
           },
           { role: 'user', content: userText }
         ],
+        max_completion_tokens: LLM_MAX_OUTPUT_TOKENS,
       });
 
-      const llmResponseText = completion.choices[0].message.content;
-      logger.info(`LLM Response: ${llmResponseText}`);
+      const llmResponseText = completion.choices?.[0]?.message?.content;
+      if (typeof llmResponseText !== 'string' || !llmResponseText.trim()) {
+        throw new Error('LLM returned an empty response');
+      }
+
+      const responseText = llmResponseText.trim();
+      if (responseText.length > TTS_MAX_RESPONSE_CHARS) {
+        throw new Error('LLM response exceeds the voice response limit');
+      }
+
+      logger.info(`LLM Response: ${responseText}`);
 
       // 3. Convert Text to Speech using ElevenLabs
       const voiceId = this.voiceIds[language] || this.voiceIds['en'];
       const ttsResponse = await axios.post(
         `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
         {
-          text: llmResponseText,
+          text: responseText,
           model_id: 'eleven_multilingual_v2',
         },
         {
@@ -85,7 +119,7 @@ class VoiceAiService {
             'Content-Type': 'application/json',
           },
           responseType: 'stream',
-          timeout: 30000,
+          timeout: Number(process.env.VOICE_AI_TIMEOUT_MS) || 20000,
         }
       );
 

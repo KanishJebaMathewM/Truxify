@@ -1,4 +1,9 @@
+import os
+import sys
+
 import networkx as nx
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 class _FakeFormatter:
@@ -19,7 +24,7 @@ class _FakeFormatter:
         }
 
 
-def test_route_service_preserves_parallel_edges(monkeypatch):
+def test_route_service_preserves_parallel_edges():
     from quantum_service import QuantumService
 
     service = QuantumService.__new__(QuantumService)

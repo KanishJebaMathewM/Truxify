@@ -8,6 +8,7 @@ import { buildDepositTx, recordDepositTx, submitEscrowRefund } from '../services
 import { predictDemand } from '../services/ml.js';
 import { buildStraightLineGeometry, getRouteGeometry } from '../services/osrm.js';
 import logger from '../middleware/logger.js';
+import { AppError } from '../utils/errors.js';
 
 const orderRepository = new OrderRepository(supabase);
 const orderTimelineService = new OrderTimelineService({ supabase, logger });

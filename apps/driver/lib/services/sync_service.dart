@@ -36,6 +36,9 @@ class SyncService {
     _connectivitySubscription?.cancel();
   }
 
+  @visibleForTesting
+  Future<void> syncPendingDataForTesting() => _syncPendingData();
+
   Future<void> _syncPendingData() async {
     if (_isSyncing) return;
     _isSyncing = true;

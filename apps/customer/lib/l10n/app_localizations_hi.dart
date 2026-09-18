@@ -102,13 +102,15 @@ class AppLocalizationsHi extends AppLocalizations {
   String get loginWithBiometrics => 'बायोमेट्रिक्स से लॉगिन करें';
 
   @override
-  String get biometricsNotSupported => 'इस डिवाइस पर बायोमेट्रिक्स समर्थित नहीं है';
+  String get biometricsNotSupported =>
+      'इस डिवाइस पर बायोमेट्रिक्स समर्थित नहीं है';
 
   @override
   String get biometricAuthSuccessful => 'बायोमेट्रिक प्रमाणीकरण सफल';
 
   @override
-  String get biometricAuthRequiresSession => 'कोई सहेजा गया सत्र नहीं मिला। कृपया पहले अपने फ़ोन नंबर से साइन इन करें।';
+  String get biometricAuthRequiresSession =>
+      'कोई सहेजा गया सत्र नहीं मिला। कृपया पहले अपने फ़ोन नंबर से साइन इन करें।';
 
   @override
   String get pleaseEnterPhone => 'कृपया अपना फ़ोन नंबर दर्ज करें';
@@ -128,10 +130,12 @@ class AppLocalizationsHi extends AppLocalizations {
   String get verificationFailed => 'सत्यापन असफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get phoneVerificationFailed => 'फ़ोन सत्यापन असफल। कृपया पुनः प्रयास करें।';
+  String get phoneVerificationFailed =>
+      'फ़ोन सत्यापन असफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get autoVerificationFailed => 'स्वचालित सत्यापन असफल। कृपया OTP मैन्युअल रूप से दर्ज करें।';
+  String get autoVerificationFailed =>
+      'स्वचालित सत्यापन असफल। कृपया OTP मैन्युअल रूप से दर्ज करें।';
 
   @override
   String get failedToSendOtp => 'OTP भेजने में असफल। कृपया पुनः प्रयास करें।';
@@ -148,13 +152,15 @@ class AppLocalizationsHi extends AppLocalizations {
   String get invalidOtp => 'अमान्य OTP। कृपया जांचें और पुनः प्रयास करें।';
 
   @override
-  String get verificationSessionExpired => 'सत्यापन सत्र समाप्त हो गया है। कृपया नया OTP अनुरोध करें।';
+  String get verificationSessionExpired =>
+      'सत्यापन सत्र समाप्त हो गया है। कृपया नया OTP अनुरोध करें।';
 
   @override
   String get invalidVerificationCode => 'अमान्य सत्यापन कोड।';
 
   @override
-  String get otpExpired => 'OTP की समय सीमा समाप्त हो गई है। कृपया नया अनुरोध करें।';
+  String get otpExpired =>
+      'OTP की समय सीमा समाप्त हो गई है। कृपया नया अनुरोध करें।';
 
   @override
   String get home => 'होम';
@@ -446,7 +452,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get unableToShare => 'शेयर करने में असमर्थ';
 
   @override
-  String get linkExpired => 'यह ट्रैकिंग लिंक समाप्त हो गया है या अब मान्य नहीं है।';
+  String get linkExpired =>
+      'यह ट्रैकिंग लिंक समाप्त हो गया है या अब मान्य नहीं है।';
 
   @override
   String get trackingRevoked => 'सभी ट्रैकिंग लिंक रद्द कर दिए गए हैं।';

@@ -8,6 +8,9 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
+  record: ^5.0.5
+  audioplayers: ^5.2.1
+  pointycastle: ^3.7.3
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
   firebase_messaging: ^16.4.1
@@ -45,7 +48,10 @@ dependencies:
   sentry_flutter: ^8.14.1
 
 dev_dependencies:
-  flutter_lints: ^3.0.0
+  record: ^5.0.5
+  audioplayers: ^5.2.1
+  pointycastle: ^3.7.3
+  flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
   mocktail: ^1.0.4

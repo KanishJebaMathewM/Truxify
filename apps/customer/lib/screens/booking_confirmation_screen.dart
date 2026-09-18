@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
@@ -47,8 +48,11 @@ class BookingConfirmationScreen extends StatefulWidget {
 
 class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
-  final _paymentRepo = PaymentRepository();
-  final _addressRepo = AddressRepository();
+  late final PaymentRepository _paymentRepo;
+  late final AddressRepository _addressRepo;
+  late final ApiClient _apiClient;
+  bool _isPassengerMode = false;
+  bool _isAwaitingUpi = false;
   bool _showSuccess = false;
   bool _isLoading = true;
   bool _isSubmitting = false;
@@ -177,9 +181,10 @@ final orderId = _createdOrderId ?? await _orderService.createOrder(
         requiresRefrigeration: widget.draft.requiresRefrigeration,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
-        driverId: widget.truck.driverId.trim(),
-        truckId: widget.truck.truckId.trim(),
+        driverId: widget.truck.driverId?.trim() ?? '' ?? '',
+        truckId: widget.truck.truckId?.trim() ?? '',
         idempotencyKey: _orderIdempotencyKey,
+      );
 
       _createdOrderId ??= orderId;
       await _fetchUpiIntent(_createdOrderId!);

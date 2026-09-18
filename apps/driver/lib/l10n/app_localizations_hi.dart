@@ -71,10 +71,12 @@ class AppLocalizationsHi extends AppLocalizations {
   String get phoneMustBeDigits => 'फ़ोन नंबर में केवल अंक होने चाहिए';
 
   @override
-  String get autoVerificationFailed => 'स्वतः सत्यापन विफल। कृपया मैन्युअल रूप से OTP दर्ज करें।';
+  String get autoVerificationFailed =>
+      'स्वतः सत्यापन विफल। कृपया मैन्युअल रूप से OTP दर्ज करें।';
 
   @override
-  String get protectedDriverAccess => 'यह क्षेत्र केवल पंजीकृत ड्राइवरों के लिए प्रतिबंधित है।';
+  String get protectedDriverAccess =>
+      'यह क्षेत्र केवल पंजीकृत ड्राइवरों के लिए प्रतिबंधित है।';
 
   @override
   String get verifyOtp => 'OTP सत्यापित करें';
@@ -91,13 +93,15 @@ class AppLocalizationsHi extends AppLocalizations {
   String get invalidOtp => 'अमान्य OTP। कृपया पुनः प्रयास करें।';
 
   @override
-  String get codeExpired => 'OTP की समय सीमा समाप्त हो गई है। कृपया एक नया अनुरोध करें।';
+  String get codeExpired =>
+      'OTP की समय सीमा समाप्त हो गई है। कृपया एक नया अनुरोध करें।';
 
   @override
   String get verificationFailedMsg => 'सत्यापन विफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get couldNotVerifyOtp => 'OTP सत्यापित नहीं हो सका। कृपया पुनः प्रयास करें।';
+  String get couldNotVerifyOtp =>
+      'OTP सत्यापित नहीं हो सका। कृपया पुनः प्रयास करें।';
 
   @override
   String get verifying => 'सत्यापित हो रहा है...';
@@ -115,7 +119,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get profile => 'प्रोफ़ाइल';
 
   @override
-  String get offlineUsingCachedData => 'आप ऑफ़लाइन हैं। कैश किया गया डेटा उपयोग हो रहा है।';
+  String get offlineUsingCachedData =>
+      'आप ऑफ़लाइन हैं। कैश किया गया डेटा उपयोग हो रहा है।';
 
   @override
   String get newLoadAvailable => 'नया लोड उपलब्ध है!';
@@ -156,13 +161,16 @@ class AppLocalizationsHi extends AppLocalizations {
   String get offline => 'ऑफ़लाइन';
 
   @override
-  String get offlineGoOnline => 'आप ऑफ़लाइन हैं। लोड प्राप्त करने के लिए ऑनलाइन हो जाएँ।';
+  String get offlineGoOnline =>
+      'आप ऑफ़लाइन हैं। लोड प्राप्त करने के लिए ऑनलाइन हो जाएँ।';
 
   @override
-  String get radarActiveFetching => 'रडार सक्रिय — आस-पास के लोड प्राप्त किए जा रहे हैं...';
+  String get radarActiveFetching =>
+      'रडार सक्रिय — आस-पास के लोड प्राप्त किए जा रहे हैं...';
 
   @override
-  String get radarActiveLooking => 'रडार सक्रिय — आपके निकट लोड खोजे जा रहे हैं।';
+  String get radarActiveLooking =>
+      'रडार सक्रिय — आपके निकट लोड खोजे जा रहे हैं।';
 
   @override
   String get todayPay => 'आज की कमाई';
@@ -230,7 +238,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get pleaseGoOnline => 'कृपया पहले ऑनलाइन हो जाएँ';
 
   @override
-  String get noDestinationAvailable2 => 'कोई गंतव्य उपलब्ध नहीं है। कृपया गंतव्य निर्धारित करें।';
+  String get noDestinationAvailable2 =>
+      'कोई गंतव्य उपलब्ध नहीं है। कृपया गंतव्य निर्धारित करें।';
 
   @override
   String get locationPermissionRequired => 'स्थान अनुमति आवश्यक है';
@@ -239,7 +248,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get locationAccessDenied => 'स्थान पहुँच अस्वीकृत';
 
   @override
-  String get locationPermDenied => 'स्थान अनुमति स्थायी रूप से अस्वीकृत। कृपया सेटिंग्स में सक्षम करें।';
+  String get locationPermDenied =>
+      'स्थान अनुमति स्थायी रूप से अस्वीकृत। कृपया सेटिंग्स में सक्षम करें।';
 
   @override
   String get openSettings => 'सेटिंग्स खोलें';
@@ -299,7 +309,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get aboutTruxifyDriverApp => 'ट्रक्सिफाई ड्राइवर ऐप के बारे में';
 
   @override
-  String get truxifyDescription => 'ट्रक्सिफाई एक ट्रक लॉजिस्टिक्स प्लेटफ़ॉर्म है जो पूर्वी अफ्रीका में ड्राइवरों को लोड से जोड़ता है।';
+  String get truxifyDescription =>
+      'ट्रक्सिफाई एक ट्रक लॉजिस्टिक्स प्लेटफ़ॉर्म है जो पूर्वी अफ्रीका में ड्राइवरों को लोड से जोड़ता है।';
 
   @override
   String get documents => 'दस्तावेज़';
@@ -413,7 +424,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get marketplaceLoads => 'मार्केटप्लेस लोड';
 
   @override
-  String get availableLoadsYouCanBidFor => 'उपलब्ध लोड जिन पर आप बोली लगा सकते हैं';
+  String get availableLoadsYouCanBidFor =>
+      'उपलब्ध लोड जिन पर आप बोली लगा सकते हैं';
 
   @override
   String get couldNotLoadMarketplace => 'मार्केटप्लेस लोड नहीं हो सका';
@@ -452,7 +464,8 @@ class AppLocalizationsHi extends AppLocalizations {
   String get couldNotLoadRecommendations => 'सिफारिशें लोड नहीं हो सकीं';
 
   @override
-  String get noActiveTripForRecommendations => 'वापसी लोड सुझाव देखने के लिए यात्रा पूरी करें';
+  String get noActiveTripForRecommendations =>
+      'वापसी लोड सुझाव देखने के लिए यात्रा पूरी करें';
 
   @override
   String get detourDistance => 'डायवर्जन';
@@ -528,7 +541,7 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String resendOtpIn(int seconds) {
-    return 'Resend in $secondss';
+    return 'Resend in ${seconds}s';
   }
 
   @override

@@ -29,7 +29,7 @@ void main() {
           reason: 'Duplicated _apiClient.post statements were the reported bug');
 
       final confirmOtpEndpoint = RegExp(
-        r"_apiClient\.post\(\s*['\"]/api/orders/\$\{widget\.orderId\}/confirm-otp['\"]",
+        r"""_apiClient\.post\(\s*['"]/api/orders/\$\{widget\.orderId\}/confirm-otp['"]""",
       ).allMatches(source);
       expect(confirmOtpEndpoint.length, 1,
           reason: 'The confirm-otp endpoint must be requested exactly once');

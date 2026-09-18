@@ -275,7 +275,7 @@ void main() {
     testWidgets('subscribes to Supabase Realtime when order id is an integer', (tester) async {
       final mockChannel = MockRealtimeChannel();
 
-      when(() => mockSupabase.removeChannel(any())).thenAnswer((_) async {});
+      when(() => mockSupabase.removeChannel(any())).thenAnswer((_) async => 'ok');
       when(() => mockChannel.onBroadcast(
             event: any(named: 'event'),
             callback: any(named: 'callback'),

@@ -51,6 +51,14 @@ class QuantumCircuitDesigner:
         
         # QAOA ansatz
         qaoa = QAOAAnsatz(cost_hamiltonian, reps=p)
+
+        # This endpoint executes the ansatz directly rather than optimizing its
+        # parameters first. Bind a neutral initial point so Aer can run it, then
+        # measure every qubit so the execution produces counts.
+        qaoa = qaoa.assign_parameters(
+            {parameter: 0.0 for parameter in qaoa.parameters}
+        )
+        qaoa.measure_all()
         
         self.circuit = qaoa
         return qaoa
@@ -77,6 +85,15 @@ class QuantumCircuitDesigner:
             
             # Get counts
             counts = result.get_counts()
+
+            if not counts:
+                return {
+                    'success': False,
+                    'counts': {},
+                    'shots': shots,
+                    'most_frequent': None,
+                    'error': 'Circuit produced no measurement counts'
+                }
             
             return {
                 'success': True,

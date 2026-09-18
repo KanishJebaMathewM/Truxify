@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import coldChainAnomalyService from '../services/coldChainAnomalyService.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
@@ -155,27 +156,22 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       return res.status(500).json({ error: 'Database error' });
     }
 
-    // Notify only on the out-of-range transition: the previous frame was in
-    // range (or absent) and the new frame is out of range. Continuing
-    // out-of-range frames are skipped, so a single excursion produces one
-    // notification instead of one per frame.
-    if (isOutOfRange && !prevErr && !prevOutOfRange) {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: load.customer_id,
-        title: 'Temperature Alert',
-        body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        notif_type: 'system',
-        metadata: {
-          load_id: loadId,
-          temperature,
-          target_temperature_min: load.target_temperature_min,
-          target_temperature_max: load.target_temperature_max,
-          cold_chain_alert: true
-        }
-      }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
-    }
+    // Evaluate sliding-window cumulative excursions & MKT degradation
+    const analysis = await coldChainAnomalyService.processTelemetry({
+      loadId,
+      orderId: load.order_display_id,
+      temperature,
+      targetMin: load.target_temperature_min,
+      targetMax: load.target_temperature_max,
+      customerId: load.customer_id,
+      driverId: req.user?.id,
+    });
 
-    return res.status(201).json({ success: true, message: 'Telemetry recorded' });
+    return res.status(201).json({
+      success: true,
+      message: 'Telemetry recorded',
+      analysis,
+    });
   } catch (err) {
     logger.error({ event: 'IOT_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Internal server error in IoT telemetry route');
     return res.status(500).json({ error: 'Internal server error' });

@@ -8,9 +8,11 @@ and driver rating, then solves the optimal assignment via
 
 import logging
 import math
+import os
 from typing import List, Dict, Any
 
 import numpy as np
+import requests
 from scipy.optimize import linear_sum_assignment
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _EARTH_RADIUS_KM = 6_371.0
+_DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
+_OSRM_TIMEOUT_SECONDS = 1.5
+_FALLBACK_AVG_SPEED_KMH = 50.0
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -29,6 +34,58 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlon = lon2 - lon1
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return 2 * _EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+
+
+def _osrm_enabled() -> bool:
+    return os.getenv("TRUXIFY_ML_USE_OSRM", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _fetch_route_duration_matrix(
+    drivers: List[Dict[str, Any]],
+    loads: List[Dict[str, Any]],
+) -> list[list[float | None]] | None:
+    """Fetch road travel durations from every driver to every load origin."""
+    if not _osrm_enabled() or not drivers or not loads:
+        return None
+
+    coordinates = [
+        f"{driver['current_lng']},{driver['current_lat']}"
+        for driver in drivers
+    ] + [
+        f"{load['origin_lng']},{load['origin_lat']}"
+        for load in loads
+    ]
+    source_indexes = ";".join(str(i) for i in range(len(drivers)))
+    destination_offset = len(drivers)
+    destination_indexes = ";".join(
+        str(destination_offset + i) for i in range(len(loads))
+    )
+    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
+    url = f"{base_url}/table/v1/driving/{';'.join(coordinates)}"
+
+    try:
+        response = requests.get(
+            url,
+            params={
+                "sources": source_indexes,
+                "destinations": destination_indexes,
+                "annotations": "duration",
+            },
+            timeout=_OSRM_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        durations = payload.get("durations") if isinstance(payload, dict) else None
+        if not isinstance(durations, list) or len(durations) != len(drivers):
+            logger.warning("OSRM returned an invalid bilateral duration matrix")
+            return None
+        if any(not isinstance(row, list) or len(row) != len(loads) for row in durations):
+            logger.warning("OSRM returned an invalid bilateral duration row")
+            return None
+        return durations
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning("OSRM bilateral duration lookup failed: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +98,115 @@ _PENALTY_INFEASIBLE = 1e6   # effectively forbids the pairing
 # so that a negative `_rating_bonus` (−10 for a 5-star driver) cannot pull an
 # infeasible pairing's cost back under the threshold and get it accepted.
 _INFEASIBLE_THRESHOLD = 1e5
+# Assignments at or above this cost are better represented by leaving the
+# load/driver unmatched. This matches the zero-score boundary below.
+_UNMATCHED_COST = 200.0
+
+
+def _validate_finite_value(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    positive: bool = False,
+) -> float:
+    """Validate that a matching input is finite and within its allowed range."""
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a finite number") from exc
+
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"{field_name} must be a finite number")
+    if positive and numeric_value <= 0:
+        raise ValueError(f"{field_name} must be greater than 0")
+    if minimum is not None and numeric_value < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum}")
+    if maximum is not None and numeric_value > maximum:
+        raise ValueError(f"{field_name} must be at most {maximum}")
+
+    return numeric_value
+
+
+def _validate_bilateral_inputs(
+    loads: List[Dict[str, Any]],
+    drivers: List[Dict[str, Any]],
+) -> None:
+    """Validate direct matcher inputs before building the optimization matrix."""
+    load_ranges = {
+        "origin_lat": (-90.0, 90.0),
+        "origin_lng": (-180.0, 180.0),
+        "dest_lat": (-90.0, 90.0),
+        "dest_lng": (-180.0, 180.0),
+    }
+    load_positive_fields = (
+        "weight_kg",
+        "length_m",
+        "width_m",
+        "height_m",
+        "deadline_hours",
+    )
+    driver_ranges = {
+        "current_lat": (-90.0, 90.0),
+        "current_lng": (-180.0, 180.0),
+    }
+    driver_positive_fields = (
+        "max_weight_kg",
+        "max_length_m",
+        "max_width_m",
+        "max_height_m",
+    )
+
+    for load_index, load in enumerate(loads):
+        for field_name, (minimum, maximum) in load_ranges.items():
+            _validate_finite_value(
+                load.get(field_name),
+                f"loads[{load_index}].{field_name}",
+                minimum=minimum,
+                maximum=maximum,
+            )
+        for field_name in load_positive_fields:
+            _validate_finite_value(
+                load.get(field_name),
+                f"loads[{load_index}].{field_name}",
+                positive=True,
+            )
+
+    for driver_index, driver in enumerate(drivers):
+        for field_name, (minimum, maximum) in driver_ranges.items():
+            _validate_finite_value(
+                driver.get(field_name),
+                f"drivers[{driver_index}].{field_name}",
+                minimum=minimum,
+                maximum=maximum,
+            )
+        for field_name in driver_positive_fields:
+            _validate_finite_value(
+                driver.get(field_name),
+                f"drivers[{driver_index}].{field_name}",
+                positive=True,
+            )
+
+        _validate_finite_value(
+            driver.get("rating", 3.0),
+            f"drivers[{driver_index}].rating",
+            minimum=1.0,
+            maximum=5.0,
+        )
+
+        for field_name, (minimum, maximum) in {
+            "preferred_dest_lat": (-90.0, 90.0),
+            "preferred_dest_lng": (-180.0, 180.0),
+        }.items():
+            value = driver.get(field_name)
+            if value is not None:
+                _validate_finite_value(
+                    value,
+                    f"drivers[{driver_index}].{field_name}",
+                    minimum=minimum,
+                    maximum=maximum,
+                )
 
 
 def _distance_cost(driver: dict, load: dict) -> float:
@@ -71,13 +237,23 @@ def _dimension_penalty(driver: dict, load: dict) -> float:
     return 0.0
 
 
-def _deadline_urgency(load: dict, distance_km: float) -> float:
+def _deadline_urgency(
+    load: dict,
+    distance_km: float,
+    route_duration_seconds: float | None = None,
+) -> float:
     """Penalise matches where estimated travel time is tight versus deadline.
 
-    Higher cost when the deadline is close relative to distance.
+    Road-network duration is preferred when available. The previous straight-line
+    distance estimate is retained only as an explicit routing-service fallback.
     """
-    avg_speed_kmh = 50.0
-    travel_hours = distance_km / avg_speed_kmh if avg_speed_kmh > 0 else 0.0
+    if route_duration_seconds is not None:
+        if not math.isfinite(route_duration_seconds) or route_duration_seconds < 0:
+            return _PENALTY_INFEASIBLE
+        travel_hours = route_duration_seconds / 3600.0
+    else:
+        travel_hours = distance_km / _FALLBACK_AVG_SPEED_KMH
+
     deadline = load.get("deadline_hours", 72.0)
     if deadline <= 0:
         return _PENALTY_INFEASIBLE
@@ -133,6 +309,8 @@ def match_bilateral(
         ``unmatched_loads``  – indices of loads without a match
         ``unmatched_drivers`` – indices of drivers without a match
     """
+    _validate_bilateral_inputs(loads, drivers)
+
     n_loads = len(loads)
     n_drivers = len(drivers)
 
@@ -152,32 +330,56 @@ def match_bilateral(
             "unmatched_drivers": [],
         }
 
+    route_durations = _fetch_route_duration_matrix(drivers, loads)
+
     # Build cost matrix  (rows = loads, cols = drivers)
     cost = np.zeros((n_loads, n_drivers), dtype=np.float64)
 
     for i, load in enumerate(loads):
         for j, driver in enumerate(drivers):
             dist_km = _distance_cost(driver, load)
+            route_duration_seconds = None
+            if route_durations is not None:
+                candidate_duration = route_durations[j][i]
+                if candidate_duration is None:
+                    route_duration_seconds = float("inf")
+                elif isinstance(candidate_duration, (int, float)) and math.isfinite(candidate_duration):
+                    route_duration_seconds = float(candidate_duration)
+                else:
+                    route_duration_seconds = float("inf")
             c = (
                 dist_km / _MAX_DISTANCE_KM * 100.0  # normalised distance
                 + _weight_penalty(driver, load)
                 + _dimension_penalty(driver, load)
-                + _deadline_urgency(load, dist_km)
+                + _deadline_urgency(load, dist_km, route_duration_seconds)
                 + _destination_penalty(driver, load)
                 + _rating_bonus(driver)
             )
             cost[i, j] = c
 
-    # Solve assignment (minimise cost)
-    row_idx, col_idx = linear_sum_assignment(cost)
+    # Add explicit dummy rows/columns so the optimizer can choose an unmatched
+    # load or driver instead of being forced to accept a poor finite pairing.
+    size = n_loads + n_drivers
+    assignment_cost = np.zeros((size, size), dtype=np.float64)
+    assignment_cost[:n_loads, :n_drivers] = cost
+    assignment_cost[:n_loads, n_drivers:] = _UNMATCHED_COST
+    assignment_cost[n_loads:, :n_drivers] = _UNMATCHED_COST
+
+    # Solve the augmented assignment problem.
+    row_idx, col_idx = linear_sum_assignment(assignment_cost)
 
     assignments = []
     matched_loads = set()
     matched_drivers = set()
 
     for r, c in zip(row_idx, col_idx):
+        # Dummy row/column assignments represent unmatched entities.
+        if r >= n_loads or c >= n_drivers:
+            continue
         if cost[r, c] >= _INFEASIBLE_THRESHOLD:
             continue  # infeasible pairing – skip
+        if cost[r, c] >= _UNMATCHED_COST:
+            continue  # a poor finite pairing is worse than staying unmatched
         score = round(min(1.0, max(0.0, 1.0 - cost[r, c] / 200.0)), 4)  # 0‥1
         assignments.append(
             {"load_index": int(r), "driver_index": int(c), "match_score": float(score)}

@@ -412,7 +412,7 @@ class RouteOptimizer:
                 return None
 
             # Convert to PyTorch Geometric
-            data = graph_data.to(self.device)
+            data = graph_data.to(self.device).clone()
 
             # Validate the node-feature dimension matches the model before the
             # GCN conv layers run (otherwise Linear raises a cryptic size mismatch).
@@ -616,7 +616,7 @@ class RouteOptimizer:
             total_loss = 0.0
             
             for data in train_data:
-                data = data.to(self.device)
+                data = data.to(self.device).clone()
                 self.feature_scaler.transform_graph(data)
                 optimizer.zero_grad()
                 

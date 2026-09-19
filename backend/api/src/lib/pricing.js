@@ -89,7 +89,7 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
     return haversineDistance(lat1, lon1, lat2, lon2, 'km');
   } catch (err) {
     if (err instanceof TypeError) {
-      throw new TypeError('haversineKm requires finite numeric lat/lng arguments');
+      throw new TypeError('haversineKm requires finite numeric lat/lng arguments', { cause: err });
     }
     throw err;
   }

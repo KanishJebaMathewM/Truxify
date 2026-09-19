@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateCoordinateRange } from '../../src/utils/coordinates.js';
+import { validateCoordinateRange, haversineDistance } from '../../src/utils/coordinates.js';
 
 describe('validateCoordinateRange', () => {
   describe('valid coordinates', () => {
@@ -180,7 +180,7 @@ describe('validateCoordinateRange', () => {
   });
 });
 
-import { haversineDistance } from '../../src/utils/coordinates.js';
+
 
 describe('haversineDistance', () => {
   it('throws on non-finite coordinates', () => {

@@ -136,7 +136,7 @@ router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePo
 
 /**
  * @openapi
- * /api/webrtc/offline/{peerId}:
+ * /webrtc/offline/{peerId}:
  *   get:
  *     tags: [WebRTC]
  *     summary: Retrieve offline GPS data for a peer

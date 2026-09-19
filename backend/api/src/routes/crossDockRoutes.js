@@ -188,6 +188,8 @@ import {
  *       '500': { description: Internal server error }
  * */ 
 
+const router = express.Router();
+
 function handleError(res, err, label) {
   if (err instanceof DomainError) {
     return res.status(err.status).json(err.payload);

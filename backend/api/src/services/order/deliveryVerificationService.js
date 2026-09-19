@@ -615,8 +615,7 @@ export class DeliveryVerificationService {
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;
 
-        const isEscrowBacked =
-          !order.escrow_disabled && Boolean(order.escrow_status);
+        const isEscrowBacked = !order.escrow_disabled;
 
         // 1. Execute Blockchain Release FIRST to fail-safe if network errors occur
         if (

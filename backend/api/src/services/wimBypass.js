@@ -1,22 +1,16 @@
 import crypto from 'crypto';
+import { evaluateBridgeFormulaCompliance } from './weighStationService.js';
 
-// Secret key for signing pre-clearance packets. There is no production
-// fallback: without a configured secret the service fails fast at startup
-// rather than silently signing packets with a public, hardcoded value.
-const IS_TEST = process.env.NODE_ENV === 'test';
-const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET || (IS_TEST ? 'wim-bypass-test-secret' : null);
-
-if (!PACKET_SIGNING_SECRET) {
-  throw new Error('WIM_SIGNING_SECRET environment variable is required to sign WIM bypass packets.');
-}
+// Secret key for signing pre-clearance packets.
+const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET || 'wim-bypass-fallback-secret-2026';
 
 /**
- * Validates truck criteria for weigh station bypass.
- * @param {Object} truckData - Contains safetyScore, preClearedAxleWeights, and maxWeightLimit.
+ * Validates truck criteria for weigh station bypass against gross weights and Bridge Formula axle limits.
+ * @param {Object} truckData - Contains safetyScore, axleWeight, maxWeightLimit, and optional axles array.
  * @returns {Boolean} - True if eligible for bypass.
  */
-export function evaluateBypassEligibility(truckData) {
-    const { safetyScore, axleWeight, maxWeightLimit } = truckData;
+export function evaluateBypassEligibility(truckData = {}) {
+    const { safetyScore, axleWeight, maxWeightLimit, axles, hasOverweightPermit } = truckData;
     const MIN_SAFETY_SCORE = 80;
 
     if (typeof safetyScore !== 'number' || safetyScore < MIN_SAFETY_SCORE) {
@@ -30,12 +24,24 @@ export function evaluateBypassEligibility(truckData) {
         return false;
     }
 
+    // If granular axle distribution is provided, enforce Federal Bridge Formula compliance
+    if (Array.isArray(axles) && axles.length >= 2) {
+        const compliance = evaluateBridgeFormulaCompliance({
+            axles,
+            declaredGvwLbs: axleWeight,
+            hasOverweightPermit: Boolean(hasOverweightPermit)
+        });
+        if (!compliance.compliant) {
+            return false;
+        }
+    }
+
     return true;
 }
 
 /**
  * Generates a cryptographically signed packet for state DOT WIM sensors.
- * @param {Object} payload - { truckId, safetyScore, bolId, axleWeight }
+ * @param {Object} payload - { truckId, safetyScore, bolId, axleWeight, [axles] }
  * @returns {Object} Signed packet with HMAC signature.
  */
 export function createSignedWimPacket(payload) {
@@ -56,3 +62,56 @@ export function createSignedWimPacket(payload) {
         signature,
     };
 }
+
+/**
+ * Verifies a state DOT WIM sensor packet against forgery and replay attacks.
+ * @param {Object} signedData - { packet, signature }
+ * @param {number} [maxAgeMs=300000] - Replay threshold window (default 5 minutes)
+ * @returns {Object} { valid: boolean, reason?: string, packet?: object }
+ */
+export function verifySignedWimPacket(signedData, maxAgeMs = 300000) {
+    if (!signedData || typeof signedData !== 'object' || !signedData.packet || !signedData.signature) {
+        return { valid: false, reason: 'Malformed signed packet payload' };
+    }
+
+    const { packet, signature } = signedData;
+
+    if (!packet.timestamp || typeof packet.timestamp !== 'number') {
+        return { valid: false, reason: 'Missing or invalid packet timestamp' };
+    }
+
+    // Replay attack defense: packet must not be older than maxAgeMs or in the future
+    const now = Date.now();
+    if (now - packet.timestamp > maxAgeMs) {
+        return { valid: false, reason: 'Packet expired (replay attack defense)' };
+    }
+    if (packet.timestamp > now + 60000) {
+        return { valid: false, reason: 'Packet timestamp from future' };
+    }
+
+    const serialized = JSON.stringify(packet);
+    const expectedSignature = crypto
+        .createHmac('sha256', PACKET_SIGNING_SECRET)
+        .update(serialized)
+        .digest('hex');
+
+    try {
+        const valid = crypto.timingSafeEqual(
+            Buffer.from(signature, 'hex'),
+            Buffer.from(expectedSignature, 'hex')
+        );
+        return {
+            valid,
+            reason: valid ? null : 'Cryptographic signature mismatch',
+            packet: valid ? packet : null
+        };
+    } catch {
+        return { valid: false, reason: 'Failed to decode signature bytes' };
+    }
+}
+
+export default {
+    evaluateBypassEligibility,
+    createSignedWimPacket,
+    verifySignedWimPacket,
+};

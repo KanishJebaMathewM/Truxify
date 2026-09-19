@@ -7,6 +7,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -43,6 +44,7 @@ const EXECUTABLE_BYTES = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 
 describe('Maintenance Photo Routes Integration Tests', () => {
   beforeEach(() => {
     process.env.BYPASS_AUTH = 'true';
+    process.env.ENABLE_TEST_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.truck_maintenance_tickets = [
       {

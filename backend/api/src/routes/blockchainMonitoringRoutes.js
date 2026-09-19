@@ -63,8 +63,6 @@ const router = express.Router();
  *           type: string
  *           format: date-time
  *         activeAlerts:
- *           type: string
- *         activeAlerts:
  *           type: array
  *           items:
  *             type: object

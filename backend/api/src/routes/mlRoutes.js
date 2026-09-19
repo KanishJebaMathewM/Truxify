@@ -186,7 +186,6 @@ router.get(
  *           description: Current A/B testing lifecycle status.
  *           example: active
  *         active_test:
- *           nullable: true
  *           type: object
  *           nullable: true
  *           required: [test_id, production_version, shadow_version, started_at, status]

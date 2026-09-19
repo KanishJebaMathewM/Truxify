@@ -32,6 +32,7 @@
   - Fraud Detection
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
+  - Biometric Authentication
 - Rate Limiting
 - Idempotency
 - WebSocket Events
@@ -304,6 +305,52 @@ Base Path
 |GET|/:id|
 
 ---
+
+## Biometric Authentication
+
+Base Path
+
+/api/biometric-auth
+
+Authentication
+
+All biometric-authentication endpoints require a Bearer token and the authenticated-user rate limiter.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+|POST|/check|Checks whether the submitted freight value requires biometric authentication.|
+|POST|/challenge|Creates a five-minute biometric authentication challenge.|
+|POST|/verify|Verifies a signed biometric proof for an open challenge.|
+|POST|/fallback|Verifies the six-digit fallback OTP for an open challenge.|
+|GET|/status/:challengeId|Returns the authenticated user's challenge status.|
+|GET|/threshold|Returns the effective biometric threshold.|
+|PUT|/threshold|Updates the user's biometric threshold within the configured security boundary.|
+
+### Accepted biometric methods
+
+The supported methods are fingerprint and face_recognition.
+
+Biometric challenge identifiers are 32-character hexadecimal values. Biometric proof tokens must be Base64URL-compatible and 16–4096 characters long. Fallback OTPs must contain exactly six digits.
+
+### Threshold policy
+
+The default server threshold is 5,000,000 paisa (₹50,000) unless BIOMETRIC_FREIGHT_THRESHOLD_PAISA is configured. A user's personal threshold may only lower the effective threshold; it cannot raise it above the server-configured threshold.
+
+Both freight_value_paisa and threshold_paisa must be integers. Route-level maximum validation rejects values above 1,000,000,000 paisa.
+
+### Status codes
+
+| Code | Meaning |
+|------|---------|
+|200|Successful check, verification, status lookup, or threshold operation.|
+|201|Biometric challenge created.|
+|400|Invalid freight value, challenge ID, biometric token, method, OTP, or threshold.|
+|401|Authentication required.|
+|403|Biometric authentication is not required for the freight value, or the authenticated caller does not own the challenge.|
+|404|Challenge not found.|
+|500|Unexpected challenge-creation or internal service error.|
 
 ## Support
 

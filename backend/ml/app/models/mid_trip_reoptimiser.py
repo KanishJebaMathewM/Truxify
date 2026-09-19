@@ -198,6 +198,14 @@ def find_mid_trip_loads(
             continue
         if load.get("height_m", 0) > cap_height:
             continue
+        payment = load.get("payment_inr", 0.0)
+        try:
+            payment = float(payment)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(payment) or payment <= 0.0:
+            continue
+
         candidate_loads.append(load)
 
     if not candidate_loads:
@@ -256,11 +264,11 @@ def find_mid_trip_loads(
                 continue
 
             dist_cur_pickup = distance_matrix[0][pickup_idx]
-            payment = load.get("payment_inr", 0.0)
+            payment = float(load.get("payment_inr", 0.0))
             if detour_km > 0:
                 earnings_per_km = payment / detour_km
             else:
-                earnings_per_km = payment if payment > 0 else 0.0
+                earnings_per_km = payment
             earnings_score = min(earnings_per_km / 50.0, 1.0) * 40.0
 
             max_proximity_km = 100.0

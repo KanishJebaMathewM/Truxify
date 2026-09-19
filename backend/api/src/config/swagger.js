@@ -3,7 +3,12 @@ import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
 // Use environment variable for Swagger server URL
-const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
+export const normalizeApiPublicUrl = (publicUrl) => {
+  const url = publicUrl || 'http://localhost:5000';
+  return url.replace(/\/api\/?$/, '');
+};
+
+const apiUrl = normalizeApiPublicUrl(process.env.API_PUBLIC_URL);
 
 const options = {
   definition: {

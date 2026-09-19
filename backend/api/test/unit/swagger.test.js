@@ -12,7 +12,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
-const { setupSwagger } = await import('../../src/config/swagger.js')
+const { setupSwagger, normalizeApiPublicUrl } = await import('../../src/config/swagger.js')
 
 describe('setupSwagger', () => {
   const originalEnv = process.env.NODE_ENV
@@ -26,6 +26,14 @@ describe('setupSwagger', () => {
     const app = { use: vi.fn() }
     setupSwagger(app)
     expect(app.use).not.toHaveBeenCalled()
+  })
+
+  it('normalizes API_PUBLIC_URL without duplicating the /api prefix', () => {
+    expect(normalizeApiPublicUrl()).toBe('http://localhost:5000')
+    expect(normalizeApiPublicUrl('https://api.example.com')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://api.example.com/api')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://api.example.com/api/')).toBe('https://api.example.com')
+    expect(normalizeApiPublicUrl('https://example.com/truxify/api')).toBe('https://example.com/truxify')
   })
 
   it('mounts the docs UI in development', () => {

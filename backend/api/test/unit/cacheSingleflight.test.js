@@ -141,4 +141,31 @@ describe('CacheManager Singleflight Coalescing', () => {
     await CacheManager.getOrSetSingleflight(namespace, entityId, errorFetcher).catch(() => {});
     expect(errorFetcher).toHaveBeenCalledTimes(2);
   });
+
+  it('should correctly propagate errors and clean up the in-flight map if fetcher throws synchronously', async () => {
+    const namespace = 'test';
+    const entityId = 'sync_error_test';
+    
+    const syncErrorFetcher = jest.fn().mockImplementation(() => {
+      throw new Error('Synchronous error');
+    });
+    
+    const promises = Array.from({ length: 3 }).map(() =>
+      CacheManager.getOrSetSingleflight(namespace, entityId, syncErrorFetcher).catch(err => err.message)
+    );
+    
+    const results = await Promise.all(promises);
+    
+    // All promises should reject with the same error
+    results.forEach((res) => {
+      expect(res).toBe('Synchronous error');
+    });
+    
+    expect(syncErrorFetcher).toHaveBeenCalledTimes(1);
+    
+    // Subsequent calls should re-trigger the fetcher since inFlight map was cleaned up
+    mockRedisClient.get.mockResolvedValueOnce(null);
+    await CacheManager.getOrSetSingleflight(namespace, entityId, syncErrorFetcher).catch(() => {});
+    expect(syncErrorFetcher).toHaveBeenCalledTimes(2);
+  });
 });

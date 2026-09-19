@@ -107,15 +107,15 @@ export async function getOrSetSingleflight(namespace, entityId, fetcher, opts = 
     return inFlight.get(key);
   }
 
-  const promise = (async () => {
-    try {
-      const data = await fetcher();
+  const promise = Promise.resolve()
+    .then(fetcher)
+    .then(async (data) => {
       await set(namespace, entityId, data, opts);
       return data;
-    } finally {
+    })
+    .finally(() => {
       inFlight.delete(key);
-    }
-  })();
+    });
 
   inFlight.set(key, promise);
   return promise;

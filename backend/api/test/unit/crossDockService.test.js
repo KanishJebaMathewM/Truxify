@@ -39,6 +39,9 @@ const fromMock = vi.fn((table) => chainable(table));
 const rpcMock = vi.fn((name, args) => chainable('rpc:' + name));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: { from: fromMock, rpc: rpcMock },
   isSupabaseConnected: () => true,
 }));

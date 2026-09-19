@@ -72,7 +72,7 @@ class ColdChainAnomalyService {
       }
 
       const windowKey = `coldchain:window:${loadId}`;
-      let windowTemperatures = [];
+      let windowTemperatures;
 
       // 1. Maintain sliding window in Redis (or local memory)
       if (redisClient) {

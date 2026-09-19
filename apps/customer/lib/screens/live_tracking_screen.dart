@@ -1071,40 +1071,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }
   }
 
-  void _showVoiceAi() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _VoiceAiSheet(
-        orderId: widget.orderId,
-        orderService: _orderService,
-        orderData: _order,
-      ),
-    );
-  }
 
-  void _showCallDriver() {
-    if (_driverPhone == null || _driverPhone!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Driver phone number not available')),
-      );
-      return;
-    }
-    launchUrl(Uri.parse('tel:$_driverPhone'));
-  }
 
-  void _showChangeDrop() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Drop address change requested')),
-    );
-  }
 
-  void _showCancel() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Order cancellation unavailable for active trips')),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {

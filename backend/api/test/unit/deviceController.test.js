@@ -4,6 +4,9 @@ import { createSupabaseMock } from '../helpers/supabaseMock.js';
 const supabaseMock = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: supabaseMock.supabase,
   supabaseAdmin: supabaseMock.supabase,
 }));

@@ -23,11 +23,11 @@ describe('FraudDetectionService stats', () => {
     dbMock.supabaseAdmin = { from: vi.fn() } ;
     const mockClient = createSupabaseMock({
       tables: {
-       fraud_stats: generateMockFraudEvents(50),
+       fraud_stats: Array.from({length: 50}, (_, idx) => ({ id: 'id-' + idx, risk_score: idx * 2, severity: idx > 30 ? 'high' : 'low' })),
        users: [{ id: 'user-1', risk_score: 10 }]
       }
     });
-    dbConfig.supabaseAdmin = mockClient;
+    dbMock.supabaseAdmin = mockClient;
   });
 
   describe('getFraudStats', () => {

@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/controllers/app_controller.dart';
 import 'package:truxify_driver/screens/driver_profile_screen.dart';
+import 'package:truxify_driver/widgets/common_widgets.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 

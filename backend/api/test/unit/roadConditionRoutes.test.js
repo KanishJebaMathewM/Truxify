@@ -26,6 +26,9 @@ vi.mock('../../src/middleware/logger.js', () => ({
 
 const mockFrom = vi.fn();
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: {
     from: (...args) => mockFrom(...args),
   },

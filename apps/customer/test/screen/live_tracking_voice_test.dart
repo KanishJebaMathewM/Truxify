@@ -83,12 +83,14 @@ void main() {
     });
   });
 
+  final controller = TruxifyController();
+
   Widget buildSubject() {
     return AnimatedBuilder(
-      animation: AppController.instance,
+      animation: controller,
       builder: (context, _) {
         return MaterialApp(
-          locale: AppController.instance.locale,
+          locale: controller.locale,
           supportedLocales: AppLocalizations.supportedLocales,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           home: LiveTrackingScreen(

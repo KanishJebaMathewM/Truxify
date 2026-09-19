@@ -4,6 +4,8 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'apps/**'
 
 permissions:
   contents: read
@@ -43,7 +45,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
         with:
-          flutter-version: '3.22.x' # Assuming 3.22.x based on pubspec sdk constraint >=3.3.0
           channel: 'stable'
 
       - name: Install Dependencies

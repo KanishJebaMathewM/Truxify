@@ -6,6 +6,9 @@ const { from, createUserClientMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from },
   createUserClient: createUserClientMock,
 }));

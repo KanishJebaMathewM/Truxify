@@ -58,15 +58,15 @@ void main() {
         expect(request.method, equals('POST'));
         expect(request.headers['Content-Type'], equals('application/json'));
 
-        final body = jsonDecode(request.body as String) as Map<String, dynamic>;
+        final req = request as http.Request;
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
         expect(body['amount'], equals(50000));
 
         return http.Response(jsonEncode(mockResponse), 200);
       });
 
-      final result = await service.withdrawFunds(50000);
-      expect(result, isA<Map<String, dynamic>>());
-      expect(result['withdrawnAmount'], equals(50000));
+      await service.withdrawFunds(50000);
+      // Function returns void, success is implied if no exception is thrown.
     });
 
     test('throws ApiException with status 400 on bad request', () async {

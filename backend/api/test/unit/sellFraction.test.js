@@ -38,6 +38,9 @@ vi.mock('ethers', async () => {
 })
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: vi.fn() },
 }))
 

@@ -32,6 +32,9 @@
   - Fraud Detection
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
+  - Road Conditions
+  - IoT Telemetry
+  - Cross-Docking
 - Rate Limiting
 - Idempotency
 - WebSocket Events
@@ -304,6 +307,101 @@ Base Path
 |GET|/:id|
 
 ---
+
+## Road Conditions
+
+Base Path
+
+```
+/api/road-conditions
+```
+
+Authentication
+
+Both road-condition endpoints require a Bearer token and are protected by a telemetry rate limiter allowing up to 100 requests per 5 minutes per client key.
+
+### Report grip telemetry
+
+```
+POST /api/road-conditions/grip
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "latitude": 28.6139,
+  "longitude": 77.2090,
+  "grip_index": 7.5,
+  "slip_events_count": 1
+}
+```
+
+Field rules:
+
+| Field | Required | Constraints |
+|-------|----------|-------------|
+|latitude|Yes|Finite number in [-90, 90].|
+|longitude|Yes|Finite number in [-180, 180].|
+|grip_index|Yes|Number in [0, 10].|
+|slip_events_count|No|Number >= 0; defaults to 0.|
+
+Successful response:
+
+```json
+{
+  "success": true,
+  "message": "Grip data reported successfully"
+}
+```
+
+### Retrieve nearby grip telemetry
+
+```
+GET /api/road-conditions/grip/nearby?lat=28.6139&lng=77.2090&radius_miles=50
+```
+
+Query parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+|lat|Yes|Latitude in [-90, 90].|
+|lng|Yes|Longitude in [-180, 180].|
+|radius_miles|No|Finite radius greater than 0 and at most 1000 miles. Defaults to 50.|
+
+The endpoint searches for reports from the previous 12 hours and returns at most 100 results.
+
+Successful response:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "latitude": 28.6139,
+      "longitude": 77.2090,
+      "grip_index": 7.5,
+      "slip_events_count": 1,
+      "recorded_at": "2026-09-19T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Road-condition status codes
+
+| Code | Meaning |
+|------|---------|
+|200|Nearby grip data returned|
+|201|Grip telemetry recorded|
+|400|Invalid telemetry payload, missing coordinates, or invalid coordinate/radius values|
+|401|Authentication required|
+|500|Database or unexpected server error|
+
+
 
 ## Support
 

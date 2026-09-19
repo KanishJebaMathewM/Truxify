@@ -235,12 +235,21 @@ class QUBOFormatter:
 
             # Solve
             result = optimizer.solve(qubo)
-            
+
+            # Qiskit returns solution values in the exact order of qubo.variables.
+            # Derive the edge mapping from the solved QUBO so a previously
+            # formulated problem cannot be paired with stale self.variables.
+            edge_variables = [
+                (index, variable.name)
+                for index, variable in enumerate(qubo.variables)
+                if variable.name.startswith('x_')
+            ]
+
             return {
                 'success': True,
-                'solution': result.x[:len(self.variables)],
+                'solution': [result.x[index] for index, _ in edge_variables],
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': [name for _, name in edge_variables]
             }
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")

@@ -941,6 +941,16 @@ process.on('unhandledRejection', async (reason) => {
 })
 
 process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
-process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
+process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev 
+
+// --- I18N IMPORTS ---
+import i18nRoutes from './routes/i18nRoutes.js';
+import { localeMiddleware } from './lib/localeDetector.js';
+
+// Apply locale detection globally (before routes)
+app.use(localeMiddleware());
+
+// Mount i18n routes
+app.use('/api/i18n', i18nRoutes);
 
 app.use('/api/tolls', tollOptimizationRouter);

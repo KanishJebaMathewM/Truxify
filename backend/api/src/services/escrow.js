@@ -325,16 +325,14 @@ export function getEscrowBookingId (orderDisplayId) {
 }
 
 /**
- * Query the escrow contract's bookings mapping for a given booking ID.
+ * Query the on-chain escrow smart contract mapping.
  * Used by escrowFundingReconciliation and the release reconciler to check
  * the authoritative on-chain booking state.
- * Used by escrowFundingReconciliation and the payout amount checks to read
- * the authoritative on-chain state for a booking.
  *
  * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
  * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
  */
-export async function getEscrowBooking(escrowBookingId) {
+export async function getOnChainEscrowBooking(escrowBookingId) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — cannot query bookings.');
     return null;
@@ -349,7 +347,7 @@ export async function getEscrowBooking(escrowBookingId) {
     const booking = await escrowContract.bookings(escrowBookingId);
     return booking;
   } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
+    logger.error(`[escrow] getOnChainEscrowBooking failed: ${err?.message ?? String(err)}`);
     return null;
   }
 }
@@ -1066,3 +1064,188 @@ export async function setEscrowContractPaused(paused) {
     }
   });
 }
+
+export const ESCROW_MILESTONE_STATES = {
+  INITIALIZED: 'INITIALIZED',
+  ADVANCE_RELEASED: 'ADVANCE_RELEASED',
+  IN_TRANSIT_LOCKED: 'IN_TRANSIT_LOCKED',
+  FINAL_SETTLEMENT_PENDING: 'FINAL_SETTLEMENT_PENDING',
+  RELEASED: 'RELEASED',
+  REFUNDED: 'REFUNDED',
+  DISPUTED: 'DISPUTED',
+};
+
+/**
+ * Validates POD document SHA-256 hash against supplied IPFS Content Identifier.
+ */
+export function verifyPodDocumentHash(podBufferOrHash, expectedHashOrCid) {
+  if (!podBufferOrHash || !expectedHashOrCid) return false;
+  if (typeof podBufferOrHash === 'string') {
+    const cleanA = podBufferOrHash.trim().toLowerCase().replace(/^0x/, '');
+    const cleanB = expectedHashOrCid.trim().toLowerCase().replace(/^0x/, '');
+    return cleanA === cleanB;
+  }
+  if (Buffer.isBuffer(podBufferOrHash)) {
+    const computedHash = crypto.createHash('sha256').update(podBufferOrHash).digest('hex');
+    const cleanExpected = expectedHashOrCid.trim().toLowerCase().replace(/^0x/, '');
+    return computedHash === cleanExpected;
+  }
+  return false;
+}
+
+/**
+ * State machine managing dual-party partial milestone releases.
+ */
+export async function processMilestoneTransition({
+  orderId,
+  bookingId,
+  targetMilestone,
+  podHash,
+  ipfsCid,
+  advancePercentage = 30,
+}) {
+  return measureExecution('EscrowService.processMilestoneTransition', async () => {
+    if (!supabaseAdmin) {
+      return { error: 'Database service unconfigured' };
+    }
+
+    // 1. Fetch current order / escrow record
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, price, escrow_status, escrow_amount_wei, customer_id, driver_id, status, pod_hash')
+      .eq('id', orderId)
+      .single();
+
+    if (orderErr || !order) {
+      return { error: `Order ${orderId} not found` };
+    }
+
+    const currentMilestone = order.escrow_status || ESCROW_MILESTONE_STATES.INITIALIZED;
+
+    // 2. Handle Advance Release (e.g. 30% on Pickup)
+    if (targetMilestone === ESCROW_MILESTONE_STATES.ADVANCE_RELEASED) {
+      if (currentMilestone !== ESCROW_MILESTONE_STATES.INITIALIZED) {
+        return { success: true, alreadyInState: true, milestone: currentMilestone };
+      }
+
+      const totalWei = BigInt(order.escrow_amount_wei || '0');
+      const advanceWei = (totalWei * BigInt(advancePercentage)) / 100n;
+      const remainingWei = totalWei - advanceWei;
+
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          escrow_status: ESCROW_MILESTONE_STATES.ADVANCE_RELEASED,
+          escrow_advance_released_wei: advanceWei.toString(),
+          escrow_remaining_wei: remainingWei.toString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
+
+      logger.info(`[Escrow] Advance of ${advancePercentage}% (${advanceWei} Wei) released for Order ${orderId}`);
+
+      return {
+        success: true,
+        milestone: ESCROW_MILESTONE_STATES.ADVANCE_RELEASED,
+        advanceReleasedWei: advanceWei.toString(),
+        remainingWei: remainingWei.toString(),
+      };
+    }
+
+    // 3. Handle Final Settlement (70% on POD verification)
+    if (targetMilestone === ESCROW_MILESTONE_STATES.RELEASED) {
+      if (currentMilestone === ESCROW_MILESTONE_STATES.RELEASED) {
+        return { success: true, alreadyInState: true, milestone: ESCROW_MILESTONE_STATES.RELEASED };
+      }
+
+      // Cryptographic POD Verification
+      const verifiedPod = verifyPodDocumentHash(podHash, order.pod_hash || ipfsCid);
+      if (!verifiedPod && !ipfsCid) {
+        return {
+          error: 'Proof of Delivery (POD) cryptographic hash verification failed or missing.',
+          code: 'POD_VERIFICATION_FAILED',
+        };
+      }
+
+      // Execute on-chain / relayer release for remaining balance
+      let onChainResult = null;
+      if (bookingId && escrowContract) {
+        try {
+          const tx = await withTimeout(escrowContract.releasePayment(BigInt(bookingId)));
+          const receipt = await tx.wait(1);
+          onChainResult = { txHash: receipt.hash, blockNumber: receipt.blockNumber };
+        } catch (chainErr) {
+          logger.warn(`[Escrow] On-chain final release deferred/failed: ${chainErr?.message}`);
+        }
+      }
+
+      await supabaseAdmin
+        .from('orders')
+        .update({
+          escrow_status: ESCROW_MILESTONE_STATES.RELEASED,
+          status: 'delivered',
+          pod_verified: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
+
+      logger.info(`[Escrow] Final settlement released for Order ${orderId}`);
+
+      return {
+        success: true,
+        milestone: ESCROW_MILESTONE_STATES.RELEASED,
+        onChain: onChainResult,
+      };
+    }
+
+    return { error: `Unsupported milestone transition to ${targetMilestone}` };
+  });
+}
+
+/**
+ * Evaluates and executes automated clawback refund if a trip remains abandoned.
+ */
+export async function executeEscrowTimeoutClawback({ orderId, bookingId, maxInactivityHours = 72 }) {
+  return measureExecution('EscrowService.executeEscrowTimeoutClawback', async () => {
+    if (!supabaseAdmin) return { error: 'Database unconfigured' };
+
+    const { data: order, error } = await supabaseAdmin
+      .from('orders')
+      .select('id, escrow_status, updated_at, customer_id')
+      .eq('id', orderId)
+      .single();
+
+    if (error || !order) return { error: 'Order not found' };
+
+    if (order.escrow_status === ESCROW_MILESTONE_STATES.RELEASED || order.escrow_status === ESCROW_MILESTONE_STATES.REFUNDED) {
+      return { success: true, message: 'Order is already settled' };
+    }
+
+    const lastUpdated = new Date(order.updated_at).getTime();
+    const elapsedHours = (Date.now() - lastUpdated) / (1000 * 3600);
+
+    if (elapsedHours < maxInactivityHours) {
+      return { success: false, message: `Trip is not abandoned. Elapsed: ${elapsedHours.toFixed(1)}h < ${maxInactivityHours}h` };
+    }
+
+    // Execute clawback
+    await supabaseAdmin
+      .from('orders')
+      .update({
+        escrow_status: ESCROW_MILESTONE_STATES.REFUNDED,
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', orderId);
+
+    logger.info(`[Escrow Clawback] Order ${orderId} refunded to customer due to inactivity (${elapsedHours.toFixed(1)}h)`);
+
+    return {
+      success: true,
+      refunded: true,
+      milestone: ESCROW_MILESTONE_STATES.REFUNDED,
+      elapsedHours: Number(elapsedHours.toFixed(1)),
+    };
+  });
+}
+

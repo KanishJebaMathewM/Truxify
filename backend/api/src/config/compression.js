@@ -19,9 +19,10 @@ import compression from 'compression';
  * header and trailer are added.
  */
 const _parsedThreshold = Number(process.env.COMPRESSION_THRESHOLD_BYTES || 1024);
-export const COMPRESSION_THRESHOLD_BYTES = Number.isFinite(_parsedThreshold) && _parsedThreshold > 0
-  ? Math.floor(_parsedThreshold)
-  : 1024;
+export const COMPRESSION_THRESHOLD_BYTES =
+  Number.isFinite(_parsedThreshold) && _parsedThreshold > 0
+    ? Math.floor(_parsedThreshold)
+    : 1024;
 
 /**
  * zlib level, 1 (fastest) to 9 (smallest). 6 is zlib's default and sits at
@@ -29,9 +30,10 @@ export const COMPRESSION_THRESHOLD_BYTES = Number.isFinite(_parsedThreshold) && 
  * little additional saving on JSON.
  */
 const _parsedLevel = Number(process.env.COMPRESSION_LEVEL || 6);
-export const COMPRESSION_LEVEL = Number.isFinite(_parsedLevel) && _parsedLevel >= 1 && _parsedLevel <= 9
-  ? Math.round(_parsedLevel)
-  : 6;
+export const COMPRESSION_LEVEL =
+  Number.isFinite(_parsedLevel) && _parsedLevel >= 1 && _parsedLevel <= 9
+    ? Math.round(_parsedLevel)
+    : 6;
 
 /**
  * Content types that are already compressed. Re-compressing them burns CPU

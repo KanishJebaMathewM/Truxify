@@ -72,6 +72,11 @@ describe('services/ml.js Unit Tests', () => {
       expect(() => guardMlApiKey()).toThrow(/ML_API_KEY is not configured/);
     });
 
+    it('throws 503 error when ML_API_KEY is whitespace-only', () => {
+      process.env.ML_API_KEY = '   ';
+      expect(() => guardMlApiKey()).toThrow(/ML_API_KEY is not configured/);
+    });
+
     it('does not throw when ML_API_KEY is set', () => {
       process.env.ML_API_KEY = 'valid-key';
       expect(() => guardMlApiKey()).not.toThrow();
@@ -108,8 +113,25 @@ describe('services/ml.js Unit Tests', () => {
       });
     });
 
+    it('trims leading and trailing whitespace from ML_API_KEY in X-API-Key header', () => {
+      process.env.ML_API_KEY = '  my-secret-key  ';
+      const headers = getHeaders();
+      expect(headers).toEqual({
+        'Content-Type': 'application/json',
+        'X-API-Key': 'my-secret-key',
+      });
+    });
+
     it('includes only Content-Type when ML_API_KEY is unset', () => {
       delete process.env.ML_API_KEY;
+      const headers = getHeaders();
+      expect(headers).toEqual({
+        'Content-Type': 'application/json',
+      });
+    });
+
+    it('includes only Content-Type when ML_API_KEY is whitespace-only', () => {
+      process.env.ML_API_KEY = '   ';
       const headers = getHeaders();
       expect(headers).toEqual({
         'Content-Type': 'application/json',

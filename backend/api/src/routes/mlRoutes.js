@@ -187,25 +187,25 @@ router.get(
  *           example: active
  *         active_test:
  *           nullable: true
- *           oneOf:
- *             - type: object
- *               required: [test_id, production_version, shadow_version, started_at, status]
- *               properties:
- *                 test_id:
- *                   type: string
- *                   example: test-2026-09-19
- *                 production_version:
- *                   type: string
- *                   example: generation-42
- *                 shadow_version:
- *                   type: string
- *                   example: generation-43
- *                 started_at:
- *                   type: string
- *                   format: date-time
- *                 status:
- *                   type: string
- *                   example: active
+ *           type: object
+ *           nullable: true
+ *           required: [test_id, production_version, shadow_version, started_at, status]
+ *           properties:
+ *             test_id:
+ *               type: string
+ *               example: test-2026-09-19
+ *             production_version:
+ *               type: string
+ *               example: generation-42
+ *             shadow_version:
+ *               type: string
+ *               example: generation-43
+ *             started_at:
+ *               type: string
+ *               format: date-time
+ *             status:
+ *               type: string
+ *               example: active
  *         timestamp:
  *           type: string
  *           format: date-time

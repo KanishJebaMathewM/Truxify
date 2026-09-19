@@ -18,6 +18,7 @@
   - Authentication
   - Orders
   - Driver
+  - Earnings
   - Trucks
   - Profile
   - Device
@@ -219,6 +220,29 @@ Endpoints include:
 |GET|/bids|
 |POST|/wallet/withdraw|
 |GET|/:driverId/reputation|
+
+---
+
+## Earnings
+
+Base Path
+
+```
+/api/earnings
+```
+
+Requires Bearer authentication and the driver:view-earnings policy.
+
+| Method | Endpoint | Description |
+|---------|----------|-------------|
+|GET|/summary|Authenticated driver's earnings summary; supports period=weekly or period=monthly|
+
+Example:
+
+```http
+GET /api/earnings/summary?period=monthly
+Authorization: Bearer <JWT_TOKEN>
+```
 
 ---
 

@@ -44,11 +44,11 @@ const options = {
     path.join(__dirname, '../../../mev/routes.js'),
     path.join(__dirname, '../../../tokenization/routes.js'),
     path.join(__dirname, '../../../atomic-swap/routes.js'),
-    path.join(__dirname, '../../../ebpf/routes.js'),
-    path.join(__dirname, '../../../wasi/routes.js'),
-    path.join(__dirname, '../../../wasm/routes.js'),
-    path.join(__dirname, '../../../snyk/routes.js'),
-    path.join(__dirname, '../../../database/liquibase/routes.js'),
+    path.join(__dirname, '../../../../ebpf/routes.js'),
+    path.join(__dirname, '../../../../wasi/routes.js'),
+    path.join(__dirname, '../../../../wasm/routes.js'),
+    path.join(__dirname, '../../../../snyk/routes.js'),
+    path.join(__dirname, '../../../../database/liquibase/routes.js'),
   ],
 };
 

@@ -18,6 +18,15 @@ const options = {
       version: '1.0.0',
       description: 'API documentation for Truxify logistics backend',
     },
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
     servers: [
       {
         url: apiUrl,
@@ -44,6 +53,24 @@ const options = {
 };
 
 const swaggerSpec = swaggerJsdoc(options);
+
+const publicTokenPaths = new Set([
+  '/api/token/asset/{assetId}',
+  '/api/token/stats',
+]);
+
+for (const [pathName, operations] of Object.entries(swaggerSpec.paths || {})) {
+  const isProtected = pathName.startsWith('/api/swap/')
+    || (pathName.startsWith('/api/token/') && !publicTokenPaths.has(pathName));
+
+  if (!isProtected) {
+    continue;
+  }
+
+  for (const operation of Object.values(operations)) {
+    operation.security = [{ BearerAuth: [] }];
+  }
+}
 
 export { swaggerSpec };
 

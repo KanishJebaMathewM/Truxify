@@ -142,7 +142,7 @@ router.post('/alerts/:alertId/resolve', authenticate, requireRole(['admin', 'sup
 
 /**
  * Get monitoring events with filtering
- * GET /api/blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=50
+ * GET /blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=50
  */
 /**
  * @openapi
@@ -207,7 +207,7 @@ router.post('/alerts/:alertId/resolve', authenticate, requireRole(['admin', 'sup
 
 /**
  * @openapi
- * /api/blockchain/events:
+ * /blockchain/events:
  *   get:
  *     tags: [Blockchain Monitoring]
  *     summary: List blockchain monitoring events

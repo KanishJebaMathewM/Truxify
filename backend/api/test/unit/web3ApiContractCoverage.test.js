@@ -36,15 +36,28 @@ describe('ZK-ID, DAO and MEV OpenAPI contract', () => {
     }
   });
 
-  it('marks protected endpoint families with BearerAuth', () => {
-    for (const path of expectedPaths.filter((value) => ![
+  it('defines BearerAuth and applies it to protected endpoints only', () => {
+    expect(swaggerSpec.components.securitySchemes.BearerAuth).toEqual({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    });
+
+    const publicPaths = new Set([
       '/api/dao/proposal/{proposalId}',
       '/api/dao/member/{userAddress}',
       '/api/dao/stats',
-    ].includes(value))) {
+    ]);
+
+    for (const path of expectedPaths) {
       const operations = swaggerSpec.paths[path];
+
       for (const operation of Object.values(operations)) {
-        expect(operation.security).toEqual([{ BearerAuth: [] }]);
+        if (publicPaths.has(path)) {
+          expect(operation.security).toBeUndefined();
+        } else {
+          expect(operation.security).toEqual([{ BearerAuth: [] }]);
+        }
       }
     }
   });

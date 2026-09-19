@@ -44,6 +44,8 @@ const options = {
 
 const swaggerSpec = swaggerJsdoc(options);
 
+export { swaggerSpec };
+
 export const setupSwagger = (app) => {
   if (process.env.NODE_ENV === 'production') {
     logger.warn('[Swagger] Disabling Swagger UI in production');

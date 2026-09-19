@@ -38,6 +38,43 @@ export const isValidIdentifier = (id) => {
 };
 
 /**
+ * @openapi
+ * /api/carbon-credits/mint:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Mint carbon credits from freight emissions savings
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [truck_id, trip_id, fuel_saved_liters]
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *               trip_id:
+ *                 type: string
+ *               distance_km:
+ *                 type: number
+ *               fuel_saved_liters:
+ *                 type: number
+ *               load_weight_kg:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Carbon credits calculated and minted successfully
+ *       400:
+ *         description: Missing or invalid carbon metric input
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       500:
+ *         description: Carbon credit minting failed
+ */
+
+/**
  * POST /api/carbon-credits/mint
  * Calculates carbon savings from telematics & mints cross-chain carbon tokens.
  * Restricted to carriers, drivers, fleet owners, and admins.
@@ -104,6 +141,37 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
 });
 
 /**
+ * @openapi
+ * /api/carbon-credits/purchase:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Purchase and retire carbon credits
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token_id, buyer_address]
+ *             properties:
+ *               token_id:
+ *                 type: string
+ *               buyer_address:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Carbon credits purchased and retired successfully
+ *       400:
+ *         description: Missing required parameters
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       500:
+ *         description: Carbon credit purchase failed
+ */
+
+/**
  * POST /api/carbon-credits/purchase
  * Enables corporate shippers to buy and retire tokens for Scope 3 offsets.
  * Restricted to shippers, brokers, and admins.
@@ -146,6 +214,31 @@ router.post('/purchase', authenticate, userLimiter, async (req, res) => {
     return res.status(status).json({ error: err.message || 'Failed to purchase carbon credit tokens' });
   }
 });
+
+/**
+ * @openapi
+ * /api/carbon-credits/{tokenId}:
+ *   get:
+ *     tags: [Carbon Credits]
+ *     summary: Get carbon credit token details
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tokenId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Carbon credit token details and chain verification state
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       404:
+ *         description: Carbon credit token not found
+ *       500:
+ *         description: Carbon credit lookup failed
+ */
 
 /**
  * GET /api/carbon-credits/:tokenId

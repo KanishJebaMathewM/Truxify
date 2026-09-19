@@ -107,7 +107,7 @@ async def test_update_eta_uses_bounded_inference_executor(traffic_pipeline_conte
 
 def test_predict_eta_serializes_same_pipeline_calls(traffic_pipeline_context):
     """Verify concurrent worker calls for one pipeline are serialized."""
-    pipeline_module, TrafficPipeline = traffic_pipeline_context
+    _, TrafficPipeline = traffic_pipeline_context
     pipeline = TrafficPipeline.__new__(TrafficPipeline)
 
     state_lock = threading.Lock()
@@ -128,7 +128,9 @@ def test_predict_eta_serializes_same_pipeline_calls(traffic_pipeline_context):
         return 20.0
 
     pipeline.predict_eta = predict_eta
-    serialized_predict = sys.modules["services._eta_inference_off_event_loop_patch"]._run_serialized_predict_eta
+    serialized_predict = sys.modules[
+        "services._eta_inference_off_event_loop_patch"
+    ]._run_serialized_predict_eta
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(

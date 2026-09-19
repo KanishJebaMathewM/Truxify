@@ -144,6 +144,112 @@ router.post('/alerts/:alertId/resolve', authenticate, requireRole(['admin', 'sup
  * Get monitoring events with filtering
  * GET /api/blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=50
  */
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     BlockchainMonitoringEvent:
+ *       type: object
+ *       required:
+ *         - id
+ *         - type
+ *         - severity
+ *       properties:
+ *         id:
+ *           type: integer
+ *           format: int64
+ *         type:
+ *           type: string
+ *           enum:
+ *             - PAYMENT_RECEIVED
+ *             - PAYMENT_RELEASED
+ *             - BOOKING_CANCELLED
+ *             - BOOKING_STARTED
+ *             - BOOKING_DISPUTED
+ *             - DISPUTE_RESOLVED
+ *             - BOOKING_CREATED
+ *             - BLOCKCHAIN_STATE_DIVERGENCE
+ *             - SCAN_CHECKPOINT
+ *             - INSURANCE_CLAIM_APPROVED
+ *             - INSURANCE_CLAIM_REJECTED
+ *             - GEOFENCE_BREACH
+ *             - BALANCE_UPDATE_FAILED
+ *             - SMART_CONTRACT_REVERT
+ *         severity:
+ *           type: string
+ *           enum: [LOW, MEDIUM, HIGH, CRITICAL]
+ *         data:
+ *           type: object
+ *           nullable: true
+ *           additionalProperties: true
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *     BlockchainMonitoringEventsResponse:
+ *       type: object
+ *       required:
+ *         - timestamp
+ *         - count
+ *         - events
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         count:
+ *           type: integer
+ *           minimum: 0
+ *         events:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/BlockchainMonitoringEvent'
+ */
+
+/**
+ * @openapi
+ * /api/blockchain/events:
+ *   get:
+ *     tags: [Blockchain Monitoring]
+ *     summary: List blockchain monitoring events
+ *     description: Returns recent blockchain monitoring events for administrators and support users, with optional type and severity filters.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: false
+ *         description: Filter by blockchain monitoring event type
+ *         schema:
+ *           type: string
+ *           enum: [PAYMENT_RECEIVED, PAYMENT_RELEASED, BOOKING_CANCELLED, BOOKING_STARTED, BOOKING_DISPUTED, DISPUTE_RESOLVED, BOOKING_CREATED, BLOCKCHAIN_STATE_DIVERGENCE, SCAN_CHECKPOINT, INSURANCE_CLAIM_APPROVED, INSURANCE_CLAIM_REJECTED, GEOFENCE_BREACH, BALANCE_UPDATE_FAILED, SMART_CONTRACT_REVERT]
+ *       - in: query
+ *         name: severity
+ *         required: false
+ *         description: Filter by event severity
+ *         schema:
+ *           type: string
+ *           enum: [LOW, MEDIUM, HIGH, CRITICAL]
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         description: Maximum number of events to return
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 1000
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: Blockchain monitoring events
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BlockchainMonitoringEventsResponse'
+ *       400:
+ *         description: Invalid event type, severity, or limit
+ *       500:
+ *         description: Failed to fetch blockchain monitoring events
+ */
 router.get('/events', authenticate, requireRole(['admin', 'support']), async (req, res) => {
   try {
     const { type, severity, limit = '50' } = req.query;

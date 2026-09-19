@@ -122,7 +122,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
-import { authenticate, requireRole, verifyJWT } from './middleware/auth.js'
+import { authenticate, requireRole } from './middleware/auth.js'
 import { requireApiKey } from './middleware/apiKey.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
@@ -497,7 +497,7 @@ app.use(requireJsonContent)
 // ============================================================================
 // RATE LIMITING
 // ============================================================================
-app.use('/api', verifyJWT)
+app.use('/api', authenticate)
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)

@@ -11,6 +11,44 @@ import { haversineKm } from '../lib/pricing.js';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MlEnrouteLoadRecommendation:
+ *       type: object
+ *       properties:
+ *         load_id:
+ *           type: string
+ *         detour_km:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *         extra_earnings:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *         match_score:
+ *           type: number
+ *           format: float
+ *         extra_distance_km:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *         ml_used:
+ *           type: boolean
+ *       additionalProperties: true
+ *     MlEnrouteLoadsResponse:
+ *       type: object
+ *       required:
+ *         - recommendations
+ *       properties:
+ *         recommendations:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/MlEnrouteLoadRecommendation'
+ */
+
 function parseCoord(value, min, max) {
   const n = Number(value);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
@@ -93,6 +131,60 @@ router.get(
 // 4. GET ENROUTE LOADS
 // GET /api/ml/enroute-loads
 // ============================================================================
+/**
+ * @swagger
+ * /api/ml/enroute-loads:
+ *   get:
+ *     summary: Find en-route load recommendations
+ *     description: Returns available load recommendations near the driver's current position, limited by the requested maximum detour. Matching uses the ML engine with a haversine-distance fallback when the ML service is unavailable.
+ *     tags:
+ *       - Machine Learning
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: lat
+ *         required: true
+ *         description: Current driver latitude.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -90
+ *           maximum: 90
+ *       - in: query
+ *         name: lng
+ *         required: true
+ *         description: Current driver longitude.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -180
+ *           maximum: 180
+ *       - in: query
+ *         name: maxDetour
+ *         required: false
+ *         description: Maximum accepted detour in kilometres. Defaults to 10 and must be greater than 0 and no greater than 500.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           exclusiveMinimum: true
+ *           minimum: 0
+ *           maximum: 500
+ *           default: 10
+ *     responses:
+ *       '200':
+ *         description: En-route load recommendations.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MlEnrouteLoadsResponse'
+ *       '400':
+ *         description: Invalid or missing coordinates, or an invalid maximum detour.
+ *       '401':
+ *         description: Authentication required.
+ *       '500':
+ *         description: Failed to load offers or match en-route recommendations.
+ */
 router.get(
   '/enroute-loads',
   authenticate,

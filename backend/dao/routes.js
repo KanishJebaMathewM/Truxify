@@ -24,6 +24,34 @@ function recoverSigner(message, signature) {
 }
 
 // Join DAO — authenticated + wallet-signed to prevent membership spoofing.
+/**
+ * @openapi
+ * /api/dao/join:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Join the DAO
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/join', requireDaoAuth('join'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
@@ -52,6 +80,34 @@ router.post('/dao/join', requireDaoAuth('join'), authenticate, async (req, res) 
 });
 
 // Leave DAO — authenticated + wallet-signed to prevent membership spoofing.
+/**
+ * @openapi
+ * /api/dao/leave:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Leave the DAO
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/leave', requireDaoAuth('leave'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
@@ -81,6 +137,40 @@ router.post('/dao/leave', requireDaoAuth('leave'), authenticate, async (req, res
 
 // Create proposal — authenticated + wallet-signed; actor bound to the
 // recovered signer so the proposer cannot be spoofed via the request body.
+/**
+ * @openapi
+ * /api/dao/proposal/create:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Create a DAO proposal
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               title:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, async (req, res) => {
     try {
         const { title, description, callData, target, value, proposalType, userAddress, signature } = req.body;
@@ -124,6 +214,37 @@ router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, asy
 
 // Cast vote — authenticated + wallet-signed; voting power is derived
 // server-side from the voter's on-chain governance-token balance.
+/**
+ * @openapi
+ * /api/dao/vote/cast:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Cast a DAO vote
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - proposalId
+ *               - voterAddress
+ *               - signature
+ *             properties:
+ *               proposalId:
+ *                 type: string
+ *               voterAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/vote/cast', requireDaoAuth('vote'), authenticate, async (req, res) => {
     try {
         const { proposalId, voterAddress, signature } = req.body;
@@ -153,6 +274,37 @@ router.post('/dao/vote/cast', requireDaoAuth('vote'), authenticate, async (req, 
 
 // Execute proposal — authenticated + wallet-signed; only the verified
 // signer may trigger execution, preventing spoofed execution requests.
+/**
+ * @openapi
+ * /api/dao/proposal/execute:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Execute a DAO proposal
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - proposalId
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               proposalId:
+ *                 type: string
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/proposal/execute', requireDaoAuth('execute'), authenticate, async (req, res) => {
     try {
         const { proposalId, userAddress, signature } = req.body;
@@ -187,6 +339,26 @@ router.post('/dao/proposal/execute', requireDaoAuth('execute'), authenticate, as
 });
 
 // Get proposal
+/**
+ * @openapi
+ * /api/dao/proposal/{proposalId}:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get a DAO proposal
+ *     parameters:
+ *       - in: path
+ *         name: proposalId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/proposal/:proposalId', async (req, res) => {
     try {
         const { proposalId } = req.params;
@@ -199,6 +371,26 @@ router.get('/dao/proposal/:proposalId', async (req, res) => {
 });
 
 // Get member
+/**
+ * @openapi
+ * /api/dao/member/{userAddress}:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get DAO membership information
+ *     parameters:
+ *       - in: path
+ *         name: userAddress
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/member/:userAddress', async (req, res) => {
     try {
         const { userAddress } = req.params;
@@ -211,6 +403,20 @@ router.get('/dao/member/:userAddress', async (req, res) => {
 });
 
 // Get stats
+/**
+ * @openapi
+ * /api/dao/stats:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get DAO statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/stats', async (req, res) => {
     try {
         const stats = await daoService.getDAOStats();

@@ -6,9 +6,150 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 const router = express.Router();
 
 /**
+ * @openapi
+ * components:
+ *   schemas:
+ *     TireAnalyticsReading:
+ *       type: object
+ *       required:
+ *         - position
+ *         - pressurePsi
+ *         - tempC
+ *       properties:
+ *         position:
+ *           type: string
+ *           example: FL
+ *         pressurePsi:
+ *           type: number
+ *           description: Tire pressure in PSI.
+ *           example: 105
+ *         tempC:
+ *           type: number
+ *           description: Tire temperature in degrees Celsius.
+ *           example: 42
+ *         mileageKm:
+ *           type: number
+ *           minimum: 0
+ *           example: 45000
+ *     TireAnalyticsReport:
+ *       type: object
+ *       required:
+ *         - ownerId
+ *         - truckId
+ *         - overallHealth
+ *         - tires
+ *         - evaluatedAt
+ *       properties:
+ *         ownerId:
+ *           type: string
+ *           example: 9a1b2c3d
+ *         truckId:
+ *           type: string
+ *           example: TRUCK-101
+ *         overallHealth:
+ *           type: string
+ *           enum:
+ *             - OPERATIONAL
+ *             - CRITICAL_ATTENTION_REQUIRED
+ *         tires:
+ *           type: array
+ *           items:
+ *             type: object
+ *             required:
+ *               - position
+ *               - pressurePsi
+ *               - tempC
+ *               - wearPercent
+ *               - remainingLifeKm
+ *               - alertLevel
+ *               - recommendation
+ *             properties:
+ *               position:
+ *                 type: string
+ *               pressurePsi:
+ *                 type: number
+ *               tempC:
+ *                 type: number
+ *               wearPercent:
+ *                 type: number
+ *               remainingLifeKm:
+ *                 type: integer
+ *               alertLevel:
+ *                 type: string
+ *                 enum:
+ *                   - NORMAL
+ *                   - WARNING
+ *                   - CRITICAL
+ *               recommendation:
+ *                 type: string
+ *         evaluatedAt:
+ *           type: string
+ *           format: date-time
+ */
+
+
+
+/**
  * POST /api/tire-analytics/analyze
  * Processes TPMS data to predict tire wear and safety alerts
  */
+/**
+ * @openapi
+ * /api/tire-analytics/analyze:
+ *   post:
+ *     tags:
+ *       - Tire Analytics
+ *     summary: Analyze TPMS readings
+ *     description: Processes TPMS telemetry and returns tire wear and safety analytics.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - truck_id
+ *               - tpms_readings
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *                 example: TRUCK-101
+ *               tpms_readings:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   $ref: '#/components/schemas/TireAnalyticsReading'
+ *           example:
+ *             truck_id: TRUCK-101
+ *             tpms_readings:
+ *               - position: FL
+ *                 pressurePsi: 105
+ *                 tempC: 42
+ *                 mileageKm: 45000
+ *     responses:
+ *       200:
+ *         description: Tire wear analytics generated successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 report:
+ *                   $ref: '#/components/schemas/TireAnalyticsReport'
+ *       400:
+ *         description: Missing or invalid truck_id or tpms_readings.
+ *       401:
+ *         description: Authentication is required.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Failed to calculate tire wear analytics.
+ */
+
 router.post('/analyze', authenticate, userLimiter, async (req, res) => {
   try {
     const { truck_id, tpms_readings } = req.body;
@@ -36,6 +177,44 @@ router.post('/analyze', authenticate, userLimiter, async (req, res) => {
  * GET /api/tire-analytics/status/:truckId
  * Fetches latest tire wear and status report for a truck
  */
+/**
+ * @openapi
+ * /api/tire-analytics/status/{truckId}:
+ *   get:
+ *     tags:
+ *       - Tire Analytics
+ *     summary: Retrieve the latest tire health report
+ *     description: Returns the latest tire analytics report for a truck that is visible to the authenticated user.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - name: truckId
+ *         in: path
+ *         required: true
+ *         description: Truck identifier.
+ *         schema:
+ *           type: string
+ *         example: TRUCK-101
+ *     responses:
+ *       200:
+ *         description: Latest tire analytics report.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 report:
+ *                   $ref: '#/components/schemas/TireAnalyticsReport'
+ *       401:
+ *         description: Authentication is required.
+ *       404:
+ *         description: No tire analytics report was found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Failed to retrieve the tire analytics report.
+ */
+
 router.get('/status/:truckId', authenticate, userLimiter, async (req, res) => {
   try {
     const { truckId } = req.params;

@@ -45,6 +45,10 @@ vi.mock('../../../mev/mev.service.js', () => ({
 
 const mevRouter = (await import('../../../mev/routes.js')).default;
 
+/**
+ * Builds an Express application that mounts the route under its API prefix.
+ * @returns {import('express').Express} Configured Express test application.
+ */
 function makeApp() {
   const app = express();
   app.use(express.json());

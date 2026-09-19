@@ -16,6 +16,7 @@ describe('Distributed Redis Locking (#6726)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     redisClient.status = 'ready';
+    delete redisClient.eval;
   });
 
   describe('acquireDistributedLock', () => {
@@ -24,7 +25,8 @@ describe('Distributed Redis Locking (#6726)', () => {
       const result = await acquireDistributedLock('lock:test:123', 5);
       
       expect(result.acquired).toBe(true);
-      expect(redisClient.set).toHaveBeenCalledWith('lock:test:123', '1', 'NX', 'EX', 5);
+      expect(result.token).toBeDefined();
+      expect(redisClient.set).toHaveBeenCalledWith('lock:test:123', expect.any(String), 'NX', 'EX', 5);
     });
 
     it('should return acquired=false when lock is already held', async () => {
@@ -42,7 +44,8 @@ describe('Distributed Redis Locking (#6726)', () => {
       expect(redisClient.set).not.toHaveBeenCalled();
     });
 
-    it('should release the lock by deleting the key', async () => {
+    it('should release the lock by deleting the key when eval is absent', async () => {
+      delete redisClient.eval;
       redisClient.set.mockResolvedValue('OK');
       redisClient.del.mockResolvedValue(1);
       
@@ -50,6 +53,21 @@ describe('Distributed Redis Locking (#6726)', () => {
       await result.release();
       
       expect(redisClient.del).toHaveBeenCalledWith('lock:test:123');
+    });
+
+    it('should release the lock via atomic compare-and-delete when eval is available', async () => {
+      redisClient.set.mockResolvedValue('OK');
+      redisClient.eval = vi.fn().mockResolvedValue(1);
+
+      const result = await acquireDistributedLock('lock:test:123', 5);
+      await result.release();
+
+      expect(redisClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining("if redis.call('GET', KEYS[1]) == ARGV[1] then"),
+        1,
+        'lock:test:123',
+        result.token
+      );
     });
   });
 

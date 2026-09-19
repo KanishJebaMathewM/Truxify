@@ -44,25 +44,26 @@ function acquireLocalLock(key, ttlSeconds) {
  * @returns {Promise<{acquired: boolean, release: Function}>}
  */
 export async function acquireDistributedLock(key, ttlSeconds = 5) {
-  const isRedisReady = redisClient &&
-    (redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function'));
-
-  if (!isRedisReady) {
-    // Degraded / fallback mode: maintain in-process mutual exclusion per key
+  if (!redisClient) {
+    // Degraded / fallback mode: maintain in-process mutual exclusion per key when Redis is unconfigured
     return acquireLocalLock(key, ttlSeconds);
   }
 
+  const isRedisReady = redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function');
+  if (!isRedisReady) {
+    return { acquired: false, token: null, release: async () => {} };
+  }
+
+  const token = crypto.randomUUID();
+
   try {
-    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
+    const lock = await redisClient.set(key, token, 'NX', 'EX', ttlSeconds);
     if (lock === 'OK') {
       return {
         acquired: true,
+        token,
         release: async () => {
-          try {
-            await redisClient.del(key);
-          } catch (err) {
-            logger.error({ err, key }, 'Failed to release distributed lock');
-          }
+          await releaseDistributedLock(key, token);
         }
       };
     }
@@ -71,7 +72,34 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
     return acquireLocalLock(key, ttlSeconds);
   }
 
-  return { acquired: false, release: async () => {} };
+  return { acquired: false, token: null, release: async () => {} };
+}
+
+/**
+ * Releases a distributed lock acquired via acquireDistributedLock by key.
+ * If a token is provided and atomic Lua release is available, releases only if the token matches.
+ * Removes from Redis and clears any local fallback queue entry.
+ *
+ * @param {string} key - Lock key
+ * @param {string|null} [token] - Lock owner token (UUID)
+ */
+export async function releaseDistributedLock(key, token) {
+  if (token && redisClient && typeof redisClient.eval === 'function') {
+    try {
+      await releaseLock(key, token);
+    } catch (err) {
+      logger.error({ err, key }, 'Failed to release distributed lock via token');
+    }
+  } else if (redisClient && typeof redisClient.del === 'function') {
+    try {
+      await redisClient.del(key);
+    } catch (err) {
+      logger.error({ err, key }, 'Failed to release distributed lock');
+    }
+  }
+  if (localQueues.has(key)) {
+    localQueues.delete(key);
+  }
 }
 
 /**
@@ -104,4 +132,190 @@ export async function withLock(key, fn, options = {}) {
 }
 
 
-import crypto from 'crypto';
+/**
+ * Thrown when a distributed lock cannot be acquired because Redis is
+ * unavailable or an unexpected error occurred during SET NX.
+ *
+ * Callers MUST catch this and abort the protected operation — typically
+ * by returning HTTP 503 Service Unavailable. This is a hard failure,
+ * not a "lock is already held" signal.
+ */
+export class LockAcquisitionError extends Error {
+  constructor(resourceKey, reason) {
+    super(`Failed to acquire lock for "${resourceKey}": ${reason}`);
+    this.name = 'LockAcquisitionError';
+    this.resourceKey = resourceKey;
+    this.reason = reason;
+  }
+}
+
+/**
+ * Acquires a distributed Redis lock using SET … NX PX with a random owner
+ * token (UUID) so that only the holder can release it.
+ *
+ * Failure semantics — **fail closed**:
+ *   - Returns `null`               → lock is held by another process; caller should back off.
+ *   - Throws `LockAcquisitionError` → Redis is unavailable or errored; caller MUST abort
+ *                                     the critical section and return 503.
+ *
+ * @param {string} resourceKey  Unique key for the guarded resource, e.g. `payment_lock:order_123`
+ * @param {number} ttlMs        Lock TTL in **milliseconds** (default 30 000 = 30 s)
+ * @returns {Promise<string|null>} The owner token (UUID) on success, null if already locked.
+ * @throws {LockAcquisitionError}  When Redis is down or SET NX throws.
+ */
+export async function acquireLock(resourceKey, ttlMs = 30_000) {
+  if (!redisClient) {
+    throw new LockAcquisitionError(
+      resourceKey,
+      'Redis client is not initialised — cannot guarantee mutual exclusion'
+    );
+  }
+
+  if (!resourceKey || typeof resourceKey !== 'string') {
+    throw new LockAcquisitionError(
+      resourceKey ?? 'undefined',
+      'resourceKey must be a non-empty string'
+    );
+  }
+
+  const lockValue = crypto.randomUUID();
+
+  try {
+    const result = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
+
+    if (result === 'OK' || result === 1 || result === true) {
+      return lockValue;
+    }
+
+    return null;
+  } catch (err) {
+    logger.error({ err }, '[RedisLock] Error acquiring lock for key', resourceKey);
+    throw new LockAcquisitionError(resourceKey, err?.message ?? String(err));
+  }
+}
+
+/**
+ * Renews a distributed lock by extending its TTL, but only if the caller
+ * still holds it (verified via Lua to prevent TOCTOU races).
+ *
+ * @param {string} resourceKey
+ * @param {string} lockValue   The UUID returned by acquireLock
+ * @param {number} ttlMs       New TTL in milliseconds
+ * @returns {Promise<boolean>} true if renewed, false if the lock is no longer ours
+ */
+export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
+  if (!redisClient || !lockValue) return false;
+
+  const luaScript = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      redis.call('PEXPIRE', KEYS[1], ARGV[2])
+      return 1
+    end
+    return 0
+  `;
+
+  try {
+    const result = await redisClient.eval(
+      luaScript, 1, resourceKey, lockValue, ttlMs.toString()
+    );
+    return result === 1;
+  } catch (err) {
+    logger.error({ err }, '[RedisLock] Error renewing lock for key', resourceKey);
+    return false;
+  }
+}
+
+export const DEFAULT_LOCK_RENEWAL_INTERVAL_MS = 10_000;
+
+export async function withLockRenewal(resourceKey, lockValue, ttlMs, asyncFn, intervalMs = DEFAULT_LOCK_RENEWAL_INTERVAL_MS) {
+  if (!resourceKey || !lockValue || typeof asyncFn !== 'function') {
+    return asyncFn();
+  }
+
+  const renewalIntervalMs = Math.max(Math.min(intervalMs, Math.floor(ttlMs / 2)), 1_000);
+
+  // AbortController lets us signal the protected operation to stop if the lock
+  // is lost mid-execution (renewal returns false = another holder now owns it).
+  const ac = new AbortController();
+  const { signal } = ac;
+
+  const timer = setInterval(async () => {
+    const renewed = await renewLock(resourceKey, lockValue, ttlMs);
+    if (!renewed) {
+      // Lock ownership lost — stop the renewal loop and abort the operation.
+      clearInterval(timer);
+      logger.error(
+        { resourceKey },
+        '[RedisLock] Lock renewal failed: ownership lost. Aborting protected operation.'
+      );
+      ac.abort();
+    }
+  }, renewalIntervalMs);
+  timer.unref?.();
+
+  try {
+    const result = await asyncFn(signal);
+    // If the lock was lost after asyncFn resolved, surface it before returning.
+    if (signal.aborted) {
+      throw new LockAcquisitionError(
+        resourceKey,
+        'Lock ownership was lost during execution \u2014 protected operation aborted'
+      );
+    }
+    return result;
+  } catch (err) {
+    if (signal.aborted && !(err instanceof LockAcquisitionError)) {
+      // Wrap the raw AbortError in a domain-specific error.
+      throw new LockAcquisitionError(
+        resourceKey,
+        'Lock ownership was lost during execution \u2014 protected operation aborted'
+      );
+    }
+    throw err;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+
+/**
+ * Releases a distributed lock **only if** we still own it.
+ *
+ * Uses an atomic Lua script (GET + DEL) so a slow holder cannot accidentally
+ * delete a newer holder's lock after its own TTL has expired.
+ *
+ * Safe to call in a `finally` block — never throws; returns false on failure.
+ *
+ * @param {string}      resourceKey  The same key passed to acquireLock
+ * @param {string|null} lockValue    The UUID returned by acquireLock; if null/undefined, no-op
+ * @returns {Promise<boolean>} true if we held and deleted the lock, false otherwise
+ */
+export async function releaseLock(resourceKey, lockValue) {
+  if (!redisClient || !lockValue) return false;
+
+  const luaScript = `
+    if redis.call('GET', KEYS[1]) == ARGV[1] then
+      redis.call('DEL', KEYS[1])
+      return 1
+    end
+    return 0
+  `;
+
+  try {
+    const result = await redisClient.eval(luaScript, 1, resourceKey, lockValue);
+    return result === 1;
+  } catch (err) {
+    logger.error({ err }, '[RedisLock] Error releasing lock for key', resourceKey);
+    return false;
+  }
+}
+
+export class LockState {
+  constructor() { this.released = false; this.held = false; }
+  acquire() { if (this.held) return false; this.held = true; return true; }
+  release() {
+    if (this.released || !this.held) { this.released = true; return false; }
+    this.held = false; this.released = true; return true;
+  }
+  isHeld() { return this.held && !this.released; }
+}

@@ -30,6 +30,7 @@
   - Oracle
   - Admin
   - Fraud Detection
+  - Carbon Credits
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
 - Rate Limiting
@@ -418,6 +419,53 @@ Base Path
 |POST|/fraud/review/:reviewId/resolve|
 |POST|/fraud/track|
 |POST|/fraud/analyze-network/:userId|
+
+---
+
+## Carbon Credits
+
+Base Path
+
+```
+/api/carbon-credits
+```
+
+All endpoints require Bearer authentication.
+
+| Method | Endpoint | Description |
+|---------|----------|-------------|
+|POST|/mint|Calculate freight carbon savings and mint carbon credits|
+|POST|/purchase|Purchase and retire carbon credits for Scope 3 offsetting|
+|GET|/:tokenId|Retrieve token details and chain verification state|
+
+### Mint Carbon Credits
+
+```json
+{
+  "truck_id": "truck_123",
+  "trip_id": "trip_456",
+  "distance_km": 312.5,
+  "fuel_saved_liters": 18.4,
+  "load_weight_kg": 12000
+}
+```
+
+The truck_id, trip_id, and fuel_saved_liters fields are required. Distance and load weight default to zero when omitted and all numeric values must be finite and non-negative.
+
+### Purchase Carbon Credits
+
+```json
+{
+  "token_id": "carbon_123",
+  "buyer_address": "0x0000000000000000000000000000000000000000"
+}
+```
+
+### Responses
+
+Successful minting returns HTTP 201 with a message and the minted token. Successful purchase and token lookup responses return the resulting token under token.
+
+Unauthenticated requests return HTTP 401; unknown token IDs return HTTP 404.
 
 ---
 

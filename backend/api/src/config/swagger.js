@@ -1,9 +1,14 @@
 import logger from '../middleware/logger.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Use environment variable for Swagger server URL
-const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
+const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const options = {
   definition: {
@@ -22,10 +27,25 @@ const options = {
       },
     ],
   },
-  apis: ['./src/routes/*.js'], // files containing annotations as above
+  apis: [
+    path.join(__dirname, '../routes/*.js'),
+    path.join(__dirname, '../../routes/*.js'),
+    path.join(__dirname, '../../../zkid/routes.js'),
+    path.join(__dirname, '../../../dao/routes.js'),
+    path.join(__dirname, '../../../mev/routes.js'),
+    path.join(__dirname, '../../../tokenization/routes.js'),
+    path.join(__dirname, '../../../atomic-swap/routes.js'),
+    path.join(__dirname, '../../../ebpf/routes.js'),
+    path.join(__dirname, '../../../wasi/routes.js'),
+    path.join(__dirname, '../../../wasm/routes.js'),
+    path.join(__dirname, '../../../snyk/routes.js'),
+    path.join(__dirname, '../../../database/liquibase/routes.js'),
+  ],
 };
 
 const swaggerSpec = swaggerJsdoc(options);
+
+export { swaggerSpec };
 
 export const setupSwagger = (app) => {
   if (process.env.NODE_ENV === 'production') {

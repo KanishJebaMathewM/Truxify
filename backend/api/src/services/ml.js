@@ -58,17 +58,10 @@ function parseWeightKg(weight) {
   return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
-function parseWeightKgSafe(weight) {
-  if (weight == null || weight === '') {
-    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
-    return null;
-  }
-  const result = parseWeightKg(weight);
-  if (result == null) {
-    logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return null;
-  }
-  return result;
+export function parseWeightKgSafe(weightInput, defaultKg = 1000) {
+  if (weightInput == null) return defaultKg;
+  const parsed = typeof weightInput === 'number' ? weightInput : parseFloat(weightInput);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultKg;
 }
 
 /**
@@ -662,6 +655,7 @@ export default {
   matchEnRouteLoads,
   getAbTestingStatus,
   rollbackAbTest,
+  parseWeightKgSafe,
   handleResponse,
   __testing,
 };

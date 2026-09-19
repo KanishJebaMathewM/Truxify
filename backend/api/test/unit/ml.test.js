@@ -214,12 +214,12 @@ describe('services/ml.js Unit Tests', () => {
       expect(parseWeightKg(null)).toBeNull();
     });
 
-    it('parseWeightKgSafe returns parsed number or null on invalid', () => {
+    it('parseWeightKgSafe returns parsed number or defaultKg on invalid', () => {
       expect(parseWeightKgSafe('500 kg')).toBe(500);
-      expect(parseWeightKgSafe(null)).toBeNull();
-      expect(parseWeightKgSafe('')).toBeNull();
-      expect(parseWeightKgSafe('unparseable')).toBeNull();
-      expect(mockLogger.warn).toHaveBeenCalled();
+      expect(parseWeightKgSafe(null)).toBe(1000);
+      expect(parseWeightKgSafe('')).toBe(1000);
+      expect(parseWeightKgSafe('unparseable')).toBe(1000);
+      expect(parseWeightKgSafe(null, 500)).toBe(500);
     });
   });
 

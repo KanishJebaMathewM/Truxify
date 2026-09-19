@@ -176,6 +176,22 @@ export async function validateEscrowSetup () {
   });
 }
 
+export async function pauseEscrowContract () {
+  if (!escrowContract) {
+    throw new Error('Escrow contract is not configured');
+  }
+
+  const transaction = await withTimeout(escrowContract.pause());
+  const receipt = await withTimeout(transaction.wait());
+  const paused = await withTimeout(escrowContract.paused());
+
+  if (!paused) {
+    throw new Error('Escrow pause transaction was mined but contract remains unpaused');
+  }
+
+  return { txHash: receipt.hash, paused: true };
+}
+
 /**
  * Canonical wei-per-paisa scale derived from the configured escrow rate.
  * For the default ESCROW_MATIC_PER_PAISA=0.000004 this is exactly

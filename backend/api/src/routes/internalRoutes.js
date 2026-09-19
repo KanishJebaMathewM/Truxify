@@ -35,7 +35,7 @@ import {
   setEscrowPaused,
   getPauseState,
 } from '../services/escrowCircuitBreaker.js';
-import { setEscrowContractPaused } from '../services/escrow.js';
+import { setEscrowContractPaused, pauseEscrowContract } from '../services/escrow.js';
 
 const router = express.Router();
 
@@ -234,6 +234,19 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
       '[internal] Failed to update escrow circuit breaker.'
     );
     return res.status(500).json({ error: 'Failed to update escrow circuit breaker.' });
+  }
+});
+
+router.post('/pause-escrow-onchain', async (_req, res) => {
+  try {
+    const result = await pauseEscrowContract();
+    return res.json(result);
+  } catch (err) {
+    logger.error(
+      { err: err && err.message, event: 'ESCROW_ONCHAIN_PAUSE_ERROR' },
+      '[internal] Failed to pause escrow contract on-chain.'
+    );
+    return res.status(502).json({ error: 'Failed to pause escrow contract on-chain.' });
   }
 });
 

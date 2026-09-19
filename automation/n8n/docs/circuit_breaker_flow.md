@@ -16,6 +16,9 @@ graph TD
 - Automated call execution to `TruxifyEscrow.pause()`
 - Alert notifications dispatched to system admins
 
+The workflow records the distributed backend pause first, then calls `/api/internal/pause-escrow-onchain`. The API waits for the `TruxifyEscrow.pause()` transaction and confirms the contract `paused()` view before reporting success. RPC, signer, receipt, or confirmation failures keep the workflow failed for operator alerting.
+
 ## Availability behavior
 
 The backend circuit breaker fails closed. A Redis outage or unreadable pause flag blocks new escrow submissions and must be treated as an active emergency pause until the state can be verified. The workflow must not interpret a backend read failure as a safe-to-release condition.
+

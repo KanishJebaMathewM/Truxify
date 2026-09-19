@@ -17,17 +17,18 @@ describe('cross-dock OpenAPI contract', () => {
       '/api/cross-dock/{id}/cancel',
       '/api/cross-dock/{id}/verify',
     ]));
-    const expectedOperations = {
-      '/api/cross-dock/candidates': 'get',
-      '/api/cross-dock': 'post',
-      '/api/cross-dock/{id}': 'get',
-      '/api/cross-dock/{id}/accept': 'post',
-      '/api/cross-dock/{id}/decline': 'post',
-      '/api/cross-dock/{id}/cancel': 'post',
-      '/api/cross-dock/{id}/verify': 'post',
-    };
+    const expectedOperations = [
+      ['/api/cross-dock/candidates', 'get'],
+      ['/api/cross-dock', 'post'],
+      ['/api/cross-dock', 'get'],
+      ['/api/cross-dock/{id}', 'get'],
+      ['/api/cross-dock/{id}/accept', 'post'],
+      ['/api/cross-dock/{id}/decline', 'post'],
+      ['/api/cross-dock/{id}/cancel', 'post'],
+      ['/api/cross-dock/{id}/verify', 'post'],
+    ];
 
-    for (const [path, method] of Object.entries(expectedOperations)) {
+    for (const [path, method] of expectedOperations) {
       expect(spec.paths[path]).toHaveProperty(method);
     }
   });

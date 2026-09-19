@@ -167,6 +167,70 @@ router.get(
 // ============================================================================
 // 5. A/B TESTING STATUS & ROLLBACK (ADMIN PROXIED)
 // ============================================================================
+/**
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     MlAbTestingStatusResponse:
+ *       type: object
+ *       required: [status, active_test, timestamp]
+ *       properties:
+ *         status:
+ *           type: string
+ *           enum: [active]
+ *           description: Current A/B testing lifecycle status.
+ *           example: active
+ *         active_test:
+ *           type: object
+ *           nullable: true
+ *           required: [test_id, production_version, shadow_version, started_at, status]
+ *           properties:
+ *             test_id:
+ *               type: string
+ *               example: test-2026-09-19
+ *             production_version:
+ *               type: string
+ *               example: generation-42
+ *             shadow_version:
+ *               type: string
+ *               example: generation-43
+ *             started_at:
+ *               type: string
+ *               format: date-time
+ *             status:
+ *               type: string
+ *               example: active
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ * /api/ml/ab-testing/status:
+ *   get:
+ *     tags: [ML A/B Testing]
+ *     summary: Get ML A/B-testing status
+ *     description: Returns the current ML A/B-testing status and active test metadata for administrators.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current A/B-testing status.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MlAbTestingStatusResponse'
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: Caller does not have administrator privileges.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       502:
+ *         description: Failed to fetch A/B-testing status from the ML engine.
+ */
 router.get(
   '/ab-testing/status',
   authenticate,

@@ -94,6 +94,7 @@ class QUBOFormatter:
     def __init__(self):
         self.qubo = None
         self.variables = []
+        self.edge_mapping = []
         
         logger.info("✅ QUBO Formatter initialized")
     
@@ -110,10 +111,12 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
-        # Add binary variables for each edge
+        # Add opaque binary variables for each edge. Encoding endpoint names
+        # directly into variable names is unsafe when node IDs contain
+        # underscores and can also create collisions between different edges.
         edge_vars = {}
         for i, (u, v) in enumerate(graph.edges()):
-            var_name = f'x_{u}_{v}'
+            var_name = f'x_{i}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
 
@@ -165,6 +168,7 @@ class QUBOFormatter:
 
         self.qubo = qubo
         self.variables = list(edge_vars.values())
+        self.edge_mapping = list(edge_vars.keys())
 
         return qubo
 
@@ -188,7 +192,8 @@ class QUBOFormatter:
                 'success': True,
                 'solution': result.x,
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': self.variables,
+                'edge_mapping': self.edge_mapping
             }
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")

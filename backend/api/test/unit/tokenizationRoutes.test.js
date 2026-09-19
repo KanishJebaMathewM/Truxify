@@ -47,11 +47,11 @@ const tokenServiceMock = vi.hoisted(() => ({
   getRelayerSigner: vi.fn(),
 }));
 
-vi.mock('../../../../tokenization/token.service.js', () => ({
+vi.mock('../../../tokenization/token.service.js', () => ({
   default: tokenServiceMock,
 }));
 
-const tokenizationRouter = (await import('../../../../tokenization/routes.js')).default;
+const tokenizationRouter = (await import('../../../tokenization/routes.js')).default;
 
 function makeApp() {
   const app = express();

@@ -7,7 +7,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from quantum_circuit import QUBOFormatter  # noqa: E402
 
-from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # noqa: E402
+from qiskit_optimization.algorithms import ScipyMilpOptimizer  # noqa: E402
 
 
 def _selected_edges(formatter, result):
@@ -101,6 +101,25 @@ def test_route_qubo_scales_connectivity_without_subset_cutoff():
         if name.startswith("flow_capacity_")
     ]
     assert len(capacity_constraints) == 2 * len(graph.edges())
+
+    result = formatter.solve_qubo(
+        qubo,
+        eigensolver=ScipyMilpOptimizer(),
+    )
+    assert result["success"] is True
+
+    selected = _selected_edges(formatter, result)
+    assert len(selected) == len(graph.nodes())
+
+    selected_graph = nx.Graph()
+    selected_graph.add_nodes_from(graph.nodes())
+    selected_graph.add_edges_from(selected)
+
+    # A valid degree-2 route over all nodes must be one connected cycle,
+    # not the two disconnected cycles that the old cutoff allowed.
+    assert nx.is_connected(selected_graph)
+    degrees = _node_degrees(selected, list(graph.nodes()))
+    assert all(degree == 2 for degree in degrees.values())
 
 
 def test_route_qubo_rejects_disconnected_graph():

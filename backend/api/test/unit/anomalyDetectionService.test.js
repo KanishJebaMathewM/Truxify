@@ -258,7 +258,16 @@ describe('AnomalyDetectionService', () => {
 
     it('returns null when recording or retrieving with invalid userId', () => {
       expect(service.recordBehavior(null)).toBeNull();
+      expect(service.recordBehavior('')).toBeNull();
+      expect(service.recordBehavior('   ')).toBeNull();
+      expect(service.recordBehavior(123)).toBeNull();
+      expect(service.recordBehavior(undefined)).toBeNull();
+
       expect(service.getBehaviorProfile(null)).toBeNull();
+      expect(service.getBehaviorProfile('')).toBeNull();
+      expect(service.getBehaviorProfile('   ')).toBeNull();
+      expect(service.getBehaviorProfile(123)).toBeNull();
+      expect(service.getBehaviorProfile(undefined)).toBeNull();
       expect(service.getBehaviorProfile('non-existent')).toBeNull();
     });
   });

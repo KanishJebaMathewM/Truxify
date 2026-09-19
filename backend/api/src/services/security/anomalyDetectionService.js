@@ -81,7 +81,10 @@ class AnomalyDetectionService {
   }
 
   recordBehavior(userId, behaviorData = {}) {
-    if (!userId) return null;
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      logger.debug('[AnomalyDetection] Skipping behavior tracking for unauthenticated/empty userId');
+      return null;
+    }
 
     let profile = this.behavioralProfiles.get(userId);
     if (!profile) {
@@ -127,7 +130,7 @@ class AnomalyDetectionService {
   }
 
   getBehaviorProfile(userId) {
-    if (!userId) return null;
+    if (!userId || typeof userId !== 'string' || !userId.trim()) return null;
     return this.behavioralProfiles.get(userId) || null;
   }
 

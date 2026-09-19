@@ -4,7 +4,7 @@ from qiskit.circuit.library import QAOAAnsatz
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
 from qiskit_optimization import QuadraticProgram
-from qiskit_optimization.algorithms import MinimumEigenOptimizer
+from qiskit_optimization.algorithms import MinimumEigenOptimizer, ScipyMilpOptimizer
 from qiskit_algorithms.minimum_eigensolvers import QAOA
 from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
@@ -130,7 +130,10 @@ class QUBOFormatter:
             weight = graph[u][v].get('weight', 1)
             objective[(var, var)] = weight
 
-        qubo.minimize(quadratic=objective)
+        # Edge costs are linear because every route variable is binary.
+        # Keeping the objective linear also allows the mixed-integer flow model
+        # to be solved directly by ScipyMilpOptimizer in regression tests.
+        qubo.minimize(linear=objective)
 
         # Degree constraints: each node must have degree exactly 2.
         for node in nodes:
@@ -231,10 +234,15 @@ class QUBOFormatter:
         try:
             if eigensolver is None:
                 eigensolver = QAOA(optimizer=COBYLA(), reps=1)
-            optimizer = MinimumEigenOptimizer(eigensolver)
 
-            # Solve
-            result = optimizer.solve(qubo)
+            # Mixed-integer flow formulations can be solved directly with
+            # SciPy MILP without expanding the integer flow variables into
+            # additional binary variables for a quantum eigensolver.
+            if isinstance(eigensolver, ScipyMilpOptimizer):
+                result = eigensolver.solve(qubo)
+            else:
+                optimizer = MinimumEigenOptimizer(eigensolver)
+                result = optimizer.solve(qubo)
 
             # Qiskit returns solution values in the exact order of qubo.variables.
             # Derive the edge mapping from the solved QUBO so a previously

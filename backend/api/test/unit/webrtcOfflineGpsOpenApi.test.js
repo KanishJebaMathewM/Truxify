@@ -27,7 +27,7 @@ const swaggerSpec = swaggerJsdoc({
 
 describe('WebRTC offline GPS OpenAPI contract', () => {
   it('documents the offline GPS operation and query contract', () => {
-    const operation = swaggerSpec.paths['/api/webrtc/offline/{peerId}']?.get;
+    const operation = swaggerSpec.paths['/webrtc/offline/{peerId}']?.get;
 
     expect(operation).toBeDefined();
     expect(operation.security).toEqual([{ BearerAuth: [] }]);

@@ -940,7 +940,13 @@ process.on('unhandledRejection', async (reason) => {
   await shutdown('unhandledRejection')
 })
 
-process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
+// --- FLEET ANALYTICS IMPORTS ---
+import analyticsRoutes from './routes/analyticsRoutes.js';
+
+// Mount analytics routes
+app.use('/api/analytics', analyticsRoutes);
+
+process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop 
 process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
 
 app.use('/api/tolls', tollOptimizationRouter);

@@ -17,7 +17,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from prompt_security import build_safe_mistral_prompt
+from rag_prompt import build_untrusted_rag_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -215,8 +215,7 @@ class LLMService:
             Provide accurate, concise, and helpful responses. Be friendly and professional.
             If you don't know something, say so honestly."""
             
-            prompt = build_safe_mistral_prompt(
-                self.tokenizer,
+            prompt = build_untrusted_rag_prompt(
                 system_prompt,
                 context,
                 query,

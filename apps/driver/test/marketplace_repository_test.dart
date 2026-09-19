@@ -182,7 +182,6 @@ void main() {
 
       expect(loads, isEmpty);
     });
-<<<<<<< HEAD
   });
 
   group('MarketplaceRepository.fetchDriverBids', () {
@@ -239,8 +238,6 @@ void main() {
       expect(bids.first.amount, 2000);
       expect(bids.first.status.name, 'accepted');
     });
-=======
->>>>>>> 55d75dc2e (fix(driver): handle { loads } envelope and bare lists in MarketplaceRepository (fixes #13310))
   });
 
   group('MarketplaceRepository.submitBid', () {

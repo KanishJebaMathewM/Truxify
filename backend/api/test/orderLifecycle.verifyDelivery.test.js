@@ -68,7 +68,7 @@ describe('OrderLifecycleService.verifyDeliveryFn (issue #2082)', () => {
     mocks.releaseLock.mockResolvedValue(true);
     const svc = makeService();
 
-    await svc.verifyDeliveryFn('order-1', 'driver-1', '123456', {});
+    await svc.verifyDeliveryFn('order-1', 'driver-1', '654321', {});
 
     expect(mocks.acquireLock).toHaveBeenCalledWith('escrow_lock:order-1', 120000);
     expect(mocks.releaseLock).toHaveBeenCalledWith('escrow_lock:order-1', 'lock-owner-1');
@@ -79,7 +79,7 @@ describe('OrderLifecycleService.verifyDeliveryFn (issue #2082)', () => {
     const svc = makeService();
 
     await expect(
-      svc.verifyDeliveryFn('order-1', 'driver-1', '123456', {}),
+      svc.verifyDeliveryFn('order-1', 'driver-1', '654321', {}),
     ).rejects.toMatchObject({
       status: 409,
       payload: { error: expect.stringContaining('currently being processed') },
@@ -98,7 +98,7 @@ describe('OrderLifecycleService.verifyDeliveryFn (issue #2082)', () => {
     const svc = makeService({ verifyDelivery: boom });
 
     await expect(
-      svc.verifyDeliveryFn('order-1', 'driver-1', '123456', {}),
+      svc.verifyDeliveryFn('order-1', 'driver-1', '654321', {}),
     ).rejects.toThrow('on-chain timeout');
 
     expect(mocks.releaseLock).toHaveBeenCalledWith('escrow_lock:order-1', 'lock-owner-1');

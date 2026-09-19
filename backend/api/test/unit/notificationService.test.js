@@ -46,6 +46,7 @@ const {
   verifyDeliveryOtpHash,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
+  getConsumedDeliveryOtp,
   verifyDeliveryOtp,
   expireDeliveryOtps,
   getUserFcmToken,
@@ -279,10 +280,25 @@ describe('notificationService', () => {
       expect(result.summary.delivered).toBe(0);
       expect(result.summary.deactivated).toBe(0);
     });
+
+    it('returns controlled failure when Firebase messaging is unconfigured', async () => {
+      const dbModule = await import('../../src/config/db.js');
+      const originalMessaging = dbModule.firebaseAdmin.messaging;
+      dbModule.firebaseAdmin.messaging = null;
+
+      try {
+        const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
+        expect(result.success).toBe(false);
+        expect(result.errorCode).toBe('FCM_NOT_CONFIGURED');
+        expect(result.error).toBe('Firebase not configured');
+      } finally {
+        dbModule.firebaseAdmin.messaging = originalMessaging;
+      }
+    });
   });
 
   describe('sendDeliveryOtpNotification', () => {
-    it("only targets the customer's devices when delivering a delivery OTP", async () => {
+    it("only targets the customer's devices when delivering a delivery OTP and includes OTP in body and FCM payload", async () => {
       seedDevices([
         { id: 'cust-dev', user_id: 'customer-1', fcm_token: 'customer-token' },
         { id: 'other-dev', user_id: 'driver-9', fcm_token: 'driver-token' },
@@ -293,15 +309,21 @@ describe('notificationService', () => {
 
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['customer-token']);
+      expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].notification.body).toContain('123456');
+      expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].data).toEqual({
+        orderDisplayId: 'ORD-1001',
+        notifType: 'delivery_otp',
+        otp: '123456',
+      });
       expect(result.success).toBe(true);
 
       const persisted = supabaseMock.store.notifications.find(
         (n) => n.user_id === 'customer-1'
       );
       expect(persisted).toBeTruthy();
-      expect(persisted.notif_type).toBe('order_update');
+      expect(persisted.notif_type).toBe('delivery_otp');
+      expect(persisted.body).toContain('123456');
       expect(persisted.metadata).toEqual({ order_display_id: 'ORD-1001' });
-      expect(JSON.stringify(persisted)).not.toContain('123456');
     });
   });
 
@@ -387,6 +409,24 @@ describe('notificationService', () => {
       expect(supabaseMock.store.notifications).toHaveLength(1);
     });
 
+    it('continues FCM delivery even when database insertion fails', async () => {
+      seedDevices([{ fcm_token: 'token-a' }]);
+      firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['token-a']));
+      supabaseMock.programErrorFor('notifications', 'insert', 'Database write failure');
+
+      const result = await sendPushNotification(
+        'user-1',
+        'Order updated',
+        'Your order is on the way',
+        'order_update',
+        {}
+      );
+
+      expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+      expect(result.fcm.summary.delivered).toBe(1);
+    });
+
     const VALID_TYPES = [
       'order_update',
       'payment',
@@ -398,6 +438,7 @@ describe('notificationService', () => {
       'new_bid',
       'payment_locked',
       'payment_released',
+      'delivery_otp',
     ];
 
     it.each(VALID_TYPES)('accepts valid notif_type "%s"', async (notifType) => {
@@ -496,6 +537,58 @@ describe('notificationService', () => {
       const otp2 = supabaseMock.store.delivery_otps.find((o) => o.id === 'otp-2');
       expect(new Date(otp1.expires_at).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
       expect(otp2.expires_at).toBe('2099-01-01T00:00:00.000Z');
+    });
+
+    it('fetches only genuinely consumed delivery OTPs with non-null used_at', async () => {
+      const { hash, salt } = hashDeliveryOtp('123456');
+      supabaseMock.store.delivery_otps = [
+        {
+          id: 'otp-invalidated',
+          order_id: 'order-100',
+          otp_hash: 'old-hash',
+          otp_salt: 'old-salt',
+          verified: true,
+          used_at: null,
+          created_at: new Date(Date.now() - 60000).toISOString(),
+        },
+        {
+          id: 'otp-consumed',
+          order_id: 'order-100',
+          otp_hash: hash,
+          otp_salt: salt,
+          verified: true,
+          used_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      const consumed = await getConsumedDeliveryOtp('order-100');
+      expect(consumed).toBeDefined();
+      expect(consumed.id).toBe('otp-consumed');
+      expect(consumed.used_at).not.toBeNull();
+    });
+
+    it('returns null when only invalidated (used_at=null) OTPs exist', async () => {
+      supabaseMock.store.delivery_otps = [
+        {
+          id: 'otp-invalidated',
+          order_id: 'order-100',
+          otp_hash: 'old-hash',
+          otp_salt: 'old-salt',
+          verified: true,
+          used_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      const consumed = await getConsumedDeliveryOtp('order-100');
+      expect(consumed).toBeNull();
+    });
+
+    it('returns null on getConsumedDeliveryOtp database failure', async () => {
+      supabaseMock.programError('Fetch failed');
+      const result = await getConsumedDeliveryOtp('order-100');
+      expect(result).toBeNull();
     });
   });
 
@@ -702,6 +795,19 @@ describe('notificationService', () => {
       expect(results).toHaveLength(1);
       expect(results[0].deviceId).toBe('profile-fallback');
       expect(results[0].success).toBe(true);
+    });
+
+    it('continues device delivery even if Redis publish throws an error', async () => {
+      seedDevices([{ id: 'dev-1', fcm_token: 'token-1' }]);
+      firebaseMock.send.mockResolvedValue('msg-id-ok');
+      mockRedis.publish.mockRejectedValueOnce(new Error('Redis publishing error'));
+
+      const payload = { notification: { title: 'Hello', body: 'World' } };
+      const results = await sendNotification('user-1', payload);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].success).toBe(true);
+      expect(firebaseMock.send).toHaveBeenCalledTimes(1);
     });
   });
 

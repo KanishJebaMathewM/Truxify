@@ -33,6 +33,7 @@ const ALLOWED_NOTIF_TYPES = new Set([
   'new_bid',
   'payment_locked',
   'payment_released',
+  'delivery_otp',
 ]);
 
 // Tokens that can never be delivered again — the device row is deactivated so
@@ -496,9 +497,10 @@ export async function getActiveDeliveryOtp(orderId) {
     }
     const { data, error } = await supabaseAdmin
       .from('delivery_otps')
-      .select('id, otp_hash, otp_salt, expires_at')
+      .select('id, otp_hash, otp_salt, expires_at, used_at')
       .eq('order_id', orderId)
       .eq('verified', false)
+      .is('used_at', null)
       .gte('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
@@ -513,6 +515,83 @@ export async function getActiveDeliveryOtp(orderId) {
   });
 }
 
+export async function getConsumedDeliveryOtp(orderId) {
+  return measureExecution('NotificationService.getConsumedDeliveryOtp', async () => {
+    if (!supabaseAdmin) {
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot read OTP.');
+      return null;
+    }
+    const { data, error } = await supabaseAdmin
+      .from('delivery_otps')
+      .select('id, otp_hash, otp_salt, used_at, verified')
+      .eq('order_id', orderId)
+      .not('used_at', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ err: error }, '[NotificationService] Failed to fetch consumed OTP');
+      return null;
+    }
+
+    return data;
+  });
+}
+
+export async function consumeDeliveryOtpAtomic(otpId, orderId) {
+  return measureExecution('NotificationService.consumeDeliveryOtpAtomic', async () => {
+    if (!supabaseAdmin) {
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot consume OTP.');
+      return false;
+    }
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({
+        used_at: nowIso,
+      })
+      .eq('id', otpId)
+      .eq('order_id', orderId)
+      .is('used_at', null)
+      .eq('verified', false)
+      .gte('expires_at', nowIso)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ err: error }, '[NotificationService] Failed to atomically consume OTP');
+      return false;
+    }
+
+    return Boolean(data && data.id);
+  });
+}
+
+export async function resetDeliveryOtpConsumption(otpId, orderId) {
+  return measureExecution('NotificationService.resetDeliveryOtpConsumption', async () => {
+    if (!supabaseAdmin) {
+      logger.error({}, '[NotificationService] Service-role client not configured — cannot reset OTP.');
+      return false;
+    }
+    const { error } = await supabaseAdmin
+      .from('delivery_otps')
+      .update({
+        used_at: null,
+      })
+      .eq('id', otpId)
+      .eq('order_id', orderId)
+      .eq('verified', false);
+
+    if (error) {
+      logger.error({ err: error }, '[NotificationService] Failed to reset OTP consumption');
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export async function verifyDeliveryOtp(otpId) {
   return measureExecution('NotificationService.verifyDeliveryOtp', async () => {
     // Target a specific OTP record by ID instead of bulk-updating all
@@ -523,11 +602,13 @@ export async function verifyDeliveryOtp(otpId) {
       logger.error({}, '[NotificationService] Service-role client not configured — cannot verify OTP.');
       return false;
     }
+    const nowIso = new Date().toISOString();
     const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .update({
         verified: true,
-        verified_at: new Date().toISOString()
+        verified_at: nowIso,
+        used_at: nowIso,
       })
       .eq('id', otpId)
       .eq('verified', false)
@@ -642,7 +723,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const body = `Your delivery OTP for order ${orderDisplayId} is ready. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
 
   let dbSuccess = false;
   try {
@@ -654,12 +735,8 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
-        // `delivery_otp` is not in the notifications.notif_type CHECK constraint
-        // (see supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql),
-        // so use an allowed type or the insert always fails and the OTP
-        // notification is never persisted.
-        notif_type: 'order_update',
-        // No OTP or OTP-derived value is persisted here: an unsalted digest of
+        notif_type: 'delivery_otp',
+        // No OTP or OTP-derived value is persisted in metadata: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }
       });
@@ -680,7 +757,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', otp }
+      { orderDisplayId, notifType: 'delivery_otp', otp: String(otp) }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

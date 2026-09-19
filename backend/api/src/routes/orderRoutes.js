@@ -204,6 +204,12 @@ import {
 } from '../controllers/orderController.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import {
+  validatePodFile,
+  generatePodStoragePath,
+  uploadPodFile,
+  createPodSignedUrl
+} from '../lib/storage/podStorage.js';
 import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 
 const router = express.Router();
@@ -211,7 +217,7 @@ const MAX_GEOFENCE_RADIUS_M = 500;
 
 const milestoneStore = createStore('rl:milestone:');
 const milestoneLimiter = rateLimit({
-  windowMs: 60 * 1000,
+  windowMs: 60 * 1000, 
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   keyGenerator: (req) => req.user?.id || 'unknown',
   ...(milestoneStore && typeof milestoneStore.init === 'function' ? { store: milestoneStore } : {}),
@@ -399,17 +405,24 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
  */
 router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
-    const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
+    const result = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
 
-    if (escrowUpdateFailed) {
+    if (result && result.escrowUpdateFailed) {
       return res.status(202).json({
-        message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
+        message: result.message || 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
         payment_released: true,
+        amount_inr: result.amount_inr,
+        order_display_id: result.order_display_id,
       });
     }
 
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    res.json({
+      message: result?.message || 'Delivery confirmed and verified successfully! Payment released to driver.',
+      payment_released: true,
+      amount_inr: result?.amount_inr,
+      order_display_id: result?.order_display_id,
+    });
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
@@ -584,7 +597,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
     }
 
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount, version');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
@@ -704,25 +717,32 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       expectedAmountWei
     );
 
-    if (result.alreadyFunded) {
-      const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-        escrow_status: 'funded',
-      }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+    if (result.error) {
+      return res.status(422).json({ error: result.error, code: result.code });
+    }
 
+    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
+      orderId,
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: (order.version || 0) + 1,
+        updated_at: new Date().toISOString(),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: order.version },
+      ],
+      'id'
+    );
+
+    if (result.alreadyFunded) {
       if (!updateErr && updatedData) {
         await finalizeAcceptance();
         return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
       }
       return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
     }
-
-    if (result.error) {
-      return res.status(422).json({ error: result.error, code: result.code });
-    }
-
-    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-      escrow_status: 'funded',
-    }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
     if (updateErr) {
       logger.error('[confirm-deposit] DB update failed:', updateErr.message);
@@ -750,10 +770,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     return res.status(500).json({ error: 'Internal Server Error' });
   } finally {
     if (lockValue) {
-      await releaseLock(lockKey, lockValue).catch(() => {});
+      await releaseLock(lockKey, lockValue).catch(() => { });
     }
     if (lock && typeof lock.release === 'function') {
-      await lock.release().catch(() => {});
+      await lock.release().catch(() => { });
     }
   }
 }); 

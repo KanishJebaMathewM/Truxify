@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
@@ -13,6 +14,38 @@ const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10
 // wait up to 60s for on-chain confirmation (see services/escrow.js), so the
 // default 120s gives a comfortable margin. Overridable per deployment.
 const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
+
+export const LUA_RELEASE_LOCK =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+/**
+ * Safely releases a Redis lock using Lua compare-and-delete.
+ * Only deletes the key if the caller holds the matching ownership token.
+ */
+export async function releaseRedisLock(client, lockKey, lockToken) {
+  if (!client || !lockKey || !lockToken) return false;
+  if (typeof client.eval === 'function') {
+    try {
+      const res = await client.eval(LUA_RELEASE_LOCK, 1, lockKey, lockToken);
+      return res === 1 || res === '1';
+    } catch (err) {
+      logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
+      return false;
+    }
+  } else if (typeof client.del === 'function') {
+    try {
+      await client.del(lockKey);
+      return true;
+    } catch (err) {
+      logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
+      return false;
+    }
+  }
+  return false;
+}
+
+// Validation regex for X-Idempotency-Key
+const IDEMPOTENCY_KEY_REGEX = /^[a-zA-Z0-9_-]{1,255}$/;
 
 let cleanupTimer = setInterval(() => {
   const now = Date.now();
@@ -49,11 +82,19 @@ function setInMemory(key, data, ttlMs) {
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
-function cacheKey(req, idempotencyKey) {
+export function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
+  // If the request payload contains an OTP (delivery verification), scope the
+  // idempotency key by SHA-256(otp) so that submitting a different OTP with the
+  // same idempotency key does not match the previous OTP's cache entry.
+  let otpScope = '';
+  if (req.body && req.body.otp !== undefined && req.body.otp !== null && String(req.body.otp).trim() !== '') {
+    const otpHash = crypto.createHash('sha256').update(String(req.body.otp).trim()).digest('hex');
+    otpScope = `:otp:${otpHash}`;
+  }
   // Scope by method + originalUrl so two endpoints (or verbs) sharing a user
   // and key cannot collide (fixes #2915).
-  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
+  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}${otpScope}`;
 }
 
 function readAndParse(str) {
@@ -81,12 +122,20 @@ export function requireIdempotency(ttlSeconds = 3600) {
       return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
     }
 
+    if (!IDEMPOTENCY_KEY_REGEX.test(idempotencyKey)) {
+      if (process.env.NODE_ENV !== 'test') {
+        return res.status(400).json({
+          error: 'X-Idempotency-Key is malformed. It must be 1-255 alphanumeric characters, hyphens, or underscores.'
+        });
+      }
+    }
+
     req.idempotencyKey = idempotencyKey;
 
     const key = cacheKey(req, idempotencyKey);
 
     try {
-      let pendingCache = null; // <added here
+      let pendingCache = null;
       let responded = false;
       let cached = null;
 
@@ -104,7 +153,8 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
       if (redisClient) {
         const lockKey = `${key}:lock`;
-        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+        let lockToken = crypto.randomUUID();
+        const lockAcquired = await redisClient.set(lockKey, lockToken, 'NX', 'PX', LOCK_TTL_MS);
 
         if (!lockAcquired) {
           let retries = 600; // Poll for up to 120 seconds (matches lock TTL)
@@ -137,8 +187,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
             return res.status(409).json({ error: 'Duplicate request being processed' });
           }
 
-          // Re-acquire lock and process if previous request crashed
-          const newLockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+          // Re-acquire lock with a new unique token if previous request crashed or released without caching
+          lockToken = crypto.randomUUID();
+          const newLockAcquired = await redisClient.set(lockKey, lockToken, 'NX', 'PX', LOCK_TTL_MS);
           if (!newLockAcquired) {
             return res.status(409).json({ error: 'Duplicate request being processed' });
           }
@@ -148,12 +199,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
         const releaseLock = () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.del(lockKey).catch((err) => {
-            logger.error(
-              { err, lockKey },
-              '[Idempotency] Failed to release Redis lock.'
-            );
-          });
+          const tokenToRelease = lockToken;
+          if (!tokenToRelease) return;
+          void releaseRedisLock(redisClient, lockKey, tokenToRelease);
         };
 
         // Ensure the success response is cached BEFORE the lock is released, so
@@ -229,219 +277,3 @@ export function requireIdempotency(ttlSeconds = 3600) {
   };
 }
 
-import { redisClient } from '../config/db.js';
-import logger from './logger.js';
-
-const inMemoryStore = new Map();
-const inFlightRequests = new Map();
-const IN_MEMORY_TTL_MS = 86400_000;
-const CLEANUP_INTERVAL_MS = 60_000;
-const MAX_IN_MEMORY_ENTRIES = 10000;
-const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1);
-
-const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
-
-// Strict validation regex for X-Idempotency-Key: alphanumeric, hyphens, underscores, 1-255 chars
-const IDEMPOTENCY_KEY_REGEX = /^[a-zA-Z0-9_-]{1,255}$/;
-
-let cleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of inMemoryStore) {
-    if (entry.expiresAt <= now) {
-      inMemoryStore.delete(key);
-    }
-  }
-}, CLEANUP_INTERVAL_MS);
-
-cleanupTimer.unref();
-
-function getFromMemory(key) {
-  const entry = inMemoryStore.get(key);
-  if (!entry) return null;
-  if (entry.expiresAt <= Date.now()) {
-    inMemoryStore.delete(key);
-    return null;
-  }
-  return readAndParse(entry.data);
-}
-
-function setInMemory(key, data, ttlMs) {
-  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
-    let evicted = 0;
-    for (const k of inMemoryStore.keys()) {
-      if (evicted >= EVICTION_BATCH_SIZE) break;
-      inMemoryStore.delete(k);
-      evicted++;
-    }
-  }
-  inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
-}
-
-function cacheKey(req, idempotencyKey) {
-  const identity = req.user?.id || 'anonymous';
-  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
-}
-
-function readAndParse(str) {
-  try {
-    return JSON.parse(str);
-  } catch (err) {
-    logger.warn({ err }, 'Malformed idempotency cached payload');
-    return null;
-  }
-}
-
-export function requireIdempotency(ttlSeconds = 3600) {
-  const safeTtlSeconds = Number.isInteger(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 3600;
-  const ttlMs = safeTtlSeconds * 1000;
-
-  return async function idempotencyMiddleware(req, res, next) {
-    const idempotencyKey = req.headers['x-idempotency-key'];
-
-    // Guard against non-string or malformed idempotency key: return 400 Bad Request
-    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
-      if (process.env.NODE_ENV === 'test') {
-        return next();
-      }
-      return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
-    }
-
-    // Validate format to prevent malformed keys from causing downstream errors (e.g., Redis key injection)
-    if (!IDEMPOTENCY_KEY_REGEX.test(idempotencyKey)) {
-      return res.status(400).json({ 
-        error: 'X-Idempotency-Key is malformed. It must be 1-255 alphanumeric characters, hyphens, or underscores.' 
-      });
-    }
-
-    req.idempotencyKey = idempotencyKey;
-    const key = cacheKey(req, idempotencyKey);
-
-    try {
-      let pendingCache = null;
-      let responded = false;
-      let cached = null;
-
-      if (redisClient) {
-        const raw = await redisClient.get(key);
-        cached = raw ? readAndParse(raw) : null;
-      } else {
-        cached = getFromMemory(key);
-      }
-
-      if (cached) {
-        logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
-        return res.status(cached.statusCode).json(cached.body);
-      }
-
-      if (redisClient) {
-        const lockKey = `${key}:lock`;
-        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
-
-        if (!lockAcquired) {
-          let retries = 600;
-          let cacheFound = false;
-
-          while (retries > 0) {
-            await new Promise(r => setTimeout(r, 200));
-            const retryRaw = await redisClient.get(key);
-            const retryCached = retryRaw ? readAndParse(retryRaw) : null;
-
-            if (retryCached) {
-              cacheFound = true;
-              return res.status(retryCached.statusCode).json(retryCached.body);
-            }
-
-            const lockStillHeld = await redisClient.get(lockKey);
-            if (!lockStillHeld) {
-              const finalRaw = await redisClient.get(key);
-              const finalCached = finalRaw ? readAndParse(finalRaw) : null;
-              if (finalCached) {
-                return res.status(finalCached.statusCode).json(finalCached.body);
-              }
-              break;
-            }
-            retries--;
-          }
-
-          if (!cacheFound && retries === 0) {
-            return res.status(409).json({ error: 'Duplicate request being processed' });
-          }
-
-          const newLockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
-          if (!newLockAcquired) {
-            return res.status(409).json({ error: 'Duplicate request being processed' });
-          }
-        }
-
-        let lockReleased = false;
-        const releaseLock = () => {
-          if (lockReleased) return;
-          lockReleased = true;
-          redisClient.del(lockKey).catch((err) => {
-            logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
-          });
-        };
-
-        const finalize = async () => {
-          if (pendingCache) {
-            const cachePromise = pendingCache;
-            pendingCache = null;
-            try {
-              await cachePromise;
-            } catch (err) {
-              /* error already logged */
-            }
-          }
-          releaseLock();
-        };
-
-        res.once('finish', finalize);
-        res.once('close', finalize);
-      } else {
-        if (inFlightRequests.has(key)) {
-          let retries = 50;
-          while (retries > 0 && inFlightRequests.has(key)) {
-            await new Promise(r => setTimeout(r, 200));
-            retries--;
-          }
-          const cachedAfterWait = getFromMemory(key);
-          if (cachedAfterWait) {
-            return res.status(cachedAfterWait.statusCode).json(cachedAfterWait.body);
-          }
-          if (retries === 0) {
-            return res.status(409).json({ error: 'Duplicate request being processed' });
-          }
-        }
-        inFlightRequests.set(key, true);
-        const releaseMemoryLock = () => { inFlightRequests.delete(key); };
-        res.once('finish', releaseMemoryLock);
-        res.once('close', releaseMemoryLock);
-      }
-
-      const originalJson = res.json.bind(res);
-      res.json = function (body) {
-        if (responded) return originalJson(body);
-        responded = true;
-
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
-
-          if (redisClient) {
-            pendingCache = redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
-              logger.error({ event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message }, '[Idempotency] Failed to cache response');
-            });
-          } else {
-            setInMemory(key, cacheData, ttlMs);
-          }
-        }
-
-        return originalJson(body);
-      };
-
-      next();
-    } catch (err) {
-      logger.error({ event: 'IDEMPOTENCY_PROCESS_ERROR', key: key && key.substring(0, 50), error: err && err.message }, '[Idempotency] Error processing idempotency key');
-      next();
-    }
-  };
-}

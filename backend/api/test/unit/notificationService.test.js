@@ -46,6 +46,7 @@ const {
   verifyDeliveryOtpHash,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
+  getConsumedDeliveryOtp,
   verifyDeliveryOtp,
   expireDeliveryOtps,
   getUserFcmToken,
@@ -536,6 +537,58 @@ describe('notificationService', () => {
       const otp2 = supabaseMock.store.delivery_otps.find((o) => o.id === 'otp-2');
       expect(new Date(otp1.expires_at).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
       expect(otp2.expires_at).toBe('2099-01-01T00:00:00.000Z');
+    });
+
+    it('fetches only genuinely consumed delivery OTPs with non-null used_at', async () => {
+      const { hash, salt } = hashDeliveryOtp('123456');
+      supabaseMock.store.delivery_otps = [
+        {
+          id: 'otp-invalidated',
+          order_id: 'order-100',
+          otp_hash: 'old-hash',
+          otp_salt: 'old-salt',
+          verified: true,
+          used_at: null,
+          created_at: new Date(Date.now() - 60000).toISOString(),
+        },
+        {
+          id: 'otp-consumed',
+          order_id: 'order-100',
+          otp_hash: hash,
+          otp_salt: salt,
+          verified: true,
+          used_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      const consumed = await getConsumedDeliveryOtp('order-100');
+      expect(consumed).toBeDefined();
+      expect(consumed.id).toBe('otp-consumed');
+      expect(consumed.used_at).not.toBeNull();
+    });
+
+    it('returns null when only invalidated (used_at=null) OTPs exist', async () => {
+      supabaseMock.store.delivery_otps = [
+        {
+          id: 'otp-invalidated',
+          order_id: 'order-100',
+          otp_hash: 'old-hash',
+          otp_salt: 'old-salt',
+          verified: true,
+          used_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      const consumed = await getConsumedDeliveryOtp('order-100');
+      expect(consumed).toBeNull();
+    });
+
+    it('returns null on getConsumedDeliveryOtp database failure', async () => {
+      supabaseMock.programError('Fetch failed');
+      const result = await getConsumedDeliveryOtp('order-100');
+      expect(result).toBeNull();
     });
   });
 

@@ -365,11 +365,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, unexpired OTP for this phone number
+    // Look up the latest unused, active, unexpired OTP for this phone number
     const { data: otpRecord, error: fetchErr } = await supabase
       .from("phone_otps")
-      .select("id, otp_hash, otp_salt, expires_at, verified")
+      .select("id, otp_hash, otp_salt, expires_at, verified, is_active")
       .eq("phone", phone)
+      .eq("is_active", true)
       .eq("verified", false)
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false })
@@ -421,7 +422,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     // Consume the OTP so it cannot be reused
     const { error: updateErr } = await supabase
       .from("phone_otps")
-      .update({ verified: true, verified_at: new Date().toISOString() })
+      .update({ verified: true, verified_at: new Date().toISOString(), is_active: false })
       .eq("id", otpRecord.id);
 
     if (updateErr) {

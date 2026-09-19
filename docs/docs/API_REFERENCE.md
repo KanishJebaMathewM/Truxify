@@ -222,6 +222,45 @@ Endpoints include:
 
 ---
 
+## Drone
+
+Base Path
+
+```
+/api/drone
+```
+
+### Launch
+
+**POST /launch**
+
+Launches a last-mile drone delivery handoff. Requires Bearer authentication and a `driver`, `dispatcher`, or `admin` role.
+
+Request body:
+
+```json
+{"trip_id":"TRP-101","parcel_id":"PCL-9988","safe_zone_gps":{"lat":28.6139,"lng":77.209},"destination_gps":{"lat":28.63,"lng":77.22}}
+```
+
+Required fields:
+
+- `trip_id`: identifier, 1-64 characters; only A–Z, a–z, 0–9, underscore, hyphen, colon, and period are allowed
+- `parcel_id`: identifier, 1-64 characters; only A–Z, a–z, 0–9, underscore, hyphen, colon, and period are allowed
+- `safe_zone_gps`: latitude [-90, 90] and longitude [-180, 180]
+- `destination_gps`: latitude [-90, 90] and longitude [-180, 180]
+
+The flight distance is calculated with the Haversine formula and must not exceed **25 km**.
+
+Successful response: `201 Created`
+
+```json
+{"message":"Drone delivery handoff launched successfully","flightDistanceKm":2.13,"mission":{}}
+```
+
+Possible errors: `400` for invalid or excessive launch parameters, `401` for missing authentication, `403` for an unauthorized role, `429` for rate limiting, and `500` for launch failures.
+
+---
+
 ## Trucks
 
 Base Path

@@ -180,6 +180,11 @@ import {
 } from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
 
+// --- AUDIT LOGGING IMPORTS ---
+import auditRoutes from './routes/auditRoutes.js';
+import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
+
+
 // Configuration load from root folder is handled in db.js
 
 // ============================================================================
@@ -943,4 +948,14 @@ process.on('unhandledRejection', async (reason) => {
 process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
 process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
 
-app.use('/api/tolls', tollOptimizationRouter);
+app.use('/api/tolls', tollOptimizationRouter); 
+
+// Start the audit log flush timer on server boot
+startAuditFlushTimer();
+
+// Mount audit routes (admin only)
+app.use('/api/audit', auditRoutes);
+
+// Global error audit logger (must be after routes, before error handler)
+app.use(auditErrors);
+

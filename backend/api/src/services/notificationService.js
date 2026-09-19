@@ -604,7 +604,7 @@ export async function insertNotification(notificationData) {
  * document flows. Persists to the notifications table, then fans the push out
  * to every active device via sendFcmNotification.
  */
-export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
+export async function sendPushNotification(userId, title, body, notifType, metadata = {}, data = {}) {
   return measureExecution('NotificationService.sendPushNotification', async () => {
     if (notifType && !ALLOWED_NOTIF_TYPES.has(notifType)) {
       throw new DomainError(400, { error: `Invalid notif_type: ${notifType}` });

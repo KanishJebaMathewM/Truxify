@@ -44,11 +44,11 @@ const zkidServiceMock = vi.hoisted(() => ({
   getZKIDStats: vi.fn(),
 }));
 
-vi.mock('../../../../zkid/zkid.service.js', () => ({
+vi.mock('../../../zkid/zkid.service.js', () => ({
   default: zkidServiceMock,
 }));
 
-const zkidRouter = (await import('../../../../zkid/routes.js')).default;
+const zkidRouter = (await import('../../../zkid/routes.js')).default;
 
 function makeApp() {
   const app = express();

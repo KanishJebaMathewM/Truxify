@@ -478,11 +478,32 @@ The backend also supports real-time communication for:
 
 ---
 
-# Future Improvements
+# API Documentation
 
-Future API versions may include:
+The repository exposes a generated OpenAPI 3.0 specification and an interactive Swagger UI for the backend API.
 
-- OpenAPI/Swagger endpoint documentation
-- API versioning
-- SDK generation
-- Expanded request and response examples
+## Interactive API documentation
+
+Start the backend API in a non-production environment and open:
+
+http://localhost:5000/api/docs
+
+The generated API server URL is controlled by API_PUBLIC_URL. When it is unset, the development server URL defaults to http://localhost:5000/api.
+
+Swagger UI is disabled when NODE_ENV=production.
+
+## OpenAPI source
+
+The generated specification is built with swagger-jsdoc from OpenAPI annotations in backend/api/src/routes/*.js.
+
+Route documentation should remain next to the implementation it describes. Changes to endpoint parameters, request bodies, authentication requirements, or responses should update those annotations together with the implementation.
+
+## Validation
+
+From backend/api:
+
+npm test -- test/unit/swagger.test.js
+
+For endpoint-specific documentation changes, run the focused OpenAPI contract test as well as the Swagger configuration test.
+
+The generated documentation is served by the backend at /api/docs; contributors do not need to maintain a separate static Swagger artifact.

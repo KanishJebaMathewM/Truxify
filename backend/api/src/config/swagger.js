@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Use environment variable for Swagger server URL
-const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000';
+const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

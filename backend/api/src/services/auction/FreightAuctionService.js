@@ -1,7 +1,12 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { acquireLockOrFallback } from '../../lib/lockFallback.js';
-import { acquireDistributedLock } from '../../lib/redisLock.js';
+import {
+  acquireLock,
+  releaseLock,
+  acquireDistributedLock,
+  releaseDistributedLock,
+  LockAcquisitionError,
+} from '../../lib/redisLock.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
 import { OrderRepository } from '../../repositories/orderRepository.js';
 
@@ -114,6 +119,24 @@ export class FreightAuctionService {
   }
 
   /**
+   * Compensates a failed or aborted bid submission by removing the bid from auction state
+   * and releasing the reserved collateral lock so the driver can retry cleanly.
+   */
+  async compensateFailedBid(loadOfferId, driverId) {
+    const auction = await this._getAuction(loadOfferId);
+    if (auction && Array.isArray(auction.bids)) {
+      auction.bids = auction.bids.filter(b => b.driverId !== driverId);
+      await this._setAuction(loadOfferId, auction);
+    }
+    const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
+    try {
+      await releaseDistributedLock(collateralKey);
+    } catch (err) {
+      logger.warn({ err, collateralKey }, '[FreightAuction] Failed to release collateral during compensation');
+    }
+  }
+
+  /**
    * Initialize a new freight reverse auction for a load listing.
    */
   async openAuction({
@@ -129,8 +152,8 @@ export class FreightAuctionService {
     if (!reservePrice || reservePrice <= 0) throw new Error('reservePrice must be greater than zero');
 
     const lockKey = `lock:auction:load:${loadOfferId}`;
-    const lock = await acquireLockOrFallback(lockKey, 10000);
-    if (!lock.ok) {
+    const lockValue = await acquireLock(lockKey, 10000);
+    if (!lockValue) {
       throw new Error('Concurrent auction initialization in progress');
     }
 
@@ -167,7 +190,7 @@ export class FreightAuctionService {
       logger.info({ loadOfferId, reservePrice, scheduledCloseAt }, '[FreightAuction] Auction opened successfully');
       return auctionRecord;
     } finally {
-      await lock.release();
+      await releaseLock(lockKey, lockValue);
     }
   }
 
@@ -186,8 +209,8 @@ export class FreightAuctionService {
 
     // 1. Acquire Load-Level Mutual Exclusion to prevent front-running & race conditions
     const loadLockKey = `lock:auction:load:${loadOfferId}`;
-    const loadLock = await acquireLockOrFallback(loadLockKey, 10000);
-    if (!loadLock.ok) {
+    const loadLockValue = await acquireLock(loadLockKey, 10000);
+    if (!loadLockValue) {
       throw new Error('Concurrent bid processing in progress. Please retry.');
     }
 
@@ -293,8 +316,8 @@ export class FreightAuctionService {
           });
 
           if (persistErr) {
-            auction.bids.pop();
             await collateralLock.release();
+            await this.compensateFailedBid(loadOfferId, driverId);
             throw new Error(`Failed to persist bid to database: ${persistErr.message || 'Database error'}`);
           }
           dbBid = data;
@@ -302,8 +325,8 @@ export class FreightAuctionService {
             bidRecord.dbBidId = data.id;
           }
         } catch (err) {
-          auction.bids.pop();
           await collateralLock.release();
+          await this.compensateFailedBid(loadOfferId, driverId);
           throw err;
         }
       }
@@ -319,7 +342,7 @@ export class FreightAuctionService {
         antiSnipingTriggered,
       };
     } finally {
-      await loadLock.release();
+      await releaseLock(loadLockKey, loadLockValue);
     }
   }
 
@@ -329,8 +352,8 @@ export class FreightAuctionService {
   async clearAuction(loadOfferId, options = {}) {
     const { force = false } = options;
     const loadLockKey = `lock:auction:load:${loadOfferId}`;
-    const loadLock = await acquireLockOrFallback(loadLockKey, 15000);
-    if (!loadLock.ok) {
+    const loadLockValue = await acquireLock(loadLockKey, 15000);
+    if (!loadLockValue) {
       throw new Error('Concurrent auction clearing in progress');
     }
 
@@ -420,7 +443,7 @@ export class FreightAuctionService {
         clearedAt: now,
       };
     } finally {
-      await loadLock.release();
+      await releaseLock(loadLockKey, loadLockValue);
     }
   }
 

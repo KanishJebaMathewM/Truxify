@@ -394,13 +394,25 @@ export class OrderLifecycleService {
             detourKm: options.detourKm || 0,
           });
 
-          const bid = auctionResult.dbBid || {
-            id: auctionResult.bid?.dbBidId || auctionResult.bid?.bidId,
-            load_id: loadOfferId,
-            driver_id: driverId,
-            bid_amount: bidAmount,
-            status: 'pending',
-          };
+          let bid = auctionResult.dbBid;
+          if (!bid) {
+            const { data: createdBid, error: bidErr } = await this.orderRepository.createBid({
+              load_id: loadOfferId,
+              driver_id: driverId,
+              bid_amount: bidAmount,
+              status: 'pending',
+            });
+
+            if (bidErr) {
+              // Compensation: remove the bid and release collateral lock from auction state
+              await freightAuctionService.compensateFailedBid(loadOfferId, driverId);
+              throw new DomainError(500, {
+                error: 'Failed to record bid in database.',
+                details: bidErr.message,
+              });
+            }
+            bid = createdBid;
+          }
 
           sendPushNotification(
             offer.customer_id,

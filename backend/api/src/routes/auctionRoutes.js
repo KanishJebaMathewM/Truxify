@@ -5,6 +5,7 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import { freightAuctionService, AUCTION_STATES } from '../services/auction/FreightAuctionService.js';
 import logger from '../middleware/logger.js';
 import { supabaseAdmin } from '../config/db.js';
+import { LockAcquisitionError } from '../lib/redisLock.js';
 
 const router = express.Router();
 
@@ -156,7 +157,8 @@ router.post(
       });
     } catch (err) {
       logger.error({ err, loadId: req.params.id }, '[AuctionRoute] Failed to open auction');
-      return res.status(err.statusCode || 400).json({ error: err.message });
+      const statusCode = err instanceof LockAcquisitionError ? 503 : (err.statusCode || 400);
+      return res.status(statusCode).json({ error: err.message });
     }
   }
 );
@@ -198,8 +200,10 @@ router.post(
     } catch (err) {
       logger.error({ err, loadId: req.params.id }, '[AuctionRoute] Bid submission failed');
       const statusCode =
-        err.statusCode ||
-        (err.message.includes('collateral') || err.message.includes('active bid') ? 409 : 400);
+        err instanceof LockAcquisitionError
+          ? 503
+          : (err.statusCode ||
+            (err.message.includes('collateral') || err.message.includes('active bid') ? 409 : 400));
       return res.status(statusCode).json({ error: err.message });
     }
   }
@@ -237,7 +241,8 @@ router.post(
       });
     } catch (err) {
       logger.error({ err, loadId: req.params.id }, '[AuctionRoute] Failed to clear auction');
-      return res.status(err.statusCode || 400).json({ error: err.message });
+      const statusCode = err instanceof LockAcquisitionError ? 503 : (err.statusCode || 400);
+      return res.status(statusCode).json({ error: err.message });
     }
   }
 );

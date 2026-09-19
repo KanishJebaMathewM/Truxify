@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FreightAuctionService, AUCTION_STATES, AUCTION_CONFIG } from '../../src/services/auction/FreightAuctionService.js';
-import * as lockFallback from '../../src/lib/lockFallback.js';
+import * as redisLock from '../../src/lib/redisLock.js';
 
 describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () => {
   let auctionService;
@@ -9,6 +9,8 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
     auctionService = new FreightAuctionService();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.spyOn(redisLock, 'acquireLock').mockImplementation(async (key) => `mock-lock-token-${key}`);
+    vi.spyOn(redisLock, 'releaseLock').mockResolvedValue(true);
   });
 
   describe('1. Auction Initialization (openAuction)', () => {
@@ -303,21 +305,9 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
     });
   });
 
-  describe('6. Concurrency Serialization Test', () => {
-    it('serialized local-fallback mode: all 10 bids accepted with unique bidIds', async () => {
-      // In this test Redis is unavailable so acquireLockOrFallback queues callers
-      // via the in-process mutex — all 10 bids MUST succeed sequentially.
-      // Simulate Redis unavailability by making acquireLockOrFallback use local queue.
-      vi.spyOn(lockFallback, 'acquireLockOrFallback').mockImplementation(async (key, ttlMs) => {
-        // Resolve immediately with a local serialised lock (no actual Redis)
-        let release;
-        const gate = new Promise(r => { release = r; });
-        // Allow one caller at a time (simulate local queue drain for test speed)
-        const handle = { ok: true, release: async () => release() };
-        return Promise.resolve(handle);
-      });
-
-      const loadOfferId = 'load-local-concurrent';
+  describe('6. Concurrency Serialization & Distributed Lock Semantics', () => {
+    it('mutual exclusion: 10 bids submitted sequentially succeed with unique bidIds', async () => {
+      const loadOfferId = 'load-sequential-concurrent';
       await auctionService.openAuction({
         loadOfferId,
         shipperId: 'shipper-concurrent',
@@ -327,19 +317,17 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
 
       const concurrentDrivers = Array.from({ length: 10 }, (_, i) => ({
         loadOfferId,
-        driverId: `local-driver-${i}`,
+        driverId: `seq-driver-${i}`,
         bidAmount: 1000000 + i * 10000,
         driverRating: 80 + (i % 20),
         detourKm: i * 2,
       }));
 
-      // Run sequentially (not all at once) to deterministically test the fallback path
       const results = [];
       for (const bid of concurrentDrivers) {
         results.push(await auctionService.submitBid(bid));
       }
 
-      // All 10 bids must succeed in serialised fallback mode
       expect(results).toHaveLength(10);
       results.forEach(r => expect(r.success).toBe(true));
 
@@ -347,7 +335,6 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
       const uniqueBidIds = new Set(bidIds);
       expect(uniqueBidIds.size).toBe(10); // All bidIds must be unique
 
-      // Exactly one record per driver
       const status = await auctionService._getAuction(loadOfferId);
       expect(status.bids).toHaveLength(10);
       const driverIds = status.bids.map(b => b.driverId);
@@ -355,22 +342,21 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
     });
 
     it('Redis contention mode: exactly 1 bid accepted, 9 rejected as concurrent', async () => {
-      // When Redis holds the load lock, acquireLockOrFallback returns ok:false for
-      // all but the first caller — only ONE bid should succeed.
       let lockHeld = false;
-      vi.spyOn(lockFallback, 'acquireLockOrFallback').mockImplementation(async () => {
+      vi.spyOn(redisLock, 'acquireLock').mockImplementation(async () => {
         if (lockHeld) {
-          // Lock already held by first caller — reject remaining callers
-          return { ok: false, release: async () => {} };
+          return null;
         }
         lockHeld = true;
-        return {
-          ok: true,
-          release: async () => { lockHeld = false; },
-        };
+        return 'mock-lock-token-contention';
+      });
+      vi.spyOn(redisLock, 'releaseLock').mockImplementation(async () => {
+        lockHeld = false;
+        return true;
       });
 
       const loadOfferId = 'load-redis-contention';
+      lockHeld = false;
       await auctionService.openAuction({
         loadOfferId,
         shipperId: 'shipper-contention',
@@ -386,7 +372,6 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
         detourKm: 0,
       }));
 
-      // Fire all 10 simultaneously
       const settled = await Promise.allSettled(
         bids.map(bid => auctionService.submitBid(bid))
       );
@@ -394,17 +379,90 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
       const fulfilled = settled.filter(r => r.status === 'fulfilled');
       const rejected = settled.filter(r => r.status === 'rejected');
 
-      // Exactly 1 bid accepted, exactly 9 rejected as concurrent
       expect(fulfilled).toHaveLength(1);
       expect(rejected).toHaveLength(9);
-
-      // The one successful bid must have a unique bidId
       expect(fulfilled[0].value.bid.bidId).toBeDefined();
 
-      // All rejections must be the 'concurrent' error, not a logic error
       rejected.forEach(r => {
         expect(r.reason.message).toMatch(/Concurrent bid processing in progress/);
       });
+    });
+
+    it('Fail-closed distributed lock: rejects mutations when Redis is unavailable (no local fallback)', async () => {
+      vi.spyOn(redisLock, 'acquireLock').mockImplementation(async (key) => {
+        throw new redisLock.LockAcquisitionError(key, 'Redis client unavailable');
+      });
+
+      const loadOfferId = 'load-redis-down';
+
+      // openAuction must fail-closed
+      await expect(
+        auctionService.openAuction({
+          loadOfferId,
+          shipperId: 'shipper-1',
+          reservePrice: 1000000,
+        })
+      ).rejects.toThrow(redisLock.LockAcquisitionError);
+
+      // submitBid must fail-closed
+      await expect(
+        auctionService.submitBid({
+          loadOfferId,
+          driverId: 'driver-1',
+          bidAmount: 500000,
+        })
+      ).rejects.toThrow(redisLock.LockAcquisitionError);
+
+      // clearAuction must fail-closed
+      await expect(
+        auctionService.clearAuction(loadOfferId, { force: true })
+      ).rejects.toThrow(redisLock.LockAcquisitionError);
+    });
+
+    it('Durable persistence compensation: rolls back auction state and releases collateral when DB insert fails', async () => {
+      const mockOrderRepo = {
+        createBid: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'DB connection timeout' },
+        }),
+      };
+
+      const customAuctionService = new FreightAuctionService({ orderRepository: mockOrderRepo });
+      const loadOfferId = 'load-persist-failure';
+
+      await customAuctionService.openAuction({
+        loadOfferId,
+        shipperId: 'shipper-test',
+        reservePrice: 1000000,
+      });
+
+      await expect(
+        customAuctionService.submitBid({
+          loadOfferId,
+          driverId: 'driver-fail',
+          bidAmount: 800000,
+        })
+      ).rejects.toThrow(/Failed to persist bid to database/);
+
+      // Auction state must have compensated by removing the bid
+      const status = await customAuctionService._getAuction(loadOfferId);
+      expect(status.bids).toHaveLength(0);
+
+      // Subsequent retry should not fail as duplicate bid
+      mockOrderRepo.createBid.mockResolvedValueOnce({
+        data: { id: 'db-bid-retry' },
+        error: null,
+      });
+
+      const retryResult = await customAuctionService.submitBid({
+        loadOfferId,
+        driverId: 'driver-fail',
+        bidAmount: 790000,
+      });
+
+      expect(retryResult.success).toBe(true);
+      expect(retryResult.bid.bidAmount).toBe(790000);
+      expect(retryResult.bid.dbBidId).toBe('db-bid-retry');
     });
   });
 });

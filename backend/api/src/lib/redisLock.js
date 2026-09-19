@@ -75,6 +75,25 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
 }
 
 /**
+ * Releases a distributed lock acquired via acquireDistributedLock by key.
+ * Removes from Redis and clears any local fallback queue entry.
+ *
+ * @param {string} key - Lock key
+ */
+export async function releaseDistributedLock(key) {
+  if (redisClient && typeof redisClient.del === 'function') {
+    try {
+      await redisClient.del(key);
+    } catch (err) {
+      logger.error({ err, key }, 'Failed to release distributed lock');
+    }
+  }
+  if (localQueues.has(key)) {
+    localQueues.delete(key);
+  }
+}
+
+/**
  * Executes a function with a distributed lock, retrying if the lock is held.
  * 
  * @param {string} key - Lock key

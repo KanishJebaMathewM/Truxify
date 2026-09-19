@@ -19,6 +19,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 
 import auctionRoutes from '../../src/routes/auctionRoutes.js';
 import { freightAuctionService, AUCTION_STATES } from '../../src/services/auction/FreightAuctionService.js';
+import * as redisLock from '../../src/lib/redisLock.js';
 
 function makeApp() {
   const app = express();
@@ -34,6 +35,9 @@ describe('Auction Routes API (/api/auctions)', () => {
     app = makeApp();
     freightAuctionService.auctions.clear();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.spyOn(redisLock, 'acquireLock').mockImplementation(async (key) => `mock-lock-${key}`);
+    vi.spyOn(redisLock, 'releaseLock').mockResolvedValue(true);
   });
 
   describe('POST /api/auctions/load/:id/open', () => {
@@ -143,6 +147,19 @@ describe('Auction Routes API (/api/auctions)', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.status).toBe(AUCTION_STATES.SETTLED);
       expect(res.body.data.winningBid.driverId).toBe('driver-x');
+    });
+
+    it('should return 503 when distributed lock fails closed', async () => {
+      vi.spyOn(redisLock, 'acquireLock').mockRejectedValueOnce(
+        new redisLock.LockAcquisitionError('lock:auction:load:load-fail', 'Redis down')
+      );
+
+      const res = await request(app)
+        .post('/api/auctions/load/load-fail/open')
+        .send({ reservePrice: 500000 });
+
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain('Failed to acquire lock');
     });
   });
 });

@@ -16,12 +16,15 @@ import logger from '../middleware/logger.js';
 let redisClient = null;
 let initialized = false;
 
+const inFlight = new Map();
+
 const stats = {
   hits: 0,
   misses: 0,
   sets: 0,
   deletes: 0,
   errors: 0,
+  coalesced: 0,
 };
 
 export function init(client) {
@@ -77,6 +80,45 @@ export async function set(namespace, entityId, value, opts = {}) {
     logger.error({ err, key }, '[CacheManager] SET error');
     return false;
   }
+}
+
+export async function getOrSetSingleflight(namespace, entityId, fetcher, opts = {}) {
+  if (!redisClient) {
+    return fetcher();
+  }
+
+  const key = CacheKeyBuilder.build(namespace, entityId, opts.subKey);
+
+  try {
+    const raw = await redisClient.get(key);
+    if (raw) {
+      stats.hits++;
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    stats.errors++;
+    logger.error({ err, key }, '[CacheManager] GET error in singleflight');
+  }
+
+  stats.misses++;
+
+  if (inFlight.has(key)) {
+    stats.coalesced++;
+    return inFlight.get(key);
+  }
+
+  const promise = Promise.resolve()
+    .then(fetcher)
+    .then(async (data) => {
+      await set(namespace, entityId, data, opts);
+      return data;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+
+  inFlight.set(key, promise);
+  return promise;
 }
 
 export async function invalidate(namespace, entityId, opts = {}) {
@@ -155,6 +197,7 @@ export function resetStats() {
   stats.sets = 0;
   stats.deletes = 0;
   stats.errors = 0;
+  stats.coalesced = 0;
 }
 
 export function isInitialized() {
@@ -172,6 +215,7 @@ export default {
   init,
   get,
   set,
+  getOrSetSingleflight,
   invalidate,
   invalidateBatch,
   invalidateAll,

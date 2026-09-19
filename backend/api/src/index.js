@@ -73,6 +73,8 @@ import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
 import arLoadingRoutes from './routes/arLoadingRoutes.js'
+import ebolRoutes from './routes/ebolRoutes.js'
+
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -551,6 +553,8 @@ app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
+app.use('/api/ebol', ebolRoutes)
+
 
 // ============================================================================
 // 🆕 WEB3 SUBSYSTEM ROUTES

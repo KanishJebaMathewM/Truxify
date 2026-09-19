@@ -32,6 +32,9 @@
   - Fraud Detection
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
+  - Road Conditions
+  - IoT Telemetry
+  - Cross-Docking
 - Rate Limiting
 - Idempotency
 - WebSocket Events
@@ -304,6 +307,85 @@ Base Path
 |GET|/:id|
 
 ---
+
+## IoT Telemetry
+
+Base Path
+
+```
+/api/iot
+```
+
+Authentication
+
+All telemetry endpoints require a Bearer token. Access is restricted to the load owner, the currently assigned driver, an appropriately assigned IoT device, or an administrator.
+
+The telemetry history endpoint is additionally rate-limited to 300 requests per 15 minutes per client key.
+
+### Record telemetry
+
+```
+POST /api/iot/telemetry/<load_id>
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "temperature": 4.5
+}
+```
+
+Temperature must be a finite number between `-100` and `200` °C.
+
+A telemetry submission is accepted only for an existing load that requires refrigeration. Provisioned IoT devices must also be assigned to the target load.
+
+Successful response:
+
+```json
+{
+  "success": true,
+  "message": "Telemetry recorded",
+  "analysis": {}
+}
+```
+
+### Retrieve telemetry history
+
+```
+GET /api/iot/telemetry/<load_id>
+```
+
+The response contains up to the 20 most recent telemetry rows for the load, ordered newest first.
+
+Example:
+
+```json
+[
+  {
+    "id": "uuid",
+    "load_id": "uuid",
+    "temperature": 4.5,
+    "recorded_at": "2026-09-19T12:00:00.000Z"
+  }
+]
+```
+
+### IoT telemetry authorization and status codes
+
+| Code | Meaning |
+|------|---------|
+|200|Telemetry history returned|
+|201|Telemetry reading recorded|
+|400|Invalid payload, invalid load state, or non-refrigerated load|
+|401|Authentication required|
+|403|Caller is not authorized for the load|
+|404|Load not found|
+|500|Database, authorization, anomaly-processing, or unexpected server error|
+
+
 
 ## Support
 

@@ -31,6 +31,7 @@ describe('Drone launch OpenAPI contract', () => {
 
     expect(operation).toBeDefined();
     expect(operation.security).toEqual([{ BearerAuth: [] }]);
+    expect(operation.description).toMatch(/driver.*dispatcher.*admin/i);
     expect(operation.requestBody).toMatchObject({
       required: true,
       content: {
@@ -53,11 +54,13 @@ describe('Drone launch OpenAPI contract', () => {
       properties: expect.objectContaining({
         trip_id: expect.objectContaining({
           type: 'string',
+          pattern: '^[a-zA-Z0-9_\-:.]{1,64}$',
           minLength: 1,
           maxLength: 64,
         }),
         parcel_id: expect.objectContaining({
           type: 'string',
+          pattern: '^[a-zA-Z0-9_\-:.]{1,64}$',
           minLength: 1,
           maxLength: 64,
         }),
@@ -98,6 +101,12 @@ describe('Drone launch OpenAPI contract', () => {
 
     expect(operation.responses['400'].description).toMatch(/25 km/i);
     expect(operation.responses['400'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/DroneLaunchErrorResponse',
+    });
+    expect(operation.responses['403'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/DroneLaunchErrorResponse',
+    });
+    expect(operation.responses['500'].content['application/json'].schema).toEqual({
       $ref: '#/components/schemas/DroneLaunchErrorResponse',
     });
     expect(errorSchema).toMatchObject({

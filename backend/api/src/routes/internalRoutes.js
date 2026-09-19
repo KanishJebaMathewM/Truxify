@@ -155,7 +155,7 @@ router.get('/escrow-velocity', async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Open or close the escrow circuit breaker
- *     description: Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS); any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.
+ *     description: 'Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS); any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.'
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -243,7 +243,7 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Emergency defensive pause (security sentinel)
- *     description: Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.
+ *     description: 'Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.'
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:

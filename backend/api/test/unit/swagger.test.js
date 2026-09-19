@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-vi.mock('swagger-jsdoc', () => ({
-  default: vi.fn(() => ({ openapi: '3.0.0', paths: {} })),
-}))
+let generatedSpec
 
 vi.mock('swagger-ui-express', () => ({
-  default: { serve: 'serve-fn', setup: vi.fn(() => 'setup-fn') },
+  default: {
+    serve: 'serve-fn',
+    setup: vi.fn((spec) => {
+      generatedSpec = spec
+      return 'setup-fn'
+    }),
+  },
 }))
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -33,5 +37,15 @@ describe('setupSwagger', () => {
     const app = { use: vi.fn() }
     setupSwagger(app)
     expect(app.use).toHaveBeenCalledWith('/api/docs', 'serve-fn', 'setup-fn')
+  })
+
+  it('generates the documented OpenAPI paths from the route annotations', () => {
+    process.env.NODE_ENV = 'development'
+    const app = { use: vi.fn() }
+    setupSwagger(app)
+
+    expect(generatedSpec.openapi).toBe('3.0.0')
+    expect(generatedSpec.paths['/api/orders/{id}/milestones']?.put).toBeDefined()
+    expect(generatedSpec.paths['/api/orders/load-offers/en-route']?.get).toBeDefined()
   })
 })

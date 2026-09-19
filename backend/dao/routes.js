@@ -11,10 +11,22 @@ const router = express.Router();
 // wallet that owns the DAO action. The server recovers the signer and
 // rejects any request whose recovered address does not match the claimed
 // address, preventing spoofing of membership or votes.
+/**
+ * Builds the canonical DAO message that wallets sign for authenticated actions.
+ * @param {string} action - DAO action identifier.
+ * @param {string} payload - Action-specific message payload.
+ * @returns {string} Canonical message to sign.
+ */
 function buildDaoMessage(action, payload) {
     return `Truxify DAO\nAction: ${action}\n${payload}`;
 }
 
+/**
+ * Recovers the wallet address that signed a DAO action message.
+ * @param {string} message - Signed message.
+ * @param {string} signature - Wallet signature.
+ * @returns {string|null} Recovered signer address, or null for invalid signatures.
+ */
 function recoverSigner(message, signature) {
     try {
         return ethers.verifyMessage(message, signature);
@@ -24,6 +36,58 @@ function recoverSigner(message, signature) {
 }
 
 // Join DAO — authenticated + wallet-signed to prevent membership spoofing.
+/**
+ * @openapi
+ * /api/dao/join:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Join the DAO
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: x-dao-signature
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Delegated wallet signature used when the authenticated JWT wallet differs from the target wallet.
+ *       - in: header
+ *         name: x-dao-message
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Canonical DAO action message signed by the delegated wallet.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: DAO authorization failed.
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/join', requireDaoAuth('join'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
@@ -52,6 +116,58 @@ router.post('/dao/join', requireDaoAuth('join'), authenticate, async (req, res) 
 });
 
 // Leave DAO — authenticated + wallet-signed to prevent membership spoofing.
+/**
+ * @openapi
+ * /api/dao/leave:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Leave the DAO
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: x-dao-signature
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Delegated wallet signature used when the authenticated JWT wallet differs from the target wallet.
+ *       - in: header
+ *         name: x-dao-message
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Canonical DAO action message signed by the delegated wallet.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userAddress
+ *               - signature
+ *             properties:
+ *               userAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: DAO authorization failed.
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/leave', requireDaoAuth('leave'), authenticate, async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
@@ -81,25 +197,83 @@ router.post('/dao/leave', requireDaoAuth('leave'), authenticate, async (req, res
 
 // Create proposal — authenticated + wallet-signed; actor bound to the
 // recovered signer so the proposer cannot be spoofed via the request body.
+/**
+ * @openapi
+ * /api/dao/proposal/create:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Create a DAO proposal
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: x-dao-signature
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Delegated wallet signature used when the authenticated JWT wallet differs from the target wallet.
+ *       - in: header
+ *         name: x-dao-message
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Canonical DAO action message signed by the delegated wallet.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - proposer
+ *               - signature
+ *             properties:
+ *               title:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               proposer:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: DAO authorization failed.
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, async (req, res) => {
     try {
-        const { title, description, callData, target, value, proposalType, userAddress, signature } = req.body;
+        const { title, description, callData, target, value, proposalType, proposer, signature } = req.body;
         if (!title || !description) {
             return res.status(400).json({
                 success: false,
                 error: 'title and description required'
             });
         }
-        if (!userAddress || !signature) {
+        if (!proposer || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'userAddress and signature required'
+                error: 'proposer and signature required'
             });
         }
 
         const message = buildDaoMessage('proposal', `title: ${title}\ndescription: ${description}`);
         const signer = recoverSigner(message, signature);
-        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+        if (!signer || signer.toLowerCase() !== proposer.toLowerCase()) {
             return res.status(401).json({
                 success: false,
                 error: 'invalid signature: signer does not match userAddress'
@@ -113,7 +287,7 @@ router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, asy
             target,
             value,
             proposalType,
-            proposer: userAddress
+            proposer
         });
         res.json({ success: true, data: result });
     } catch (error) {
@@ -124,6 +298,61 @@ router.post('/dao/proposal/create', requireDaoAuth('propose'), authenticate, asy
 
 // Cast vote — authenticated + wallet-signed; voting power is derived
 // server-side from the voter's on-chain governance-token balance.
+/**
+ * @openapi
+ * /api/dao/vote/cast:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Cast a DAO vote
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: x-dao-signature
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Delegated wallet signature used when the authenticated JWT wallet differs from the target wallet.
+ *       - in: header
+ *         name: x-dao-message
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Canonical DAO action message signed by the delegated wallet.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - proposalId
+ *               - voterAddress
+ *               - signature
+ *             properties:
+ *               proposalId:
+ *                 type: string
+ *               voterAddress:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: DAO authorization failed.
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/vote/cast', requireDaoAuth('vote'), authenticate, async (req, res) => {
     try {
         const { proposalId, voterAddress, signature } = req.body;
@@ -153,25 +382,80 @@ router.post('/dao/vote/cast', requireDaoAuth('vote'), authenticate, async (req, 
 
 // Execute proposal — authenticated + wallet-signed; only the verified
 // signer may trigger execution, preventing spoofed execution requests.
+/**
+ * @openapi
+ * /api/dao/proposal/execute:
+ *   post:
+ *     tags: [DAO]
+ *     summary: Execute a DAO proposal
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: header
+ *         name: x-dao-signature
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Delegated wallet signature used when the authenticated JWT wallet differs from the target wallet.
+ *       - in: header
+ *         name: x-dao-message
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Canonical DAO action message signed by the delegated wallet.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - proposalId
+ *               - executor
+ *               - signature
+ *             properties:
+ *               proposalId:
+ *                 type: string
+ *               executor:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: DAO authorization failed.
+ *       500:
+ *         description: Server error
+ */
 router.post('/dao/proposal/execute', requireDaoAuth('execute'), authenticate, async (req, res) => {
     try {
-        const { proposalId, userAddress, signature } = req.body;
+        const { proposalId, executor, signature } = req.body;
         if (!proposalId) {
             return res.status(400).json({
                 success: false,
                 error: 'proposalId required'
             });
         }
-        if (!userAddress || !signature) {
+        if (!executor || !signature) {
             return res.status(400).json({
                 success: false,
-                error: 'userAddress and signature required'
+                error: 'executor and signature required'
             });
         }
 
         const message = buildDaoMessage('execute', `proposalId: ${proposalId}`);
         const signer = recoverSigner(message, signature);
-        if (!signer || signer.toLowerCase() !== userAddress.toLowerCase()) {
+        if (!signer || signer.toLowerCase() !== executor.toLowerCase()) {
             return res.status(401).json({
                 success: false,
                 error: 'invalid signature: signer does not match userAddress'
@@ -187,6 +471,26 @@ router.post('/dao/proposal/execute', requireDaoAuth('execute'), authenticate, as
 });
 
 // Get proposal
+/**
+ * @openapi
+ * /api/dao/proposal/{proposalId}:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get a DAO proposal
+ *     parameters:
+ *       - in: path
+ *         name: proposalId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/proposal/:proposalId', async (req, res) => {
     try {
         const { proposalId } = req.params;
@@ -199,6 +503,26 @@ router.get('/dao/proposal/:proposalId', async (req, res) => {
 });
 
 // Get member
+/**
+ * @openapi
+ * /api/dao/member/{userAddress}:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get DAO membership information
+ *     parameters:
+ *       - in: path
+ *         name: userAddress
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/member/:userAddress', async (req, res) => {
     try {
         const { userAddress } = req.params;
@@ -211,6 +535,20 @@ router.get('/dao/member/:userAddress', async (req, res) => {
 });
 
 // Get stats
+/**
+ * @openapi
+ * /api/dao/stats:
+ *   get:
+ *     tags: [DAO]
+ *     summary: Get DAO statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/dao/stats', async (req, res) => {
     try {
         const stats = await daoService.getDAOStats();

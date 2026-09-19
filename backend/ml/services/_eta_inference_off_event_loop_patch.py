@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from functools import partial
+import threading
 
 import numpy as np
 
@@ -9,6 +10,25 @@ from app.execution import run_inference
 from . import traffic_pipeline as _traffic_pipeline
 
 _BaseTrafficPipeline = _traffic_pipeline.TrafficPipeline
+_LOCK_INIT_GUARD = threading.Lock()
+
+
+def _get_predict_eta_lock(pipeline):
+    """Return the thread lock used to serialize inference for one pipeline."""
+    lock = getattr(pipeline, "_eta_predict_lock", None)
+    if lock is None:
+        with _LOCK_INIT_GUARD:
+            lock = getattr(pipeline, "_eta_predict_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                pipeline._eta_predict_lock = lock
+    return lock
+
+
+def _run_serialized_predict_eta(pipeline, features, route_id, route_signature):
+    """Run one ETA prediction while holding the pipeline-local inference lock."""
+    with _get_predict_eta_lock(pipeline):
+        return pipeline.predict_eta(features, route_id, route_signature)
 
 
 async def update_eta_realtime(self, order_id, current_location, destination):
@@ -31,7 +51,8 @@ async def update_eta_realtime(self, order_id, current_location, destination):
 
             route_signature = self.build_route_signature(destination)
             predicted_speed_mps = await _traffic_pipeline.run_inference(
-                self.predict_eta,
+                _run_serialized_predict_eta,
+                self,
                 features,
                 f"order_{order_id}",
                 route_signature,

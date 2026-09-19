@@ -9,7 +9,6 @@ environment:
 
 dependencies:
   record: ^5.0.5
-  audioplayers: ^5.2.1
   pointycastle: ^3.7.3
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4

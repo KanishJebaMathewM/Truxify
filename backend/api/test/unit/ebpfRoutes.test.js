@@ -33,7 +33,7 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
   },
 }));
 
-const ebpfRouter = (await import('../../../ebpf/routes.js')).default;
+const ebpfRouter = (await import('../../../../ebpf/routes.js')).default;
 
 function makeApp() {
   const app = express();

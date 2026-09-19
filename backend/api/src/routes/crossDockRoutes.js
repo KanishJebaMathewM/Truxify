@@ -61,7 +61,7 @@ import {
  *       type: object
  *       required: [handoff_code]
  *       properties:
- *         handoff_code: { type: string, minLength: 6, maxLength: 6, description: Six-digit handoff code }
+ *         handoff_code: { type: string, pattern: '^[0-9]{6}$', description: Six-digit handoff code }
  *     CrossDockError:
  *       type: object
  *       properties:
@@ -88,6 +88,7 @@ import {
  *         description: Candidate drivers
  *         content: { application/json: { schema: { type: object, properties: { candidates: { type: array, items: { $ref: '#/components/schemas/CrossDockCandidate' } } } } } }
  *       '400': { description: Invalid query, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockError' } } } }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '500': { description: Internal server error }
  * /api/cross-dock:
@@ -103,6 +104,7 @@ import {
  *     responses:
  *       '201': { description: Transfer created, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
  *       '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockError' } } } }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '500': { description: Internal server error }
  *   get:
@@ -127,6 +129,7 @@ import {
  *     responses:
  *       '200': { description: Transfer details, content: { application/json: { schema: { type: object, properties: { transfer: { $ref: '#/components/schemas/CrossDockTransfer' } } } } } }
  *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '404': { description: Transfer not found }
  *       '500': { description: Internal server error }
@@ -140,6 +143,7 @@ import {
  *     responses:
  *       '200': { description: Accepted transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
  *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '409': { description: Invalid transfer state }
  *       '500': { description: Internal server error }
@@ -153,6 +157,7 @@ import {
  *     responses:
  *       '200': { description: Declined transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
  *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '409': { description: Invalid transfer state }
  *       '500': { description: Internal server error }
@@ -166,6 +171,7 @@ import {
  *     responses:
  *       '200': { description: Cancelled transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
  *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '409': { description: Invalid transfer state }
  *       '500': { description: Internal server error }
@@ -182,6 +188,7 @@ import {
  *     responses:
  *       '200': { description: Verified transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
  *       '400': { description: Invalid ID or handoff code }
+ *       '401': { description: Unauthorized }
  *       '403': { description: Forbidden }
  *       '409': { description: Invalid transfer state }
  *       '422': { description: Invalid or expired handoff code }
@@ -190,6 +197,13 @@ import {
 
 const router = express.Router();
 
+/**
+ * Sends a normalized response for cross-dock domain errors and unexpected failures.
+ * @param {import('express').Response} res - Express response object.
+ * @param {unknown} err - Error raised by the cross-dock service.
+ * @param {string} label - Operation label used for unexpected-error logging.
+ * @returns {import('express').Response} The response sent to the client.
+ */
 function handleError(res, err, label) {
   if (err instanceof DomainError) {
     return res.status(err.status).json(err.payload);

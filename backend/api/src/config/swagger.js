@@ -1,9 +1,14 @@
 import logger from '../middleware/logger.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Use environment variable for Swagger server URL
 const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const options = {
   definition: {
@@ -31,10 +36,15 @@ const options = {
       },
     ],
   },
-  apis: ['./src/routes/*.js'], // files containing annotations as above
+  apis: [
+    path.resolve(__dirname, '../routes/*.js'),
+    path.resolve(__dirname, '../../routes/*.js'),
+  ].map((globPath) => globPath.split(path.sep).join('/')),
 };
 
 const swaggerSpec = swaggerJsdoc(options);
+
+export { swaggerSpec };
 
 export const setupSwagger = (app) => {
   if (process.env.NODE_ENV === 'production') {

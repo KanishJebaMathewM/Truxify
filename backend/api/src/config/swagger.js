@@ -37,9 +37,9 @@ const options = {
     ],
   },
   apis: [
-    path.join(__dirname, '../routes/*.js'),
-    path.join(__dirname, '../../routes/*.js'),
-  ],
+    path.resolve(__dirname, '../routes/*.js'),
+    path.resolve(__dirname, '../../routes/*.js'),
+  ].map((globPath) => globPath.split(path.sep).join('/')),
 };
 
 const swaggerSpec = swaggerJsdoc(options);

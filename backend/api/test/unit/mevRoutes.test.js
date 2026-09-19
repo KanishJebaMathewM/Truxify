@@ -16,7 +16,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 let allowAuth = true;
 let allowPolicy = true;
 
-vi.mock('../../src/middleware/auth.js', () => ({
+vi.mock('../../src/middleware/index.js', () => ({
   authenticate: (req, res, next) => {
     if (!allowAuth) return res.status(401).json({ error: 'Authentication required' });
     req.user = { id: 'mev-user-1', role: 'member' };
@@ -39,11 +39,11 @@ const mevServiceMock = vi.hoisted(() => ({
   getMEVStats: vi.fn(),
 }));
 
-vi.mock('../../../../mev/mev.service.js', () => ({
+vi.mock('../../../mev/mev.service.js', () => ({
   default: mevServiceMock,
 }));
 
-const mevRouter = (await import('../../../../mev/routes.js')).default;
+const mevRouter = (await import('../../../mev/routes.js')).default;
 
 function makeApp() {
   const app = express();

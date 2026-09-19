@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -79,11 +80,7 @@ async def test_update_eta_uses_bounded_inference_executor(traffic_pipeline_conte
         captured["func"] = func
         captured["args"] = args
         captured["kwargs"] = kwargs
-        return await _run_captured_inference(func, *args, **kwargs)
-
-    async def _run_captured_inference(func, *args, **kwargs):
-        """Invoke the submitted callable without calling predict_eta directly."""
-        loop = __import__("asyncio").get_running_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
     monkeypatch.setattr(traffic_pipeline_module, "run_inference", fake_run_inference)

@@ -922,7 +922,13 @@ async function shutdown(signal) {
     clearTimeout(forceExit)
     process.exit(exitCode)
   }
-}
+} 
+
+// --- COMPLIANCE IMPORTS ---
+import complianceRoutes from './routes/complianceRoutes.js';
+
+// Mount compliance routes
+app.use('/api/compliance', complianceRoutes);
 
 // Handle uncaught exceptions and unhandled rejections.
 // Both handlers route through shutdown() so that connections are drained

@@ -137,18 +137,32 @@ export class OrderLifecycleService {
         });
       }
 
+      let finalBaseFreight = pricing.baseFreight;
+      let finalTollEstimate = pricing.tollEstimate;
+      let finalPlatformFee = pricing.platformFee;
+      let finalTotalAmount = pricing.totalAmount;
       let estimatedPrice = null;
+
       try {
         const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
 
         const mlResult = await mlPriceCircuitBreaker.execute(() => predictPrice({
           distanceKm: pricing.distanceKm,
           cargoWeightKg: Number(weight_tonnes) * 1000,
+          truckType: 'medium_truck',
           routeOrigin: pickup_address,
           routeDestination: drop_address,
           trafficMultiplier,
         }));
-        estimatedPrice = mlResult.estimatedPricePaisa;
+        if (mlResult && mlResult.estimatedPricePaisa > 0) {
+          estimatedPrice = mlResult.estimatedPricePaisa;
+          finalTotalAmount = mlResult.estimatedPricePaisa;
+          finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+          finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+          if (finalBaseFreight === 0) {
+            finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
+          }
+        }
       } catch (mlErr) {
         logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
       }
@@ -169,10 +183,10 @@ export class OrderLifecycleService {
           pickup_date, pickup_time,
           goods_type, weight_tonnes, length_ft, width_ft, height_ft,
           is_stackable, is_fragile, special_requirements,
-          base_freight: pricing.baseFreight,
-          toll_estimate: pricing.tollEstimate,
-          platform_fee: pricing.platformFee,
-          total_amount: pricing.totalAmount,
+          base_freight: finalBaseFreight,
+          toll_estimate: finalTollEstimate,
+          platform_fee: finalPlatformFee,
+          total_amount: finalTotalAmount,
           estimated_price: estimatedPrice,
           payment_method_id, upi_id,
           waypoints: optimizedWaypoints,

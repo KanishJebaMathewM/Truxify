@@ -244,8 +244,8 @@ Request body:
 
 Required fields:
 
-- `trip_id`: identifier, 1-64 characters
-- `parcel_id`: identifier, 1-64 characters
+- `trip_id`: identifier, 1-64 characters; only A–Z, a–z, 0–9, underscore, hyphen, colon, and period are allowed
+- `parcel_id`: identifier, 1-64 characters; only A–Z, a–z, 0–9, underscore, hyphen, colon, and period are allowed
 - `safe_zone_gps`: latitude [-90, 90] and longitude [-180, 180]
 - `destination_gps`: latitude [-90, 90] and longitude [-180, 180]
 
@@ -258,13 +258,6 @@ Successful response: `201 Created`
 ```
 
 Possible errors: `400` for invalid or excessive launch parameters, `401` for missing authentication, `403` for an unauthorized role, `429` for rate limiting, and `500` for launch failures.
-
-### Telemetry and Abort
-
-| Method | Endpoint | Description |
-|---------|----------|-------------|
-|GET|/telemetry/:missionId|Fetch active mission telemetry|
-|POST|/abort/:missionId|Abort an active mission and return the aircraft to the safe-zone base|
 
 ---
 

@@ -179,3 +179,26 @@ describe('validateCoordinateRange', () => {
     });
   });
 });
+
+import { haversineDistance } from '../../src/utils/coordinates.js';
+
+describe('haversineDistance', () => {
+  it('throws on non-finite coordinates', () => {
+    expect(() => haversineDistance(NaN, 0, 0, 0)).toThrow(TypeError);
+    expect(() => haversineDistance(0, Infinity, 0, 0)).toThrow(TypeError);
+  });
+
+  it('returns 0 for identical points', () => {
+    expect(haversineDistance(40.7, -74.0, 40.7, -74.0)).toBe(0);
+  });
+
+  it('calculates expected distance in km', () => {
+    const d = haversineDistance(12.9716, 77.5946, 13.0827, 80.2707, 'km');
+    expect(d).toBeCloseTo(290.17, 1);
+  });
+
+  it('calculates expected distance in meters', () => {
+    const d = haversineDistance(12.9716, 77.5946, 13.0827, 80.2707, 'meters');
+    expect(d).toBeCloseTo(290172, -2);
+  });
+});

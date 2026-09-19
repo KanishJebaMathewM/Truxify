@@ -44,7 +44,7 @@ const expectedEventTypes = [
 
 describe('Blockchain monitoring events OpenAPI contract', () => {
   it('documents filters, security, and response schema', () => {
-    const operation = swaggerSpec.paths['/api/blockchain/events']?.get;
+    const operation = swaggerSpec.paths['/blockchain/events']?.get;
 
     expect(operation).toBeDefined();
     expect(operation.security).toEqual([{ BearerAuth: [] }]);

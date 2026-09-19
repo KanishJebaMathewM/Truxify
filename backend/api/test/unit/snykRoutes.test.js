@@ -41,11 +41,11 @@ const snykServiceMock = vi.hoisted(() => ({
   getStats: vi.fn(),
 }));
 
-vi.mock('../../../snyk/snyk.service.js', () => ({
+vi.mock('../../../../snyk/snyk.service.js', () => ({
   default: snykServiceMock,
 }));
 
-const snykRouter = (await import('../../../snyk/routes.js')).default;
+const snykRouter = (await import('../../../../snyk/routes.js')).default;
 
 function makeApp() {
   const app = express();

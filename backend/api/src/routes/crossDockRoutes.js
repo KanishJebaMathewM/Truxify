@@ -39,8 +39,171 @@ import {
   listTransfers,
 } from '../services/order/crossDockService.js';
 
+
+/** 
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     CrossDockTransferRequest:
+ *       type: object
+ *       required: [to_driver_id, cross_dock_lat, cross_dock_lng]
+ *       properties:
+ *         to_driver_id: { type: string, format: uuid }
+ *         cross_dock_lat: { type: number, minimum: -90, maximum: 90 }
+ *         cross_dock_lng: { type: number, minimum: -180, maximum: 180 }
+ *         cross_dock_note: { type: string, maxLength: 500 }
+ *     CrossDockHandoffVerification:
+ *       type: object
+ *       required: [handoff_code]
+ *       properties:
+ *         handoff_code: { type: string, pattern: '^[0-9]{6}$', description: Six-digit handoff code }
+ *     CrossDockError:
+ *       type: object
+ *       properties:
+ *         error: { type: string }
+ *     CrossDockTransfer:
+ *       type: object
+ *       additionalProperties: true
+ *     CrossDockCandidate:
+ *       type: object
+ *       additionalProperties: true
+ * /api/cross-dock/candidates:
+ *   get:
+ *     summary: Find drivers near a cross-dock point
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: orderId, required: true, schema: { type: string, format: uuid } }
+ *       - { in: query, name: cross_dock_lat, required: true, schema: { type: number, minimum: -90, maximum: 90 } }
+ *       - { in: query, name: cross_dock_lng, required: true, schema: { type: number, minimum: -180, maximum: 180 } }
+ *       - { in: query, name: radius_km, required: false, schema: { type: number, minimum: 1, maximum: 500 } }
+ *       - { in: query, name: limit, required: false, schema: { type: integer, minimum: 1, maximum: 50 } }
+ *     responses:
+ *       '200':
+ *         description: Candidate drivers
+ *         content: { application/json: { schema: { type: object, properties: { candidates: { type: array, items: { $ref: '#/components/schemas/CrossDockCandidate' } } } } } }
+ *       '400': { description: Invalid query, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockError' } } } }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock:
+ *   post:
+ *     summary: Create a cross-dock transfer request
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: orderId, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransferRequest' } } }
+ *     responses:
+ *       '201': { description: Transfer created, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
+ *       '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockError' } } } }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '500': { description: Internal server error }
+ *   get:
+ *     summary: List cross-dock transfers for the authenticated driver
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: status, required: false, schema: { type: string } }
+ *       - { in: query, name: limit, required: false, schema: { type: integer, minimum: 0 } }
+ *     responses:
+ *       '200': { description: Transfer list, content: { application/json: { schema: { type: object, properties: { transfers: { type: array, items: { $ref: '#/components/schemas/CrossDockTransfer' } } } } } } }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock/{id}:
+ *   get:
+ *     summary: Get a cross-dock transfer
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       '200': { description: Transfer details, content: { application/json: { schema: { type: object, properties: { transfer: { $ref: '#/components/schemas/CrossDockTransfer' } } } } } }
+ *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '404': { description: Transfer not found }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock/{id}/accept:
+ *   post:
+ *     summary: Accept a cross-dock transfer
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       '200': { description: Accepted transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
+ *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '409': { description: Invalid transfer state }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock/{id}/decline:
+ *   post:
+ *     summary: Decline a cross-dock transfer
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       '200': { description: Declined transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
+ *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '409': { description: Invalid transfer state }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock/{id}/cancel:
+ *   post:
+ *     summary: Cancel a cross-dock transfer
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     responses:
+ *       '200': { description: Cancelled transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
+ *       '400': { description: Invalid transfer ID }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '409': { description: Invalid transfer state }
+ *       '500': { description: Internal server error }
+ * /api/cross-dock/{id}/verify:
+ *   post:
+ *     summary: Verify a cross-dock handoff
+ *     tags: [Cross-Docking]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+ *     requestBody:
+ *       required: true
+ *       content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockHandoffVerification' } } }
+ *     responses:
+ *       '200': { description: Verified transfer, content: { application/json: { schema: { $ref: '#/components/schemas/CrossDockTransfer' } } } }
+ *       '400': { description: Invalid ID or handoff code }
+ *       '401': { description: Unauthorized }
+ *       '403': { description: Forbidden }
+ *       '409': { description: Invalid transfer state }
+ *       '422': { description: Invalid or expired handoff code }
+ *       '500': { description: Internal server error }
+ * */ 
+
 const router = express.Router();
 
+/**
+ * Sends a normalized response for cross-dock domain errors and unexpected failures.
+ * @param {import('express').Response} res - Express response object.
+ * @param {unknown} err - Error raised by the cross-dock service.
+ * @param {string} label - Operation label used for unexpected-error logging.
+ * @returns {import('express').Response} The response sent to the client.
+ */
 function handleError(res, err, label) {
   if (err instanceof DomainError) {
     return res.status(err.status).json(err.payload);

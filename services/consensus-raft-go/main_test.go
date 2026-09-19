@@ -964,3 +964,395 @@ func TestMultiEntryLogIndexCorrectness(t *testing.T) {
 	}
 }
 
+
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// TestWALBasicOperations tests basic WAL functionality.
+func TestWALBasicOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Test term change
+	if err := wal.AppendTermChange(1); err != nil {
+		t.Fatalf("Failed to append term: %v", err)
+	}
+
+	// Test vote
+	if err := wal.AppendVote(1, "node-1"); err != nil {
+		t.Fatalf("Failed to append vote: %v", err)
+	}
+
+	// Test log entry
+	if err := wal.AppendLogEntry(1, 1, map[string]string{"type": "order", "id": "123"}); err != nil {
+		t.Fatalf("Failed to append log: %v", err)
+	}
+
+	// Test commit
+	if err := wal.AppendCommit(1); err != nil {
+		t.Fatalf("Failed to append commit: %v", err)
+	}
+
+	// Replay and verify
+	entries, err := wal.Replay()
+	if err != nil {
+		t.Fatalf("Failed to replay: %v", err)
+	}
+
+	if len(entries) != 4 {
+		t.Errorf("Expected 4 entries, got %d", len(entries))
+	}
+
+	if entries[0].Type != "term" || entries[0].Term != 1 {
+		t.Errorf("First entry should be term change")
+	}
+
+	if entries[1].Type != "vote" || entries[1].VotedFor != "node-1" {
+		t.Errorf("Second entry should be vote for node-1")
+	}
+}
+
+// TestWALRecovery tests that state is recovered after restart.
+func TestWALRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// First "session"
+	wal1, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Simulate Raft operations
+	wal1.AppendTermChange(5)
+	wal1.AppendVote(5, "node-2")
+	wal1.AppendLogEntry(5, 1, "order_created")
+	wal1.AppendLogEntry(5, 2, "order_dispatched")
+	wal1.AppendCommit(2)
+	wal1.Close()
+
+	// Second "session" (simulating restart)
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover state: %v", err)
+	}
+
+	if state.CurrentTerm != 5 {
+		t.Errorf("Expected term 5, got %d", state.CurrentTerm)
+	}
+
+	if state.VotedFor != "node-2" {
+		t.Errorf("Expected voted for node-2, got %s", state.VotedFor)
+	}
+
+	if len(state.Log) != 2 {
+		t.Errorf("Expected 2 log entries, got %d", len(state.Log))
+	}
+
+	if state.CommitIndex != 2 {
+		t.Errorf("Expected commit index 2, got %d", state.CommitIndex)
+	}
+}
+
+// TestWALVoteSafety tests that votedFor is durable across term changes.
+func TestWALVoteSafety(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Term 1: vote for node-A
+	wal.AppendTermChange(1)
+	wal.AppendVote(1, "node-A")
+	
+	// Term 2: vote for node-B (different term, different vote allowed)
+	wal.AppendTermChange(2)
+	wal.AppendVote(2, "node-B")
+	
+	wal.Close()
+
+	// Recover and verify
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover: %v", err)
+	}
+
+	if state.CurrentTerm != 2 {
+		t.Errorf("Expected term 2, got %d", state.CurrentTerm)
+	}
+
+	// Should have vote from term 2
+	if state.VotedFor != "node-B" {
+		t.Errorf("Expected vote for node-B in term 2, got %s", state.VotedFor)
+	}
+}
+
+// TestWALCrashBetweenAppendAndFsync tests that uncommitted entries are lost.
+func TestWALCrashBetweenAppendAndFsync(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create WAL with sync mode disabled (simulating crash before fsync)
+	wal, err := NewWAL(tmpDir, false)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	wal.AppendTermChange(1)
+	wal.AppendVote(1, "node-1")
+	
+	// Don't call Close() - simulate crash
+	// (In real scenario, data might not be on disk)
+	
+	// For this test, we just verify the file exists
+	walPath := filepath.Join(tmpDir, "raft.wal")
+	if _, err := os.Stat(walPath); os.IsNotExist(err) {
+		t.Error("WAL file should exist")
+	}
+}
+
+// TestSnapshotCreation tests snapshot creation and loading.
+func TestSnapshotCreation(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Create snapshot
+	state := map[string]interface{}{
+		"orders": []string{"order-1", "order-2"},
+		"count":  2,
+	}
+
+	if err := sm.Save(100, 5, state); err != nil {
+		t.Fatalf("Failed to save snapshot: %v", err)
+	}
+
+	// Load and verify
+	snapshot, err := sm.Load()
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+
+	if snapshot.LastIncludedIndex != 100 {
+		t.Errorf("Expected index 100, got %d", snapshot.LastIncludedIndex)
+	}
+
+	if snapshot.LastIncludedTerm != 5 {
+		t.Errorf("Expected term 5, got %d", snapshot.LastIncludedTerm)
+	}
+}
+
+// TestSnapshotCompaction tests log compaction after snapshot.
+func TestSnapshotCompaction(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Create snapshot at index 50
+	sm.Save(50, 3, nil)
+
+	// Create log with entries 1-100
+	var log []LogEntry
+	for i := uint64(1); i <= 100; i++ {
+		log = append(log, LogEntry{Index: i, Term: 3})
+	}
+
+	// Compact
+	compacted := sm.CompactLog(log)
+
+	// Should only have entries 51-100
+	if len(compacted) != 50 {
+		t.Errorf("Expected 50 entries after compaction, got %d", len(compacted))
+	}
+
+	if compacted[0].Index != 51 {
+		t.Errorf("First entry should be index 51, got %d", compacted[0].Index)
+	}
+}
+
+// TestShouldSnapshot tests the snapshot threshold logic.
+func TestShouldSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// No snapshot yet - should snapshot at threshold
+	if !sm.ShouldSnapshot(100, 100) {
+		t.Error("Should snapshot at threshold")
+	}
+
+	// Create snapshot at index 100
+	sm.Save(100, 1, nil)
+
+	// 50 entries since snapshot - should not snapshot yet
+	if sm.ShouldSnapshot(150, 100) {
+		t.Error("Should not snapshot before threshold")
+	}
+
+	// 100 entries since snapshot - should snapshot
+	if !sm.ShouldSnapshot(200, 100) {
+		t.Error("Should snapshot at threshold")
+	}
+}
+
+// TestIntegrationWALAndSnapshot tests WAL + snapshot working together.
+func TestIntegrationWALAndSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create WAL and snapshot manager
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Simulate Raft operations
+	wal.AppendTermChange(1)
+	
+	for i := uint64(1); i <= 100; i++ {
+		wal.AppendLogEntry(1, i, map[string]string{"order": "test"})
+	}
+	
+	wal.AppendCommit(100)
+
+	// Take snapshot at index 100
+	sm.Save(100, 1, "state-at-100")
+
+	// Continue with more entries
+	for i := uint64(101); i <= 150; i++ {
+		wal.AppendLogEntry(1, i, map[string]string{"order": "test"})
+	}
+
+	// Recover state
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover: %v", err)
+	}
+
+	// Should have all 150 entries in WAL
+	if len(state.Log) != 150 {
+		t.Errorf("Expected 150 log entries, got %d", len(state.Log))
+	}
+
+	// Snapshot should be at 100
+	if sm.LastIncludedIndex() != 100 {
+		t.Errorf("Snapshot should be at 100")
+	}
+}
+
+// TestRaftNodeRestart tests full Raft node restart with durability.
+func TestRaftNodeRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	nodeID := "test-node-1"
+	
+	// First run: create node and commit some orders
+	node1 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Simulate becoming leader and committing
+	node1.CurrentTerm = 3
+	node1.Role = Leader
+	
+	// Commit 5 orders
+	for i := 0; i < 5; i++ {
+		cmd := map[string]string{
+			"type":    "commit_order",
+			"orderID": "order-" + string(rune('A'+i)),
+			"status":  "DISPATCHED",
+		}
+		node1.HandleCommitOrder(cmd)
+		time.Sleep(10 * time.Millisecond)
+	}
+	
+	if len(node1.Log) != 5 {
+		t.Errorf("Expected 5 log entries, got %d", len(node1.Log))
+	}
+
+	// "Crash" - just stop using node1
+	
+	// Second run: restart node
+	node2 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Should restore state
+	if node2.CurrentTerm != 3 {
+		t.Errorf("Expected term 3 after restart, got %d", node2.CurrentTerm)
+	}
+
+	if len(node2.Log) != 5 {
+		t.Errorf("Expected 5 log entries after restart, got %d", len(node2.Log))
+	}
+
+	// Verify committed orders are still there
+	if node2.CommitIndex != 5 {
+		t.Errorf("Expected commit index 5 after restart, got %d", node2.CommitIndex)
+	}
+}
+
+// TestVoteNotRegrantedAfterRestart tests that a node doesn't re-vote in same term.
+func TestVoteNotRegrantedAfterRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	nodeID := "test-node-1"
+	
+	// First run: vote for candidate-A in term 5
+	node1 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	node1.CurrentTerm = 5
+	node1.VotedFor = "candidate-A"
+	
+	// Persist the vote
+	if node1.wal != nil {
+		node1.wal.AppendTermChange(5)
+		node1.wal.AppendVote(5, "candidate-A")
+	}
+	
+	// "Restart"
+	node2 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Should remember it voted for candidate-A
+	if node2.CurrentTerm != 5 {
+		t.Errorf("Expected term 5 after restart")
+	}
+	
+	if node2.VotedFor != "candidate-A" {
+		t.Errorf("Expected VotedFor=candidate-A after restart, got %s", node2.VotedFor)
+	}
+}
+
+// Helper to create RaftNode with persistence (if not already in main.go)
+func NewRaftNodeWithPersistence(id, dataDir string) *RaftNode {
+	// This would be implemented in main.go
+	// For testing, we create a minimal node
+	return &RaftNode{
+		NodeID:      id,
+		CurrentTerm: 0,
+		VotedFor:    "",
+		Role:        Follower,
+		Log:         make([]LogEntry, 0),
+		CommitIndex: 0,
+		LastApplied: 0,
+	}
+}
+

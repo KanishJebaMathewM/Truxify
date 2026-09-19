@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +12,13 @@ import 'battery_service.dart';
 import 'location_replay_service.dart';
 import 'offline_location_queue.dart';
 import 'secure_storage.dart';
+
+/// Factory for creating [ResilientWebSocket] instances (allows mocking in tests).
+typedef ResilientWebSocketFactory = ResilientWebSocket Function(
+  String url, {
+  void Function()? onConnect,
+  String Function()? urlFactory,
+});
 
 /// Outcome of a location ping attempt.
 ///
@@ -30,6 +39,9 @@ enum LocationDelivery {
 class LocationService {
   LocationService._privateConstructor();
   static final LocationService instance = LocationService._privateConstructor();
+
+  @visibleForTesting
+  static ResilientWebSocketFactory? wsFactoryForTesting;
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
@@ -247,6 +259,32 @@ class LocationService {
     });
   }
 
+  /// Heartbeat ping for the fallback timer. Re-checks the throttle (and re-checks
+  /// again under the send lock) so it only fires when no successful ping landed
+  /// within [_maxInterval], preventing duplicate backend writes.
+  Future<void> _sendFallbackPing() async {
+    final last = _lastSentPosition;
+    if (last == null || !_isTracking) return;
+    final now = DateTime.now();
+    if (_lastSentTime != null &&
+        now.difference(_lastSentTime!) < _maxInterval) {
+      return;
+    }
+    await _serializeSend(() async {
+      if (!_isTracking) return;
+      if (_lastSentTime != null &&
+          DateTime.now().difference(_lastSentTime!) < _maxInterval) {
+        return;
+      }
+      debugPrint('[LocationService] Max interval elapsed, sending fallback ping');
+      final result = await _sendLocationPing(last);
+      if (result == LocationDelivery.delivered ||
+          result == LocationDelivery.queued) {
+        _lastSentTime = DateTime.now();
+      }
+    });
+  }
+
   Future<void> _handleLocationUpdate(Position position) async {
     // Drop stale/cached fixes: Geolocator routinely re-emits the last-known
     // position with an old `timestamp` (after startup, GPS loss, or waking from
@@ -263,18 +301,6 @@ class LocationService {
       return;
     }
 
-    // Implement displacement-based throttling
-    if (_lastSentPosition == null) {
-      // First position, always send
-      final result = await _sendLocationPing(position);
-      if (result == LocationDelivery.delivered ||
-          result == LocationDelivery.queued) {
-        _lastSentTime = DateTime.now();
-      }
-    });
-  }
-
-  Future<void> _handleLocationUpdate(Position position) async {
     // Serialize the throttle decision + send + state update so two concurrent
     // updates (or the fallback timer) cannot both read the same stale throttle
     // state and both pass the check (issue #13955).
@@ -304,7 +330,7 @@ class LocationService {
         position.longitude,
       );
 
-      // Send if: moved 15m+ OR max interval (30s) has elapsed
+      // Send if: moved 10m+ OR max interval (5s) has elapsed
       if (distanceMoved >= _minDistanceMeters ||
           timeSinceLastSend.compareTo(_maxInterval) >= 0) {
         final result = await _sendLocationPing(position);
@@ -611,20 +637,39 @@ class LocationService {
     _lastCloseCode = null;
     _wsAuthenticated = false;
 
-    final ws = ResilientWebSocket(
-      _buildWsUri().toString(),
-      onConnect: () async {
-        _emitStatus(WsConnectionStatus.connected);
-        // The auth handshake runs on every (re)connect — the server requires
-        // the token as a first frame on each new TCP/TLS session.
-        _wsAuthenticated = false;
-        final token = await _resolveAuthToken();
-        if (token != null && token.isNotEmpty) {
-          ws.send({'event': 'auth', 'data': {'token': token}});
-        }
-      },
-      urlFactory: () => _buildWsUri().toString(),
-    );
+    late final ResilientWebSocket ws;
+    final factory = wsFactoryForTesting;
+    if (factory != null) {
+      ws = factory(
+        _buildWsUri().toString(),
+        onConnect: () async {
+          _emitStatus(WsConnectionStatus.connected);
+          // The auth handshake runs on every (re)connect — the server requires
+          // the token as a first frame on each new TCP/TLS session.
+          _wsAuthenticated = false;
+          final token = await _resolveAuthToken();
+          if (token != null && token.isNotEmpty) {
+            ws.send({'event': 'auth', 'data': {'token': token}});
+          }
+        },
+        urlFactory: () => _buildWsUri().toString(),
+      );
+    } else {
+      ws = ResilientWebSocket(
+        _buildWsUri().toString(),
+        onConnect: () async {
+          _emitStatus(WsConnectionStatus.connected);
+          // The auth handshake runs on every (re)connect — the server requires
+          // the token as a first frame on each new TCP/TLS session.
+          _wsAuthenticated = false;
+          final token = await _resolveAuthToken();
+          if (token != null && token.isNotEmpty) {
+            ws.send({'event': 'auth', 'data': {'token': token}});
+          }
+        },
+        urlFactory: () => _buildWsUri().toString(),
+      );
+    }
     _resilientWs = ws;
 
     _socketSubscription = ws.stream.listen(
@@ -690,8 +735,102 @@ class LocationService {
     _resilientWs = null;
   }
 
-  void stopTracking() {
-    _timer?.cancel();
-    _socket?.disconnect();
-  }
-}
+  // ── Testing Hooks & Accessors ─────────────────────────────────────────────
+
+  @visibleForTesting
+  Map<String, dynamic> buildLocationPayload(
+    Position position, {
+    required String driverId,
+    required String orderId,
+    required String orderDisplayId,
+  }) =>
+      _buildLocationPayload(
+        position,
+        driverId: driverId,
+        orderId: orderId,
+        orderDisplayId: orderDisplayId,
+      );
+
+  @visibleForTesting
+  Future<void> connectWebSocket() => _connectWebSocket();
+
+  @visibleForTesting
+  void closeWebSocket() => _closeWebSocket();
+
+  @visibleForTesting
+  Future<LocationDelivery> sendLocationPing(Position position) =>
+      _sendLocationPing(position);
+
+  @visibleForTesting
+  Future<void> handleLocationUpdate(Position position) =>
+      _handleLocationUpdate(position);
+
+  @visibleForTesting
+  Future<void> sendFallbackPing() => _sendFallbackPing();
+
+  @visibleForTesting
+  Future<void> checkGeofence(Map<String, dynamic> order, Position position) =>
+      _checkGeofence(order, position);
+
+  @visibleForTesting
+  Future<void> updateOrderMilestone(String orderId, String milestone) =>
+      _updateOrderMilestone(orderId, milestone);
+
+  @visibleForTesting
+  void emitStatus(WsConnectionStatus status) => _emitStatus(status);
+
+  @visibleForTesting
+  bool get wsAuthenticated => _wsAuthenticated;
+
+  @visibleForTesting
+  set wsAuthenticated(bool value) => _wsAuthenticated = value;
+
+  @visibleForTesting
+  int? get lastCloseCode => _lastCloseCode;
+
+  @visibleForTesting
+  set lastCloseCode(int? code) => _lastCloseCode = code;
+
+  @visibleForTesting
+  ResilientWebSocket? get resilientWs => _resilientWs;
+
+  @visibleForTesting
+  set resilientWs(ResilientWebSocket? ws) => _resilientWs = ws;
+
+  @visibleForTesting
+  String? get activeOrderId => _activeOrderId;
+
+  @visibleForTesting
+  set activeOrderId(String? id) => _activeOrderId = id;
+
+  @visibleForTesting
+  String? get activeOrderDisplayId => _activeOrderDisplayId;
+
+  @visibleForTesting
+  set activeOrderDisplayId(String? id) => _activeOrderDisplayId = id;
+
+  @visibleForTesting
+  Position? get lastSentPosition => _lastSentPosition;
+
+  @visibleForTesting
+  set lastSentPosition(Position? pos) => _lastSentPosition = pos;
+
+  @visibleForTesting
+  DateTime? get lastSentTime => _lastSentTime;
+
+  @visibleForTesting
+  set lastSentTime(DateTime? time) => _lastSentTime = time;
+
+  @visibleForTesting
+  String? get lastTriggeredMilestone => _lastTriggeredMilestone;
+
+  @visibleForTesting
+  set lastTriggeredMilestone(String? milestone) =>
+      _lastTriggeredMilestone = milestone;
+
+  @visibleForTesting
+  set isTrackingForTesting(bool value) => _isTracking = value;
+
+  @visibleForTesting
+  void installReplayHooks() => _installReplayHooks();
+}

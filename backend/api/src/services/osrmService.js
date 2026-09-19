@@ -245,8 +245,140 @@ export const getRouteWithResilience = async (startLon, startLat, endLon, endLat)
     }
 };
 
+/**
+ * Computes an N x N distance and duration matrix using spherical Haversine geometry with freight tortuosity factor.
+ * @param {Array<[number, number]>} coordinates Array of [lon, lat] pairs
+ * @param {Object} options Configuration options
+ * @returns {Object} Matrix result with distances (meters) and durations (seconds)
+ */
+export const calculateHaversineDistanceMatrix = (coordinates, options = {}) => {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+        throw new Error('Coordinates must be an array of at least 2 coordinate pairs [lon, lat]');
+    }
+
+    const maxPoints = options.maxPoints || 50;
+    if (coordinates.length > maxPoints) {
+        throw new Error(`Exceeded maximum allowed matrix points (${maxPoints}). Received: ${coordinates.length}`);
+    }
+
+    const tortuosityFactor = Number.isFinite(options.tortuosityFactor) && options.tortuosityFactor >= 1.0
+        ? options.tortuosityFactor
+        : 1.25; // Default freight road network curvature factor
+
+    const averageSpeedKmh = Number.isFinite(options.averageSpeedKmh) && options.averageSpeedKmh > 0
+        ? options.averageSpeedKmh
+        : 45; // Default commercial freight corridor speed
+
+    const validatedPoints = coordinates.map((c, index) => {
+        if (!Array.isArray(c) || c.length < 2) {
+            throw new Error(`Coordinate at index ${index} must be an array [lon, lat]`);
+        }
+        return validateCoordinate(c[0], c[1], `point[${index}]`);
+    });
+
+    const n = validatedPoints.length;
+    const distances = Array.from({ length: n }, () => new Float64Array(n));
+    const durations = Array.from({ length: n }, () => new Float64Array(n));
+
+    for (let i = 0; i < n; i++) {
+        distances[i][i] = 0;
+        durations[i][i] = 0;
+        for (let j = i + 1; j < n; j++) {
+            const rawMeters = calculateStraightLineDistance(
+                validatedPoints[i].lon,
+                validatedPoints[i].lat,
+                validatedPoints[j].lon,
+                validatedPoints[j].lat
+            );
+            const roadMeters = Math.round(rawMeters * tortuosityFactor);
+            const durationSec = estimateDurationFromDistance(roadMeters, averageSpeedKmh);
+
+            distances[i][j] = roadMeters;
+            distances[j][i] = roadMeters;
+            durations[i][j] = durationSec;
+            durations[j][i] = durationSec;
+        }
+    }
+
+    return {
+        distances: distances.map(row => Array.from(row)),
+        durations: durations.map(row => Array.from(row)),
+        sources: validatedPoints.map(p => ({ location: [p.lon, p.lat] })),
+        destinations: validatedPoints.map(p => ({ location: [p.lon, p.lat] })),
+        tortuosityFactor,
+        averageSpeedKmh
+    };
+};
+
+/**
+ * Resilient N x N distance matrix resolution with circuit breaker and Haversine fallback.
+ * @param {Array<[number, number]>} coordinates
+ * @param {Object} options
+ * @returns {Promise<Object>}
+ */
+export const getDistanceMatrixWithResilience = async (coordinates, options = {}) => {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+        throw new Error('Coordinates must be an array of at least 2 coordinate pairs [lon, lat]');
+    }
+
+    const maxPoints = options.maxPoints || 50;
+    if (coordinates.length > maxPoints) {
+        throw new Error(`Exceeded maximum allowed matrix points (${maxPoints}). Received: ${coordinates.length}`);
+    }
+
+    // Validate coordinates first
+    const validatedPoints = coordinates.map((c, index) => {
+        if (!Array.isArray(c) || c.length < 2) {
+            throw new Error(`Coordinate at index ${index} must be an array [lon, lat]`);
+        }
+        return validateCoordinate(c[0], c[1], `point[${index}]`);
+    });
+
+    try {
+        return await osrmCircuitBreaker.execute(async () => {
+            return await osrmBackoff.execute(async () => {
+                const formattedCoords = validatedPoints.map(p => `${p.lon},${p.lat}`).join(';');
+                const url = `${OSRM_BASE_URL}/table/v1/driving/${formattedCoords}?annotations=distance,duration`;
+
+                const response = await axiosClient.get(url, {
+                    timeout: OSRM_TIMEOUT,
+                });
+
+                if (!response || !response.data || response.data.code !== 'Ok') {
+                    throw new Error(`OSRM table returned error code: ${response?.data?.code || 'UNKNOWN'}`);
+                }
+
+                return {
+                    fallback: false,
+                    durations: response.data.durations,
+                    distances: response.data.distances || null,
+                    sources: response.data.sources || validatedPoints.map(p => ({ location: [p.lon, p.lat] })),
+                    destinations: response.data.destinations || validatedPoints.map(p => ({ location: [p.lon, p.lat] })),
+                    circuitBreakerState: osrmCircuitBreaker.getState()
+                };
+            });
+        });
+    } catch (error) {
+        const fallbackMatrix = calculateHaversineDistanceMatrix(coordinates, options);
+        return {
+            fallback: true,
+            durations: fallbackMatrix.durations,
+            distances: fallbackMatrix.distances,
+            sources: fallbackMatrix.sources,
+            destinations: fallbackMatrix.destinations,
+            tortuosityFactor: fallbackMatrix.tortuosityFactor,
+            averageSpeedKmh: fallbackMatrix.averageSpeedKmh,
+            message: 'OSRM distance matrix degraded. Returning Haversine curvature matrix.',
+            error: error.message,
+            circuitBreakerState: osrmCircuitBreaker.getState()
+        };
+    }
+};
+
 export default {
     getRouteWithResilience,
+    getDistanceMatrixWithResilience,
+    calculateHaversineDistanceMatrix,
     fetchRouteFromOSRM,
     calculateStraightLineDistance,
     estimateDurationFromDistance,

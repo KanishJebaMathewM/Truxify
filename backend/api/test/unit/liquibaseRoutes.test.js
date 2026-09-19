@@ -36,11 +36,11 @@ const liquibaseServiceMock = vi.hoisted(() => ({
   validate: vi.fn(),
 }));
 
-vi.mock('../../../database/liquibase/liquibase.service.js', () => ({
+vi.mock('../../../../database/liquibase/liquibase.service.js', () => ({
   default: liquibaseServiceMock,
 }));
 
-const liquibaseRouter = (await import('../../../database/liquibase/routes.js')).default;
+const liquibaseRouter = (await import('../../../../database/liquibase/routes.js')).default;
 
 function makeApp() {
   const app = express();

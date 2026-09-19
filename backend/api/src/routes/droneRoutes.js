@@ -56,6 +56,124 @@ export const isValidMissionId = (missionId) => {
  * Coordinates launch of automated drone for last-mile handoff.
  * Restricted to drivers, dispatchers, and admins with pre-flight safety checks.
  */
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     DroneGpsCoordinate:
+ *       type: object
+ *       required:
+ *         - lat
+ *         - lng
+ *       properties:
+ *         lat:
+ *           type: number
+ *           format: double
+ *           minimum: -90
+ *           maximum: 90
+ *           description: Latitude in decimal degrees.
+ *         lng:
+ *           type: number
+ *           format: double
+ *           minimum: -180
+ *           maximum: 180
+ *           description: Longitude in decimal degrees.
+ *     DroneLaunchRequest:
+ *       type: object
+ *       required:
+ *         - trip_id
+ *         - parcel_id
+ *         - safe_zone_gps
+ *         - destination_gps
+ *       properties:
+ *         trip_id:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 64
+ *           description: Trip identifier accepted by the drone launch service.
+ *         parcel_id:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 64
+ *           description: Parcel identifier accepted by the drone launch service.
+ *         safe_zone_gps:
+ *           $ref: '#/components/schemas/DroneGpsCoordinate'
+ *         destination_gps:
+ *           $ref: '#/components/schemas/DroneGpsCoordinate'
+ *     DroneLaunchResponse:
+ *       type: object
+ *       required:
+ *         - message
+ *         - flightDistanceKm
+ *         - mission
+ *       properties:
+ *         message:
+ *           type: string
+ *           example: Drone delivery handoff launched successfully
+ *         flightDistanceKm:
+ *           type: number
+ *           format: double
+ *           minimum: 0
+ *         mission:
+ *           type: object
+ *           additionalProperties: true
+ *     DroneLaunchErrorResponse:
+ *       type: object
+ *       required:
+ *         - error
+ *       properties:
+ *         error:
+ *           type: string
+ *         flightDistanceKm:
+ *           type: number
+ *           format: double
+ *           minimum: 0
+ *         maxRadiusKm:
+ *           type: number
+ *           format: double
+ *           minimum: 0
+ *           maximum: 25
+ *           description: Maximum permitted one-way flight distance in kilometers.
+ */
+
+/**
+ * @swagger
+ * /drone/launch:
+ *   post:
+ *     summary: Launch a drone delivery handoff
+ *     description: Starts a last-mile drone delivery mission after validating the caller role, request identifiers, GPS coordinates, and the maximum 25 km flight radius.
+ *     tags:
+ *       - Drone
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/DroneLaunchRequest'
+ *     responses:
+ *       '201':
+ *         description: Drone delivery handoff launched successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DroneLaunchResponse'
+ *       '400':
+ *         description: Missing or invalid request parameters, GPS coordinates, or a flight distance greater than 25 km.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DroneLaunchErrorResponse'
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Caller role is not authorized to launch drone missions.
+ *       '429':
+ *         description: User rate limit exceeded.
+ *       '500':
+ *         description: Drone launch failed.
+ */
 router.post('/launch', authenticate, userLimiter, async (req, res) => {
   try {
     if (req.user && req.user.role && !ALLOWED_LAUNCH_ROLES.includes(req.user.role)) {

@@ -44,16 +44,24 @@ class QuantumService:
     def solve_route_optimization(self, nodes: List[Dict], edges: List[Dict]) -> Dict:
         """Solve route optimization using quantum computing"""
         try:
-            # Build graph
-            graph = nx.Graph()
+            # Build a multigraph so distinct roads between the same locations
+            # remain independently selectable.
+            graph = nx.MultiGraph()
             
             # Add nodes
             for node in nodes:
                 graph.add_node(node['id'], **node)
             
-            # Add edges
-            for edge in edges:
-                graph.add_edge(edge['source'], edge['target'], weight=edge.get('distance', 1))
+            # Add edges with stable per-input identity.
+            for index, edge in enumerate(edges):
+                graph.add_edge(
+                    edge['source'],
+                    edge['target'],
+                    key=index,
+                    weight=edge.get('distance', 1),
+                    edge_id=edge.get('id'),
+                    edge_index=index,
+                )
             
             # Formulate QUBO
             qubo = self.qubo_formatter.formulate_route_optimization(graph)
@@ -77,10 +85,26 @@ class QuantumService:
                     }
                 }
 
+            selected_edges = []
+            edge_mapping = result.get('edge_mapping') or []
+            solution = result.get('solution')
+            if solution is not None and len(solution) == len(edge_mapping):
+                for bit, (u, v, key) in zip(solution, edge_mapping):
+                    if bit:
+                        data = graph[u][v][key]
+                        selected_edges.append({
+                            'source': u,
+                            'target': v,
+                            'edge_index': data.get('edge_index', key),
+                            'id': data.get('edge_id'),
+                            'distance': data.get('weight', 1),
+                        })
+
             return {
                 'success': True,
                 'data': {
                     'route': route,
+                    'selected_edges': selected_edges,
                     'objective': result.get('objective'),
                     'num_nodes': len(nodes),
                     'num_edges': len(edges)
@@ -92,23 +116,33 @@ class QuantumService:
     
     def _extract_route(self, qubo_result: Dict, node_ids: List) -> List:
         """Decode the QUBO edge-selection solution into an ordered route"""
-        solution = qubo_result.get('solution') or []
+        solution = qubo_result.get('solution')
         variables = qubo_result.get('variables') or []
-        if not solution or len(solution) != len(variables):
+        edge_mapping = qubo_result.get('edge_mapping')
+
+        if solution is None or len(solution) != len(variables):
             return None
 
         selected = []
-        for var, bit in zip(variables, solution):
-            if bit and str(var).startswith('x_'):
-                parts = str(var)[2:].split('_')
-                if len(parts) == 2:
-                    selected.append((parts[0], parts[1]))
+        if edge_mapping is not None and len(edge_mapping) == len(variables):
+            for bit, edge in zip(solution, edge_mapping):
+                if bit:
+                    if not isinstance(edge, (list, tuple)) or len(edge) != 3:
+                        return None
+                    selected.append(tuple(edge))
+        else:
+            for var, bit in zip(variables, solution):
+                if bit and str(var).startswith('x_'):
+                    parts = str(var)[2:].split('_')
+                    if len(parts) == 2:
+                        selected.append((parts[0], parts[1]))
 
         if not selected:
             return None
 
         adjacency = {}
-        for u, v in selected:
+        selected_pairs = [(edge[0], edge[1]) for edge in selected]
+        for u, v in selected_pairs:
             adjacency.setdefault(u, []).append(v)
             adjacency.setdefault(v, []).append(u)
 
@@ -126,8 +160,8 @@ class QuantumService:
 
         # Order the selected edges into a traversal
         route = []
-        stack = [selected[0][0]]
-        remaining = list(selected)
+        stack = [selected_pairs[0][0]]
+        remaining = list(selected_pairs)
         while stack:
             u = stack[-1]
             edge = next((e for e in remaining if u in e), None)

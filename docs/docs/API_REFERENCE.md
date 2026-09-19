@@ -32,6 +32,9 @@
   - Fraud Detection
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
+  - Road Conditions
+  - IoT Telemetry
+  - Cross-Docking
 - Rate Limiting
 - Idempotency
 - WebSocket Events
@@ -304,6 +307,185 @@ Base Path
 |GET|/:id|
 
 ---
+
+## Cross-Docking
+
+Base Path
+
+```
+/api/cross-dock
+```
+
+Authentication
+
+All cross-dock endpoints require a Bearer token. Route-level policies and participant checks additionally restrict each operation:
+
+| Operation | Allowed roles / policy |
+|-----------|------------------------|
+|GET /candidates|driver, admin — `crossdock:list-candidates`|
+|POST /|driver — `crossdock:create`|
+|GET /|driver, admin — `crossdock:list`|
+|GET /:id|driver, admin — `crossdock:view`|
+|POST /:id/accept|driver — `crossdock:accept`|
+|POST /:id/decline|driver — `crossdock:decline`|
+|POST /:id/cancel|driver — `crossdock:cancel`|
+|POST /:id/verify|driver — `crossdock:verify`|
+
+### Find candidate drivers
+
+```
+GET /api/cross-dock/candidates?orderId=<uuid>&cross_dock_lat=28.6139&cross_dock_lng=77.2090&radius_km=50&limit=20
+```
+
+Parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+|orderId|Yes|UUID of the load/order to relay.|
+|cross_dock_lat|Yes|Cross-dock latitude, from -90 to 90.|
+|cross_dock_lng|Yes|Cross-dock longitude, from -180 to 180.|
+|radius_km|No|Search radius in kilometres, 1–500. Defaults to 50 km.|
+|limit|No|Maximum candidates to return, 1–50. Defaults to 20.|
+
+Successful response:
+
+```json
+{
+  "candidates": [
+    {
+      "driver_id": "uuid",
+      "name": "Driver Name",
+      "distance_km": 8.42,
+      "last_seen_at": "2026-09-19T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Create a transfer request
+
+```
+POST /api/cross-dock?orderId=<uuid>
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "to_driver_id": "uuid",
+  "cross_dock_lat": 28.6139,
+  "cross_dock_lng": 77.2090,
+  "cross_dock_note": "Meet at the north truck entrance"
+}
+```
+
+The request must target another driver and the authenticated driver must currently be carrying a load whose status permits handoff.
+
+Successful response:
+
+```json
+{
+  "id": "uuid",
+  "status": "requested",
+  "from_driver_id": "uuid",
+  "to_driver_id": "uuid",
+  "cross_dock_lat": 28.6139,
+  "cross_dock_lng": 77.2090,
+  "expires_at": "2026-09-19T13:00:00.000Z",
+  "created_at": "2026-09-19T12:00:00.000Z",
+  "handoff_code": "123456"
+}
+```
+
+### List transfers
+
+```
+GET /api/cross-dock?status=requested&limit=50
+```
+
+`status` is optional and may be `requested`, `accepted`, `verified`, `declined`, `cancelled`, or `expired`. `limit` defaults to 50 and the service caps it at 200.
+
+Successful response:
+
+```json
+{
+  "transfers": []
+}
+```
+
+### Get a transfer
+
+```
+GET /api/cross-dock/<transfer_id>
+```
+
+Only participating drivers may retrieve a transfer. Sensitive OTP fields are stripped from the response.
+
+Successful response:
+
+```json
+{
+  "transfer": {
+    "id": "uuid",
+    "order_id": "uuid",
+    "from_driver_id": "uuid",
+    "to_driver_id": "uuid",
+    "status": "accepted",
+    "cross_dock_lat": 28.6139,
+    "cross_dock_lng": 77.2090,
+    "created_at": "2026-09-19T12:00:00.000Z",
+    "expires_at": "2026-09-19T13:00:00.000Z",
+    "verified_at": null
+  }
+}
+```
+
+### Accept, decline, or cancel a transfer
+
+```
+POST /api/cross-dock/<transfer_id>/accept
+POST /api/cross-dock/<transfer_id>/decline
+POST /api/cross-dock/<transfer_id>/cancel
+```
+
+These operations require the authenticated participant permitted by the corresponding policy. Successful responses return the updated transfer object.
+
+### Verify handoff
+
+```
+POST /api/cross-dock/<transfer_id>/verify
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "handoff_code": "123456"
+}
+```
+
+The handoff code must be exactly six digits. On successful verification the transfer moves to `verified` and the load custody is reassigned to the receiving driver.
+
+### Cross-dock status codes
+
+| Code | Meaning |
+|------|---------|
+|200|Successful lookup, listing, or lifecycle operation|
+|201|Transfer created|
+|400|Invalid UUID/query/body, invalid status, or invalid handoff request|
+|401|Authentication required|
+|403|Role, policy, or participant authorization failure|
+|404|Load or transfer not found|
+|409|Invalid lifecycle state or concurrent/duplicate transfer conflict|
+|410|Transfer or handoff code expired|
+|500|Unexpected or database error|
+|503|Nearby-driver lookup unavailable|
+
+
 
 ## Support
 

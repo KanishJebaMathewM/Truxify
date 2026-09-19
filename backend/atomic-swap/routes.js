@@ -19,6 +19,40 @@ function recoverSigner(message, signature) {
 // ============ Mutating routes (authenticated + authorized only) ============
 
 // Create swap
+/**
+ * @openapi
+ * /api/swap/create:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Create an atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - counterparty
+ *               - amount
+ *               - secret
+ *               - signature
+ *             properties:
+ *               counterparty:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               secret:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/create', authenticate, requirePolicy('swap:create'), async (req, res) => {
     try {
         const { counterparty, tokenAddress, amount, secret, signature } = req.body;
@@ -68,6 +102,37 @@ router.post('/swap/create', authenticate, requirePolicy('swap:create'), async (r
 });
 
 // Execute swap
+/**
+ * @openapi
+ * /api/swap/execute:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Execute an atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - swapId
+ *               - secret
+ *               - signature
+ *             properties:
+ *               swapId:
+ *                 type: string
+ *               secret:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/execute', authenticate, requirePolicy('swap:execute'), async (req, res) => {
     try {
         const { swapId, secret, signature } = req.body;
@@ -103,6 +168,34 @@ router.post('/swap/execute', authenticate, requirePolicy('swap:execute'), async 
 });
 
 // Refund swap
+/**
+ * @openapi
+ * /api/swap/refund:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Refund an atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - swapId
+ *               - signature
+ *             properties:
+ *               swapId:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/refund', authenticate, requirePolicy('swap:refund'), async (req, res) => {
     try {
         const { swapId, signature } = req.body;
@@ -135,6 +228,43 @@ router.post('/swap/refund', authenticate, requirePolicy('swap:refund'), async (r
 });
 
 // Create cross-chain swap
+/**
+ * @openapi
+ * /api/swap/cross-chain/create:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Create a cross-chain atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - destChainId
+ *               - counterparty
+ *               - amount
+ *               - secret
+ *               - signature
+ *             properties:
+ *               destChainId:
+ *                 type: string
+ *               counterparty:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               secret:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/cross-chain/create', authenticate, requirePolicy('swap:cross-chain:create'), async (req, res) => {
     try {
         const { destChainId, counterparty, tokenAddress, amount, secret, signature } = req.body;
@@ -177,6 +307,40 @@ router.post('/swap/cross-chain/create', authenticate, requirePolicy('swap:cross-
 });
 
 // Execute cross-chain swap
+/**
+ * @openapi
+ * /api/swap/cross-chain/execute:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Execute a cross-chain atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - swapId
+ *               - secret
+ *               - proof
+ *               - signature
+ *             properties:
+ *               swapId:
+ *                 type: string
+ *               secret:
+ *                 type: string
+ *               proof:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/cross-chain/execute', authenticate, requirePolicy('swap:cross-chain:execute'), async (req, res) => {
     try {
         const { swapId, secret, proof, signature } = req.body;
@@ -209,6 +373,34 @@ router.post('/swap/cross-chain/execute', authenticate, requirePolicy('swap:cross
 });
 
 // Refund cross-chain swap
+/**
+ * @openapi
+ * /api/swap/cross-chain/refund:
+ *   post:
+ *     tags: [Atomic Swap]
+ *     summary: Refund a cross-chain atomic swap
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - swapId
+ *               - signature
+ *             properties:
+ *               swapId:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/swap/cross-chain/refund', authenticate, requirePolicy('swap:cross-chain:refund'), async (req, res) => {
     try {
         const { swapId, signature } = req.body;
@@ -243,6 +435,20 @@ router.post('/swap/cross-chain/refund', authenticate, requirePolicy('swap:cross-
 // ============ Read-only routes (authenticated only) ============
 
 // Get stats
+/**
+ * @openapi
+ * /api/swap/stats:
+ *   get:
+ *     tags: [Atomic Swap]
+ *     summary: Get atomic swap statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/swap/stats', authenticate, async (req, res) => {
     try {
         const stats = await swapService.getSwapStats();
@@ -254,6 +460,26 @@ router.get('/swap/stats', authenticate, async (req, res) => {
 });
 
 // Get swap
+/**
+ * @openapi
+ * /api/swap/{swapId}:
+ *   get:
+ *     tags: [Atomic Swap]
+ *     summary: Get an atomic swap
+ *     parameters:
+ *       - in: path
+ *         name: swapId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/swap/:swapId', authenticate, async (req, res) => {
     try {
         const { swapId } = req.params;
@@ -266,6 +492,26 @@ router.get('/swap/:swapId', authenticate, async (req, res) => {
 });
 
 // Get cross-chain swap
+/**
+ * @openapi
+ * /api/swap/cross-chain/{swapId}:
+ *   get:
+ *     tags: [Atomic Swap]
+ *     summary: Get a cross-chain atomic swap
+ *     parameters:
+ *       - in: path
+ *         name: swapId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/swap/cross-chain/:swapId', authenticate, async (req, res) => {
     try {
         const { swapId } = req.params;

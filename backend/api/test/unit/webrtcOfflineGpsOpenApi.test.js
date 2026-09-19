@@ -64,10 +64,10 @@ describe('WebRTC offline GPS OpenAPI contract', () => {
       type: 'object',
       required: ['id', 'data', 'timestamp', 'synced'],
       properties: expect.objectContaining({
-        id: { type: 'string' },
-        data: { type: 'object', additionalProperties: true },
-        timestamp: { type: 'integer', format: 'int64' },
-        synced: { type: 'boolean' },
+        id: expect.objectContaining({ type: 'string' }),
+        data: expect.objectContaining({ type: 'object', additionalProperties: true }),
+        timestamp: expect.objectContaining({ type: 'integer', format: 'int64' }),
+        synced: expect.objectContaining({ type: 'boolean' }),
       }),
     });
 

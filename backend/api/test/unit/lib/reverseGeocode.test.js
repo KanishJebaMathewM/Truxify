@@ -10,7 +10,9 @@ import {
   getReverseGeocode,
   fetchAddressFromCoords,
   reverseGeocodePoint,
-  clampGeohashPrecision
+  clampGeohashPrecision,
+  getTimeoutMs,
+  parseRetryAfterMs
 } from '../../../src/lib/reverseGeocode.js';
 import logger from '../../../src/middleware/logger.js';
 import { redisClient } from '../../../src/config/db.js';
@@ -111,6 +113,37 @@ describe('getTimeoutMs', async () => {
     expect(getTimeoutMs(0)).toBe(5000);
     expect(getTimeoutMs(3500)).toBe(3500);
     expect(getTimeoutMs('3500')).toBe(3500);
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('returns default 60000ms when retryAfter is null, undefined, or not a string', () => {
+    expect(parseRetryAfterMs(null)).toBe(60000);
+    expect(parseRetryAfterMs(undefined)).toBe(60000);
+    expect(parseRetryAfterMs(120)).toBe(60000);
+    expect(parseRetryAfterMs({})).toBe(60000);
+    expect(parseRetryAfterMs('')).toBe(60000);
+    expect(parseRetryAfterMs('   ')).toBe(60000);
+  });
+
+  it('parses delay-seconds format accurately into milliseconds', () => {
+    expect(parseRetryAfterMs('30')).toBe(30000);
+    expect(parseRetryAfterMs('  120  ')).toBe(120000);
+    expect(parseRetryAfterMs('0')).toBe(60000); // 0 is non-positive -> default
+  });
+
+  it('parses HTTP-date format accurately relative to now', () => {
+    const now = Date.parse('2026-09-19T12:00:00.000Z');
+    const futureDate = 'Sat, 19 Sep 2026 12:01:00 GMT'; // 60s in future
+    expect(parseRetryAfterMs(futureDate, now)).toBe(60000);
+
+    const pastDate = 'Sat, 19 Sep 2026 11:59:00 GMT'; // in the past
+    expect(parseRetryAfterMs(pastDate, now)).toBe(60000); // non-positive -> default
+  });
+
+  it('falls back to default 60000ms for invalid date/string formats', () => {
+    expect(parseRetryAfterMs('invalid-date-string')).toBe(60000);
+    expect(parseRetryAfterMs('-50')).toBe(60000);
   });
 });
 

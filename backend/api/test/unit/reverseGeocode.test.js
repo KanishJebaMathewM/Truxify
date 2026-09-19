@@ -29,7 +29,15 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
-import { reverseGeocode, clampGeohashPrecision, getTimeoutMs } from '../../src/lib/reverseGeocode.js';
+import {
+  reverseGeocode,
+  clampGeohashPrecision,
+  getTimeoutMs,
+  parseRetryAfterMs,
+  getReverseGeocode,
+  fetchAddressFromCoords,
+  reverseGeocodePoint
+} from '../../src/lib/reverseGeocode.js';
 
 describe('reverseGeocode - Comprehensive Edge Cases', () => {
   beforeEach(() => {
@@ -445,6 +453,37 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
   });
 });
 
+describe('parseRetryAfterMs', () => {
+  it('returns default 60000ms when retryAfter is null, undefined, or not a string', () => {
+    expect(parseRetryAfterMs(null)).toBe(60000);
+    expect(parseRetryAfterMs(undefined)).toBe(60000);
+    expect(parseRetryAfterMs(120)).toBe(60000);
+    expect(parseRetryAfterMs({})).toBe(60000);
+    expect(parseRetryAfterMs('')).toBe(60000);
+    expect(parseRetryAfterMs('   ')).toBe(60000);
+  });
+
+  it('parses delay-seconds format accurately into milliseconds', () => {
+    expect(parseRetryAfterMs('30')).toBe(30000);
+    expect(parseRetryAfterMs('  120  ')).toBe(120000);
+    expect(parseRetryAfterMs('0')).toBe(60000);
+  });
+
+  it('parses HTTP-date format accurately relative to now', () => {
+    const now = Date.parse('2026-09-19T12:00:00.000Z');
+    const futureDate = 'Sat, 19 Sep 2026 12:01:00 GMT';
+    expect(parseRetryAfterMs(futureDate, now)).toBe(60000);
+
+    const pastDate = 'Sat, 19 Sep 2026 11:59:00 GMT';
+    expect(parseRetryAfterMs(pastDate, now)).toBe(60000);
+  });
+
+  it('falls back to default 60000ms for invalid date/string formats', () => {
+    expect(parseRetryAfterMs('invalid-date-string')).toBe(60000);
+    expect(parseRetryAfterMs('-50')).toBe(60000);
+  });
+});
+
 describe('clampGeohashPrecision', () => {
   it('returns default (6) for undefined or NaN', () => {
     expect(clampGeohashPrecision(undefined)).toBe(6);
@@ -468,5 +507,14 @@ describe('clampGeohashPrecision', () => {
     expect(clampGeohashPrecision(7)).toBe(7);
     expect(clampGeohashPrecision(8.8)).toBe(8);
     expect(clampGeohashPrecision(12)).toBe(12);
+  });
+});
+
+describe('Enterprise Integration Aliases', () => {
+  it('verifies getReverseGeocode, fetchAddressFromCoords, and reverseGeocodePoint proxy to reverseGeocode', async () => {
+    mockRedisGet.mockResolvedValue('Alias Location');
+    expect(await getReverseGeocode(19.076, 72.878)).toBe('Alias Location');
+    expect(await fetchAddressFromCoords(19.076, 72.878)).toBe('Alias Location');
+    expect(await reverseGeocodePoint(19.076, 72.878)).toBe('Alias Location');
   });
 });

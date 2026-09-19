@@ -315,6 +315,12 @@ export default router;
 
 // === Spec 43: ===
 // === Spec 43: recover sender ===
+/**
+ * Recovers the Ethereum address that signed a message.
+ * @param {string} msg - Signed message.
+ * @param {string} sig - Wallet signature.
+ * @returns {string|null} Recovered address, or null for an invalid signature.
+ */
 export function recoverSender(msg, sig) {
   try {
     return ethers.verifyMessage(msg, sig);

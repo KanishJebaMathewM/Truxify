@@ -131,6 +131,59 @@ router.get('/plan/:planId', authenticate, userLimiter, async (req, res) => {
  * POST /api/ar-loading/verify/:planId
  * Verifies physical trailer loading completion against the AR spatial model.
  */
+/**
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     ARLoadingVerificationResponse:
+ *       type: object
+ *       required: [message, plan]
+ *       properties:
+ *         message:
+ *           type: string
+ *           example: AR loading plan verified successfully against physical load
+ *         plan:
+ *           type: object
+ *           additionalProperties: true
+ * /api/ar-loading/verify/{planId}:
+ *   post:
+ *     tags: [AR Loading]
+ *     summary: Verify an AR loading plan
+ *     description: Verifies physical trailer loading completion against the stored AR spatial loading plan.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - name: planId
+ *         in: path
+ *         required: true
+ *         description: Loading plan identifier.
+ *         schema:
+ *           type: string
+ *           pattern: '^PLAN-[a-zA-Z0-9_\\-]{6,64}$'
+ *         example: PLAN-ABC12345
+ *     responses:
+ *       200:
+ *         description: AR loading plan verified successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ARLoadingVerificationResponse'
+ *       400:
+ *         description: Invalid plan identifier.
+ *       401:
+ *         description: Authentication is required.
+ *       404:
+ *         description: AR loading plan not found.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Failed to verify the AR loading plan.
+ */
 router.post('/verify/:planId', authenticate, userLimiter, async (req, res) => {
   try {
     const { planId } = req.params;

@@ -50,8 +50,9 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
       limit: safeLimit,
       total: safeTotal,
       totalPages,
-      hasNextPage: safePage < totalPages,
-      hasPrevPage: safePage > 1,
+      hasNextPage: safeTotal > 0 && safePage < totalPages,
+      hasPrevPage: safeTotal > 0 && safePage > 1,
+      hasPreviousPage: safeTotal > 0 && safePage > 1,
     },
   };
 }

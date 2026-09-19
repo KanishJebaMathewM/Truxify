@@ -60,6 +60,7 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 
 const router = express.Router();
@@ -169,12 +170,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
     }
     const vehicleType = req.query.vehicle_type || '';
     if (vehicleType && vehicleType.toLowerCase() !== 'truck') {
+      const pagination = formatPaginationMeta(0, page, limit);
       return res.json({
-        page,
-        limit,
-        total: 0,
-        totalPages: 0,
-        loads: []
+        page: pagination.page,
+        limit: pagination.limit,
+        total: pagination.total,
+        totalPages: pagination.totalPages,
+        loads: [],
+        data: [],
+        pagination
       });
     }
 
@@ -303,26 +307,18 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
       vehicle_type: 'Truck'
     }));
 
-    const totalCount = count || 0;
-    const totalPages = Math.ceil(totalCount / limit);
-    const hasNextPage = page * limit < totalCount;
+    const pagination = formatPaginationMeta(count || 0, page, limit);
 
     res.json({
       success: true,
-      page,
-      limit,
-      total: totalCount,
-      totalPages,
-      hasNextPage,
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      hasNextPage: pagination.hasNextPage,
       loads: formattedLoads,
       data: formattedLoads,
-      pagination: {
-        page,
-        limit,
-        total: totalCount,
-        totalPages,
-        hasNextPage,
-      }
+      pagination
     });
 
   } catch (err) {

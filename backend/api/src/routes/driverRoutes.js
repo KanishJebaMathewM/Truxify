@@ -147,6 +147,7 @@ import {
   toDateKey,
 } from '../services/driver/earningsReportService.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
@@ -571,12 +572,16 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      transactions: transactions || []
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      transactions: transactions || [],
+      data: transactions || [],
+      pagination
     });
 
   } catch (err) {
@@ -961,12 +966,16 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       };
     });
 
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      trips: enrichedTrips
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      trips: enrichedTrips,
+      data: enrichedTrips,
+      pagination
     });
   } catch (err) {
     logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
@@ -1286,12 +1295,16 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
       .range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch bids.', details: error.message });
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      bids: bids || []
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      bids: bids || [],
+      data: bids || [],
+      pagination
     });
   } catch (err) {
     logger.error('Driver bids fetch error:', err);

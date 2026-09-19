@@ -45,7 +45,7 @@ def _forward(self, x, edge_index, edge_attr=None, batch=None):
     x = F.relu(x)
     x = self.dropout(x)
     x = self.lin2(x)
-    return x.squeeze()
+    return x.squeeze(-1)
 
 
 def _train(self, train_data, val_data=None, epochs=100):

@@ -35,8 +35,9 @@ const clearAuctionSchema = z.object({
  */
 async function requireShipperOwnership(loadOfferId, userId) {
   if (!supabaseAdmin) {
-    // Supabase not configured; skip ownership check (dev/test mode)
-    return null;
+    const err = new Error('Database service unavailable — cannot verify ownership');
+    err.statusCode = 503;
+    throw err;
   }
   const { data: offer, error } = await supabaseAdmin
     .from('load_offers')
@@ -63,12 +64,13 @@ async function requireShipperOwnership(loadOfferId, userId) {
  * Returns { driverRating, detourKm }.
  */
 async function resolveDriverBidContext(loadOfferId, driverId) {
-  let driverRating = 80; // safe default when DB is unavailable
+  let driverRating = 80; // safe default
   let detourKm = 0;      // conservative default
 
   if (!supabaseAdmin) {
-    // Supabase not configured; skip DB checks (dev/test mode)
-    return { driverRating, detourKm };
+    const err = new Error('Database service unavailable — cannot verify driver eligibility');
+    err.statusCode = 503;
+    throw err;
   }
 
   // 1. Verify the caller is not the load owner
@@ -254,9 +256,9 @@ router.post(
 router.get(
   '/load/:id/status',
   validateParams(loadIdParamSchema),
-  (req, res) => {
+  async (req, res) => {
     const loadOfferId = req.params.id;
-    const status = freightAuctionService.getAuctionStatus(loadOfferId);
+    const status = await freightAuctionService.getAuctionStatus(loadOfferId);
 
     if (!status) {
       return res.status(404).json({ error: `Auction for load ${loadOfferId} not found` });

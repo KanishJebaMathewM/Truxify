@@ -44,25 +44,26 @@ function acquireLocalLock(key, ttlSeconds) {
  * @returns {Promise<{acquired: boolean, release: Function}>}
  */
 export async function acquireDistributedLock(key, ttlSeconds = 5) {
-  const isRedisReady = redisClient &&
-    (redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function'));
-
-  if (!isRedisReady) {
-    // Degraded / fallback mode: maintain in-process mutual exclusion per key
+  if (!redisClient) {
+    // Degraded / fallback mode: maintain in-process mutual exclusion per key when Redis is unconfigured
     return acquireLocalLock(key, ttlSeconds);
   }
 
+  const isRedisReady = redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function');
+  if (!isRedisReady) {
+    return { acquired: false, token: null, release: async () => {} };
+  }
+
+  const token = crypto.randomUUID();
+
   try {
-    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
+    const lock = await redisClient.set(key, token, 'NX', 'EX', ttlSeconds);
     if (lock === 'OK') {
       return {
         acquired: true,
+        token,
         release: async () => {
-          try {
-            await redisClient.del(key);
-          } catch (err) {
-            logger.error({ err, key }, 'Failed to release distributed lock');
-          }
+          await releaseDistributedLock(key, token);
         }
       };
     }
@@ -71,17 +72,25 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
     return acquireLocalLock(key, ttlSeconds);
   }
 
-  return { acquired: false, release: async () => {} };
+  return { acquired: false, token: null, release: async () => {} };
 }
 
 /**
  * Releases a distributed lock acquired via acquireDistributedLock by key.
+ * If a token is provided and atomic Lua release is available, releases only if the token matches.
  * Removes from Redis and clears any local fallback queue entry.
  *
  * @param {string} key - Lock key
+ * @param {string|null} [token] - Lock owner token (UUID)
  */
-export async function releaseDistributedLock(key) {
-  if (redisClient && typeof redisClient.del === 'function') {
+export async function releaseDistributedLock(key, token) {
+  if (token && redisClient && typeof redisClient.eval === 'function') {
+    try {
+      await releaseLock(key, token);
+    } catch (err) {
+      logger.error({ err, key }, 'Failed to release distributed lock via token');
+    }
+  } else if (redisClient && typeof redisClient.del === 'function') {
     try {
       await redisClient.del(key);
     } catch (err) {

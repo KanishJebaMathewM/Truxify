@@ -5,6 +5,7 @@ import {
   releaseLock,
   acquireDistributedLock,
   releaseDistributedLock,
+  withLockRenewal,
   LockAcquisitionError,
 } from '../../lib/redisLock.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
@@ -75,7 +76,8 @@ export class FreightAuctionService {
         );
         return;
       } catch (err) {
-        logger.warn({ err, loadOfferId }, '[FreightAuction] Redis write failed; using local fallback');
+        logger.error({ err, loadOfferId }, '[FreightAuction] Redis write failed');
+        throw err;
       }
     }
     this._localAuctions.set(loadOfferId, auction);
@@ -121,16 +123,24 @@ export class FreightAuctionService {
   /**
    * Compensates a failed or aborted bid submission by removing the bid from auction state
    * and releasing the reserved collateral lock so the driver can retry cleanly.
+   *
+   * @param {string} loadOfferId
+   * @param {string} driverId
+   * @param {string|null} [token]
    */
-  async compensateFailedBid(loadOfferId, driverId) {
-    const auction = await this._getAuction(loadOfferId);
-    if (auction && Array.isArray(auction.bids)) {
-      auction.bids = auction.bids.filter(b => b.driverId !== driverId);
-      await this._setAuction(loadOfferId, auction);
+  async compensateFailedBid(loadOfferId, driverId, token = null) {
+    try {
+      const auction = await this._getAuction(loadOfferId);
+      if (auction && Array.isArray(auction.bids)) {
+        auction.bids = auction.bids.filter(b => b.driverId !== driverId);
+        await this._setAuction(loadOfferId, auction);
+      }
+    } catch (err) {
+      logger.warn({ err, loadOfferId }, '[FreightAuction] Failed to update auction state during compensation');
     }
     const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
     try {
-      await releaseDistributedLock(collateralKey);
+      await releaseDistributedLock(collateralKey, token);
     } catch (err) {
       logger.warn({ err, collateralKey }, '[FreightAuction] Failed to release collateral during compensation');
     }
@@ -215,132 +225,148 @@ export class FreightAuctionService {
     }
 
     try {
-      const auction = await this._getAuction(loadOfferId);
-      if (!auction) {
-        throw new Error(`No active auction found for load ${loadOfferId}`);
-      }
+      return await withLockRenewal(loadLockKey, loadLockValue, 10000, async (signal) => {
+        const auction = await this._getAuction(loadOfferId);
+        if (!auction) {
+          throw new Error(`No active auction found for load ${loadOfferId}`);
+        }
 
-      const now = Date.now();
-      if (![AUCTION_STATES.AUCTION_OPEN, AUCTION_STATES.SOFT_CLOSE_EXTENDED].includes(auction.status) || now >= auction.currentCloseAt) {
-        throw new Error('Auction is closed for new bids');
-      }
+        const now = Date.now();
+        if (![AUCTION_STATES.AUCTION_OPEN, AUCTION_STATES.SOFT_CLOSE_EXTENDED].includes(auction.status) || now >= auction.currentCloseAt) {
+          throw new Error('Auction is closed for new bids');
+        }
 
-      if (bidAmount > auction.reservePrice) {
-        throw new Error(`Bid amount ₹${(bidAmount / 100).toFixed(2)} exceeds shipper reserve ceiling ₹${(auction.reservePrice / 100).toFixed(2)}`);
-      }
+        if (bidAmount > auction.reservePrice) {
+          throw new Error(`Bid amount ₹${(bidAmount / 100).toFixed(2)} exceeds shipper reserve ceiling ₹${(auction.reservePrice / 100).toFixed(2)}`);
+        }
 
-      // Check for duplicate pending bid from the same driver
-      const existingBidIndex = auction.bids.findIndex(b => b.driverId === driverId);
-      if (existingBidIndex !== -1) {
-        throw new Error('Driver already has an active bid in this auction');
-      }
+        // Check for duplicate pending bid from the same driver
+        const existingBidIndex = auction.bids.findIndex(b => b.driverId === driverId);
+        if (existingBidIndex !== -1) {
+          throw new Error('Driver already has an active bid in this auction');
+        }
 
-      // 2. Compute multi-criteria utility score
-      const utilityScore = this.calculateUtilityScore({
-        bidAmount,
-        reservePrice: auction.reservePrice,
-        driverRating,
-        detourKm,
-      });
+        // 2. Compute multi-criteria utility score
+        const utilityScore = this.calculateUtilityScore({
+          bidAmount,
+          reservePrice: auction.reservePrice,
+          driverRating,
+          detourKm,
+        });
 
-      // 3. Anti-Sniping Soft-Close Window Evaluation
-      // Pre-compute whether an extension is warranted so the collateral lock TTL
-      // covers the fully extended closing time (addressing CodeRabbit comment 7).
-      let antiSnipingTriggered = false;
-      let effectiveCloseAt = auction.currentCloseAt;
-      let newExtensionsCount = auction.extensionsCount;
-      const timeRemainingMs = auction.currentCloseAt - now;
+        // 3. Anti-Sniping Soft-Close Window Evaluation
+        // Pre-compute whether an extension is warranted so the collateral lock TTL
+        // covers the fully extended closing time (addressing CodeRabbit comment 7).
+        let antiSnipingTriggered = false;
+        let effectiveCloseAt = auction.currentCloseAt;
+        let newExtensionsCount = auction.extensionsCount;
+        const timeRemainingMs = auction.currentCloseAt - now;
 
-      if (timeRemainingMs <= auction.antiSnipingWindowMs) {
-        const currentBestBid = auction.bids.length > 0
-          ? auction.bids.reduce((prev, curr) => (curr.utilityScore > prev.utilityScore ? curr : prev), auction.bids[0])
-          : null;
+        if (timeRemainingMs <= auction.antiSnipingWindowMs) {
+          const currentBestBid = auction.bids.length > 0
+            ? auction.bids.reduce((prev, curr) => (curr.utilityScore > prev.utilityScore ? curr : prev), auction.bids[0])
+            : null;
 
-        const isCompetitive = !currentBestBid || utilityScore >= currentBestBid.utilityScore || bidAmount < currentBestBid.bidAmount;
-        if (isCompetitive) {
-          const maxAllowedClose = auction.scheduledCloseAt + AUCTION_CONFIG.MAX_EXTENSION_MS;
-          const extendedCloseAt = Math.min(auction.currentCloseAt + auction.extensionMs, maxAllowedClose);
+          const isCompetitive = !currentBestBid || utilityScore >= currentBestBid.utilityScore || bidAmount < currentBestBid.bidAmount;
+          if (isCompetitive) {
+            const maxAllowedClose = auction.scheduledCloseAt + AUCTION_CONFIG.MAX_EXTENSION_MS;
+            const extendedCloseAt = Math.min(auction.currentCloseAt + auction.extensionMs, maxAllowedClose);
 
-          if (extendedCloseAt > auction.currentCloseAt) {
-            effectiveCloseAt = extendedCloseAt;
-            newExtensionsCount += 1;
-            antiSnipingTriggered = true;
+            if (extendedCloseAt > auction.currentCloseAt) {
+              effectiveCloseAt = extendedCloseAt;
+              newExtensionsCount += 1;
+              antiSnipingTriggered = true;
+            }
           }
         }
-      }
 
-      // 4. Driver Solvency & Capacity Reservation Lock
-      // Acquire lock with TTL covering the (potentially extended) auction close time.
-      const remainingSeconds = Math.max(60, Math.ceil((effectiveCloseAt - now) / 1000));
-      const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
-      const collateralLock = await acquireDistributedLock(collateralKey, remainingSeconds);
-      if (!collateralLock.acquired) {
-        throw new Error('Driver already has a conflicting collateral or capacity reservation for this auction');
-      }
+        // 4. Driver Solvency & Capacity Reservation Lock
+        // Acquire lock with TTL covering the (potentially extended) auction close time.
+        const remainingSeconds = Math.max(60, Math.ceil((effectiveCloseAt - now) / 1000));
+        const collateralKey = `auction:collateral:${driverId}:${loadOfferId}`;
+        const collateralLock = await acquireDistributedLock(collateralKey, remainingSeconds);
+        if (!collateralLock.acquired) {
+          throw new Error('Driver already has a conflicting collateral or capacity reservation for this auction');
+        }
 
-      // Apply anti-sniping state update now that driver collateral is locked
-      if (antiSnipingTriggered) {
-        auction.currentCloseAt = effectiveCloseAt;
-        auction.status = AUCTION_STATES.SOFT_CLOSE_EXTENDED;
-        auction.extensionsCount = newExtensionsCount;
-        logger.info(
-          { loadOfferId, driverId, extendedCloseAt: effectiveCloseAt, extensionsCount: auction.extensionsCount },
-          '[FreightAuction] Anti-sniping soft-close window extended'
-        );
-      }
+        let dbBid = null;
 
-      const bidRecord = {
-        bidId: crypto.randomUUID(),
-        loadOfferId,
-        driverId,
-        bidAmount,
-        driverRating,
-        detourKm,
-        utilityScore,
-        submittedAt: now,
-        antiSnipingTriggered,
-      };
-
-      auction.bids.push(bidRecord);
-
-      // 5. Durable Bid Persistence: coordinate with orderRepository (load_bids table)
-      // If persistence fails, roll back the in-memory/cache auction bid and release collateral lock.
-      let dbBid = null;
-      if (this.orderRepository) {
         try {
-          const { data, error: persistErr } = await this.orderRepository.createBid({
-            load_id: loadOfferId,
-            driver_id: driverId,
-            bid_amount: bidAmount,
-            status: 'pending',
-          });
+          if (signal?.aborted) {
+            throw new LockAcquisitionError(loadLockKey, 'Lock ownership was lost during execution — protected operation aborted');
+          }
 
-          if (persistErr) {
-            await collateralLock.release();
-            await this.compensateFailedBid(loadOfferId, driverId);
-            throw new Error(`Failed to persist bid to database: ${persistErr.message || 'Database error'}`);
+          // Apply anti-sniping state update now that driver collateral is locked
+          if (antiSnipingTriggered) {
+            auction.currentCloseAt = effectiveCloseAt;
+            auction.status = AUCTION_STATES.SOFT_CLOSE_EXTENDED;
+            auction.extensionsCount = newExtensionsCount;
+            logger.info(
+              { loadOfferId, driverId, extendedCloseAt: effectiveCloseAt, extensionsCount: auction.extensionsCount },
+              '[FreightAuction] Anti-sniping soft-close window extended'
+            );
           }
-          dbBid = data;
-          if (data?.id) {
-            bidRecord.dbBidId = data.id;
+
+          const bidRecord = {
+            bidId: crypto.randomUUID(),
+            loadOfferId,
+            driverId,
+            bidAmount,
+            driverRating,
+            detourKm,
+            utilityScore,
+            submittedAt: now,
+            antiSnipingTriggered,
+          };
+
+          auction.bids.push(bidRecord);
+
+          // 5. Durable Bid Persistence: coordinate with orderRepository (load_bids table)
+          if (this.orderRepository) {
+            const { data, error: persistErr } = await this.orderRepository.createBid({
+              load_id: loadOfferId,
+              driver_id: driverId,
+              bid_amount: bidAmount,
+              status: 'pending',
+            });
+
+            if (persistErr) {
+              throw new Error(`Failed to persist bid to database: ${persistErr.message || 'Database error'}`);
+            }
+            dbBid = data;
+            if (data?.id) {
+              bidRecord.dbBidId = data.id;
+            }
           }
+
+          if (signal?.aborted) {
+            throw new LockAcquisitionError(loadLockKey, 'Lock ownership was lost during execution — protected operation aborted');
+          }
+
+          // 6. Redis State Persistence
+          await this._setAuction(loadOfferId, auction);
+
+          return {
+            success: true,
+            bid: bidRecord,
+            dbBid,
+            auctionStatus: auction.status,
+            currentCloseAt: auction.currentCloseAt,
+            antiSnipingTriggered,
+          };
         } catch (err) {
           await collateralLock.release();
-          await this.compensateFailedBid(loadOfferId, driverId);
+          await this.compensateFailedBid(loadOfferId, driverId, collateralLock.token);
+          if (this.orderRepository && dbBid?.id && typeof this.orderRepository.deleteBid === 'function') {
+            try {
+              await this.orderRepository.deleteBid(dbBid.id);
+            } catch (delErr) {
+              logger.error({ delErr, dbBidId: dbBid.id }, '[FreightAuction] Failed to roll back db bid on failure');
+            }
+          }
           throw err;
         }
-      }
-
-      await this._setAuction(loadOfferId, auction);
-
-      return {
-        success: true,
-        bid: bidRecord,
-        dbBid,
-        auctionStatus: auction.status,
-        currentCloseAt: auction.currentCloseAt,
-        antiSnipingTriggered,
-      };
+      });
     } finally {
       await releaseLock(loadLockKey, loadLockValue);
     }
@@ -358,90 +384,89 @@ export class FreightAuctionService {
     }
 
     try {
-      const auction = await this._getAuction(loadOfferId);
-      if (!auction) {
-        throw new Error(`Auction for load ${loadOfferId} not found`);
-      }
-
-      const now = Date.now();
-      if (!force && now < auction.currentCloseAt) {
-        throw new Error('Auction bidding window is still active');
-      }
-
-      if ([AUCTION_STATES.SETTLED, AUCTION_STATES.CANCELLED_UNMET_RESERVE].includes(auction.status)) {
-        return {
-          status: auction.status,
-          winningBid: auction.winningBid,
-          settlementPrice: auction.settlementPrice,
-          message: 'Auction already finalized',
-        };
-      }
-
-      auction.status = AUCTION_STATES.CLEARING_EVALUATION;
-
-      if (!auction.bids || auction.bids.length < auction.minBidsRequired) {
-        auction.status = AUCTION_STATES.CANCELLED_UNMET_RESERVE;
-        await this._releaseAllCollateralLocks(auction);
-        logger.warn({ loadOfferId }, '[FreightAuction] Auction cancelled — unmet minimum bids');
-        return {
-          status: AUCTION_STATES.CANCELLED_UNMET_RESERVE,
-          reason: 'Insufficient qualifying bids meeting reserve price',
-          bidsCount: auction.bids.length,
-        };
-      }
-
-      // Sort bids by utilityScore DESC (best match first), tie-breaker: submittedAt ASC
-      const sortedBids = [...auction.bids].sort((a, b) => {
-        if (b.utilityScore !== a.utilityScore) {
-          return b.utilityScore - a.utilityScore;
+      return await withLockRenewal(loadLockKey, loadLockValue, 15000, async (signal) => {
+        const auction = await this._getAuction(loadOfferId);
+        if (!auction) {
+          throw new Error(`Auction for load ${loadOfferId} not found`);
         }
-        return a.submittedAt - b.submittedAt;
-      });
 
-      const winningBid = sortedBids[0];
+        const now = Date.now();
+        if (!force && now < auction.currentCloseAt) {
+          throw new Error('Auction bidding window is still active');
+        }
 
-      // Second-Price Reverse Auction Settlement:
-      // The winner pays the second-lowest price (critical price), not their own bid.
-      // Critical price = the lowest qualifying bid price among all non-winning bids,
-      // capped at the reserve ceiling. We sort by bidAmount ASC to find this, which
-      // is independent of the utility-ranking used to choose the winner.
-      let settlementPrice = winningBid.bidAmount;
-      if (sortedBids.length >= 2) {
-        // Select the second-lowest bid AMOUNT (price-ranked), not sortedBids[1]
-        // which is utility-ranked and may not be the cheapest remaining bid.
-        const losingBidAmounts = sortedBids.slice(1).map(b => b.bidAmount);
-        const secondLowestPrice = Math.min(...losingBidAmounts);
-        // Winner pays whichever is lower: reserve ceiling or the second-lowest competitor price.
-        // winningBid.bidAmount is the floor (winner cannot pay less than their own bid).
-        settlementPrice = Math.min(
-          auction.reservePrice,
-          Math.max(winningBid.bidAmount, secondLowestPrice)
+        if ([AUCTION_STATES.SETTLED, AUCTION_STATES.CANCELLED_UNMET_RESERVE].includes(auction.status)) {
+          return {
+            status: auction.status,
+            winningBid: auction.winningBid,
+            settlementPrice: auction.settlementPrice,
+            message: 'Auction already finalized',
+          };
+        }
+
+        auction.status = AUCTION_STATES.CLEARING_EVALUATION;
+
+        if (!auction.bids || auction.bids.length < auction.minBidsRequired) {
+          auction.status = AUCTION_STATES.CANCELLED_UNMET_RESERVE;
+          await this._setAuction(loadOfferId, auction);
+          await this._releaseAllCollateralLocks(auction);
+          logger.warn({ loadOfferId }, '[FreightAuction] Auction cancelled — unmet minimum bids');
+          return {
+            status: AUCTION_STATES.CANCELLED_UNMET_RESERVE,
+            reason: 'Insufficient qualifying bids meeting reserve price',
+            bidsCount: auction.bids.length,
+          };
+        }
+
+        // Sort bids by utilityScore DESC (best match first), tie-breaker: submittedAt ASC
+        const sortedBids = [...auction.bids].sort((a, b) => {
+          if (b.utilityScore !== a.utilityScore) {
+            return b.utilityScore - a.utilityScore;
+          }
+          return a.submittedAt - b.submittedAt;
+        });
+
+        const winningBid = sortedBids[0];
+
+        // Second-Price Reverse Auction Settlement:
+        let settlementPrice = winningBid.bidAmount;
+        if (sortedBids.length >= 2) {
+          const losingBidAmounts = sortedBids.slice(1).map(b => b.bidAmount);
+          const secondLowestPrice = Math.min(...losingBidAmounts);
+          settlementPrice = Math.min(
+            auction.reservePrice,
+            Math.max(winningBid.bidAmount, secondLowestPrice)
+          );
+        }
+
+        if (signal?.aborted) {
+          throw new LockAcquisitionError(loadLockKey, 'Lock ownership was lost during clearing');
+        }
+
+        auction.winningBid = winningBid;
+        auction.settlementPrice = settlementPrice;
+        auction.status = AUCTION_STATES.SETTLED;
+        auction.settledAt = now;
+
+        await this._setAuction(loadOfferId, auction);
+
+        // Release collateral locks for all losing carriers
+        const losingBids = sortedBids.slice(1);
+        await this._releaseLosingCollateralLocks(loadOfferId, losingBids);
+
+        logger.info(
+          { loadOfferId, winner: winningBid.driverId, settlementPrice, totalBids: sortedBids.length },
+          '[FreightAuction] Auction cleared successfully'
         );
-      }
 
-      auction.winningBid = winningBid;
-      auction.settlementPrice = settlementPrice;
-      auction.status = AUCTION_STATES.SETTLED;
-      auction.settledAt = now;
-
-      await this._setAuction(loadOfferId, auction);
-
-      // Release collateral locks for all losing carriers
-      const losingBids = sortedBids.slice(1);
-      await this._releaseLosingCollateralLocks(loadOfferId, losingBids);
-
-      logger.info(
-        { loadOfferId, winner: winningBid.driverId, settlementPrice, totalBids: sortedBids.length },
-        '[FreightAuction] Auction cleared successfully'
-      );
-
-      return {
-        status: AUCTION_STATES.SETTLED,
-        winningBid,
-        settlementPrice,
-        totalBids: sortedBids.length,
-        clearedAt: now,
-      };
+        return {
+          status: AUCTION_STATES.SETTLED,
+          winningBid,
+          settlementPrice,
+          totalBids: sortedBids.length,
+          clearedAt: now,
+        };
+      });
     } finally {
       await releaseLock(loadLockKey, loadLockValue);
     }
@@ -450,10 +475,8 @@ export class FreightAuctionService {
   /**
    * Fetch current public state of the auction.
    */
-  getAuctionStatus(loadOfferId) {
-    // Note: this is a synchronous read from the local map for fast status checks.
-    // Callers requiring cross-instance consistency should use _getAuction() instead.
-    const auction = this._localAuctions.get(loadOfferId);
+  async getAuctionStatus(loadOfferId) {
+    const auction = await this._getAuction(loadOfferId);
     if (!auction) return null;
 
     const now = Date.now();
@@ -482,9 +505,7 @@ export class FreightAuctionService {
     for (const bid of losingBids) {
       const key = `auction:collateral:${bid.driverId}:${loadOfferId}`;
       try {
-        if (redisClient && typeof redisClient.del === 'function') {
-          await redisClient.del(key);
-        }
+        await releaseDistributedLock(key);
       } catch (err) {
         logger.warn({ err, key }, '[FreightAuction] Failed to release losing collateral lock');
       }
@@ -496,9 +517,7 @@ export class FreightAuctionService {
     for (const bid of auction.bids) {
       const key = `auction:collateral:${bid.driverId}:${auction.loadOfferId}`;
       try {
-        if (redisClient && typeof redisClient.del === 'function') {
-          await redisClient.del(key);
-        }
+        await releaseDistributedLock(key);
       } catch (err) {
         logger.warn({ err, key }, '[FreightAuction] Failed to release collateral lock');
       }

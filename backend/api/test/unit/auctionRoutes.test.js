@@ -2,11 +2,68 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { mockAuthenticate } = vi.hoisted(() => ({
-  mockAuthenticate: vi.fn((req, _res, next) => {
-    req.user = { id: 'test-user-id', role: 'carrier' };
-    next();
-  }),
+const { mockAuthenticate, mockDbConfig } = vi.hoisted(() => {
+  let lastFilterId = null;
+  const buildQuery = (table) => ({
+    select: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    eq: vi.fn((col, val) => {
+      if (col === 'id') lastFilterId = val;
+      return buildQuery(table);
+    }),
+    single: vi.fn().mockImplementation(async () => {
+      if (table === 'load_offers') {
+        return {
+          data: {
+            id: lastFilterId || 'load-test',
+            // When bidding on load-bid-route, the caller is driver 'test-user-id', so owner is 'shipper-1'
+            customer_id: lastFilterId === 'load-bid-route' ? 'shipper-1' : 'test-user-id',
+            status: 'open',
+          },
+          error: null,
+        };
+      }
+      if (table === 'load_bids') {
+        return {
+          data: {
+            id: 'mock-db-bid-id',
+            status: 'pending',
+          },
+          error: null,
+        };
+      }
+      if (table === 'driver_profiles') {
+        return {
+          data: {
+            reputation_score: 90,
+            current_lat: null,
+            current_lng: null,
+          },
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    }),
+  });
+
+  return {
+    mockAuthenticate: vi.fn((req, _res, next) => {
+      req.user = { id: 'test-user-id', role: 'carrier' };
+      next();
+    }),
+    mockDbConfig: {
+      supabaseAdmin: {
+        from: vi.fn((table) => buildQuery(table)),
+      },
+    },
+  };
+});
+
+vi.mock('../../src/config/db.js', () => ({
+  get supabaseAdmin() {
+    return mockDbConfig.supabaseAdmin;
+  },
+  redisClient: null,
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({
@@ -160,6 +217,21 @@ describe('Auction Routes API (/api/auctions)', () => {
 
       expect(res.status).toBe(503);
       expect(res.body.error).toContain('Failed to acquire lock');
+    });
+
+    it('should return 503 when supabaseAdmin is null (fail-closed DB guard)', async () => {
+      const origAdmin = mockDbConfig.supabaseAdmin;
+      mockDbConfig.supabaseAdmin = null;
+      try {
+        const res = await request(app)
+          .post('/api/auctions/load/load-guard-fail/open')
+          .send({ reservePrice: 500000 });
+
+        expect(res.status).toBe(503);
+        expect(res.body.error).toContain('Database service unavailable');
+      } finally {
+        mockDbConfig.supabaseAdmin = origAdmin;
+      }
     });
   });
 });

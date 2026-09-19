@@ -208,7 +208,7 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
       expect(bidResult.currentCloseAt).toBeGreaterThan(originalCloseAt);
       expect(bidResult.currentCloseAt - originalCloseAt).toBe(extensionMs);
 
-      const status = auctionService.getAuctionStatus(loadOfferId);
+      const status = await auctionService.getAuctionStatus(loadOfferId);
       expect(status.extensionsCount).toBe(1);
       expect(status.status).toBe(AUCTION_STATES.SOFT_CLOSE_EXTENDED);
     });
@@ -278,7 +278,7 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
       expect(clearResult.settlementPrice).toBe(800000);
       expect(clearResult.totalBids).toBe(3);
 
-      const status = auctionService.getAuctionStatus(loadOfferId);
+      const status = await auctionService.getAuctionStatus(loadOfferId);
       expect(status.status).toBe(AUCTION_STATES.SETTLED);
       expect(status.winningBid.driverId).toBe('driver-A');
     });
@@ -463,6 +463,56 @@ describe('FreightAuctionService - Real-Time Dynamic Reverse Auction Engine', () 
       expect(retryResult.success).toBe(true);
       expect(retryResult.bid.bidAmount).toBe(790000);
       expect(retryResult.bid.dbBidId).toBe('db-bid-retry');
+    });
+
+    it('Persists CANCELLED_UNMET_RESERVE state to Redis when minimum bids not met', async () => {
+      const loadOfferId = 'load-cancel-persist';
+      await auctionService.openAuction({
+        loadOfferId,
+        shipperId: 'shipper-test',
+        reservePrice: 500000,
+      });
+
+      const clearResult = await auctionService.clearAuction(loadOfferId, { force: true });
+      expect(clearResult.status).toBe(AUCTION_STATES.CANCELLED_UNMET_RESERVE);
+
+      const persisted = await auctionService._getAuction(loadOfferId);
+      expect(persisted.status).toBe(AUCTION_STATES.CANCELLED_UNMET_RESERVE);
+    });
+
+    it('Rolls back DB bid when Redis _setAuction fails during submitBid', async () => {
+      const deleteBidSpy = vi.fn().mockResolvedValue({ error: null });
+      const mockOrderRepo = {
+        createBid: vi.fn().mockResolvedValue({
+          data: { id: 'db-bid-to-rollback' },
+          error: null,
+        }),
+        deleteBid: deleteBidSpy,
+      };
+
+      const customAuctionService = new FreightAuctionService({ orderRepository: mockOrderRepo });
+      const loadOfferId = 'load-redis-persist-failure';
+
+      await customAuctionService.openAuction({
+        loadOfferId,
+        shipperId: 'shipper-test',
+        reservePrice: 1000000,
+      });
+
+      // Force _setAuction to throw on submitBid
+      vi.spyOn(customAuctionService, '_setAuction').mockRejectedValue(
+        new Error('Redis connection severed during _setAuction')
+      );
+
+      await expect(
+        customAuctionService.submitBid({
+          loadOfferId,
+          driverId: 'driver-rollback',
+          bidAmount: 850000,
+        })
+      ).rejects.toThrow('Redis connection severed during _setAuction');
+
+      expect(deleteBidSpy).toHaveBeenCalledWith('db-bid-to-rollback');
     });
   });
 });

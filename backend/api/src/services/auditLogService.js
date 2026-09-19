@@ -300,50 +300,48 @@ class AuditLogService {
         return [];
       }
 
-      // ioredis xreadgroup: XREADGROUP GROUP group consumer COUNT count STREAMS key id
+      const parseEntries = (messages) => {
+        if (!messages || !messages[0]) return [];
+        const [, entries] = messages[0];
+        if (!Array.isArray(entries)) return [];
+        return entries.map(([id, fields]) => ({
+          id,
+          data: Object.fromEntries(
+            fields.reduce((acc, v, i) => {
+              if (i % 2 === 0) acc.push([v, fields[i + 1]]);
+              return acc;
+            }, [])
+          ),
+        }));
+      };
+
       try {
         const messages = await redisClient.xreadgroup(
           'GROUP', consumerGroup, consumerName,
           'COUNT', count,
           'STREAMS', STREAM_NAME, '>'
         );
-        
-        if (messages && messages[0]) {
-          const [, entries] = messages[0];
-          return entries.map(([id, fields]) => ({
-            id,
-            data: Object.fromEntries(
-              fields.reduce((acc, v, i) => {
-                if (i % 2 === 0) acc.push([v, fields[i + 1]]);
-                return acc;
-              }, [])
-            ),
-          }));
-        }
+        return parseEntries(messages);
       } catch (groupErr) {
-        // If consumer group doesn't exist, create it and try again
-        if (groupErr.message.includes('NOGROUP')) {
+        // If consumer group doesn't exist, create it and retry XREADGROUP
+        if (groupErr?.message?.includes('NOGROUP')) {
           try {
-            // ioredis xgroup: XGROUP CREATE key group id [MKSTREAM]
             await redisClient.xgroup('CREATE', STREAM_NAME, consumerGroup, '0', 'MKSTREAM');
             logger.info('[AuditLog] Created consumer group:', consumerGroup);
-          } catch (createErr) {
-            logger.error({ err: createErr }, '[AuditLog] Failed to create consumer group');
+            const retryMessages = await redisClient.xreadgroup(
+              'GROUP', consumerGroup, consumerName,
+              'COUNT', count,
+              'STREAMS', STREAM_NAME, '>'
+            );
+            return parseEntries(retryMessages);
+          } catch (retryErr) {
+            logger.error({ err: retryErr }, '[AuditLog] Failed to create consumer group or retry XREADGROUP');
+            return [];
           }
         }
+        logger.error({ err: groupErr }, '[AuditLog] Failed to read from Redis stream via consumer group');
+        return [];
       }
-
-      // Fallback to simple XRANGE read
-      const rawMessages = await redisClient.xrange(STREAM_NAME, '-', '+', 'COUNT', count);
-      return rawMessages.map(([id, fields]) => ({
-        id,
-        data: Object.fromEntries(
-          fields.reduce((acc, v, i) => {
-            if (i % 2 === 0) acc.push([v, fields[i + 1]]);
-            return acc;
-          }, [])
-        ),
-      }));
     } catch (err) {
       logger.error({ err }, '[AuditLog] Failed to read from Redis stream');
       return [];

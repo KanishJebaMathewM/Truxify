@@ -376,7 +376,7 @@ export class OrderLifecycleService {
 
         // 2. Driver Solvency & Capacity Reservation Lock (non-auction path only; auction path
         //    manages its own collateral lock inside FreightAuctionService.submitBid).
-        const auctionStatus = freightAuctionService.getAuctionStatus(loadOfferId);
+        const auctionStatus = await freightAuctionService.getAuctionStatus(loadOfferId);
         let auctionResult = null;
 
         if (auctionStatus) {
@@ -438,14 +438,24 @@ export class OrderLifecycleService {
           throw new DomainError(409, { error: 'Driver already has an active capacity or collateral lock for this load.' });
         }
 
-        const { data: bid, error: bidErr } = await this.orderRepository.createBid({
-          load_id: loadOfferId,
-          driver_id: driverId,
-          bid_amount: bidAmount,
-          status: 'pending',
-        });
+        let bid;
+        try {
+          const { data: createdBid, error: bidErr } = await this.orderRepository.createBid({
+            load_id: loadOfferId,
+            driver_id: driverId,
+            bid_amount: bidAmount,
+            status: 'pending',
+          });
 
-        if (bidErr) throw new DomainError(500, { error: 'Failed to record bid.', details: bidErr.message });
+          if (bidErr) {
+            await collateralLock.release();
+            throw new DomainError(500, { error: 'Failed to record bid.', details: bidErr.message });
+          }
+          bid = createdBid;
+        } catch (err) {
+          await collateralLock.release();
+          throw err;
+        }
 
         sendPushNotification(
           offer.customer_id,

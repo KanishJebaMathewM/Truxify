@@ -421,6 +421,58 @@ Base Path
 
 ---
 
+## Blockchain Monitoring
+
+Base Path
+
+```
+/api/blockchain
+```
+
+| Method | Endpoint | Description |
+|---------|----------|-------------|
+|GET|/events|List recent blockchain monitoring events with optional type, severity, and limit filters|
+
+### GET /api/blockchain/events
+
+Requires a Bearer token and an `admin` or `support` role.
+
+Optional query parameters:
+
+| Parameter | Constraints |
+|-----------|-------------|
+|`type`|One of the documented blockchain event types|
+|`severity`|`LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`|
+|`limit`|Integer from 1 to 1000; defaults to 50|
+
+Successful responses contain a timestamp, result count, and matching events:
+
+```json
+{
+  "timestamp": "2026-09-19T12:00:00.000Z",
+  "count": 1,
+  "events": [
+    {
+      "id": 1,
+      "type": "PAYMENT_RECEIVED",
+      "severity": "HIGH",
+      "data": {},
+      "created_at": "2026-09-19T11:59:00.000Z"
+    }
+  ]
+}
+```
+
+Responses:
+
+| Status | Meaning |
+|--------|---------|
+|200|Matching monitoring events returned|
+|400|Invalid type, severity, or limit|
+|500|Event lookup failed|
+
+---
+
 ## WebRTC
 
 Base Path

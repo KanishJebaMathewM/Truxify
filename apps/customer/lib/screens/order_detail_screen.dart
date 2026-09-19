@@ -6,6 +6,7 @@ import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_row.dart';
+import '../services/order_service.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
@@ -18,6 +19,7 @@ class OrderDetailScreen extends StatefulWidget {
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   int _rating = 0;
+  bool _isSubmitting = false;
   final TextEditingController _commentController = TextEditingController();
 
   @override
@@ -26,7 +28,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     super.dispose();
   }
 
-  void _submitRating() {
+  Future<void> _submitRating() async {
     if (_rating == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a rating before submitting.')),
@@ -34,14 +36,42 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return;
     }
 
+    setState(() {
+      _isSubmitting = true;
+    });
+
     final comment = _commentController.text.trim();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Thanks for your review! You submitted a $_rating-star rating${comment.isNotEmpty ? ' with a comment.' : '.'}',
-        ),
-      ),
-    );
+    
+    try {
+      final orderService = OrderService();
+      await orderService.submitRating(
+        orderId: widget.order.orderId,
+        stars: _rating,
+        comment: comment,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Thanks for your review! You submitted a $_rating-star rating${comment.isNotEmpty ? ' with a comment.' : '.'}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to submit rating: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
   }
 
   Future<void> _showReceipt() async {
@@ -202,7 +232,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 8),
             TextField(controller: _commentController, maxLines: 3, decoration: const InputDecoration(labelText: 'Comment')),
             const SizedBox(height: 12),
-            PrimaryButton(label: 'Submit Rating', onPressed: _submitRating),
+            PrimaryButton(
+              label: _isSubmitting ? 'Submitting...' : 'Submit Rating',
+              onPressed: _isSubmitting ? null : _submitRating,
+            ),
           ],
         ],
       ),

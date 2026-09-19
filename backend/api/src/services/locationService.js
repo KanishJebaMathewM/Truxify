@@ -89,11 +89,32 @@ export const validateCoordinates = (longitude, latitude) => {
     return { lon, lat };
 };
 
+// Canonical WGS-84 mean Earth radius. Matches pricing.js and the value
+// PR #16317 will export from utils/coordinates.js.
+const EARTH_RADIUS_KM = 6371.0088;
+
 /**
- * Computes Haversine distance in meters between two coordinate points.
+ * Haversine distance in meters between two coordinate points.
+ *
+ * Temporary local implementation pending consolidation onto the shared
+ * utils/coordinates.js export once PR #16317 merges (issue #16318).
+ *
+ * @param {number} lon1
+ * @param {number} lat1
+ * @param {number} lon2
+ * @param {number} lat2
+ * @returns {number} Distance in meters.
  */
 export const calculateDistanceMeters = (lon1, lat1, lon2, lat2) => {
-    const R = 6371e3;
+    if (
+        !Number.isFinite(lon1) || !Number.isFinite(lat1) ||
+        !Number.isFinite(lon2) || !Number.isFinite(lat2)
+    ) {
+        throw new TypeError('calculateDistanceMeters: all coordinates must be finite numbers');
+    }
+    if (lon1 === lon2 && lat1 === lat2) return 0;
+
+    const R = EARTH_RADIUS_KM * 1000;
     const phi1 = (lat1 * Math.PI) / 180;
     const phi2 = (lat2 * Math.PI) / 180;
     const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;

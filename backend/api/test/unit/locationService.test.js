@@ -82,6 +82,35 @@ describe('locationService - Telematics Geolocation & Speed Anomaly Defense', () 
         it('should return 0 meters for identical points', () => {
             expect(calculateDistanceMeters(77.5, 12.5, 77.5, 12.5)).toBe(0);
         });
+
+        it('should compute Delhi to Mumbai (~1148 km)', () => {
+            // lon1, lat1, lon2, lat2 — longitude-first signature
+            const distance = calculateDistanceMeters(77.2090, 28.6139, 72.8777, 19.0760);
+            const distanceKm = distance / 1000;
+            expect(distanceKm).toBeGreaterThan(1140);
+            expect(distanceKm).toBeLessThan(1160);
+        });
+
+        it('should be commutative', () => {
+            const d1 = calculateDistanceMeters(77.2090, 28.6139, 72.8777, 19.0760);
+            const d2 = calculateDistanceMeters(72.8777, 19.0760, 77.2090, 28.6139);
+            expect(d1).toBe(d2);
+        });
+
+        it('should throw TypeError on non-finite coordinates', () => {
+            expect(() => calculateDistanceMeters(NaN, 12, 77, 13)).toThrow(TypeError);
+            expect(() => calculateDistanceMeters(77, Infinity, 78, 13)).toThrow(TypeError);
+            expect(() => calculateDistanceMeters(77, 12, undefined, 13)).toThrow(TypeError);
+            expect(() => calculateDistanceMeters(77, 12, 78, null)).toThrow(TypeError);
+        });
+
+        it('should use EARTH_RADIUS_KM = 6371.0088 (regression <0.1% vs old R=6371e3)', () => {
+            const distance = calculateDistanceMeters(77.2090, 28.6139, 72.8777, 19.0760);
+            // Old value with R=6371e3: 1148094.873 m
+            const oldDistance = 1148094.873;
+            const pctDelta = Math.abs(distance - oldDistance) / oldDistance * 100;
+            expect(pctDelta).toBeLessThan(0.1);
+        });
     });
 
     describe('checkSpeedAnomaly', () => {

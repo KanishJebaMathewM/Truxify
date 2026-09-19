@@ -165,7 +165,7 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
 
 /**
  * @openapi
- * /api/webrtc/sync/{peerId}:
+ * /webrtc/sync/{peerId}:
  *   post:
  *     tags: [WebRTC]
  *     summary: Acknowledge synced offline GPS rows for a peer

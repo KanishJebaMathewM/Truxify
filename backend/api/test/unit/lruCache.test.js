@@ -37,4 +37,16 @@ describe('lruCache clampMaxKeys', () => {
     expect(clampMaxKeys(Number.NaN, Number.POSITIVE_INFINITY)).toBe(1000);
     expect(clampMaxKeys(Number.NaN, Number.NEGATIVE_INFINITY)).toBe(1000);
   });
+
+  it('safely handles unusual inputs like Symbol and objects without throwing', () => {
+    expect(clampMaxKeys(Symbol('test'), 1000)).toBe(1000);
+    const objWithThrowingValueOf = {
+      valueOf: () => {
+        throw new Error('Conversion error');
+      }
+    };
+    expect(clampMaxKeys(objWithThrowingValueOf, 2000)).toBe(2000);
+    expect(clampMaxKeys('25')).toBe(25);
+    expect(clampMaxKeys(null)).toBe(MIN_KEYS);
+  });
 });

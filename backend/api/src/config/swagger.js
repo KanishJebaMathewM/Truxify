@@ -18,6 +18,15 @@ const options = {
       version: '1.0.0',
       description: 'API documentation for Truxify logistics backend',
     },
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
     servers: [
       {
         url: apiUrl,
@@ -44,6 +53,29 @@ const options = {
 };
 
 const swaggerSpec = swaggerJsdoc(options);
+
+const publicWasmPaths = new Set([
+  '/api/wasm/route',
+  '/api/wasm/drivers',
+  '/api/wasm/optimize',
+  '/api/wasm/eta',
+]);
+
+for (const [pathName, operations] of Object.entries(swaggerSpec.paths || {})) {
+  const isProtected = pathName.startsWith('/api/ebpf/')
+    || pathName.startsWith('/api/wasi/')
+    || pathName.startsWith('/api/snyk/')
+    || pathName.startsWith('/api/liquibase/')
+    || (pathName.startsWith('/api/wasm/') && !publicWasmPaths.has(pathName));
+
+  if (!isProtected) {
+    continue;
+  }
+
+  for (const operation of Object.values(operations)) {
+    operation.security = [{ BearerAuth: [] }];
+  }
+}
 
 export { swaggerSpec };
 

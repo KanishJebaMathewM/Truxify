@@ -467,7 +467,6 @@ Successful minting returns HTTP 201 with a message and the minted token. Success
 
 Unauthenticated requests return HTTP 401; unknown token IDs return HTTP 404.
 
----
 
 ## WebRTC
 

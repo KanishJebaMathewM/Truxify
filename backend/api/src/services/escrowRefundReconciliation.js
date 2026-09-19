@@ -1,6 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking, getEscrowBookingId } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getOnChainEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import os from 'os';
 
@@ -119,7 +119,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // bookings, and cancelWithPenalty also reverts on started bookings,
           // so submitting either would waste gas and revert on every retry.
           // Escalate for manual review instead of retrying forever.
-          const escrowBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+          const escrowBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
           if (escrowBooking && escrowBooking.started) {
             logger.error({ orderId: order.order_display_id }, '[escrow-reconciliation] Booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.');
             await orderRepository.updateOrder(order.id, {
@@ -155,7 +155,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // cancellation_fee is 0 so the driver is compensated; if no fee can
           // be derived, refuse to refund and leave the order for review.
           if (driverFeeWei === 0n) {
-            const onChainBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+            const onChainBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
             if (onChainBooking?.started) {
               throw new Error(
                 `Escrow refund for ${order.order_display_id} aborted: on-chain booking is already started ` +

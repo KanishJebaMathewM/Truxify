@@ -136,6 +136,7 @@ function buildOrder(overrides = {}) {
     escrow_status: 'funding',
     escrow_amount_wei: '1000',
     escrow_driver_wallet: '0xdriver',
+    version: 1,
     pending_bid_acceptance: {
       bid_id: 'bid-1',
       load_id: 'load-1',
@@ -201,6 +202,62 @@ describe('POST /api/orders/:id/confirm-deposit', () => {
       'accept_bid_tx',
       expect.objectContaining({ p_bid_id: 'bid-1' }),
       expect.anything(),
+    );
+  });
+
+  it('calls updateOrderWithFilter exactly once with correct payload and optimistic lock in normal flow', async () => {
+    repo.executeRpc.mockResolvedValue({ error: null });
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(200);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledTimes(1);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledWith(
+      'order-1',
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: 2,
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: 1 },
+      ],
+      'id'
+    );
+  });
+
+  it('calls updateOrderWithFilter exactly once with correct payload and optimistic lock in alreadyFunded path', async () => {
+    depositMock.recordDepositTx.mockResolvedValue({
+      error: null,
+      alreadyFunded: true,
+      txHash: '0xdep',
+    });
+    repo.executeRpc.mockResolvedValue({ error: null });
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Escrow deposit confirmed (recovered).');
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledTimes(1);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledWith(
+      'order-1',
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: 2,
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: 1 },
+      ],
+      'id'
     );
   });
 });

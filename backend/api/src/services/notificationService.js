@@ -33,6 +33,7 @@ const ALLOWED_NOTIF_TYPES = new Set([
   'new_bid',
   'payment_locked',
   'payment_released',
+  'delivery_otp',
 ]);
 
 // Tokens that can never be delivered again — the device row is deactivated so
@@ -642,7 +643,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const body = `Your delivery OTP for order ${orderDisplayId} is ready. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
 
   let dbSuccess = false;
   try {
@@ -654,12 +655,8 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         user_id: customerId,
         title,
         body,
-        // `delivery_otp` is not in the notifications.notif_type CHECK constraint
-        // (see supabase/migrations/20260807000050_widen_notifications_notif_type_check.sql),
-        // so use an allowed type or the insert always fails and the OTP
-        // notification is never persisted.
-        notif_type: 'order_update',
-        // No OTP or OTP-derived value is persisted here: an unsalted digest of
+        notif_type: 'delivery_otp',
+        // No OTP or OTP-derived value is persisted in metadata: an unsalted digest of
         // a 6-digit code is offline-brute-forceable if the table leaks.
         metadata: { order_display_id: orderDisplayId }
       });
@@ -680,7 +677,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', otp }
+      { orderDisplayId, notifType: 'delivery_otp', otp: String(otp) }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

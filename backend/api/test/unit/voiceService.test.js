@@ -129,8 +129,11 @@ describe('voiceService', () => {
 
       expect(result).toBeNull();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Orders table check failed in voiceService:',
-        'Table not found'
+        expect.objectContaining({
+          event: 'VOICE_ORDER_LOOKUP_ERROR',
+          error: expect.any(String),
+        }),
+        expect.any(String)
       );
     });
 

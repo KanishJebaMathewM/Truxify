@@ -35,11 +35,11 @@ const edgeRuntimeMock = vi.hoisted(() => ({
   getFunctionStats: vi.fn(),
 }));
 
-vi.mock('../../../wasm/edge-runtime.js', () => ({
+vi.mock('../../../../wasm/edge-runtime.js', () => ({
   default: edgeRuntimeMock,
 }));
 
-const wasmRouter = (await import('../../../wasm/routes.js')).default;
+const wasmRouter = (await import('../../../../wasm/routes.js')).default;
 
 function makeApp() {
   const app = express();

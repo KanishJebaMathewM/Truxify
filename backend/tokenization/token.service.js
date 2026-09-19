@@ -188,10 +188,7 @@ class TokenizationService {
 
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            if (!signer) {
-                throw new Error('A verified user signer is required to sell fractions.');
-            }
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),

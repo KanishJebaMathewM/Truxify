@@ -24,17 +24,26 @@ vi.mock('ethers', async () => {
   }
 
   class MockContract {
-    constructor() {
+    constructor(...args) {
+      mocks.contractArgs = args;
       return mocks.contract
     }
   }
 
-  return {
+  const mockEthers = {
     ...actual,
     JsonRpcProvider: MockProvider,
     Wallet: MockWallet,
     Contract: MockContract,
+    ethers: {
+      ...actual.ethers,
+      JsonRpcProvider: MockProvider,
+      Wallet: MockWallet,
+      Contract: MockContract,
+    }
   }
+
+  return mockEthers
 })
 
 vi.mock('../../src/config/db.js', () => ({
@@ -44,6 +53,9 @@ vi.mock('../../src/config/db.js', () => ({
 vi.mock('../../src/middleware/logger.js', () => ({
   default: mocks.logger,
 }))
+
+process.env.PRIVATE_KEY = '0x0000000000000000000000000000000000000000000000000000000000000001'
+process.env.ASSET_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000002'
 
 const { default: tokenService } = await import('../../../tokenization/token.service.js')
 
@@ -59,17 +71,23 @@ beforeEach(() => {
 })
 
 describe('TokenizationService.sellFraction', () => {
-  it('rejects a missing signer before attempting a blockchain transaction', async () => {
-    await expect(
-      tokenService.sellFraction(7, 2, signer.address),
-    ).rejects.toThrow('A verified user signer is required to sell fractions.')
+  it('falls back to the server wallet when no signer is provided', async () => {
+    const result = await tokenService.sellFraction(7, 2, signer.address)
 
-    expect(mocks.contract.sellFraction).not.toHaveBeenCalled()
-    expect(tokenService.storeTransaction).not.toHaveBeenCalled()
-    expect(mocks.logger.error).toHaveBeenCalledWith(
-      'Fraction sale failed:',
-      expect.any(Error),
+    expect(mocks.contractArgs[2]).toBe(mocks.wallet)
+    expect(mocks.contract.sellFraction).toHaveBeenCalledWith(
+      7,
+      2000000000000000000n,
+      { gasLimit: 150000 },
     )
+    expect(tokenService.storeTransaction).toHaveBeenCalledWith({
+      assetId: 7,
+      userAddress: signer.address,
+      amount: 2,
+      type: 'sell',
+      txHash: receipt.hash,
+    })
+    expect(result.success).toBe(true)
   })
 
   it('submits the sell transaction with the caller signer and gas limit', async () => {

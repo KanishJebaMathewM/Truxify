@@ -3,6 +3,7 @@ import heapq
 from . import models as _models
 
 _BaseRouteOptimizer = _models.RouteOptimizer
+_ORIGINAL_FIND_OPTIMAL_ROUTE = _BaseRouteOptimizer._find_optimal_route
 
 
 def _constrained_find_optimal_route(
@@ -14,12 +15,13 @@ def _constrained_find_optimal_route(
     objectives,
     constraints=None,
 ):
+    """Find a route while preserving nondominated score/time labels."""
     constraints = constraints or {}
     max_time = constraints.get("max_time")
     if max_time is None:
         max_time = constraints.get("hos_limit")
     if max_time is None:
-        return _BaseRouteOptimizer._find_optimal_route(
+        return _ORIGINAL_FIND_OPTIMAL_ROUTE(
             self, start, end, embeddings, graph_data, objectives, constraints
         )
 
@@ -34,6 +36,7 @@ def _constrained_find_optimal_route(
     node_map = getattr(graph_data, "node_map", None)
 
     def weight_func(current, neighbor, edge_attrs):
+        """Return the weighted edge score, or None when hard constraints reject it."""
         if constraints.get("hazmat", False) and not edge_attrs.get("hazmat_allowed", True):
             return None
 
@@ -57,6 +60,7 @@ def _constrained_find_optimal_route(
         )
 
     def dominates(existing, candidate):
+        """Return whether an existing label dominates the candidate label."""
         existing_score, existing_time, existing_path = existing
         candidate_score, candidate_time, candidate_path = candidate
         if existing_score > candidate_score or existing_time > candidate_time:
@@ -64,6 +68,7 @@ def _constrained_find_optimal_route(
         return set(existing_path).issubset(candidate_path)
 
     def path_to_route(path):
+        """Convert a node path into the route edge records returned by callers."""
         route = []
         for current, neighbor in zip(path, path[1:]):
             edge_data = graph[current][neighbor]

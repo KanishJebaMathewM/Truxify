@@ -9,6 +9,7 @@ from gnn.models import GNNRouteModel, GraphNetworkBuilder, RouteOptimizer
 
 
 def test_node_embeddings_and_graph_predictions_have_explicit_shapes():
+    """Verify node embeddings and batched graph outputs keep explicit shapes."""
     model = GNNRouteModel(input_dim=9, hidden_dim=16, output_dim=8, edge_dim=5)
     model.eval()
 
@@ -30,6 +31,7 @@ def test_node_embeddings_and_graph_predictions_have_explicit_shapes():
 
 
 def test_route_inference_uses_per_node_embeddings():
+    """Verify route inference receives the per-node representation."""
     builder = GraphNetworkBuilder()
     builder.build_road_network(
         [
@@ -48,6 +50,7 @@ def test_route_inference_uses_per_node_embeddings():
     captured = []
 
     def capture_embeddings(start, end, embeddings, graph_data, objectives, constraints):
+        """Capture the embeddings passed into the route-search implementation."""
         captured.append(torch.as_tensor(embeddings))
         return [
             {
@@ -70,6 +73,7 @@ def test_route_inference_uses_per_node_embeddings():
 
 
 def test_single_graph_training_uses_the_graph_prediction_head():
+    """Verify single-graph training uses the graph prediction head."""
     optimizer = RouteOptimizer(allow_untrained=False)
     data = Data(
         x=torch.randn(4, 9),

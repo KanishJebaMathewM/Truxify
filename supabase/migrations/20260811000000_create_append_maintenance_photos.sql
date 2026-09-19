@@ -9,12 +9,15 @@ BEGIN;
 -- with 500 "Failed to save photo references". This migration ships the
 -- missing function so the atomic photo append actually works.
 
+-- Issue #10497: Enforce strict caller authorization with get_profile_id().
+-- Rejects unauthenticated calls (auth.uid() IS NULL or unresolvable profile),
+-- disallows service_role bypass so the operation is bound to the owning driver,
+-- and rejects non-owner drivers whose profile does not match the ticket's driver_id.
+
 -- RPC: append_maintenance_photos — Atomically append photo storage paths to a
 -- maintenance ticket while enforcing the MAX_PHOTOS cap under a row lock.
--- SECURITY DEFINER so the row lock + ownership check work for both the owning
--- driver (authenticated) and the backend (service_role). The controller's
--- ticket lookup is advisory; this row lock is authoritative against
--- concurrent uploads on the same ticket.
+-- SECURITY DEFINER so the row lock + ownership check work with the verified
+-- driver profile from get_profile_id().
 CREATE OR REPLACE FUNCTION public.append_maintenance_photos(
   p_ticket_id UUID,
   p_new_paths TEXT[],
@@ -27,9 +30,21 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_ticket truck_maintenance_tickets%ROWTYPE;
+  v_caller_profile_id UUID;
   v_existing_count INTEGER;
   v_total_count INTEGER;
 BEGIN
+  -- Reject unauthenticated callers (no auth.uid())
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  -- Resolve the authenticated caller's application profile ID
+  v_caller_profile_id := get_profile_id();
+  IF v_caller_profile_id IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized: Profile not found';
+  END IF;
+
   -- Lock the ticket row to serialize concurrent photo appends.
   SELECT * INTO v_ticket
   FROM truck_maintenance_tickets
@@ -40,11 +55,9 @@ BEGIN
     RAISE EXCEPTION 'MAINTENANCE_TICKET_NOT_FOUND';
   END IF;
 
-  -- Identity is derived from the JWT; service_role is the backend itself.
-  -- IS DISTINCT FROM fails closed when the caller has no resolvable profile
-  -- (get_profile_id() IS NULL).
-  IF auth.role() <> 'service_role'
-     AND get_profile_id() IS DISTINCT FROM v_ticket.driver_id THEN
+  -- Verify the maintenance ticket belongs to the authenticated driver.
+  -- No service_role bypass is permitted per issue #10497.
+  IF v_ticket.driver_id IS NULL OR v_caller_profile_id IS DISTINCT FROM v_ticket.driver_id THEN
     RAISE EXCEPTION 'Access Denied: You do not own this maintenance ticket.';
   END IF;
 
@@ -61,8 +74,11 @@ BEGIN
 END;
 $$;
 
--- The owning driver can append photos via an authenticated client; the
--- backend uses the service-role client.
+-- Revoke default public execution privileges to prevent unauthorized access
+REVOKE EXECUTE ON FUNCTION public.append_maintenance_photos(UUID, TEXT[], INTEGER) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.append_maintenance_photos(UUID, TEXT[], INTEGER) FROM anon;
+
+-- Grant execution to authenticated users
 GRANT EXECUTE ON FUNCTION public.append_maintenance_photos(UUID, TEXT[], INTEGER) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.append_maintenance_photos(UUID, TEXT[], INTEGER) TO service_role;
 

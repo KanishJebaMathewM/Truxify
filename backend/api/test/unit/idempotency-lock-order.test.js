@@ -16,7 +16,7 @@ const mockRedisRef = vi.hoisted(() => {
         // First lock acquisition succeeds; later ones fail (NX semantics).
         if (!lockAcquired) {
           lockAcquired = true;
-          store.set(key, '1');
+          store.set(key, value);
           return Promise.resolve('OK');
         }
         return Promise.resolve(null);
@@ -26,6 +26,14 @@ const mockRedisRef = vi.hoisted(() => {
         store.set(key, value);
         return 'OK';
       });
+    }),
+    eval: vi.fn((script, numKeys, key, token) => {
+      if (store.get(key) === token) {
+        store.delete(key);
+        if (key.endsWith(':lock')) lockAcquired = false;
+        return Promise.resolve(1);
+      }
+      return Promise.resolve(0);
     }),
     del: vi.fn((key) => {
       store.delete(key);
@@ -119,8 +127,8 @@ describe('idempotency lock ordering (#11451)', () => {
       expect(handlerBCalled).toBe(false);
       expect(resB.status).toHaveBeenCalledWith(200);
       expect(resB.json).toHaveBeenCalledWith({ ok: true });
-      // The lock was actually released (deleted) after the cache write landed.
-      expect(mockRedisRef.mock.del).toHaveBeenCalled();
+      // The lock was safely released via atomic Lua compare-and-delete after the cache write landed.
+      expect(mockRedisRef.mock.eval).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

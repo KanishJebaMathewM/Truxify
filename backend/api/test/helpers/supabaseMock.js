@@ -135,8 +135,13 @@ class SupabaseQueryBuilder {
     const firstDot = rest.indexOf('.');
     const secondDot = rest.indexOf('.', firstDot + 1);
     const col = rest.slice(0, firstDot);
-    const op = rest.slice(firstDot + 1, secondDot);
+    let op = rest.slice(firstDot + 1, secondDot);
     let val = rest.slice(secondDot + 1);
+    if (op === 'not' && val.startsWith('is.')) {
+      opPrefix = 'not:';
+      op = 'is';
+      val = val.substring(3);
+    }
     if (op === 'is') {
       if (val === 'null') val = null;
       if (val === 'true') val = true;

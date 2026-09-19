@@ -82,6 +82,13 @@ vi.mock("../../src/services/escrow.js", async () => {
     ...actual,
     escrowRelease: escrowReleaseMock,
   };
+});vi.mock("../../src/middleware/rateLimiter.js", async () => {
+  const actual = await vi.importActual("../../src/middleware/rateLimiter.js");
+  return {
+    ...actual,
+    verifyDeliveryLimiter: (_req, _res, next) => next(),
+    resendOtpLimiter: (_req, _res, next) => next(),
+  };
 });
 
 const { default: orderRouter } =
@@ -134,11 +141,15 @@ function seedDriverAtDropOff(
   driverId,
   lat = DROP_LAT,
   lng = DROP_LNG,
+  orderDisplayId,
 ) {
+  const order = m.store.orders.find((o) => o.id === orderId);
+  const displayId = orderDisplayId || order?.order_display_id;
   mockMongoDb = makeMongoDbMock([
     {
       driver_id: driverId,
       order_id: orderId,
+      order_display_id: displayId,
       lat,
       lng,
       server_received_at: new Date(),
@@ -150,7 +161,7 @@ function makeOtpRecord(id, orderId) {
   return {
     id,
     order_id: orderId,
-    otp_hash: crypto.createHash("sha256").update("123456").digest("hex"),
+    otp_hash: crypto.createHash("sha256").update("654321").digest("hex"),
     expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     verified: false,
     created_at: new Date().toISOString(),
@@ -240,7 +251,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-1/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-1")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectContract(res, 200);
     expect(res.body).toHaveProperty("message");
@@ -273,10 +284,14 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-2/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-2")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectContract(res, 200);
-    expect(escrowReleaseMock).toHaveBeenCalledWith("ORD-DV-202");
+    expect(escrowReleaseMock).toHaveBeenCalledWith(
+      "ORD-DV-202",
+      expect.anything(),
+      expect.anything(),
+    );
     expect(m.calls.find((c) => c.rpc === "complete_trip_tx")).toBeTruthy();
   });
 
@@ -305,7 +320,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-cotp-1/confirm-otp")
       .set("X-Idempotency-Key", "cotp-test-1")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectContract(res, 200);
     expect(res.body.payment_released).toBe(true);
@@ -337,7 +352,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
     m.store.delivery_otps.push({
       id: "otp-dv-3",
       order_id: "order-dv-3",
-      otp_hash: crypto.createHash("sha256").update("123456").digest("hex"),
+      otp_hash: crypto.createHash("sha256").update("654321").digest("hex"),
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       verified: false,
       created_at: new Date().toISOString(),
@@ -347,7 +362,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-3/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-4")
       .set(DRIVER)
-      .send({ otp: "654321" });
+      .send({ otp: "999999" });
 
     expectErrorContract(res, 400);
     expect(res.body.error).toContain("Invalid OTP");
@@ -365,7 +380,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-4/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-5")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectForbidden(res);
   });
@@ -390,7 +405,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-5/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-6")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectErrorContract(res, 503);
     expect(res.body).toHaveProperty("retryable");
@@ -415,7 +430,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-6/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-7")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectServerError(res);
   });
@@ -440,7 +455,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-7/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-8")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectErrorContract(res, 409);
     expect(res.body.error).toMatch(/km from the drop-off/i);
@@ -467,7 +482,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-8/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-9")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectErrorContract(res, 409);
     expect(res.body.error).toMatch(/location is not available/i);
@@ -495,7 +510,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
       .post("/api/orders/order-dv-9/verify-delivery")
       .set("X-Idempotency-Key", "dv-test-10")
       .set(DRIVER)
-      .send({ otp: "123456" });
+      .send({ otp: "654321" });
 
     expectErrorContract(res, 503);
     expect(res.body.retryable).toBe(true);

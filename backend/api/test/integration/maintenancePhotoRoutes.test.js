@@ -7,6 +7,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -43,6 +44,7 @@ const EXECUTABLE_BYTES = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 
 describe('Maintenance Photo Routes Integration Tests', () => {
   beforeEach(() => {
     process.env.BYPASS_AUTH = 'true';
+    process.env.ENABLE_TEST_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.truck_maintenance_tickets = [
       {
@@ -223,6 +225,45 @@ describe('Maintenance Photo Routes Integration Tests', () => {
         (t) => t.id === 'ticket-uuid-001'
       );
       expect(ticket.photo_urls.length).toBe(1);
+    });
+
+    it('appends new photo URLs while preserving existing photo URLs', async () => {
+      m.store.truck_maintenance_tickets[0].photo_urls = [
+        'https://mock-storage.supabase.co/existing-photo-1.jpg',
+      ];
+
+      const res = await request(buildApp())
+        .post('/api/maintenance/ticket-uuid-001/photos')
+        .set(DRIVER_HEADERS)
+        .attach('photos', JPEG_BYTES, { filename: 'photo2.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.uploaded_count).toBe(1);
+      expect(res.body.photo_urls).toHaveLength(2);
+      expect(res.body.photo_urls[0]).toBe('https://mock-storage.supabase.co/existing-photo-1.jpg');
+
+      const ticket = m.store.truck_maintenance_tickets.find(
+        (t) => t.id === 'ticket-uuid-001'
+      );
+      expect(ticket.photo_urls).toHaveLength(2);
+      expect(ticket.photo_urls[0]).toBe('https://mock-storage.supabase.co/existing-photo-1.jpg');
+    });
+
+    it('rejects upload when ticket already has maximum allowed photos', async () => {
+      m.store.truck_maintenance_tickets[0].photo_urls = [
+        'https://mock-storage.supabase.co/photo1.jpg',
+        'https://mock-storage.supabase.co/photo2.jpg',
+        'https://mock-storage.supabase.co/photo3.jpg',
+      ];
+
+      const res = await request(buildApp())
+        .post('/api/maintenance/ticket-uuid-001/photos')
+        .set(DRIVER_HEADERS)
+        .attach('photos', JPEG_BYTES, { filename: 'photo4.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/maximum 3 allowed/i);
     });
   });
 });

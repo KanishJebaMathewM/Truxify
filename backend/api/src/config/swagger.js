@@ -18,6 +18,15 @@ const options = {
       version: '1.0.0',
       description: 'API documentation for Truxify logistics backend',
     },
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
     servers: [
       {
         url: apiUrl,
@@ -44,6 +53,28 @@ const options = {
 };
 
 const swaggerSpec = swaggerJsdoc(options);
+
+const protectedPathPrefixes = ['/api/zkid/', '/api/mev/'];
+const protectedDaoPaths = new Set([
+  '/api/dao/join',
+  '/api/dao/leave',
+  '/api/dao/proposal/create',
+  '/api/dao/vote/cast',
+  '/api/dao/proposal/execute',
+]);
+
+for (const [pathName, operations] of Object.entries(swaggerSpec.paths || {})) {
+  const isProtected = protectedPathPrefixes.some((prefix) => pathName.startsWith(prefix))
+    || protectedDaoPaths.has(pathName);
+
+  if (!isProtected) {
+    continue;
+  }
+
+  for (const operation of Object.values(operations)) {
+    operation.security = [{ BearerAuth: [] }];
+  }
+}
 
 export { swaggerSpec };
 

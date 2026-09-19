@@ -2,7 +2,7 @@ import logger from '../../middleware/logger.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
 import { getRouteEstimate } from '../osrm.js';
 import { getLiveTrafficMultiplier } from '../trafficService.js';
-import { getHaversineDistance } from '../routingService.js';
+import { haversineDistance } from '../utils/coordinates.js';
 import { broadcastOrderEta } from '../../sockets/tracker.js';
 import { emitEtaUpdateToBooking } from '../../sockets/locationServer.js';
 
@@ -147,10 +147,6 @@ export async function calculateRouteEta({ originLat, originLng, destLat, destLng
   }
 }
 
-function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
-  const km = getHaversineDistance(lat1, lng1, lat2, lng2);
-  return km * 1000;
-}
 
 async function getLastCalcPosition(driverId) {
   if (!redisClient || !driverId) return null;
@@ -234,7 +230,7 @@ export function hasMeaningfulMovement(lastPos, lat, lng, thresholdM = LOCATION_M
   if (!lastPos || !Number.isFinite(lastPos.lat) || !Number.isFinite(lastPos.lng)) {
     return true;
   }
-  const distanceM = haversineDistanceMeters(lastPos.lat, lastPos.lng, lat, lng);
+  const distanceM = haversineDistance(lastPos.lat, lastPos.lng, lat, lng, 'meters');
   return distanceM >= thresholdM;
 }
 

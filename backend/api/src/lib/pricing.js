@@ -28,7 +28,7 @@ export function sanitizePrice(value) {
   return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
 }
 
-const EARTH_RADIUS_KM = 6371.0088;
+import { EARTH_RADIUS_KM, haversineDistance } from '../utils/coordinates.js';
 
 // Pricing constants (all amounts in paisa unless noted)
 const TOLL_ESCALATION_HOURS = 6;
@@ -85,22 +85,14 @@ function readRateCard() {
  * Google Directions and pass the actual road distance in instead.
  */
 export function haversineKm(lat1, lon1, lat2, lon2) {
-  if (
-    !Number.isFinite(lat1) || !Number.isFinite(lon1) ||
-    !Number.isFinite(lat2) || !Number.isFinite(lon2)
-  ) {
-    throw new TypeError('haversineKm requires finite numeric lat/lng arguments');
+  try {
+    return haversineDistance(lat1, lon1, lat2, lon2, 'km');
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new TypeError('haversineKm requires finite numeric lat/lng arguments', { cause: err });
+    }
+    throw err;
   }
-  if (lat1 === lat2 && lon1 === lon2) return 0;
-
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return EARTH_RADIUS_KM * c;
 }
 
 /**
@@ -216,15 +208,11 @@ export function convertKmToMiles(km) {
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat, safePaisa };
 
 
+// === Spec 10: ===
 // === Spec 10: non-negative validation ===
 export function guardNonNegative(value, label = 'value') {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite, got ${value}`);
   if (value < 0) return 0;
   return value;
 }
-
-
-// === Issue #1513: Export version info for test verification ===
-export const PRICING_MODULE_VERSION = '1.0.0';
-export const PRICING_MODULE_TESTS_ADDED = true;
 

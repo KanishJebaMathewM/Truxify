@@ -50,6 +50,10 @@ vi.mock('../../../zkid/zkid.service.js', () => ({
 
 const zkidRouter = (await import('../../../zkid/routes.js')).default;
 
+/**
+ * Builds an Express application that mounts the route under its API prefix.
+ * @returns {import('express').Express} Configured Express test application.
+ */
 function makeApp() {
   const app = express();
   app.use(express.json());

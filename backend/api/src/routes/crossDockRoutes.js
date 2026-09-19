@@ -317,11 +317,6 @@ export default router;
  *       '403': { description: Forbidden }
  *       '404': { description: Transfer not found }
  *       '500': { description: Internal server error }
- *   post:
- *     summary: Invalid operation placeholder
- *     tags: [Cross-Docking]
- *     responses:
- *       '405': { description: Method not allowed }
  * /api/cross-dock/{id}/accept:
  *   post:
  *     summary: Accept a cross-dock transfer

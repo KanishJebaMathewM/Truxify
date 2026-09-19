@@ -17,9 +17,19 @@ describe('cross-dock OpenAPI contract', () => {
       '/api/cross-dock/{id}/cancel',
       '/api/cross-dock/{id}/verify',
     ]));
-    expect(spec.paths['/api/cross-dock']).toHaveProperty('get');
-    expect(spec.paths['/api/cross-dock']).toHaveProperty('post');
-    expect(spec.paths['/api/cross-dock/{id}']).toHaveProperty('get');
+    const expectedOperations = {
+      '/api/cross-dock/candidates': 'get',
+      '/api/cross-dock': 'post',
+      '/api/cross-dock/{id}': 'get',
+      '/api/cross-dock/{id}/accept': 'post',
+      '/api/cross-dock/{id}/decline': 'post',
+      '/api/cross-dock/{id}/cancel': 'post',
+      '/api/cross-dock/{id}/verify': 'post',
+    };
+
+    for (const [path, method] of Object.entries(expectedOperations)) {
+      expect(spec.paths[path]).toHaveProperty(method);
+    }
   });
 
   it('declares authentication and request contracts', () => {
@@ -30,7 +40,8 @@ describe('cross-dock OpenAPI contract', () => {
     });
     for (const path of Object.keys(spec.paths)) {
       for (const operation of Object.values(spec.paths[path])) {
-        if (operation.security) expect(operation.security).toEqual([{ BearerAuth: [] }]);
+        expect(operation.security).toEqual([{ BearerAuth: [] }]);
+        expect(operation.responses).toHaveProperty('401');
       }
     }
     expect(spec.paths['/api/cross-dock'].post.requestBody).toBeDefined();

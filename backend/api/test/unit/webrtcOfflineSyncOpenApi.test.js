@@ -27,7 +27,7 @@ const swaggerSpec = swaggerJsdoc({
 
 describe('WebRTC offline sync OpenAPI contract', () => {
   it('documents the offline sync operation and request contract', () => {
-    const operation = swaggerSpec.paths['/api/webrtc/sync/{peerId}']?.post;
+    const operation = swaggerSpec.paths['/webrtc/sync/{peerId}']?.post;
 
     expect(operation).toBeDefined();
     expect(operation.security).toEqual([{ BearerAuth: [] }]);

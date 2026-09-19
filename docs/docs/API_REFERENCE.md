@@ -434,7 +434,7 @@ Base Path
 |GET|/webrtc/stats|
 |GET|/webrtc/nearby|
 |GET|/webrtc/offline/:peerId|
-|POST|/webrtc/sync/:peerId|
+|POST|/webrtc/sync/:peerId|Acknowledge synchronized offline GPS rows for an accessible peer|
 
 ---
 
@@ -452,6 +452,31 @@ Base Path
 |GET|/zkp/status/:userId|
 |GET|/zkp/document-hash/:userId|
 |GET|/zkp/stats|
+
+
+### POST /api/webrtc/sync/{peerId}
+
+Requires a Bearer token and the `webrtc:sync-offline` policy.
+
+Request body:
+
+```json
+{
+  "ackedIds": ["row-1", "row-2"]
+}
+```
+
+`ackedIds` must be a non-empty array containing the offline GPS row IDs the client has successfully received.
+
+Responses:
+
+| Status | Meaning |
+|--------|---------|
+|200|Offline data synchronized|
+|400|`ackedIds` is missing or empty|
+|403|Authenticated user cannot access the peer|
+|500|Synchronization failed|
+|503|WebRTC signaling server is not initialized|
 
 ---
 

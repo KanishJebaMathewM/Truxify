@@ -98,14 +98,20 @@ Successful responses generally follow:
 }
 ```
 
-Error responses generally contain:
+Error responses from the global API error handler use the following structure:
 
 ```json
 {
   "success": false,
-  "message": "Description of the error"
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "details": {}
+  }
 }
 ```
+
+The error.code identifies the error category, error.message contains the human-readable message, and error.details contains structured context when available. Route-specific handlers may return a simpler error shape; when an endpoint documents a different response, follow that endpoint's contract.
 
 ---
 

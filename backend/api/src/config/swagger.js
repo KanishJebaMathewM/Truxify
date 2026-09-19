@@ -13,6 +13,15 @@ const options = {
       version: '1.0.0',
       description: 'API documentation for Truxify logistics backend',
     },
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
     servers: [
       {
         url: apiUrl,

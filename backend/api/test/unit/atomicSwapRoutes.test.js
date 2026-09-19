@@ -43,11 +43,11 @@ const swapServiceMock = vi.hoisted(() => ({
   getCrossChainSwap: vi.fn(),
 }));
 
-vi.mock('../../../../atomic-swap/swap.service.js', () => ({
+vi.mock('../../../atomic-swap/swap.service.js', () => ({
   default: swapServiceMock,
 }));
 
-const swapRouter = (await import('../../../../atomic-swap/routes.js')).default;
+const swapRouter = (await import('../../../atomic-swap/routes.js')).default;
 
 function makeApp() {
   const app = express();

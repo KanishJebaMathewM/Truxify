@@ -16,7 +16,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 
 let allowDaoAuth = true;
 
-vi.mock('../../../../dao/middleware/daoAuth.js', () => ({
+vi.mock('../../../dao/middleware/daoAuth.js', () => ({
   requireDaoAuth: () => (req, res, next) => {
     if (!allowDaoAuth) return res.status(403).json({ error: 'Forbidden' });
     req.verifiedSigner = req.user?.wallet_address;
@@ -46,11 +46,11 @@ const daoServiceMock = vi.hoisted(() => ({
   getDAOStats: vi.fn(),
 }));
 
-vi.mock('../../../../dao/dao.service.js', () => ({
+vi.mock('../../../dao/dao.service.js', () => ({
   default: daoServiceMock,
 }));
 
-const daoRouter = (await import('../../../../dao/routes.js')).default;
+const daoRouter = (await import('../../../dao/routes.js')).default;
 
 function makeApp() {
   const app = express();

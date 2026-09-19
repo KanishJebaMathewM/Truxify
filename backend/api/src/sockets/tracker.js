@@ -187,7 +187,7 @@ let telemetryMonitorInterval = null;
 let driverStateSweepInterval = null;
 let wsUpgradeLimitsCleanupInterval = null;
 let messageRateTrackerCleanupInterval = null;
-const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
+const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 30000; // 30 seconds
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
@@ -711,7 +711,7 @@ export function initWebSocketServer(server, orderRepository) {
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('Terminating unresponsive WebSocket client');
+        logger.warn({ driverId: ws.driverId, socketId: ws.socketId }, '[WS][heartbeat] Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -805,6 +805,9 @@ export async function isMessageRateLimited(ws) {
 }
 
 export async function handleTrackingMessage(ws, message, req) {
+  // Any incoming message means the connection is alive
+  ws.isAlive = true;
+
   if (await isMessageRateLimited(ws)) {
     ws.send(JSON.stringify({ error: 'Rate limit exceeded: too many messages per second', code: 429, retryAfter: 1 }));
     return;

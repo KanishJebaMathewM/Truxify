@@ -1,6 +1,9 @@
 import asyncio
 import importlib
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
@@ -100,6 +103,54 @@ async def test_update_eta_uses_bounded_inference_executor(traffic_pipeline_conte
     )
     assert captured["args"][2] == "order_order-123"
     pipeline.predict_eta.assert_called_once()
+
+
+def test_predict_eta_serializes_same_pipeline_calls(traffic_pipeline_context):
+    """Verify concurrent worker calls for one pipeline are serialized."""
+    pipeline_module, TrafficPipeline = traffic_pipeline_context
+    pipeline = TrafficPipeline.__new__(TrafficPipeline)
+
+    state_lock = threading.Lock()
+    first_call_entered = threading.Event()
+    active_calls = 0
+    peak_calls = 0
+
+    def predict_eta(features, route_id=None, route_signature=None):
+        """Track concurrent prediction calls while simulating model work."""
+        nonlocal active_calls, peak_calls
+        with state_lock:
+            active_calls += 1
+            peak_calls = max(peak_calls, active_calls)
+            first_call_entered.set()
+        time.sleep(0.05)
+        with state_lock:
+            active_calls -= 1
+        return 20.0
+
+    pipeline.predict_eta = predict_eta
+    serialized_predict = sys.modules["services._eta_inference_off_event_loop_patch"]._run_serialized_predict_eta
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            serialized_predict,
+            pipeline,
+            np.zeros((1, 5)),
+            "order-1",
+            "route-1",
+        )
+        assert first_call_entered.wait(timeout=1)
+        second = executor.submit(
+            serialized_predict,
+            pipeline,
+            np.zeros((1, 5)),
+            "order-2",
+            "route-2",
+        )
+
+        assert first.result(timeout=1) == 20.0
+        assert second.result(timeout=1) == 20.0
+
+    assert peak_calls == 1
 
 
 @pytest.mark.asyncio

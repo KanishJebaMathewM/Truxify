@@ -4,12 +4,11 @@ from qiskit.circuit.library import QAOAAnsatz
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
 from qiskit_optimization import QuadraticProgram
-from qiskit_optimization.algorithms import MinimumEigenOptimizer
+from qiskit_optimization.algorithms import MinimumEigenOptimizer, ScipyMilpOptimizer
 from qiskit_algorithms.minimum_eigensolvers import QAOA
 from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
 from typing import Dict, List, Tuple, Any, Optional
-import itertools
 import logging
 
 logger = logging.getLogger(__name__)
@@ -110,29 +109,38 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
-        # Add binary variables for each edge
+        nodes = list(graph.nodes())
+        if len(nodes) < 3:
+            raise ValueError("Route optimization requires at least 3 nodes")
+        if not nx.is_connected(graph):
+            raise ValueError("Route optimization requires a connected graph")
+        if any(graph.degree(node) < 2 for node in nodes):
+            raise ValueError("Every node must have at least two incident edges")
+
+        # Add binary variables for each edge.
         edge_vars = {}
-        for i, (u, v) in enumerate(graph.edges()):
+        for u, v in graph.edges():
             var_name = f'x_{u}_{v}'
             qubo.binary_var(var_name)
             edge_vars[(u, v)] = var_name
 
-        # Objective: minimize total distance
+        # Objective: minimize total distance.
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
             objective[(var, var)] = weight
 
-        qubo.minimize(quadratic=objective)
+        # Edge costs are linear because every route variable is binary.
+        # Keeping the objective linear also allows the mixed-integer flow model
+        # to be solved directly by ScipyMilpOptimizer in regression tests.
+        qubo.minimize(linear=objective)
 
         # Degree constraints: each node must have degree exactly 2.
-        for node in graph.nodes():
+        for node in nodes:
             incident = [
                 var for (u, v), var in edge_vars.items()
                 if u == node or v == node
             ]
-            if not incident:
-                continue
             qubo.linear_constraint(
                 linear={var: 1 for var in incident},
                 sense='==',
@@ -140,27 +148,74 @@ class QUBOFormatter:
                 name=f'degree_{node}',
             )
 
-        # Connectivity / subtour-elimination constraints: for every proper
-        # non-empty subset S of nodes, the number of selected edges entirely
-        # inside S must be <= |S| - 1. This forbids disconnected cycles and
-        # guarantees the selected edges form a single connected cycle. Only
-        # applied for small graphs to avoid the exponential subset blow-up.
-        nodes = list(graph.nodes())
-        if len(nodes) <= 8:
-            for size in range(2, len(nodes)):
-                for subset in itertools.combinations(nodes, size):
-                    s = set(subset)
-                    inner = [
-                        var for (u, v), var in edge_vars.items()
-                        if u in s and v in s
-                    ]
-                    if len(inner) <= size - 1:
-                        continue
+        # A simple undirected graph with fewer than 6 nodes cannot contain
+        # two disjoint cycles while every node has degree exactly 2. Therefore,
+        # degree constraints alone already guarantee connectivity for these
+        # small cases. Starting at 6 nodes, disconnected 2-regular components
+        # become possible, so add single-commodity flow constraints there.
+        if len(nodes) >= 6:
+            # Each non-root node consumes one unit of flow. A selected route edge
+            # can carry at most n-1 units in either direction. This prevents
+            # disconnected cycles without enumerating all node subsets.
+            root = nodes[0]
+            flow_vars = {}
+            for u, v in graph.edges():
+                forward = f'flow_{u}_{v}'
+                reverse = f'flow_{v}_{u}'
+                qubo.integer_var(
+                    name=forward,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
+                )
+                qubo.integer_var(
+                    name=reverse,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
+                )
+                flow_vars[(u, v)] = (forward, reverse)
+
+                capacity = len(nodes) - 1
+                qubo.linear_constraint(
+                    linear={forward: 1, edge_vars[(u, v)]: -capacity},
+                    sense='<=',
+                    rhs=0,
+                    name=f'flow_capacity_{u}_{v}_forward',
+                )
+                qubo.linear_constraint(
+                    linear={reverse: 1, edge_vars[(u, v)]: -capacity},
+                    sense='<=',
+                    rhs=0,
+                    name=f'flow_capacity_{u}_{v}_reverse',
+                )
+
+            for node in nodes:
+                outgoing = []
+                incoming = []
+                for (u, v), (forward, reverse) in flow_vars.items():
+                    if u == node:
+                        outgoing.append(forward)
+                        incoming.append(reverse)
+                    elif v == node:
+                        outgoing.append(reverse)
+                        incoming.append(forward)
+
+                conservation = {var: 1 for var in incoming}
+                for var in outgoing:
+                    conservation[var] = conservation.get(var, 0) - 1
+
+                if node == root:
                     qubo.linear_constraint(
-                        linear={var: 1 for var in inner},
-                        sense='<=',
-                        rhs=size - 1,
-                        name=f'subtour_{size}_{"_".join(str(n) for n in subset)}',
+                        linear=conservation,
+                        sense='==',
+                        rhs=-(len(nodes) - 1),
+                        name='flow_conservation_root',
+                    )
+                else:
+                    qubo.linear_constraint(
+                        linear=conservation,
+                        sense='==',
+                        rhs=1,
+                        name=f'flow_conservation_{node}',
                     )
 
         self.qubo = qubo
@@ -179,16 +234,30 @@ class QUBOFormatter:
         try:
             if eigensolver is None:
                 eigensolver = QAOA(optimizer=COBYLA(), reps=1)
-            optimizer = MinimumEigenOptimizer(eigensolver)
 
-            # Solve
-            result = optimizer.solve(qubo)
-            
+            # Mixed-integer flow formulations can be solved directly with
+            # SciPy MILP without expanding the integer flow variables into
+            # additional binary variables for a quantum eigensolver.
+            if isinstance(eigensolver, ScipyMilpOptimizer):
+                result = eigensolver.solve(qubo)
+            else:
+                optimizer = MinimumEigenOptimizer(eigensolver)
+                result = optimizer.solve(qubo)
+
+            # Qiskit returns solution values in the exact order of qubo.variables.
+            # Derive the edge mapping from the solved QUBO so a previously
+            # formulated problem cannot be paired with stale self.variables.
+            edge_variables = [
+                (index, variable.name)
+                for index, variable in enumerate(qubo.variables)
+                if variable.name.startswith('x_')
+            ]
+
             return {
                 'success': True,
-                'solution': result.x,
+                'solution': [result.x[index] for index, _ in edge_variables],
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': [name for _, name in edge_variables]
             }
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")

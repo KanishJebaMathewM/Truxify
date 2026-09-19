@@ -21,6 +21,9 @@ describe('ML A/B-testing status OpenAPI contract', () => {
     const operation = spec.paths['/api/ml/ab-testing/status'].get;
     expect(operation.security).toEqual([{ BearerAuth: [] }]);
     expect(operation.responses).toHaveProperty('200');
+    expect(operation.responses['200'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/MlAbTestingStatusResponse',
+    });
     expect(operation.responses).toHaveProperty('401');
     expect(operation.responses).toHaveProperty('403');
     expect(operation.responses).toHaveProperty('429');
@@ -30,7 +33,18 @@ describe('ML A/B-testing status OpenAPI contract', () => {
     expect(schema).toBeDefined();
     expect(schema.required).toEqual(['status', 'active_test', 'timestamp']);
     expect(schema.properties.status.enum).toEqual(['active']);
-    expect(schema.properties.active_test.nullable).toBe(true);
+    expect(schema.properties.active_test).toMatchObject({
+      type: 'object',
+      nullable: true,
+      required: ['test_id', 'production_version', 'shadow_version', 'started_at', 'status'],
+      properties: expect.objectContaining({
+        test_id: expect.objectContaining({ type: 'string' }),
+        production_version: expect.objectContaining({ type: 'string' }),
+        shadow_version: expect.objectContaining({ type: 'string' }),
+        started_at: expect.objectContaining({ type: 'string', format: 'date-time' }),
+        status: expect.objectContaining({ type: 'string' }),
+      }),
+    });
     expect(schema.properties.timestamp.format).toBe('date-time');
     expect(spec.components.securitySchemes.BearerAuth).toEqual({
       type: 'http',

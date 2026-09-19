@@ -22,7 +22,10 @@ const stats = {
   sets: 0,
   deletes: 0,
   errors: 0,
+  coalesced: 0,
 };
+
+const inFlightSingleflightGroup = new Map();
 
 export function init(client) {
   if (initialized) return;
@@ -51,7 +54,6 @@ export async function get(namespace, entityId, subKey) {
     return null;
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] GET error');
     return null;
   }
@@ -73,10 +75,51 @@ export async function set(namespace, entityId, value, opts = {}) {
     return true;
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] SET error');
     return false;
   }
+}
+
+/**
+ * Executes fetcherFn with Singleflight request coalescing to prevent Cache Stampedes.
+ * Concurrent requests for the same key await the single in-flight database query.
+ *
+ * @param {string} namespace Cache namespace
+ * @param {string} entityId Entity ID
+ * @param {Function} fetcherFn Async function to fetch data on cache miss
+ * @param {Object} [opts] Options (subKey, ttl)
+ * @returns {Promise<any>}
+ */
+export async function getOrSetSingleflight(namespace, entityId, fetcherFn, opts = {}) {
+  const key = CacheKeyBuilder.build(namespace, entityId, opts.subKey);
+
+  // 1. Check cache first
+  const cached = await get(namespace, entityId, opts.subKey);
+  if (cached !== null) {
+    return cached;
+  }
+
+  // 2. Check if a database fetch for this key is already in-flight
+  if (inFlightSingleflightGroup.has(key)) {
+    stats.coalesced++;
+    return await inFlightSingleflightGroup.get(key);
+  }
+
+  // 3. Initiate singleflight execution
+  const fetchPromise = (async () => {
+    try {
+      const data = await fetcherFn();
+      if (data !== undefined && data !== null) {
+        await set(namespace, entityId, data, opts);
+      }
+      return data;
+    } finally {
+      inFlightSingleflightGroup.delete(key);
+    }
+  })();
+
+  inFlightSingleflightGroup.set(key, fetchPromise);
+  return await fetchPromise;
 }
 
 export async function invalidate(namespace, entityId, opts = {}) {
@@ -104,7 +147,6 @@ export async function invalidateBatch(namespace, entityIds, opts = {}) {
     }
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, namespace }, '[CacheManager] Batch invalidation error');
   }
 }
@@ -155,6 +197,7 @@ export function resetStats() {
   stats.sets = 0;
   stats.deletes = 0;
   stats.errors = 0;
+  stats.coalesced = 0;
 }
 
 export function isInitialized() {
@@ -172,6 +215,7 @@ export default {
   init,
   get,
   set,
+  getOrSetSingleflight,
   invalidate,
   invalidateBatch,
   invalidateAll,

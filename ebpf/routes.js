@@ -39,6 +39,20 @@ const ebpfMetricsLimiter = rateLimit({
 // ============ System Metrics ============
 
 // System metrics
+/**
+ * @openapi
+ * /api/ebpf/metrics:
+ *   get:
+ *     tags: [eBPF]
+ *     summary: Get eBPF system metrics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/ebpf/metrics', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: get metrics from eBPF
@@ -77,6 +91,20 @@ router.get('/ebpf/metrics', authenticate, requirePolicy('ebpf:manage'), ebpfMetr
 });
 
 // System calls
+/**
+ * @openapi
+ * /api/ebpf/syscalls:
+ *   get:
+ *     tags: [eBPF]
+ *     summary: Get eBPF syscall telemetry
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/ebpf/syscalls', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: read from BPF map
@@ -102,6 +130,20 @@ router.get('/ebpf/syscalls', authenticate, requirePolicy('ebpf:manage'), ebpfMet
 });
 
 // Network stats
+/**
+ * @openapi
+ * /api/ebpf/network:
+ *   get:
+ *     tags: [eBPF]
+ *     summary: Get eBPF network telemetry
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/ebpf/network', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         // In production: read from BPF map
@@ -124,6 +166,20 @@ router.get('/ebpf/network', authenticate, requirePolicy('ebpf:manage'), ebpfMetr
 });
 
 // Security events
+/**
+ * @openapi
+ * /api/ebpf/security:
+ *   get:
+ *     tags: [eBPF]
+ *     summary: Get eBPF security telemetry
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/ebpf/security', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         const events = [
@@ -154,6 +210,20 @@ router.get('/ebpf/security', authenticate, requirePolicy('ebpf:manage'), ebpfMet
 });
 
 // Performance profile
+/**
+ * @openapi
+ * /api/ebpf/profile:
+ *   get:
+ *     tags: [eBPF]
+ *     summary: Get eBPF process profile
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/ebpf/profile', authenticate, requirePolicy('ebpf:manage'), ebpfMetricsLimiter, async (req, res) => {
     try {
         const profile = {
@@ -186,6 +256,29 @@ router.get('/ebpf/profile', authenticate, requirePolicy('ebpf:manage'), ebpfMetr
 // ============ eBPF Load/Unload with Rate Limiting ============
 
 // Load eBPF programs (admin only, with rate limiting)
+/**
+ * @openapi
+ * /api/ebpf/load:
+ *   post:
+ *     tags: [eBPF]
+ *     summary: Load an approved eBPF program
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               program:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/ebpf/load', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         // Validate request
@@ -224,6 +317,29 @@ router.post('/ebpf/load', authenticate, requirePolicy('ebpf:manage'), ebpfAction
 });
 
 // Unload eBPF programs (admin only, with rate limiting)
+/**
+ * @openapi
+ * /api/ebpf/unload:
+ *   post:
+ *     tags: [eBPF]
+ *     summary: Unload an approved eBPF program
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               program:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/ebpf/unload', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         // Validate request
@@ -259,6 +375,20 @@ router.post('/ebpf/unload', authenticate, requirePolicy('ebpf:manage'), ebpfActi
 });
 
 // Unload all eBPF programs (admin only, with rate limiting)
+/**
+ * @openapi
+ * /api/ebpf/unload-all:
+ *   post:
+ *     tags: [eBPF]
+ *     summary: Unload all Truxify eBPF programs
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/ebpf/unload-all', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         await execAsync('sudo rm -f /sys/fs/bpf/truxify_*');

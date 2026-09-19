@@ -7,6 +7,35 @@ import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 const router = express.Router();
 
 // Calculate route
+/**
+ * @openapi
+ * /api/wasm/route:
+ *   post:
+ *     tags: [WASM]
+ *     summary: Calculate a route using the WASM edge runtime
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               origin:
+ *                 type: string
+ *               destination:
+ *                 type: string
+ *               weight:
+ *                 type: number
+ *               distance:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasm/route', async (req, res) => {
     try {
         const { origin, destination, weight, distance } = req.body;
@@ -36,6 +65,29 @@ router.post('/wasm/route', async (req, res) => {
 });
 
 // Process drivers
+/**
+ * @openapi
+ * /api/wasm/drivers:
+ *   post:
+ *     tags: [WASM]
+ *     summary: Process drivers using the WASM edge runtime
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               drivers:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasm/drivers', async (req, res) => {
     try {
         const { drivers } = req.body;
@@ -59,6 +111,31 @@ router.post('/wasm/drivers', async (req, res) => {
 });
 
 // Optimize loads
+/**
+ * @openapi
+ * /api/wasm/optimize:
+ *   post:
+ *     tags: [WASM]
+ *     summary: Optimize loads using the WASM edge runtime
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               loads:
+ *                 type: array
+ *               capacity:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasm/optimize', async (req, res) => {
     try {
         const { loads, capacity } = req.body;
@@ -82,6 +159,33 @@ router.post('/wasm/optimize', async (req, res) => {
 });
 
 // Calculate ETA
+/**
+ * @openapi
+ * /api/wasm/eta:
+ *   post:
+ *     tags: [WASM]
+ *     summary: Calculate ETA using the WASM edge runtime
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               distance:
+ *                 type: number
+ *               speed:
+ *                 type: number
+ *               trafficFactor:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasm/eta', async (req, res) => {
     try {
         const { distance, speed, trafficFactor } = req.body;
@@ -126,6 +230,20 @@ router.post('/wasm/eta', async (req, res) => {
 // against a stored, hashed OTP — never a client-supplied reference.
 
 // Get stats
+/**
+ * @openapi
+ * /api/wasm/stats:
+ *   get:
+ *     tags: [WASM]
+ *     summary: Get WASM runtime statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/wasm/stats', authenticate, requirePolicy('wasm:manage'), async (req, res) => {
     try {
         const stats = await edgeRuntime.getFunctionStats();

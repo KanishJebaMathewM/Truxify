@@ -314,6 +314,15 @@ export async function checkEscrowHealth() {
 }
 
 /**
+ * Derive a deterministic booking ID from an order's display ID.
+ * @param {string} orderDisplayId — e.g. "#FF20260521"
+ * @returns {string} bytes32 hex string
+ */
+export function getEscrowBookingId (orderDisplayId) {
+  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`]);
+}
+
+/**
  * Retrieves a full escrow booking record by its ID.
  * Used by the funding reconciliation sweeper to verify on-chain deposits.
  * Resolves Issue #7340.
@@ -720,6 +729,53 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   }
   });
 }
+
+/**
+ * Authorize trustless escrow release upon verified eBL delivery discharge.
+ * Triggered by EbolCustodyService once FINAL_DISCHARGED state and Merkle tamper seals verify.
+ *
+ * @param {object} params
+ * @param {string} params.ebolId
+ * @param {string} params.orderDisplayId
+ * @param {string} [params.consigneeAddress]
+ * @param {boolean} [params.tamperSealVerified=true]
+ * @returns {Promise<object>} Result of escrow release operation
+ */
+export async function authorizeEbolEscrowRelease({
+  ebolId,
+  orderDisplayId,
+  consigneeAddress = null,
+  tamperSealVerified = true,
+}) {
+  return measureExecution('EscrowService.authorizeEbolEscrowRelease', async () => {
+    if (!tamperSealVerified) {
+      return {
+        success: false,
+        error: 'Cannot release escrow: Cargo tamper seal verification failed or was bypassed.',
+        code: 'TAMPER_SEAL_UNVERIFIED',
+      };
+    }
+
+    if (!orderDisplayId) {
+      return {
+        success: false,
+        error: 'Order display ID is required to release escrowed funds.',
+        code: 'ORDER_DISPLAY_ID_REQUIRED',
+      };
+    }
+
+    logger.info(`[escrow] Authorized trustless release for eBL ${ebolId}, Order ${orderDisplayId}`);
+    const releaseResult = await escrowRelease(orderDisplayId);
+    return {
+      success: !releaseResult.error,
+      ebolId,
+      orderDisplayId,
+      consigneeAddress,
+      ...releaseResult,
+    };
+  });
+}
+
 
 
 /**

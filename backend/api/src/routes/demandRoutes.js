@@ -9,10 +9,157 @@ import { demandConfig } from '../config/demand.js';
 
 const router = express.Router();
 
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     DemandHeatmapFeature:
+ *       type: object
+ *       required:
+ *         - type
+ *         - geometry
+ *         - properties
+ *       properties:
+ *         type:
+ *           type: string
+ *           enum:
+ *             - Feature
+ *         geometry:
+ *           type: object
+ *           required:
+ *             - type
+ *             - coordinates
+ *           properties:
+ *             type:
+ *               type: string
+ *               enum:
+ *                 - Point
+ *             coordinates:
+ *               type: array
+ *               minItems: 2
+ *               maxItems: 2
+ *               items:
+ *                 type: number
+ *         properties:
+ *           type: object
+ *           properties:
+ *             intensity:
+ *               type: number
+ *             status:
+ *               type: string
+ *             address:
+ *               type: string
+ *     DemandHeatmapResponse:
+ *       type: object
+ *       properties:
+ *         type:
+ *           type: string
+ *           enum:
+ *             - FeatureCollection
+ *         features:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/DemandHeatmapFeature'
+ *         routeSuggestions:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: integer
+ *               recommendedRoute:
+ *                 type: string
+ *               estimatedEarnings:
+ *                 type: number
+ *               confidenceScore:
+ *                 type: number
+ *         estimatedEarningPotential:
+ *           type: number
+ *         predictedDemandNext48Hours:
+ *           type: object
+ *           properties:
+ *             next24Hours:
+ *               type: number
+ *             next48Hours:
+ *               type: number
+ *             peakHours:
+ *               type: array
+ *               items:
+ *                 type: integer
+ *         repositioningAreas:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               zone:
+ *                 type: string
+ *               suggestedDrivers:
+ *                 type: integer
+ *               priority:
+ *                 type: string
+ *               isMockData:
+ *                 type: boolean
+ *         filtersApplied:
+ *           type: object
+ *           properties:
+ *             vehicle_type:
+ *               type: string
+ *               nullable: true
+ *             cargo_category:
+ *               type: string
+ *               nullable: true
+ */
+
+
+
 // ============================================================================
 // 1. GET DEMAND HEATMAP
 // GET /api/demand-heatmap
 // ============================================================================
+/**
+ * @openapi
+ * /api/demand-heatmap:
+ *   get:
+ *     tags:
+ *       - Demand Analytics
+ *     summary: Retrieve the demand heatmap
+ *     description: Returns GeoJSON demand data with route suggestions, earnings estimates, forecast demand, and repositioning recommendations.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - name: vehicle_type
+ *         in: query
+ *         required: false
+ *         description: Optional vehicle type filter.
+ *         schema:
+ *           type: string
+ *         example: Truck
+ *       - name: cargo_category
+ *         in: query
+ *         required: false
+ *         description: Optional cargo category filter matched against goods_type.
+ *         schema:
+ *           type: string
+ *         example: Electronics
+ *     responses:
+ *       200:
+ *         description: Demand heatmap data.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DemandHeatmapResponse'
+ *       400:
+ *         description: Invalid query filter value.
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: The authenticated caller lacks the demand:view-heatmap policy.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Failed to fetch or calculate heatmap data.
+ */
+
 router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'), async (req, res) => {
   try {
     // Extract optional query filters for vehicle type and cargo category

@@ -46,11 +46,11 @@ const wasiRuntimeMock = vi.hoisted(() => ({
   getStats: vi.fn(),
 }));
 
-vi.mock('../../../wasi/wasi-runtime.js', () => ({
+vi.mock('../../../../wasi/wasi-runtime.js', () => ({
   default: wasiRuntimeMock,
 }));
 
-const wasiRouter = (await import('../../../wasi/routes.js')).default;
+const wasiRouter = (await import('../../../../wasi/routes.js')).default;
 
 function makeApp() {
   const app = express();

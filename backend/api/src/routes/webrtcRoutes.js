@@ -93,6 +93,87 @@ router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePo
 });
 
 // Get offline GPS data
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     WebRTCOfflineGPSRecord:
+ *       type: object
+ *       required:
+ *         - id
+ *         - data
+ *         - timestamp
+ *         - synced
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Offline GPS row identifier
+ *         data:
+ *           type: object
+ *           additionalProperties: true
+ *           description: Stored GPS payload
+ *         timestamp:
+ *           type: integer
+ *           format: int64
+ *           description: Unix timestamp in milliseconds
+ *         synced:
+ *           type: boolean
+ *           description: Whether the row has already been synchronized
+ *     WebRTCOfflineGPSResponse:
+ *       type: object
+ *       required:
+ *         - success
+ *         - data
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           example: true
+ *         data:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/WebRTCOfflineGPSRecord'
+ */
+
+/**
+ * @openapi
+ * /webrtc/offline/{peerId}:
+ *   get:
+ *     tags: [WebRTC]
+ *     summary: Retrieve offline GPS data for a peer
+ *     description: Returns bounded offline GPS rows newer than the requested timestamp after verifying that the authenticated user may access the peer.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: peerId
+ *         required: true
+ *         description: WebRTC peer identifier
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: since
+ *         required: true
+ *         description: Unix timestamp in milliseconds. Only rows newer than this timestamp are returned.
+ *         schema:
+ *           type: integer
+ *           format: int64
+ *           minimum: 0
+ *     responses:
+ *       200:
+ *         description: Offline GPS data retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/WebRTCOfflineGPSResponse'
+ *       400:
+ *         description: since is missing, invalid, or negative
+ *       403:
+ *         description: The authenticated user cannot access the requested peer
+ *       500:
+ *         description: Offline GPS retrieval failed
+ *       503:
+ *         description: WebRTC signaling server is not initialized
+ */
 router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('webrtc:view-offline'), async (req, res) => {
   try {
     const { peerId } = req.params;

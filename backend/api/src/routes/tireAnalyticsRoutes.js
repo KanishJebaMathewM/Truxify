@@ -114,6 +114,57 @@ router.get('/status/:truckId', authenticate, userLimiter, async (req, res) => {
  * POST /api/tire-analytics/reset/:truckId
  * Acknowledges tire maintenance/replacement and resets critical blowout alerts.
  */
+/**
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ * /api/tire-analytics/reset/{truckId}:
+ *   post:
+ *     tags: [Tire Analytics]
+ *     summary: Reset a tire health alert after maintenance
+ *     description: Acknowledges scheduled tire maintenance or replacement and resets the truck's critical tire alert state.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - name: truckId
+ *         in: path
+ *         required: true
+ *         description: Truck identifier.
+ *         schema:
+ *           type: string
+ *           pattern: '^[a-zA-Z0-9_\\-:.]{1,64}$'
+ *         example: TRUCK-101
+ *     responses:
+ *       200:
+ *         description: Tire health alert reset successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [message, report]
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Tire health alert reset successfully after scheduled maintenance
+ *                 report:
+ *                   $ref: '#/components/schemas/TireAnalyticsReport'
+ *       400:
+ *         description: Invalid truck identifier.
+ *       401:
+ *         description: Authentication is required.
+ *       403:
+ *         description: Caller role is not permitted to reset tire alerts.
+ *       404:
+ *         description: No tire analytics report found for the truck.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Failed to reset the tire health alert.
+ */
 router.post('/reset/:truckId', authenticate, userLimiter, async (req, res) => {
   try {
     if (req.user && req.user.role && !ALLOWED_TIRE_ROLES.includes(req.user.role)) {

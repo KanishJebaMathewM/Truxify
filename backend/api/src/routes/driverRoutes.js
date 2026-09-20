@@ -127,7 +127,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, redisClient, createUserClient } from '../config/db.js';
+import { supabase, getAdminClient, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
@@ -234,7 +234,7 @@ const hosStatusSchema = z.object({
  */
 router.get('/active', requireApiKey, userLimiter, async (req, res) => {
   try {
-    const client = supabaseAdmin || supabase;
+    const client = getAdminClient();
     if (!client) {
       return res.status(503).json({ error: 'Supabase is not configured.' });
     }

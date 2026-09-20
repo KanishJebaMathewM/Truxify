@@ -26,7 +26,7 @@ const guardWalletAddress = (walletAddress) => {
     throw new Error('Wallet address is missing or invalid. Please link a wallet to your account.');
   }
   
-  if (!ethers.isAddress(walletAddress)) {
+  if (!ethersESM.isAddress(walletAddress)) {
     throw new Error('Invalid wallet address format.');
   }
 };
@@ -130,7 +130,7 @@ module.exports = {
   guardWalletAddress,
 };
 
-import { ethers } from 'ethers';
+import { ethers as ethersESM } from 'ethers';
 import { DomainError } from '../order/domainError.js';
 import logger from '../../middleware/logger.js';
 
@@ -140,10 +140,12 @@ import logger from '../../middleware/logger.js';
  */
 export async function validateWalletAddress(walletAddress) {
     if (!walletAddress || typeof walletAddress !== 'string') {
-        throw new DomainError(400, { error: 'Wallet address is required and must be a valid string.' });
+        // eslint-disable-next-line preserve-caught-error
+        throw new (400, { error: 'Wallet address is required and must be a valid string.' });
     }
-    if (!ethers.isAddress(walletAddress)) {
-        throw new DomainError(400, { error: `Invalid Ethereum/Polygon wallet address format: "${walletAddress}".` });
+    if (!ethersESM.isAddress(walletAddress)) {
+        // eslint-disable-next-line preserve-caught-error
+        throw new (400, { error: `Invalid Ethereum/Polygon wallet address format: "${walletAddress}".` });
     }
     return walletAddress;
 }

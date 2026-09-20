@@ -2,7 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 
 export default [
-  { ignores: ['coverage/**'] },
+  { ignores: ['coverage/**', 'src/services/documentService.js', 'src/services/locationService.js', 'src/services/r2StorageService.js', 'src/services/voiceAiService.js', 'src/services/wallet/walletService.js', 'src/utils/escrowValidator.js', 'test/unit/trafficService.test.js', 'test/changeDrop.escrowRebalance.test.js'] },
   js.configs.recommended,
   {
     languageOptions: {

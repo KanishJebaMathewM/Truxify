@@ -62,14 +62,11 @@ impl WasiPluginExecutor {
             .checked_add(input_bytes.len())
             .ok_or_else(|| anyhow::anyhow!("input length overflow"))?;
 
-        let out_cap = mem_bytes - out_offset;
-
         if out_offset > mem_bytes {
             anyhow::bail!("input data does not fit in plugin linear memory");
         }
-        if out_offset > mem_bytes {
-            anyhow::bail!("plugin output region does not fit in linear memory");
-        }
+
+        let out_cap = mem_bytes - out_offset;
 
         memory.write(&mut store, input_offset, input_bytes)?;
 
@@ -86,6 +83,9 @@ impl WasiPluginExecutor {
                 (out_cap.min(i32::MAX as usize)) as i32,
             ),
         ) {
+            Ok(len) if len < 0 => {
+                anyhow::bail!("plugin returned negative output length");
+            }
             Ok(len) => len as usize,
             // A fuel-exhaustion trap means the plugin exceeded its instruction
             // budget (e.g. an infinite loop). Surface it as a clear error

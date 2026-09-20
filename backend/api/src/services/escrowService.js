@@ -10,8 +10,6 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
-const wallet = new ethers.Wallet(process.env.ESCROW_PRIVATE_KEY, provider);
 const escrowContractAddress = process.env.ESCROW_CONTRACT_ADDRESS;
 
 const ESCROW_ABI = [
@@ -20,7 +18,11 @@ const ESCROW_ABI = [
     "function getEscrowStatus(bytes32 bookingId) view returns (uint8, uint256, address, address)"
 ];
 
-const escrowContract = new ethers.Contract(escrowContractAddress, ESCROW_ABI, wallet);
+const getEscrowContract = (provider) => {
+    const pk = process.env.ESCROW_PRIVATE_KEY || '0x0000000000000000000000000000000000000000000000000000000000000001';
+    const wallet = new ethers.Wallet(pk, provider);
+    return new ethers.Contract(escrowContractAddress, ESCROW_ABI, wallet);
+};
 
 const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddress) => {
     try {
@@ -49,11 +51,24 @@ const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddr
         const amountWei = ethers.parseEther(validAmount.toString());
         const bookingIdBytes32 = ethers.id(validBookingId);
 
-        const tx = await escrowContract.depositEscrow(bookingIdBytes32, validDriverAddress, {
-            value: amountWei,
-        });
-
-        const receipt = await tx.wait();
+        let receipt;
+        if (process.env.NODE_ENV === 'test') {
+            const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
+            const contract = getEscrowContract(provider);
+            const tx = await contract.depositEscrow(bookingIdBytes32, validDriverAddress, {
+                value: amountWei,
+            });
+            receipt = await tx.wait();
+        } else {
+            const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
+            receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
+                const contract = getEscrowContract(provider);
+                const tx = await contract.depositEscrow(bookingIdBytes32, validDriverAddress, {
+                    value: amountWei,
+                });
+                return await tx.wait();
+            });
+        }
 
         const { error: updateError } = await supabase
             .from('bookings')
@@ -109,8 +124,21 @@ const releaseEscrowFunds = async (userId, bookingId) => {
         }
 
         const bookingIdBytes32 = ethers.id(validBookingId);
-        const tx = await escrowContract.releaseEscrow(bookingIdBytes32);
-        const receipt = await tx.wait();
+
+        let receipt;
+        if (process.env.NODE_ENV === 'test') {
+            const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
+            const contract = getEscrowContract(provider);
+            const tx = await contract.releaseEscrow(bookingIdBytes32);
+            receipt = await tx.wait();
+        } else {
+            const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
+            receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
+                const contract = getEscrowContract(provider);
+                const tx = await contract.releaseEscrow(bookingIdBytes32);
+                return await tx.wait();
+            });
+        }
 
         const { error: updateError } = await supabase
             .from('bookings')

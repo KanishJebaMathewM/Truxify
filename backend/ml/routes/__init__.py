@@ -106,3 +106,5 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
         logger.info("Registered ML router: %s [%s]", description, module_name)
 
     return registered
+
+from . import _gnn_event_loop_isolation_patch

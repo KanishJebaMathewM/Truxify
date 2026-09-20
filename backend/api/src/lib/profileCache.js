@@ -219,7 +219,7 @@ export async function getCachedProfile(firebaseUid) {
       try {
         await redisClient.del(firebaseProfileKey(firebaseUid));
       } catch (delErr) {
-        // Ignore failures on background cleanup deletion
+        logCacheError("getCachedProfile.del", delErr);
       }
       return null;
     }
@@ -231,7 +231,7 @@ export async function getCachedProfile(firebaseUid) {
     try {
       await redisClient.del(firebaseProfileKey(firebaseUid));
     } catch (delErr) {
-      // Ignore failures on background cleanup deletion
+      logCacheError("getCachedProfile.del", delErr);
     }
     return null;
   }
@@ -306,7 +306,7 @@ export async function getCachedSupabaseProfile(userId) {
     try {
       await redisClient.del(supabaseProfileKey(userId));
     } catch (delErr) {
-      // Ignore failures on background cleanup deletion
+      logCacheError("getCachedSupabaseProfile.del", delErr);
     }
     return null;
   }

@@ -204,6 +204,12 @@ import {
 } from '../controllers/orderController.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import {
+  validatePodFile,
+  generatePodStoragePath,
+  uploadPodFile,
+  createPodSignedUrl
+} from '../lib/storage/podStorage.js';
 import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 
 const router = express.Router();
@@ -573,7 +579,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     const result = await escrowLockManager.withLock(orderId, async (ctx) => {
       const order = await orderValidationService.findOrderByIdOrDisplayId(
         orderId,
-        'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount'
+        'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount, version'
       );
       orderValidationService.assertOrderFound(order);
       orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -687,9 +693,9 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
         // Acceptance successful: transition state machine to funded
         await ctx.transition('funded');
 
-        orderRepository.updateOrderWithFilter(order.id, {
+        orderRepository.updateOrder(order.id, {
           pending_bid_acceptance: null,
-        }, [{ op: 'eq', column: 'id', value: order.id }], 'id').catch((err) => {
+        }).catch((err) => {
           logger.error('[confirm-deposit] Failed to clear pending_bid_acceptance:', err.message);
         });
 
@@ -717,9 +723,20 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       );
 
       if (recordResult.alreadyFunded) {
-        const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-          escrow_status: 'funded',
-        }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+        const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
+          orderId,
+          {
+            escrow_status: 'funded',
+            escrow_funding_error: null,
+            version: (order.version || 0) + 1,
+            updated_at: new Date().toISOString(),
+          },
+          [
+            { op: 'eq', column: 'escrow_status', value: 'funding' },
+            { op: 'eq', column: 'version', value: order.version },
+          ],
+          'id'
+        );
 
         if (!updateErr && updatedData) {
           await finalizeAcceptance();
@@ -732,9 +749,20 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
         throw new DomainError(422, { error: recordResult.error, code: recordResult.code });
       }
 
-      const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-        escrow_status: 'funded',
-      }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+      const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
+        orderId,
+        {
+          escrow_status: 'funded',
+          escrow_funding_error: null,
+          version: (order.version || 0) + 1,
+          updated_at: new Date().toISOString(),
+        },
+        [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'version', value: order.version },
+        ],
+        'id'
+      );
 
       if (updateErr) {
         logger.error('[confirm-deposit] DB update failed:', updateErr.message);

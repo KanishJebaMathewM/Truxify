@@ -55,4 +55,40 @@ describe('getCachedProfile payload validation', () => {
     const result = await getCachedProfile('fb-1');
     expect(result).toBeNull();
   });
+
+  it('logs getCachedProfile.del error when corrupt payload cleanup del fails', async () => {
+    const { getCachedProfile } = await load();
+    redisMock.get.mockResolvedValue('42');
+    redisMock.del.mockRejectedValueOnce(new Error('Redis DEL error'));
+    const result = await getCachedProfile('fb-1');
+    expect(result).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'getCachedProfile.del' }),
+      'Redis cache error (throttled)',
+    );
+  });
+
+  it('logs getCachedProfile.del error when redis get and cleanup del both fail', async () => {
+    const { getCachedProfile } = await load();
+    redisMock.get.mockRejectedValueOnce(new Error('Redis GET failure'));
+    redisMock.del.mockRejectedValueOnce(new Error('Redis DEL failure'));
+    const result = await getCachedProfile('fb-1');
+    expect(result).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'getCachedProfile.del' }),
+      'Redis cache error (throttled)',
+    );
+  });
+
+  it('logs getCachedSupabaseProfile.del error when redis get and cleanup del both fail', async () => {
+    const { getCachedSupabaseProfile } = await load();
+    redisMock.get.mockRejectedValueOnce(new Error('Redis GET failure'));
+    redisMock.del.mockRejectedValueOnce(new Error('Redis DEL failure'));
+    const result = await getCachedSupabaseProfile('user-1');
+    expect(result).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'getCachedSupabaseProfile.del' }),
+      'Redis cache error (throttled)',
+    );
+  });
 });

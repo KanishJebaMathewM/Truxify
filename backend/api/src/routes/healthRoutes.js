@@ -58,7 +58,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { getAdminClient, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
@@ -82,11 +82,11 @@ function withTimeout(promise) {
   ]).finally(() => clearTimeout(timer));
 }
 
-async function checkSupabase() {
+async function checkSupabase(req) {
   // Probe through the service-role client: anon privileges on profiles are
   // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
   // report 42501 permission denied even when Supabase is reachable.
-  const client = supabaseAdmin || supabase;
+  const client = getAdminClient();
   if (!client) return 'not_configured';
   try {
     const { error } = await withTimeout(
@@ -94,29 +94,29 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error({ err }, '[health] Supabase check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] Supabase check failed');
     return 'failed';
   }
 }
 
-async function checkMongo() {
+async function checkMongo(req) {
   if (!mongoDb) return 'not_configured';
   try {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error({ err }, '[health] MongoDB check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] MongoDB check failed');
     return 'failed';
   }
 }
 
-async function checkRedis() {
+async function checkRedis(req) {
   if (!redisClient) return 'not_configured';
   try {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error({ err }, '[health] Redis check failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[health] Redis check failed');
     return 'failed';
   }
 }
@@ -125,12 +125,12 @@ function checkFirebase() {
   return firebaseAdmin ? 'configured' : 'not_configured';
 }
 
-async function checkEscrow() {
+async function checkEscrow(req) {
   try {
     const result = await checkEscrowHealth();
     return result.status;
   } catch (err) {
-    logger.error({ err }, '[Health] checkEscrow failed');
+    logger.error({ err, requestId: req?.requestId || req?.id }, '[Health] checkEscrow failed');
     return 'failed';
   }
 }
@@ -169,10 +169,10 @@ const CRITICAL_UNHEALTHY_MONGO = new Set(['failed']);
  */
 router.get('/', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus, escrowStatus] = await Promise.all([
-    checkSupabase(),
-    checkMongo(),
-    checkRedis(),
-    checkEscrow(),
+    checkSupabase(req),
+    checkMongo(req),
+    checkRedis(req),
+    checkEscrow(req),
   ]);
 
   const services = {
@@ -248,9 +248,9 @@ router.get('/live', healthLimiter, (req, res) => {
  */
 router.get('/ready', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
-    checkSupabase(),
-    checkMongo(),
-    checkRedis(),
+    checkSupabase(req),
+    checkMongo(req),
+    checkRedis(req),
   ]);
 
   const services = {

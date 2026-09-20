@@ -157,8 +157,8 @@ class AuditLogService {
       created_at: new Date().toISOString(),
     };
 
-    let dbSuccess = false;
-    let dbError = null;
+    let dbSuccess;
+    let dbError;
 
     // Write to Supabase (persistent storage)
     try {

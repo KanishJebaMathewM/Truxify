@@ -18,6 +18,18 @@
 import { policy, PolicyError } from '../security/policyEngine.js';
 
 /**
+ * Maps a thrown authorization error to the correct HTTP response.
+ * PolicyError carries its own status code (401/403/404); anything else is
+ * an unexpected failure and is reported as a generic 500.
+ */
+function sendAuthorizationError(res, err) {
+  if (err instanceof PolicyError) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  return res.status(500).json({ error: 'Internal Server Error' });
+}
+
+/**
  * Middleware to enforce policy-based authorization.
  *
  * @param {string}   action       - The policy action to check.
@@ -52,26 +64,17 @@ export function requirePolicy(action, getResource) {
           policy.authorize(req.user, action, resource, { requestId });
           next();
         } catch (err) {
-          if (err instanceof PolicyError) {
-            return res.status(err.status).json({ error: err.message });
-          }
-          return res.status(500).json({ error: 'Internal Server Error' });
+          return sendAuthorizationError(res, err);
         }
       }).catch((err) => {
-        if (err instanceof PolicyError) {
-          return res.status(err.status).json({ error: err.message });
-        }
-        return res.status(500).json({ error: 'Internal Server Error' });
+        return sendAuthorizationError(res, err);
       });
     } else {
       try {
         policy.authorize(req.user, action, undefined, { requestId });
         next();
       } catch (err) {
-        if (err instanceof PolicyError) {
-          return res.status(err.status).json({ error: err.message });
-        }
-        return res.status(500).json({ error: 'Internal Server Error' });
+        return sendAuthorizationError(res, err);
       }
     }
   };

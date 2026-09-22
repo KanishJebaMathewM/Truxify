@@ -314,6 +314,15 @@ export async function checkEscrowHealth() {
 }
 
 /**
+ * Derive a deterministic booking ID from an order's display ID.
+ * @param {string} orderDisplayId — e.g. "#FF20260521"
+ * @returns {string} bytes32 hex string
+ */
+export function getEscrowBookingId (orderDisplayId) {
+  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`])
+}
+
+/**
  * Retrieves a full escrow booking record by its ID.
  * Used by the funding reconciliation sweeper to verify on-chain deposits.
  * Resolves Issue #7340.

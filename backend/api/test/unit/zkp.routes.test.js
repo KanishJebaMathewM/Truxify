@@ -19,6 +19,19 @@ vi.mock('../../../src/middleware/redisRateLimiter.js', () => ({
   redisRateLimiter: () => (req, res, next) => next(),
 }));
 
+vi.mock('mongoose', () => ({
+  default: {
+    Schema: class {
+      constructor(fields, opts) {
+        this.fields = fields;
+        this.opts = opts;
+      }
+    },
+    model: vi.fn((name, schema) => ({ name, schema })),
+    Types: { ObjectId: class {} },
+  },
+}));
+
 vi.mock('../../../src/lib/redisLock.js', () => ({
   LockAcquisitionError: class LockAcquisitionError extends Error {
     constructor() { super('Lock acquisition failed'); }

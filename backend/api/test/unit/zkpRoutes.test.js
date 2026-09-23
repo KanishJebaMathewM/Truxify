@@ -24,6 +24,19 @@ vi.mock('../../../../src/middleware/redisRateLimiter.js', () => ({
   redisRateLimiter: () => (_req, _res, next) => next(),
 }));
 
+vi.mock('mongoose', () => ({
+  default: {
+    Schema: class {
+      constructor(fields, opts) {
+        this.fields = fields;
+        this.opts = opts;
+      }
+    },
+    model: vi.fn((name, schema) => ({ name, schema })),
+    Types: { ObjectId: class {} },
+  },
+}));
+
 import zkpRouter from '../../../../src/routes/zkp.routes.js';
 
 function makeApp() {

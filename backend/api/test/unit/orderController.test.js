@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import express from 'express';
-import request from 'supertest';
 
 vi.mock('../../../../src/config/db.js', () => ({
   supabaseAdmin: { from: vi.fn(() => ({ select: vi.fn(() => Promise.resolve({ data: null, error: null })) })) },
@@ -14,6 +12,20 @@ vi.mock('../../../../src/middleware/logger.js', () => ({
 vi.mock('../../../../src/utils/apiResponse.js', () => ({
   success: vi.fn((res, data) => res),
   error: vi.fn((res, msg, code) => res),
+}));
+
+vi.mock('mongoose', () => ({
+  default: {
+    Schema: class {
+      constructor(fields, opts) {
+        this.fields = fields;
+        this.opts = opts;
+      }
+    },
+    model: vi.fn((name, schema) => ({ name, schema })),
+    models: {},
+    Types: { ObjectId: class {} },
+  },
 }));
 
 import * as orderController from '../../../../src/controllers/orderController.js';

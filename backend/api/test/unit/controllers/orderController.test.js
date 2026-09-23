@@ -48,7 +48,29 @@ vi.mock('../../../src/services/order/orderValidationService.js', () => ({
 vi.mock('../../../src/services/escrow.js', () => ({
   buildDepositTx: vi.fn(),
   recordDepositTx: vi.fn(),
+  submitEscrowRefund: vi.fn(),
   escrowRefund: vi.fn(),
+}));
+
+vi.mock('mongoose', () => ({
+  default: {
+    Schema: class {
+      constructor(fields, opts) {
+        this.fields = fields;
+        this.opts = opts;
+      }
+    },
+    model: vi.fn((name, schema) => ({ name, schema })),
+    Types: { ObjectId: class {} },
+  },
+  Schema: class {
+    constructor(fields, opts) {
+      this.fields = fields;
+      this.opts = opts;
+    }
+  },
+  model: vi.fn(),
+  Types: { ObjectId: class {} },
 }));
 
 vi.mock('../../../src/services/ml.js', () => ({

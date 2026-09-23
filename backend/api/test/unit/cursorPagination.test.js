@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encodeCursor, decodeCursor } from '../../../../src/utils/cursorPagination.js';
+import { encodeCursor, decodeCursor } from '../../src/utils/cursorPagination.js';
 
 describe('cursorPagination', () => {
   describe('encodeCursor', () => {
@@ -9,8 +9,10 @@ describe('cursorPagination', () => {
       expect(result.length).toBeGreaterThan(0);
     });
 
-    it('returns empty string for null input', () => {
-      expect(encodeCursor(null)).toBe('');
+    it('round-trips null through encode/decode', () => {
+      const encoded = encodeCursor(null);
+      expect(encoded).toBe(Buffer.from('null').toString('base64url'));
+      expect(decodeCursor(encoded)).toBeNull();
     });
   });
 

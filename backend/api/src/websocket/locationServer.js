@@ -1,6 +1,6 @@
-const { Server } = require("socket.io");
-const GpsLog = require("../models/GpsLog");
-const jwt = require("jsonwebtoken");
+import { Server } from 'socket.io';
+import GpsLog from '../models/GpsLog.js';
+import jwt from 'jsonwebtoken';
 
 function verifyToken(token, secret) {
   try {
@@ -79,4 +79,4 @@ function attachLocationServer(httpServer) {
   return io;
 }
 
-module.exports = { attachLocationServer };
+export { attachLocationServer };

@@ -44,8 +44,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     testTimeout: 15000,
-    passWithNoTests: true,
-    include: ['test_fake/**/*.test.js'],
+    include: ['test/**/*.test.js'],
     setupFiles: ['test/setup.js'],
     coverage: {
       provider: 'v8',

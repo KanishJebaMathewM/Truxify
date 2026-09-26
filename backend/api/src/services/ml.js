@@ -20,7 +20,7 @@ const DEFAULT_TRUCK_MAX_HEIGHT_M = 4;
 // Startup validation
 const initialApiKey = (process.env.ML_API_KEY || '').trim();
 if (!initialApiKey) {
-    logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
+  logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
 }
 
 function guardMlApiKey() {
@@ -108,21 +108,21 @@ function getHeaders() {
  * Utility: handle ML engine responses consistently
  */
 async function handleResponse(response, url = '', method = 'GET') {
-    const text = await response.text();
+  const text = await response.text();
 
-    if (response.status === 401 || response.status === 403) {
-        throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
-    }
-    if (!response.ok) {
-        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
-    }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
+  }
+  if (!response.ok) {
+    throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
+  }
 
-    try {
-        return JSON.parse(text);
-    } catch (err) {
-        logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
-        throw new Error(`[ML] Invalid JSON response from ML engine: ${err?.message ?? String(err)}`, { cause: err });
-    }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
+    throw new Error(`[ML] Invalid JSON response from ML engine: ${err?.message ?? String(err)}`, { cause: err });
+  }
 }
 
 function getBaseUrl() {
@@ -143,10 +143,10 @@ export async function predictDemand(features = {}) {
   const url = `${getBaseUrl()}/predict/demand`;
 
   const response = await fetch(url, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(features),
-      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(features),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const result = await handleResponse(response, url, 'POST');
@@ -166,18 +166,18 @@ export async function predictDemand(features = {}) {
  * @throws {Error} on HTTP failure, timeout, or prediction validation failure
  */
 export async function predictPrice({
-    distanceKm,
-    cargoWeightKg,
-    truckType = 'medium_truck',
-    routeOrigin = '',
-    routeDestination = '',
-    trafficMultiplier = 1.0,
+  distanceKm,
+  cargoWeightKg,
+  truckType = 'medium_truck',
+  routeOrigin = '',
+  routeDestination = '',
+  trafficMultiplier = 1.0,
 } = {}) {
   guardMlApiKey();
 
   const safeMultiplier = (typeof trafficMultiplier === 'number' && Number.isFinite(trafficMultiplier) && trafficMultiplier > 0)
-      ? Math.min(Math.max(trafficMultiplier, 0.5), 3.0)
-      : 1.0;
+    ? Math.min(Math.max(trafficMultiplier, 0.5), 3.0)
+    : 1.0;
 
   const cacheKey = JSON.stringify({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination, trafficMultiplier: safeMultiplier });
   const cached = priceCache.get(cacheKey);
@@ -186,61 +186,61 @@ export async function predictPrice({
   const url = `${getBaseUrl()}/predict/price`;
 
   const payload = {
-      distance_km: distanceKm,
-      cargo_weight_kg: cargoWeightKg,
-      truck_type: truckType,
-      route_origin: routeOrigin,
-      route_destination: routeDestination,
-      traffic_multiplier: safeMultiplier,
+    distance_km: distanceKm,
+    cargo_weight_kg: cargoWeightKg,
+    truck_type: truckType,
+    route_origin: routeOrigin,
+    route_destination: routeDestination,
+    traffic_multiplier: safeMultiplier,
   };
 
   const response = await fetch(url, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const raw = await handleResponse(response, url, 'POST');
 
   const initialValidation = validatePricePrediction(raw);
   if (!initialValidation.ok) {
-      logger.warn({
-          reason: initialValidation.reason,
-          detail: initialValidation.detail,
-          response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
-      }, '[ML] Price prediction rejected by validator');
-      throw new Error(`[ML] Invalid prediction: ${initialValidation.reason} — ${initialValidation.detail}`);
+    logger.warn({
+      reason: initialValidation.reason,
+      detail: initialValidation.detail,
+      response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
+    }, '[ML] Price prediction rejected by validator');
+    throw new Error(`[ML] Invalid prediction: ${initialValidation.reason} — ${initialValidation.detail}`);
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
   // Only forward min_price/max_price keys when the raw response actually
   // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
-      ...raw,
-      estimated_price: adjustedPrice,
-      ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
-      ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
+    ...raw,
+    estimated_price: adjustedPrice,
+    ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
+    ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
-      logger.warn({
-          reason: revalidated.reason,
-          detail: revalidated.detail,
-          adjusted_price: adjustedPrice,
-      }, '[ML] Surge-adjusted price prediction rejected by validator');
-      throw new Error(`[ML] Invalid prediction: ${revalidated.reason} — ${revalidated.detail}`);
+    logger.warn({
+      reason: revalidated.reason,
+      detail: revalidated.detail,
+      adjusted_price: adjustedPrice,
+    }, '[ML] Surge-adjusted price prediction rejected by validator');
+    throw new Error(`[ML] Invalid prediction: ${revalidated.reason} — ${revalidated.detail}`);
   }
 
   logger.debug({
-      estimated_price_inr: revalidated.validated.estimated_price,
-      confidence: revalidated.validated.confidence,
+    estimated_price_inr: revalidated.validated.estimated_price,
+    confidence: revalidated.validated.confidence,
   }, '[ML] Price prediction validated successfully');
 
   const result = {
-      ...revalidated.validated,
-      estimatedPricePaisa: convertToPaisa(revalidated.validated.estimated_price),
-      estimatedPriceInr: revalidated.validated.estimated_price,
+    ...revalidated.validated,
+    estimatedPricePaisa: convertToPaisa(revalidated.validated.estimated_price),
+    estimatedPriceInr: revalidated.validated.estimated_price,
   };
   priceCache.set(cacheKey, result);
   return result;
@@ -250,10 +250,10 @@ export async function predictPrice({
  * Predicts estimated time of arrival for a route.
  *
  * @param {object} params
- * @param {number} params.routeDistance  - Route distance in km (must be > 0)
- * @param {number} params.timeOfDay      - Hour of the day (0-23)
- * @param {number} params.dayOfWeek      - Day of week (0=Sunday, 6=Saturday)
- * @param {string} params.routeType      - Route type ("highway" or "city")
+ * @param {number} params.routeDistance   - Route distance in km (must be > 0)
+ * @param {number} params.timeOfDay       - Hour of the day (0-23)
+ * @param {number} params.dayOfWeek       - Day of week (0=Sunday, 6=Saturday)
+ * @param {string} params.routeType       - Route type ("highway" or "city")
  * @param {number} params.historicalSpeed - Historical average speed in km/h (must be > 0)
  * @returns {Promise<{eta_minutes: number, confidence_interval: {lower: number, upper: number}}>}
  * @throws {Error} if ML_API_KEY is missing, HTTP fails, or response is invalid
@@ -362,11 +362,11 @@ export async function predictCancellationPenalty({
  * Predicts driver profit for a given route using ML model.
  *
  * @param {object} params
- * @param {number} params.routeDistanceKm  - Total route distance in km (must be > 0)
+ * @param {number} params.routeDistanceKm   - Total route distance in km (must be > 0)
  * @param {number} params.fuelPricePerLitre - Current fuel price in INR/L (must be > 0)
- * @param {number} params.tollEstimateInr  - Estimated toll cost in INR (must be >= 0)
- * @param {number} params.truckMileageKmL  - Truck fuel efficiency in km/L (must be > 0)
- * @param {number} params.cargoWeightKg    - Cargo weight in kg (must be > 0)
+ * @param {number} params.tollEstimateInr   - Estimated toll cost in INR (must be >= 0)
+ * @param {number} params.truckMileageKmL   - Truck fuel efficiency in km/L (must be > 0)
+ * @param {number} params.cargoWeightKg     - Cargo weight in kg (must be > 0)
  * @param {number} params.tripDurationHours - Estimated trip duration in hours (must be > 0)
  * @returns {Promise<{predicted_profit: number, confidence_interval: {lower: number, upper: number}}>}
  * @throws {Error} if ML_API_KEY is missing, HTTP fails, or response is invalid
@@ -412,38 +412,34 @@ export async function predictDriverProfit({
     throw new Error('[ML] Invalid driver profit prediction: missing confidence_interval');
   }
 
+  // Calculate raw bounds: clamp lower bound to 0
+  let rawLower = Math.max(0, result.confidence_interval.lower ?? 0);
+
+  // Sane upper fallback: for negative predictions (losses), fallback to absolute magnitude
+  let rawUpper = result.confidence_interval.upper ?? Math.max(0, result.predicted_profit * 2, Math.abs(result.predicted_profit));
+
+  // Enforce lower <= upper and upper >= predicted_profit
+  rawUpper = Math.max(rawLower, rawUpper, result.predicted_profit);
+
+  // Round both bounds to two decimal places
+  const lower = Math.round(rawLower * 100) / 100;
+  let upper = Math.round(rawUpper * 100) / 100;
+
+  // Protect against rounding drift in tight ranges
+  if (lower > upper) {
+    upper = lower;
+  }
+
   return {
     predicted_profit: Math.round(result.predicted_profit * 100) / 100,
     confidence_interval: {
-      lower: Math.max(0, Math.round((result.confidence_interval.lower ?? 0) * 100) / 100),
-      upper: Math.round((result.confidence_interval.upper ?? result.predicted_profit * 2) * 100) / 100,
+      lower,
+      upper,
     },
     currency: 'INR',
   };
 }
 
-/**
- * Recommends available loads for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedDrivers]   - Previously rated drivers
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
- * Recommends suitable trucks for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedLoads]     - Previously rated loads
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
 /**
  * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
  * @param {object} params

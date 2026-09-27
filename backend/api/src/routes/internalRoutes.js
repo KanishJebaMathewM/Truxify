@@ -3,17 +3,17 @@
  * (automation/n8n/workflows/).
  *
  *   GET  /api/internal/escrow-velocity  — reports escrow event counts over a
- *                                         rolling window and whether the rate
- *                                         exceeds the anomaly threshold.
+ *                                          rolling window and whether the rate
+ *                                          exceeds the anomaly threshold.
  *   POST /api/internal/pause-escrow     — opens (or closes) the escrow circuit
- *                                         breaker; while open, every on-chain
- *                                         escrow submission in services/escrow.js
- *                                         is refused.
+ *                                          breaker; while open, every on-chain
+ *                                          escrow submission in services/escrow.js
+ *                                          is refused.
  *   POST /api/internal/defensive-pause  — one-way emergency open of the same
- *                                         circuit breaker, called by the
- *                                         security sentinel workflow when it
- *                                         matches a flash-loan/frontrun pattern
- *                                         in the Polygon mempool.
+ *                                          circuit breaker, called by the
+ *                                          security sentinel workflow when it
+ *                                          matches a flash-loan/frontrun pattern
+ *                                          in the Polygon mempool.
  *
  * Every endpoint is gated by requireApiKey (x-api-key header against
  * VALID_API_KEYS) at the mount in index.js, so they are only reachable by
@@ -81,7 +81,7 @@ function isEscrowOperatorRequest(req) {
  *   get:
  *     tags: [Internal]
  *     summary: Escrow velocity monitor
- *     description: Counts escrow deposits, releases and refunds within a rolling window and reports whether the combined rate exceeds the anomaly threshold configured via ESCROW_VELOCITY_WINDOW_MINUTES / ESCROW_ANOMALY_THRESHOLD.
+ *     description: "Counts escrow deposits, releases and refunds within a rolling window and reports whether the combined rate exceeds the anomaly threshold configured via ESCROW_VELOCITY_WINDOW_MINUTES / ESCROW_ANOMALY_THRESHOLD."
  *     security:
  *       - ApiKeyAuth: []
  *     responses:
@@ -155,7 +155,11 @@ router.get('/escrow-velocity', async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Open or close the escrow circuit breaker
- *     description: Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS); any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.
+ *     description: >
+ *       Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission.
+ *       Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated
+ *       ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS);
+ *       any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -174,7 +178,7 @@ router.get('/escrow-velocity', async (req, res) => {
  *       401:
  *         description: Missing or invalid API key
  *       403:
- *         description: The caller holds a valid internal API key but not the dedicated escrow operator key (also returned when ESCROW_OPERATOR_API_KEY is not configured)
+ *         description: "The caller holds a valid internal API key but not the dedicated escrow operator key (also returned when ESCROW_OPERATOR_API_KEY is not configured)"
  *       500:
  *         description: Failed to persist pause state
  *       502:
@@ -243,7 +247,11 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Emergency defensive pause (security sentinel)
- *     description: Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.
+ *     description: >
+ *       Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern.
+ *       Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector
+ *       cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action
+ *       via POST /api/internal/pause-escrow {"paused": false}.
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -267,7 +275,7 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *       500:
  *         description: Failed to persist pause state
  *       503:
- *         description: Redis unavailable — the on-chain pause succeeded, but off-chain persistence failed.
+ *         description: "Redis unavailable — the on-chain pause succeeded, but off-chain persistence failed."
  *       502:
  *         description: Failed to confirm on-chain pause
  */

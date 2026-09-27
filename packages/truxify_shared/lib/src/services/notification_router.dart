@@ -81,10 +81,6 @@ const Map<String, NotificationTarget> _targetByType = {
 };
 
 /// Signature for the app-specific navigation callback.
-///
-/// The callback receives the resolved [target] and the raw [data] map so it
-/// can look up any required IDs (orderDisplayId, tripId, etc.) and perform
-/// the actual navigation using the app's own navigation framework.
 typedef NotificationNavigationCallback = Future<void> Function(
   NotificationTarget target,
   Map<String, dynamic> data,
@@ -144,6 +140,9 @@ class NotificationRouter {
             ? const NavigateToWallet()
             : const NavigateToEarnings();
 
+      case 'payment':
+        return const NavigateToEarnings();
+
       case 'support_ticket':
         if (payload.supportTicketId != null) {
           return NavigateToSupportTicket(payload.supportTicketId!);
@@ -156,7 +155,7 @@ class NotificationRouter {
     }
   }
 
-  /// Registers a callback that performs the actual navigation for a route.
+  /// Registers a callback that performs the actual navigation.
   static void registerNavigateCallback(
     void Function(BuildContext context, NotificationRoute route) callback,
   ) {
@@ -170,66 +169,91 @@ class NotificationRouter {
   static bool get isCallbackRegistered => _navigateCallback != null;
 
   /// Executes navigation by invoking the registered callback.
-  static void executeNavigation(BuildContext context, NotificationRoute route) {
+  static void executeNavigation(
+    BuildContext context,
+    NotificationRoute route,
+  ) {
     final callback = _navigateCallback;
     if (callback != null) {
       callback(context, route);
     } else {
-      debugPrint('[NotificationRouter] No navigation callback registered.');
+      debugPrint(
+        '[NotificationRouter] No navigation callback registered.',
+      );
     }
   }
 
-  /// Resolves the [NotificationTarget] from a raw data map (FCM data payload
-  /// or [NotificationItem.metadata]).
-  ///
-  /// Mirrors [_resolveForAppType] so the FCM-tap path used by
-  /// [navigateFromRemoteMessage] agrees with the in-app route resolver on
-  /// every type. `payment_released` is app-specific: customers land on the
-  /// wallet target, drivers on earnings.
-  static NotificationTarget resolveTarget(Map<String, dynamic> data) {
+  /// Resolves the [NotificationTarget] from a raw data map.
+  static NotificationTarget resolveTarget(
+    Map<String, dynamic> data,
+  ) {
     final type = _extractNotifType(data);
+
     if (type == 'payment_released') {
       return _appType == NotificationAppType.customer
           ? NotificationTarget.wallet
           : NotificationTarget.earnings;
     }
+
     return _targetByType[type] ?? NotificationTarget.unknown;
   }
 
   /// Maps a resolved [NotificationRoute] back to its in-app
   /// [NotificationTarget].
-  ///
-  /// This is the canonical route→target mapping and is the counterpart to
-  /// [resolveTarget]; the consistency regression test guarantees the two never
-  /// drift apart.
-  static NotificationTarget targetForRoute(NotificationRoute route) {
-    if (route is NavigateToOrderDetail) return NotificationTarget.orderDetail;
-    if (route is NavigateToLiveTracking) return NotificationTarget.tripDetail;
-    if (route is NavigateToLoadDetail) return NotificationTarget.loadDetail;
-    if (route is NavigateToWallet) return NotificationTarget.wallet;
-    if (route is NavigateToEarnings) return NotificationTarget.earnings;
+  static NotificationTarget targetForRoute(
+    NotificationRoute route,
+  ) {
+    if (route is NavigateToOrderDetail) {
+      return NotificationTarget.orderDetail;
+    }
+
+    if (route is NavigateToLiveTracking) {
+      return NotificationTarget.tripDetail;
+    }
+
+    if (route is NavigateToLoadDetail) {
+      return NotificationTarget.loadDetail;
+    }
+
+    if (route is NavigateToWallet) {
+      return NotificationTarget.wallet;
+    }
+
+    if (route is NavigateToEarnings) {
+      return NotificationTarget.earnings;
+    }
+
     if (route is NavigateToSupportTicket) {
       return NotificationTarget.notifications;
     }
+
     if (route is NavigateToNotificationsList) {
       return NotificationTarget.notifications;
     }
+
     return NotificationTarget.unknown;
   }
 
   /// Extracts the order display ID from the data map.
-  static String? extractOrderId(Map<String, dynamic> data) {
+  static String? extractOrderId(
+    Map<String, dynamic> data,
+  ) {
     return data['order_display_id']?.toString() ??
         data['orderId']?.toString();
   }
 
   /// Extracts the trip ID from the data map.
-  static String? extractTripId(Map<String, dynamic> data) {
-    return data['trip_id']?.toString() ?? data['tripId']?.toString();
+  static String? extractTripId(
+    Map<String, dynamic> data,
+  ) {
+    return data['trip_id']?.toString() ??
+        data['tripId']?.toString();
   }
 
   /// Extracts the bid/load offer ID from the data map.
-  static String? extractBidId(Map<String, dynamic> data) {
+  static String? extractBidId(
+    Map<String, dynamic> data,
+  ) {
     return data['bid_id']?.toString() ??
         data['load_offer_id']?.toString() ??
         data['bidId']?.toString();
@@ -241,6 +265,7 @@ class NotificationRouter {
     NotificationNavigationCallback callback,
   ) async {
     final target = resolveTarget(data);
+
     try {
       await callback(target, data);
     } catch (e) {
@@ -248,7 +273,7 @@ class NotificationRouter {
     }
   }
 
-  /// Convenience: navigate from an [NotificationItem].
+  /// Convenience: navigate from a [NotificationItem].
   static Future<void> navigateFromItem(
     NotificationItem item,
     NotificationNavigationCallback callback,
@@ -257,23 +282,32 @@ class NotificationRouter {
       'notifType': item.notifType,
       if (item.metadata != null) ...item.metadata!,
     };
+
     await navigate(data, callback);
   }
 
-  /// Navigates from an [RemoteMessage]'s data payload.
+  /// Navigates from a [RemoteMessage]'s data payload.
   static Future<void> navigateFromRemoteMessage(
     RemoteMessage message,
     NotificationNavigationCallback callback,
   ) async {
-    await navigate(Map<String, dynamic>.from(message.data), callback);
+    await navigate(
+      Map<String, dynamic>.from(message.data),
+      callback,
+    );
   }
 
   // ── Private helpers ──────────────────────────────────────────────────
 
   /// Extracts the notifType from either a top-level `notifType` key or the
-  /// nested `type` key (different backend code paths).
-  static String _extractNotifType(Map<String, dynamic> data) {
-    return (data['notifType'] ?? data['notif_type'] ?? data['type'] ?? '')
+  /// nested `type` key.
+  static String _extractNotifType(
+    Map<String, dynamic> data,
+  ) {
+    return (data['notifType'] ??
+            data['notif_type'] ??
+            data['type'] ??
+            '')
         .toString()
         .toLowerCase();
   }

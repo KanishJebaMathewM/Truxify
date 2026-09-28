@@ -20,6 +20,7 @@ const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 10000; // Capped backoff sleep upper bound (10 seconds)
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
@@ -39,6 +40,11 @@ export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function calculateRetryDelayMs(baseDelayMs, attempt) {
+  const delay = baseDelayMs * Math.pow(2, attempt);
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
 }
 
 function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
@@ -102,8 +108,9 @@ export async function getRouteEstimate(input = {}) {
         clearTimeout(timeout);
         const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
         if (response.status >= 500 && attempt < maxRetries - 1) {
-          logger.warn({ status: response.status, attempt: attempt + 1, maxRetries, url: routeUrl.toString(), errorBody: errBody }, 'Server error. Retrying...');
-          await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
+          const delayMs = calculateRetryDelayMs(baseDelayMs, attempt);
+          logger.warn({ status: response.status, attempt: attempt + 1, maxRetries, url: routeUrl.toString(), delayMs, errorBody: errBody }, 'Server error. Retrying...');
+          await new Promise(r => setTimeout(r, delayMs));
           continue;
         }
         logger.warn({ status: response.status, statusText: response.statusText, url: routeUrl.toString(), errorBody: errBody }, '[OSRM] HTTP request failed with non-2xx status');
@@ -137,7 +144,7 @@ export async function getRouteEstimate(input = {}) {
       clearTimeout(timeout);
       const routeUrlStr = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }).toString();
       if (attempt < maxRetries - 1) {
-        const delayMs = baseDelayMs * Math.pow(2, attempt);
+        const delayMs = calculateRetryDelayMs(baseDelayMs, attempt);
         if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
           logger.warn({ url: routeUrlStr, errMessage: err.message }, '[OSRM] Circuit is open. Falling back instantly.');
           return null; // Return null so caller knows to use straight-line fallback
@@ -281,12 +288,12 @@ export const __testing = {
   buildCacheKey,
   buildGeometryUrl,
   buildGeometryCacheKey,
+  calculateRetryDelayMs,
+  MAX_RETRY_DELAY_MS,
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
 
-
-// === Spec 22: ===
 // === Spec 22: OSRM failover ===
 function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const nLat1 = Number(lat1);
@@ -308,6 +315,7 @@ function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
 export async function routeWithFailover(primary, _fb, coords) {
   try { return await primary(coords); }
   catch (err) {
@@ -319,4 +327,3 @@ export async function routeWithFailover(primary, _fb, coords) {
     return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
   }
 }
-

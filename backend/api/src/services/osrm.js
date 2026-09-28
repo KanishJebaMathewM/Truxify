@@ -1,329 +1,125 @@
-import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import CircuitBreaker from 'opossum';
-import { measureExecution } from '../core/performanceMetrics.js';
+import { supabase } from '../config/supabaseClient.js';
 
-const osrmBreaker = new CircuitBreaker(async (url, options) => {
-  const response = await fetch(url, options);
-  if (response.status >= 500) {
-    await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
-    throw new Error(`[OSRM] Request failed (${response.status})`);
+// Map to store active location tracking channels by orderUUID
+const locationChannels = new Map();
+
+// Map to track active retry backoff timers by orderUUID
+const retryTimers = new Map();
+
+/**
+ * Clears and removes any pending retry timers for a given order.
+ * @param {string} orderUUID 
+ */
+function clearRetryTimer(orderUUID) {
+  if (retryTimers.has(orderUUID)) {
+    clearTimeout(retryTimers.get(orderUUID));
+    retryTimers.delete(orderUUID);
   }
-  return response;
-}, {
-  timeout: 5000,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30000
-});
-
-const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
-const DEFAULT_TIMEOUT_MS = 1500;
-const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_RETRY_BASE_DELAY_MS = 500;
-const MAX_RETRY_DELAY_MS = 10000; // Capped backoff sleep upper bound (10 seconds)
-const CACHE_TTL_SECONDS = 86400;
-const ROUTE_CACHE_TTL_SECONDS = 30;
-
-export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
-  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
-      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
-    return 'Invalid coordinates provided.';
-  }
-  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
-  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
-  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
-  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
-  
-  return null;
-};
-
-function parsePositiveNumber(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function calculateRetryDelayMs(baseDelayMs, attempt) {
-  const delay = baseDelayMs * Math.pow(2, attempt);
-  return Math.min(delay, MAX_RETRY_DELAY_MS);
-}
+/**
+ * Subscribes to real-time location updates for a specific order.
+ * @param {string} orderUUID 
+ * @param {Function} onLocationUpdate Callback function when a new location event arrives.
+ * @param {number} reconnectAttempts Tracks backoff retry attempts.
+ */
+export function subscribeToOrderLocation(orderUUID, onLocationUpdate, reconnectAttempts = 0) {
+  if (!orderUUID) return;
 
-function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const baseUrl = process.env.OSRM_BASE_URL || DEFAULT_OSRM_BASE_URL;
-  const url = new URL('/route/v1/driving/', baseUrl);
-  url.pathname += `${pickupLng},${pickupLat};${dropLng},${dropLat}`;
-  url.searchParams.set('overview', 'false');
-  url.searchParams.set('alternatives', 'false');
-  url.searchParams.set('steps', 'false');
-  return url;
-}
+  // Clear any previously scheduled retry timer for this order
+  clearRetryTimer(orderUUID);
 
-function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const r = (n) => Number(n.toFixed(6));
-  return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
-}
-
-export async function getRouteEstimate(input = {}) {
-  if (!input) return null;
-  const { pickupLat, pickupLng, dropLat, dropLng } = input;
-  return measureExecution('OSRMService.getRouteEstimate', async () => {
-  if (
-    !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
-    !Number.isFinite(dropLat) || !Number.isFinite(dropLng)
-  ) {
-    return null;
+  // If a channel already exists for this order, clean it up before creating a new one
+  if (locationChannels.has(orderUUID)) {
+    const existingChannel = locationChannels.get(orderUUID);
+    supabase.removeChannel(existingChannel);
+    locationChannels.delete(orderUUID);
   }
 
-  const cacheKey = buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng });
+  const topic = `order-location:${orderUUID}`;
+  const channel = supabase.channel(topic);
 
-  if (redisClient) {
-    try {
-      const cached = await redisClient.get(cacheKey);
-      // Only return cached result if it is a valid object.
-      // Stale null results (from transient failures) must not be served
-      // from cache — the next call should retry the OSRM API.
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed !== null) return parsed;
+  // Track the newly created channel instance
+  locationChannels.set(orderUUID, channel);
+
+  channel
+    .on('broadcast', { event: 'location_update' }, (payload) => {
+      if (onLocationUpdate && typeof onLocationUpdate === 'function') {
+        onLocationUpdate(payload);
       }
-    } catch (err) {
-      logger.error({ event: 'OSRM_REDIS_GET_ERROR', error: err && err.message }, '[osrm] Redis get error');
-    }
-  }
+    })
+    .subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        logger.info({ orderUUID, topic }, '[Tracker] Successfully subscribed to order location channel');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        logger.warn(
+          { orderUUID, status, err: err?.message, reconnectAttempts },
+          '[Tracker] Supabase Realtime channel error or closed'
+        );
 
-  const timeoutMs = parsePositiveNumber(process.env.OSRM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
-  const maxRetries = parsePositiveNumber(process.env.OSRM_MAX_RETRIES, DEFAULT_MAX_RETRIES);
-  const baseDelayMs = parsePositiveNumber(process.env.OSRM_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS);
+        // 1. Explicitly remove the failed channel instance from Supabase client
+        supabase.removeChannel(channel);
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const routeUrl = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng });
-      const response = await osrmBreaker.fire(routeUrl, {
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        clearTimeout(timeout);
-        const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
-        if (response.status >= 500 && attempt < maxRetries - 1) {
-          const delayMs = calculateRetryDelayMs(baseDelayMs, attempt);
-          logger.warn({ status: response.status, attempt: attempt + 1, maxRetries, url: routeUrl.toString(), delayMs, errorBody: errBody }, 'Server error. Retrying...');
-          await new Promise(r => setTimeout(r, delayMs));
-          continue;
+        // 2. Delete the map entry only if it still references this exact failed channel
+        if (locationChannels.get(orderUUID) === channel) {
+          locationChannels.delete(orderUUID);
         }
-        logger.warn({ status: response.status, statusText: response.statusText, url: routeUrl.toString(), errorBody: errBody }, '[OSRM] HTTP request failed with non-2xx status');
-        return null;
+
+        // 3. Schedule retry with backoff, ensuring pending timers are tracked and ownership validated
+        clearRetryTimer(orderUUID);
+        const backoffMs = Math.min((reconnectAttempts + 1) * 1000, 10000);
+
+        const timerId = setTimeout(() => {
+          retryTimers.delete(orderUUID);
+
+          // Verify the order wasn't unsubscribed or reassigned during the delay
+          if (!locationChannels.has(orderUUID)) {
+            subscribeToOrderLocation(orderUUID, onLocationUpdate, reconnectAttempts + 1);
+          }
+        }, backoffMs);
+
+        retryTimers.set(orderUUID, timerId);
       }
+    });
 
-      const payload = await response.json();
-      const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
-      if (!route || !Number.isFinite(route.distance) || route.distance < 0) {
-        clearTimeout(timeout);
-        return null;
-      }
-
-      const result = {
-        distanceKm: route.distance / 1000,
-        durationSeconds: Number.isFinite(route.duration) ? route.duration : null,
-      };
-
-      if (redisClient) {
-        try {
-          await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
-        } catch (err) {
-          logger.error({ event: 'OSRM_REDIS_SET_ERROR', error: err && err.message }, '[osrm] Redis set error');
-        }
-      }
-
-      clearTimeout(timeout);
-      return result;
-
-    } catch (err) {
-      clearTimeout(timeout);
-      const routeUrlStr = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }).toString();
-      if (attempt < maxRetries - 1) {
-        const delayMs = calculateRetryDelayMs(baseDelayMs, attempt);
-        if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
-          logger.warn({ url: routeUrlStr, errMessage: err.message }, '[OSRM] Circuit is open. Falling back instantly.');
-          return null; // Return null so caller knows to use straight-line fallback
-        }
-        logger.warn({ attempt: attempt + 1, maxRetries, errMessage: err.message, url: routeUrlStr, delayMs }, 'Fetch error. Retrying...');
-        await new Promise(r => setTimeout(r, delayMs));
-      } else {
-        logger.error({ maxRetries, errMessage: err.message, stack: err.stack, url: routeUrlStr }, 'Fetch error after all retries:');
-        return null;
-      }
-    }
-  }
-
-  return null;
-  });
+  return channel;
 }
 
-function buildGeometryUrl({ originLat, originLng, destLat, destLng }) {
-  const baseUrl = process.env.OSRM_BASE_URL || DEFAULT_OSRM_BASE_URL;
-  const url = new URL('/route/v1/driving/', baseUrl);
-  url.pathname += `${originLng},${originLat};${destLng},${destLat}`;
-  url.searchParams.set('overview', 'full');
-  url.searchParams.set('geometries', 'geojson');
-  url.searchParams.set('alternatives', 'false');
-  url.searchParams.set('steps', 'false');
-  return url;
+/**
+ * Unsubscribes from location updates for a specific order and cleans up resources.
+ * @param {string} orderUUID 
+ */
+export function unsubscribeFromOrderLocation(orderUUID) {
+  if (!orderUUID) return;
+
+  // Cancel any pending retries first
+  clearRetryTimer(orderUUID);
+
+  if (locationChannels.has(orderUUID)) {
+    const channel = locationChannels.get(orderUUID);
+    supabase.removeChannel(channel);
+    locationChannels.delete(orderUUID);
+    logger.info({ orderUUID }, '[Tracker] Unsubscribed from order location channel');
+  }
 }
 
-function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
-  const r = (n) => Number(n.toFixed(6));
-  return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
-}
-
-export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {
-  return measureExecution('OSRMService.getRouteGeometry', async () => {
-  if (
-    !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
-  ) {
-    return null;
+/**
+ * Cleanup function to disconnect all active channels and clear all pending retries.
+ * Called during socket disconnects or server shutdown.
+ */
+export function cleanupAllLocationTrackers() {
+  // Clear all pending retry timers
+  for (const [orderUUID, timerId] of retryTimers.entries()) {
+    clearTimeout(timerId);
   }
+  retryTimers.clear();
 
-  const cacheKey = buildGeometryCacheKey({ originLat, originLng, destLat, destLng });
-
-  if (redisClient) {
-    try {
-      const cached = await redisClient.get(cacheKey);
-      // Only return cached result if it is a valid object.
-      // Stale null results (from transient failures) must not be served
-      // from cache — the next call should retry the OSRM API.
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed !== null) return parsed;
-      }
-    } catch (err) {
-      logger.error({ event: 'OSRM_REDIS_GET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis get error (geometry)');
-    }
+  // Remove and close all active Supabase realtime channels
+  for (const [orderUUID, channel] of locationChannels.entries()) {
+    supabase.removeChannel(channel);
   }
+  locationChannels.clear();
 
-  const timeoutMs = parsePositiveNumber(process.env.OSRM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const geometryUrl = buildGeometryUrl({ originLat, originLng, destLat, destLng });
-    const response = await osrmBreaker.fire(
-      geometryUrl,
-      { signal: controller.signal },
-    );
-    if (!response.ok) {
-      const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
-      logger.warn({ status: response.status, statusText: response.statusText, url: geometryUrl.toString(), errorBody: errBody }, '[OSRM] Geometry HTTP request failed with non-2xx status');
-      return null;
-    }
-
-    const payload = await response.json();
-    const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
-    const coordinates = route?.geometry?.coordinates;
-    if (!Array.isArray(coordinates) || coordinates.length < 2) {
-      return null;
-    }
-
-    const feature = {
-      type: 'Feature',
-      properties: {
-        distanceKm: Number.isFinite(route.distance) ? route.distance / 1000 : null,
-        durationSeconds: Number.isFinite(route.duration) ? route.duration : null,
-      },
-      geometry: {
-        type: 'LineString',
-        coordinates,
-      },
-    };
-
-    if (redisClient) {
-      try {
-        await redisClient.set(cacheKey, JSON.stringify(feature), 'EX', ROUTE_CACHE_TTL_SECONDS);
-      } catch (err) {
-        logger.error({ event: 'OSRM_REDIS_SET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis set error (geometry)');
-      }
-    }
-    return feature;
-
-  } catch (err) {
-    const geometryUrlStr = buildGeometryUrl({ originLat, originLng, destLat, destLng }).toString();
-    if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
-      logger.warn({ url: geometryUrlStr, errMessage: err.message }, '[OSRM] Circuit is open during geometry fetch. Falling back.');
-      return null;
-    }
-    logger.error({ errMessage: err.message, stack: err.stack, url: geometryUrlStr }, '[OSRM] Failed to fetch route geometry');
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-  });
-}
-
-export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
-  if (
-    !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
-  ) {
-    return null;
-  }
-
-  return {
-    type: 'Feature',
-    properties: { fallback: true },
-    geometry: {
-      type: 'LineString',
-      coordinates: [
-        [originLng, originLat],
-        [destLng, destLat],
-      ],
-    },
-  };
-}
-
-export const __testing = {
-  buildRouteUrl,
-  buildCacheKey,
-  buildGeometryUrl,
-  buildGeometryCacheKey,
-  calculateRetryDelayMs,
-  MAX_RETRY_DELAY_MS,
-  DEFAULT_OSRM_BASE_URL,
-  DEFAULT_TIMEOUT_MS,
-};
-
-// === Spec 22: OSRM failover ===
-function haversineFallbackKm(lat1, lon1, lat2, lon2) {
-  const nLat1 = Number(lat1);
-  const nLon1 = Number(lon1);
-  const nLat2 = Number(lat2);
-  const nLon2 = Number(lon2);
-  if (!Number.isFinite(nLat1) || !Number.isFinite(nLon1) ||
-      !Number.isFinite(nLat2) || !Number.isFinite(nLon2)) {
-    return 0;
-  }
-  if (nLat1 < -90 || nLat1 > 90 || nLat2 < -90 || nLat2 > 90 ||
-      nLon1 < -180 || nLon1 > 180 || nLon2 < -180 || nLon2 > 180) {
-    return 0;
-  }
-  const R = 6371.0088;
-  const t = (d) => (d * Math.PI) / 180;
-  const dLat = t(nLat2 - nLat1);
-  const dLon = t(nLon2 - nLon1);
-  const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-export async function routeWithFailover(primary, _fb, coords) {
-  try { return await primary(coords); }
-  catch (err) {
-    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
-    if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
-      return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
-    }
-    const [a, b] = coords[0];
-    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
-  }
+  logger.info('[Tracker] All location tracking channels and retry timers cleaned up');
 }

@@ -94,6 +94,7 @@ class QUBOFormatter:
     def __init__(self):
         self.qubo = None
         self.variables = []
+        self.edge_mapping = []
         
         logger.info("✅ QUBO Formatter initialized")
     
@@ -110,25 +111,43 @@ class QUBOFormatter:
         # Create quadratic program
         qubo = QuadraticProgram()
 
-        # Add binary variables for each edge
         edge_vars = {}
-        for i, (u, v) in enumerate(graph.edges()):
-            var_name = f'x_{u}_{v}'
-            qubo.binary_var(var_name)
-            edge_vars[(u, v)] = var_name
+        edge_mapping = []
+        if graph.is_multigraph():
+            edge_records = [
+                (u, v, key, data)
+                for u, v, key, data in graph.edges(keys=True, data=True)
+            ]
+        else:
+            edge_records = [
+                (u, v, None, data)
+                for u, v, data in graph.edges(data=True)
+            ]
 
-        # Objective: minimize total distance
+        # Use opaque variable names and retain the original edge identity
+        # separately so node identifiers never affect variable parsing and
+        # parallel edges cannot collide.
+        for index, (u, v, key, data) in enumerate(edge_records):
+            var_name = f'x_{index}'
+            qubo.binary_var(var_name)
+            edge_ref = (u, v, key)
+            edge_vars[edge_ref] = var_name
+            edge_mapping.append(edge_ref)
+
+        # Objective: minimize total distance.
         objective = {}
-        for (u, v), var in edge_vars.items():
-            weight = graph[u][v].get('weight', 1)
+        for (u, v, key), var in edge_vars.items():
+            data = graph[u][v][key] if key is not None else graph[u][v]
+            weight = data.get('weight', 1)
             objective[(var, var)] = weight
 
         qubo.minimize(quadratic=objective)
 
         # Degree constraints: each node must have degree exactly 2.
-        for node in graph.nodes():
+        nodes = list(graph.nodes())
+        for node in nodes:
             incident = [
-                var for (u, v), var in edge_vars.items()
+                var for (u, v, _), var in edge_vars.items()
                 if u == node or v == node
             ]
             if not incident:
@@ -140,18 +159,14 @@ class QUBOFormatter:
                 name=f'degree_{node}',
             )
 
-        # Connectivity / subtour-elimination constraints: for every proper
-        # non-empty subset S of nodes, the number of selected edges entirely
-        # inside S must be <= |S| - 1. This forbids disconnected cycles and
-        # guarantees the selected edges form a single connected cycle. Only
-        # applied for small graphs to avoid the exponential subset blow-up.
-        nodes = list(graph.nodes())
+        # Keep the existing exact subtour formulation for small graphs. The
+        # edge representation above now preserves every parallel edge.
         if len(nodes) <= 8:
             for size in range(2, len(nodes)):
                 for subset in itertools.combinations(nodes, size):
                     s = set(subset)
                     inner = [
-                        var for (u, v), var in edge_vars.items()
+                        var for (u, v, _), var in edge_vars.items()
                         if u in s and v in s
                     ]
                     if len(inner) <= size - 1:
@@ -165,6 +180,7 @@ class QUBOFormatter:
 
         self.qubo = qubo
         self.variables = list(edge_vars.values())
+        self.edge_mapping = edge_mapping
 
         return qubo
 
@@ -188,7 +204,8 @@ class QUBOFormatter:
                 'success': True,
                 'solution': result.x,
                 'objective': result.fval,
-                'variables': self.variables
+                'variables': self.variables,
+                'edge_mapping': self.edge_mapping
             }
         except Exception as e:
             logger.error(f"QUBO solve failed: {e}")

@@ -13,10 +13,9 @@ from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # no
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    for edge, value in zip(result["edge_mapping"], result["solution"]):
         if value is not None and abs(value - 1) < 1e-6:
-            _, u, v = var_name.split('_')
-            selected.add((u, v))
+            selected.add(tuple(edge[:2]))
     return selected
 
 

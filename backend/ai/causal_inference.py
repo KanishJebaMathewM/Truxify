@@ -293,24 +293,29 @@ class BottleneckAnalyzer:
         
         self.bottlenecks = bottlenecks
         return bottlenecks
-    
     def find_root_causes(self, bottleneck: Dict, causal_graph: nx.DiGraph) -> List[Dict]:
-        """Find root causes of bottleneck"""
+        """Find root causes of bottleneck."""
+        target = bottleneck.get('metric')
+        if target is None:
+            logger.warning("Cannot find root causes: bottleneck has no 'metric' value")
+            return []
+
+        if target not in causal_graph:
+            self.root_causes[target] = []
+            return []
+
         root_causes = []
-        
-        # Find all ancestors in causal graph
-        target = bottleneck['metric']
-        ancestors = nx.ancestors(causal_graph, target)
-        
-        for ancestor in ancestors:
+        for ancestor in nx.ancestors(causal_graph, target):
             root_causes.append({
                 'cause': ancestor,
-                'type': 'direct' if ancestor in causal_graph.predecessors(target) else 'indirect',
-                'path_length': len(nx.shortest_path(causal_graph, ancestor, target)) if nx.has_path(causal_graph, ancestor, target) else 0
+                'type': 'direct' if causal_graph.has_edge(ancestor, target) else 'indirect',
+                'path_length': len(nx.shortest_path(causal_graph, ancestor, target))
             })
-        
+
         self.root_causes[target] = root_causes
         return root_causes
+
+                    
     
     def generate_recommendations(self, root_causes: List[Dict]) -> List[str]:
         """Generate recommendations based on root causes"""

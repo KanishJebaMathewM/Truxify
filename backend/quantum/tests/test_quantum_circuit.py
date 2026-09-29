@@ -20,10 +20,9 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    for value, edge in zip(result["solution"], result["edge_mapping"]):
         if value is not None and abs(value - 1) < 1e-6:
-            _, u, v = var_name.split('_')
-            selected.add((u, v))
+            selected.add(tuple(edge))
     return selected
 
 
@@ -78,17 +77,8 @@ def test_module_parses_and_has_single_solve_qubo():
 
     module = ast.parse(source)
 
-    # Exactly one solve_qubo definition (no duplicate-merge signatures).
-    solve_defs = [
-        n
-        for n in module.body
-        if isinstance(n, ast.FunctionDef) and n.name == "solve_qubo"
-    ]
-    assert len(solve_defs) == 1, (
-        f"expected exactly one solve_qubo definition, found {len(solve_defs)}"
-    )
-
-    # A single QUBOFormatter class exposing formulate_route_optimization.
+    # A single QUBOFormatter class should contain exactly one solve_qubo
+    # method and expose formulate_route_optimization.
     formatters = [
         n
         for n in module.body
@@ -97,8 +87,21 @@ def test_module_parses_and_has_single_solve_qubo():
     assert len(formatters) == 1, (
         f"expected exactly one QUBOFormatter class, found {len(formatters)}"
     )
+
+    formatter_methods = [
+        item
+        for item in formatters[0].body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    solve_defs = [
+        item for item in formatter_methods if item.name == "solve_qubo"
+    ]
+    assert len(solve_defs) == 1, (
+        f"expected exactly one QUBOFormatter.solve_qubo method, found {len(solve_defs)}"
+    )
+
     assert any(
-        isinstance(item, ast.FunctionDef)
+        isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
         and item.name == "formulate_route_optimization"
         for item in formatters[0].body
     )
@@ -119,3 +122,41 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_formatter_uses_unique_variables_for_underscored_node_ids():
+    formatter = QUBOFormatter()
+    graph = nx.Graph()
+    graph.add_edge("A_B", "C", weight=1.0)
+    graph.add_edge("C", "A", weight=1.0)
+    graph.add_edge("A", "B_C", weight=1.0)
+    graph.add_edge("B_C", "A_B", weight=1.0)
+
+    qubo = formatter.formulate_route_optimization(graph)
+
+    assert len(qubo.variables) == len(graph.edges())
+    assert len({variable.name for variable in qubo.variables}) == len(graph.edges())
+
+
+def test_extract_route_preserves_underscored_node_ids():
+    from quantum_service import QuantumService
+
+    service = QuantumService.__new__(QuantumService)
+    result = {
+        "solution": [1, 1, 1],
+        "variables": ["x_0", "x_1", "x_2"],
+        "edge_mapping": [
+            ("truck_1", "stop_2"),
+            ("stop_2", "stop_3"),
+            ("stop_3", "truck_1"),
+        ],
+    }
+
+    route = service._extract_route(
+        result,
+        ["truck_1", "stop_2", "stop_3"],
+    )
+
+    assert set(route) == {"truck_1", "stop_2", "stop_3"}
+    assert route[0] == "truck_1"
+    assert route[-1] == "truck_1"

@@ -80,6 +80,9 @@ function makeService({ escrowReleaseFn } = {}) {
   return new DeliveryVerificationService(null, {
     notificationService: {
       getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+      getConsumedDeliveryOtp: () => Promise.resolve(null),
+      consumeDeliveryOtpAtomic: () => Promise.resolve(true),
+      resetDeliveryOtpConsumption: () => Promise.resolve(true),
       verifyDeliveryOtpHash: () => true,
       verifyDeliveryOtp: () => Promise.resolve(true),
       storeDeliveryOtp: () => Promise.resolve(true),
@@ -245,6 +248,9 @@ describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
     const svc = new DeliveryVerificationService(null, {
       notificationService: {
         getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+        getConsumedDeliveryOtp: () => Promise.resolve(null),
+        consumeDeliveryOtpAtomic: () => Promise.resolve(true),
+        resetDeliveryOtpConsumption: () => Promise.resolve(true),
         verifyDeliveryOtpHash: () => true,
         verifyDeliveryOtp: () => Promise.resolve(true),
         storeDeliveryOtp: () => Promise.resolve(true),
@@ -346,6 +352,9 @@ describe('verifyDelivery stuck-escrow retry release confirmation (issue #7732)',
     };
     const notificationService = {
       getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+      getConsumedDeliveryOtp: () => Promise.resolve(null),
+      consumeDeliveryOtpAtomic: () => Promise.resolve(true),
+      resetDeliveryOtpConsumption: () => Promise.resolve(true),
       verifyDeliveryOtpHash: () => true,
       verifyDeliveryOtp: vi.fn().mockResolvedValue(true),
       storeDeliveryOtp: () => Promise.resolve(true),
@@ -386,6 +395,9 @@ describe('verifyDelivery stuck-escrow retry release confirmation (issue #7732)',
     const trackingTokenService = { revokeAllForOrder: vi.fn().mockResolvedValue() };
     const notificationService = {
       getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+      getConsumedDeliveryOtp: () => Promise.resolve(null),
+      consumeDeliveryOtpAtomic: () => Promise.resolve(true),
+      resetDeliveryOtpConsumption: () => Promise.resolve(true),
       verifyDeliveryOtpHash: () => true,
       verifyDeliveryOtp: vi.fn().mockResolvedValue(true),
       storeDeliveryOtp: () => Promise.resolve(true),

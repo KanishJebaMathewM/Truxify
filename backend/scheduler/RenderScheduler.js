@@ -1,535 +1,141 @@
-import { EventEmitter } from 'events';
 import logger from '../api/src/middleware/logger.js';
-import { context, trace, SpanStatusCode } from '@opentelemetry/api';
-import spanFactory from '../api/src/core/telemetry/SpanFactory.js';
-import { ContextPropagator } from '../api/src/core/telemetry/ContextPropagator.js';
 
-// Priority levels
-export const Priority = {
-    CRITICAL: 0,   // UI notifications, loading indicators
-    HIGH: 1,       // User interactions, real-time updates
-    MEDIUM: 2,     // Charts, tables, lists
-    LOW: 3,        // Background updates, analytics
-    IDLE: 4        // Pre-rendering, prefetching
-};
-
-export const PriorityNames = {
-    [Priority.CRITICAL]: 'CRITICAL',
-    [Priority.HIGH]: 'HIGH',
-    [Priority.MEDIUM]: 'MEDIUM',
-    [Priority.LOW]: 'LOW',
-    [Priority.IDLE]: 'IDLE'
-};
-
-class RenderTask {
-    constructor(id, component, priority = Priority.MEDIUM, metadata = {}) {
-        this.id = id;
-        this.component = component;
-        this.priority = priority;
-        this.metadata = metadata;
-        this.status = 'pending'; // pending, running, completed, failed, cancelled
-        this.createdAt = Date.now();
-        this.startedAt = null;
-        this.completedAt = null;
-        this.attempts = 0;
-        this.maxAttempts = 3;
-        this.dependencies = [];
-        this.dependents = [];
-        this.result = null;
-        this.error = null;
+class LocationChannelManager {
+    constructor(supabaseClient) {
+        this.supabase = supabaseClient;
+        this.locationChannels = new Map(); // Key: driverId, Value: Channel
+        this.retryTimers = new Map();       // Key: driverId, Value: Timer handle
+        this.maxRetries = 5;
+        this.baseDelayMs = 1000;
     }
 
-    get age() {
-        return Date.now() - this.createdAt;
-    }
+    /**
+     * Connects or reconnects to a driver location channel
+     */
+    connectChannel(driverId, attempt = 1) {
+        // Clear any existing pending retry timer for this driver
+        this.clearRetryTimer(driverId);
 
-    get waitTime() {
-        return this.startedAt ? this.startedAt - this.createdAt : null;
-    }
+        // If a channel already exists, unsubscribe and clean it up before recreating
+        if (this.locationChannels.has(driverId)) {
+            this.cleanupChannel(driverId);
+        }
 
-    get executionTime() {
-        return this.completedAt && this.startedAt ? this.completedAt - this.startedAt : null;
-    }
-}
+        const channelName = `driver-location:${driverId}`;
+        const channel = this.supabase.channel(channelName);
 
-class RenderScheduler extends EventEmitter {
-    constructor(config = {}) {
-        super();
-
-        this.maxConcurrent = config.maxConcurrent || 4;
-        this.queues = {
-            [Priority.CRITICAL]: [],
-            [Priority.HIGH]: [],
-            [Priority.MEDIUM]: [],
-            [Priority.LOW]: [],
-            [Priority.IDLE]: []
-        };
-
-        this.running = new Map();
-        this.completed = [];
-        this.taskMap = new Map();
-        this.nextTaskId = 1;
-        this.isProcessing = false;
-        this.stats = {
-            totalTasks: 0,
-            completedTasks: 0,
-            failedTasks: 0,
-            cancelledTasks: 0,
-            averageWaitTime: 0,
-            averageExecutionTime: 0,
-            totalExecutionTime: 0,
-            startTime: Date.now()
-        };
-
-        // Start processing loop
-        this.startProcessing();
-
-        logger.info(`✅ RenderScheduler initialized (maxConcurrent: ${this.maxConcurrent})`);
-    }
-
-    // ============ Task Management ============
-
-    schedule(component, priority = Priority.MEDIUM, metadata = {}) {
-        const taskId = this.nextTaskId++;
-        const task = new RenderTask(taskId, component, priority, metadata);
-
-        // Add to queue
-        this.queues[priority].push(task);
-        this.taskMap.set(taskId, task);
-        this.stats.totalTasks++;
-
-        this.emit('taskScheduled', { taskId, priority: PriorityNames[priority] });
-        logger.debug(`Task ${taskId} scheduled with priority ${PriorityNames[priority]}`);
-
-        return taskId;
-    }
-
-    cancel(taskId) {
-        const task = this.taskMap.get(taskId);
-        if (!task) return false;
-
-        if (task.status === 'pending') {
-            // Remove from queue
-            const queue = this.queues[task.priority];
-            const index = queue.indexOf(task);
-            if (index !== -1) {
-                queue.splice(index, 1);
-                // Unlink this task from any dependents so they are not
-                // permanently deadlocked by a dependency that will never
-                // complete. Removing the edge lets a dependent with no other
-                // dependencies become schedulable again.
-                for (const depId of [...task.dependents]) {
-                    this.removeDependency(depId, taskId);
-                    const dependent = this.taskMap.get(depId);
-                    if (dependent) {
-                        this.emit('dependentUnblocked', { taskId: depId, dependencyId: taskId });
-                    }
+        channel
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, (payload) => {
+                this.handleLocationUpdate(driverId, payload);
+            })
+            .subscribe((status, err) => {
+                if (status === 'SUBSCRIBED') {
+                    logger.info(`Successfully subscribed to location channel for driver ${driverId}`);
+                    this.clearRetryTimer(driverId);
+                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    logger.warn(`Channel error for driver ${driverId}: ${err?.message || status}`);
+                    this.handleChannelFailure(driverId, attempt);
                 }
-                task.status = 'cancelled';
-                this.stats.cancelledTasks++;
-                this.emit('taskCancelled', { taskId });
-                this.taskMap.delete(taskId);
-                logger.debug(`Task ${taskId} cancelled`);
-                this.pruneTaskMap();
-                return true;
-            }
-        }
-
-        if (task.status === 'running') {
-            // Can't cancel running tasks
-            return false;
-        }
-
-        return false;
-    }
-
-    cancelAll(priority = null) {
-        let count = 0;
-
-        if (priority !== null) {
-            const queue = this.queues[priority];
-            const tasks = [...queue];
-            for (const task of tasks) {
-                if (this.cancel(task.id)) count++;
-            }
-        } else {
-            for (const p of Object.values(Priority)) {
-                const queue = this.queues[p];
-                const tasks = [...queue];
-                for (const task of tasks) {
-                    if (this.cancel(task.id)) count++;
-                }
-            }
-        }
-
-        this.emit('tasksCancelled', { count });
-        logger.info(`${count} tasks cancelled`);
-        return count;
-    }
-
-    // ============ Priority Management ============
-
-    changePriority(taskId, newPriority) {
-        const task = this.taskMap.get(taskId);
-        if (!task || task.status !== 'pending') return false;
-
-        // Remove from current queue
-        const oldQueue = this.queues[task.priority];
-        const index = oldQueue.indexOf(task);
-        if (index === -1) return false;
-        oldQueue.splice(index, 1);
-
-        // Add to new queue
-        const oldPriority = task.priority;
-        task.priority = newPriority;
-        this.queues[newPriority].push(task);
-
-        this.emit('priorityChanged', { taskId, oldPriority: PriorityNames[oldPriority], newPriority: PriorityNames[newPriority] });
-        logger.debug(`Task ${taskId} priority changed to ${PriorityNames[newPriority]}`);
-
-        return true;
-    }
-
-    getQueueLength(priority = null) {
-        if (priority !== null) {
-            return this.queues[priority].length;
-        }
-
-        let total = 0;
-        for (const p of Object.values(Priority)) {
-            total += this.queues[p].length;
-        }
-        return total;
-    }
-
-    // ============ Processing ============
-
-    startProcessing() {
-        if (this.isProcessing) return;
-        this.isProcessing = true;
-        this.processLoop();
-    }
-
-    async processLoop() {
-        while (this.isProcessing) {
-            try {
-                // Check if we can run more tasks
-                if (this.running.size >= this.maxConcurrent) {
-                    await this.sleep(100);
-                    continue;
-                }
-
-                // Get next task
-                const task = this.getNextTask();
-                if (!task) {
-                    await this.sleep(100);
-                    continue;
-                }
-
-                // Run task
-                this.runTask(task);
-            } catch (err) {
-                logger.error(`Scheduler processLoop error: ${err.message}`);
-                await this.sleep(1000);
-            }
-        }
-    }
-
-    getNextTask() {
-        // Check priorities in order
-        for (const priority of [
-            Priority.CRITICAL,
-            Priority.HIGH,
-            Priority.MEDIUM,
-            Priority.LOW,
-            Priority.IDLE
-        ]) {
-            const queue = this.queues[priority];
-
-            // Check for tasks without dependencies
-            for (let i = 0; i < queue.length; i++) {
-                const task = queue[i];
-                if (this.areDependenciesMet(task)) {
-                    queue.splice(i, 1);
-                    return task;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    areDependenciesMet(task) {
-        for (const depId of task.dependencies) {
-            const dep = this.taskMap.get(depId);
-            if (!dep || dep.status !== 'completed') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    async runTask(task) {
-        task.status = 'running';
-        task.startedAt = Date.now();
-        task.attempts++;
-
-        this.running.set(task.id, task);
-        this.emit('taskStarted', { taskId: task.id });
-        logger.debug(`Task ${task.id} started`);
-
-        const span = spanFactory.startSchedulerTaskSpan(`render-task-${task.id}`, {
-            attributes: {
-                'scheduler.task_id': task.id,
-                'scheduler.priority': PriorityNames[task.priority],
-                'scheduler.attempt': task.attempts,
-                'scheduler.max_attempts': task.maxAttempts,
-            },
-        });
-
-        try {
-            const result = await context.with(trace.setSpan(context.active(), span), async () => {
-                return await this.executeTask(task);
             });
 
-            // Complete task
-            task.status = 'completed';
-            task.completedAt = Date.now();
-            task.result = result;
-
-            this.running.delete(task.id);
-            this.completed.push(task);
-            if (this.completed.length > 1000) {
-                this.completed = this.completed.slice(-1000);
-            }
-            this.stats.completedTasks++;
-
-            // Update stats
-            const execTime = task.executionTime;
-            if (execTime !== null) {
-                this.stats.totalExecutionTime += execTime;
-                this.stats.averageExecutionTime = this.stats.totalExecutionTime / this.stats.completedTasks;
-            }
-
-            // Update wait time stats
-            const waitTime = task.waitTime;
-            if (waitTime !== null) {
-                this.stats.averageWaitTime = 
-                    (this.stats.averageWaitTime * (this.stats.completedTasks - 1) + waitTime) / this.stats.completedTasks;
-            }
-
-            span.setAttributes({ 'scheduler.execution_time_ms': execTime });
-            span.setStatus({ code: SpanStatusCode.OK });
-            span.end();
-
-            this.emit('taskCompleted', { taskId: task.id, result, executionTime: execTime });
-            logger.debug(`Task ${task.id} completed in ${execTime}ms`);
-
-            // Process dependents
-            this.processDependents(task);
-            this.pruneTaskMap();
-
-        } catch (error) {
-            // Handle error
-            task.status = 'failed';
-            task.error = error.message;
-
-            this.running.delete(task.id);
-
-            spanFactory.recordError(span, error);
-            span.end();
-
-            if (task.attempts < task.maxAttempts) {
-                // Retry
-                task.status = 'pending';
-                this.queues[task.priority].push(task);
-                this.emit('taskRetry', { taskId: task.id, attempts: task.attempts });
-                logger.warn(`Task ${task.id} retry ${task.attempts}/${task.maxAttempts}`);
-            } else {
-                this.stats.failedTasks++;
-                this.emit('taskFailed', { taskId: task.id, error: error.message });
-                logger.error(`Task ${task.id} failed: ${error.message}`);
-                this.pruneTaskMap();
-            }
-        }
+        this.locationChannels.set(driverId, channel);
     }
 
-    async executeTask(task) {
-        // Execute component render function
-        if (typeof task.component === 'function') {
-            return await task.component();
-        } else if (task.component && typeof task.component.render === 'function') {
-            return await task.component.render();
-        } else {
-            return await task.component;
-        }
-    }
+    /**
+     * Handles retry with linear backoff and timer tracking
+     */
+    handleChannelFailure(driverId, attempt) {
+        // Explicitly remove and unsubscribe the failed channel
+        this.cleanupChannel(driverId);
 
-    processDependents(task) {
-        for (const depId of task.dependents) {
-            const dep = this.taskMap.get(depId);
-            if (dep && dep.status === 'pending') {
-                this.emit('dependentReady', { taskId: dep.id, dependencyId: task.id });
+        if (attempt > this.maxRetries) {
+            logger.error(`Max retries (${this.maxRetries}) reached for driver ${driverId}. Disconnecting channel.`);
+            return;
+        }
+
+        // Linear backoff delay calculation
+        const delayMs = this.baseDelayMs * attempt;
+        logger.info(`Scheduling reconnect for driver ${driverId} in ${delayMs}ms using linear backoff (attempt ${attempt}/${this.maxRetries})`);
+
+        const timer = setTimeout(() => {
+            this.retryTimers.delete(driverId);
+            // Guard against stale callbacks if cleanup happened during delay
+            if (this.shouldReconnect(driverId)) {
+                this.connectChannel(driverId, attempt + 1);
             }
-        }
+        }, delayMs);
+
+        this.retryTimers.set(driverId, timer);
     }
 
-    pruneTaskMap() {
-        const toDelete = [];
-        for (const [taskId, task] of this.taskMap) {
-            if (task.status === 'completed' || task.status === 'failed') {
-                const hasLiveDependents = task.dependents.some(depId => {
-                    const dep = this.taskMap.get(depId);
-                    return dep && (dep.status === 'pending' || dep.status === 'running');
-                });
-                if (!hasLiveDependents) {
-                    toDelete.push(taskId);
-                }
-            } else if (task.status === 'pending') {
-                const blockedForever = task.dependencies.some(depId => {
-                    const dep = this.taskMap.get(depId);
-                    return dep && (dep.status === 'cancelled' || dep.status === 'failed');
-                });
-                if (blockedForever) {
-                    toDelete.push(taskId);
-                }
-            }
-        }
-        for (const taskId of toDelete) {
-            const task = this.taskMap.get(taskId);
-            if (task) {
-                const queue = this.queues[task.priority];
-                const index = queue.indexOf(task);
-                if (index !== -1) queue.splice(index, 1);
-                this.taskMap.delete(taskId);
-            }
-        }
-    }
-
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    // ============ Task Dependencies ============
-
-    addDependency(taskId, dependencyId) {
-        const task = this.taskMap.get(taskId);
-        const dep = this.taskMap.get(dependencyId);
-
-        if (!task || !dep) return false;
-
-        task.dependencies.push(dependencyId);
-        dep.dependents.push(taskId);
-
-        this.emit('dependencyAdded', { taskId, dependencyId });
+    /**
+     * Checks if reconnection should proceed
+     */
+    shouldReconnect(driverId) {
+        // Customize check based on application state if needed
         return true;
     }
 
-    removeDependency(taskId, dependencyId) {
-        const task = this.taskMap.get(taskId);
-        if (!task) return false;
+    /**
+     * Unsubscribes and deletes a single channel safely
+     */
+    cleanupChannel(driverId) {
+        const channel = this.locationChannels.get(driverId);
+        if (channel) {
+            try {
+                channel.unsubscribe();
+            } catch (err) {
+                logger.error(`Error unsubscribing channel for driver ${driverId}: ${err.message}`);
+            }
+            this.locationChannels.delete(driverId);
+        }
+    }
 
-        const index = task.dependencies.indexOf(dependencyId);
-        if (index === -1) return false;
+    /**
+     * Clears pending retry timers for a specific driver
+     */
+    clearRetryTimer(driverId) {
+        if (this.retryTimers.has(driverId)) {
+            clearTimeout(this.retryTimers.get(driverId));
+            this.retryTimers.delete(driverId);
+        }
+    }
 
-        task.dependencies.splice(index, 1);
+    /**
+     * Removes specific driver location channels and cancels any pending retries
+     */
+    removeDriverLocationChannels(driverId) {
+        this.clearRetryTimer(driverId);
+        this.cleanupChannel(driverId);
+        logger.info(`Removed location channel and cancelled retries for driver ${driverId}`);
+    }
 
-        const dep = this.taskMap.get(dependencyId);
-        if (dep) {
-            const depIndex = dep.dependents.indexOf(taskId);
-            if (depIndex !== -1) {
-                dep.dependents.splice(depIndex, 1);
+    /**
+     * Completely cleans up all active subscriptions and pending retry timers
+     */
+    removeClientFromAllSubscriptions() {
+        // 1. Cancel all active retry timers
+        for (const [driverId, timer] of this.retryTimers.entries()) {
+            clearTimeout(timer);
+        }
+        this.retryTimers.clear();
+
+        // 2. Unsubscribe all channels
+        for (const [driverId, channel] of this.locationChannels.entries()) {
+            try {
+                channel.unsubscribe();
+            } catch (err) {
+                logger.error(`Error unsubscribing channel for driver ${driverId} during complete cleanup: ${err.message}`);
             }
         }
+        this.locationChannels.clear();
 
-        this.emit('dependencyRemoved', { taskId, dependencyId });
-        return true;
+        logger.info('Successfully removed all client subscriptions and cancelled pending retries.');
     }
 
-    // ============ Queries ============
-
-    getTask(taskId) {
-        return this.taskMap.get(taskId);
-    }
-
-    getTasks(status = null) {
-        const tasks = Array.from(this.taskMap.values());
-        if (status !== null) {
-            return tasks.filter(t => t.status === status);
-        }
-        return tasks;
-    }
-
-    getRunningTasks() {
-        return Array.from(this.running.values());
-    }
-
-    getCompletedTasks(limit = 100) {
-        return this.completed.slice(-limit);
-    }
-
-    getQueueStats() {
-        const stats = {};
-        for (const [priority, queue] of Object.entries(this.queues)) {
-            stats[PriorityNames[priority]] = queue.length;
-        }
-        return stats;
-    }
-
-    getStats() {
-        return {
-            ...this.stats,
-            running: this.running.size,
-            queued: this.getQueueLength(),
-            maxConcurrent: this.maxConcurrent,
-            queues: this.getQueueStats(),
-            uptime: Math.max(0, Date.now() - this.stats.startTime)
-        };
-    }
-
-    // ============ Control ============
-
-    pause() {
-        this.isProcessing = false;
-        this.emit('paused');
-        logger.info('Scheduler paused');
-    }
-
-    resume() {
-        if (!this.isProcessing) {
-            this.isProcessing = true;
-            this.processLoop();
-            this.emit('resumed');
-            logger.info('Scheduler resumed');
-        }
-    }
-
-    clear() {
-        this.cancelAll();
-        for (const priority of Object.values(Priority)) {
-            this.queues[priority] = [];
-        }
-        this.emit('cleared');
-        logger.info('Scheduler cleared');
-    }
-
-    reset() {
-        this.clear();
-        this.completed = [];
-        this.taskMap.clear();
-        this.stats = {
-            totalTasks: 0,
-            completedTasks: 0,
-            failedTasks: 0,
-            cancelledTasks: 0,
-            averageWaitTime: 0,
-            averageExecutionTime: 0,
-            totalExecutionTime: 0,
-            startTime: Date.now()
-        };
-        this.emit('reset');
-        logger.info('Scheduler reset');
+    handleLocationUpdate(driverId, payload) {
+        // Payload processing logic
     }
 }
 
-export default RenderScheduler;
+export default LocationChannelManager;

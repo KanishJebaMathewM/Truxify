@@ -340,25 +340,16 @@ class OrderReadModel {
   }
 
   /**
-   * Per-status order counts, derived from the snapshot payload stored in the
-   * single authoritative read model.
+   * Per-status order counts from the canonical `status` column of the single
+   * authoritative read model (the same column getOrderList filters on).
    */
   async getOrderStats() {
-  const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
+    const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
     const stats = {};
     for (const s of statuses) { stats[s] = 0; }
 
     for (const status of statuses) {
       const { count, error } = await this.client
-        .from(ORDER_READ_MODEL_TABLE)
-        .select('*', { count: 'exact', head: true })
-        .eq('payload->>status', status);
-
-      if (error) throw error;
-      stats[status] = count ?? 0;
-    }
-
-    return stats;
         .from(ORDER_READ_MODEL_TABLE)
         .select('*', { count: 'exact', head: true })
         .eq('status', status);
@@ -376,7 +367,6 @@ class OrderReadModel {
   }
 }
 
-export default new OrderReadModel();
 export default new OrderReadModel();
 export { OrderReadModel };
 

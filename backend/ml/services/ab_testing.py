@@ -1,4 +1,5 @@
 import random
+import math
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -65,11 +66,15 @@ class ABTestModel:
         test_state = self._test_states.setdefault(test_id, {
             'test_id': test_id,
             'production_version': self.get_production_version(),
-            'shadow_version': model_version,
             'started_at': datetime.utcnow().isoformat(),
             'status': 'active',
         })
-        test_state['shadow_version'] = model_version
+
+        if model_version not in {
+            test_state.get('production_version'),
+            'production'
+        }:
+            test_state['shadow_version'] = model_version
         session = self.Session()
         for metric_name, value in metrics.items():
             metric = ABTestMetrics(
@@ -137,12 +142,31 @@ class ABTestModel:
                     )
                 }
 
-            is_better = self.is_shadow_better(results)
-            has_comparison = any(
-                values.get('production') is not None and values.get('shadow') is not None
-                for values in results.values()
-            )
 
+            comparable_metrics = [
+                values for values in results.values()
+                if values.get('production') is not None
+                and values.get('shadow') is not None
+                and pd.notna(values.get('production'))
+                and pd.notna(values.get('shadow'))
+                and math.isfinite(values.get('production'))
+                and math.isfinite(values.get('shadow'))
+            ]
+
+            if not comparable_metrics:
+                return {
+                    'test_id': test_id,
+                    'results': results,
+                    'shadow_better': False,
+                    'should_rollback': False,
+                    'error': 'Insufficient metrics for production vs shadow comparison',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+
+           is_better = self.is_shadow_better(results)
+
+            has_comparison = len(comparable_metrics) > 0
+            
             return {
                 'test_id': test_id,
                 'results': results,
@@ -178,7 +202,7 @@ class ABTestModel:
         for metric, values in results.items():
             prod = values.get('production')
             shadow = values.get('shadow')
-            if prod is None or shadow is None:
+            if prod is None or shadow is None or not pd.notna(prod) or not pd.notna(shadow):
                 continue
 
             total_metrics += 1
@@ -242,6 +266,14 @@ class ABTestModel:
         """Auto-rollback to previous version if shadow model underperforms"""
         evaluation = self.evaluate_test(test_id)
 
+        if evaluation.get('error'):
+            return {
+                'action': 'none',
+                'test_id': test_id,
+                'reason': evaluation['error'],
+                'timestamp': datetime.utcnow().isoformat()
+            }
+
         if not evaluation.get('has_comparison', False):
             return {
                 'action': 'insufficient_metrics',
@@ -254,14 +286,26 @@ class ABTestModel:
             restored = restore_previous_model(DEMAND_MODEL_NAME)
             if restored:
                 reset_model_cache()
-            state = self._test_states.setdefault(test_id, {'test_id': test_id})
+
+            state = self._test_states.setdefault(
+                test_id,
+                {'test_id': test_id}
+            )
+
             state.update({
                 'status': 'rolled_back' if restored else 'rollback_failed',
                 'rolled_back': restored,
                 'production_version': self.get_production_version(),
             })
+
             self.mark_test_terminal(test_id, state['status'])
-            logger.warning("Demand forecast rollback %s for test %s", "completed" if restored else "failed", test_id)
+
+            logger.warning(
+                "Demand forecast rollback %s for test %s",
+                "completed" if restored else "failed",
+                test_id
+            )
+
             return {
                 'action': 'rollback' if restored else 'rollback_failed',
                 'test_id': test_id,
@@ -270,6 +314,7 @@ class ABTestModel:
                 'production_version': self.get_production_version(),
                 'timestamp': datetime.utcnow().isoformat()
             }
+
         return {
             'action': 'promote',
             'test_id': test_id,

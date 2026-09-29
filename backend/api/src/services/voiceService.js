@@ -67,13 +67,13 @@ async function getBookingContext(bookingId, userId) {
 
     const { data: order, error } = await orderQuery.maybeSingle();
     if (error) {
-      logger.warn('Orders table check failed in voiceService:', error?.message ?? String(error));
+      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: error.message }, 'Orders table check failed in voiceService');
       return null;
     }
 
     return order;
   } catch (err) {
-    logger.warn('Orders table check failed in voiceService:', err?.message ?? String(err));
+      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
   }
   return null;
 }
@@ -174,7 +174,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-    logger.error('Whisper transcription failed:', err?.message ?? String(err));
+      logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
     throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -200,7 +200,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
-    logger.error('LLM completion failed:', err?.message ?? String(err));
+    logger.error({ event: 'LLM_COMPLETION_FAILED', error: err.message }, 'LLM completion failed');
     throw new Error('LLM failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -228,7 +228,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
-    logger.error('ElevenLabs TTS failed:', err?.message ?? String(err));
+    logger.error({ event: 'ELEVENLABS_TTS_FAILED', error: err.message }, 'ElevenLabs TTS failed');
     throw new Error('TTS failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 

@@ -3,6 +3,9 @@ import { getDriverById, getDriverTrips, updateDriver } from '../../src/controlle
 import { supabaseAdmin } from '../../src/config/db.js';
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: null,
   supabaseAdmin: {
     from: vi.fn(),

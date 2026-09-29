@@ -297,6 +297,32 @@ describe('lumperEscrowRoutes', () => {
       expect(res.status).toBe(404);
       expect(res.body.error).toMatch(/not found/i);
     });
+
+    it('returns 400 when claimedAmount exceeds estimated escrow amount', async () => {
+      lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
+        new Error('claimedAmount cannot exceed the estimated escrow amount')
+      );
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/cannot exceed/i);
+    });
+
+    it('returns 409 when escrow has already been released', async () => {
+      lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
+        new Error('Lumper fee escrow already released')
+      );
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/already released/i);
+    });
   });
 
   describe('GET /api/lumper-escrow/:escrowId', () => {

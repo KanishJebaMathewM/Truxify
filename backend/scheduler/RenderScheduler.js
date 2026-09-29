@@ -38,15 +38,15 @@ class RenderTask {
         this.result = null;
         this.error = null;
     }
-    
+
     get age() {
         return Date.now() - this.createdAt;
     }
-    
+
     get waitTime() {
         return this.startedAt ? this.startedAt - this.createdAt : null;
     }
-    
+
     get executionTime() {
         return this.completedAt && this.startedAt ? this.completedAt - this.startedAt : null;
     }
@@ -55,7 +55,7 @@ class RenderTask {
 class RenderScheduler extends EventEmitter {
     constructor(config = {}) {
         super();
-        
+
         this.maxConcurrent = config.maxConcurrent || 4;
         this.queues = {
             [Priority.CRITICAL]: [],
@@ -64,7 +64,7 @@ class RenderScheduler extends EventEmitter {
             [Priority.LOW]: [],
             [Priority.IDLE]: []
         };
-        
+
         this.running = new Map();
         this.completed = [];
         this.taskMap = new Map();
@@ -83,31 +83,31 @@ class RenderScheduler extends EventEmitter {
 
         // Start processing loop
         this.startProcessing();
-        
+
         logger.info(`✅ RenderScheduler initialized (maxConcurrent: ${this.maxConcurrent})`);
     }
-    
+
     // ============ Task Management ============
-    
+
     schedule(component, priority = Priority.MEDIUM, metadata = {}) {
         const taskId = this.nextTaskId++;
         const task = new RenderTask(taskId, component, priority, metadata);
-        
+
         // Add to queue
         this.queues[priority].push(task);
         this.taskMap.set(taskId, task);
         this.stats.totalTasks++;
-        
+
         this.emit('taskScheduled', { taskId, priority: PriorityNames[priority] });
         logger.debug(`Task ${taskId} scheduled with priority ${PriorityNames[priority]}`);
-        
+
         return taskId;
     }
-    
+
     cancel(taskId) {
         const task = this.taskMap.get(taskId);
         if (!task) return false;
-        
+
         if (task.status === 'pending') {
             // Remove from queue
             const queue = this.queues[task.priority];
@@ -134,18 +134,18 @@ class RenderScheduler extends EventEmitter {
                 return true;
             }
         }
-        
+
         if (task.status === 'running') {
             // Can't cancel running tasks
             return false;
         }
-        
+
         return false;
     }
-    
+
     cancelAll(priority = null) {
         let count = 0;
-        
+
         if (priority !== null) {
             const queue = this.queues[priority];
             const tasks = [...queue];
@@ -161,24 +161,24 @@ class RenderScheduler extends EventEmitter {
                 }
             }
         }
-        
+
         this.emit('tasksCancelled', { count });
         logger.info(`${count} tasks cancelled`);
         return count;
     }
-    
+
     // ============ Priority Management ============
-    
+
     changePriority(taskId, newPriority) {
         const task = this.taskMap.get(taskId);
         if (!task || task.status !== 'pending') return false;
-        
+
         // Remove from current queue
         const oldQueue = this.queues[task.priority];
         const index = oldQueue.indexOf(task);
         if (index === -1) return false;
         oldQueue.splice(index, 1);
-        
+
         // Add to new queue
         const oldPriority = task.priority;
         task.priority = newPriority;
@@ -186,30 +186,30 @@ class RenderScheduler extends EventEmitter {
 
         this.emit('priorityChanged', { taskId, oldPriority: PriorityNames[oldPriority], newPriority: PriorityNames[newPriority] });
         logger.debug(`Task ${taskId} priority changed to ${PriorityNames[newPriority]}`);
-        
+
         return true;
     }
-    
+
     getQueueLength(priority = null) {
         if (priority !== null) {
             return this.queues[priority].length;
         }
-        
+
         let total = 0;
         for (const p of Object.values(Priority)) {
             total += this.queues[p].length;
         }
         return total;
     }
-    
+
     // ============ Processing ============
-    
+
     startProcessing() {
         if (this.isProcessing) return;
         this.isProcessing = true;
         this.processLoop();
     }
-    
+
     async processLoop() {
         while (this.isProcessing) {
             try {
@@ -218,14 +218,14 @@ class RenderScheduler extends EventEmitter {
                     await this.sleep(100);
                     continue;
                 }
-                
+
                 // Get next task
                 const task = this.getNextTask();
                 if (!task) {
                     await this.sleep(100);
                     continue;
                 }
-                
+
                 // Run task
                 this.runTask(task);
             } catch (err) {
@@ -234,7 +234,7 @@ class RenderScheduler extends EventEmitter {
             }
         }
     }
-    
+
     getNextTask() {
         // Check priorities in order
         for (const priority of [
@@ -245,7 +245,7 @@ class RenderScheduler extends EventEmitter {
             Priority.IDLE
         ]) {
             const queue = this.queues[priority];
-            
+
             // Check for tasks without dependencies
             for (let i = 0; i < queue.length; i++) {
                 const task = queue[i];
@@ -255,10 +255,10 @@ class RenderScheduler extends EventEmitter {
                 }
             }
         }
-        
+
         return null;
     }
-    
+
     areDependenciesMet(task) {
         for (const depId of task.dependencies) {
             const dep = this.taskMap.get(depId);
@@ -268,12 +268,12 @@ class RenderScheduler extends EventEmitter {
         }
         return true;
     }
-    
+
     async runTask(task) {
         task.status = 'running';
         task.startedAt = Date.now();
         task.attempts++;
-        
+
         this.running.set(task.id, task);
         this.emit('taskStarted', { taskId: task.id });
         logger.debug(`Task ${task.id} started`);
@@ -286,31 +286,31 @@ class RenderScheduler extends EventEmitter {
                 'scheduler.max_attempts': task.maxAttempts,
             },
         });
-        
+
         try {
             const result = await context.with(trace.setSpan(context.active(), span), async () => {
                 return await this.executeTask(task);
             });
-            
+
             // Complete task
             task.status = 'completed';
             task.completedAt = Date.now();
             task.result = result;
-            
+
             this.running.delete(task.id);
             this.completed.push(task);
             if (this.completed.length > 1000) {
                 this.completed = this.completed.slice(-1000);
             }
             this.stats.completedTasks++;
-            
+
             // Update stats
             const execTime = task.executionTime;
             if (execTime !== null) {
                 this.stats.totalExecutionTime += execTime;
                 this.stats.averageExecutionTime = this.stats.totalExecutionTime / this.stats.completedTasks;
             }
-            
+
             // Update wait time stats
             const waitTime = task.waitTime;
             if (waitTime !== null) {
@@ -321,24 +321,24 @@ class RenderScheduler extends EventEmitter {
             span.setAttributes({ 'scheduler.execution_time_ms': execTime });
             span.setStatus({ code: SpanStatusCode.OK });
             span.end();
-            
+
             this.emit('taskCompleted', { taskId: task.id, result, executionTime: execTime });
             logger.debug(`Task ${task.id} completed in ${execTime}ms`);
-            
+
             // Process dependents
             this.processDependents(task);
             this.pruneTaskMap();
-            
+
         } catch (error) {
             // Handle error
             task.status = 'failed';
             task.error = error.message;
-            
+
             this.running.delete(task.id);
 
             spanFactory.recordError(span, error);
             span.end();
-            
+
             if (task.attempts < task.maxAttempts) {
                 // Retry
                 task.status = 'pending';
@@ -353,7 +353,7 @@ class RenderScheduler extends EventEmitter {
             }
         }
     }
-    
+
     async executeTask(task) {
         // Execute component render function
         if (typeof task.component === 'function') {
@@ -364,7 +364,7 @@ class RenderScheduler extends EventEmitter {
             return await task.component;
         }
     }
-    
+
     processDependents(task) {
         for (const depId of task.dependents) {
             const dep = this.taskMap.get(depId);
@@ -374,13 +374,6 @@ class RenderScheduler extends EventEmitter {
         }
     }
 
-    // Completed/failed tasks are kept in this.taskMap forever, so a long-lived
-    // scheduler accumulates one entry per scheduled task (unbounded memory).
-    // A terminal task can be pruned once none of its dependents is still
-    // pending or running — it is only read later by areDependenciesMet()
-    // for live dependents. Keep failed tasks only while they may still be
-    // depended on; getTask()/getTasks() for long-gone tasks are not used by
-    // the processing loop.
     pruneTaskMap() {
         const toDelete = [];
         for (const [taskId, task] of this.taskMap) {
@@ -393,9 +386,6 @@ class RenderScheduler extends EventEmitter {
                     toDelete.push(taskId);
                 }
             } else if (task.status === 'pending') {
-                // A pending task whose dependencies can never be satisfied
-                // (a cancelled or permanently failed dependency) is dead: it
-                // would deadlock forever and leak its taskMap entry. Remove it.
                 const blockedForever = task.dependencies.some(depId => {
                     const dep = this.taskMap.get(depId);
                     return dep && (dep.status === 'cancelled' || dep.status === 'failed');
@@ -415,35 +405,35 @@ class RenderScheduler extends EventEmitter {
             }
         }
     }
-    
+
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
-    
+
     // ============ Task Dependencies ============
-    
+
     addDependency(taskId, dependencyId) {
         const task = this.taskMap.get(taskId);
         const dep = this.taskMap.get(dependencyId);
-        
+
         if (!task || !dep) return false;
-        
+
         task.dependencies.push(dependencyId);
         dep.dependents.push(taskId);
-        
+
         this.emit('dependencyAdded', { taskId, dependencyId });
         return true;
     }
-    
+
     removeDependency(taskId, dependencyId) {
         const task = this.taskMap.get(taskId);
         if (!task) return false;
-        
+
         const index = task.dependencies.indexOf(dependencyId);
         if (index === -1) return false;
-        
+
         task.dependencies.splice(index, 1);
-        
+
         const dep = this.taskMap.get(dependencyId);
         if (dep) {
             const depIndex = dep.dependents.indexOf(taskId);
@@ -451,17 +441,17 @@ class RenderScheduler extends EventEmitter {
                 dep.dependents.splice(depIndex, 1);
             }
         }
-        
+
         this.emit('dependencyRemoved', { taskId, dependencyId });
         return true;
     }
-    
+
     // ============ Queries ============
-    
+
     getTask(taskId) {
         return this.taskMap.get(taskId);
     }
-    
+
     getTasks(status = null) {
         const tasks = Array.from(this.taskMap.values());
         if (status !== null) {
@@ -469,15 +459,15 @@ class RenderScheduler extends EventEmitter {
         }
         return tasks;
     }
-    
+
     getRunningTasks() {
         return Array.from(this.running.values());
     }
-    
+
     getCompletedTasks(limit = 100) {
         return this.completed.slice(-limit);
     }
-    
+
     getQueueStats() {
         const stats = {};
         for (const [priority, queue] of Object.entries(this.queues)) {
@@ -485,7 +475,7 @@ class RenderScheduler extends EventEmitter {
         }
         return stats;
     }
-    
+
     getStats() {
         return {
             ...this.stats,
@@ -496,15 +486,15 @@ class RenderScheduler extends EventEmitter {
             uptime: Math.max(0, Date.now() - this.stats.startTime)
         };
     }
-    
+
     // ============ Control ============
-    
+
     pause() {
         this.isProcessing = false;
         this.emit('paused');
         logger.info('Scheduler paused');
     }
-    
+
     resume() {
         if (!this.isProcessing) {
             this.isProcessing = true;
@@ -513,7 +503,7 @@ class RenderScheduler extends EventEmitter {
             logger.info('Scheduler resumed');
         }
     }
-    
+
     clear() {
         this.cancelAll();
         for (const priority of Object.values(Priority)) {
@@ -522,7 +512,7 @@ class RenderScheduler extends EventEmitter {
         this.emit('cleared');
         logger.info('Scheduler cleared');
     }
-    
+
     reset() {
         this.clear();
         this.completed = [];
@@ -543,4 +533,3 @@ class RenderScheduler extends EventEmitter {
 }
 
 export default RenderScheduler;
-export { Priority };

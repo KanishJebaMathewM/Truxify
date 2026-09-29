@@ -108,3 +108,4 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
     return registered
 
 from . import _gnn_event_loop_isolation_patch
+from . import _gnn_current_position_patch

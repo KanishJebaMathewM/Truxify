@@ -36,6 +36,23 @@ export const ORDER_READ_MODEL_COLUMNS = Object.freeze([
 ]);
 
 export const ORDER_READ_MODEL_PRIMARY_KEY = 'order_id';
+export const ORDER_STATUSES = Object.freeze([
+  'created',
+  'assigned',
+  'paid',
+  'in_transit',
+  'completed',
+  'settled',
+  'pending',
+  'truck_assigned',
+  'en_route_pickup',
+  'arrived_pickup',
+  'picked_up',
+  'arriving',
+  'delivered',
+  'payment_released',
+  'cancelled',
+]);
 
 export class OrderReadModelSchemaError extends Error {
   constructor(message) {

@@ -344,7 +344,7 @@ class OrderReadModel {
    * single authoritative read model.
    */
   async getOrderStats() {
-  const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
+    const statuses = ORDER_STATUSES;
     const stats = {};
     for (const s of statuses) { stats[s] = 0; }
 

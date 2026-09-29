@@ -77,6 +77,37 @@ function verifyOperationSignature(req, action, fields) {
 
 // Create asset
 router.post(
+/**
+ * @openapi
+ * /api/token/asset/create:
+ *   post:
+ *     tags: [Tokenization]
+ *     summary: Create a tokenized freight asset
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - assetType
+ *               - signature
+ *             properties:
+ *               name:
+ *                 type: string
+ *               assetType:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
     '/token/asset/create',
     authenticate,
     requirePolicy('token:create-asset'),
@@ -99,6 +130,37 @@ router.post(
 
 // Purchase fraction
 router.post(
+/**
+ * @openapi
+ * /api/token/fraction/purchase:
+ *   post:
+ *     tags: [Tokenization]
+ *     summary: Purchase a fraction of a tokenized asset
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assetId
+ *               - amount
+ *               - signature
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
     '/token/fraction/purchase',
     authenticate,
     requirePolicy('token:purchase-fraction'),
@@ -135,6 +197,37 @@ router.post(
 
 // Sell fraction
 router.post(
+/**
+ * @openapi
+ * /api/token/fraction/sell:
+ *   post:
+ *     tags: [Tokenization]
+ *     summary: Sell a fraction of a tokenized asset
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assetId
+ *               - amount
+ *               - signature
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
     '/token/fraction/sell',
     authenticate,
     requirePolicy('token:sell-fraction'),
@@ -171,6 +264,43 @@ router.post(
 
 // Create trade order
 router.post(
+/**
+ * @openapi
+ * /api/token/trade/create:
+ *   post:
+ *     tags: [Tokenization]
+ *     summary: Create a token trade order
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assetId
+ *               - amount
+ *               - price
+ *               - orderType
+ *               - signature
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               price:
+ *                 type: string
+ *               orderType:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
     '/token/trade/create',
     authenticate,
     requirePolicy('token:create-trade'),
@@ -209,6 +339,37 @@ router.post(
 
 // Execute trade order
 router.post(
+/**
+ * @openapi
+ * /api/token/trade/execute:
+ *   post:
+ *     tags: [Tokenization]
+ *     summary: Execute a token trade order
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - assetId
+ *               - orderIndex
+ *               - signature
+ *             properties:
+ *               assetId:
+ *                 type: string
+ *               orderIndex:
+ *                 type: string
+ *               signature:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
     '/token/trade/execute',
     authenticate,
     requirePolicy('token:execute-trade'),
@@ -244,6 +405,26 @@ router.post(
 );
 
 // Get asset
+/**
+ * @openapi
+ * /api/token/asset/{assetId}:
+ *   get:
+ *     tags: [Tokenization]
+ *     summary: Get tokenized asset details
+ *     parameters:
+ *       - in: path
+ *         name: assetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/token/asset/:assetId', async (req, res) => {
     try {
         const { assetId } = req.params;
@@ -256,6 +437,26 @@ router.get('/token/asset/:assetId', async (req, res) => {
 });
 
 // Get fractional ownership
+/**
+ * @openapi
+ * /api/token/ownership/{assetId}:
+ *   get:
+ *     tags: [Tokenization]
+ *     summary: Get the authenticated user's asset ownership
+ *     parameters:
+ *       - in: path
+ *         name: assetId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/token/ownership/:assetId', authenticate, async (req, res) => {
     try {
         const { assetId } = req.params;
@@ -269,6 +470,20 @@ router.get('/token/ownership/:assetId', authenticate, async (req, res) => {
 });
 
 // Get stats
+/**
+ * @openapi
+ * /api/token/stats:
+ *   get:
+ *     tags: [Tokenization]
+ *     summary: Get tokenization statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/token/stats', async (req, res) => {
     try {
         const stats = await tokenService.getStats();

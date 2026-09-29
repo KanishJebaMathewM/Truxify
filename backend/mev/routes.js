@@ -12,6 +12,34 @@ const router = express.Router();
 router.use(authenticate);
 
 // Create commitment
+/**
+ * @openapi
+ * /api/mev/commitment:
+ *   post:
+ *     tags: [MEV]
+ *     summary: Create an MEV commitment
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - secret
+ *               - userId
+ *             properties:
+ *               secret:
+ *                 type: string
+ *               userId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/mev/commitment', requirePolicy('mev:escrow'), async (req, res) => {
     try {
         const { secret, userId } = req.body;
@@ -31,6 +59,37 @@ router.post('/mev/commitment', requirePolicy('mev:escrow'), async (req, res) => 
 });
 
 // Create MEV protected escrow
+/**
+ * @openapi
+ * /api/mev/escrow:
+ *   post:
+ *     tags: [MEV]
+ *     summary: Create an MEV-protected escrow
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - driver
+ *               - amount
+ *               - secret
+ *             properties:
+ *               driver:
+ *                 type: string
+ *               amount:
+ *                 type: string
+ *               secret:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/mev/escrow', requirePolicy('mev:escrow'), async (req, res) => {
     try {
         const { driver, amount, secret } = req.body;
@@ -59,6 +118,37 @@ router.post('/mev/escrow', requirePolicy('mev:escrow'), async (req, res) => {
 });
 
 // Release escrow
+/**
+ * @openapi
+ * /api/mev/release/{escrowId}:
+ *   post:
+ *     tags: [MEV]
+ *     summary: Release an MEV-protected escrow
+ *     parameters:
+ *       - in: path
+ *         name: escrowId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - secret
+ *             properties:
+ *               secret:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/mev/release/:escrowId', requirePolicy('mev:escrow'), async (req, res) => {
     try {
         const { escrowId } = req.params;
@@ -82,6 +172,37 @@ router.post('/mev/release/:escrowId', requirePolicy('mev:escrow'), async (req, r
 });
 
 // Submit Flashbots bundle
+/**
+ * @openapi
+ * /api/mev/flashbots/{escrowId}:
+ *   post:
+ *     tags: [MEV]
+ *     summary: Submit a Flashbots bundle
+ *     parameters:
+ *       - in: path
+ *         name: escrowId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - transactions
+ *             properties:
+ *               transactions:
+ *                 type: array
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/mev/flashbots/:escrowId', requirePolicy('mev:flashbots'), async (req, res) => {
     try {
         const { escrowId } = req.params;
@@ -102,6 +223,26 @@ router.post('/mev/flashbots/:escrowId', requirePolicy('mev:flashbots'), async (r
 });
 
 // Get MEV protection level
+/**
+ * @openapi
+ * /api/mev/protection/{escrowId}:
+ *   get:
+ *     tags: [MEV]
+ *     summary: Get MEV protection level
+ *     parameters:
+ *       - in: path
+ *         name: escrowId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/mev/protection/:escrowId', requireRole(['admin']), async (req, res) => {
     try {
         const { escrowId } = req.params;
@@ -114,6 +255,26 @@ router.get('/mev/protection/:escrowId', requireRole(['admin']), async (req, res)
 });
 
 // Get escrow details
+/**
+ * @openapi
+ * /api/mev/escrow/{escrowId}:
+ *   get:
+ *     tags: [MEV]
+ *     summary: Get MEV escrow details
+ *     parameters:
+ *       - in: path
+ *         name: escrowId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/mev/escrow/:escrowId', requireRole(['admin']), async (req, res) => {
     try {
         const { escrowId } = req.params;
@@ -126,6 +287,20 @@ router.get('/mev/escrow/:escrowId', requireRole(['admin']), async (req, res) => 
 });
 
 // Get MEV stats
+/**
+ * @openapi
+ * /api/mev/stats:
+ *   get:
+ *     tags: [MEV]
+ *     summary: Get MEV statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/mev/stats', async (req, res) => {
     try {
         const stats = await mevService.getMEVStats();
@@ -140,6 +315,12 @@ export default router;
 
 // === Spec 43: ===
 // === Spec 43: recover sender ===
+/**
+ * Recovers the Ethereum address that signed a message.
+ * @param {string} msg - Signed message.
+ * @param {string} sig - Wallet signature.
+ * @returns {string|null} Recovered address, or null for an invalid signature.
+ */
 export function recoverSender(msg, sig) {
   try {
     return ethers.verifyMessage(msg, sig);

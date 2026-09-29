@@ -77,7 +77,7 @@ class VoiceAiService {
       });
       
       const userText = transcription.text;
-      logger.info(`Transcription result: ${userText}`);
+      logger.info(`Transcription completed. Text length: ${userText.length}`);
 
       // 2. Generate LLM Response
       const completion = await this.openai.chat.completions.create({
@@ -102,7 +102,7 @@ class VoiceAiService {
         throw new Error('LLM response exceeds the voice response limit');
       }
 
-      logger.info(`LLM Response: ${responseText}`);
+      logger.info(`LLM Response generated. Text length: ${responseText.length}`);
 
       // 3. Convert Text to Speech using ElevenLabs
       const voiceId = this.voiceIds[language] || this.voiceIds['en'];

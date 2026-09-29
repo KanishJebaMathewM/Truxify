@@ -90,7 +90,7 @@ class QuantumService:
             logger.error(f"Route optimization failed: {e}")
             return {'success': False, 'error': str(e)}
     
-    def _extract_route(self, qubo_result: Dict, node_ids: List) -> List:
+    def _extract_route(self, qubo_result: Dict, node_ids: List) -> Optional[List]:
         """Decode the QUBO edge-selection solution into an ordered route"""
         solution = qubo_result.get('solution') or []
         variables = qubo_result.get('variables') or []
@@ -121,7 +121,8 @@ class QuantumService:
                 continue
             visited.add(current)
             stack.extend(adjacency.get(current, []))
-        if len(visited) != len(adjacency):
+        expected_nodes = {str(node_id) for node_id in node_ids}
+        if visited != expected_nodes:
             return None
 
         # Order the selected edges into a traversal

@@ -85,6 +85,9 @@ function makeOrderRepository(readOrder = ORDER) {
 function makeService({ repo = makeOrderRepository(), notificationOverrides = {} } = {}) {
   const notificationService = {
     getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+    getConsumedDeliveryOtp: () => Promise.resolve(null),
+    consumeDeliveryOtpAtomic: () => Promise.resolve(true),
+    resetDeliveryOtpConsumption: () => Promise.resolve(true),
     verifyDeliveryOtpHash: () => true,
     verifyDeliveryOtp: () => Promise.resolve(true),
     storeDeliveryOtp: () => Promise.resolve(true),
@@ -116,7 +119,10 @@ describe('deliveryVerificationService', () => {
         expect.objectContaining({ p_order_id: 'order-1' }),
         expect.anything(),
       );
-      expect(result).toEqual({ escrowUpdateFailed: false });
+      expect(result).toMatchObject({
+        escrowUpdateFailed: false,
+        payment_released: true,
+      });
     });
 
     it('throws when order is not in a delivery-ready status', async () => {

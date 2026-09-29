@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -49,6 +49,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     uint256 public bookingCount;
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
+    mapping(bytes32 => bool) public releaseIdempotencyKeys;
 
     // Backend-issued commitment nonce, tracked PER (customer, bookingId). A
     // valid createBooking requires an owner-signed EIP-191 commitment over
@@ -78,7 +79,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 amount
     );
 
-        event DisputeSettled(bytes32 indexed bookingId, address indexed recipient, uint256 amount);
+    event DisputeSettled(uint256 indexed bookingId, address indexed recipient, uint256 amount);
     event BookingCancelled(
         uint256 indexed bookingId,
         address indexed customer,
@@ -346,20 +347,56 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking whose payment to release
      */
+    /**
+     * @dev Release payment to driver after GPS geofence + OTP confirmation.
+     *      Called by the Truxify backend (owner) after both conditions are met.
+     *      Preserved for backward compatibility.
+     *
+     * @param bookingId The booking whose payment to release
+     */
     function releasePayment(uint256 bookingId)
         external
         onlyOwner
         nonReentrant
         whenNotPaused
     {
+        _releasePayment(bookingId, bytes32(0));
+    }
+
+    /**
+     * @dev Release payment to driver with idempotency key protection.
+     *      Called by the Truxify backend (owner) with an idempotency key derived
+     *      from order ID and verified delivery OTP hash.
+     *
+     * @param bookingId The booking whose payment to release
+     * @param idempotencyKey Unique idempotency key preventing duplicate release execution
+     */
+    function releasePayment(uint256 bookingId, bytes32 idempotencyKey)
+        external
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
+        _releasePayment(bookingId, idempotencyKey);
+    }
+
+    function _releasePayment(uint256 bookingId, bytes32 idempotencyKey) internal {
+        if (idempotencyKey != bytes32(0)) {
+            require(
+                !releaseIdempotencyKeys[idempotencyKey],
+                "TruxifyEscrow: Idempotency key already used"
+            );
+            releaseIdempotencyKeys[idempotencyKey] = true;
+        }
+
         Booking storage booking = bookings[bookingId];
 
+        require(!booking.paid, "TruxifyEscrow: Already paid");
         require(
             booking.status == BookingStatus.Active,
             "TruxifyEscrow: Booking not active"
         );
         require(booking.started, "TruxifyEscrow: Trip not started");
-        require(!booking.paid, "TruxifyEscrow: Already paid");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to release");
 
         // ── CHECKS done above ─────────────────────────────────────────────

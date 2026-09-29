@@ -32,119 +32,166 @@ function runLiquibase(args, password) {
 }
 
 class LiquibaseService {
-    constructor() {
-        this.liquibasePath = path.join(__dirname, '../../database/liquibase');
-        this.dbUrl = process.env.DATABASE_URL;
-        this.username = process.env.DB_USERNAME;
-        this.password = process.env.DB_PASSWORD;
+  constructor() {
+    this.liquibasePath = path.join(__dirname, '../../database/liquibase');
+    logger.info('✅ Liquibase Service initialized');
+  }
 
-        if (!this.dbUrl || !this.username || !this.password) {
-            throw new Error('DATABASE_URL, DB_USERNAME, and DB_PASSWORD environment variables are required');
-        }
-        
-        logger.info('✅ Liquibase Service initialized');
+  /**
+   * Lazily reads process.env variables at method execution time
+   * to ensure root .env variables loaded after module import are properly read.
+   */
+  _getCredentials() {
+    return {
+      dbUrl: process.env.DATABASE_URL,
+      username: process.env.DB_USERNAME,
+      password: process.env.DB_PASSWORD,
+    };
+  }
+
+  /**
+   * Validates configuration dynamically before executing any operation.
+   */
+  _validateConfig() {
+    const { dbUrl, username, password } = this._getCredentials();
+    if (!dbUrl || !username || !password) {
+      return 'DATABASE_URL, DB_USERNAME, and DB_PASSWORD environment variables are required for Liquibase operations';
+    }
+    return null;
+  }
+
+  async runMigrations() {
+    const configError = this._validateConfig();
+    if (configError) {
+      logger.error('Migration failed:', configError);
+      return { success: false, error: configError };
     }
 
-    async runMigrations() {
-        try {
-            const args = [
-                `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
-                `--url=${this.dbUrl}`,
-                `--username=${this.username}`,
-                'update',
-            ];
+    const { dbUrl, username, password } = this._getCredentials();
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+    try {
+      const args = [
+        `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
+        `--url=${dbUrl}`,
+        `--username=${username}`,
+        'update',
+      ];
 
-            if (stderr && !stderr.includes('WARNING')) {
-                logger.error('Migration error:', stderr);
-                return { success: false, error: stderr };
-            }
+      const { stdout, stderr } = await runLiquibase(args, password);
 
-            logger.info('✅ Migrations completed');
-            return { success: true, output: stdout };
-        } catch (error) {
-            logger.error('Migration failed:', error);
-            return { success: false, error: error.message };
-        }
+      if (stderr && !stderr.includes('WARNING')) {
+        logger.error('Migration error:', stderr);
+        return { success: false, error: stderr };
+      }
+
+      logger.info('✅ Migrations completed');
+      return { success: true, output: stdout };
+    } catch (error) {
+      logger.error('Migration failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async rollback(rollbackCount = 1) {
+    const configError = this._validateConfig();
+    if (configError) {
+      logger.error('Rollback failed:', configError);
+      return { success: false, error: configError };
     }
 
-    async rollback(rollbackCount = 1) {
-        try {
-            const parsedCount = parseInt(rollbackCount, 10);
-            if (!Number.isFinite(parsedCount) || parsedCount < 1) {
-                throw new Error('rollbackCount must be a positive integer');
-            }
+    const { dbUrl, username, password } = this._getCredentials();
 
-            const args = [
-                `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
-                `--url=${this.dbUrl}`,
-                `--username=${this.username}`,
-                'rollback',
-                `--rollbackCount=${parsedCount}`,
-            ];
+    try {
+      const parsedCount = parseInt(rollbackCount, 10);
+      if (!Number.isFinite(parsedCount) || parsedCount < 1) {
+        throw new Error('rollbackCount must be a positive integer');
+      }
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+      const args = [
+        `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
+        `--url=${dbUrl}`,
+        `--username=${username}`,
+        'rollback',
+        `--rollbackCount=${parsedCount}`,
+      ];
 
-            if (stderr && !stderr.includes('WARNING')) {
-                logger.error('Rollback error:', stderr);
-                return { success: false, error: stderr };
-            }
+      const { stdout, stderr } = await runLiquibase(args, password);
 
-            logger.info(`✅ Rollback ${parsedCount} changes completed`);
-            return { success: true, output: stdout };
-        } catch (error) {
-            logger.error('Rollback failed:', error);
-            return { success: false, error: error.message };
-        }
+      if (stderr && !stderr.includes('WARNING')) {
+        logger.error('Rollback error:', stderr);
+        return { success: false, error: stderr };
+      }
+
+      logger.info(`✅ Rollback ${parsedCount} changes completed`);
+      return { success: true, output: stdout };
+    } catch (error) {
+      logger.error('Rollback failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async getStatus() {
+    const configError = this._validateConfig();
+    if (configError) {
+      logger.error('Status check failed:', configError);
+      return { success: false, error: configError };
     }
 
-    async getStatus() {
-        try {
-            const args = [
-                `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
-                `--url=${this.dbUrl}`,
-                `--username=${this.username}`,
-                'status',
-            ];
+    const { dbUrl, username, password } = this._getCredentials();
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+    try {
+      const args = [
+        `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
+        `--url=${dbUrl}`,
+        `--username=${username}`,
+        'status',
+      ];
 
-            if (stderr && !stderr.includes('WARNING')) {
-                logger.error('Status error:', stderr);
-                return { success: false, error: stderr };
-            }
+      const { stdout, stderr } = await runLiquibase(args, password);
 
-            return { success: true, status: stdout };
-        } catch (error) {
-            logger.error('Status check failed:', error);
-            return { success: false, error: error.message };
-        }
+      if (stderr && !stderr.includes('WARNING')) {
+        logger.error('Status error:', stderr);
+        return { success: false, error: stderr };
+      }
+
+      return { success: true, status: stdout };
+    } catch (error) {
+      logger.error('Status check failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async validate() {
+    const configError = this._validateConfig();
+    if (configError) {
+      logger.error('Validation failed:', configError);
+      return { success: false, error: configError };
     }
 
-    async validate() {
-        try {
-            const args = [
-                `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
-                `--url=${this.dbUrl}`,
-                `--username=${this.username}`,
-                'validate',
-            ];
+    const { dbUrl, username, password } = this._getCredentials();
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+    try {
+      const args = [
+        `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
+        `--url=${dbUrl}`,
+        `--username=${username}`,
+        'validate',
+      ];
 
-            if (stderr && !stderr.includes('WARNING')) {
-                logger.error('Validation error:', stderr);
-                return { success: false, error: stderr };
-            }
+      const { stdout, stderr } = await runLiquibase(args, password);
 
-            logger.info('✅ Validation completed');
-            return { success: true, output: stdout };
-        } catch (error) {
-            logger.error('Validation failed:', error);
-            return { success: false, error: error.message };
-        }
+      if (stderr && !stderr.includes('WARNING')) {
+        logger.error('Validation error:', stderr);
+        return { success: false, error: stderr };
+      }
+
+      logger.info('✅ Validation completed');
+      return { success: true, output: stdout };
+    } catch (error) {
+      logger.error('Validation failed:', error);
+      return { success: false, error: error.message };
     }
+  }
 }
 
 export default new LiquibaseService();

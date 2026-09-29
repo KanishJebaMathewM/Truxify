@@ -1,4 +1,12 @@
 import crypto from 'crypto';
+import {
+  EbolCustodyService,
+  defaultCustodyService,
+  CUSTODY_STATES,
+  EBOL_EIP712_DOMAIN,
+  EBOL_EIP712_TYPES,
+} from './ebol/EbolCustodyService.js';
+import { MerkleTree, sha256Hash, combineHashes } from './ebol/MerkleTree.js';
 
 const DEFAULT_GEOFENCE_RADIUS_METERS = 200; // Facility boundary threshold
 
@@ -29,8 +37,10 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 
 /**
  * Validates geofence proximity and records a cryptographically verified eBOL digital signature.
+ * Supports both legacy biometric/vector signatures and enterprise EIP-712 cryptographic
+ * non-repudiation with Merkle tamper-seal verification.
  * 
- * @param {Object} signParams - { ebolId, receiverId, receiverName, facilityCoordinates, receiverCoordinates, signatureData, biometricAuthToken }
+ * @param {Object} signParams - Parameters for geofenced signature verification
  * @returns {Object} Signature verification result and immutable audit record
  */
 export function processGeofencedSignature(signParams = {}) {
@@ -41,7 +51,13 @@ export function processGeofencedSignature(signParams = {}) {
         facilityCoordinates = {},
         receiverCoordinates = {},
         signatureData,
-        biometricAuthToken
+        biometricAuthToken,
+        signerAddress,
+        fromActor,
+        eip712Signature,
+        tamperSealProof,
+        nonce,
+        custodyService = defaultCustodyService,
     } = signParams;
 
     const { latitude: facLat, longitude: facLon, geofenceRadiusMeters = DEFAULT_GEOFENCE_RADIUS_METERS } = facilityCoordinates;
@@ -59,9 +75,49 @@ export function processGeofencedSignature(signParams = {}) {
             proximityMetrics: {
                 distanceMeters,
                 geofenceRadiusMeters,
-                isWithinGeofence: false
-            }
+                isWithinGeofence: false,
+            },
         };
+    }
+
+    // Cryptographic verification if EIP-712 signature is supplied
+    let cryptographicProof = null;
+    if (eip712Signature) {
+        try {
+            const ebolRecord = custodyService.getEbol(ebolId);
+            const currentRoot = ebolRecord ? ebolRecord.tamperSealRoot : '0x' + '0'.repeat(64);
+
+            const recoveredAddress = custodyService.verifyCustodySignature({
+                ebolId,
+                fromActor: fromActor || signerAddress || receiverId,
+                toActor: signerAddress || receiverId,
+                fromState: ebolRecord ? ebolRecord.state : CUSTODY_STATES.IN_TRANSIT,
+                toState: CUSTODY_STATES.FINAL_DISCHARGED,
+                tamperSealRoot: currentRoot,
+                timestamp: Math.floor(Date.now() / 1000),
+                nonce: nonce || 1,
+                signature: eip712Signature,
+            });
+
+            // Tamper seal check if proof provided
+            let sealValid = false;
+            if (tamperSealProof && tamperSealProof.leaf && tamperSealProof.proof) {
+                sealValid = MerkleTree.verifyProof(tamperSealProof.proof, tamperSealProof.leaf, currentRoot);
+            }
+
+            cryptographicProof = {
+                algorithm: 'secp256k1-EIP712',
+                recoveredSigner: recoveredAddress,
+                tamperSealVerified: sealValid,
+            };
+        } catch (cryptoErr) {
+            return {
+                signed: false,
+                reason: 'CRYPTOGRAPHIC_SIGNATURE_INVALID',
+                message: `Cryptographic non-repudiation check failed: ${cryptoErr.message}`,
+                error: cryptoErr.message,
+            };
+        }
     }
 
     const timestamp = new Date().toISOString();
@@ -78,25 +134,40 @@ export function processGeofencedSignature(signParams = {}) {
             receiverName,
             signedAt: timestamp,
             signatureImage: signatureData ? '[STORED_VECTOR_SIGNATURE]' : null,
-            biometricVerified: !!biometricAuthToken
+            biometricVerified: !!biometricAuthToken,
+            signerAddress: signerAddress || null,
         },
         geofenceProof: {
             facilityCoordinates: { latitude: facLat, longitude: facLon },
             receiverCoordinates: { latitude: recLat, longitude: recLon },
             distanceMeters,
-            isWithinGeofence: true
+            isWithinGeofence: true,
         },
         auditTrail: {
             immutableHash: auditHash,
-            verificationAlgorithm: 'SHA-256'
-        }
+            verificationAlgorithm: 'SHA-256',
+        },
     };
+
+    if (cryptographicProof) {
+        signedEbolRecord.cryptographicProof = cryptographicProof;
+    }
 
     return {
         signed: true,
-        data: signedEbolRecord
+        data: signedEbolRecord,
     };
 }
 
-export { calculateDistanceMeters, DEFAULT_GEOFENCE_RADIUS_METERS };
-
+export {
+    calculateDistanceMeters,
+    DEFAULT_GEOFENCE_RADIUS_METERS,
+    EbolCustodyService,
+    defaultCustodyService,
+    MerkleTree,
+    sha256Hash,
+    combineHashes,
+    CUSTODY_STATES,
+    EBOL_EIP712_DOMAIN,
+    EBOL_EIP712_TYPES,
+};

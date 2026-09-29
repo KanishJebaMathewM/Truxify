@@ -1,6 +1,6 @@
+import { randomUUID } from 'crypto';
 import { EventPublisher } from '../EventPublisher.js';
 import logger from '../../../middleware/logger.js';
-import { v4 as uuidv4 } from 'uuid';
 import { ContextPropagator } from '../../telemetry/ContextPropagator.js';
 
 export class KafkaAdapter extends EventPublisher {
@@ -55,12 +55,13 @@ export class KafkaAdapter extends EventPublisher {
     }
 
     const topic = this.getTopic(event.eventType);
-    const key = event.metadata?.eventId || uuidv4();
+    const eventId = event.metadata?.eventId || randomUUID();
+    const key = eventId;
 
     const enriched = ContextPropagator.injectIntoEventPayload(event);
 
     const kafkaEvent = {
-      eventId: event.metadata?.eventId || uuidv4(),
+      eventId: eventId,
       eventType: event.eventType,
       data: event.payload,
       metadata: enriched.metadata?.toJSON ? enriched.metadata.toJSON() : enriched.metadata,
@@ -82,15 +83,16 @@ export class KafkaAdapter extends EventPublisher {
 
     const messages = events.map(event => {
       const enriched = ContextPropagator.injectIntoEventPayload(event);
+      const eventId = event.metadata?.eventId || randomUUID();
       return {
         topic: this.getTopic(event.eventType),
         event: {
-          eventId: event.metadata?.eventId || uuidv4(),
+          eventId: eventId,
           eventType: event.eventType,
           data: event.payload,
           metadata: enriched.metadata?.toJSON ? enriched.metadata.toJSON() : enriched.metadata,
         },
-        key: event.metadata?.eventId || uuidv4(),
+        key: eventId,
       };
     });
 

@@ -227,6 +227,16 @@ const milestoneLimiter = rateLimit({
 });
 
 
+// 1. CREATE ORDER (CUSTOMER)
+router.post(
+  '/',
+  authenticate,
+  userLimiter,
+  requirePolicy('order:create'),
+  validateBody(createOrderSchema),
+  createOrder
+);
+
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
 

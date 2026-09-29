@@ -56,9 +56,10 @@ class ShardManager {
 
   initializeShards() {
     const missingPasswords = [];
+    const fallbackPassword = process.env.SHARD_PASSWORD;
 
     // North Zone - Delhi, UP, Punjab, Haryana, Rajasthan
-    const northPassword = process.env.SHARD_PASSWORD_NORTH;
+    const northPassword = process.env.SHARD_PASSWORD_NORTH || fallbackPassword;
     if (!northPassword) missingPasswords.push('SHARD_PASSWORD_NORTH');
     this.shards.set('north', {
       name: 'north',
@@ -72,7 +73,7 @@ class ShardManager {
     });
 
     // South Zone - Tamil Nadu, Karnataka, Kerala, AP, Telangana
-    const southPassword = process.env.SHARD_PASSWORD_SOUTH;
+    const southPassword = process.env.SHARD_PASSWORD_SOUTH || fallbackPassword;
     if (!southPassword) missingPasswords.push('SHARD_PASSWORD_SOUTH');
     this.shards.set('south', {
       name: 'south',
@@ -86,7 +87,7 @@ class ShardManager {
     });
 
     // East Zone - WB, Bihar, Odisha, Jharkhand, NE States
-    const eastPassword = process.env.SHARD_PASSWORD_EAST;
+    const eastPassword = process.env.SHARD_PASSWORD_EAST || fallbackPassword;
     if (!eastPassword) missingPasswords.push('SHARD_PASSWORD_EAST');
     this.shards.set('east', {
       name: 'east',
@@ -100,7 +101,7 @@ class ShardManager {
     });
 
     // West Zone - Maharashtra, Gujarat, MP, Goa
-    const westPassword = process.env.SHARD_PASSWORD_WEST;
+    const westPassword = process.env.SHARD_PASSWORD_WEST || fallbackPassword;
     if (!westPassword) missingPasswords.push('SHARD_PASSWORD_WEST');
     this.shards.set('west', {
       name: 'west',
@@ -114,7 +115,10 @@ class ShardManager {
     });
 
     if (missingPasswords.length > 0) {
-      throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      if (process.env.SHARDING_ENABLED === 'true') {
+        throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      }
+      logger.warn(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
     }
 
     // Initialize connection pools

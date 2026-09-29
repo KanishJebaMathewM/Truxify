@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.hoisted(() => {
   process.env.SHARD_PASSWORD_NORTH = 'mock';
@@ -399,6 +399,93 @@ describe('ShardManager', () => {
       for (const [, shard] of ShardManager.shards) {
         expect(shard.pool.end).toHaveBeenCalledTimes(1);
       }
+    });
+  });
+  describe('initializeShards password fallbacks & sharding configuration', () => {
+    let originalEnv;
+
+    beforeEach(() => {
+      originalEnv = { ...process.env };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('uses SHARD_PASSWORD alone to provide credentials for all four zones', async () => {
+      delete process.env.SHARD_PASSWORD_NORTH;
+      delete process.env.SHARD_PASSWORD_SOUTH;
+      delete process.env.SHARD_PASSWORD_EAST;
+      delete process.env.SHARD_PASSWORD_WEST;
+      process.env.SHARD_PASSWORD = 'shared-secret';
+      process.env.SHARDING_ENABLED = 'true';
+
+      vi.resetModules();
+      const ShardManagerModule = (
+        await import('../../src/services/sharding/ShardManager.js')
+      ).default;
+
+      expect(ShardManagerModule.shards.get('north').password).toBe('shared-secret');
+      expect(ShardManagerModule.shards.get('south').password).toBe('shared-secret');
+      expect(ShardManagerModule.shards.get('east').password).toBe('shared-secret');
+      expect(ShardManagerModule.shards.get('west').password).toBe('shared-secret');
+    });
+
+    it('overrides SHARD_PASSWORD with zone-specific SHARD_PASSWORD_<ZONE>', async () => {
+      process.env.SHARD_PASSWORD = 'shared-secret';
+      process.env.SHARD_PASSWORD_NORTH = 'north-override';
+      delete process.env.SHARD_PASSWORD_SOUTH;
+      delete process.env.SHARD_PASSWORD_EAST;
+      delete process.env.SHARD_PASSWORD_WEST;
+      process.env.SHARDING_ENABLED = 'true';
+
+      vi.resetModules();
+      const ShardManagerModule = (
+        await import('../../src/services/sharding/ShardManager.js')
+      ).default;
+
+      expect(ShardManagerModule.shards.get('north').password).toBe('north-override');
+      expect(ShardManagerModule.shards.get('south').password).toBe('shared-secret');
+      expect(ShardManagerModule.shards.get('east').password).toBe('shared-secret');
+      expect(ShardManagerModule.shards.get('west').password).toBe('shared-secret');
+    });
+
+    it('does not throw and logs warning when SHARDING_ENABLED is disabled and shard credentials are missing', async () => {
+      delete process.env.SHARD_PASSWORD;
+      delete process.env.SHARD_PASSWORD_NORTH;
+      delete process.env.SHARD_PASSWORD_SOUTH;
+      delete process.env.SHARD_PASSWORD_EAST;
+      delete process.env.SHARD_PASSWORD_WEST;
+      delete process.env.SHARDING_ENABLED;
+
+      const logger = (await import('../../src/middleware/logger.js')).default;
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      vi.resetModules();
+      await expect(
+        import('../../src/services/sharding/ShardManager.js')
+      ).resolves.toBeDefined();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Missing required shard password env vars: SHARD_PASSWORD_NORTH, SHARD_PASSWORD_SOUTH, SHARD_PASSWORD_EAST, SHARD_PASSWORD_WEST')
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('throws and reports missing variables when SHARDING_ENABLED=true and required credentials are missing', async () => {
+      delete process.env.SHARD_PASSWORD;
+      delete process.env.SHARD_PASSWORD_NORTH;
+      delete process.env.SHARD_PASSWORD_SOUTH;
+      delete process.env.SHARD_PASSWORD_EAST;
+      delete process.env.SHARD_PASSWORD_WEST;
+      process.env.SHARDING_ENABLED = 'true';
+
+      vi.resetModules();
+      await expect(
+        import('../../src/services/sharding/ShardManager.js')
+      ).rejects.toThrow(
+        'Missing required shard password env vars: SHARD_PASSWORD_NORTH, SHARD_PASSWORD_SOUTH, SHARD_PASSWORD_EAST, SHARD_PASSWORD_WEST'
+      );
     });
   });
 });

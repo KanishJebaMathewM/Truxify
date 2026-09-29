@@ -352,6 +352,15 @@ export async function getEscrowBooking(escrowBookingId) {
 }
 
 /**
+ * Derive a deterministic booking ID from an order's display ID.
+ * @param {string} orderDisplayId — e.g. "#FF20260521"
+ * @returns {string} bytes32 hex string
+ */
+export function getEscrowBookingId(orderDisplayId) {
+  return ethers.solidityPackedKeccak256(['string'], [`escrow:${orderDisplayId}`]);
+}
+
+/**
  * Query the on-chain escrow smart contract mapping.
  * Used by escrowFundingReconciliation and the release reconciler to check
  * the authoritative on-chain booking state.

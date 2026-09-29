@@ -43,7 +43,7 @@ export const EARNINGS_MAX_ROWS = 1000;
 const PERIODS = new Set(['day', 'week', 'month']);
 
 /**
- * Inclusive lower bound for a reporting period.
+ * Inclusive lower bound for a reporting period in UTC calendar time.
  *
  * @param {'day'|'week'|'month'} period
  * @param {Date} [now]
@@ -55,11 +55,11 @@ export function getEarningsCutoff(period, now = new Date()) {
   }
   const cutoff = new Date(now);
   if (period === 'day') {
-    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setUTCHours(0, 0, 0, 0);
   } else if (period === 'week') {
-    cutoff.setDate(cutoff.getDate() - 7);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 7);
   } else {
-    cutoff.setDate(cutoff.getDate() - 30);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 30);
   }
   return cutoff;
 }
@@ -69,15 +69,14 @@ export function getEarningsCutoff(period, now = new Date()) {
  *
  * The rule only ever compares a trip to its immediate predecessor within
  * DEADHEAD_MAX_GAP_DAYS, so the scan needs the reporting window extended
- * backwards by that gap — not the driver's entire career. Previously this
- * query had no bound at all and grew without limit over a driver's tenure.
+ * backwards by that gap — not the driver's entire career.
  *
  * @param {Date} cutoff Reporting-period lower bound.
  * @returns {Date}
  */
 export function getDeadheadCutoff(cutoff) {
   const start = new Date(cutoff);
-  start.setDate(start.getDate() - DEADHEAD_MAX_GAP_DAYS);
+  start.setUTCDate(start.getUTCDate() - DEADHEAD_MAX_GAP_DAYS);
   return start;
 }
 
@@ -105,10 +104,6 @@ function toAmount(value) {
 /**
  * Parse the numeric distance out of a free-text column such as `"420 km"`.
  *
- * The original read `String(trip.distance, 10)` — `String()` takes a single
- * argument, so the radix was silently ignored. The intent was
- * `parseInt(String(value), 10)`.
- *
  * @param {unknown} value
  * @returns {number} Kilometres, or 0 when unparseable.
  */
@@ -125,7 +120,7 @@ export function parseDistanceKm(value) {
 }
 
 /**
- * Daily earnings bucketed by calendar date for a reporting period.
+ * Daily earnings bucketed by UTC calendar date for a reporting period.
  *
  * Every bucket is one real calendar date (`YYYY-MM-DD`), so trips from
  * different weeks never merge into the same bar. The frame follows the
@@ -143,7 +138,7 @@ export function buildWeeklyChart(trips, { period = 'week', now = new Date() } = 
   const buckets = {};
   for (let i = frameDays - 1; i >= 0; i -= 1) {
     const d = new Date(now);
-    d.setDate(d.getDate() - i);
+    d.setUTCDate(d.getUTCDate() - i);
     buckets[toDateKey(d)] = 0;
   }
 

@@ -457,3 +457,19 @@ describe('routeWithFailover edge cases', () => {
     );
   });
 });
+
+describe('osrm - retryDelayMs backoff clamp', () => {
+  const { retryDelayMs, MAX_RETRY_DELAY_MS } = __testing;
+
+  it('doubles the delay per attempt', () => {
+    expect(retryDelayMs(500, 0)).toBe(500);
+    expect(retryDelayMs(500, 1)).toBe(1000);
+    expect(retryDelayMs(500, 2)).toBe(2000);
+  });
+
+  it('clamps the delay at MAX_RETRY_DELAY_MS', () => {
+    expect(retryDelayMs(500, 10)).toBe(MAX_RETRY_DELAY_MS);
+    expect(retryDelayMs(10000, 3)).toBe(MAX_RETRY_DELAY_MS);
+    expect(MAX_RETRY_DELAY_MS).toBeLessThanOrEqual(10_000);
+  });
+});

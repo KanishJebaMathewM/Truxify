@@ -15,7 +15,17 @@ export function cacheMiddleware(ttlSeconds, keyPrefix, keyGenerator) {
       return next();
     }
 
-    const uniqueKey = await keyGenerator(req);
+    // Key generation is intentionally kept BEFORE the Redis read so a stale or
+    // malformed key never hits storage. If the generator itself throws, the
+    // request must still reach the handler — fail open (skip caching) instead
+    // of letting the request die.
+    let uniqueKey;
+    try {
+      uniqueKey = await keyGenerator(req);
+    } catch (err) {
+      logger.warn({ err, keyPrefix }, '[Cache] Key generation failed; bypassing cache');
+      return next();
+    }
     const cacheKey = `cache:${keyPrefix}:${uniqueKey}`;
 
     try {

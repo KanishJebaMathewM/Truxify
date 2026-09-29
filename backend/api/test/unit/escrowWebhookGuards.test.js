@@ -5,6 +5,9 @@ const { dbMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() { return dbMock.supabaseAdmin; },
   get supabase() { return null; },
 }));

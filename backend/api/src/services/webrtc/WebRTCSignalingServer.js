@@ -116,21 +116,6 @@ class WebRTCSignalingServer {
 
       const peerId = this.generatePeerId();
 
-      // Security: Validate caller authorization for requested mesh instead of trusting client
-      const requestedMeshId = url.searchParams.get('meshId') || req.headers['x-mesh-id'];
-      let meshId = null;
-
-      if (requestedMeshId) {
-        const isAuthorized = await this.isUserAuthorizedForMesh(decoded.id, requestedMeshId, decoded.role);
-        if (isAuthorized) {
-          meshId = requestedMeshId;
-        } else {
-          logger.warn(`WebRTC connection rejected: user ${decoded.id} unauthorized for requested mesh ${requestedMeshId}`);
-          ws.close(4003, 'Unauthorized for requested mesh');
-          return;
-        }
-      }
-
       if (!meshId) {
         for (const [existingPeerId, peer] of this.peers.entries()) {
           if (peer.userId === decoded.id && peer.meshId && this.meshes.has(peer.meshId)) {

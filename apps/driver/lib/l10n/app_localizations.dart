@@ -7,9 +7,9 @@ import 'package:intl/intl.dart' as intl;
 
 import 'app_localizations_en.dart';
 import 'app_localizations_hi.dart';
-import 'app_localizations_ta.dart';
 import 'app_localizations_kn.dart';
 import 'app_localizations_mr.dart';
+import 'app_localizations_ta.dart';
 
 // ignore_for_file: type=lint
 
@@ -49,12 +49,12 @@ import 'app_localizations_mr.dart';
 ///
 /// iOS applications define key application metadata, including supported
 /// locales, in an Info.plist file that is built into the application bundle.
-/// To configure the locales supported by your app, you'll need to edit this
+/// To configure the locales supported by your app, you’ll need to edit this
 /// file.
 ///
-/// First, open your project's ios/Runner.xcworkspace Xcode workspace file.
+/// First, open your project’s ios/Runner.xcworkspace Xcode workspace file.
 /// Then, in the Project Navigator, open the Info.plist file under the Runner
-/// project's Runner folder.
+/// project’s Runner folder.
 ///
 /// Next, select the Information Property List item, select Add Item from the
 /// Editor menu, then select Localizations from the pop-up menu.
@@ -99,9 +99,9 @@ abstract class AppLocalizations {
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
     Locale('hi'),
-    Locale('ta'),
     Locale('kn'),
     Locale('mr'),
+    Locale('ta')
   ];
 
   /// The title of the driver application
@@ -644,7 +644,7 @@ class _AppLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) =>
-      <String>['en', 'hi', 'ta', 'kn', 'mr'].contains(locale.languageCode);
+      <String>['en', 'hi', 'kn', 'mr', 'ta'].contains(locale.languageCode);
 
   @override
   bool shouldReload(_AppLocalizationsDelegate old) => false;
@@ -657,12 +657,12 @@ AppLocalizations lookupAppLocalizations(Locale locale) {
       return AppLocalizationsEn();
     case 'hi':
       return AppLocalizationsHi();
-    case 'ta':
-      return AppLocalizationsTa();
     case 'kn':
       return AppLocalizationsKn();
     case 'mr':
       return AppLocalizationsMr();
+    case 'ta':
+      return AppLocalizationsTa();
   }
 
   throw FlutterError(

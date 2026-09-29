@@ -11,6 +11,9 @@ const state = vi.hoisted(() => ({
 vi.mock('../../../did/did.service.js', () => ({ default: state.didService }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({

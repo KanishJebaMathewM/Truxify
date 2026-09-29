@@ -10,7 +10,11 @@ const authMiddleware = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-        if (process.env.BYPASS_AUTH === 'true' && token === process.env.DEV_ACCESS_TOKEN) {
+        if (
+            process.env.NODE_ENV !== 'production' &&
+            process.env.BYPASS_AUTH === 'true' && 
+            token === process.env.DEV_ACCESS_TOKEN
+        ) {
             req.user = { uid: 'dev-user-id', email: 'dev@truxify.com' };
             return next();
         }

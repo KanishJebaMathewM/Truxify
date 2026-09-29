@@ -19,6 +19,29 @@ const wasiActionLimiter = rateLimit({
 });
 
 // Load WASI module
+/**
+ * @openapi
+ * /api/wasi/load:
+ *   post:
+ *     tags: [WASI]
+ *     summary: Load a WASI module
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               wasmPath:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasi/load', wasiActionLimiter, async (req, res) => {
     try {
         const { wasmPath } = req.body;
@@ -35,6 +58,31 @@ router.post('/wasi/load', wasiActionLimiter, async (req, res) => {
 });
 
 // File operations
+/**
+ * @openapi
+ * /api/wasi/file/read:
+ *   post:
+ *     tags: [WASI]
+ *     summary: Read a file through a WASI instance
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               instanceId:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasi/file/read', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path } = req.body;
@@ -46,6 +94,33 @@ router.post('/wasi/file/read', wasiActionLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/wasi/file/write:
+ *   post:
+ *     tags: [WASI]
+ *     summary: Write a file through a WASI instance
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               instanceId:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *               content:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasi/file/write', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path, content } = req.body;
@@ -57,6 +132,31 @@ router.post('/wasi/file/write', wasiActionLimiter, async (req, res) => {
     }
 });
 
+/**
+ * @openapi
+ * /api/wasi/file/list:
+ *   post:
+ *     tags: [WASI]
+ *     summary: List a directory through a WASI instance
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               instanceId:
+ *                 type: string
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasi/file/list', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path } = req.body;
@@ -69,6 +169,33 @@ router.post('/wasi/file/list', wasiActionLimiter, async (req, res) => {
 });
 
 // Network operations
+/**
+ * @openapi
+ * /api/wasi/http:
+ *   post:
+ *     tags: [WASI]
+ *     summary: Perform an HTTP request through a WASI instance
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               instanceId:
+ *                 type: string
+ *               url:
+ *                 type: string
+ *               method:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/wasi/http', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, url, method, headers, body } = req.body;
@@ -81,6 +208,25 @@ router.post('/wasi/http', wasiActionLimiter, async (req, res) => {
 });
 
 // Time operations
+/**
+ * @openapi
+ * /api/wasi/time:
+ *   get:
+ *     tags: [WASI]
+ *     summary: Get WASI time information
+ *     parameters:
+ *       - in: query
+ *         name: instanceId
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/wasi/time', async (req, res) => {
     try {
         const { instanceId } = req.query;
@@ -94,6 +240,25 @@ router.get('/wasi/time', async (req, res) => {
 });
 
 // System operations
+/**
+ * @openapi
+ * /api/wasi/system:
+ *   get:
+ *     tags: [WASI]
+ *     summary: Get WASI process/system information
+ *     parameters:
+ *       - in: query
+ *         name: instanceId
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/wasi/system', async (req, res) => {
     try {
         const { instanceId } = req.query;
@@ -107,6 +272,20 @@ router.get('/wasi/system', async (req, res) => {
 });
 
 // Stats
+/**
+ * @openapi
+ * /api/wasi/stats:
+ *   get:
+ *     tags: [WASI]
+ *     summary: Get WASI runtime statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/wasi/stats', async (req, res) => {
     try {
         const stats = await wasiRuntime.getStats();

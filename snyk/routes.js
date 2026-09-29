@@ -12,6 +12,29 @@ const router = express.Router();
 router.use(authenticate, requirePolicy('snyk:manage'));
 
 // Scan dependencies
+/**
+ * @openapi
+ * /api/snyk/scan/dependencies:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Scan project dependencies with Snyk
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/scan/dependencies', async (req, res) => {
     try {
         const { path } = req.body;
@@ -24,6 +47,29 @@ router.post('/snyk/scan/dependencies', async (req, res) => {
 });
 
 // Scan container
+/**
+ * @openapi
+ * /api/snyk/scan/container:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Scan a container image with Snyk
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               image:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/scan/container', async (req, res) => {
     try {
         const { image } = req.body;
@@ -42,6 +88,29 @@ router.post('/snyk/scan/container', async (req, res) => {
 });
 
 // Scan IaC
+/**
+ * @openapi
+ * /api/snyk/scan/iac:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Scan infrastructure-as-code with Snyk
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/scan/iac', async (req, res) => {
     try {
         const { path } = req.body;
@@ -60,6 +129,29 @@ router.post('/snyk/scan/iac', async (req, res) => {
 });
 
 // Scan code
+/**
+ * @openapi
+ * /api/snyk/scan/code:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Scan source code with Snyk
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/scan/code', async (req, res) => {
     try {
         const { path } = req.body;
@@ -78,6 +170,29 @@ router.post('/snyk/scan/code', async (req, res) => {
 });
 
 // Monitor project
+/**
+ * @openapi
+ * /api/snyk/monitor:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Monitor a project with Snyk
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               path:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/monitor', async (req, res) => {
     try {
         const { path } = req.body;
@@ -94,6 +209,26 @@ router.post('/snyk/monitor', async (req, res) => {
 });
 
 // Get vulnerabilities
+/**
+ * @openapi
+ * /api/snyk/vulnerabilities/{projectId}:
+ *   get:
+ *     tags: [Snyk]
+ *     summary: Get project vulnerabilities
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/snyk/vulnerabilities/:projectId', async (req, res) => {
     try {
         const { projectId } = req.params;
@@ -106,6 +241,26 @@ router.get('/snyk/vulnerabilities/:projectId', async (req, res) => {
 });
 
 // Create fix PR
+/**
+ * @openapi
+ * /api/snyk/fix-pr/{projectId}:
+ *   post:
+ *     tags: [Snyk]
+ *     summary: Create a Snyk fix pull request
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.post('/snyk/fix-pr/:projectId', async (req, res) => {
     try {
         const { projectId } = req.params;
@@ -118,6 +273,20 @@ router.post('/snyk/fix-pr/:projectId', async (req, res) => {
 });
 
 // Get projects
+/**
+ * @openapi
+ * /api/snyk/projects:
+ *   get:
+ *     tags: [Snyk]
+ *     summary: List monitored Snyk projects
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/snyk/projects', async (req, res) => {
     try {
         const result = await snykService.getProjects();
@@ -129,6 +298,20 @@ router.get('/snyk/projects', async (req, res) => {
 });
 
 // Get stats
+/**
+ * @openapi
+ * /api/snyk/stats:
+ *   get:
+ *     tags: [Snyk]
+ *     summary: Get Snyk integration statistics
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Server error
+ */
 router.get('/snyk/stats', async (req, res) => {
     try {
         const stats = await snykService.getStats();

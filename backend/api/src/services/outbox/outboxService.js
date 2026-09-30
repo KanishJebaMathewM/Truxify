@@ -121,12 +121,10 @@ export class OutboxService {
   }
 
   /**
-   * Mark an event as failed and increment the attempt counter.
+   * Mark an event as failed and increment the retry/attempt counter.
    *
-   * `event_outbox` has no `failed` status (its check constraint only allows
-   * pending/publishing/published). A non-delivered event is returned to
-   * `pending` with `last_error` + `attempts` bumped so the relay reclaims it
-   * (next_attempt_at is already managed by the claim RPC).
+   * Awaits the increment RPC call first to extract the updated scalar integer value,
+   * avoiding storing unresolved Promise objects in the database.
    */
   async markFailed(eventId, workerId, errorMessage) {
     if (!eventId || !workerId) {
@@ -134,27 +132,41 @@ export class OutboxService {
       return false;
     }
 
-    const { data: current, error: fetchError } = await supabaseAdmin
-      .from('event_outbox')
-      .select('attempts')
-      .eq('event_id', eventId)
-      .single();
+    // Step 1: Await RPC execution to retrieve the incremented integer retry count
+    const { data: newRetryCount, error: rpcError } = await supabaseAdmin.rpc('increment', {
+      row_id: eventId,
+    });
 
-    if (fetchError) {
-      logger.warn('[OutboxService] Failed to read attempts:', fetchError.message, { eventId });
+    let attemptsCount = newRetryCount;
+
+    if (rpcError || typeof attemptsCount !== 'number') {
+      logger.warn('[OutboxService] Failed RPC increment, falling back to read-modify-write:', rpcError?.message, { eventId });
+      
+      const { data: current, error: fetchError } = await supabaseAdmin
+        .from('event_outbox')
+        .select('attempts')
+        .eq('event_id', eventId)
+        .single();
+
+      if (fetchError) {
+        logger.warn('[OutboxService] Failed to read attempts fallback:', fetchError.message, { eventId });
+      }
+
+      const currentAttempts = Number.isFinite(current?.attempts) ? current.attempts : 0;
+      attemptsCount = currentAttempts + 1;
     }
 
-    const currentAttempts = Number.isFinite(current?.attempts) ? current.attempts : 0;
-
+    // Step 2: Perform the status update using the awaited integer value
     const { error } = await supabaseAdmin
       .from('event_outbox')
       .update({
         status: 'pending',
         last_error: String(errorMessage).slice(0, 1000),
-        attempts: currentAttempts + 1,
+        attempts: attemptsCount,
         next_attempt_at: new Date().toISOString(),
       })
       .eq('event_id', eventId);
+
     if (error) {
       logger.error('[OutboxService] Failed to mark event failed:', error.message, { eventId });
       return false;

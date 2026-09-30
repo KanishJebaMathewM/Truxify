@@ -462,6 +462,7 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
 
     if (invalidateError) {
       logger.error({ err: invalidateError }, '[NotificationService] Failed to invalidate existing OTPs');
+      return null;
     }
 
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
@@ -532,6 +533,7 @@ export async function verifyDeliveryOtp(otpId) {
       })
       .eq('id', otpId)
       .eq('verified', false)
+      .gt('expires_at', new Date().toISOString())
       .select('id')
       .maybeSingle();
 
@@ -556,7 +558,7 @@ export async function expireDeliveryOtps(orderId) {
   return measureExecution('NotificationService.expireDeliveryOtps', async () => {
     if (!supabaseAdmin) {
       logger.error({}, '[NotificationService] Service-role client not configured — cannot expire OTPs.');
-      return;
+      return false;
     }
     const { error } = await supabaseAdmin
       .from('delivery_otps')
@@ -566,7 +568,9 @@ export async function expireDeliveryOtps(orderId) {
 
     if (error) {
       logger.error({ err: error }, '[NotificationService] Failed to expire OTPs');
+      return false;
     }
+    return true;
   });
 }
 

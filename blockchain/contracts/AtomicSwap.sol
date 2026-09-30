@@ -13,7 +13,7 @@ contract AtomicSwap is ReentrancyGuard {
         address payable sender;
         address payable recipient;
         uint256 amount;
-        bytes32 hashLock;
+        bytes32 hashLock; 
         uint256 lockTime;
         bool claimed;
         bool refunded;

@@ -14,6 +14,21 @@ class ChaosService {
         logger.info('✅ Chaos Engineering Service initialized');
     }
 
+    // Validate lazily so importing an unconfigured service does not prevent
+    // health/reporting endpoints from starting. Never include credential values.
+    requireGremlinConfiguration() {
+        const missing = [];
+        if (typeof this.gremlinApiKey !== 'string' || !this.gremlinApiKey.trim()) {
+            missing.push('GREMLIN_API_KEY');
+        }
+        if (typeof this.teamId !== 'string' || !this.teamId.trim()) {
+            missing.push('GREMLIN_TEAM_ID');
+        }
+        if (missing.length) {
+            throw new Error(`Gremlin experiment configuration missing: ${missing.join(', ')}`);
+        }
+    }
+
     // ============ Experiment Management ============
 
     async runExperiment(experimentType, config = {}) {
@@ -67,6 +82,7 @@ class ChaosService {
     }
 
     async runPodKill(config) {
+        this.requireGremlinConfiguration();
         // Kill pods
         const { namespace = 'truxify', labelSelector = 'app=api', count = 1 } = config;
         
@@ -97,6 +113,7 @@ class ChaosService {
     }
 
     async runNetworkLatency(config) {
+        this.requireGremlinConfiguration();
         const { namespace = 'truxify', labelSelector = 'app=api', latency = '300ms', duration = '5m' } = config;
         
         const response = await axios.post(
@@ -127,6 +144,7 @@ class ChaosService {
     }
 
     async runCpuStress(config) {
+        this.requireGremlinConfiguration();
         const { namespace = 'truxify', labelSelector = 'app=ml-engine', workers = 2, load = 80, duration = '10m' } = config;
         
         const response = await axios.post(
@@ -158,6 +176,7 @@ class ChaosService {
     }
 
     async runMemoryStress(config) {
+        this.requireGremlinConfiguration();
         const { namespace = 'truxify', labelSelector = 'app=redis', memory = '512MB', duration = '5m' } = config;
         
         const response = await axios.post(
@@ -188,6 +207,7 @@ class ChaosService {
     }
 
     async runServiceDisruption(config) {
+        this.requireGremlinConfiguration();
         const { service = 'api-service', namespace = 'truxify', duration = '2m' } = config;
         
         const response = await axios.post(

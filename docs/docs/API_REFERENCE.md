@@ -18,6 +18,7 @@
   - Authentication
   - Orders
   - Driver
+  - Earnings
   - Trucks
   - Profile
   - Device
@@ -30,8 +31,12 @@
   - Oracle
   - Admin
   - Fraud Detection
+  - Carbon Credits
   - WebRTC
   - Zero-Knowledge Proof (ZKP)
+  - Road Conditions
+  - IoT Telemetry
+  - Cross-Docking
 - Rate Limiting
 - Idempotency
 - WebSocket Events
@@ -98,14 +103,20 @@ Successful responses generally follow:
 }
 ```
 
-Error responses generally contain:
+Error responses from the global API error handler use the following structure:
 
 ```json
 {
   "success": false,
-  "message": "Description of the error"
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "details": {}
+  }
 }
 ```
+
+The error.code identifies the error category, error.message contains the human-readable message, and error.details contains structured context when available. Route-specific handlers may return a simpler error shape; when an endpoint documents a different response, follow that endpoint's contract.
 
 ---
 
@@ -222,6 +233,29 @@ Endpoints include:
 
 ---
 
+## Earnings
+
+Base Path
+
+```
+/api/earnings
+```
+
+Requires Bearer authentication and the driver:view-earnings policy.
+
+| Method | Endpoint | Description |
+|---------|----------|-------------|
+|GET|/summary|Authenticated driver's earnings summary; supports period=weekly or period=monthly|
+
+Example:
+
+```http
+GET /api/earnings/summary?period=monthly
+Authorization: Bearer <JWT_TOKEN>
+```
+
+---
+
 ## Trucks
 
 Base Path
@@ -304,6 +338,185 @@ Base Path
 |GET|/:id|
 
 ---
+
+## Cross-Docking
+
+Base Path
+
+```
+/api/cross-dock
+```
+
+Authentication
+
+All cross-dock endpoints require a Bearer token. Route-level policies and participant checks additionally restrict each operation:
+
+| Operation | Allowed roles / policy |
+|-----------|------------------------|
+|GET /candidates|driver, admin — `crossdock:list-candidates`|
+|POST /|driver — `crossdock:create`|
+|GET /|driver, admin — `crossdock:list`|
+|GET /:id|driver, admin — `crossdock:view`|
+|POST /:id/accept|driver — `crossdock:accept`|
+|POST /:id/decline|driver — `crossdock:decline`|
+|POST /:id/cancel|driver — `crossdock:cancel`|
+|POST /:id/verify|driver — `crossdock:verify`|
+
+### Find candidate drivers
+
+```
+GET /api/cross-dock/candidates?orderId=<uuid>&cross_dock_lat=28.6139&cross_dock_lng=77.2090&radius_km=50&limit=20
+```
+
+Parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+|orderId|Yes|UUID of the load/order to relay.|
+|cross_dock_lat|Yes|Cross-dock latitude, from -90 to 90.|
+|cross_dock_lng|Yes|Cross-dock longitude, from -180 to 180.|
+|radius_km|No|Search radius in kilometres, 1–500. Defaults to 50 km.|
+|limit|No|Maximum candidates to return, 1–50. Defaults to 20.|
+
+Successful response:
+
+```json
+{
+  "candidates": [
+    {
+      "driver_id": "uuid",
+      "name": "Driver Name",
+      "distance_km": 8.42,
+      "last_seen_at": "2026-09-19T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Create a transfer request
+
+```
+POST /api/cross-dock?orderId=<uuid>
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "to_driver_id": "uuid",
+  "cross_dock_lat": 28.6139,
+  "cross_dock_lng": 77.2090,
+  "cross_dock_note": "Meet at the north truck entrance"
+}
+```
+
+The request must target another driver and the authenticated driver must currently be carrying a load whose status permits handoff.
+
+Successful response:
+
+```json
+{
+  "id": "uuid",
+  "status": "requested",
+  "from_driver_id": "uuid",
+  "to_driver_id": "uuid",
+  "cross_dock_lat": 28.6139,
+  "cross_dock_lng": 77.2090,
+  "expires_at": "2026-09-19T13:00:00.000Z",
+  "created_at": "2026-09-19T12:00:00.000Z",
+  "handoff_code": "123456"
+}
+```
+
+### List transfers
+
+```
+GET /api/cross-dock?status=requested&limit=50
+```
+
+`status` is optional and may be `requested`, `accepted`, `verified`, `declined`, `cancelled`, or `expired`. `limit` defaults to 50 and the service caps it at 200.
+
+Successful response:
+
+```json
+{
+  "transfers": []
+}
+```
+
+### Get a transfer
+
+```
+GET /api/cross-dock/<transfer_id>
+```
+
+Only participating drivers may retrieve a transfer. Sensitive OTP fields are stripped from the response.
+
+Successful response:
+
+```json
+{
+  "transfer": {
+    "id": "uuid",
+    "order_id": "uuid",
+    "from_driver_id": "uuid",
+    "to_driver_id": "uuid",
+    "status": "accepted",
+    "cross_dock_lat": 28.6139,
+    "cross_dock_lng": 77.2090,
+    "created_at": "2026-09-19T12:00:00.000Z",
+    "expires_at": "2026-09-19T13:00:00.000Z",
+    "verified_at": null
+  }
+}
+```
+
+### Accept, decline, or cancel a transfer
+
+```
+POST /api/cross-dock/<transfer_id>/accept
+POST /api/cross-dock/<transfer_id>/decline
+POST /api/cross-dock/<transfer_id>/cancel
+```
+
+These operations require the authenticated participant permitted by the corresponding policy. Successful responses return the updated transfer object.
+
+### Verify handoff
+
+```
+POST /api/cross-dock/<transfer_id>/verify
+Content-Type: application/json
+Authorization: Bearer <JWT_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "handoff_code": "123456"
+}
+```
+
+The handoff code must be exactly six digits. On successful verification the transfer moves to `verified` and the load custody is reassigned to the receiving driver.
+
+### Cross-dock status codes
+
+| Code | Meaning |
+|------|---------|
+|200|Successful lookup, listing, or lifecycle operation|
+|201|Transfer created|
+|400|Invalid UUID/query/body, invalid status, or invalid handoff request|
+|401|Authentication required|
+|403|Role, policy, or participant authorization failure|
+|404|Load or transfer not found|
+|409|Invalid lifecycle state or concurrent/duplicate transfer conflict|
+|410|Transfer or handoff code expired|
+|500|Unexpected or database error|
+|503|Nearby-driver lookup unavailable|
+
+
 
 ## Support
 
@@ -421,6 +634,52 @@ Base Path
 
 ---
 
+## Carbon Credits
+
+Base Path
+
+```
+/api/carbon-credits
+```
+
+All endpoints require Bearer authentication.
+
+| Method | Endpoint | Description |
+|---------|----------|-------------|
+|POST|/mint|Calculate freight carbon savings and mint carbon credits|
+|POST|/purchase|Purchase and retire carbon credits for Scope 3 offsetting|
+|GET|/:tokenId|Retrieve token details and chain verification state|
+
+### Mint Carbon Credits
+
+```json
+{
+  "truck_id": "truck_123",
+  "trip_id": "trip_456",
+  "distance_km": 312.5,
+  "fuel_saved_liters": 18.4,
+  "load_weight_kg": 12000
+}
+```
+
+The truck_id, trip_id, and fuel_saved_liters fields are required. Distance and load weight default to zero when omitted and all numeric values must be finite and non-negative.
+
+### Purchase Carbon Credits
+
+```json
+{
+  "token_id": "carbon_123",
+  "buyer_address": "0x0000000000000000000000000000000000000000"
+}
+```
+
+### Responses
+
+Successful minting returns HTTP 201 with a message and the minted token. Successful purchase and token lookup responses return the resulting token under token.
+
+Unauthenticated requests return HTTP 401; unknown token IDs return HTTP 404.
+
+
 ## WebRTC
 
 Base Path
@@ -434,7 +693,7 @@ Base Path
 |GET|/webrtc/stats|
 |GET|/webrtc/nearby|
 |GET|/webrtc/offline/:peerId|
-|POST|/webrtc/sync/:peerId|
+|POST|/webrtc/sync/:peerId|Acknowledge synchronized offline GPS rows for an accessible peer|
 
 ---
 
@@ -452,6 +711,31 @@ Base Path
 |GET|/zkp/status/:userId|
 |GET|/zkp/document-hash/:userId|
 |GET|/zkp/stats|
+
+
+### POST /api/webrtc/sync/{peerId}
+
+Requires a Bearer token and the `webrtc:sync-offline` policy.
+
+Request body:
+
+```json
+{
+  "ackedIds": ["row-1", "row-2"]
+}
+```
+
+`ackedIds` must be a non-empty array containing the offline GPS row IDs the client has successfully received.
+
+Responses:
+
+| Status | Meaning |
+|--------|---------|
+|200|Offline data synchronized|
+|400|`ackedIds` is missing or empty|
+|403|Authenticated user cannot access the peer|
+|500|Synchronization failed|
+|503|WebRTC signaling server is not initialized|
 
 ---
 
@@ -478,11 +762,32 @@ The backend also supports real-time communication for:
 
 ---
 
-# Future Improvements
+# API Documentation
 
-Future API versions may include:
+The repository exposes a generated OpenAPI 3.0 specification and an interactive Swagger UI for the backend API.
 
-- OpenAPI/Swagger endpoint documentation
-- API versioning
-- SDK generation
-- Expanded request and response examples
+## Interactive API documentation
+
+Start the backend API in a non-production environment and open:
+
+http://localhost:5000/api/docs
+
+The generated API server URL is controlled by API_PUBLIC_URL. When it is unset, the development server URL defaults to http://localhost:5000/api.
+
+Swagger UI is disabled when NODE_ENV=production.
+
+## OpenAPI source
+
+The generated specification is built with swagger-jsdoc from OpenAPI annotations in backend/api/src/routes/*.js.
+
+Route documentation should remain next to the implementation it describes. Changes to endpoint parameters, request bodies, authentication requirements, or responses should update those annotations together with the implementation.
+
+## Validation
+
+From backend/api:
+
+npm test -- test/unit/swagger.test.js
+
+For endpoint-specific documentation changes, run the focused OpenAPI contract test as well as the Swagger configuration test.
+
+The generated documentation is served by the backend at /api/docs; contributors do not need to maintain a separate static Swagger artifact.

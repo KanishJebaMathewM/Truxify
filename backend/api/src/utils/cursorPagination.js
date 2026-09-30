@@ -33,14 +33,14 @@ export function decodeCursor(cursor) {
       if (
         typeof ps !== 'number' ||
         !Number.isInteger(ps) ||
-        ps < 1
+        ps <=0
       ) {
         return null;
       }
     }
     return result;
   } catch (err) {
-    logger.error('[cursorPagination] Failed to decode cursor:', err?.message);
+    logger.warn({ err: err?.message, cursorSnippet: cursor?.slice(0, 16) }, '[cursorPagination] Failed to decode cursor');
     return null;
   }
 }

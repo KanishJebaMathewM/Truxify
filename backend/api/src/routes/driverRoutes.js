@@ -127,6 +127,7 @@
  */
 
 import express from 'express';
+import { getStatementPayout } from '../services/driver/statementPayout.js';
 import { supabase, getAdminClient, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
@@ -1574,7 +1575,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
     while (true) {
       let pageQuery = supabase
         .from('orders')
-        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, bid_amount, total_amount, base_freight, toll_estimate, platform_fee')
         .eq('driver_id', userId)
         .in('status', ['delivered', 'payment_released'])
         .order('pickup_date', { ascending: true })
@@ -1613,7 +1614,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
       const baseFreight = Number(trip.base_freight) || 0;
       const platformFee = Number(trip.platform_fee) || 0;
       const tollEstimate = Number(trip.toll_estimate) || 0;
-      const netEarnings = baseFreight - platformFee;
+      const netEarnings = getStatementPayout(trip);
 
       totalBaseFreight += baseFreight;
       totalPlatformFees += platformFee;

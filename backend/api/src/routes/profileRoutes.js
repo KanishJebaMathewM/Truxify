@@ -92,6 +92,7 @@
  */
 
 import express from 'express';
+import { getStatementPayout } from '../services/driver/statementPayout.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { z } from 'zod';
@@ -549,7 +550,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     while (true) {
       let pageQuery = supabaseAdmin
         .from('orders')
-        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, bid_amount, total_amount, base_freight, toll_estimate, platform_fee, created_at')
         .eq('driver_id', userId)
         .in('status', ['delivered', 'payment_released'])
         .order('pickup_date', { ascending: true })
@@ -599,7 +600,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       const baseFreight = Number(trip.base_freight) || 0;
       const platformFee = Number(trip.platform_fee) || 0;
       const tollEstimate = Number(trip.toll_estimate) || 0;
-      const netEarnings = baseFreight - platformFee;
+      const netEarnings = getStatementPayout(trip);
 
       totalBaseFreight += baseFreight;
       totalPlatformFees += platformFee;

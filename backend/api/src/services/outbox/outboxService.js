@@ -230,9 +230,9 @@ export class OutboxService {
    * Clears any stale claim metadata so the row can be re-claimed.
    * If a delay is specified, awaits a Promise-based timeout before requeueing.
    */
-  async requeueFailedEvents(maxRetries = 5, delay = 0) {
-    if (delay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delay));
+  async requeueFailedEvents(maxRetries = 5, delayMs = 0) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     const { error } = await supabaseAdmin
       .from('event_outbox')

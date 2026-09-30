@@ -121,10 +121,11 @@ export class OutboxService {
   }
 
   /**
-   * Mark an event as failed and increment the retry/attempt counter.
+   * Mark an event as failed and schedule it for retry.
    *
-   * Awaits the increment RPC call first to extract the updated scalar integer value,
-   * avoiding storing unresolved Promise objects in the database.
+   * `claim_outbox_events` automatically increments `attempts` when claiming an event.
+   * To prevent inflating the retry counter or introducing non-atomic race conditions,
+   * this method updates the status, error details, and next attempt schedule without modifying `attempts`.
    */
   async markFailed(eventId, workerId, errorMessage) {
     if (!eventId || !workerId) {
@@ -132,37 +133,11 @@ export class OutboxService {
       return false;
     }
 
-    // Step 1: Await RPC execution to retrieve the incremented integer retry count
-    const { data: newRetryCount, error: rpcError } = await supabaseAdmin.rpc('increment', {
-      row_id: eventId,
-    });
-
-    let attemptsCount = newRetryCount;
-
-    if (rpcError || typeof attemptsCount !== 'number') {
-      logger.warn('[OutboxService] Failed RPC increment, falling back to read-modify-write:', rpcError?.message, { eventId });
-      
-      const { data: current, error: fetchError } = await supabaseAdmin
-        .from('event_outbox')
-        .select('attempts')
-        .eq('event_id', eventId)
-        .single();
-
-      if (fetchError) {
-        logger.warn('[OutboxService] Failed to read attempts fallback:', fetchError.message, { eventId });
-      }
-
-      const currentAttempts = Number.isFinite(current?.attempts) ? current.attempts : 0;
-      attemptsCount = currentAttempts + 1;
-    }
-
-    // Step 2: Perform the status update using the awaited integer value
     const { error } = await supabaseAdmin
       .from('event_outbox')
       .update({
         status: 'pending',
         last_error: String(errorMessage).slice(0, 1000),
-        attempts: attemptsCount,
         next_attempt_at: new Date().toISOString(),
       })
       .eq('event_id', eventId);

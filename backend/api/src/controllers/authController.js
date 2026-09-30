@@ -1,70 +1,181 @@
-import jwt from 'jsonwebtoken';
-import refreshTokenService from '../services/refreshTokenService.js';
-import { ValidationError, UnauthorizedError, AppError } from '../utils/errors.js';
+import logger from '../api/src/middleware/logger.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+class RealtimeLocationManager {
+  constructor(supabaseClient) {
+    this.supabase = supabaseClient;
+    this.locationChannels = new Map();               // Key: channelKey, Value: Channel
+    this.driverToLocationChannels = new Map();       // Key: driverId, Value: Set<channelKey>
+    this.displayIdToLocationChannelKeys = new Map(); // Key: displayId, Value: Set<channelKey>
+    this.retryTimers = new Map();                     // Key: channelKey, Value: Timeout Handle
 
-const createAccessToken = (tokenRecord) => jwt.sign(
-  {
-    id: tokenRecord.user_id,
-    uid: tokenRecord.user_id,
-    iss: 'truxify-backend-api',
-  },
-  JWT_SECRET,
-  { expiresIn: '7d' },
-);
+    this.MAX_RECONNECT_ATTEMPTS = 5;
+    this.BASE_RECONNECT_DELAY_MS = 1000;
+  }
 
-export const refreshToken = async (req, res, next) => {
-  try {
-    const { refreshToken: token, deviceId, deviceInfo } = req.body;
+  /**
+   * Connects or reconnects a driver location channel
+   */
+  connectChannel(channelKey, driverId, displayId, attempt = 0) {
+    // Clear any pending retry timers for this channel key
+    this.clearRetryTimer(channelKey);
 
-    if (!token || !deviceId) {
-      return next(new ValidationError('Refresh token and deviceId are required'));
+    // Clean up existing channel instance before recreating
+    if (this.locationChannels.has(channelKey)) {
+      this.removeChannel(channelKey, driverId, displayId);
     }
 
-    const newTokenData = await refreshTokenService.rotateRefreshToken(token, deviceId, deviceInfo);
-    const newAccessToken = createAccessToken(newTokenData);
+    const channelName = `driver-location:${channelKey}`;
+    const channel = this.supabase.channel(channelName);
 
-    return res.status(200).json({
-      success: true,
-      accessToken: newAccessToken,
-      refreshToken: newTokenData.token,
-      expiresAt: newTokenData.expires_at,
-    });
-  } catch (err) {
-    if (err.message && err.message.includes('Token reuse detected')) {
-      return next(new UnauthorizedError('Security Alert: Token theft detected. All sessions terminated.'));
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, (payload) => {
+        this.handleLocationUpdate(driverId, displayId, payload);
+      })
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          logger.info(`[Realtime] Subscribed to location channel: ${channelKey}`);
+          this.clearRetryTimer(channelKey);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          logger.warn(`[Realtime] Channel error for ${channelKey}: ${err?.message || status}`);
+          this.handleChannelFailure(channelKey, driverId, displayId, attempt + 1);
+        }
+      });
+
+    this.locationChannels.set(channelKey, channel);
+
+    // Establish driver membership mappings
+    if (!this.driverToLocationChannels.has(driverId)) {
+      this.driverToLocationChannels.set(driverId, new Set());
     }
-    return next(new UnauthorizedError(err.message));
-  }
-};
+    this.driverToLocationChannels.get(driverId).add(channelKey);
 
-export const logout = async (req, res, next) => {
-  try {
-    const { refreshToken: token } = req.body;
-    if (token) {
-      await refreshTokenService.revokeToken(token);
+    if (displayId) {
+      if (!this.displayIdToLocationChannelKeys.has(displayId)) {
+        this.displayIdToLocationChannelKeys.set(displayId, new Set());
+      }
+      this.displayIdToLocationChannelKeys.get(displayId).add(channelKey);
     }
-    return res.status(200).json({ success: true, message: 'Logged out successfully' });
-  } catch (err) {
-    return next(new AppError(err.message, 500));
   }
-};
 
-export const logoutAllDevices = async (req, res, next) => {
-  try {
-    const userId = req.user.uid;
-    await refreshTokenService.revokeAllUserTokens(userId);
-    return res.status(200).json({ success: true, message: 'Logged out from all devices' });
-  } catch (err) {
-    return next(new AppError(err.message, 500));
+  /**
+   * Handles channel failure with explicit cleanup and exponential backoff
+   */
+  handleChannelFailure(channelKey, driverId, displayId, attempt) {
+    // Explicitly call centralized channel cleanup on failure
+    this.removeChannel(channelKey, driverId, displayId);
+
+    if (attempt > this.MAX_RECONNECT_ATTEMPTS) {
+      logger.error(`[Realtime] Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached for ${channelKey}. Halting retries.`);
+      return;
+    }
+
+    const delayMs = Math.pow(2, attempt - 1) * this.BASE_RECONNECT_DELAY_MS;
+    logger.info(`[Realtime] Scheduling retry ${attempt}/${this.MAX_RECONNECT_ATTEMPTS} for ${channelKey} in ${delayMs}ms`);
+
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(channelKey);
+
+      // Guard: Only reconnect if driver membership is still intact
+      const driverKeys = this.driverToLocationChannels.get(driverId);
+      if (driverKeys && driverKeys.has(channelKey)) {
+        this.connectChannel(channelKey, driverId, displayId, attempt);
+      } else {
+        logger.info(`[Realtime] Suppressed retry for ${channelKey}; channel membership was invalidated`);
+      }
+    }, delayMs);
+
+    this.retryTimers.set(channelKey, timer);
   }
-};
 
-const authController = {
-  refreshToken,
-  logout,
-  logoutAllDevices,
-};
+  /**
+   * Centralized method to remove channel from Supabase and invalidate all associated mappings
+   */
+  removeChannel(channelKey, driverId, displayId) {
+    const channel = this.locationChannels.get(channelKey);
+    if (channel) {
+      try {
+        this.supabase.removeChannel(channel);
+      } catch (err) {
+        logger.error(`[Realtime] Error removing channel ${channelKey} from Supabase: ${err.message}`);
+      }
+      this.locationChannels.delete(channelKey);
+    }
 
-export default authController;
+    // Invalidate driver membership
+    if (driverId && this.driverToLocationChannels.has(driverId)) {
+      const keys = this.driverToLocationChannels.get(driverId);
+      keys.delete(channelKey);
+      if (keys.size === 0) {
+        this.driverToLocationChannels.delete(driverId);
+      }
+    }
+
+    // Invalidate displayId membership
+    if (displayId && this.displayIdToLocationChannelKeys.has(displayId)) {
+      const keys = this.displayIdToLocationChannelKeys.get(displayId);
+      keys.delete(channelKey);
+      if (keys.size === 0) {
+        this.displayIdToLocationChannelKeys.delete(displayId);
+      }
+    }
+  }
+
+  /**
+   * Clears pending retry timers for a specific channel key
+   */
+  clearRetryTimer(channelKey) {
+    if (this.retryTimers.has(channelKey)) {
+      clearTimeout(this.retryTimers.get(channelKey));
+      this.retryTimers.delete(channelKey);
+    }
+  }
+
+  /**
+   * Removes all location channels and cancels retries for a specific driver
+   */
+  removeDriverLocationChannels(driverId) {
+    const channelKeys = this.driverToLocationChannels.get(driverId);
+    if (!channelKeys) return;
+
+    for (const channelKey of Array.from(channelKeys)) {
+      this.clearRetryTimer(channelKey);
+      this.removeChannel(channelKey, driverId);
+    }
+
+    this.driverToLocationChannels.delete(driverId);
+    logger.info(`[Realtime] Successfully cleaned up channels and cancelled retries for driver: ${driverId}`);
+  }
+
+  /**
+   * Complete cleanup of all active subscriptions, maps, and timers
+   */
+  removeClientFromAllSubscriptions() {
+    // 1. Cancel all pending retry timers
+    for (const timer of this.retryTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.retryTimers.clear();
+
+    // 2. Remove all active channels from Supabase
+    for (const [channelKey, channel] of this.locationChannels.entries()) {
+      try {
+        this.supabase.removeChannel(channel);
+      } catch (err) {
+        logger.error(`[Realtime] Error removing channel ${channelKey} during complete cleanup: ${err.message}`);
+      }
+    }
+
+    // 3. Clear all tracking maps
+    this.locationChannels.clear();
+    this.driverToLocationChannels.clear();
+    this.displayIdToLocationChannelKeys.clear();
+
+    logger.info('[Realtime] Removed all client subscriptions, invalidated mappings, and cleared retry timers.');
+  }
+
+  handleLocationUpdate(driverId, displayId, payload) {
+    // Payload processing logic
+  }
+}
+
+export default RealtimeLocationManager;

@@ -192,8 +192,6 @@ describe('Pricing Service Unit Tests', () => {
 
     it('does not subtract the toll from netProfit (toll is recovered from the customer)', () => {
       const result = computeOrderPricing(defaultInput, mockRateCard);
-      // tollEstimate is non-zero (200 * 100 = 20000) and is already included in
-      // totalAmount, so netProfit must equal baseFreight - fuelCost only.
       expect(result.tollEstimate).toBeGreaterThan(0);
       expect(result.netProfit).toBe(result.baseFreight - result.fuelCost);
     });
@@ -208,7 +206,7 @@ describe('Pricing Service Unit Tests', () => {
       expect(Number.isFinite(result.netProfit)).toBe(true);
     });
 
-    it('guarantees finite results when inputs or rate cards have edge-case values (zero distance, null/NaN surcharges)', () => {
+    it('guarantees finite results when inputs or rate cards have edge-case values', () => {
       const edgeCard = {
         ratePerTonneKm: 50,
         handlingFee: NaN,
@@ -281,29 +279,29 @@ describe('Pricing Service Unit Tests', () => {
   });
 });
 
-
-// === Spec 10 test ===
 describe('guardNonNegative', () => {
   it('passes positive', () => { expect(guardNonNegative(10, 'x')).toBe(10); });
   it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });
   it('rejects NaN', () => { expect(() => guardNonNegative(NaN, 'x')).toThrow(TypeError); });
 });
+
 describe('parsePositiveFloat (from __testing)', () => {
+  const { parsePositiveFloat } = __testing;
+
   it('returns parsed value for valid positive numbers', () => {
-    expect(__testing.parsePositiveFloat(5, 1)).toBe(5);
-    expect(__testing.parsePositiveFloat('10.5', 1)).toBe(10.5);
+    expect(parsePositiveFloat(5, 1)).toBe(5);
+    expect(parsePositiveFloat('10.5', 1)).toBe(10.5);
   });
 
   it('returns 0 as a valid non-negative value', () => {
-    expect(__testing.parsePositiveFloat(0, 1)).toBe(0);
+    expect(parsePositiveFloat(0, 1)).toBe(0);
   });
 
   it('returns fallback for negative numbers', () => {
-    expect(__testing.parsePositiveFloat(-5, 1)).toBe(1);
+    expect(parsePositiveFloat(-5, 1)).toBe(1);
   });
 
   it('returns fallback for NaN', () => {
-    expect(__testing.parsePositiveFloat(NaN, 1)).toBe(1);
+    expect(parsePositiveFloat(NaN, 1)).toBe(1);
   });
 });
-

@@ -1,96 +1,104 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import request from 'supertest';
+import express from 'express';
 
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
-  debug: vi.fn(),
 }));
 
-vi.mock('../../../src/middleware/logger.js', () => ({
-  default: mockLogger,
+const zkpMocks = vi.hoisted(() => ({
+  verifyDriver: vi.fn(),
+  isVerified: vi.fn(),
+  getVerificationStats: vi.fn(),
 }));
 
-vi.mock('../../../src/middleware/auth.js', () => ({
-  authenticate: (req, res, next) => { req.user = { id: 'user-123' }; next(); },
-}));
+vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
-vi.mock('../../../src/middleware/redisRateLimiter.js', () => ({
+vi.mock('../../src/middleware/redisRateLimiter.js', () => ({
   redisRateLimiter: () => (req, res, next) => next(),
 }));
 
-vi.mock('../../../src/lib/redisLock.js', () => ({
-  LockAcquisitionError: class LockAcquisitionError extends Error {
-    constructor() { super('Lock acquisition failed'); }
-  },
-  acquireLock: vi.fn(),
-  releaseLock: vi.fn(),
+vi.mock('../../src/lib/redisLock.js', () => ({
+  LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 
-vi.mock('../../../src/services/zkp/zkp.service.js', () => ({
-  default: {
-    verifyDriver: vi.fn(),
-    isVerified: vi.fn(),
-    getVerificationStats: vi.fn(),
-  },
+vi.mock('../../src/lib/profileCache.js', () => ({
+  default: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
 
-const zkpRoutes = (await import('../../../src/routes/zkp.routes.js')).default;
+vi.mock('mongoose', () => ({
+  default: {},
+  ConnectionStates: {},
+}));
 
-describe('zkp.routes', () => {
+vi.mock('../../src/services/zkp/zkp.service.js', () => ({
+  default: zkpMocks,
+}));
+
+const zkpRouter = (await import('../../src/services/security/zkp.routes.js')).default;
+
+function makeApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/zkp', zkpRouter);
+  return app;
+}
+
+describe('zkp routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    zkpMocks.verifyDriver.mockResolvedValue({ success: true });
+    zkpMocks.isVerified.mockResolvedValue(true);
+    zkpMocks.getVerificationStats.mockResolvedValue({ total: 1 });
   });
 
-  describe('router', () => {
-    it('is defined as an Express router', () => {
-      expect(zkpRoutes).toBeDefined();
-      expect(typeof zkpRoutes).toBe('function');
-    });
+  it('exports an express router as the default export', () => {
+    expect(typeof zkpRouter).toBe('function');
   });
 
-  describe('POST /verify', () => {
-    it('validates userId is required and a non-empty string', () => {
-      // The route validates: !userId || typeof userId !== 'string' || !userId.trim()
-      const invalidCases = [null, undefined, '', '   '];
-      invalidCases.forEach(userId => {
-        const isInvalid = !userId || typeof userId !== 'string' || !String(userId).trim();
-        expect(isInvalid).toBe(true);
-      });
-    });
-
-    it('accepts valid userId', () => {
-      const userId = 'user-valid-123';
-      const isValid = !!userId && typeof userId === 'string' && !!userId.trim();
-      expect(isValid).toBe(true);
-    });
-
-    it('returns 403 when userId mismatches req.user.id', () => {
-      // Route check: userId !== req.user.id
-      const reqUserId = 'user-123';
-      const reqBodyUserId = 'user-456';
-      expect(reqBodyUserId !== reqUserId).toBe(true);
-    });
-
-    it('allows same userId as req.user.id', () => {
-      const reqUserId = 'user-123';
-      const reqBodyUserId = 'user-123';
-      expect(reqBodyUserId !== reqUserId).toBe(false);
-    });
+  it('POST /verify returns 400 when userId is missing', async () => {
+    const res = await request(makeApp()).post('/zkp/verify').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('userId is required');
+    expect(zkpMocks.verifyDriver).not.toHaveBeenCalled();
   });
 
-  describe('GET /status/:userId', () => {
-    it('returns 403 when userId does not match authenticated user', () => {
-      const reqUserId = 'user-123';
-      const paramUserId = 'user-456';
-      expect(paramUserId !== reqUserId).toBe(true);
-    });
+  it('POST /verify delegates to verifyDriver and returns 200 on success', async () => {
+    const res = await request(makeApp())
+      .post('/zkp/verify')
+      .send({ userId: 'u1', name: 'A' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+    expect(zkpMocks.verifyDriver).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'u1', name: 'A' }),
+    );
   });
 
-  describe('verification stats', () => {
-    it('returns totalVerified, totalUnverified, and total', async () => {
-      const stats = { totalVerified: 100, totalUnverified: 50, total: 150 };
-      expect(stats.total).toBe(stats.totalVerified + stats.totalUnverified);
-    });
+  it('POST /verify returns 409 when the lock is already held', async () => {
+    zkpMocks.verifyDriver.mockResolvedValue({ conflict: true, error: 'in-flight' });
+    const res = await request(makeApp()).post('/zkp/verify').send({ userId: 'u1' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('in-flight');
+  });
+
+  it('POST /verify returns 503 when the distributed lock cannot be acquired', async () => {
+    const { LockAcquisitionError } = await import('../../src/lib/redisLock.js');
+    zkpMocks.verifyDriver.mockRejectedValue(new LockAcquisitionError('redis down'));
+    const res = await request(makeApp()).post('/zkp/verify').send({ userId: 'u1' });
+    expect(res.status).toBe(503);
+  });
+
+  it('GET /status/:userId returns the verification status', async () => {
+    const res = await request(makeApp()).get('/zkp/status/u1');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, verified: true });
+  });
+
+  it('GET /stats returns aggregate verification counts', async () => {
+    const res = await request(makeApp()).get('/zkp/stats');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, total: 1 });
   });
 });

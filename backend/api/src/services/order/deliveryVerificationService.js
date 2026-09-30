@@ -465,7 +465,10 @@ export class DeliveryVerificationService {
     const distanceM =
       haversineKm(lat, lng, Number(order.drop_lat), Number(order.drop_lng)) *
       1000;
-    const effectiveRadiusM = radiusM ?? DELIVERY_GEOFENCE_RADIUS_KM * 1000;
+    const effectiveRadiusM =
+      Number.isFinite(radiusM) && radiusM > 0
+        ? radiusM
+        : DELIVERY_GEOFENCE_RADIUS_KM * 1000;
     if (distanceM > effectiveRadiusM) {
       throw new DomainError(409, {
         error: `Driver is ${(distanceM / 1000).toFixed(2)}km from the drop-off location. Must be within ${effectiveRadiusM}m to confirm delivery.`,

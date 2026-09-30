@@ -2,7 +2,7 @@ import express from 'express';
 import { getWebRTCSignaling } from '../sockets/webrtc.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, nearbyLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -36,7 +36,7 @@ router.get('/webrtc/stats', authenticate, userLimiter, requirePolicy('webrtc:vie
 });
 
 // Get nearby peers
-router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:view-nearby'), async (req, res) => {
+router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePolicy('webrtc:view-nearby'), async (req, res) => {
   try {
     const { lat, lng, radius } = req.query;
     const parsedLat = parseFiniteNumber(lat);
@@ -75,7 +75,8 @@ router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:vi
     const peers = await signaling.getPeersNearLocation(
       parsedLat,
       parsedLng,
-      parsedRadius
+      parsedRadius,
+      req.user
     );
 
     res.json({
@@ -84,7 +85,7 @@ router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:vi
       count: peers.length
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       error: error.message
     });
@@ -133,6 +134,73 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
 });
 
 // Sync offline data
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     WebRTCOfflineSyncRequest:
+ *       type: object
+ *       required:
+ *         - ackedIds
+ *       properties:
+ *         ackedIds:
+ *           type: array
+ *           minItems: 1
+ *           items:
+ *             type: string
+ *           description: IDs of offline GPS rows confirmed as received by the client
+ *     WebRTCOfflineSyncResponse:
+ *       type: object
+ *       required:
+ *         - success
+ *         - message
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           example: true
+ *         message:
+ *           type: string
+ *           example: Offline data synced
+ */
+
+/**
+ * @openapi
+ * /webrtc/sync/{peerId}:
+ *   post:
+ *     tags: [WebRTC]
+ *     summary: Acknowledge synced offline GPS rows for a peer
+ *     description: Marks the specified offline GPS rows as synchronized after the authenticated user has access to the requested peer.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: peerId
+ *         required: true
+ *         description: WebRTC peer identifier whose offline rows are being acknowledged
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/WebRTCOfflineSyncRequest'
+ *     responses:
+ *       200:
+ *         description: Offline GPS rows were acknowledged successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/WebRTCOfflineSyncResponse'
+ *       400:
+ *         description: ackedIds is missing or empty
+ *       403:
+ *         description: The authenticated user cannot access the requested peer
+ *       500:
+ *         description: Offline synchronization failed
+ *       503:
+ *         description: WebRTC signaling server is not initialized
+ */
 router.post('/webrtc/sync/:peerId', authenticate, userLimiter, requirePolicy('webrtc:sync-offline'), async (req, res) => {
   try {
     const { peerId } = req.params;

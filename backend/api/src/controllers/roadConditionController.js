@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { reportGripDataSchema } from '../validation/requestSchemas.js';
+import { reportGripDataSchema, nearbyGripQuerySchema } from '../validation/requestSchemas.js';
 
 export const reportGripData = async (req, res) => {
   try {
@@ -35,27 +35,15 @@ export const reportGripData = async (req, res) => {
 
 export const getNearbyGripData = async (req, res) => {
   try {
-    const { lat, lng, radius_miles = 50 } = req.query;
-
-    if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') {
-      return res.status(400).json({ error: 'Latitude (lat) and longitude (lng) are required' });
+    const parseResult = nearbyGripQuerySchema.safeParse(req.query);
+    if (!parseResult.success) {
+      const issue = parseResult.error.issues[0];
+      const field = issue?.path.join('.') || 'query';
+      const message = issue?.message || 'Invalid value';
+      return res.status(400).json({ error: `Invalid ${field}: ${message}` });
     }
 
-    const latitude = Number(lat);
-    const longitude = Number(lng);
-    const radiusMiles = Number(radius_miles);
-
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
-      return res.status(400).json({ error: 'Invalid latitude: must be a finite number in [-90, 90]' });
-    }
-
-    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
-      return res.status(400).json({ error: 'Invalid longitude: must be a finite number in [-180, 180]' });
-    }
-
-    if (!Number.isFinite(radiusMiles) || radiusMiles <= 0 || radiusMiles > 1000) {
-      return res.status(400).json({ error: 'Invalid radius_miles: must be a finite number in (0, 1000]' });
-    }
+    const { lat: latitude, lng: longitude, radius_miles: radiusMiles } = parseResult.data;
 
     // Approximate bounding box (1 degree is roughly 69 miles)
     const radiusDeg = radiusMiles / 69.0;

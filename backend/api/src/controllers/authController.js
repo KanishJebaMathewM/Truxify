@@ -1,15 +1,6 @@
-import refreshTokenService from '../services/refreshTokenService.js';
 import jwt from 'jsonwebtoken';
-
-const createAccessToken = (tokenRecord) => jwt.sign(
-  {
-    id: tokenRecord.user_id,
-    uid: tokenRecord.user_id,
-    iss: 'truxify-backend-api',
-  },
-  process.env.JWT_SECRET || 'truxify-jwt-secret-key',
-  { expiresIn: '7d' },
-);
+import refreshTokenService from '../services/refreshTokenService.js';
+import { ValidationError, UnauthorizedError, AppError } from '../utils/errors.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
 
@@ -41,7 +32,7 @@ export const refreshToken = async (req, res, next) => {
       expiresAt: newTokenData.expires_at,
     });
   } catch (err) {
-    if (err.message.includes('Token reuse detected')) {
+    if (err.message && err.message.includes('Token reuse detected')) {
       return next(new UnauthorizedError('Security Alert: Token theft detected. All sessions terminated.'));
     }
     return next(new UnauthorizedError(err.message));

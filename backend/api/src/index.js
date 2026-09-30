@@ -118,7 +118,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
-import { authenticate, requireRole, verifyJWT } from './middleware/auth.js'
+import { authenticate, requireRole } from './middleware/auth.js'
 import { requireApiKey } from './middleware/apiKey.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
@@ -474,9 +474,25 @@ app.use(requireJsonContent)
 // See individual route mounts below.
 
 // ============================================================================
+// AUTHENTICATION
+// ============================================================================
+// There is intentionally NO global `app.use('/api', verifyJWT)` gate here.
+// Authentication is applied per mount, which is what lets the unauthenticated
+// surface (/api/health, /api/auth, /api/public, /api/webhooks, and the
+// device-authenticated /api/iot) keep working.
+//
+// A `verifyJWT` line used to sit at the top of the RATE LIMITING block, wired
+// to a `verifyJWT` export that a later merge had silently dropped from
+// middleware/auth.js. The import resolved to `undefined`, and Express 5 rejects
+// a non-function handler with "argument handler must be a function", so the
+// whole server threw at registration and could not boot.
+//
+// Do not reintroduce a global gate here. If central middleware is wanted, it
+// needs a public-path allowlist and must land with its own export and tests.
+
+// ============================================================================
 // RATE LIMITING
 // ============================================================================
-app.use('/api', verifyJWT)
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)

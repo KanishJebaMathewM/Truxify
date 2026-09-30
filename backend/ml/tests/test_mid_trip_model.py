@@ -115,7 +115,7 @@ class TestFindMidTripLoads:
             "dropoff_lat": 13.0, "dropoff_lng": 78.1,
             "weight_kg": 500, "length_m": 2, "width_m": 1, "height_m": 1,
             "payment_inr": 2000,
-            "pickup_deadline": (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat(),
+            "pickup_deadline": (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat(),
         }
         result = find_mid_trip_loads(
             {"lat": 12.0, "lng": 77.0},

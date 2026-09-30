@@ -204,6 +204,12 @@ import {
 } from '../controllers/orderController.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import {
+  validatePodFile,
+  generatePodStoragePath,
+  uploadPodFile,
+  createPodSignedUrl
+} from '../lib/storage/podStorage.js';
 import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 
 const router = express.Router();
@@ -211,7 +217,7 @@ const MAX_GEOFENCE_RADIUS_M = 500;
 
 const milestoneStore = createStore('rl:milestone:');
 const milestoneLimiter = rateLimit({
-  windowMs: 60 * 1000,
+  windowMs: 60 * 1000, 
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   keyGenerator: (req) => req.user?.id || 'unknown',
   ...(milestoneStore && typeof milestoneStore.init === 'function' ? { store: milestoneStore } : {}),
@@ -220,6 +226,9 @@ const milestoneLimiter = rateLimit({
   message: { error: 'Too many milestone updates. Please slow down.' },
 });
 
+
+// 1. CREATE ORDER (CUSTOMER)
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), validateBody(createOrderSchema), createOrder);
 
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
@@ -584,7 +593,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
     }
 
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount, version');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
@@ -704,25 +713,32 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       expectedAmountWei
     );
 
-    if (result.alreadyFunded) {
-      const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-        escrow_status: 'funded',
-      }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+    if (result.error) {
+      return res.status(422).json({ error: result.error, code: result.code });
+    }
 
+    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
+      orderId,
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: (order.version || 0) + 1,
+        updated_at: new Date().toISOString(),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: order.version },
+      ],
+      'id'
+    );
+
+    if (result.alreadyFunded) {
       if (!updateErr && updatedData) {
         await finalizeAcceptance();
         return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
       }
       return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
     }
-
-    if (result.error) {
-      return res.status(422).json({ error: result.error, code: result.code });
-    }
-
-    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
-      escrow_status: 'funded',
-    }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
     if (updateErr) {
       logger.error('[confirm-deposit] DB update failed:', updateErr.message);
@@ -750,83 +766,13 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     return res.status(500).json({ error: 'Internal Server Error' });
   } finally {
     if (lockValue) {
-      await releaseLock(lockKey, lockValue).catch(() => {});
+      await releaseLock(lockKey, lockValue).catch(() => { });
     }
     if (lock && typeof lock.release === 'function') {
-      await lock.release().catch(() => {});
+      await lock.release().catch(() => { });
     }
   }
-}); 
-router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
-     const orderId = req.params.id;
-     
-     try {
-       const result = await escrowLockManager.withLock(orderId, async (ctx) => {
-         // SINGLE READ - no more duplicate readOrder() calls
-         const { data: order, error } = await orderRepository.findOrderById(orderId);
-         if (error || !order) {
-           throw new DomainError(404, { error: 'Order not found' });
-         }
-         
-         // Resolve expected deposit amount once
-         const expectedAmount = resolveExpectedDepositAmount(order);
-         
-         // Transition to confirming state
-         const transitionResult = await ctx.transition('confirming');
-         if (!transitionResult.success) {
-           throw new DomainError(409, { error: 'Invalid state transition' });
-         }
-         
-         // Verify on-chain deposit
-         const depositTx = await recordDepositTx(order, expectedAmount);
-         
-         try {
-           // Execute acceptance RPC (may take time)
-           await finalizeAcceptance(order, depositTx);
-           
-           // Transition to funded
-           await ctx.transition('funded');
-           
-           // Update DB atomically
-           await orderRepository.updateOrder(orderId, {
-             escrow_status: 'funded',
-             deposit_tx_hash: depositTx.hash
-           });
-           
-           return { success: true, txHash: depositTx.hash };
-         } catch (rpcError) {
-           // EXTEND LOCK for refund processing
-           await ctx.extend();
-           
-           // Transition to refund_pending
-           await ctx.transition('refund_pending');
-           
-           // Execute refund WHILE HOLDING LOCK
-           const refundResult = await submitEscrowRefund(orderId, depositTx);
-           
-           // Transition to refunded
-           await ctx.transition('refunded');
-           
-           await orderRepository.updateOrder(orderId, {
-             escrow_status: 'refunded',
-             refund_tx_hash: refundResult.txHash
-           });
-           
-           throw new DomainError(500, { 
-             error: 'Acceptance failed, refund processed',
-             refundTxHash: refundResult.txHash 
-           });
-         }
-       }, { 
-         expectedState: 'funding',
-         targetState: 'confirming'
-       });
-       
-       res.json(result);
-     } catch (err) {
-       next(err);
-     }
-   });
+});
 
 
 //  ============================================================================

@@ -90,26 +90,17 @@ async function relayOnce() {
           const reason = outcome.deduplicated
             ? "Event deduplicated by EventBus"
             : outcome.adapterAttempted === 0
-              ? "No event consumer/adapters handled the event"
-              : `Adapter failures: ${outcome.adapterErrors.join("; ")}`;
-          await outboxService.markFailed(event.event_id, reason);
-          logger.error("[OutboxRelay] Event not delivered, marked failed:", {
-            eventId: event.event_id,
-            reason,
-          });
+              ? 'No event consumer/adapters handled the event'
+              : `Adapter failures: ${outcome.adapterErrors.join('; ')}`;
+          await outboxService.markFailed(event.event_id, _workerId, reason);
+          logger.error('[OutboxRelay] Event not delivered, marked failed:', { eventId: event.event_id, reason });
         }
       } catch (err) {
-        logger.error("[OutboxRelay] Failed to publish event:", {
-          eventId: event.id,
-          err: err.message,
-        });
+        logger.error('[OutboxRelay] Failed to publish event:', { eventId: event.event_id, err: err.message });
         try {
-          await outboxService.markFailed(event.id, err.message);
+          await outboxService.markFailed(event.event_id, _workerId, err.message);
         } catch (markErr) {
-          logger.error("[OutboxRelay] Failed to mark event failed:", {
-            eventId: event.id,
-            err: markErr.message,
-          });
+          logger.error('[OutboxRelay] Failed to mark event failed:', { eventId: event.event_id, err: markErr.message });
         }
       }
     }

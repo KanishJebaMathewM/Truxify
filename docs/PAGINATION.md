@@ -46,6 +46,29 @@ Unbounded `limit` values (e.g. `?limit=1000000000`) force the database to materi
 
 ---
 
+## Response Metadata Format
+
+Paginated collection endpoints return standardized pagination metadata:
+
+```json
+{
+  "data": [],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 125,
+    "totalPages": 7,
+    "hasNextPage": true,
+    "hasPreviousPage": false
+  }
+}
+```
+
+- When `total` is 0, `totalPages` is 0, and both `hasNextPage` and `hasPreviousPage` are `false`.
+- Existing endpoints maintain backwards-compatible aliases for collection names and legacy root-level pagination fields.
+
+---
+
 ## Testing
 
 Automated tests verify:
@@ -54,3 +77,4 @@ Automated tests verify:
 - Invalid values return 400.
 - Page-based offsets are computed correctly.
 - The `X-Total-Count` header is injected when a count is present.
+- Pagination metadata includes `page`, `limit`, `total`, `totalPages`, `hasNextPage`, and `hasPreviousPage`.

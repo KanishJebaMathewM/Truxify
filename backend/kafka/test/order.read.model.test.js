@@ -3,11 +3,11 @@
  * (backend/kafka/cqrs/order.read.model.js).
  *
  * Covers the read-model consolidation requirements of Issue #1:
- *   - applyEvent() applies the event ATOMICALLY with its idempotency record
- *     via the apply_order_event RPC
- *   - applyEvent() uses the real order id (never the event id)
- *   - duplicate/replayed events return false (no duplicate read-model effect)
- *   - the read model is read from `orders_read_model` (the single table)
+ *    - applyEvent() applies the event ATOMICALLY with its idempotency record
+ *      via the apply_order_event RPC
+ *    - applyEvent() uses the real order id (never the event id)
+ *    - duplicate/replayed events return false (no duplicate read-model effect)
+ *    - the read model is read from `orders_read_model` (the single table)
  * Unit tests for backend/kafka/cqrs/order.read.model.js
  *
  * The Kafka CQRS projection and the eventsourcing projection share the
@@ -15,11 +15,11 @@
  * 20260812000000_unify_order_read_model_schema.sql and the schema module
  * backend/api/src/core/orders/read-model-schema.js). This test verifies the
  * Kafka writer:
- *   - upserts only canonical columns (never the legacy `data` column),
- *   - derives event_type / version from the snapshot timeline,
- *   - writes the normalized lowercase status column,
- *   - queries ORDER_READ_MODEL_TABLE everywhere (no `order_read_models`),
- *   - filters the list query on payload->customer_id / payload->driver_id.
+ *    - upserts only canonical columns (never the legacy `data` column),
+ *    - derives event_type / version from the snapshot timeline,
+ *    - writes the normalized lowercase status column,
+ *    - queries ORDER_READ_MODEL_TABLE everywhere (no `order_read_models`),
+ *    - filters the list query on payload->customer_id / payload->driver_id.
  *
  * Run with:  npm test -- test/order.read.model.test.js
  */

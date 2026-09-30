@@ -1,173 +1,98 @@
-import { supabase, supabaseAdmin } from '../config/db.js';
-import logger from '../middleware/logger.js';
-
-/**
- * GET /api/driver/:driverId
- * Retrieves driver profile, details, and active vehicle assignment.
- */
-export const getDriverById = async (req, res) => {
-  const { driverId } = req.params;
-
+// Get driver statement and earnings report
+const getDriverStatement = async (req, res) => {
   try {
-    const client = supabaseAdmin || supabase;
-    if (!client) {
-      return res.status(503).json({ error: 'Database service unavailable' });
-    }
+    const driverId = req.user?.id || req.user?._id;
+    const { startDate, endDate } = req.query;
 
-    const { data: driverDetails, error: detailsError } = await client
-      .from('driver_details')
-      .select('*')
-      .eq('user_id', driverId)
-      .maybeSingle();
-
-    if (detailsError) {
-      logger.error({ err: detailsError, driverId }, '[driverController] Failed to fetch driver details');
-      return res.status(500).json({ error: 'Failed to fetch driver details.' });
-    }
-
-    if (!driverDetails) {
-      return res.status(404).json({ error: 'Driver not found.' });
-    }
-
-    const { data: profile, error: profileError } = await client
-      .from('profiles')
-      .select('id, full_name, email, phone, role, created_at')
-      .eq('id', driverId)
-      .maybeSingle();
-
-    if (profileError) {
-      logger.warn({ err: profileError, driverId }, '[driverController] Failed to fetch profile details');
-    }
-
-    let truck = null;
-    if (driverDetails.truck_id) {
-      const { data: truckData } = await client
-        .from('trucks')
-        .select('*')
-        .eq('id', driverDetails.truck_id)
-        .maybeSingle();
-      truck = truckData || null;
-    }
-
-    return res.json({
-      driver: {
-        ...driverDetails,
-        profile: profile || null,
-        truck,
-      },
-    });
-  } catch (err) {
-    logger.error({ err: err.message, driverId }, '[driverController] Error fetching driver by ID');
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
-/**
- * GET /api/driver/:driverId/trips
- * Retrieves paginated trip history for the specified driver.
- */
-export const getDriverTrips = async (req, res) => {
-  const { driverId } = req.params;
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
-
-  try {
-    const client = supabaseAdmin || supabase;
-    if (!client) {
-      return res.status(503).json({ error: 'Database service unavailable' });
-    }
-
-    const { data: trips, error, count } = await client
-      .from('trips')
-      .select('*', { count: 'exact' })
-      .eq('driver_id', driverId)
-      .order('created_at', { ascending: false })
-      .range(from, to);
-
-    if (error) {
-      logger.error({ err: error, driverId }, '[driverController] Failed to fetch driver trips');
-      return res.status(500).json({ error: 'Failed to fetch driver trips.' });
-    }
-
-    return res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      trips: trips || [],
-    });
-  } catch (err) {
-    logger.error({ err: err.message, driverId }, '[driverController] Error fetching driver trips');
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
-/**
- * PUT /api/driver/:driverId
- * Updates driver profile or settings.
- */
-export const updateDriver = async (req, res) => {
-  const { driverId } = req.params;
-
-  // Authorization check: driver can update own profile, or user is admin
-  if (req.user?.id !== driverId && req.user?.role !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden: You cannot update another driver profile.' });
-  }
-
-  const { is_online, hos_status, truck_id } = req.body;
-  const updatePayload = {
-    updated_at: new Date().toISOString(),
-  };
-
-  const VALID_HOS_STATUSES = ['off_duty', 'on_duty', 'driving', 'resting'];
-  if (hos_status !== undefined) {
-    if (typeof hos_status !== 'string' || !VALID_HOS_STATUSES.includes(hos_status)) {
-      return res.status(400).json({
-        error: `Invalid hos_status. Must be one of: ${VALID_HOS_STATUSES.join(', ')}`,
+    if (!driverId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Driver authentication required',
       });
     }
-    updatePayload.hos_status = hos_status;
-  }
 
-  if (typeof is_online === 'boolean') updatePayload.is_online = is_online;
-  if (truck_id !== undefined) updatePayload.truck_id = truck_id;
-
-  try {
-    const client = supabaseAdmin || supabase;
-    if (!client) {
-      return res.status(503).json({ error: 'Database service unavailable' });
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'startDate and endDate are required',
+      });
     }
 
-    const { data: updated, error } = await client
-      .from('driver_details')
-      .update(updatePayload)
-      .eq('user_id', driverId)
-      .select('*')
-      .maybeSingle();
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
 
-    if (error) {
-      logger.error({ err: error, driverId }, '[driverController] Failed to update driver');
-      return res.status(500).json({ error: 'Failed to update driver details.' });
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date range',
+      });
     }
 
-    if (!updated) {
-      return res.status(404).json({ error: 'Driver profile not found.' });
+    if (start > end) {
+      return res.status(400).json({
+        success: false,
+        message: 'startDate must be before endDate',
+      });
     }
 
-    return res.json({
-      message: 'Driver updated successfully.',
-      driver: updated,
+    // Fetch completed driver earnings for the requested period.
+    // Adjust the model/query below to match your existing Order/Earning model.
+    const orders = await Order.find({
+      driver: driverId,
+      status: 'completed',
+      completedAt: {
+        $gte: start,
+        $lte: end,
+      },
+    }).lean();
+
+    const totals = orders.reduce(
+      (result, order) => {
+        const baseFreight = Number(order.baseFreight || order.freightAmount || 0);
+        const platformFee = Number(order.platformFee || order.platformFees || 0);
+        const tollEstimate = Number(order.tollEstimate || order.tollAmount || 0);
+        const netEarnings =
+          Number(
+            order.netEarnings ??
+              (baseFreight - platformFee + tollEstimate)
+          );
+
+        result.baseFreight += baseFreight;
+        result.platformFees += platformFee;
+        result.tollEstimates += tollEstimate;
+        result.netEarnings += netEarnings;
+        result.completedTrips += 1;
+
+        return result;
+      },
+      {
+        baseFreight: 0,
+        platformFees: 0,
+        tollEstimates: 0,
+        netEarnings: 0,
+        completedTrips: 0,
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        driverId,
+        period: {
+          startDate,
+          endDate,
+        },
+        totals,
+      },
     });
-  } catch (err) {
-    logger.error({ err: err.message, driverId }, '[driverController] Error updating driver');
-    return res.status(500).json({ error: 'Internal Server Error' });
-  }
-};
+  } catch (error) {
+    console.error('Error retrieving driver statement:', error);
 
-export default {
-  getDriverById,
-  getDriverTrips,
-  updateDriver,
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve driver statement',
+      error: error.message,
+    });
+  }
 };

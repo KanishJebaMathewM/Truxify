@@ -1233,5 +1233,35 @@ router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:subm
     return res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
+router.post(
+  '/:id/bids',
+  authenticate,
+  userLimiter,
+  requirePolicy('bid:submit'),
+  bidLimiter,
+  validateParams(paramIdSchema),
+  validateBody(submitBidSchema),
+  async (req, res) => {
+    try {
+      const { amount, bid_amount } = req.body;
+      const finalBidAmount = bid_amount ?? amount;
+
+      const result = await orderLifecycleService.submitBid(
+        req.params.id,
+        req.user.id,
+        finalBidAmount
+      );
+
+      return res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return res.status(err.status).json(err.payload);
+      }
+
+      logger.error('Failed to submit bid:', err?.message);
+      return res.status(500).json({ error: 'Internal Server Error.' });
+    }
+  }
+);
 
 export default router;

@@ -1,0 +1,23 @@
+import express from 'express';
+import logger from '../middleware/logger.js';
+// ... other imports (e.g., database health checks, uptime metrics)
+
+const router = express.Router();
+
+router.get('/health', async (req, res) => {
+  try {
+    // Perform minimal checks (DB, Redis, etc.)
+    logger.info({ event: 'HEALTH_CHECK_PING' }, 'Health check probe received.');
+    
+    return res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
+  } catch (err) {
+    logger.error({ event: 'HEALTH_CHECK_FAILED', error: err?.message }, 'Health check failed.');
+    return res.status(503).json({ status: 'unhealthy', error: err?.message });
+  }
+});
+
+export default router;

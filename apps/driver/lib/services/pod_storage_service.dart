@@ -46,6 +46,7 @@ class PodStorageService {
   static Database? _database;
   static Future<Database>? _pendingInit;
   static const String tableName = 'pods';
+  static const int schemaVersion = 2;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -60,12 +61,14 @@ class PodStorageService {
 
     return await openDatabase(
       path,
-      version: 1,
-      onCreate: _createDB,
+      version: schemaVersion,
+      onCreate: createDatabase,
+      onUpgrade: upgradeDatabase,
     );
   }
 
-  Future _createDB(Database db, int version) async {
+  /// Creates the current schema for a fresh installation.
+  static Future<void> createDatabase(Database db, int version) async {
     await db.execute('''
       CREATE TABLE $tableName (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +79,30 @@ class PodStorageService {
         created_at INTEGER NOT NULL
       )
     ''');
+    await _createIndexes(db);
+  }
+
+  /// Preserves existing PODs while upgrading a version 1 database.
+  static Future<void> upgradeDatabase(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      await _createIndexes(db);
+    }
+  }
+
+  static Future<void> _createIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pods_synced ON $tableName(synced)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pods_order_id ON $tableName(order_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_pods_created_at ON $tableName(created_at)',
+    );
   }
 
   Future<int> insertPod(PodRecord pod) async {

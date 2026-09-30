@@ -1,7 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:truxify_driver/services/pod_storage_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
   group('PodRecord', () {
     test('creates PodRecord with required fields', () {
       final record = PodRecord(
@@ -87,4 +99,95 @@ void main() {
       expect(record.photoPath, isNull);
     });
   });
+
+  group('POD database migration', () {
+    late Directory tempDirectory;
+
+    setUp(() async {
+      tempDirectory = await Directory.systemTemp.createTemp('truxify-pods-');
+    });
+
+    tearDown(() async {
+      await tempDirectory.delete(recursive: true);
+    });
+
+    test('upgrades version 1 without losing pending or synced PODs', () async {
+      final databasePath = path.join(tempDirectory.path, 'pods.db');
+      final oldDb = await openDatabase(
+        databasePath,
+        version: 1,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE pods (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              order_id TEXT NOT NULL,
+              signature_path TEXT,
+              photo_path TEXT,
+              synced INTEGER DEFAULT 0,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+        },
+      );
+      await oldDb.insert('pods', {
+        'order_id': 'pending-order',
+        'signature_path': '/signature.png',
+        'synced': 0,
+        'created_at': 123,
+      });
+      await oldDb.insert('pods', {
+        'order_id': 'synced-order',
+        'synced': 1,
+        'created_at': 456,
+      });
+      await oldDb.close();
+
+      final upgradedDb = await openDatabase(
+        databasePath,
+        version: PodStorageService.schemaVersion,
+        onCreate: PodStorageService.createDatabase,
+        onUpgrade: PodStorageService.upgradeDatabase,
+      );
+      try {
+        final rows = await upgradedDb.query('pods', orderBy: 'id');
+        expect(
+          rows.map((row) => row['order_id']).toList(),
+          ['pending-order', 'synced-order'],
+        );
+        expect(rows.first['signature_path'], '/signature.png');
+        expect(rows.map((row) => row['synced']).toList(), [0, 1]);
+        expect(rows.map((row) => row['created_at']).toList(), [123, 456]);
+        expect(await upgradedDb.getVersion(), PodStorageService.schemaVersion);
+        await _expectIndexes(upgradedDb);
+      } finally {
+        await upgradedDb.close();
+      }
+    });
+
+    test('creates the indexes on a fresh database', () async {
+      final db = await openDatabase(
+        path.join(tempDirectory.path, 'new-pods.db'),
+        version: PodStorageService.schemaVersion,
+        onCreate: PodStorageService.createDatabase,
+        onUpgrade: PodStorageService.upgradeDatabase,
+      );
+      try {
+        await _expectIndexes(db);
+      } finally {
+        await db.close();
+      }
+    });
+  });
+}
+
+Future<void> _expectIndexes(Database db) async {
+  final indexes = await db.rawQuery('PRAGMA index_list(pods)');
+  expect(
+    indexes.map((index) => index['name']).toList(),
+    containsAll([
+      'idx_pods_synced',
+      'idx_pods_order_id',
+      'idx_pods_created_at',
+    ]),
+  );
 }

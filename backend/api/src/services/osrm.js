@@ -2,6 +2,7 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+import { validateCoordinate } from '../utils/coordinates.js';
 
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
@@ -25,14 +26,22 @@ const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
 export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
-  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
-      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
-    return 'Invalid coordinates provided.';
+  const pLat = validateCoordinate(pickupLat, 'lat', 'pickup_lat');
+  if (!pLat.valid) {
+    return pLat.error.includes('between') ? 'pickup_lat must be between -90 and 90.' : 'Invalid coordinates provided.';
   }
-  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
-  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
-  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
-  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  const pLng = validateCoordinate(pickupLng, 'lng', 'pickup_lng');
+  if (!pLng.valid) {
+    return pLng.error.includes('between') ? 'pickup_lng must be between -180 and 180.' : 'Invalid coordinates provided.';
+  }
+  const dLat = validateCoordinate(dropLat, 'lat', 'drop_lat');
+  if (!dLat.valid) {
+    return dLat.error.includes('between') ? 'drop_lat must be between -90 and 90.' : 'Invalid coordinates provided.';
+  }
+  const dLng = validateCoordinate(dropLng, 'lng', 'drop_lng');
+  if (!dLng.valid) {
+    return dLng.error.includes('between') ? 'drop_lng must be between -180 and 180.' : 'Invalid coordinates provided.';
+  }
   
   return null;
 };
@@ -72,7 +81,9 @@ export async function getRouteEstimate(input = {}) {
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
-    !Number.isFinite(dropLat) || !Number.isFinite(dropLng)
+    !Number.isFinite(dropLat) || !Number.isFinite(dropLng) ||
+    pickupLat < -90 || pickupLat > 90 || dropLat < -90 || dropLat > 90 ||
+    pickupLng < -180 || pickupLng > 180 || dropLng < -180 || dropLng > 180
   ) {
     return null;
   }
@@ -185,7 +196,9 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
+    !Number.isFinite(destLat) || !Number.isFinite(destLng) ||
+    originLat < -90 || originLat > 90 || destLat < -90 || destLat > 90 ||
+    originLng < -180 || originLng > 180 || destLng < -180 || destLng > 180
   ) {
     return null;
   }
@@ -268,7 +281,9 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
 export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
+    !Number.isFinite(destLat) || !Number.isFinite(destLng) ||
+    originLat < -90 || originLat > 90 || destLat < -90 || destLat > 90 ||
+    originLng < -180 || originLng > 180 || destLng < -180 || destLng > 180
   ) {
     return null;
   }

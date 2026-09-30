@@ -61,7 +61,7 @@ function toDbStatus(status) {
     return ORDER_STATUS_TO_DB[status] || status.toLowerCase();
 }
 
-const typeDefs = gql`
+export const typeDefs = gql`
     extend type Query {
         order(id: ID!): Order
         orders(status: OrderStatus, limit: Int, offset: Int): [Order]
@@ -148,7 +148,7 @@ const typeDefs = gql`
     }
 `;
 
-const resolvers = {
+export const resolvers = {
     Query: {
         order: async (_, { id }, { user }) => {
             const currentUser = requireUser(user);
@@ -233,6 +233,11 @@ const resolvers = {
         },
         updateOrder: async (_, { id, input }, { user }) => {
             const currentUser = requireUser(user);
+            // Customer lifecycle transitions must run the REST OTP/escrow
+            // checks, rather than patching the order status directly.
+            if (!isAdmin(currentUser) && input.status != null) {
+                throw new Error('Order status changes require the REST lifecycle endpoints.');
+            }
             const updates = {
                 status: toDbStatus(input.status),
                 pickup_address: input.pickup?.address ?? undefined,

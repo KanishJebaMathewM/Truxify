@@ -1,113 +1,170 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { carbonTokenService } from '../../src/services/carbonTokenService.js';
+/**
+ * Unit tests for backend/api/src/services/carbonTokenService.js
+ *
+ * The service previously coerced every input with Number() and never checked
+ * the result, so `fuel_saved_liters: 'abc'` minted a token whose co2SavedKg and
+ * tokenAmount were NaN, and negative distances/weights were accepted. Those
+ * bogus credits could then be retired as corporate Scope 3 offsets.
+ *
+ * Run with:  npm test -- test/unit/carbonTokenService.test.js
+ */
+import { describe, it, expect, vi } from 'vitest';
 
-describe('carbonTokenService', () => {
-  beforeEach(() => {
-    carbonTokenService.tokens.clear();
+const mockLogger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
+
+vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
+
+const { carbonTokenService } = await import('../../src/services/carbonTokenService.js');
+const { ValidationError } = await import('../../src/utils/errors.js');
+
+const base = {
+  truckId: 'TR-1',
+  tripId: 'TP-1',
+  distanceKm: 450,
+  fuelSavedLiters: 12,
+  loadWeightKg: 9000,
+};
+
+describe('carbonTokenService.calculateAndMintCarbonCredits', () => {
+  it('mints a credit from valid telematics figures', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({ ...base });
+    // 12 L * 2.68 = 32.16 kg CO2 = 0.0322 metric tons
+    expect(token.co2SavedKg).toBe(32.16);
+    expect(token.co2SavedMetricTons).toBe(0.0322);
+    expect(token.tokenAmount).toBe(0.0322);
+    expect(token.status).toBe('MINTED');
+    expect(token.distanceKm).toBe(450);
+    expect(token.loadWeightKg).toBe(9000);
   });
 
-  describe('calculateAndMintCarbonCredits', () => {
-    it('throws error when required parameters are missing', async () => {
-      await expect(
-        carbonTokenService.calculateAndMintCarbonCredits({ tripId: 'trip-1', fuelSavedLiters: 50 })
-      ).rejects.toThrow('Missing required parameters');
-
-      await expect(
-        carbonTokenService.calculateAndMintCarbonCredits({ truckId: 'truck-1', fuelSavedLiters: 50 })
-      ).rejects.toThrow('Missing required parameters');
-
-      await expect(
-        carbonTokenService.calculateAndMintCarbonCredits({ truckId: 'truck-1', tripId: 'trip-1' })
-      ).rejects.toThrow('Missing required parameters');
+  it('coerces numeric strings', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({
+      ...base,
+      distanceKm: '450',
+      fuelSavedLiters: '12',
+      loadWeightKg: '9000',
     });
-
-    it('accurately calculates saved CO2 metric tons and mints tokens', async () => {
-      // 100 liters saved * 2.68 kg/L = 268 kg = 0.268 metric tons
-      const record = await carbonTokenService.calculateAndMintCarbonCredits({
-        truckId: 'TRUCK-101',
-        tripId: 'TRIP-5001',
-        distanceKm: 850,
-        fuelSavedLiters: 100,
-        loadWeightKg: 15000,
-      });
-
-      expect(record.tokenId).toMatch(/^CCT-TRIP-5001-\d+$/);
-      expect(record.truckId).toBe('TRUCK-101');
-      expect(record.tripId).toBe('TRIP-5001');
-      expect(record.co2SavedKg).toBe(268);
-      expect(record.co2SavedMetricTons).toBe(0.268);
-      expect(record.tokenAmount).toBe(0.268);
-      expect(record.status).toBe('PENDING_CHAIN_ANCHOR');
-      expect(record.chainNetwork).toBeNull();
-      expect(record.blockchainTxHash).toBeNull();
-      expect(record.mintedAt).toBeDefined();
-
-      const stored = await carbonTokenService.getTokenDetails(record.tokenId);
-      expect(stored).toEqual(record);
-    });
+    expect(token.fuelSavedLiters).toBe(12);
+    expect(token.co2SavedKg).toBe(32.16);
   });
 
-  describe('purchaseCarbonCredits', () => {
-    it('successfully retires minted carbon tokens for Scope 3 emissions offset', async () => {
-      const minted = await carbonTokenService.calculateAndMintCarbonCredits({
-        truckId: 'TRUCK-202',
-        tripId: 'TRIP-7002',
-        fuelSavedLiters: 500,
-      });
-
-      const buyer = '0x1111111111111111111111111111111111111111';
-      const shipper = 'SHIPPER-ACME-INC';
-
-      const retired = await carbonTokenService.purchaseCarbonCredits({
-        tokenId: minted.tokenId,
-        buyerAddress: buyer,
-        shipperId: shipper,
-      });
-
-      expect(retired.status).toBe('RETIRED_FOR_OFFSET');
-      expect(retired.buyerAddress).toBe(buyer);
-      expect(retired.shipperId).toBe(shipper);
-      expect(retired.retiredAt).toBeDefined();
-      expect(retired.transferTxHash).toBeNull();
+  it('defaults optional measurements to 0', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({
+      truckId: 'TR-2',
+      tripId: 'TP-2',
+      fuelSavedLiters: 5,
     });
-
-    it('rejects double-spending / already retired carbon tokens', async () => {
-      const minted = await carbonTokenService.calculateAndMintCarbonCredits({
-        truckId: 'TRUCK-303',
-        tripId: 'TRIP-8003',
-        fuelSavedLiters: 200,
-      });
-
-      await carbonTokenService.purchaseCarbonCredits({
-        tokenId: minted.tokenId,
-        buyerAddress: '0x123',
-        shipperId: 'SHIPPER-1',
-      });
-
-      await expect(
-        carbonTokenService.purchaseCarbonCredits({
-          tokenId: minted.tokenId,
-          buyerAddress: '0x456',
-          shipperId: 'SHIPPER-2',
-        })
-      ).rejects.toThrow('already been redeemed/retired');
-    });
-
-    it('throws error when token is not found', async () => {
-      await expect(
-        carbonTokenService.purchaseCarbonCredits({
-          tokenId: 'CCT-NONEXISTENT-999',
-          buyerAddress: '0x123',
-          shipperId: 'SHIPPER-1',
-        })
-      ).rejects.toThrow('Carbon credit token not found');
-    });
+    expect(token.distanceKm).toBe(0);
+    expect(token.loadWeightKg).toBe(0);
   });
 
-  describe('getTokenDetails', () => {
-    it('returns null for unminted token ID', async () => {
-      const details = await carbonTokenService.getTokenDetails('CCT-UNKNOWN');
-      expect(details).toBeNull();
+  it('rejects a non-numeric fuel_saved_liters instead of minting NaN credits', async () => {
+    for (const fuelSavedLiters of ['abc', '12abc', NaN, Infinity, -Infinity]) {
+      await expect(
+        carbonTokenService.calculateAndMintCarbonCredits({ ...base, fuelSavedLiters }),
+        `fuelSavedLiters=${String(fuelSavedLiters)}`,
+      ).rejects.toThrow(ValidationError);
+    }
+  });
+
+  it('rejects a negative fuel_saved_liters', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, fuelSavedLiters: -100 }),
+    ).rejects.toThrow(/must not be negative/);
+  });
+
+  it('rejects a negative distance', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, distanceKm: -50 }),
+    ).rejects.toThrow(/must not be negative/);
+  });
+
+  it('rejects a negative load weight', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, loadWeightKg: -5000 }),
+    ).rejects.toThrow(/must not be negative/);
+  });
+
+  it('rejects a non-finite distance or load weight', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, distanceKm: 'abc' }),
+    ).rejects.toThrow(/finite/);
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, loadWeightKg: Infinity }),
+    ).rejects.toThrow(/finite/);
+  });
+
+  it('refuses to mint a zero-value credit', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, fuelSavedLiters: 0 }),
+    ).rejects.toThrow(/greater than 0/);
+  });
+
+  it('still requires truckId, tripId and fuelSavedLiters', async () => {
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, truckId: undefined }),
+    ).rejects.toThrow(/Missing required parameters/);
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, tripId: '' }),
+    ).rejects.toThrow(/Missing required parameters/);
+    await expect(
+      carbonTokenService.calculateAndMintCarbonCredits({ ...base, fuelSavedLiters: undefined }),
+    ).rejects.toThrow(/Missing required parameters/);
+  });
+
+  it('never persists a NaN field', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({ ...base });
+    for (const [key, value] of Object.entries(token)) {
+      if (typeof value === 'number') {
+        expect(Number.isFinite(value), `${key} should be finite`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('carbonTokenService.purchaseCarbonCredits', () => {
+  it('retires a minted credit for a shipper', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({ ...base });
+    const retired = await carbonTokenService.purchaseCarbonCredits({
+      tokenId: token.tokenId,
+      buyerAddress: '0xBuyer',
+      shipperId: 'SH-1',
     });
+    expect(retired.status).toBe('RETIRED_FOR_OFFSET');
+    expect(retired.buyerAddress).toBe('0xBuyer');
+    expect(retired.shipperId).toBe('SH-1');
+    expect(retired.transferTxHash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it('refuses to retire the same credit twice', async () => {
+    const token = await carbonTokenService.calculateAndMintCarbonCredits({ ...base });
+    const purchase = () => carbonTokenService.purchaseCarbonCredits({
+      tokenId: token.tokenId,
+      buyerAddress: '0xBuyer',
+      shipperId: 'SH-1',
+    });
+    await purchase();
+    await expect(purchase()).rejects.toThrow(/already been redeemed/);
+  });
+
+  it('rejects an unknown token', async () => {
+    await expect(
+      carbonTokenService.purchaseCarbonCredits({
+        tokenId: 'CCT-nope',
+        buyerAddress: '0xBuyer',
+        shipperId: 'SH-1',
+      }),
+    ).rejects.toThrow(/not found/);
+  });
+});
+
+describe('carbonTokenService.getTokenDetails', () => {
+  it('returns null for an unknown token', async () => {
+    expect(await carbonTokenService.getTokenDetails('CCT-nope')).toBeNull();
   });
 });

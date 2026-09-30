@@ -295,6 +295,7 @@ describe('ShardManager', () => {
       ]);
       expect(response.unhealthy).toEqual([]);
       expect(response.partial).toBe(false);
+      expect(response.errors).toEqual({});
       expect(response.results.map((result) => result.shard)).toEqual([
         'north',
         'south',
@@ -325,6 +326,7 @@ describe('ShardManager', () => {
       expect(response.healthy).toEqual(['north', 'south', 'west']);
       expect(response.unhealthy).toEqual(['east']);
       expect(response.partial).toBe(true);
+      expect(response.errors.east).toBe('East shard connection timeout');
     });
 
     it('captures uninitialized shard pools in failed list', async () => {
@@ -346,6 +348,7 @@ describe('ShardManager', () => {
       expect(response.results).toHaveLength(3);
       expect(response.failed).toEqual(['west']);
       expect(response.partial).toBe(true);
+      expect(response.errors.west).toBe('Shard connection pool uninitialized');
     });
   });
 

@@ -23,8 +23,9 @@
     "@typechain/hardhat": "^9.0.0",
     "@types/node": "^22.20.0",
     "chai": "^4.2.0",
+    "circom_tester": "^0.0.24",
     "ethers": "^6.17.0",
-    "hardhat": "^2.28.6",
+    "hardhat": "^2.22.0",
     "hardhat-gas-reporter": "^2.3.0",
     "solidity-coverage": "^0.8.17",
     "ts-node": "^10.9.2",
@@ -48,8 +49,8 @@
   "author": "Truxify Dev Team",
   "license": "ISC",
   "dependencies": {
-    "@openzeppelin/contracts": "^5.6.1",
-    "@openzeppelin/contracts-upgradeable": "^5.1.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "@openzeppelin/contracts-upgradeable": "^5.0.2",
     "circomlib": "^2.0.5",
     "dotenv": "^16.3.1",
     "snarkjs": "^0.7.0"

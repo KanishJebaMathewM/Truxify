@@ -11,4 +11,4 @@ uvicorn==0.24.0
 python-multipart==0.0.31
 soundfile==0.12.1
 numpy==1.26.2
-python-jose==3.3.0
+python-jose==3.4.0

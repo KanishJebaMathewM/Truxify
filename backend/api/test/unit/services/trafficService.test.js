@@ -5,10 +5,26 @@
  * API error handling, rush-hour fallback, and multiplier boundary conditions.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  getLiveTrafficMultiplier,
-  getLiveTrafficMultiplierEnterprise,
+import { redisClient } from '../../../src/config/db.js';
+import logger from '../../../src/middleware/logger.js';
+import trafficService, { getLiveTrafficMultiplier, getLiveTrafficMultiplierEnterprise,
+  getTrafficForRoute,
+  getRushHourMultiplier,
 } from '../../../src/services/trafficService.js';
+
+const originalEnv = { ...process.env };
+
+vi.mock('../../../src/config/db.js', () => ({
+  redisClient: {
+    get: vi.fn(),
+    set: vi.fn(),
+    setex: vi.fn()
+  }
+}));
+vi.mock('../../../src/middleware/logger.js', () => ({
+  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }
+}));
+global.fetch = vi.fn();
 
 describe('getLiveTrafficMultiplier', () => {
   beforeEach(() => {

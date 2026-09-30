@@ -18,6 +18,11 @@ let currentContract = null;
 let reconnectAttempt = 0;
 let reconnectTimer = null;
 const MAX_RECONNECT_DELAY_MS = 30000;
+// Tail of the serialized live-event chain (see enqueueLiveEvent).
+let liveEventQueue = Promise.resolve();
+
+// Promise queue used to serialize execution of live blockchain event handlers
+let liveEventQueue = Promise.resolve();
 
 function clearReconnectTimer() {
   if (reconnectTimer) {
@@ -78,6 +83,7 @@ export async function saveLastProcessedBlock(blockNumber) {
  * Serialize live blockchain events so database synchronization and cursor updates
  * cannot overlap across concurrent ethers event callbacks.
  */
+let liveEventQueue = Promise.resolve();
 export function enqueueLiveEvent(handler, eventPayload) {
   liveEventQueue = liveEventQueue
     .then(() => handler(eventPayload))

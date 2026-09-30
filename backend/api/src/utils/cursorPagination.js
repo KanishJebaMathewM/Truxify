@@ -33,7 +33,7 @@ export function decodeCursor(cursor) {
       if (
         typeof ps !== 'number' ||
         !Number.isInteger(ps) ||
-        ps < 1
+        ps <=0
       ) {
         return null;
       }

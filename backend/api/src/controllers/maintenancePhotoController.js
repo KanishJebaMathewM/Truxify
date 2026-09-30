@@ -171,6 +171,24 @@ export async function uploadMaintenancePhotos(req, res) {
       })
     );
 
+    // Generate signed URLs for existing stored photo paths as well
+    const existingPhotoUrls = await Promise.all(
+      existingUrls.map(async (path) => {
+        const { data: urlData, error: urlError } = await supabase.storage
+          .from('maintenance-photos')
+          .createSignedUrl(path, 60 * 60 * 24 * 7); // 7-day expiry
+
+        if (urlError) {
+          logger.error('[MaintenancePhotoController] Failed to create signed URL for existing photo:', urlError.message);
+          const errObj = new Error('Failed to generate photo URL');
+          errObj.statusCode = 500;
+          throw errObj;
+        }
+
+        return urlData.signedUrl;
+      })
+    );
+
     // Atomically append new paths via PostgreSQL RPC to enforce MAX_PHOTOS and prevent race conditions
     const { error: updateError } = await userClient.rpc('append_maintenance_photos', {
       p_ticket_id: ticketId,
@@ -193,7 +211,7 @@ export async function uploadMaintenancePhotos(req, res) {
 
     return res.status(200).json({
       success: true,
-      photo_urls: [...existingUrls, ...photoUrls],
+      photo_urls: [...existingPhotoUrls, ...photoUrls],
       uploaded_count: photoUrls.length,
     });
   } catch (err) {

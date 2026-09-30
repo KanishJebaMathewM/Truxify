@@ -22,7 +22,7 @@ dependencies:
   supabase_flutter: ^2.9.1
   web_socket_channel: ^3.0.0
   flutter_secure_storage: ^10.3.1
-  flutter_webrtc: ^0.10.4
+  flutter_webrtc: >=0.11.7 <2.0.0
   audioplayers: ^5.2.1
 
   google_fonts: ^8.1.0
@@ -55,7 +55,8 @@ dependencies:
   sentry_flutter: ^8.14.1
 
 dev_dependencies:
-  flutter_lints: ^3.0.0
+  mocktail: ^1.0.3
+  flutter_lints: ^6.0.0
   sqflite_common_ffi: ^2.3.4
   flutter_test:
     sdk: flutter

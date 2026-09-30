@@ -5,6 +5,9 @@ const mockSupabaseAdmin = {};
 const mockFirebaseAdmin = {};
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabase() { return mockSupabase; },
   supabase: mockSupabase,
   get supabaseAdmin() { return mockSupabaseAdmin; },

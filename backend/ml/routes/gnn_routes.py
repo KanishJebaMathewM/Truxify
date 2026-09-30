@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.params import Depends as DependsClass
-from pydantic import BaseModel
+from pydantic import BaseModel, confloat
 from typing import List, Dict, Any, Optional
 import networkx as nx
 import json
@@ -79,11 +79,11 @@ def validate_route_objectives(objectives):
 
 class Node(BaseModel):
     id: str
-    lat: float
-    lng: float
-    traffic: Optional[float] = 0
+    lat: confloat(allow_inf_nan=False, ge=-90, le=90)
+    lng: confloat(allow_inf_nan=False, ge=-180, le=180)
+    traffic: Optional[confloat(allow_inf_nan=False, ge=0, le=100)] = 0
     road_type: Optional[str] = "local"
-    speed_limit: Optional[float] = 50
+    speed_limit: Optional[confloat(allow_inf_nan=False, ge=0)] = 50
 
 class Edge(BaseModel):
     source: str

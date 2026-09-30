@@ -407,7 +407,7 @@ describe('escortWalletController', () => {
       });
     });
 
-    it('calls next with error when an exception is thrown in handshake', async () => {
+    it('reports a non-compliant escort when credential lookup fails', async () => {
       const error = new Error('RPC provider connection failed');
       didMock.getCredentials.mockRejectedValue(error);
 
@@ -417,10 +417,16 @@ describe('escortWalletController', () => {
 
       await handshake(req, res, next);
 
-      expect(next).toHaveBeenCalledWith(error);
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        { err: error },
-        'Error in handshake'
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({
+        handshake: 'FAILED',
+        allCompliant: false,
+        convoy: [{ address: '0xEscort1', compliant: false, reason: 'Credential verification unavailable' }],
+      });
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        { err: error, address: '0xEscort1' },
+        'Escort credential verification unavailable'
       );
     });
   });

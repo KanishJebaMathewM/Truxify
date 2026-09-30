@@ -16,6 +16,14 @@ function parseCoord(value, min, max) {
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
+const LAT_MIN = -90;
+const LAT_MAX = 90;
+const LNG_MIN = -180;
+const LNG_MAX = 180;
+const MAX_DETOUR_MIN_KM = 0.1;
+const MAX_DETOUR_MAX_KM = 500;
+const DEFAULT_MAX_DETOUR_KM = 10;
+
 // ============================================================================
 // 1. GET DEMAND HEATMAP
 // GET /api/ml/demand-heatmap
@@ -100,16 +108,27 @@ router.get(
   async (req, res) => {
     const { lat, lng, maxDetour } = req.query;
     try {
-      const currentLat = parseCoord(lat, -90, 90);
-      const currentLng = parseCoord(lng, -180, 180);
-      const maxDetourKm = parseFloat(maxDetour || '10');
+      const currentLat = parseCoord(lat, LAT_MIN, LAT_MAX);
+      const currentLng = parseCoord(lng, LNG_MIN, LNG_MAX);
 
       if (currentLat === null || currentLng === null) {
-        return res.status(400).json({ error: 'Valid lat (-90 to 90) and lng (-180 to 180) query parameters are required.' });
+        return res.status(400).json({
+          error: `lat must be a number between ${LAT_MIN} and ${LAT_MAX} and lng a number between ${LNG_MIN} and ${LNG_MAX}.`,
+        });
       }
 
-      if (isNaN(maxDetourKm) || maxDetourKm <= 0 || maxDetourKm > 500) {
-        return res.status(400).json({ error: 'maxDetour must be a positive number between 0.1 and 500 km.' });
+      // An unparseable maxDetour used to reach the haversine fallback as NaN,
+      // where `x <= NaN` is always false — the endpoint answered 200 with an
+      // empty list, hiding a client error as "no en-route loads".
+      const maxDetourKm =
+        maxDetour === undefined
+          ? DEFAULT_MAX_DETOUR_KM
+          : parseCoord(maxDetour, MAX_DETOUR_MIN_KM, MAX_DETOUR_MAX_KM);
+
+      if (maxDetourKm === null) {
+        return res.status(400).json({
+          error: `maxDetour must be a number between ${MAX_DETOUR_MIN_KM} and ${MAX_DETOUR_MAX_KM}.`,
+        });
       }
 
       // 1. Fetch available load offers

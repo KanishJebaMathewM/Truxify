@@ -2,30 +2,33 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:driver/services/marketplace_repository.dart';
+import 'package:truxify_driver/services/marketplace_repository.dart';
+import 'package:truxify_driver/models/app_models.dart';
 
 /// A [RealtimeChannel] double that records the `onPostgresChanges` callback so
 /// a test can synthesise a postgres insert without a live WebSocket, and that
 /// returns `this` from [subscribe] so no network activity happens.
 class FakeRealtimeChannel extends RealtimeChannel {
-  FakeRealtimeChannel() : super('new_load_offers', const RealtimeChannelConfig());
+  FakeRealtimeChannel() : super('new_load_offers', RealtimeClient('ws://localhost', headers: {}));
 
   void Function(PostgresChangePayload)? _onPostgresChanges;
 
   @override
   RealtimeChannel onPostgresChanges({
-    required PostgresChangeEvent event,
-    required String schema,
-    String? table,
-    PostgresChangeFilter? filter,
     required void Function(PostgresChangePayload) callback,
+    required PostgresChangeEvent event,
+    PostgresChangeFilter? filter,
+    List<PostgresChangeFilter>? filters,
+    String? schema,
+    List<String>? select,
+    String? table,
   }) {
     _onPostgresChanges = callback;
     return this;
   }
 
   @override
-  Future<void> subscribe([Duration? timeout]) => Future.value();
+  RealtimeChannel subscribe([void Function(RealtimeSubscribeStatus, Object?)? callback, Duration? timeout]) => this;
 
   /// Simulates a single `INSERT` on `load_offers`, driving the registered
   /// callback exactly once (as a real DB insert would).
@@ -35,6 +38,7 @@ class FakeRealtimeChannel extends RealtimeChannel {
         eventType: PostgresChangeEvent.insert,
         newRecord: record,
         oldRecord: const <String, dynamic>{},
+        errors: null,
         schema: 'public',
         table: 'load_offers',
         commitTimestamp: DateTime.now(),
@@ -60,9 +64,9 @@ class FakeSupabaseClient extends SupabaseClient {
       fakeChannel;
 
   @override
-  Future<void> removeChannel(RealtimeChannel channel) {
+  Future<String> removeChannel(RealtimeChannel channel) async {
     removeChannelCalled = true;
-    return Future.value();
+    return 'ok';
   }
 }
 

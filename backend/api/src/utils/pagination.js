@@ -63,8 +63,8 @@ export function calculatePagination({ total = 0, page = 1, limit = 20, offset = 
   const totalPages = safeTotal === 0 ? 0 : Math.ceil(safeTotal / pagination.limit);
   const isFirstPage = pagination.page === 1;
   const isLastPage = totalPages === 0 || pagination.page >= totalPages;
-  const hasNextPage = pagination.page < totalPages;
-  const hasPrevPage = pagination.page > 1;
+  const hasNextPage = safeTotal > 0 && pagination.page < totalPages;
+  const hasPrevPage = safeTotal > 0 && pagination.page > 1;
   const isOverflow = safeTotal > 0 && pagination.offset >= safeTotal;
   const isEmpty = safeTotal === 0;
 
@@ -87,6 +87,18 @@ export function getPaginationMeta(total, page, limit) {
   return calculatePagination({ total, page, limit });
 }
 
+export function formatPaginationMeta(total = 0, page = 1, limit = 20) {
+  const meta = calculatePagination({ total, page, limit });
+  return {
+    page: meta.page,
+    limit: meta.limit,
+    total: meta.total,
+    totalPages: meta.totalPages,
+    hasNextPage: meta.hasNextPage,
+    hasPreviousPage: meta.hasPreviousPage,
+  };
+}
+
 export function paginateArray(items = [], params = {}) {
   if (!Array.isArray(items)) {
     return { data: [], pagination: calculatePagination({ total: 0, ...params }) };
@@ -105,5 +117,6 @@ export default {
   parseLimit,
   calculatePagination,
   getPaginationMeta,
+  formatPaginationMeta,
   paginateArray,
 };

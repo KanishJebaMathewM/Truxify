@@ -211,10 +211,16 @@ export const updateWalletSchema = z.object({
   ),
 }).strict();
 
+// Shared token shape for all device schemas. Mirrors the character allowlist
+// that deviceController.validateFcmToken enforces so malformed tokens are
+// rejected at the gateway (zod) layer before reaching the controller.
+export const fcmTokenSchema = z.string()
+  .min(10, { message: 'fcmToken must be at least 10 characters' })
+  .max(4096, { message: 'fcmToken is too long' })
+  .regex(/^[a-zA-Z0-9\-_:.%/+=]+$/, { message: 'fcmToken contains invalid characters' });
+
 export const registerDeviceSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
+  fcmToken: fcmTokenSchema,
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
@@ -227,17 +233,11 @@ export const registerDeviceSchema = z.object({
 }).strict();
 
 export const unregisterDeviceSchema = z.object({
-  fcmToken: z.string({ required_error: 'fcmToken is required', invalid_type_error: 'fcmToken must be a string' })
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
-  userId: z.string().optional(),
+  fcmToken: fcmTokenSchema,
 }).strict();
 
 export const updateFcmTokenSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' })
-    .nullable(),
+  fcmToken: fcmTokenSchema.nullable(),
 }).strict();
 
 export const createTicketSchema = z.object({
@@ -440,6 +440,24 @@ export const reportGripDataSchema = z.object({
     z.number({ invalid_type_error: "slip_events_count must be a number" })
       .nonnegative({ message: 'slip_events_count must be >= 0' })
   ).optional().default(0),
+}).strict();
+
+export const nearbyGripQuerySchema = z.object({
+  lat: coerceNumber(
+    z.number({ invalid_type_error: 'latitude must be a finite number' })
+      .min(-90, 'latitude must be >= -90')
+      .max(90, 'latitude must be <= 90')
+  ),
+  lng: coerceNumber(
+    z.number({ invalid_type_error: 'longitude must be a finite number' })
+      .min(-180, 'longitude must be >= -180')
+      .max(180, 'longitude must be <= 180')
+  ),
+  radius_miles: coerceNumber(
+    z.number({ invalid_type_error: 'radius_miles must be a number' })
+      .min(0.01, 'radius_miles must be greater than 0')
+      .max(1000, 'radius_miles must be at most 1000')
+  ).default(50),
 }).strict();
 
 /**

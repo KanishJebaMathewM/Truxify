@@ -29,7 +29,7 @@ export function error(message = 'An error occurred', statusCode = 500, errors = 
 
 export function paginated(data = [], page = 1, limit = 10, total = 0, message = 'Success') {
   const parsedPage = typeof page === 'number' ? page : (typeof page === 'string' && page.trim() !== '' ? Number(page) : NaN);
-  const safePage = typeof parsedPage === 'number' && Number.isFinite(parsedPage) ? Math.max(1, parsedPage) : 1;
+  const safePage = typeof parsedPage === 'number' && Number.isFinite(parsedPage) ? Math.max(0, parsedPage) : 1;
 
   const parsedLimit = typeof limit === 'number' ? limit : (typeof limit === 'string' && limit.trim() !== '' ? Number(limit) : NaN);
   const rawLimit = typeof parsedLimit === 'number' && Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
@@ -50,8 +50,9 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
       limit: safeLimit,
       total: safeTotal,
       totalPages,
-      hasNextPage: safePage < totalPages,
-      hasPrevPage: safePage > 1,
+      hasNextPage: safeTotal > 0 && safePage < totalPages,
+      hasPrevPage: safeTotal > 0 && safePage > 1,
+      hasPreviousPage: safeTotal > 0 && safePage > 1,
     },
   };
 }

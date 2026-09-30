@@ -358,6 +358,8 @@ validateEscrowSetup().then((valid) => {
 
 const app = express()
 const server = http.createServer(app)
+// Wrap JSON responses before any middleware or route can send them.
+app.use(responseSanitizer)
 app.use(sentryRequestHandler());
 app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
@@ -757,7 +759,6 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
-app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
 app.use(notFound)

@@ -545,13 +545,13 @@ router.post("/verify", async (req, res) => {
         // `email.eq.null` would silently match nothing.
         let query = supabase
           .from("profiles")
-          .select("id, role, full_name, phone");
+          .select("id, role, full_name, phone, is_active");
 
         query = verifiedEmail
           ? query.or(`firebase_uid.eq.${verifiedUid},email.eq.${verifiedEmail}`)
           : query.eq("firebase_uid", verifiedUid);
 
-        const { data: profile } = await query.maybeSingle();
+        const { data: profile, error: profileErr } = await query.maybeSingle();
 
         if (profileErr) {
           logger.error(`[auth/verify] Supabase profile query error: ${profileErr.message}`);

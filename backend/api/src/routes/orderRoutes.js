@@ -579,15 +579,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  const lock = await acquireLockOrFallback(lockKey, 120000);
-  if (!lock.ok) {
-    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-  }
-
   let lockValue = null;
   try {
-    // acquireLock throws LockAcquisitionError when Redis is unavailable and
-    // returns null when the lock is already held by another request.
+    // Financial mutations require the distributed lock. A local fallback
+    // cannot exclude another API instance when Redis is unavailable.
     lockValue = await acquireLock(lockKey, 120000);
     if (!lockValue) {
       return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
@@ -755,7 +750,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
     if (err instanceof LockAcquisitionError) {
-      // Redis is down — do NOT proceed with the deposit mutation.
       logger.error('[confirm-deposit] Redis unavailable — refusing deposit confirmation:', err.message);
       return res.status(503).json({ error: 'Payment service temporarily unavailable. Please retry in a moment.' });
     }
@@ -766,10 +760,9 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     return res.status(500).json({ error: 'Internal Server Error' });
   } finally {
     if (lockValue) {
-      await releaseLock(lockKey, lockValue).catch(() => { });
-    }
-    if (lock && typeof lock.release === 'function') {
-      await lock.release().catch(() => { });
+      await releaseLock(lockKey, lockValue).catch((releaseErr) => {
+        logger.error('[confirm-deposit] Failed to release order lock:', releaseErr.message);
+      });
     }
   }
 });

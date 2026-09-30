@@ -13,7 +13,6 @@ from policy_builder import policy_builder
 # anyone who knew the policy could recover the plaintext with a single XOR
 # (issue #13069). The key is now bound to secret material the decrypting party
 # must hold.
-MASTER_SECRET = os.environ.get('ABE_MASTER_SECRET')
 NONCE_SIZE = 12
 TAG_SIZE = 16
 KEY_SIZE = 32
@@ -29,18 +28,20 @@ class CpAbeCipherEngine:
     """
 
     def _derive_key(self, policy_str: str, nonce: bytes) -> bytes:
-        if not MASTER_SECRET:
-            raise RuntimeError(
-                'ABE_MASTER_SECRET is not configured; refusing to encrypt/decrypt '
-                'logistics documents without a master secret key.'
-            )
+    master_secret = os.environ.get("ABE_MASTER_SECRET")
 
-        return HKDF(
-            algorithm=hashes.SHA256(),
-            length=KEY_SIZE,
-            salt=nonce,
-            info=f'truxify-cpabe:{policy_str}'.encode('utf-8'),
-        ).derive(MASTER_SECRET.encode('utf-8'))
+    if not master_secret:
+        raise RuntimeError(
+            "ABE_MASTER_SECRET is not configured; refusing to encrypt/decrypt "
+            "logistics documents without a master secret key."
+        )
+
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=KEY_SIZE,
+        salt=nonce,
+        info=f"truxify-cpabe:{policy_str}".encode("utf-8"),
+    ).derive(master_secret.encode("utf-8"))
 
     def encrypt_document(self, plaintext_bytes: bytes, policy_str: str) -> dict:
         nonce = os.urandom(NONCE_SIZE)

@@ -30,25 +30,32 @@ android {
         versionName = flutter.versionName
     }
 
-    signingConfigs {
+   
+       signingConfigs {
         create("release") {
             val keystorePropertiesFile = rootProject.file("key.properties")
+            val keystoreProperties = java.util.Properties()
+
             if (keystorePropertiesFile.exists()) {
-                val keystoreProperties = Properties()
-                keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
+                keystorePropertiesFile.inputStream().use {
+                    keystoreProperties.load(it)
+                }
+
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storePassword = keystoreProperties.getProperty("storePassword")
+
+                keystoreProperties.getProperty("storeFile")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { storeFile = rootProject.file(it) }
             }
         }
     }
+    
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("release")
+           // Release builds require the production keystore configured in key.properties.                          signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -65,3 +72,52 @@ dependencies {
     implementation("com.google.firebase:firebase-crashlytics")
 }
 
+val validateReleaseSigning by tasks.registering {
+    doLast {
+        val propertiesFile = rootProject.file("key.properties")
+
+        check(propertiesFile.isFile) {
+            "Missing key.properties. Copy key.properties.example and configure signing."
+        }
+
+        val properties = java.util.Properties()
+        propertiesFile.inputStream().use {
+            properties.load(it)
+        }
+
+        val required = listOf(
+            "keyAlias",
+            "keyPassword",
+            "storePassword",
+            "storeFile"
+        )
+
+        val missing = required.filter {
+            properties.getProperty(it).isNullOrBlank()
+        }
+
+        check(missing.isEmpty()) {
+            "Missing release signing properties: ${missing.joinToString()}"
+        }
+
+        val keystoreFile = rootProject.file(properties.getProperty("storeFile"))
+
+        check(keystoreFile.isFile) {
+            "Release keystore not found: ${keystoreFile.path}"
+        }
+    }
+}
+
+tasks.configureEach {
+    if (
+        name.contains("Release") &&
+        (
+            name.startsWith("assemble") ||
+            name.startsWith("bundle") ||
+            name.startsWith("package") ||
+            name.startsWith("validateSigning")
+        )
+    ) {
+        dependsOn(validateReleaseSigning)
+    }
+}

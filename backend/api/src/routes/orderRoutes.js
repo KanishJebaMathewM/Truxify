@@ -456,12 +456,11 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
  *         application/json:
  *           schema:
  *             type: object
- *             required: [driver_lat, driver_lng]
- *             properties:
- *               driver_lat:
- *                 type: number
- *               driver_lng:
- *                 type: number
+ *             required: []
+         properties:
+        geofence_radius_m:
+    type: number
+    description: Override default 500m geofence radius
  *               geofence_radius_m:
  *                 type: number
  *                 description: Override default 500m geofence radius
@@ -479,53 +478,114 @@ router.post(
   validateParams(paramIdSchema),
   async (req, res) => {
     try {
-      const { driver_lat, driver_lng, geofence_radius_m } = req.body;
-
-      if (!driver_lat || !driver_lng) {
-        return res.status(400).json({ error: 'driver_lat and driver_lng are required.' });
-      }
-
-      const lat = parseFloat(driver_lat);
-      const lng = parseFloat(driver_lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return res.status(400).json({ error: 'driver_lat and driver_lng must be valid numbers.' });
-      }
+      const { geofence_radius_m } = req.body;
 
       let geofenceRadiusM = 500;
-      if (geofence_radius_m !== undefined && geofence_radius_m !== null && geofence_radius_m !== '') {
+
+      if (
+        geofence_radius_m !== undefined &&
+        geofence_radius_m !== null &&
+        geofence_radius_m !== ''
+      ) {
         const parsedRadius = parseFloat(geofence_radius_m);
-        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0 || parsedRadius > MAX_GEOFENCE_RADIUS_M) {
-          return res.status(400).json({ error: `geofence_radius_m must be between 0 and ${MAX_GEOFENCE_RADIUS_M} meters.` });
+
+        if (
+          !Number.isFinite(parsedRadius) ||
+          parsedRadius <= 0 ||
+          parsedRadius > MAX_GEOFENCE_RADIUS_M
+        ) {
+          return res.status(400).json({
+            error: `geofence_radius_m must be between 0 and ${MAX_GEOFENCE_RADIUS_M} meters.`,
+          });
         }
+
         geofenceRadiusM = parsedRadius;
       }
 
       if (!req.params.id || !req.params.id.trim()) {
-        return res.status(400).json({ error: 'Invalid order id' });
+        return res.status(400).json({
+          error: 'Invalid order id',
+        });
       }
 
       const order = await orderValidationService.findOrderByIdOrDisplayId(
         req.params.id,
         'id, driver_id, customer_id'
       );
+
       orderValidationService.assertOrderFound(order);
       orderValidationService.assertDriverAssignment(order, req.user.id);
 
-      const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
-        orderId: order.id,
-        driverId: req.user.id,
-        driverLat: lat,
-        driverLng: lng,
-        geofenceRadiusM,
-      });
+      if (!mongoDb) {
+        return res.status(503).json({
+          error: 'Telemetry database not available.',
+        });
+      }
+
+      const latestTelemetry = await mongoDb
+        .collection('telemetry')
+        .find({
+          driver_id: order.driver_id,
+          order_id: order.id,
+        })
+        .sort({ timestamp: -1 })
+        .limit(1)
+        .toArray();
+
+      if (!latestTelemetry || latestTelemetry.length === 0) {
+        return res.status(404).json({
+          error: 'No live telemetry found for this driver.',
+        });
+      }
+
+      const telemetry = latestTelemetry[0];
+
+      const lat = Number(telemetry.lat);
+      const lng = Number(telemetry.lng);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(404).json({
+          error: 'Latest telemetry record contains invalid coordinates.',
+        });
+      }
+
+      const telemetryTime = new Date(telemetry.timestamp).getTime();
+      const telemetryAge = Date.now() - telemetryTime;
+      const MAX_TELEMETRY_AGE_MS = 5 * 60 * 1000;
+
+      if (
+        !Number.isFinite(telemetryTime) ||
+        telemetryAge < 0 ||
+        telemetryAge > MAX_TELEMETRY_AGE_MS
+      ) {
+        return res.status(409).json({
+          error: 'Driver location is not recent enough for geofence confirmation.',
+        });
+      }
+
+      const result =
+        await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
+          orderId: order.id,
+          driverId: req.user.id,
+          driverLat: lat,
+          driverLng: lng,
+          geofenceRadiusM,
+        });
 
       return res.json(result);
     } catch (err) {
       if (err instanceof DomainError) {
         return res.status(err.status).json(err.payload);
       }
-      logger.error('Geofence auto-confirm exception:', err.message);
-      return res.status(500).json({ error: 'Internal Server Error' });
+
+      logger.error(
+        'Geofence auto-confirm exception:',
+        err.message
+      );
+
+      return res.status(500).json({
+        error: 'Internal Server Error',
+      });
     }
   }
 );

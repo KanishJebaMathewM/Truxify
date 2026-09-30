@@ -64,29 +64,30 @@ router.post('/request-bypass', async (req, res) => {
             return res.status(500).json({ error: 'Failed to verify driver registration.' });
         }
 
-        const maxWeightLimit = Number(truck.max_capacity_tons) * LBS_PER_TONNE;
-        const axleWeight = Number(order.weight_tonnes) * LBS_PER_TONNE;
-        
-        let isVerified = Boolean(profile?.is_digilocker_verified);
-        if (!isVerified) {
-            const { data: verifiedDocs } = await supabaseAdmin
-                .from('driver_documents')
-                .select('id')
-                .eq('driver_id', req.user.id)
-                .or('is_govt_verified.eq.true,status.in.(approved,verified)')
-                .limit(1);
-            if (verifiedDocs && verifiedDocs.length > 0) {
-                isVerified = true;
-            }
-        }
+        const rawTruckCapacity = truck.max_capacity_tons;
+        const rawLoadWeight = order.weight_tonnes;
 
+        const maxWeightLimit = Number(rawTruckCapacity) * LBS_PER_TONNE;
+        const axleWeight = Number(rawLoadWeight) * LBS_PER_TONNE;
         // There is no safety-score column in the schema; derive the safety
         // signal from the driver's verified registration (fail closed to 0).
         const safetyScore = isVerified ? 100 : 0;
 
 
-        if (!Number.isFinite(axleWeight) || !Number.isFinite(maxWeightLimit)) {
-            logger.warn('[WIM] Truck/load records missing weight data, failing closed:', { truckId, bolId });
+        // Number(null) and Number('') are both 0, so a load with no registered
+        // weight used to coerce to the lightest possible axle weight and be
+        // granted a bypass. The service's own typeof check cannot catch this
+        // because by the time it runs the value is already the number 0.
+        // Validate the raw column values and fail closed on anything missing,
+        // non-numeric or non-positive.
+        if (!Number.isFinite(axleWeight) || axleWeight <= 0
+            || !Number.isFinite(maxWeightLimit) || maxWeightLimit <= 0) {
+            logger.warn('[WIM] Truck/load records missing or invalid weight data, failing closed:', {
+                truckId,
+                bolId,
+                rawTruckCapacity,
+                rawLoadWeight,
+            });
             return res.json({
                 signal: 'PULL_IN',
                 message: 'Truck must pull into weigh station.',

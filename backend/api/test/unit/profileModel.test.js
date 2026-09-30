@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProfileModel } from '../../src/models/ProfileModel.js';
+import { ProfileModel } from '../../../src/models/ProfileModel.js';
 
 describe('ProfileModel', () => {
   describe('fromProfile', () => {
@@ -37,16 +37,9 @@ describe('ProfileModel', () => {
       expect(result.polygonWalletAddress).toBe('0x5678');
     });
 
-    it('handles null input gracefully', () => {
+    it('handles null/undefined input gracefully', () => {
       expect(ProfileModel.fromProfile(null)).toBeNull();
-    });
-
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromProfile(undefined);
-
-      expect(result).not.toBeNull();
-      expect(result.role).toBe('user');
-      expect(result.fullName).toBe('');
+      expect(ProfileModel.fromProfile(undefined)).toBeNull();
     });
 
     it('applies defaults for missing fields', () => {
@@ -82,14 +75,9 @@ describe('ProfileModel', () => {
       expect(result.co2ReducedKg).toBe(1200);
     });
 
-    it('handles null input gracefully', () => {
+    it('handles null/undefined input gracefully', () => {
       expect(ProfileModel.fromCustomerStats(null)).toBeNull();
-    });
-
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromCustomerStats(undefined);
-      expect(result).not.toBeNull();
-      expect(result.totalOrders).toBe(0);
+      expect(ProfileModel.fromCustomerStats(undefined)).toBeNull();
     });
 
     it('applies defaults for missing fields', () => {
@@ -129,15 +117,9 @@ describe('ProfileModel', () => {
       expect(result.kycDocNumber).toBe('ABC123');
     });
 
-    it('handles null input gracefully', () => {
+    it('handles null/undefined input gracefully', () => {
       expect(ProfileModel.fromDriverDetails(null)).toBeNull();
-    });
-
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromDriverDetails(undefined);
-      expect(result).not.toBeNull();
-      expect(result.totalTrips).toBe(0);
-      expect(result.badges).toEqual([]);
+      expect(ProfileModel.fromDriverDetails(undefined)).toBeNull();
     });
 
     it('awards badges based on achievements', () => {

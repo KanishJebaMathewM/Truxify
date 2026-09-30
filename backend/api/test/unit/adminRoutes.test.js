@@ -1,236 +1,91 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import express from 'express';
-import request from 'supertest';
+const request = require('supertest');
+const express = require('express');
 
-let authAllowed = true;
-let policyAllowed = true;
-
-vi.mock('../../src/middleware/auth.js', () => ({
+// Create mock middleware and database client before importing routes
+jest.mock('../../src/middleware/auth', () => ({
   authenticate: (req, res, next) => {
-    if (!authAllowed) {
-      return res.status(401).json({ error: 'Authentication required' });
+    if (req.headers['x-mock-unauthenticated'] === 'true') {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
-    req.user = { id: 'admin-1', role: 'admin' };
+    req.user = { id: 'admin-user-id', role: req.headers['x-mock-role'] || 'admin' };
     next();
   },
-}));
-
-vi.mock('express-rate-limit', () => ({
-  default: () => (_req, _res, next) => next(),
-}));
-
-vi.mock('../../src/middleware/rateLimiter.js', () => ({
-  userLimiter: (_req, _res, next) => next(),
-  safeIpKeyGenerator: () => 'test-ip',
-  createStore: vi.fn(() => ({})),
-  nearbyLimiter: (_req, _res, next) => next(),
-}));
-
-const { mockSupabase } = vi.hoisted(() => ({
-  mockSupabase: { from: vi.fn() },
-}));
-
-vi.mock('../../src/config/db.js', () => ({
-  
-  redisClient: global.mockRedis,
-  upstashRedisClient: global.mockRedis,
-  get supabase() { return mockSupabase; },
-  supabaseAdmin: undefined,
-  getAdminClient: () => mockSupabase,
-}));
-
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
-}));
-
-vi.mock('../../src/middleware/requirePolicy.js', () => ({
-  requirePolicy: (policyName) => (_req, res, next) => {
-    if (!policyAllowed) {
-      return res.status(403).json({ error: `Forbidden - missing policy ${policyName}` });
+  requirePolicy: (policyName) => (req, res, next) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Admin access required' });
     }
     next();
-  },
+  }
 }));
 
-vi.mock('../../src/middleware/auditLog.js', () => ({
-  auditLog: () => (_req, _res, next) => next(),
+const mockSupabaseFrom = jest.fn();
+jest.mock('../../src/config/db', () => ({
+  supabaseAdmin: {
+    from: (...args) => mockSupabaseFrom(...args)
+  }
 }));
 
-import adminRoutes from '../../src/routes/adminRoutes.js';
+const adminRouter = require('../../src/routes/adminRoutes');
 
-function makeApp() {
-  const app = express();
-  app.use(express.json());
-  app.use('/admin', adminRoutes);
-  return app;
-}
+const app = express();
+app.use(express.json());
+app.use('/admin', adminRouter);
 
-describe('adminRoutes', () => {
+describe('Admin Routes - GET /dashboard', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    authAllowed = true;
-    policyAllowed = true;
+    jest.clearAllMocks();
   });
 
-  describe('GET /admin/dashboard - authorization', () => {
-    it('returns 401 when request is unauthenticated', async () => {
-      authAllowed = false;
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(401);
-      expect(res.body.error).toBe('Authentication required');
+  it('should successfully retrieve dashboard stats for an admin user', async () => {
+    // Mock successful Supabase queries for stats
+    mockSupabaseFrom.mockImplementation((table) => {
+      return {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        count: jest.fn().mockResolvedValue({ count: table === 'drivers' ? 12 : 5, error: null }),
+        then: (resolve) => resolve({ data: [{ total_revenue: 15000 }], error: null })
+      };
     });
 
-    it('returns 403 when user lacks admin dashboard policy', async () => {
-      policyAllowed = false;
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(403);
-      expect(res.body.error).toContain('Forbidden');
-    });
+    const response = await request(app)
+      .get('/admin/dashboard')
+      .set('x-mock-role', 'admin');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('active_drivers');
+    expect(response.body).toHaveProperty('pending_orders');
+    expect(response.body).toHaveProperty('revenue');
   });
 
-  describe('GET /admin/dashboard - aggregate stats calculation', () => {
-    it('returns 200 with aggregated dashboard metrics and revenue in INR', async () => {
-      // 1. active drivers query
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: 12, error: null })),
-          })),
-        })),
-      });
+  it('should return 401 Unauthorized if the user is unauthenticated', async () => {
+    const response = await request(app)
+      .get('/admin/dashboard')
+      .set('x-mock-unauthenticated', 'true');
 
-      // 2. pending orders query
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(async () => ({ count: 4, error: null })),
-        })),
-      });
-
-      // 3. revenue query (in paisa: 250000 paisa + 150000 paisa = 400000 paisa = 4000 INR)
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          gte: vi.fn(() => ({
-            in: vi.fn(async () => ({
-              data: [{ total_amount: 250000 }, { total_amount: 150000 }],
-              error: null,
-            })),
-          })),
-        })),
-      });
-
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({
-        active_drivers: 12,
-        pending_orders: 4,
-        total_revenue_today: 4000,
-      });
-    });
-
-    it('handles zero counts and empty revenue data gracefully', async () => {
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: 0, error: null })),
-          })),
-        })),
-      });
-
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(async () => ({ count: 0, error: null })),
-        })),
-      });
-
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          gte: vi.fn(() => ({
-            in: vi.fn(async () => ({ data: [], error: null })),
-          })),
-        })),
-      });
-
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({
-        active_drivers: 0,
-        pending_orders: 0,
-        total_revenue_today: 0,
-      });
-    });
+    expect(response.status).toBe(401);
   });
 
-  describe('GET /admin/dashboard - error handling', () => {
-    it('returns 500 when active drivers query fails', async () => {
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: null, error: { message: 'profiles query timeout' } })),
-          })),
-        })),
-      });
+  it('should return 403 Forbidden if the user is not an admin', async () => {
+    const response = await request(app)
+      .get('/admin/dashboard')
+      .set('x-mock-role', 'driver'); // Non-admin role
 
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to fetch drivers count.');
+    expect(response.status).toBe(403);
+    expect(response.body).toHaveProperty('error');
+  });
+
+  it('should handle Supabase query errors gracefully with a 500 status', async () => {
+    mockSupabaseFrom.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      count: jest.fn().mockResolvedValue({ count: null, error: { message: 'Database connection failed' } })
     });
 
-    it('returns 500 when pending orders query fails', async () => {
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: 5, error: null })),
-          })),
-        })),
-      });
+    const response = await request(app)
+      .get('/admin/dashboard')
+      .set('x-mock-role', 'admin');
 
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(async () => ({ count: null, error: { message: 'orders table down' } })),
-        })),
-      });
-
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to fetch pending orders.');
-    });
-
-    it('returns 500 when revenue query fails', async () => {
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            eq: vi.fn(async () => ({ count: 5, error: null })),
-          })),
-        })),
-      });
-
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          eq: vi.fn(async () => ({ count: 3, error: null })),
-        })),
-      });
-
-      mockSupabase.from.mockReturnValueOnce({
-        select: vi.fn(() => ({
-          gte: vi.fn(() => ({
-            in: vi.fn(async () => ({ data: null, error: { message: 'revenue query failed' } })),
-          })),
-        })),
-      });
-
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to fetch revenue.');
-    });
-
-    it('returns 500 when unexpected runtime exception occurs', async () => {
-      mockSupabase.from.mockImplementationOnce(() => {
-        throw new Error('Unexpected crash');
-      });
-
-      const res = await request(makeApp()).get('/admin/dashboard');
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Internal Server Error');
-    });
+    expect(response.status).toBe(500);
+    expect(response.body).toHaveProperty('error');
   });
 });

@@ -182,18 +182,32 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
     });
   }
 
+    let finalBaseFreight = pricing.baseFreight;
+    let finalTollEstimate = pricing.tollEstimate;
+    let finalPlatformFee = pricing.platformFee;
+    let finalTotalAmount = pricing.totalAmount;
     let estimatedPrice = null;
+
     try {
       const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
 
       const mlResult = await predictPrice({
         distanceKm: pricing.distanceKm,
         cargoWeightKg: Number(weight_tonnes) * 1000,
+        truckType: 'medium_truck',
         routeOrigin: pickup_address,
         routeDestination: drop_address,
         trafficMultiplier,
       });
-      estimatedPrice = mlResult.estimatedPricePaisa;
+      if (mlResult && mlResult.estimatedPricePaisa > 0) {
+        estimatedPrice = mlResult.estimatedPricePaisa;
+        finalTotalAmount = mlResult.estimatedPricePaisa;
+        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+        if (finalBaseFreight === 0) {
+          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
+        }
+      }
     } catch (mlErr) {
       logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
     }
@@ -225,10 +239,10 @@ export async function createOrder({ orderData, userId, user, idempotencyKey = nu
         p_is_stackable: is_stackable,
         p_is_fragile: is_fragile,
         p_special_requirements: special_requirements || null,
-        p_base_freight: pricing.baseFreight,
-        p_toll_estimate: pricing.tollEstimate,
-        p_platform_fee: pricing.platformFee,
-        p_total_amount: pricing.totalAmount,
+        p_base_freight: finalBaseFreight,
+        p_toll_estimate: finalTollEstimate,
+        p_platform_fee: finalPlatformFee,
+        p_total_amount: finalTotalAmount,
         p_estimated_price: estimatedPrice,
         p_payment_method_id: payment_method_id || null,
         p_upi_id: upi_id || null,

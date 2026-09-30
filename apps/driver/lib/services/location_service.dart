@@ -193,6 +193,23 @@ class LocationService {
         return false;
       }
     };
+    _replayService.sendSyncLocations = 
+        ({required locations, required token}) async {
+      try {
+        final url = Uri.parse('$defaultApiBaseUrl/api/devices/locations/sync');
+        final response = await http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'locations': locations}),
+        );
+        return response.statusCode >= 200 && response.statusCode < 300;
+      } catch (_) {
+        return false;
+      }
+    };
     _replayService.tokenProvider =
         () => Supabase.instance.client.auth.currentSession?.accessToken;
     _replayService.driverIdProvider =
@@ -247,6 +264,7 @@ class LocationService {
     });
   }
 
+
   Future<void> _handleLocationUpdate(Position position) async {
     // Drop stale/cached fixes: Geolocator routinely re-emits the last-known
     // position with an old `timestamp` (after startup, GPS loss, or waking from
@@ -263,18 +281,6 @@ class LocationService {
       return;
     }
 
-    // Implement displacement-based throttling
-    if (_lastSentPosition == null) {
-      // First position, always send
-      final result = await _sendLocationPing(position);
-      if (result == LocationDelivery.delivered ||
-          result == LocationDelivery.queued) {
-        _lastSentTime = DateTime.now();
-      }
-    });
-  }
-
-  Future<void> _handleLocationUpdate(Position position) async {
     // Serialize the throttle decision + send + state update so two concurrent
     // updates (or the fallback timer) cannot both read the same stale throttle
     // state and both pass the check (issue #13955).
@@ -690,8 +696,4 @@ class LocationService {
     _resilientWs = null;
   }
 
-  void stopTracking() {
-    _timer?.cancel();
-    _socket?.disconnect();
-  }
 }

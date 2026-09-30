@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase, supabaseAdmin } from '../api/src/config/db.js';
@@ -32,7 +32,11 @@ function base58btc(input) {
 class DIDService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        // The signer and contract clients are created on first use (see the getters
+        // below). Building them here made the whole API fail to start whenever
+        // PRIVATE_KEY or a contract address was not configured, because ethers
+        // throws on an undefined private key or contract target.
+        this._wallet = null;
         this.didRegistryAddress = process.env.DID_REGISTRY_ADDRESS;
         this.identityWalletAddress = process.env.IDENTITY_WALLET_ADDRESS;
 
@@ -63,19 +67,53 @@ class DIDService {
             'function isWalletActive(address owner) external view returns (bool)'
         ];
 
-        this.didRegistry = new ethers.Contract(
-            this.didRegistryAddress,
-            this.didRegistryABI,
-            this.wallet
-        );
 
-        this.identityWallet = new ethers.Contract(
-            this.identityWalletAddress,
-            this.identityWalletABI,
-            this.wallet
-        );
 
         logger.info('✅ DID Service initialized');
+    }
+
+    // ============ Chain clients (created on first use) ============
+
+    get wallet() {
+        if (!this._wallet) {
+            if (!process.env.PRIVATE_KEY) {
+                throw new Error('DID chain access is not configured: set PRIVATE_KEY');
+            }
+            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        }
+        return this._wallet;
+    }
+
+    set wallet(value) {
+        this._wallet = value;
+    }
+
+    get didRegistry() {
+        if (!this._didRegistry) {
+            if (!this.didRegistryAddress) {
+                throw new Error('DID chain access is not configured: set DID_REGISTRY_ADDRESS');
+            }
+            this._didRegistry = new ethers.Contract(this.didRegistryAddress, this.didRegistryABI, this.wallet);
+        }
+        return this._didRegistry;
+    }
+
+    set didRegistry(value) {
+        this._didRegistry = value;
+    }
+
+    get identityWallet() {
+        if (!this._identityWallet) {
+            if (!this.identityWalletAddress) {
+                throw new Error('DID chain access is not configured: set IDENTITY_WALLET_ADDRESS');
+            }
+            this._identityWallet = new ethers.Contract(this.identityWalletAddress, this.identityWalletABI, this.wallet);
+        }
+        return this._identityWallet;
+    }
+
+    set identityWallet(value) {
+        this._identityWallet = value;
     }
 
     _validateCredentialData(data) {

@@ -5,7 +5,7 @@ import 'package:truxify_driver/services/offline_routing.dart';
 
 void main() {
   group('OfflineRouteMatrixService.calculateOfflineRoute', () {
-    const service = OfflineRouteMatrixService();
+    final service = OfflineRouteMatrixService();
 
     test('uses realistic detour factor and truck speed, not naive 1.25/55', () {
       final result = service.calculateOfflineRoute(
@@ -94,10 +94,10 @@ void main() {
       final durationMins = result['estimated_duration_mins'] as int;
       final fuelLiters = result['estimated_fuel_liters'] as double;
 
-      expect(distanceKm, isFinite);
+      expect(distanceKm.isFinite, isTrue);
       expect(distanceKm, greaterThan(0));
       expect(durationMins, greaterThan(0));
-      expect(fuelLiters, isFinite);
+      expect(fuelLiters.isFinite, isTrue);
       expect(fuelLiters, greaterThan(0));
       expect(result['is_offline_estimate'], isTrue);
     });

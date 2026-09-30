@@ -184,7 +184,7 @@ export class FuelAdvisorService {
     const avgEngineLoad = await this._getAverageEngineLoad(truckId);
 
     // 2. Get weather forecast for destination
-    const weather = await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    const weather = await this._getWeatherSafely(destinationLat, destinationLng);
     if (!weather || !Number.isFinite(weather.temperature_c)) {
       this.logger?.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data — using safe default B20.');
       return {
@@ -226,6 +226,20 @@ export class FuelAdvisorService {
         average_engine_load_percent: Math.round(avgEngineLoad)
       }
     };
+  }
+
+  /**
+   * Fetches a weather forecast without letting provider failures crash the
+   * recommendation, which deliberately degrades to a safe default. A throwing
+   * external API must not take down the whole fueling-advisor endpoint.
+   */
+  async _getWeatherSafely(destinationLat, destinationLng) {
+    try {
+      return await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    } catch (err) {
+      this.logger?.warn(`[FuelAdvisorService] Weather service failed: ${err?.message ?? String(err)}`);
+      return null;
+    }
   }
 
   /**

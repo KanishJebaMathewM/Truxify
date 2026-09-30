@@ -184,7 +184,6 @@ import {
 import './subscribers/reputationSubscriber.js'
 
 // --- AUDIT LOGGING IMPORTS ---
-import auditRoutes from './routes/auditRoutes.js';
 import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
 
 

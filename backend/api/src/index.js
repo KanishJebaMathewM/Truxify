@@ -26,6 +26,7 @@ import iotRoutes from './routes/iotRoutes.js'
 import demandRoutes from './routes/demandRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
+import { getJwtSecret } from './config/jwtSecret.js'
 import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
@@ -256,6 +257,16 @@ if (!process.env.DRIVER_LOGIN_OTP) {
 if (!process.env.WEBHOOK_SECRET) {
   logger.fatal('WEBHOOK_SECRET is not set. Escrow webhook signature verification cannot run and webhook requests will be rejected. Set WEBHOOK_SECRET and restart.')
   process.exit(1)
+}
+if (process.env.NODE_ENV === 'production') {
+  // The backend JWT signing key had a hardcoded public fallback, so a missing
+  // JWT_SECRET silently produced tokens anyone could forge. It is now required.
+  try {
+    getJwtSecret()
+  } catch (err) {
+    logger.fatal(`${err.message} Generate one with \`openssl rand -hex 48\` and restart.`)
+    process.exit(1)
+  }
 }
 
 // ============================================================================

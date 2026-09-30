@@ -630,7 +630,8 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 
 /**
  * Mark an escrow booking as started on-chain once the trip has begun, so
- * cancelBooking / cancelWithPenalty revert and a full refund is blocked
+ * cancelBooking reverts and a full refund is blocked; the owner can still
+ * use cancelWithPenalty to compensate the driver when policy permits.
  * (issue #5768).
  *
  * @param {string} orderDisplayId

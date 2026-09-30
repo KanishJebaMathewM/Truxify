@@ -25,7 +25,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     enum BookingStatus {
         Active,       // Payment locked, trip in progress
         Delivered,    // GPS + OTP confirmed, payment released to driver
-        Cancelled,    // Cancelled before driver started — full refund
+        Cancelled,    // Escrow resolved by full refund or cancellation penalty
         Disputed,     // Under dispute resolution via n8n automation
         Resolved      // Dispute settled by owner — funds split per resolution
     }
@@ -469,7 +469,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *      refunding the remaining escrow to the customer. The backend chooses
      *      the penalty only after validating the off-chain trip state.
      */
-        function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
+    function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
         external
         onlyOwner
         nonReentrant
@@ -482,7 +482,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
-        require(booking.started, "TruxifyEscrow: Trip not started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
         require(driverFee <= booking.amount, "TruxifyEscrow: Penalty exceeds escrow");
 
@@ -644,7 +643,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
                 releaseTimestamps[driver] = newDeadline;
             }
             emit WithdrawalReady(bookingId, driver, escrowAmount);
-            emit DisputeSettled(bookingId, driver, escrowAmount);
+            emit DisputeSettled(bytes32(bookingId), driver, escrowAmount);
         } else {
             pendingWithdrawals[customer] += escrowAmount;
             releaseTimestamps[customer] = newDeadline;

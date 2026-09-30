@@ -794,8 +794,9 @@ export class OrderLifecycleService {
         }
 
         // The driver has already started the trip — a full-refund cancellation is
-        // no longer possible. On-chain, cancelBooking / cancelWithPenalty revert
-        // once the booking has been marked as started, so reject here first.
+        // no longer possible. This customer cancellation flow rejects after
+        // pickup, while on-chain cancelWithPenalty remains available for
+        // owner-managed compensation if policy permits it.
         if (['picked_up', 'in_transit', 'arriving', 'arrived_dropoff'].includes(currentOrder.status)) {
           throw new DomainError(409, { error: 'Cannot cancel: the shipment has already been picked up and is in transit.' });
         }

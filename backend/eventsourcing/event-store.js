@@ -543,14 +543,27 @@ class EventStore {
             this._eventBus.publish(baseEvent, { deduplicate: false });
             this.logger.info(`📤 Event published via EventBus: ${event.type}`);
         } else {
+            // The consumer uses eventId (or the Kafka key) as its idempotency
+            // claim. An aggregate ID would cause separate updates to the same
+            // order to collide, while a newly generated ID would break retries.
+            const eventId = event.id ?? event.eventId;
+            if (typeof eventId !== 'string' || !eventId.trim()) {
+                throw new EventStoreValidationError('Cannot publish an event without a stable event ID');
+            }
             const topic = this.getEventTopic(event.type);
-            const enriched = ContextPropagator.injectIntoEventPayload(event);
+            const enriched = ContextPropagator.injectIntoEventPayload({
+                ...event,
+                eventId,
+                eventType: event.type,
+                orderId: event.aggregateId,
+                metadata: { ...event.metadata, eventId },
+            });
             const kafkaModule = await this._loadKafka();
             if (!kafkaModule) {
                 this.logger.warn(`Kafka unavailable — skipping publish of ${event.type}`);
                 return;
             }
-            await kafkaModule.default.publishEvent(topic, enriched, event.aggregateId);
+            await kafkaModule.default.publishEvent(topic, enriched, eventId);
             this.logger.info(`📤 Event published to Kafka: ${event.type}`);
         }
     }

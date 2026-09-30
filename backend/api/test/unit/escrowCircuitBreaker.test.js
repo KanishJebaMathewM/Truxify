@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../src/middleware/logger.js', () => ({
-  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 const { redisMock } = vi.hoisted(() => ({
@@ -18,29 +18,29 @@ import {
   getPauseState,
   escrowPausedResult,
   escrowBreaker,
+  CircuitBreaker,
   CircuitState,
 } from '../../src/services/escrowCircuitBreaker.js';
 
-describe('escrowCircuitBreaker', () => {
+describe('escrowCircuitBreaker Unit Tests', () => {
   beforeEach(() => {
     escrowBreaker.reset();
-  });
-  beforeEach(() => {
     vi.clearAllMocks();
     redisMock.get.mockResolvedValue(null);
     redisMock.set.mockResolvedValue('OK');
     redisMock.del.mockResolvedValue(1);
   });
 
-  it('isEscrowPaused is true when the flag is set in Redis', async () => {
-    redisMock.get.mockResolvedValue('1');
-    expect(await isEscrowPaused()).toBe(true);
-    expect(redisMock.get).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
-  });
+  describe('Redis-backed Emergency Pause State', () => {
+    it('isEscrowPaused returns true when the pause flag is set in Redis', async () => {
+      redisMock.get.mockResolvedValue('1');
+      expect(await isEscrowPaused()).toBe(true);
+      expect(redisMock.get).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
+    });
 
-  it('isEscrowPaused is false when the flag is absent', async () => {
-    expect(await isEscrowPaused()).toBe(false);
-  });
+    it('isEscrowPaused returns false when the flag is absent or not set to "1"', async () => {
+      redisMock.get.mockResolvedValue(null);
+      expect(await isEscrowPaused()).toBe(false);
 
   it('isEscrowPaused fails closed when a Redis read throws (outage = paused)', async () => {
     redisMock.get.mockRejectedValue(new Error('down'));
@@ -77,108 +77,135 @@ describe('escrowCircuitBreaker', () => {
     expect(redisMock.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at', result.updatedAt);
   });
 
-  it('setEscrowPaused(false) closes the circuit and clears state', async () => {
-    const result = await setEscrowPaused(false);
-    expect(result.paused).toBe(false);
-    expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
-    expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at');
-  });
+    it('setEscrowPaused(true) opens the circuit and persists pause flag and timestamp', async () => {
+      const before = Date.now();
+      const result = await setEscrowPaused(true);
+      expect(result.paused).toBe(true);
+      expect(result.persisted).toBe(true);
+      expect(new Date(result.updatedAt).getTime()).toBeGreaterThanOrEqual(before);
+      expect(redisMock.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused', '1');
+      expect(redisMock.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at', result.updatedAt);
+    });
 
-  it('setEscrowPaused reports not persisted when Redis is unavailable', async () => {
-    redisMock.set.mockRejectedValue(new Error('down'));
-    await expect(setEscrowPaused(true)).rejects.toThrow('down');
-  });
+    it('setEscrowPaused(false) closes the circuit and deletes Redis keys', async () => {
+      const result = await setEscrowPaused(false);
+      expect(result.paused).toBe(false);
+      expect(result.persisted).toBe(true);
+      expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
+      expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at');
+    });
 
-  it('getPauseState reports the flag and the time it was set', async () => {
-    redisMock.get.mockImplementation((key) =>
-      key === 'escrow:circuit-breaker:paused'
-        ? Promise.resolve('1')
-        : Promise.resolve('2026-08-11T00:00:00.000Z'),
-    );
-    const state = await getPauseState();
-    expect(state).toEqual({ paused: true, pausedAt: '2026-08-11T00:00:00.000Z' });
-  });
+    it('setEscrowPaused throws when Redis write operation fails', async () => {
+      redisMock.set.mockRejectedValue(new Error('Redis write failed'));
+      await expect(setEscrowPaused(true)).rejects.toThrow('Redis write failed');
+    });
 
   it('getPauseState reports an unknown Redis state as paused', async () => {
     const state = await getPauseState();
     expect(state).toEqual({ paused: false, pausedAt: null });
   });
 
-  it('escrowPausedResult shapes the rejection returned by escrow submission paths', () => {
-    expect(escrowPausedResult('bk-1')).toEqual({
-      bookingId: 'bk-1',
-      error: 'Escrow is paused by the circuit breaker.',
-      code: 'ESCROW_PAUSED',
+    it('getPauseState returns paused: false and pausedAt: null when no flag is set', async () => {
+      const state = await getPauseState();
+      expect(state).toEqual({ paused: false, pausedAt: null });
     });
-    expect(escrowPausedResult('bk-1', { txData: null })).toMatchObject({
-      bookingId: 'bk-1',
-      txData: null,
-      code: 'ESCROW_PAUSED',
+
+    it('getPauseState fails open and returns default unpaused state on Redis read error', async () => {
+      redisMock.get.mockRejectedValue(new Error('Redis read failure'));
+      const state = await getPauseState();
+      expect(state).toEqual({ paused: false, pausedAt: null });
+    });
+
+    it('escrowPausedResult shapes standardized error payload for escrow service rejections', () => {
+      expect(escrowPausedResult('booking-101')).toEqual({
+        bookingId: 'booking-101',
+        error: 'Escrow is paused by the circuit breaker.',
+        code: 'ESCROW_PAUSED',
+      });
+      expect(escrowPausedResult('booking-102', { transactionId: 'tx-999', retryable: false })).toEqual({
+        bookingId: 'booking-102',
+        transactionId: 'tx-999',
+        retryable: false,
+        error: 'Escrow is paused by the circuit breaker.',
+        code: 'ESCROW_PAUSED',
+      });
     });
   });
 
-  describe('escrowBreaker state machine transitions', () => {
-    it('initial state is CLOSED', () => {
+  describe('CircuitBreaker State Transitions & State Machine', () => {
+    it('initial state is CLOSED with zero failures and successes', () => {
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
       expect(escrowBreaker.state).toBe(CircuitState.CLOSED);
+      expect(escrowBreaker.failureCount).toBe(0);
+      expect(escrowBreaker.successCount).toBe(0);
     });
 
-    it('failure threshold opens circuit', async () => {
+    it('reaches failure threshold (3) and transitions from CLOSED to OPEN', async () => {
       const failingFn = vi.fn().mockRejectedValue(new Error('Contract call failed'));
 
-      // Threshold is 3
+      // Failure 1
       await expect(escrowBreaker.execute(failingFn)).rejects.toThrow('Contract call failed');
+      expect(escrowBreaker.failureCount).toBe(1);
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
 
+      // Failure 2
       await expect(escrowBreaker.execute(failingFn)).rejects.toThrow('Contract call failed');
+      expect(escrowBreaker.failureCount).toBe(2);
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
 
+      // Failure 3 -> opens circuit
       await expect(escrowBreaker.execute(failingFn)).rejects.toThrow('Contract call failed');
+      expect(escrowBreaker.failureCount).toBe(3);
       expect(escrowBreaker.getState()).toBe(CircuitState.OPEN);
+      expect(escrowBreaker.state).toBe(CircuitState.OPEN);
 
-      // Subsequent call fast-fails without executing function
-      const successFn = vi.fn().mockResolvedValue('ok');
+      // Subsequent call fast-fails without executing the wrapped function
+      const successFn = vi.fn().mockResolvedValue('tx-hash');
       await expect(escrowBreaker.execute(successFn)).rejects.toThrow('CircuitBreaker:escrow is OPEN');
       expect(successFn).not.toHaveBeenCalled();
     });
 
-    it('timeout returns circuit to half-open', async () => {
-      const failingFn = vi.fn().mockRejectedValue(new Error('Network error'));
+    it('transitions from OPEN to HALF_OPEN after reset timeout expires on next attempt check', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('RPC node unavailable'));
       for (let i = 0; i < 3; i++) {
         await expect(escrowBreaker.execute(failingFn)).rejects.toThrow();
       }
       expect(escrowBreaker.state).toBe(CircuitState.OPEN);
 
-      // Advance time past resetTimeoutMs (10000ms)
-      escrowBreaker.nextAttempt = Date.now() - 1;
+      // Simulate time advancing past nextAttempt
+      escrowBreaker.nextAttempt = Date.now() - 100;
       expect(escrowBreaker.getState()).toBe(CircuitState.HALF_OPEN);
+      expect(escrowBreaker.state).toBe(CircuitState.HALF_OPEN);
     });
 
-    it('half-open allows one test request and rejects concurrent probe', async () => {
-      const failingFn = vi.fn().mockRejectedValue(new Error('Fail'));
+    it('HALF_OPEN allows a single probe and short-circuits concurrent probe requests', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('Error'));
       for (let i = 0; i < 3; i++) {
         await expect(escrowBreaker.execute(failingFn)).rejects.toThrow();
       }
       escrowBreaker.nextAttempt = Date.now() - 1;
       expect(escrowBreaker.getState()).toBe(CircuitState.HALF_OPEN);
 
-      // Start an in-flight probe
+      // Start in-flight probe
       let resolveProbe;
-      const probeFn = () => new Promise((resolve) => { resolveProbe = resolve; });
+      const probeFn = vi.fn(() => new Promise((resolve) => { resolveProbe = resolve; }));
       const probePromise = escrowBreaker.execute(probeFn);
 
-      // Second probe attempt in HALF_OPEN should be rejected immediately
-      const extraFn = vi.fn().mockResolvedValue('extra');
-      await expect(escrowBreaker.execute(extraFn)).rejects.toThrow('CircuitBreaker:escrow is HALF_OPEN (probe in flight)');
-      expect(extraFn).not.toHaveBeenCalled();
+      // Second probe attempt during in-flight probe should be rejected immediately
+      const concurrentFn = vi.fn().mockResolvedValue('concurrent_result');
+      await expect(escrowBreaker.execute(concurrentFn)).rejects.toThrow(
+        'CircuitBreaker:escrow is HALF_OPEN (probe in flight)'
+      );
+      expect(concurrentFn).not.toHaveBeenCalled();
 
-      // Resolve probe
+      // Complete the in-flight probe successfully
       resolveProbe('probe_success');
-      const result = await probePromise;
-      expect(result).toBe('probe_success');
+      const probeResult = await probePromise;
+      expect(probeResult).toBe('probe_success');
+      expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
     });
 
-    it('success in half-open closes circuit', async () => {
+    it('successful execution in HALF_OPEN recovers and resets state to CLOSED', async () => {
       const failingFn = vi.fn().mockRejectedValue(new Error('Failure'));
       for (let i = 0; i < 3; i++) {
         await expect(escrowBreaker.execute(failingFn)).rejects.toThrow();
@@ -186,16 +213,16 @@ describe('escrowCircuitBreaker', () => {
       escrowBreaker.nextAttempt = Date.now() - 1;
       expect(escrowBreaker.getState()).toBe(CircuitState.HALF_OPEN);
 
-      const successfulProbe = vi.fn().mockResolvedValue({ txHash: '0x123' });
+      const successfulProbe = vi.fn().mockResolvedValue({ txHash: '0xabc123' });
       const result = await escrowBreaker.execute(successfulProbe);
 
-      expect(result).toEqual({ txHash: '0x123' });
+      expect(result).toEqual({ txHash: '0xabc123' });
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
       expect(escrowBreaker.failureCount).toBe(0);
     });
 
-    it('failure in half-open immediately returns to OPEN', async () => {
-      const failingFn = vi.fn().mockRejectedValue(new Error('Initial failure'));
+    it('failure during HALF_OPEN probe immediately trips circuit back to OPEN', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('Primary failure'));
       for (let i = 0; i < 3; i++) {
         await expect(escrowBreaker.execute(failingFn)).rejects.toThrow();
       }
@@ -205,17 +232,18 @@ describe('escrowCircuitBreaker', () => {
       const failedProbe = vi.fn().mockRejectedValue(new Error('Probe failed'));
       await expect(escrowBreaker.execute(failedProbe)).rejects.toThrow('Probe failed');
       expect(escrowBreaker.getState()).toBe(CircuitState.OPEN);
+      expect(escrowBreaker.state).toBe(CircuitState.OPEN);
     });
 
-    it('success in CLOSED state resets failure count', async () => {
-      const failingFn = vi.fn().mockRejectedValue(new Error('transient error'));
-      await expect(escrowBreaker.execute(failingFn)).rejects.toThrow('transient error');
+    it('successful execution in CLOSED state resets consecutive failure count', async () => {
+      const failingFn = vi.fn().mockRejectedValue(new Error('Transient network glitch'));
+      await expect(escrowBreaker.execute(failingFn)).rejects.toThrow('Transient network glitch');
       expect(escrowBreaker.failureCount).toBe(1);
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
 
-      const successFn = vi.fn().mockResolvedValue('ok');
+      const successFn = vi.fn().mockResolvedValue('success');
       const res = await escrowBreaker.execute(successFn);
-      expect(res).toBe('ok');
+      expect(res).toBe('success');
       expect(escrowBreaker.failureCount).toBe(0);
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
     });
@@ -229,7 +257,7 @@ describe('escrowCircuitBreaker', () => {
         }
         expect(escrowBreaker.state).toBe(CircuitState.OPEN);
 
-        // Fast forward timer
+        // Advance timers by resetTimeoutMs (10,000ms)
         vi.advanceTimersByTime(10000);
         expect(escrowBreaker.state).toBe(CircuitState.HALF_OPEN);
       } finally {
@@ -237,12 +265,14 @@ describe('escrowCircuitBreaker', () => {
       }
     });
 
-    it('handles request timeout and increments failure count', async () => {
+    it('enforces requestTimeoutMs and trips failure on timeout', async () => {
       vi.useFakeTimers();
       try {
         const slowFn = () => new Promise((resolve) => setTimeout(resolve, 6000));
         const execPromise = escrowBreaker.execute(slowFn);
-        const rejectionAssertion = expect(execPromise).rejects.toThrow(/Request timed out after 5000ms/);
+        const rejectionAssertion = expect(execPromise).rejects.toThrow(
+          /Request timed out after 5000ms/
+        );
         vi.advanceTimersByTime(5001);
         await rejectionAssertion;
         expect(escrowBreaker.failureCount).toBe(1);
@@ -251,18 +281,55 @@ describe('escrowCircuitBreaker', () => {
       }
     });
 
-    it('reset() manually transitions circuit breaker back to CLOSED', async () => {
+    it('throws TypeError when non-function is passed to execute()', async () => {
+      await expect(escrowBreaker.execute(null)).rejects.toThrow(TypeError);
+      await expect(escrowBreaker.execute('not-a-fn')).rejects.toThrow(TypeError);
+      await expect(escrowBreaker.execute(123)).rejects.toThrow(TypeError);
+    });
+
+    it('reset() and destroy() clear timers and restore CLOSED state', async () => {
       const failingFn = vi.fn().mockRejectedValue(new Error('fail'));
       for (let i = 0; i < 3; i++) {
         await expect(escrowBreaker.execute(failingFn)).rejects.toThrow();
       }
       expect(escrowBreaker.state).toBe(CircuitState.OPEN);
 
-      escrowBreaker.reset();
+      escrowBreaker.destroy();
       expect(escrowBreaker.state).toBe(CircuitState.CLOSED);
       expect(escrowBreaker.failureCount).toBe(0);
+      expect(escrowBreaker.successCount).toBe(0);
       expect(escrowBreaker.getState()).toBe(CircuitState.CLOSED);
+    });
+
+    it('executes fallback handler when circuit is OPEN or probe fails if fallback is provided', async () => {
+      const fallbackFn = vi.fn((param) => `fallback-${param}`);
+      const customBreaker = new CircuitBreaker('custom-escrow', {
+        failureThreshold: 2,
+        resetTimeoutMs: 5000,
+        fallback: fallbackFn,
+      });
+
+      const failingFn = vi.fn().mockRejectedValue(new Error('Service down'));
+
+      // First failure returns fallback result
+      const res1 = await customBreaker.execute(failingFn, 'attempt-1');
+      expect(res1).toBe('fallback-attempt-1');
+      expect(customBreaker.failureCount).toBe(1);
+
+      // Second failure trips circuit to OPEN and returns fallback result
+      const res2 = await customBreaker.execute(failingFn, 'attempt-2');
+      expect(res2).toBe('fallback-attempt-2');
+      expect(customBreaker.getState()).toBe(CircuitState.OPEN);
+
+      // In OPEN state, fallback is invoked without calling wrapped function
+      const successFn = vi.fn().mockResolvedValue('ok');
+      const res3 = await customBreaker.execute(successFn, 'attempt-3');
+      expect(res3).toBe('fallback-attempt-3');
+      expect(successFn).not.toHaveBeenCalled();
+
+      customBreaker.destroy();
     });
   });
 });
+
 

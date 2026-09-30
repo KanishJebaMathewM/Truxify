@@ -38,6 +38,54 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 1,
       "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Gas Result Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "url": "http://backend-api:3000/api/internal/oracle/gas",
+        "method": "POST",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1",
+          "name": "Truxify Internal API Key"
+        }
+      },
+      "name": "Sync Gas Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ADMIN_ALERT_EMAIL || 'admin@truxify.org'}}",
+        "subject": "CRITICAL: Invalid Gas Oracle Response",
+        "htmlFormat": true,
+        "message": "<h3>Invalid Gas Oracle Result</h3><p>Raw response: {{$json.raw}}</p>",
+        "options": {}
+      },
+      "name": "Alert: Invalid Gas Result",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [1050, 400]
     }
   ],
   "connections": {
@@ -57,6 +105,35 @@
         [
           {
             "node": "Compute Idempotency & Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Idempotency & Format": {
+      "main": [
+        [
+          {
+            "node": "Gas Result Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gas Result Valid?": {
+      "main": [
+        [
+          {
+            "node": "Sync Gas Price",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Invalid Gas Result",
             "type": "main",
             "index": 0
           }

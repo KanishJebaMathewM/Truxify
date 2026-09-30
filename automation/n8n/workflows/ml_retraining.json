@@ -217,8 +217,6 @@
         [
           {
             "node": "send-not-promoted-email",
-
-
             "type": "main",
             "index": 0
           }

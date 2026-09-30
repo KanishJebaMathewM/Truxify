@@ -216,6 +216,30 @@ export async function handlePaymentReleasedEvent({ bookingId, amount, driver, bl
   return { success: true, event: 'PaymentReleased', bookingId: orderIdStr };
 }
 
+function sanitizeBookingId(bookingId) {
+  if (!bookingId) return null;
+  const str = String(bookingId).trim();
+  if (/[\s,"'();:]/.test(str)) return null;
+  if (/^(0x[0-9a-fA-F]+|\d+|[0-9a-fA-F-]{36}|#?[A-Za-z0-9_-]+)$/.test(str)) {
+    return str;
+  }
+  return null;
+}
+
+function normalizeBookingId(bookingId) {
+  const clean = sanitizeBookingId(bookingId);
+  if (!clean) return null;
+  if (clean.startsWith('0x')) return clean.toLowerCase();
+  if (/^\d+$/.test(clean)) {
+    try {
+      return ethers.toBeHex(BigInt(clean), 32).toLowerCase();
+    } catch (_) {
+      return clean;
+    }
+  }
+  return clean;
+}
+
 export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber }) {
   const orderIdStr = String(bookingId);
   logger.info(`[EventListener] Processing DisputeOpened for bookingId: ${orderIdStr}, reason: ${reason}`);
@@ -224,16 +248,20 @@ export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber 
 
   if (supabaseAdmin) {
     try {
-      const { error: orderError } = await supabaseAdmin
-        .from('orders')
-        .update({
-          payment_status: 'disputed',
-          escrow_status: 'disputed',
-          updated_at: new Date().toISOString(),
-        })
-        .or(`id.eq.${orderIdStr},order_display_id.eq.${orderIdStr}`);
+      const cleanId = sanitizeBookingId(orderIdStr);
+      if (cleanId) {
+        const normalizedHex = normalizeBookingId(cleanId);
+        const { error: orderError } = await supabaseAdmin
+          .from('orders')
+          .update({
+            payment_status: 'disputed',
+            escrow_status: 'disputed',
+            updated_at: new Date().toISOString(),
+          })
+          .or(`escrow_booking_id.eq.${normalizedHex},escrow_booking_id.eq.${cleanId},order_display_id.eq.${cleanId},id.eq.${cleanId}`);
 
-      if (orderError) throw orderError;
+        if (orderError) throw orderError;
+      }
 
       const { error: tripError } = await supabaseAdmin
         .from('trips')
@@ -254,7 +282,17 @@ export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber 
     return { success: false, event: 'DisputeOpened', bookingId: orderIdStr };
   }
 
-  // Fire n8n dispute resolution webhook
+  // Deduplicate before firing n8n using verified ioredis positional arguments
+  if (redisClient) {
+    const dedupKey = `dispute:n8n:fired:${orderIdStr}`;
+    const claimed = await redisClient.set(dedupKey, '1', 'EX', 86400, 'NX');
+    if (!claimed) {
+      logger.warn(`[EventListener] Duplicate DisputeOpened ${orderIdStr} — n8n already fired`);
+      return { success: true, event: 'DisputeOpened', bookingId: orderIdStr, skipped: true };
+    }
+  }
+
+  // Fire n8n dispute resolution webhook with Bearer authentication
   const n8nWebhookUrl = process.env.N8N_DISPUTE_WEBHOOK_URL;
   if (n8nWebhookUrl) {
     try {
@@ -263,7 +301,12 @@ export async function handleDisputeOpenedEvent({ bookingId, reason, blockNumber 
         bookingId: orderIdStr,
         reason: reason || 'Customer/Driver raised dispute on-chain',
         timestamp: new Date().toISOString(),
-      }, { timeout: 5000 });
+      }, {
+        timeout: 5000,
+        headers: {
+          Authorization: `Bearer ${process.env.DISPUTE_WEBHOOK_SECRET}`,
+        },
+      });
       logger.info(`[EventListener] Successfully fired n8n dispute webhook for ${orderIdStr}`);
     } catch (err) {
       logger.error(`[EventListener] Failed to fire n8n dispute webhook: ${err.message}`);

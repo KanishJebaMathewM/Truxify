@@ -268,6 +268,8 @@ services:
       - BACKEND_API_URL=${BACKEND_API_URL:-http://api:5000}
       - VALID_API_KEYS=${VALID_API_KEYS}
       - ADMIN_ALERT_EMAIL=${ADMIN_ALERT_EMAIL:-admin@localhost}
+      - DISPUTE_WEBHOOK_SECRET=${DISPUTE_WEBHOOK_SECRET:-local_dispute_secret}
+      - ML_ALERT_EMAIL=${ML_ALERT_EMAIL:-ml-ops@localhost}
     volumes:
       - n8n_data:/home/node/.n8n
     healthcheck:

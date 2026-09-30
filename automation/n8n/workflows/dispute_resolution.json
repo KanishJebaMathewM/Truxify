@@ -34,7 +34,7 @@
           "parameter": [
             {
               "name": "bookingId",
-              "value": "={{$json.body.bookingId}}"
+              "value": "={{$json.body.bookingId || $json.body.orderId}}"
             }
           ]
         },
@@ -82,7 +82,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{$env.BACKEND_API_URL}}/api/internal/dispute-evidence/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "url": "={{$env.BACKEND_API_URL}}/api/internal/dispute-evidence/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {}
@@ -141,7 +141,7 @@
           "parameter": [
             {
               "name": "bookingId",
-              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}"
             }
           ]
         },
@@ -177,7 +177,7 @@
           "parameter": [
             {
               "name": "bookingId",
-              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}"
             }
           ]
         },
@@ -205,8 +205,8 @@
     {
       "parameters": {
         "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
-        "subject": "=Dispute Escalated: Manual Ops Review Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
-        "textBody": "=Escalation Notice: Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}} has been escalated for manual Ops review. Evidence collected: OTP Verified: {{$node[\"Collect Evidence Data\"].json.otpVerified}}, GPS Valid: {{$node[\"Collect Evidence Data\"].json.gpsValid}}.",
+        "subject": "=Dispute Escalated: Manual Ops Review Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
+        "textBody": "=Escalation Notice: Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}} has been escalated for manual Ops review. Evidence collected: OTP Verified: {{$node[\"Collect Evidence Data\"].json.otpVerified}}, GPS Valid: {{$node[\"Collect Evidence Data\"].json.gpsValid}}.",
         "options": {}
       },
       "id": "node-email-admin",
@@ -221,8 +221,8 @@
     {
       "parameters": {
         "toEmail": "={{$env.ADMIN_ALERT_EMAIL}}",
-        "subject": "=CRITICAL Alert: Escrow Release Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
-        "textBody": "=CRITICAL: Release Escrow Payment failed after retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Immediate manual intervention required.",
+        "subject": "=CRITICAL Alert: Escrow Release Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}",
+        "textBody": "=CRITICAL: Release Escrow Payment failed after retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId || $node[\"Dispute Webhook Trigger\"].json.body.orderId}}. Immediate manual intervention required.",
         "options": {}
       },
       "id": "node-alert-release-failed",

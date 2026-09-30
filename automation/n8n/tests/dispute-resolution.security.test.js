@@ -25,7 +25,7 @@ const WEBHOOK_TYPE = "n8n-nodes-base.webhook";
 const HTTP_TYPE = "n8n-nodes-base.httpRequest";
 
 /** Endpoints in this workflow that move escrow funds on-chain. */
-const FUND_MOVING_PATHS = ["/api/payments/freeze", "/api/payments/release"];
+const FUND_MOVING_PATHS = ["/api/escrow/release", "/api/payments/release"];
 
 function nodeByName(name) {
   return workflow.nodes.find((n) => n.name === name);

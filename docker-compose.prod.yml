@@ -263,6 +263,9 @@ services:
       # escalation. Required: a stuck-escrow alert that reaches nobody is worse
       # than a boot failure, so n8n refuses to start until this is set.
       ADMIN_ALERT_EMAIL: ${ADMIN_ALERT_EMAIL:?ADMIN_ALERT_EMAIL is required}
+      # Operator mailbox for ML retraining pipeline notifications (success,
+      # not-promoted, skipped). Required in production.
+      ML_ALERT_EMAIL: ${ML_ALERT_EMAIL:?ML_ALERT_EMAIL is required}
     volumes:
       - n8n_data:/home/node/.n8n
     deploy:

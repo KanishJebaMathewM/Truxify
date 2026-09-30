@@ -899,6 +899,11 @@ router.put('/:id/start', authenticate, userLimiter, async (req, res) => {
       if (!canAccessTrip(req.user, ctx.trip)) {
         return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
       }
+      // Only an active trip is an idempotent successful start. Never report
+      // completed/cancelled (or unknown-state) trips as newly running.
+      if (ctx.trip.status !== 'active') {
+        return res.status(409).json({ error: `Trip cannot be started: status is ${ctx.trip.status}.` });
+      }
       return res.json(ctx.trip);
     }
 

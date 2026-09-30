@@ -9,8 +9,10 @@ const path = require("path");
 const { groth16 } = require("snarkjs");
 const wasm_tester = require("circom_tester").wasm;
 
-// Skipped locally due to Windows native compiler environment limitations; will run on CI/CD Linux runners.
-describe.skip("BatchTelemetry Circuit (#11248)", function () {
+// Check if running on Windows (where circom native binary is missing locally)
+const isWindows = process.platform === "win32";
+
+(isWindows ? describe.skip : describe)("BatchTelemetry Circuit (#11248)", function () {
     this.timeout(300000); // 5 minutes for circuit compilation
 
     let circuit;

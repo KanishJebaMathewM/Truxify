@@ -394,6 +394,18 @@ export async function getEscrowBooking(escrowBookingId) {
 }
 
 /**
+ * Computes the bytes32 hash ID used for the escrow contract based on the display ID.
+ * Matches keccak256(abi.encodePacked("escrow:" + displayId))
+ *
+ * @param {string} displayId - The public order display ID
+ * @returns {string} The computed booking ID (bytes32 hex string)
+ */
+export function getEscrowBookingId(displayId) {
+  if (!displayId) throw new Error('Missing displayId');
+  return ethers.solidityPackedKeccak256(['string', 'string'], ['escrow:', String(displayId)]);
+}
+
+/**
  * Query the on-chain escrow smart contract mapping.
  * Used by escrowFundingReconciliation and the release reconciler to check
  * the authoritative on-chain booking state.

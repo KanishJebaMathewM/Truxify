@@ -89,8 +89,6 @@ const typeDefs = gql`
         createdAt: String!
         updatedAt: String!
         driver: Driver @external
-        payment: Payment @external
-        trip: Trip @external
     }
 
     type Location {
@@ -137,15 +135,6 @@ const typeDefs = gql`
         orders: [Order]
     }
 
-    extend type Payment @key(fields: "id") {
-        id: ID! @external
-        order: Order
-    }
-
-    extend type Trip @key(fields: "id") {
-        id: ID! @external
-        order: Order
-    }
 `;
 
 const resolvers = {
@@ -288,32 +277,6 @@ const resolvers = {
             if (!order.driverId) return null;
             // Fetch driver from driver service
             return { id: order.driverId };
-        },
-        payment: async (order, _, context) => {
-            if (!context.loaders) {
-                const { data, error } = await supabase
-                    .from('payments')
-                    .select('*')
-                    .eq('order_id', order.id)
-                    .single();
-                
-                if (error) return null;
-                return data;
-            }
-            return context.loaders.paymentLoader.load(order.id);
-        },
-        trip: async (order, _, context) => {
-            if (!context.loaders) {
-                const { data, error } = await supabase
-                    .from('trips')
-                    .select('*')
-                    .eq('order_id', order.id)
-                    .single();
-                
-                if (error) return null;
-                return data;
-            }
-            return context.loaders.tripLoader.load(order.id);
         }
     }
 };

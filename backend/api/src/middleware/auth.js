@@ -3,6 +3,16 @@ import logger from './logger.js';
 import { firebaseAdmin, supabase, createUserClient } from '../config/db.js';
 import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCachedProfile, getCachedSupabaseProfile, setCachedSupabaseProfile, invalidateCachedSupabaseProfile, isValidCachedSupabaseProfile, TOMBSTONE_TTL_SECONDS, TTL_SECONDS } from '../lib/profileCache.js';
 
+// Compute at write time so database latency cannot extend the token's cache lifetime.
+async function cacheActiveFirebaseProfile(firebaseUid, profile, tokenExpiry) {
+  const remaining = Number.isFinite(tokenExpiry)
+    ? Math.floor(tokenExpiry - Date.now() / 1000)
+    : TTL_SECONDS;
+  const ttlSeconds = Math.min(TTL_SECONDS, remaining);
+  // setCachedProfile coerces nonpositive TTLs to one second; skip expired tokens.
+  if (ttlSeconds > 0) await setCachedProfile(firebaseUid, profile, ttlSeconds);
+}
+
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
@@ -249,7 +259,7 @@ export async function authenticate(req, res, next) {
         isActive: true,
       };
 
-      await setCachedProfile(firebaseUid, req.user).catch((err) => logger.error({ err }, "Cache set failed"));
+      await cacheActiveFirebaseProfile(firebaseUid, req.user, decodedToken.exp).catch((err) => logger.error({ err }, "Cache set failed"));
       return next();
     }
   } catch (error) {
@@ -439,11 +449,6 @@ export async function verifyAuthToken(token) {
       }
     }
 
-    // Calculate token remaining lifetime to clamp cache TTL
-    const nowSec = Math.floor(Date.now() / 1000);
-    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
-    const tokenRemaining = tokenExp - nowSec;
-
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
@@ -478,7 +483,7 @@ export async function verifyAuthToken(token) {
       isActive: true,
     };
 
-    await setCachedProfile(firebaseUid, userProfile).catch((err) =>
+    await cacheActiveFirebaseProfile(firebaseUid, userProfile, decodedToken.exp).catch((err) =>
       logger.error({ err }, "Cache set failed"),
     );
 
@@ -753,7 +758,7 @@ export async function verifyJWT(req, res, next) {
       phone: profile.phone,
       isActive: true,
     };
-    await setCachedProfile(firebaseUid, appUser).catch((err) =>
+    await cacheActiveFirebaseProfile(firebaseUid, appUser, decodedToken.exp).catch((err) =>
       logger.error({ err }, 'Cache set failed'),
     );
 
@@ -1119,7 +1124,7 @@ export async function authenticate(req, res, next) {
         isActive: true,
       };
 
-      await setCachedProfile(firebaseUid, req.user).catch((err) =>
+      await cacheActiveFirebaseProfile(firebaseUid, req.user, decodedToken.exp).catch((err) =>
         logger.error({ err }, "Cache set failed"),
       );
 

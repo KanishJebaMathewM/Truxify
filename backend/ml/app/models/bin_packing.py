@@ -272,7 +272,7 @@ def _validate_delivery_addresses(
 # ---------------------------------------------------------------------------
 
 
-def _sequence_stops(
+def _greedy_sequence_stops(
     delivery_addresses: List[Dict[str, float]],
     packed_indices: List[int],
     route_start: Dict[str, float],
@@ -308,6 +308,96 @@ def _sequence_stops(
         current_lat = delivery_addresses[nearest]["lat"]
         current_lng = delivery_addresses[nearest]["lng"]
 
+    return sequence
+
+
+# Avoid scientific import/query overhead on the common small-route path.
+_SPATIAL_INDEX_MIN_STOPS = 512
+_SPATIAL_INDEX_TAIL_STOPS = 32
+# Unit-sphere chord distance: include near ties beyond double-precision noise,
+# then rank with the existing scalar Haversine/index rule.
+_CHORD_TIE_MARGIN = 2e-12
+
+
+def _get_kdtree():
+    try:
+        from scipy.spatial import KDTree
+    except ImportError:
+        return None
+    return KDTree
+
+
+def _unit_sphere_point(address):
+    lat = math.radians(address["lat"])
+    lng = math.radians(address["lng"])
+    cos_lat = math.cos(lat)
+    return (cos_lat * math.cos(lng), cos_lat * math.sin(lng), math.sin(lat))
+
+
+def _sequence_stops(delivery_addresses, packed_indices, route_start):
+    """Retain greedy ordering, shortlisting large routes with a spherical index."""
+    remaining = set(packed_indices)
+    if len(remaining) < _SPATIAL_INDEX_MIN_STOPS:
+        return _greedy_sequence_stops(delivery_addresses, packed_indices, route_start)
+    _validate_route_start(route_start)
+    if any(index < 0 or index >= len(delivery_addresses) for index in remaining):
+        raise ValueError("packed_indices contains an address index outside delivery_addresses")
+    tree_type = _get_kdtree()
+    if tree_type is None:
+        return _greedy_sequence_stops(delivery_addresses, packed_indices, route_start)
+
+    points = {index: _unit_sphere_point(delivery_addresses[index]) for index in remaining}
+    current_point = _unit_sphere_point(route_start)
+    current_lat, current_lng = route_start["lat"], route_start["lng"]
+    sequence = []
+    tree = None
+    indexed_indices = []
+
+    while remaining:
+        if len(remaining) <= _SPATIAL_INDEX_TAIL_STOPS:
+            sequence.extend(_greedy_sequence_stops(
+                delivery_addresses, sorted(remaining), {"lat": current_lat, "lng": current_lng}
+            ))
+            break
+        if tree is None or len(remaining) * 2 <= len(indexed_indices):
+            # Reclaim visited points at geometric size thresholds. Keep only
+            # linear storage, never an all-pairs distance matrix.
+            indexed_indices = sorted(remaining)
+            tree = tree_type([points[index] for index in indexed_indices])
+
+        neighbors = min(8, len(indexed_indices))
+        while True:
+            distances, positions = tree.query(
+                current_point, k=list(range(1, neighbors + 1)), eps=0, p=2, workers=1
+            )
+            nearest_distance = next((
+                float(distance) for distance, position in zip(distances, positions)
+                if indexed_indices[int(position)] in remaining
+            ), None)
+            if nearest_distance is not None:
+                break
+            neighbors = min(len(indexed_indices), neighbors * 2)
+
+        if nearest_distance >= 1.9999:
+            # Near antipodes, angular distance is numerically sensitive.
+            # Retain the original complete scalar comparison in this case.
+            candidates = remaining
+        else:
+            positions = tree.query_ball_point(
+                current_point, nearest_distance + _CHORD_TIE_MARGIN, eps=0, p=2, workers=1
+            )
+            candidates = [indexed_indices[int(position)] for position in positions
+                          if indexed_indices[int(position)] in remaining]
+        nearest = min(candidates, key=lambda index: (
+            _haversine(current_lat, current_lng,
+                       delivery_addresses[index]["lat"], delivery_addresses[index]["lng"]),
+            index,
+        ))
+        sequence.append(nearest)
+        remaining.remove(nearest)
+        current_point = points[nearest]
+        current_lat = delivery_addresses[nearest]["lat"]
+        current_lng = delivery_addresses[nearest]["lng"]
     return sequence
 
 

@@ -252,8 +252,9 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
     formData.append('file', blob, req.file.originalname);
 
-    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '').trim();
-    const mlApiKey = (process.env.ML_API_KEY || '').trim();
+    const rawMlUrl = process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || process.env.ML_OCR_SERVICE_URL || '';
+    const mlBaseUrl = rawMlUrl.trim().replace(/\/+$/, '');
+    const mlApiKey = (process.env.ML_API_KEY || process.env.ML_OCR_API_KEY || '').trim();
 
     if (!mlBaseUrl || !mlApiKey) {
       logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED', ip: req.ip }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
@@ -296,7 +297,7 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
 
       if (verifyError) throw verifyError;
     } else {
-       const { error: rejectError } = await supabaseAdmin
+      const { error: rejectError } = await supabaseAdmin
         .from('driver_details')
         .update({ kyc_status: 'Rejected' })
         .eq('user_id', userId);

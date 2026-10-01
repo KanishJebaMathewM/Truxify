@@ -94,10 +94,6 @@ def _fetch_route_duration_matrix(
 
 _MAX_DISTANCE_KM = 3_000.0  # normalisation ceiling
 _PENALTY_INFEASIBLE = 1e6   # effectively forbids the pairing
-# Cost above this is treated as infeasible. Must sit well below the 1e6 penalty
-# so that a negative `_rating_bonus` (−10 for a 5-star driver) cannot pull an
-# infeasible pairing's cost back under the threshold and get it accepted.
-_INFEASIBLE_THRESHOLD = 1e5
 # Assignments at or above this cost are better represented by leaving the
 # load/driver unmatched. This matches the zero-score boundary below.
 _UNMATCHED_COST = 200.0
@@ -284,6 +280,36 @@ def _rating_bonus(driver: dict) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _optimal_accepted_pairs(cost: np.ndarray) -> list[tuple[int, int]]:
+    """Maximize total (200 - cost) over accepted, disjoint real pairs.
+
+    Each row can instead choose a dummy at the same 200 acceptance boundary.
+    Orient the smaller partition as rows: padding costs min(n,m)*(n+m),
+    rather than (n+m)**2, and unmatched entities on the other side are free.
+    """
+    n_loads, n_drivers = cost.shape
+    if not n_loads or not n_drivers:
+        return []
+    transposed = n_drivers < n_loads
+    real_cost = cost.T if transposed else cost
+    n_rows, n_columns = real_cost.shape
+    augmented = np.full((n_rows, n_columns + n_rows), _UNMATCHED_COST)
+    # Rejected edges cannot compete and then consume endpoints before being
+    # discarded. Every row has a finite dummy, so the solve remains feasible.
+    augmented[:, :n_columns] = np.where(
+        np.isfinite(real_cost) & (real_cost < _UNMATCHED_COST),
+        real_cost,
+        np.inf,
+    )
+    rows, columns = linear_sum_assignment(augmented)
+    pairs = [
+        (int(column), int(row)) if transposed else (int(row), int(column))
+        for row, column in zip(rows, columns)
+        if column < n_columns
+    ]
+    return sorted(pairs)
+
+
 def match_bilateral(
     loads: List[Dict[str, Any]],
     drivers: List[Dict[str, Any]],
@@ -357,30 +383,12 @@ def match_bilateral(
             )
             cost[i, j] = c
 
-    # Add explicit dummy rows/columns so the optimizer can choose an unmatched
-    # load or driver instead of being forced to accept a poor finite pairing.
-    size = n_loads + n_drivers
-    assignment_cost = np.zeros((size, size), dtype=np.float64)
-    assignment_cost[:n_loads, :n_drivers] = cost
-    assignment_cost[:n_loads, n_drivers:] = _UNMATCHED_COST
-    assignment_cost[n_loads:, :n_drivers] = _UNMATCHED_COST
-
-    # Solve the augmented assignment problem.
-    row_idx, col_idx = linear_sum_assignment(assignment_cost)
-
     assignments = []
     matched_loads = set()
     matched_drivers = set()
 
-    for r, c in zip(row_idx, col_idx):
-        # Dummy row/column assignments represent unmatched entities.
-        if r >= n_loads or c >= n_drivers:
-            continue
-        if cost[r, c] >= _INFEASIBLE_THRESHOLD:
-            continue  # infeasible pairing – skip
-        if cost[r, c] >= _UNMATCHED_COST:
-            continue  # a poor finite pairing is worse than staying unmatched
-        score = round(min(1.0, max(0.0, 1.0 - cost[r, c] / 200.0)), 4)  # 0‥1
+    for r, c in _optimal_accepted_pairs(cost):
+        score = round(min(1.0, max(0.0, 1.0 - cost[r, c] / _UNMATCHED_COST)), 4)  # 0‥1
         assignments.append(
             {"load_index": int(r), "driver_index": int(c), "match_score": float(score)}
         )

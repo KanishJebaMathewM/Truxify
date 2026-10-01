@@ -10,9 +10,9 @@
  */
 
 import jwt from 'jsonwebtoken';
-import { supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin } from '../../api/src/config/db.js';
 import { ethers } from 'ethers';
-import logger from '../api/src/middleware/logger.js';
+import logger from '../../api/src/middleware/logger.js';
 
 /**
  * Verifies the Supabase JWT and attaches the user profile to req.user.

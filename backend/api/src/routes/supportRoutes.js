@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -94,7 +94,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { getAdminClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -102,6 +102,7 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(userLimiter);
@@ -111,7 +112,7 @@ router.use(userLimiter);
 // anon-key client resolves every read to empty and every write to a denial.
 // User-scoped handlers query through the caller's authenticated client;
 // admin handlers use the service-role client so they can see all tickets.
-const adminDb = supabaseAdmin || supabase;
+const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
 
 
@@ -451,14 +452,12 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
@@ -771,14 +770,12 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);

@@ -419,8 +419,8 @@ class EventStore {
      * after a rebuild.
      */
     async _upsertOrderReadModel(orderId, state, eventType, version) {
-        const status = state?.status || eventType;
-        const timeline = state?.timeline || [{ event: eventType, timestamp: new Date().toISOString() }];
+        const status = deriveOrderStatus(state);
+        const timeline = state?.timeline ?? null;
 
         const row = {
             order_id: orderId,
@@ -441,16 +441,7 @@ class EventStore {
 
         const { error } = await this._client
             .from('orders_read_model')
-            .upsert([{
-                order_id: orderId,
-                payload: state,
-                status: deriveOrderStatus(state),
-                event_type: eventType,
-                version: version ?? state?.version,
-                updated_at: new Date().toISOString()
-            }], {
-                onConflict: 'order_id'
-            });
+            .upsert([row], {
                 onConflict: 'order_id'
             });
 

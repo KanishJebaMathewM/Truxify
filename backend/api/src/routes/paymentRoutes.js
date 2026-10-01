@@ -18,6 +18,9 @@ import {
   submitEscrowRefund,
   lockPayment,
   paisaToMaticWei,
+  processMilestoneTransition,
+  executeEscrowTimeoutClawback,
+  ESCROW_MILESTONE_STATES,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
@@ -591,6 +594,78 @@ router.get(
         '[payments] status error',
       );
       return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
+
+/**
+ * POST /api/payments/escrow/milestone
+ * Processes partial escrow milestone transitions (ADVANCE_RELEASED, RELEASED).
+ */
+router.post(
+  '/escrow/milestone',
+  authenticate,
+  lockLimiter,
+  async (req, res) => {
+    try {
+      const { order_id, booking_id, target_milestone, pod_hash, ipfs_cid, advance_percentage } = req.body || {};
+
+      if (!order_id || !target_milestone) {
+        return res.status(400).json({ error: 'Missing required fields: order_id and target_milestone' });
+      }
+
+      const result = await processMilestoneTransition({
+        orderId: order_id,
+        bookingId: booking_id,
+        targetMilestone: target_milestone,
+        podHash: pod_hash,
+        ipfsCid: ipfs_cid,
+        advancePercentage: advance_percentage,
+      });
+
+      if (result.error) {
+        const status = result.code === 'POD_VERIFICATION_FAILED' ? 422 : 400;
+        return res.status(status).json({ success: false, error: result.error, code: result.code });
+      }
+
+      return res.status(200).json({ success: true, ...result });
+    } catch (err) {
+      logger.error({ err, requestId: req.requestId }, '[Escrow] Milestone processing failed');
+      return res.status(500).json({ error: 'Internal server error during milestone settlement' });
+    }
+  }
+);
+
+/**
+ * POST /api/payments/escrow/clawback
+ * Checks and triggers timeout clawbacks for abandoned trips.
+ */
+router.post(
+  '/escrow/clawback',
+  authenticate,
+  lockLimiter,
+  async (req, res) => {
+    try {
+      const { order_id, booking_id, max_inactivity_hours } = req.body || {};
+
+      if (!order_id) {
+        return res.status(400).json({ error: 'Missing required field: order_id' });
+      }
+
+      const result = await executeEscrowTimeoutClawback({
+        orderId: order_id,
+        bookingId: booking_id,
+        maxInactivityHours: max_inactivity_hours,
+      });
+
+      if (result.error) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+
+      return res.status(200).json(result);
+    } catch (err) {
+      logger.error({ err, requestId: req.requestId }, '[Escrow] Clawback execution failed');
+      return res.status(500).json({ error: 'Internal server error during escrow clawback' });
     }
   }
 );

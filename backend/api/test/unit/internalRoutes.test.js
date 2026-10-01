@@ -40,6 +40,9 @@ const { velocityResults, supabaseMock, circuitBreakerMock, escrowServiceMock } =
 // client, so both handles must be mocked or every velocity query short-circuits
 // to the 503 "Supabase is not configured" branch.
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: supabaseMock,
   supabaseAdmin: supabaseMock,
 }));

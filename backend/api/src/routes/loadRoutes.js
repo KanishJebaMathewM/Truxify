@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -60,6 +60,7 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 
 const router = express.Router();
@@ -169,12 +170,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
     }
     const vehicleType = req.query.vehicle_type || '';
     if (vehicleType && vehicleType.toLowerCase() !== 'truck') {
+      const pagination = formatPaginationMeta(0, page, limit);
       return res.json({
-        page,
-        limit,
-        total: 0,
-        totalPages: 0,
-        loads: []
+        page: pagination.page,
+        limit: pagination.limit,
+        total: pagination.total,
+        totalPages: pagination.totalPages,
+        loads: [],
+        data: [],
+        pagination
       });
     }
 
@@ -208,7 +212,13 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
 
     // Filters
     if (req.query.pickup_location) {
-      const pickupLocation = (Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location).trim();
+      if (Array.isArray(req.query.pickup_location)) {
+        return res.status(400).json({ error: 'Repeated pickup_location parameters are not allowed' });
+      }
+      if (typeof req.query.pickup_location !== 'string') {
+        return res.status(400).json({ error: 'pickup_location must be a single string' });
+      }
+      const pickupLocation = req.query.pickup_location.trim();
       if (!pickupLocation) {
         return res.status(400).json({ error: 'pickup_location must not be empty' });
       }
@@ -297,26 +307,18 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), v
       vehicle_type: 'Truck'
     }));
 
-    const totalCount = count || 0;
-    const totalPages = Math.ceil(totalCount / limit);
-    const hasNextPage = page * limit < totalCount;
+    const pagination = formatPaginationMeta(count || 0, page, limit);
 
     res.json({
       success: true,
-      page,
-      limit,
-      total: totalCount,
-      totalPages,
-      hasNextPage,
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
+      hasNextPage: pagination.hasNextPage,
       loads: formattedLoads,
       data: formattedLoads,
-      pagination: {
-        page,
-        limit,
-        total: totalCount,
-        totalPages,
-        hasNextPage,
-      }
+      pagination
     });
 
   } catch (err) {

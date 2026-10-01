@@ -79,6 +79,9 @@ function makeTelemetry(lat, lng, ageMs = 1000, overrides = {}) {
   return {
     driver_id: "driver-1",
     order_id: "order-geo-1",
+    // The tracker stamps both order ids on every telemetry record, and
+    // assertDriverAtDropoff cross-checks order_display_id as provenance.
+    order_display_id: "ORD-GEO",
     lat,
     lng,
     server_received_at: new Date(Date.now() - ageMs),
@@ -238,6 +241,63 @@ describe("DeliveryVerificationService.assertDriverAtDropoff", () => {
       service.assertDriverAtDropoff(makeOrder()),
     ).resolves.toBeUndefined();
   });
+
+  describe("geofence radius validation (issue #6966)", () => {
+    const OUTSIDE_DEFAULT_INSIDE_1000 = 77.217; // ~780m away from drop_lng 77.209
+
+    it("uses the supplied valid positive radius", async () => {
+      mockTelemetryRecords = [makeTelemetry(28.6139, OUTSIDE_DEFAULT_INSIDE_1000)];
+      const { service } = makeService();
+      // Should pass because 780m < 1000m
+      await expect(
+        service.assertDriverAtDropoff(makeOrder(), 1000)
+      ).resolves.toBeUndefined();
+    });
+
+    it("falls back to default radius when radiusM is NaN", async () => {
+      mockTelemetryRecords = [makeTelemetry(28.6139, OUTSIDE_DEFAULT_INSIDE_1000)];
+      const { service } = makeService();
+      const err = await captureDomainError(
+        service.assertDriverAtDropoff(makeOrder(), NaN)
+      );
+      expect(err).toBeInstanceOf(DomainError);
+      expect(err.status).toBe(409);
+      expect(err.payload.error).toMatch(/must be within 500m/i);
+    });
+
+    it("falls back to default radius when radiusM is 0", async () => {
+      mockTelemetryRecords = [makeTelemetry(28.6139, OUTSIDE_DEFAULT_INSIDE_1000)];
+      const { service } = makeService();
+      const err = await captureDomainError(
+        service.assertDriverAtDropoff(makeOrder(), 0)
+      );
+      expect(err).toBeInstanceOf(DomainError);
+      expect(err.status).toBe(409);
+      expect(err.payload.error).toMatch(/must be within 500m/i);
+    });
+
+    it("falls back to default radius when radiusM is negative", async () => {
+      mockTelemetryRecords = [makeTelemetry(28.6139, OUTSIDE_DEFAULT_INSIDE_1000)];
+      const { service } = makeService();
+      const err = await captureDomainError(
+        service.assertDriverAtDropoff(makeOrder(), -100)
+      );
+      expect(err).toBeInstanceOf(DomainError);
+      expect(err.status).toBe(409);
+      expect(err.payload.error).toMatch(/must be within 500m/i);
+    });
+
+    it("falls back to default radius when radiusM is null", async () => {
+      mockTelemetryRecords = [makeTelemetry(28.6139, OUTSIDE_DEFAULT_INSIDE_1000)];
+      const { service } = makeService();
+      const err = await captureDomainError(
+        service.assertDriverAtDropoff(makeOrder(), null)
+      );
+      expect(err).toBeInstanceOf(DomainError);
+      expect(err.status).toBe(409);
+      expect(err.payload.error).toMatch(/must be within 500m/i);
+    });
+  });
 });
 
 describe("DeliveryVerificationService.geofenceAutoConfirm radius override", () => {
@@ -382,18 +442,18 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
     expect(result.escrowUpdateFailed).toBe(false);
   });
 
-  it("aborts escrow release and returns 409 non-retryable when escrow amount mismatches expected total_amount", async () => {
+  it("releases the escrowed amount even when it differs from total_amount (fee + toll are not escrowed)", async () => {
     mockTelemetryRecords = [makeTelemetry(DROP_LAT, DROP_LNG)];
     const escrowReleaseFn = vi.fn().mockResolvedValue({ txHash: "0xrelease" });
-    const { service, repo } = makeService({
+    const { service } = makeService({
       escrowReleaseFn,
       repoOverrides: {
         findOrderById: vi
           .fn()
           .mockResolvedValueOnce({
             data: makeOrder({
-              total_amount: 400000, // != 1.5 Matic
-              escrow_amount_wei: 1500000000000000000n.toString(), // 1.5 Matic
+              total_amount: 400000, // customer total: includes platform fee + toll
+              escrow_amount_wei: 1500000000000000000n.toString(), // escrowed bid: 1.5 Matic
             }),
             error: null,
           })
@@ -407,22 +467,15 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
           }),
       },
     });
-    const err = await captureDomainError(
-      service.verifyDelivery({
-        orderId: "order-geo-1",
-        driverId: "driver-1",
-        otp: "123456",
-      })
-    );
-    expect(err).toBeInstanceOf(DomainError);
-    expect(err.status).toBe(409);
-    expect(err.payload.retryable).toBe(false);
-    expect(err.payload.code).toBe("ESCROW_AMOUNT_MISMATCH");
-    expect(escrowReleaseFn).not.toHaveBeenCalled();
-    expect(repo.updateOrder).toHaveBeenCalledWith(
-      "order-geo-1",
-      expect.objectContaining({ escrow_status: "release_failed" })
-    );
+
+    await service.verifyDelivery({
+      orderId: "order-geo-1",
+      driverId: "driver-1",
+      otp: "123456",
+    });
+
+    // The authoritative payout is escrow_amount_wei, not a total_amount conversion.
+    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 1500000000000000000n);
   });
 
   it("aborts before escrow release when the driver is outside the geofence", async () => {
@@ -442,53 +495,37 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
     expect(repo.executeRpc).not.toHaveBeenCalled();
   });
 
-  it("skips the geofence check on the stuck-escrow retry path", async () => {
+  it("still applies the geofence check on the stuck-escrow retry path (#11670)", async () => {
     h.mockMongoDb = null;
     const escrowReleaseFn = vi.fn().mockResolvedValue({ txHash: "0xrelease" });
-    const { service, repo } = makeService({
+    const { service } = makeService({
       escrowReleaseFn,
       repoOverrides: {
-        findOrderById: vi
-          .fn()
-          .mockResolvedValueOnce({
-            data: makeOrder({
-              status: "payment_released",
-              escrow_status: "funded",
-              total_amount: 150000,
-              escrow_amount_wei: 600000000000000000n.toString(),
-            }),
-            error: null,
-          })
-          .mockResolvedValueOnce({
-            data: {
-              status: "payment_released",
-              escrow_status: "released",
-              escrow_release_attempts: 0,
-            },
-            error: null,
+        findOrderById: vi.fn().mockResolvedValueOnce({
+          data: makeOrder({
+            status: "payment_released",
+            escrow_status: "funded",
+            total_amount: 150000,
+            escrow_amount_wei: 600000000000000000n.toString(),
           }),
+          error: null,
+        }),
       },
     });
-    const result = await service.verifyDelivery({
-      orderId: "order-geo-1",
-      driverId: "driver-1",
-      otp: "123456",
-    });
-    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n);
-    // The retry path skips the geofence check but must still finalize the trip
-    // and credit the wallet via complete_trip_tx (service_role, no OTP) so a
-    // driver is not left unpaid when the original RPC never ran (issue #11188).
-    expect(repo.executeRpc).toHaveBeenCalledWith(
-      "complete_trip_tx",
-      expect.objectContaining({
-        p_order_id: "order-geo-1",
-        p_otp_id: null,
-        p_release_tx_hash: "0xrelease",
-      }),
-      null,
+
+    const err = await captureDomainError(
+      service.verifyDelivery({
+        orderId: "order-geo-1",
+        driverId: "driver-1",
+        otp: "123456",
+      })
     );
-    expect(repo.updateOrder).toHaveBeenCalled();
-    expect(result.escrowUpdateFailed).toBe(false);
+
+    // Without telemetry the driver's presence at the drop-off cannot be
+    // verified, so the retried release must not go out.
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err.status).toBe(503);
+    expect(escrowReleaseFn).not.toHaveBeenCalled();
   });
   it("aborts escrow release and returns 409 non-retryable when no escrow amount is available", async () => {
     mockTelemetryRecords = [makeTelemetry(DROP_LAT, DROP_LNG)];

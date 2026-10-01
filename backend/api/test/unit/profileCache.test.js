@@ -36,7 +36,6 @@ describe('profileCache stats', () => {
   });
 });
 
-
 // === Spec 8 test ===
 describe('isValidProfile', () => {
   it('accepts valid profile with required fields', () => {
@@ -84,7 +83,7 @@ describe('isValidProfile', () => {
   it('rejects when createdAt is not a valid ISO date string', () => {
     expect(isValidProfile({ id: 'user-123', createdAt: 'bad' })).toBe(false);
     expect(isValidProfile({ id: 'user-123', createdAt: '' })).toBe(false);
-    expect(isValidProfile({ id: 'user-123', createdAt: '2026-13-01T00:00:00Z' })).toBe(false);  // invalid month
+    expect(isValidProfile({ id: 'user-123', createdAt: '2026-13-01T00:00:00Z' })).toBe(false); // invalid month
     expect(isValidProfile({ id: 'user-123', createdAt: null })).toBe(false);
     expect(isValidProfile({ id: 'user-123', createdAt: undefined })).toBe(false);
   });
@@ -107,5 +106,3 @@ describe('invalidateProfileCache', () => {
     await expect(invalidateProfileCache('')).resolves.toBeUndefined();
   });
 });
-
-

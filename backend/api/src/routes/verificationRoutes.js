@@ -12,6 +12,7 @@ import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 import digilockerService from '../services/digilockerService.js';
 import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
+import zkpService from '../services/zkp/zkp.service.js';
 
 const router = express.Router();
 const orderVerificationLimiter = rateLimit({
@@ -315,6 +316,65 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+const zkVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore('rl:zk-verify:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
+
+/**
+ * POST /api/verification/zk-verify-credential
+ * Verifies Groth16 ZKP driver credentials, ensures unexpired timestamp & unspent nullifier,
+ * and issues a signed session authorization token for bidding.
+ */
+router.post('/zk-verify-credential', zkVerifyLimiter, authenticate, async (req, res) => {
+  try {
+    const { proof, publicSignals } = req.body || {};
+    const userId = req.user?.id;
+
+    if (!proof || !publicSignals) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: proof and publicSignals must be provided',
+      });
+    }
+
+    const result = await zkpService.verifyCredentialProof({
+      proof,
+      publicSignals,
+      userId,
+    });
+
+    if (!result.success) {
+      const statusCode = result.code === 'NULLIFIER_ALREADY_SPENT' ? 409 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        code: result.code,
+        error: result.error,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      token: result.sessionToken,
+      expiresAt: result.expiresAt,
+      nullifierHash: result.nullifierHash,
+    });
+  } catch (error) {
+    logger.error({ err: error, userId: req.user?.id }, '[ZKP] Error in zk-verify-credential route');
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error during credential verification',
     });
   }
 });

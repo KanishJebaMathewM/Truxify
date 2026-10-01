@@ -332,7 +332,7 @@ export async function updateLocation(req, res, next) {
       return next(new UnauthorizedError('User not authenticated'));
     }
 
-    const { latitude, longitude, heading, speed } = req.body;
+    const { latitude, longitude, heading, speed, recorded_at } = req.body;
 
     const lat = parseFloat(latitude);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
@@ -346,29 +346,172 @@ export async function updateLocation(req, res, next) {
 
     const parsedHeading = Number.isFinite(parseFloat(heading)) ? parseFloat(heading) : null;
     const parsedSpeed   = Number.isFinite(parseFloat(speed))   ? parseFloat(speed)   : null;
+    const recordedAt    = recorded_at ? new Date(recorded_at).toISOString() : new Date().toISOString();
 
-    const { error } = await supabaseAdmin
-      .from('user_locations')
-      .upsert(
-        {
-          user_id:    userId,
-          latitude:   lat,
-          longitude:  lng,
-          heading:    parsedHeading,
-          speed:      parsedSpeed,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' }
-      );
+    // 1. Check if this is the newest location
+    const { data: existingLocation } = await supabaseAdmin
+      .from('driver_locations')
+      .select('recorded_at')
+      .eq('driver_id', userId)
+      .single();
 
-    if (error) {
-      logger.error('[DeviceController] Failed to update location:', error.message);
-      return next(new AppError('Failed to update location', 500));
+    // 2. Only update user_locations if it's newer than the existing recorded_at
+    let updateCurrentLocation = true;
+    if (existingLocation && existingLocation.recorded_at) {
+      if (new Date(recordedAt) <= new Date(existingLocation.recorded_at)) {
+        updateCurrentLocation = false;
+      }
+    }
+
+    if (updateCurrentLocation) {
+      const { error: upsertError } = await supabaseAdmin
+        .from('driver_locations')
+        .upsert(
+          {
+            driver_id:  userId,
+            latitude:   lat,
+            longitude:  lng,
+            heading:    parsedHeading,
+            speed:      parsedSpeed,
+            updated_at: new Date().toISOString(),
+            recorded_at: recordedAt,
+          },
+          { onConflict: 'driver_id' }
+        );
+
+      if (upsertError) {
+        logger.error('[DeviceController] Failed to update location:', upsertError.message);
+        return next(new AppError('Failed to update location', 500));
+      }
+    }
+
+    // 3. Insert into history
+    const { error: historyError } = await supabaseAdmin
+      .from('driver_location_history')
+      .insert({
+        driver_id:    userId,
+        latitude:   lat,
+        longitude:  lng,
+        heading:    parsedHeading,
+        speed:      parsedSpeed,
+        recorded_at: recordedAt,
+      });
+      // Ignore conflict errors on history insert
+
+    if (historyError && !historyError.message.includes('duplicate key value')) {
+      logger.error('[DeviceController] Failed to insert location history:', historyError.message);
     }
 
     return res.json({ success: true, message: 'Location updated' });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in updateLocation:', err.message);
+    return next(err);
+  }
+}
+
+/**
+ * Synchronize offline locations in bulk.
+ */
+export async function syncLocations(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return next(new UnauthorizedError('User not authenticated'));
+    }
+
+    const { locations } = req.body;
+    if (!Array.isArray(locations) || locations.length === 0) {
+      return res.status(400).json({ error: 'locations must be a non-empty array' });
+    }
+
+    const validLocations = [];
+    let newestLocation = null;
+    let newestTimestamp = 0;
+
+    for (const loc of locations) {
+      const lat = parseFloat(loc.latitude);
+      const lng = parseFloat(loc.longitude);
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+        continue;
+      }
+      
+      const parsedHeading = Number.isFinite(parseFloat(loc.heading)) ? parseFloat(loc.heading) : null;
+      const parsedSpeed   = Number.isFinite(parseFloat(loc.speed))   ? parseFloat(loc.speed)   : null;
+      const recordedAt    = loc.recorded_at ? new Date(loc.recorded_at).toISOString() : new Date().toISOString();
+
+      validLocations.push({
+        driver_id: userId,
+        latitude: lat,
+        longitude: lng,
+        heading: parsedHeading,
+        speed: parsedSpeed,
+        recorded_at: recordedAt,
+      });
+
+      const ts = new Date(recordedAt).getTime();
+      if (ts > newestTimestamp) {
+        newestTimestamp = ts;
+        newestLocation = validLocations[validLocations.length - 1];
+      }
+    }
+
+    if (validLocations.length === 0) {
+      return res.status(400).json({ error: 'No valid locations found in the payload' });
+    }
+
+    // 1. Insert bulk history
+    // Since we don't have ON CONFLICT DO NOTHING natively in standard supabase insert without .upsert
+    // We will iterate or use upsert with onConflict.
+    // driver_location_history_dedup_idx is unique on (driver_id, recorded_at)
+    const { error: historyError } = await supabaseAdmin
+      .from('driver_location_history')
+      .upsert(validLocations, { onConflict: 'driver_id, recorded_at', ignoreDuplicates: true });
+
+    if (historyError) {
+      logger.error('[DeviceController] Failed to sync location history:', historyError.message);
+      return next(new AppError('Failed to sync location history', 500));
+    }
+
+    // 2. Update current location if newer
+    if (newestLocation) {
+      const { data: existingLocation } = await supabaseAdmin
+        .from('driver_locations')
+        .select('recorded_at')
+        .eq('driver_id', userId)
+        .single();
+
+      let updateCurrentLocation = true;
+      if (existingLocation && existingLocation.recorded_at) {
+        if (newestTimestamp <= new Date(existingLocation.recorded_at).getTime()) {
+          updateCurrentLocation = false;
+        }
+      }
+
+      if (updateCurrentLocation) {
+        const { error: upsertError } = await supabaseAdmin
+          .from('driver_locations')
+          .upsert(
+            {
+              driver_id:    userId,
+              latitude:   newestLocation.latitude,
+              longitude:  newestLocation.longitude,
+              heading:    newestLocation.heading,
+              speed:      newestLocation.speed,
+              updated_at: new Date().toISOString(),
+              recorded_at: newestLocation.recorded_at,
+            },
+            { onConflict: 'driver_id' }
+          );
+
+        if (upsertError) {
+          logger.error('[DeviceController] Failed to update newest location during sync:', upsertError.message);
+        }
+      }
+    }
+
+    return res.json({ success: true, message: `Synced ${validLocations.length} locations` });
+  } catch (err) {
+    logger.error('[DeviceController] Unexpected error in syncLocations:', err.message);
     return next(err);
   }
 }
@@ -383,6 +526,7 @@ export default {
   unregisterDeviceToken,
   unregisterDevice,
   updateLocation,
+  syncLocations,
   unregisterAllDeviceTokens,
   getDevicePlatforms,
   pruneDevices

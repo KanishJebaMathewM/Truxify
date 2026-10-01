@@ -293,6 +293,7 @@ class _TripsScreenState extends State<TripsScreen> {
       final rawItems = _itemsByTripId[tripId] ?? [];
 
       final tripItems = rawItems.map((item) {
+        debugPrint(item.toString()); // FIXED: Moved before return to execute properly
         return TripItem(
           customerName: item['customer_name']?.toString() ?? 'Unknown',
           goods: item['goods']?.toString() ?? '',
@@ -946,8 +947,59 @@ class _TripsScreenState extends State<TripsScreen> {
               )
             else
               Expanded(
-                child: Center(
-                  child: Text('Trips view content'),
+                child: _TripsBody(
+                  loading: _isLoadingTrips,
+                  error: _tripsError,
+                  trips: _getFilteredAndSortedTrips(),
+                  stopsByTripId: _tripStopsByTripId,
+                  routePointsByTripId: _routePointsByTripId,
+                  statusFilters: _statusFilters,
+                  selectedChipIndex: _selectedChipIndex,
+                  onChipSelected: (index) => setState(() => _selectedChipIndex = index),
+                  onRefresh: _loadTrips,
+                  onCompleteStop: _completeCurrentStop,
+                  isOfflineData: _isOfflineTripsData,
+                  offlineSavedAt: _offlineTripsSavedAt,
+                  deadheadRecommendations: _deadheadRecommendations,
+                  deadheadLoading: _deadheadLoading,
+                  deadheadError: _deadheadError,
+                  onOpenDeadheadLoad: (rec) {
+                    final load = _marketplaceLoads.firstWhere(
+                      (l) => l.id == rec.loadId,
+                      orElse: () => LoadOffer(
+                        id: rec.loadId,
+                        route: rec.route,
+                        customer: '',
+                        company: '',
+                        goods: rec.goodsType,
+                        pickup: rec.pickup,
+                        distanceFromDriver: '${rec.distanceToPickupKm.toStringAsFixed(1)} km',
+                        estimatedProfit: '₹${rec.estimatedEarnings}',
+                        fuelCost: '',
+                        tollCost: '',
+                        capacityUsed: 0,
+                        truckFillLabel: '',
+                        sharingTruckWith: '',
+                        badgeLabel: '',
+                        badgeEmoji: '',
+                        routeDistance: '',
+                        routeDuration: '',
+                        weight: rec.weight,
+                        dimensions: '',
+                        stackable: '',
+                        fragile: '',
+                        specialHandling: '',
+                        freightValue: '',
+                        netProfit: '₹${rec.estimatedEarnings}',
+                        routeNote: '',
+                        extraDistance: rec.detourKm.toInt(),
+                        extraEarnings: '₹${rec.estimatedEarnings}',
+                        spaceAvailable: '',
+                        updatedTotalEarnings: '',
+                      ),
+                    );
+                    Navigator.of(context).pushNamed(AppRoutes.loadDetail, arguments: load);
+                  },
                 ),
               ),
           ],
@@ -957,29 +1009,51 @@ class _TripsScreenState extends State<TripsScreen> {
   }
 }
 
+// Supporting Helper Widgets for UI structure
 class _TopTabToggle extends StatelessWidget {
   final int index;
   final ValueChanged<int> onChanged;
 
-  const _TopTabToggle({
-    required this.index,
-    required this.onChanged,
-  });
+  const _TopTabToggle({required this.index, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        GestureDetector(
-          onTap: () => onChanged(0),
-          child: Text('Trips', style: TextStyle(fontWeight: index == 0 ? FontWeight.bold : FontWeight.normal)),
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? TruxifyColors.darkSurfaceVariant
+            : TruxifyColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildTab(context, AppLocalizations.of(context)!.myTrips, 0),
+          _buildTab(context, AppLocalizations.of(context)!.marketplace, 1),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTab(BuildContext context, String text, int tabIndex) {
+    final isSelected = index == tabIndex;
+    return GestureDetector(
+      onTap: () => onChanged(tabIndex),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? TruxifyColors.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
         ),
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: () => onChanged(1),
-          child: Text('Marketplace', style: TextStyle(fontWeight: index == 1 ? FontWeight.bold : FontWeight.normal)),
+        child: Text(
+          text,
+          style: GoogleFonts.dmSans(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface,
+          ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -1007,33 +1081,225 @@ class _MarketplaceBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (loading && standardLoads.isEmpty) {
-      return const Center(child: CircularIndicatorWidget());
+    if (loading) {
+      return const Center(child: CircularProgressIndicator(color: TruxifyColors.accent));
     }
-    if (error != null && standardLoads.isEmpty) {
-      return Center(child: Text('Error: $error'));
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+        ),
+      );
+    }
+    if (standardLoads.isEmpty && enRouteLoads.isEmpty) {
+      return Center(
+        child: Text(AppLocalizations.of(context)!.noLoadsAvailable),
+      );
     }
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (standardLoads.isEmpty)
-          const Center(child: Text('No loads available'))
-        else
-          ...standardLoads.map((load) => ListTile(
-                title: Text(load.route),
-                subtitle: Text(load.goods),
-                onTap: () => onOpenLoad(load),
+        if (enRouteLoads.isNotEmpty) ...[
+          Text(AppLocalizations.of(context)!.enRouteBackhauls,
+              style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          ...enRouteLoads.map((load) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: LoadCard(
+                  load: load,
+                  existingBid: bidsByLoadId[load.id],
+                  isSubmitting: submittingLoadIds.contains(load.id),
+                  onTap: () => onOpenLoad(load),
+                  onSubmitBid: (amt) => onSubmitBid(load, amt),
+                ),
               )),
+          const SizedBox(height: 20),
+        ],
+        Text(AppLocalizations.of(context)!.availableLoads,
+            style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        ...standardLoads.map((load) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: LoadCard(
+                load: load,
+                existingBid: bidsByLoadId[load.id],
+                isSubmitting: submittingLoadIds.contains(load.id),
+                onTap: () => onOpenLoad(load),
+                onSubmitBid: (amt) => onSubmitBid(load, amt),
+              ),
+            )),
       ],
     );
   }
 }
 
-class CircularIndicatorWidget extends StatelessWidget {
-  const CircularIndicatorWidget({super.key});
+class _TripsBody extends StatelessWidget {
+  final bool loading;
+  final String? error;
+  final List<Trip> trips;
+  final Map<String, List<Map<String, dynamic>>> stopsByTripId;
+  final Map<String, List<Map<String, dynamic>>> routePointsByTripId;
+  final List<String> statusFilters;
+  final int selectedChipIndex;
+  final ValueChanged<int> onChipSelected;
+  final VoidCallback onRefresh;
+  final Function(String) onCompleteStop;
+  final bool isOfflineData;
+  final DateTime? offlineSavedAt;
+  final List<DeadheadRecommendation> deadheadRecommendations;
+  final bool deadheadLoading;
+  final String? deadheadError;
+  final ValueChanged<DeadheadRecommendation> onOpenDeadheadLoad;
+
+  const _TripsBody({
+    required this.loading,
+    required this.error,
+    required this.trips,
+    required this.stopsByTripId,
+    required this.routePointsByTripId,
+    required this.statusFilters,
+    required this.selectedChipIndex,
+    required this.onChipSelected,
+    required this.onRefresh,
+    required this.onCompleteStop,
+    required this.isOfflineData,
+    required this.offlineSavedAt,
+    required this.deadheadRecommendations,
+    required this.deadheadLoading,
+    required this.deadheadError,
+    required this.onOpenDeadheadLoad,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return const CircularProgressIndicator();
+    if (loading) {
+      return const Center(child: CircularProgressIndicator(color: TruxifyColors.accent));
+    }
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+              const SizedBox(height: 16),
+              ElevatedButton(onPressed: onRefresh, child: Text(AppLocalizations.of(context)!.retry)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: TruxifyColors.accent,
+      onRefresh: () async => onRefresh(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (isOfflineData) ...[
+            Container(
+              padding: const EdgeInsets.all(10),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.offline_bolt, color: Colors.amber, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      AppLocalizations.of(context)!.showingCachedOfflineData,
+                      style: GoogleFonts.dmSans(fontSize: 12, color: Colors.amber[800]),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          SizedBox(
+            height: 38,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: statusFilters.length,
+              itemBuilder: (context, index) {
+                final isSelected = selectedChipIndex == index;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(_localizedFilterLabel(context, index)),
+                    selected: isSelected,
+                    onSelected: (_) => onChipSelected(index),
+                    selectedColor: TruxifyColors.accent,
+                    labelStyle: GoogleFonts.dmSans(
+                      color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface,
+                      fontSize: 12,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (trips.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Center(
+                child: Text(AppLocalizations.of(context)!.noTripsFound),
+              ),
+            )
+          else
+            ...trips.map((trip) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TripCard(
+                  trip: trip,
+                  stops: stopsByTripId[trip.tripId] ?? [],
+                  routePoints: routePointsByTripId[trip.tripId] ?? [],
+                  onCompleteStop: () => onCompleteStop(trip.tripId),
+                ),
+              );
+            }),
+          if (deadheadRecommendations.isNotEmpty || deadheadLoading) ...[
+            const SizedBox(height: 24),
+            Text(
+              AppLocalizations.of(context)!.deadheadRecommendations,
+              style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            if (deadheadLoading)
+              const Center(child: CircularProgressIndicator(color: TruxifyColors.accent))
+            else
+              ...deadheadRecommendations.map((rec) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: DeadheadRecommendationCard(
+                      recommendation: rec,
+                      onTap: () => onOpenDeadheadLoad(rec),
+                    ),
+                  )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _localizedFilterLabel(BuildContext context, int index) {
+    final l10n = AppLocalizations.of(context)!;
+    switch (index) {
+      case 0:
+        return l10n.all;
+      case 1:
+        return l10n.active2;
+      case 2:
+        return l10n.completed2;
+      case 3:
+        return l10n.cancelled2;
+      default:
+        return statusFilters[index];
+    }
   }
 }

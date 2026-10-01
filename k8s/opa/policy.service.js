@@ -96,7 +96,13 @@ class OPAService {
                         timestamp: new Date().toISOString()
                     };
                 }
-                const allowed = result.result && result.result[0]?.value === true;
+                // A single CLI query returns its value inside expressions, not
+                // directly on the result row. Accept only an unambiguous boolean.
+                const rows = result.result;
+                const expressions = Array.isArray(rows) && rows.length === 1
+                    ? rows[0]?.expressions : null;
+                const allowed = Array.isArray(expressions) && expressions.length === 1
+                    && expressions[0]?.value === true;
 
                 // Get violations
                 const violations = [];
@@ -105,9 +111,17 @@ class OPAService {
                         `opa eval --data ${path.join(this.policiesDir, policyName + '.rego')} --input ${inputPath} "data.${policyName}.deny"`
                     );
                     const denyResult = this._parseOpaOutput(denyStdout, policyName);
-                    if (denyResult && denyResult.result) {
-                        for (const r of denyResult.result) {
-                            violations.push(r.value);
+                    if (Array.isArray(denyResult?.result)) {
+                        for (const row of denyResult.result) {
+                            if (!Array.isArray(row?.expressions)) continue;
+                            for (const expression of row.expressions) {
+                                // Rego deny[msg] is a set encoded as a JSON array.
+                                if (Array.isArray(expression?.value)) {
+                                    violations.push(...expression.value.filter(
+                                        (message) => typeof message === 'string'
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

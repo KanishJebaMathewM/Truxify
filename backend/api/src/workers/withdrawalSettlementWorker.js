@@ -64,10 +64,29 @@ export function isAmbiguousDispatchError(err) {
  * Returns true only when this caller reserved the row.
  */
 async function claimWithdrawal(withdrawalId) {
+  // This claim is the linearization point before an irreversible payout, so it
+  // must re-assert EVERY precondition that makes a payout correct, not just
+  // that the claim token is free.
+  //
+  // payout_attempted_at alone is insufficient because it is a reusable token:
+  // schedule_withdrawal_retry and admin_resolve_dlq_withdrawal's requeue path
+  // both deliberately reset it to NULL so the next sweep can re-claim. A row can
+  // therefore legitimately be pending-and-unclaimed again while a worker still
+  // holds a stale candidate snapshot, and it can leave 'pending' entirely
+  // between the candidate SELECT and this UPDATE (fail_withdrawal_tx refunds the
+  // wallet and marks the row failed without touching payout_attempted_at).
+  //
+  // Claiming such a row dispatches a real payout that settle_withdrawal_tx then
+  // rejects (it only matches rows still in 'pending'), leaving money paid out on
+  // an already-refunded withdrawal. Re-asserting status/settled_at/txn_type here
+  // makes the claim match exactly the set the candidate SELECT chose from.
   const { data, error } = await supabaseAdmin
     .from("wallet_transactions")
     .update({ payout_attempted_at: new Date().toISOString() })
     .eq("id", withdrawalId)
+    .eq("txn_type", "withdrawal")
+    .eq("status", "pending")
+    .is("settled_at", null)
     .is("payout_attempted_at", null)
     .select("id");
 

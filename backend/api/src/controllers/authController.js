@@ -1,6 +1,6 @@
 import refreshTokenService from '../services/refreshTokenService.js';
 import jwt from 'jsonwebtoken';
-import { AppError, UnauthorizedError, ValidationError } from '../middleware/errorHandler.js';
+import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
 

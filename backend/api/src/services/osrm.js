@@ -68,7 +68,7 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
 
 export async function getRouteEstimate(input = {}) {
   if (!input) return null;
-  const { pickupLat, pickupLng, dropLat, dropLng } = input;
+  const { pickupLat, pickupLng, dropLat, dropLng, signal } = input;
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
@@ -99,8 +99,15 @@ export async function getRouteEstimate(input = {}) {
   const baseDelayMs = parsePositiveNumber(process.env.OSRM_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS);
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (signal?.aborted) {
+      return null;
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = () => controller.abort();
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     try {
       const routeUrl = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng });
@@ -141,10 +148,16 @@ export async function getRouteEstimate(input = {}) {
       }
 
       clearTimeout(timeout);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       return result;
 
     } catch (err) {
       clearTimeout(timeout);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       const routeUrlStr = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }).toString();
       if (attempt < maxRetries - 1) {
         const delayMs = retryDelayMs(baseDelayMs, attempt);

@@ -165,6 +165,7 @@ export async function predictPrice({
     routeOrigin = '',
     routeDestination = '',
     trafficMultiplier = 1.0,
+    signal,
 } = {}) {
   guardMlApiKey();
 
@@ -187,12 +188,28 @@ export async function predictPrice({
       traffic_multiplier: safeMultiplier,
   };
 
-  const response = await fetch(url, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ML_HTTP_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
 
   const raw = await handleResponse(response, url, 'POST');
 

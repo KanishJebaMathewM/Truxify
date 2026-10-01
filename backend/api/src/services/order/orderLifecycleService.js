@@ -115,11 +115,12 @@ export class OrderLifecycleService {
 
       let pricing;
       try {
-        const routeEstimate = await osrmCircuitBreaker.execute(() => getRouteEstimate({
+        const routeEstimate = await osrmCircuitBreaker.execute((options = {}) => getRouteEstimate({
           pickupLat: Number(pickup_lat),
           pickupLng: Number(pickup_lng),
           dropLat: Number(drop_lat),
           dropLng: Number(drop_lng),
+          signal: options?.signal,
         }));
         pricing = computeOrderPricing({
           pickupLat: Number(pickup_lat),
@@ -147,13 +148,14 @@ export class OrderLifecycleService {
       try {
         const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
 
-        const mlResult = await mlPriceCircuitBreaker.execute(() => predictPrice({
+        const mlResult = await mlPriceCircuitBreaker.execute((options = {}) => predictPrice({
           distanceKm: pricing.distanceKm,
           cargoWeightKg: Number(weight_tonnes) * 1000,
           truckType: 'medium_truck',
           routeOrigin: pickup_address,
           routeDestination: drop_address,
           trafficMultiplier,
+          signal: options?.signal,
         }));
         if (mlResult && mlResult.estimatedPricePaisa > 0) {
           estimatedPrice = mlResult.estimatedPricePaisa;

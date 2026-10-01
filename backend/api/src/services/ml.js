@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
 
@@ -9,7 +10,6 @@ const priceCache = new LRUCache(100, 15 * 60 * 1000);
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
 const ML_HTTP_TIMEOUT_MS = 5000;
-const ML_HTTP_TIMEOUT_MS_HEAVY = 10000;
 const ML_HTTP_TIMEOUT_MS_LONG = 300000;
 const ML_DEFAULT_PICKUP_LEAD_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_TRUCK_MAX_WEIGHT_KG = 25000;
@@ -466,19 +466,25 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
   guardMlApiKey();
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/match/deadhead`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({
-      driver_destination: driverDestination,
-      truck_specs: truckSpecs,
-      arrival_time: arrivalTime,
-      available_loads: availableLoads,
-    }),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
+  return mlMatchingGateway.execute(async (signal) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        driver_destination: driverDestination,
+        truck_specs: truckSpecs,
+        arrival_time: arrivalTime,
+        available_loads: availableLoads,
+      }),
+      signal,
+    });
+    // Body consumption and response validation share the admission deadline.
+    const result = await handleResponse(response, url, 'POST');
+    if (!result || !Array.isArray(result.recommendations)) {
+      throw new Error('[ML] Invalid matching recommendation response');
+    }
+    return result;
   });
-
-  return handleResponse(response);
 }
 
 /**
@@ -561,6 +567,7 @@ export async function matchEnRouteLoads({
 
   // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
+    mlUsed = false;
     recommendations = offers
       .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
       .map(o => {

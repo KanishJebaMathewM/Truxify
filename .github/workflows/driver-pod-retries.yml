@@ -1,0 +1,34 @@
+name: Driver POD retry protocol
+on:
+  pull_request:
+    paths:
+      - 'apps/driver/lib/services/pod*.dart'
+      - 'apps/driver/lib/services/background_sync_service.dart'
+      - 'apps/driver/lib/widgets/pod_sync_notice.dart'
+      - 'apps/driver/test/pod*.dart'
+      - 'apps/driver/test/background_sync_service_test.dart'
+      - 'tools/driver-pod-tests/**'
+      - '.github/workflows/driver-pod-retries.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/driver/lib/services/pod*.dart'
+      - 'apps/driver/lib/services/background_sync_service.dart'
+      - 'apps/driver/lib/widgets/pod_sync_notice.dart'
+      - 'apps/driver/test/pod*.dart'
+      - 'apps/driver/test/background_sync_service_test.dart'
+      - 'tools/driver-pod-tests/**'
+      - '.github/workflows/driver-pod-retries.yml'
+permissions:
+  contents: read
+jobs:
+  persisted-retries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+      - run: bash tools/driver-pod-tests/run.sh

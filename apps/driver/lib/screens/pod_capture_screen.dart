@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/pod_storage_service.dart';
 import '../services/background_sync_service.dart';
-import '../services/sync_service.dart';
 import '../services/image_compression_service.dart';
 
 class PodCaptureScreen extends StatefulWidget {
@@ -97,31 +96,15 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
         if (mounted) {
           setState(() => _uploadStatus = 'Uploading...');
         }
-        try {
-          await SyncService.instance.uploadPodFiles(
-            orderId: widget.orderId,
-            photoPath: savedPhotoPath,
-            signaturePath: savedSignaturePath,
-          );
-          await podStorageService.markAsSynced(podId);
-          setState(() => _uploadStatus = 'Upload complete!');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Proof of Delivery uploaded successfully'),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        } catch (e) {
-          debugPrint('Immediate upload failed, will retry in background: $e');
-          BackgroundSyncService.syncPods();
-          setState(() => _uploadStatus = 'Upload pending, will retry in background.');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Upload pending. Will retry in background.')),
-            );
-          }
+        await BackgroundSyncService.syncPods();
+        final saved = await podStorageService.getPod(podId);
+        if (mounted) {
+          final uploaded = saved?.synced == 1;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(uploaded ? 'Proof of Delivery uploaded successfully'
+                : 'Upload pending. Will retry in background.'),
+            backgroundColor: uploaded ? Colors.green : null,
+          ));
         }
       }
 

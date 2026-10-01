@@ -1,0 +1,19 @@
+name: truxify_driver
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  connectivity_plus: ^7.2.0
+  workmanager: ^0.10.10
+  firebase_auth: ^6.5.4
+  supabase_flutter: ^2.9.1
+  flutter_secure_storage: ^10.3.1
+  sqflite: ^2.3.0
+  path: ^1.9.1
+  http: ^1.6.0
+  http_parser: ^4.1.2
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  sqflite_common_ffi: ^2.3.4

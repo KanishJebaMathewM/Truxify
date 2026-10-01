@@ -115,6 +115,8 @@ class WebRTCSignalingServer {
       }
 
       const peerId = this.generatePeerId();
+      // Select a mesh from authenticated server state, never the URL query.
+      let meshId = null;
 
       if (!meshId) {
         for (const [existingPeerId, peer] of this.peers.entries()) {

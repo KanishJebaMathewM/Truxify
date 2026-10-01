@@ -152,6 +152,8 @@ async def train_demand(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -185,6 +187,8 @@ async def train_traffic(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -218,6 +222,8 @@ async def train_price(request: TrainRequest):
                 'data': results,
                 'timestamp': datetime.now().isoformat()
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")

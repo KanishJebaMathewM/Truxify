@@ -7,6 +7,8 @@ import pytest
 
 
 class _TrafficPipelineStub:
+    build_route_signature = staticmethod(lambda destination: "test-route-signature")
+
     def __init__(self, db_url, redis_url):
         self.ingest_traffic_data = AsyncMock()
         self.predict_eta = AsyncMock()
@@ -26,6 +28,7 @@ sys.modules["services.traffic_pipeline"] = mock_traffic_module
 
 mock_execution_module = types.ModuleType("app.execution")
 mock_execution_module.run_inference = _run_inference_stub
+mock_execution_module.run_training_job = _run_inference_stub
 sys.modules["app.execution"] = mock_execution_module
 
 from routes import eta_routes

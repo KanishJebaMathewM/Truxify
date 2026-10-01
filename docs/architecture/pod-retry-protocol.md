@@ -24,12 +24,15 @@ POD row ID via replacement to bypass this protocol.
 
 Failure delays are1min,5min,30min,2h,6h,24h, with24h for subsequent failures.
 Ten admitted attempts exhaust a document. No available credentials means no
-admission. A401 can refresh once; repeated401/403 pauses the batch and restores
-the document attempt count. Errors persist only status/type, never response
+admission. A401 can refresh once; repeated401 pauses the batch and restores
+the document attempt count. A403 is a document-specific failure: it follows
+backoff and the ten-attempt dead-letter budget without stopping other PODs. Errors persist only status/type, never response
 bodies or credentials. Provider token resolution is bounded to10s; each owned
 native HTTP client has a30s total preparation/send/body deadline and is closed
 on completion/error/timeout. Missing required attachments fail the document;
-they are not silently omitted.
+they are not silently omitted. Configured upload URLs must use HTTPS; only debug
+builds allow HTTP at localhost,127.0.0.1 or[::1]. Invalid URLs pause sync before
+credential lookup/admission, keeping saved deliveries pending.
 
 A persisted random128-bit key is sent as `X-Idempotency-Key`, compatible with the
 existing POD middleware. This helps server replay handling, but its retention
@@ -41,7 +44,9 @@ once, not exactly once.
 
 Workmanager registers a connected periodic task at15min. Connectivity bursts
 have a30s trailing debounce; going offline cancels it. Foreground capture uses
-this same queue, and app resume refreshes it. Batches admit at most20 jobs and
+this same queue, and app resume refreshes it. Capture returns after local save
+and starts sync without waiting for a batch; its confirmation reports a saved
+background upload, never an unobserved upload success. Batches admit at most20 jobs and
 stop admitting after two minutes; a current bounded upload can finish after
 that admission budget. OS background scheduling is best effort, so persisted
 backoff times are earliest eligibility, not promised upload times. Native
@@ -61,7 +66,7 @@ bash tools/driver-pod-tests/run.sh
 ```
 
 The locked isolated package copies the real storage, runner, HTTP transport,
-background adapter and notification widget, with their focused tests. It runs
+background adapter, capture screen and notification widget, with their focused tests. It runs
 analysis and real SQLite FFI/native HTTP tests, plus scheduling/widget tests.
 It deliberately does not claim the entire driver application passes analysis.
 Main's unrelated unquoted WebRTC dependency range is handled by own PR#16874.

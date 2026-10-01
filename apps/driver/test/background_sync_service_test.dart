@@ -11,6 +11,37 @@ void main() {
     BackgroundSyncService.connectivityChanged([ConnectivityResult.none]);
   });
 
+  test('upload URL policy requires HTTPS outside debug loopback', () {
+    for (final host in ['localhost', '127.0.0.1', '[::1]']) {
+      expect(
+        BackgroundSyncService.uploadBaseUri('http://$host:5000', debug: true),
+        isNotNull,
+      );
+      expect(
+        BackgroundSyncService.uploadBaseUri('http://$host:5000', debug: false),
+        isNull,
+      );
+    }
+    for (final value in [
+      '',
+      '/api',
+      'ftp://api.example',
+      'http://api.example',
+      'http://localhost.example',
+      'https://user:secret@api.example',
+    ]) {
+      expect(BackgroundSyncService.uploadBaseUri(value, debug: true), isNull);
+      expect(BackgroundSyncService.uploadBaseUri(value, debug: false), isNull);
+    }
+    expect(
+      BackgroundSyncService.uploadBaseUri(
+        'https://api.example/base',
+        debug: false,
+      )?.path,
+      '/base',
+    );
+  });
+
   test('registerSyncTask schedules the background sync task exactly once (issue #6281)', () {
     var scheduleCalls = 0;
     BackgroundSyncService.scheduleTaskOverride = () => scheduleCalls++;

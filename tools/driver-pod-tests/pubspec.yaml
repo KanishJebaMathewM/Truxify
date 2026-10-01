@@ -13,6 +13,12 @@ dependencies:
   path: ^1.9.1
   http: ^1.6.0
   http_parser: ^4.1.2
+  signature: ^6.3.0
+  image_picker: ^1.1.2
+  image_picker_platform_interface: ^2.11.1
+  path_provider: ^2.1.2
+  path_provider_platform_interface: ^2.1.2
+  flutter_image_compress: ^2.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

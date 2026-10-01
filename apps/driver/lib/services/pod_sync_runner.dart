@@ -33,7 +33,7 @@ class PodSyncRunner {
           if (credential != null && credential.isNotEmpty)
             status = await upload(pod, credential);
         }
-        if (status == 401 || status == 403) {
+        if (status == 401) {
           await storage.pauseForAuth(pod, now());
           break;
         }

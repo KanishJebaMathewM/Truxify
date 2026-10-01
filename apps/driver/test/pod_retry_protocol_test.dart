@@ -215,6 +215,46 @@ void main() {
     expect((await storage.metrics()).deadLetterCount, 0);
   });
 
+  test(
+    'document-specific 403 retries to dead letter without starving later PODs',
+    () async {
+      final deniedId = await add('denied');
+      final allowedId = await add('allowed');
+      var refreshCalls = 0;
+      final uploads = <String>[];
+      final runner = PodSyncRunner(
+        storage: storage,
+        token: (refresh) async {
+          if (refresh) refreshCalls++;
+          return 'valid';
+        },
+        upload: (pod, _) async {
+          uploads.add(pod.orderId);
+          return pod.orderId == 'denied' ? 403 : 201;
+        },
+        now: () => clock,
+      );
+      await runner.run();
+      expect(uploads, ['denied', 'allowed']);
+      expect((await storage.getPod(allowedId))!.synced, 1);
+      expect((await storage.getPod(deniedId))!.retryCount, 1);
+      for (
+        var attempt = 1;
+        attempt < PodStorageService.maxAttempts;
+        attempt++
+      ) {
+        clock = (await storage.getPod(deniedId))!.nextAttemptAt;
+        await runner.run();
+      }
+      expect(refreshCalls, 0);
+      expect(
+        (await storage.getPod(deniedId))!.retryCount,
+        PodStorageService.maxAttempts,
+      );
+      expect((await storage.metrics()).deadLetterCount, 1);
+    },
+  );
+
   test('bounded batch isolates document failures and persists sanitized diagnostics', () async {
     await add('bad');
     await add('good');

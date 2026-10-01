@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:signature/signature.dart';
@@ -82,7 +83,7 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
         createdAt: DateTime.now().millisecondsSinceEpoch,
       );
 
-      final podId = await podStorageService.insertPod(pod);
+      await podStorageService.insertPod(pod);
 
       final List<ConnectivityResult> connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult.contains(ConnectivityResult.none)) {
@@ -93,17 +94,10 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
           );
         }
       } else {
+        unawaited(BackgroundSyncService.syncPods());
         if (mounted) {
-          setState(() => _uploadStatus = 'Uploading...');
-        }
-        await BackgroundSyncService.syncPods();
-        final saved = await podStorageService.getPod(podId);
-        if (mounted) {
-          final uploaded = saved?.synced == 1;
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(uploaded ? 'Proof of Delivery uploaded successfully'
-                : 'Upload pending. Will retry in background.'),
-            backgroundColor: uploaded ? Colors.green : null,
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Proof of Delivery saved. Uploading in background.'),
           ));
         }
       }

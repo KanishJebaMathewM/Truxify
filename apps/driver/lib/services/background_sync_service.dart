@@ -96,22 +96,29 @@ class BackgroundSyncService {
     }
   }
 
+  /// Release uploads require HTTPS. Plain HTTP is restricted to literal
+  /// loopback development endpoints; hostname resolution is not a trust check.
+  @visibleForTesting
+  static Uri? uploadBaseUri(String value, {bool debug = kDebugMode}) {
+    final uri = Uri.tryParse(value);
+    if (uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty) return null;
+    if (uri.scheme == 'https') return uri;
+    final loopback = ['localhost', '127.0.0.1', '::1'].contains(uri.host);
+    return debug && uri.scheme == 'http' && loopback ? uri : null;
+  }
+
   static Future<void> syncPods() async {
-    if (syncOverride != null) {
-      await syncOverride!();
-      return;
-    }
     if (_syncing) return;
     _syncing = true;
     try {
+      if (syncOverride != null) {
+        await syncOverride!();
+        return;
+      }
       const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
-      final uri = Uri.tryParse(envUrl);
-      if (uri == null ||
-          !['https', 'http'].contains(uri.scheme) ||
-          uri.host.isEmpty) {
-        debugPrint(
-          'TRUXIFY_API_BASE_URL must be an absolute HTTP URL for POD sync.',
-        );
+      final uri = uploadBaseUri(envUrl);
+      if (uri == null) {
+        debugPrint('POD sync requires HTTPS (debug loopback HTTP is allowed).');
         return;
       }
       final transport = PodUploadTransport(uri);

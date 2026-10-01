@@ -1,4 +1,4 @@
-import { assertOrderReadModelRow } from '../api/src/core/orders/read-model-schema.js';
+import { assertOrderReadModelRow, deriveOrderStatus } from '../api/src/core/orders/read-model-schema.js';
 import { randomUUID as uuidv4 } from 'node:crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase, supabaseAdmin } from '../api/src/config/db.js';
@@ -8,13 +8,13 @@ import spanFactory from '../api/src/core/telemetry/SpanFactory.js';
 import { context, trace, SpanStatusCode } from '@opentelemetry/api';
 
 import { EventStoreCore, normalizeEventRow } from './event-sourcing-core.js';
+import { rebuildFromPages } from './rebuild-stream.js';
 import {
   EventStoreValidationError,
   EventStoreVersionConflictError,
   EventStorePersistenceError,
   toEventStoreError,
 } from './errors.js';
-import { deriveOrderStatus } from '../api/src/core/orders/read-model-schema.js';
 
 // Topic names mirror the values in backend/kafka/config/kafka.config.js.
 // They are duplicated here (instead of importing TOPICS) so this package does
@@ -519,6 +519,16 @@ class EventStore {
             driverCount,
             eventCount: rows.length,
         };
+    }
+
+    async rebuildProjectionsFromPages(orderPages, driverPages) {
+        return rebuildFromPages({
+            orderPages,
+            driverPages,
+            getSnapshot: (id) => this._getCore().getSnapshot(id),
+            writeOrder: (...args) => this._upsertOrderReadModel(...args),
+            writeDriver: (event) => this.updateDriverReadModel(event),
+        });
     }
 
     // ============ Event Publishing ============

@@ -26,16 +26,21 @@ MODEL_NAME = "demand_forecast"
 # Module-level cache to avoid reloading from disk on every call
 _model_cache = None
 
-# Serializes training + cache mutation for this model across executor threads
-# (e.g. an HTTP-triggered retrain racing a lazy auto-train from a prediction).
-# RLock so predict_demand() may hold it while training, which also acquires it.
+# Serializes training and rollback publication across executor threads.
+# Reentrant so publication helpers can share the same model lifecycle lock.
 _cache_lock = threading.RLock()
+# Short state critical sections are separate from long-running training.
+_cache_state_lock = threading.Lock()
+_cache_load_lock = threading.Lock()
+_cache_generation = 0
 
 
 def reset_model_cache():
     """Reset the in-memory model cache so the next prediction loads from disk."""
-    global _model_cache
-    _model_cache = None
+    global _model_cache, _cache_generation
+    with _cache_state_lock:
+        _cache_generation += 1
+        _model_cache = None
 
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
@@ -195,6 +200,13 @@ def train_demand_forecast_model() -> dict:
 
 
 def rollback_demand_forecast_model() -> dict:
+    """Restore the previous model and invalidate cache under the training lock."""
+    # Keep restoration and invalidation ordered with training publication.
+    with _cache_lock:
+        return _rollback_demand_forecast_model()
+
+
+def _rollback_demand_forecast_model() -> dict:
     """Roll back the demand-forecast model to its previously-promoted version.
 
     Returns a dict describing whether a rollback actually happened, so the
@@ -223,30 +235,53 @@ def rollback_demand_forecast_model() -> dict:
     }
 
 
+def _load_demand_tuple():
+    if not model_exists(MODEL_NAME):
+        raise RuntimeError(
+            "Demand model artifact missing. Refusing to serve synthetic forecasts. "
+            "Run the training endpoint on real booking data and ship the artifact."
+        )
+    loaded = load_model(MODEL_NAME)
+    if loaded is None:
+        raise RuntimeError("Corrupt demand model artifact: failed to load model from disk.")
+
+    # Verify the loaded model is not a synthetic-trained artifact.
+    meta = get_model_meta(MODEL_NAME) or {}
+    training_meta = meta.get("training_meta", {})
+    if training_meta.get("source") == "synthetic":
+        raise RuntimeError("Refusing to serve a demand model trained on synthetic data.")
+
+    return loaded
+
+
+def _cached_demand_tuple():
+    global _model_cache
+    with _cache_state_lock:
+        cached = _model_cache
+    if cached is not None:
+        return cached
+    # One loader at a time; followers recheck after the owner's publication.
+    # A failed load releases the lock so a later call can retry.
+    with _cache_load_lock:
+        while True:
+            with _cache_state_lock:
+                if _model_cache is not None:
+                    return _model_cache
+                generation = _cache_generation
+            loaded = _load_demand_tuple()
+            with _cache_state_lock:
+                if generation == _cache_generation:
+                    _model_cache = loaded
+                    return loaded
+            # Reset superseded this load. Reload without publishing its result.
+
+
 def predict_demand(features: List[float]) -> Optional[float]:
     if len(features) != len(FEATURE_NAMES):
         raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
 
-    global _model_cache
-    if _model_cache is None:
-        if not model_exists(MODEL_NAME):
-            raise RuntimeError(
-                "Demand model artifact missing. Refusing to serve synthetic forecasts. "
-                "Run the training endpoint on real booking data and ship the artifact."
-            )
-        loaded = load_model(MODEL_NAME)
-        if loaded is None:
-            raise RuntimeError("Corrupt demand model artifact: failed to load model from disk.")
-
-        # Verify the loaded model is not a synthetic-trained artifact.
-        meta = get_model_meta(MODEL_NAME) or {}
-        training_meta = meta.get("training_meta", {})
-        if training_meta.get("source") == "synthetic":
-            raise RuntimeError("Refusing to serve a demand model trained on synthetic data.")
-
-        _model_cache = loaded
-
-    model, scaler = _model_cache
+    # Capture once: a concurrent reset cannot turn the tuple into None.
+    model, scaler = _cached_demand_tuple()
     X = np.array(features).reshape(1, -1)
     X_scaled = scaler.transform(X)
     pred = model.predict(X_scaled)[0]

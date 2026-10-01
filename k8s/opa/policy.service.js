@@ -1,4 +1,4 @@
-﻿import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -50,15 +50,18 @@ class OPAService {
 
     // OPA CLI output can carry non-JSON noise (runtime warnings, notices)
     // before the payload. Never let a bare JSON.parse abort an authorization
-    // decision — on failure, log the raw output and return null so the caller
-    // can produce a deny result instead of an unhandled exception.
+    // decision — on failure, log the raw output and return a safe explicit deny
+    // payload instead of an unhandled exception.
     _parseOpaOutput(stdout, policyName) {
+        if (!stdout || typeof stdout !== 'string') {
+            return { result: [{ expressions: [{ value: { allow: false } }] }] };
+        }
         try {
             return JSON.parse(stdout);
         } catch (err) {
             logger.error(`OPA evaluation produced non-JSON output for policy ${policyName}: ${err.message}`);
             logger.error(`Raw OPA output: ${stdout}`);
-            return null;
+            return { result: [{ expressions: [{ value: { allow: false } }] }] };
         }
     }
 

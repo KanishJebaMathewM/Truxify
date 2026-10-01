@@ -4,10 +4,11 @@ import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptan
 import { OrderTimelineService } from '../services/order/orderTimelineService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
 import { OrderValidationService } from '../services/order/orderValidationService.js';
-import { buildDepositTx, recordDepositTx, submitEscrowRefund } from '../services/escrow.js';
+import { buildDepositTx, recordDepositTx, submitEscrowRefund as escrowRefund } from '../services/escrow.js';
 import { predictDemand } from '../services/ml.js';
 import { buildStraightLineGeometry, getRouteGeometry } from '../services/osrm.js';
 import logger from '../middleware/logger.js';
+import { AppError } from '../utils/errors.js';
 
 const orderRepository = new OrderRepository(supabase);
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
@@ -65,7 +66,7 @@ async function fetchLoadOffers(req, res, next, { isEnRoute, label }) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (error) return next(new AppError(`Failed to fetch ${label}.`, details: error.message, 500, "INTERNAL_ERROR"));
+    if (error) return next(new AppError(`Failed to fetch ${label}.`, 500, "INTERNAL_ERROR", { details: error.message }));
     res.json(offers);
   } catch (err) {
     logger.error(`[orderController] Failed to fetch ${label}:`, err.message);

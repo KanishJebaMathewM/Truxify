@@ -57,7 +57,11 @@ export function extractEventArg(receipt, contract, eventName, argIndex = 0) {
 class TokenizationService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        // The signer and contract clients are created on first use (see the getters
+        // below). Building them here made the whole API fail to start whenever
+        // PRIVATE_KEY or a contract address was not configured, because ethers
+        // throws on an undefined private key or contract target.
+        this._wallet = null;
         this.tokenAddress = process.env.ASSET_TOKEN_ADDRESS;
 
         this.tokenABI = [
@@ -76,9 +80,38 @@ class TokenizationService {
             'event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller)'
         ];
 
-        this.token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
 
         logger.info('✅ Tokenization Service initialized');
+    }
+
+    // ============ Chain clients (created on first use) ============
+
+    get wallet() {
+        if (!this._wallet) {
+            if (!process.env.PRIVATE_KEY) {
+                throw new Error('Tokenization chain access is not configured: set PRIVATE_KEY');
+            }
+            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        }
+        return this._wallet;
+    }
+
+    set wallet(value) {
+        this._wallet = value;
+    }
+
+    get token() {
+        if (!this._token) {
+            if (!this.tokenAddress) {
+                throw new Error('Tokenization chain access is not configured: set ASSET_TOKEN_ADDRESS');
+            }
+            this._token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
+        }
+        return this._token;
+    }
+
+    set token(value) {
+        this._token = value;
     }
 
     /**
@@ -188,10 +221,7 @@ class TokenizationService {
 
     async sellFraction(assetId, amount, userAddress, signer) {
         try {
-            if (!signer) {
-                throw new Error('A verified user signer is required to sell fractions.');
-            }
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.sellFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),

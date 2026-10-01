@@ -123,3 +123,62 @@ class TestIsShadowBetter:
         results = {"accuracy": {"production": 1.0, "shadow": 0.99}}
         # shadow == prod * threshold → not strictly better
         assert model.is_shadow_better(results) is False
+class TestEvaluateTest:
+    """Tests for production vs shadow metric evaluation."""
+
+    def test_no_shadow_metrics_does_not_trigger_rollback(self, tmp_path):
+        """Missing shadow metrics must not silently trigger rollback."""
+        db_path = tmp_path / "ab_test.db"
+        model = ABTestModel(f"sqlite:///{db_path}")
+
+        model.log_metrics(
+            test_id="test_1",
+            model_version="production",
+            metrics={"accuracy": 0.90},
+            request_id="request_1"
+        )
+
+        result = model.evaluate_test("test_1")
+
+        assert result["should_rollback"] is False
+        assert result["error"] == "Insufficient metrics for production vs shadow comparison"
+    def test_trigger_rollback_does_not_promote_without_shadow_metrics(self, tmp_path):
+        """Missing shadow metrics must not result in a promote action."""
+        db_path = tmp_path / "ab_test.db"
+        model = ABTestModel(f"sqlite:///{db_path}")
+
+        model.log_metrics(
+            test_id="test_rollback",
+            model_version="production",
+            metrics={"accuracy": 0.90},
+            request_id="request_1"
+        )
+
+        result = model.trigger_rollback("test_rollback")
+
+        assert result["action"] == "none"
+        assert result["reason"] == "Insufficient metrics for production vs shadow comparison"
+    def test_uses_real_shadow_version(self, tmp_path):
+        """Evaluation must use the actual logged shadow model version."""
+        db_path = tmp_path / "ab_test.db"
+        model = ABTestModel(f"sqlite:///{db_path}")
+
+        model.log_metrics(
+            test_id="test_2",
+            model_version="production",
+            metrics={"accuracy": 0.90},
+            request_id="request_1"
+        )
+
+        model.log_metrics(
+            test_id="test_2",
+            model_version="v2",
+            metrics={"accuracy": 0.95},
+            request_id="request_2"
+        )
+
+        result = model.evaluate_test("test_2")
+
+        assert result["results"]["accuracy"]["production"] == 0.90
+        assert result["results"]["accuracy"]["shadow"] == 0.95
+        assert result["should_rollback"] is False

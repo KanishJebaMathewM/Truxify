@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
@@ -14,7 +14,11 @@ import {
 export class ZKIDService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        // The signer and contract clients are created on first use (see the getters
+        // below). Building them here made the whole API fail to start whenever
+        // PRIVATE_KEY or a contract address was not configured, because ethers
+        // throws on an undefined private key or contract target.
+        this._wallet = null;
         this.zkidAddress = process.env.ZKID_CONTRACT_ADDRESS;
 
         this.zkidABI = [
@@ -30,9 +34,38 @@ export class ZKIDService {
             'function isCredentialValid(bytes32 credentialHash) external view returns (bool)'
         ];
 
-        this.zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
         this.identitySecret = crypto.randomBytes(32);
         logger.info('✅ ZK-ID Service initialized');
+    }
+
+    // ============ Chain clients (created on first use) ============
+
+    get wallet() {
+        if (!this._wallet) {
+            if (!process.env.PRIVATE_KEY) {
+                throw new Error('ZK-ID chain access is not configured: set PRIVATE_KEY');
+            }
+            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        }
+        return this._wallet;
+    }
+
+    set wallet(value) {
+        this._wallet = value;
+    }
+
+    get zkid() {
+        if (!this._zkid) {
+            if (!this.zkidAddress) {
+                throw new Error('ZK-ID chain access is not configured: set ZKID_CONTRACT_ADDRESS');
+            }
+            this._zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
+        }
+        return this._zkid;
+    }
+
+    set zkid(value) {
+        this._zkid = value;
     }
 
     // ============ Identity Management ============

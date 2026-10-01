@@ -40,61 +40,8 @@ class ExponentialBackoff {
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
-    constructor(options = {}) {
-      this.name = options.name || 'default';
-      this.failureThreshold = options.failureThreshold || 5;
-      this.resetTimeout = options.resetTimeout || 60000; 
-      this.state = 'CLOSED'; 
-      this.failureCount = 0;
-      this.lastFailureTime = null;
-    }
-
-    async execute(fn) {
-      if (this.state === 'OPEN') {
-        if (Date.now() - this.lastFailureTime > this.resetTimeout) {
-          console.log(`Circuit breaker '${this.name}' transitioning to HALF-OPEN`);
-          this.state = 'HALF-OPEN';
-        } else {
-          throw new Error(`Circuit breaker '${this.name}' is OPEN. Service unavailable.`);
-        }
-      }
-
-      try {
-        const result = await fn();
-        this.onSuccess();
-        return result;
-      } catch (error) {
-        this.onFailure();
-        throw error;
-      }
-    }
-
-    onSuccess() {
-      this.failureCount = 0;
-      if (this.state === 'HALF-OPEN') {
-        console.log(`Circuit breaker '${this.name}' transitioning to CLOSED`);
-        this.state = 'CLOSED';
-      }
-    }
-
-    onFailure() {
-      this.failureCount++;
-      this.lastFailureTime = Date.now();
-
-      if (this.failureCount >= this.failureThreshold) {
-        console.warn(`Circuit breaker '${this.name}' transitioning to OPEN due to ${this.failureCount} failures`);
-        this.state = 'OPEN';
-      }
-    }
-
-    getState() {
-      if (this.state === 'OPEN' && Date.now() - this.lastFailureTime > this.resetTimeout) {
-        return 'HALF-OPEN';
-      }
-      return this.state;
-    }
   }
+}
 
-module.exports = CircuitBreaker;
-module.exports.default = CircuitBreaker;
-module.exports.CircuitBreaker = CircuitBreaker;
+export default ExponentialBackoff;
+export { ExponentialBackoff };

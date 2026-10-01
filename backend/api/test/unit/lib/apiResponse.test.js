@@ -101,6 +101,11 @@ describe('paginated', () => {
     expect(firstPage.pagination.hasNextPage).toBe(true);
   });
 
+  it('returns false for hasNextPage on the last 0-based page', () => {
+    const result = paginated([], 0, 10, 10);
+
+    expect(result.pagination.hasNextPage).toBe(false);
+  });
   it('coerces page and limit to numbers', () => {
     const result = paginated([], '2', '10', '25');
     expect(result.pagination.page).toBe(2);

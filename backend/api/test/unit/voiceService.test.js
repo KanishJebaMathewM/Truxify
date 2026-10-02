@@ -34,6 +34,9 @@ vi.mock('axios');
 const mockSupabaseFrom = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: {
     from: mockSupabaseFrom,
   },
@@ -129,8 +132,11 @@ describe('voiceService', () => {
 
       expect(result).toBeNull();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Orders table check failed in voiceService:',
-        'Table not found'
+        expect.objectContaining({
+          event: 'VOICE_ORDER_LOOKUP_ERROR',
+          error: expect.any(String),
+        }),
+        expect.any(String)
       );
     });
 

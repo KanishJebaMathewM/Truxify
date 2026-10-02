@@ -4,9 +4,11 @@ import sys
 
 import networkx as nx
 import pytest
+import qiskit
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from quantum_circuit import QUBOFormatter  # noqa: E402
+import quantum_circuit  # noqa: E402
+from quantum_circuit import QUBOFormatter, QuantumCircuitDesigner  # noqa: E402
 
 from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # noqa: E402
 
@@ -119,3 +121,38 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_qaoa_circuit_binds_parameters_and_measures_all_qubits():
+    circuit = QuantumCircuitDesigner().create_qaoa_circuit()
+
+    assert not circuit.parameters
+    assert circuit.num_clbits == circuit.num_qubits
+    assert circuit.count_ops().get('measure') == circuit.num_qubits
+
+
+def test_run_circuit_returns_a_clear_error_when_counts_are_empty(monkeypatch):
+    class EmptyResult:
+        def get_counts(self):
+            return {}
+
+    class EmptyJob:
+        def result(self):
+            return EmptyResult()
+
+    class EmptyCountsSimulator:
+        def run(self, circuit, shots):
+            return EmptyJob()
+
+    monkeypatch.setattr(quantum_circuit, 'AerSimulator', EmptyCountsSimulator)
+    monkeypatch.setattr(qiskit, 'transpile', lambda circuit, simulator: circuit)
+
+    result = QuantumCircuitDesigner().run_circuit(object())
+
+    assert result == {
+        'success': False,
+        'counts': {},
+        'shots': 1024,
+        'most_frequent': None,
+        'error': 'Circuit produced no measurement counts',
+    }

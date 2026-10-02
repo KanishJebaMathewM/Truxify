@@ -53,13 +53,16 @@ export function getEarningsCutoff(period, now = new Date()) {
   if (!PERIODS.has(period)) {
     return null;
   }
+  // Work in UTC like `trip_date` keys (toDateKey) and buildWeeklyChart: a
+  // local-midnight cutoff formatted with toISOString() is the *previous* UTC
+  // day on any server east of UTC, so 'day' also counted yesterday's trips.
   const cutoff = new Date(now);
   if (period === 'day') {
-    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setUTCHours(0, 0, 0, 0);
   } else if (period === 'week') {
-    cutoff.setDate(cutoff.getDate() - 7);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 7);
   } else {
-    cutoff.setDate(cutoff.getDate() - 30);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 30);
   }
   return cutoff;
 }
@@ -77,7 +80,7 @@ export function getEarningsCutoff(period, now = new Date()) {
  */
 export function getDeadheadCutoff(cutoff) {
   const start = new Date(cutoff);
-  start.setDate(start.getDate() - DEADHEAD_MAX_GAP_DAYS);
+  start.setUTCDate(start.getUTCDate() - DEADHEAD_MAX_GAP_DAYS);
   return start;
 }
 

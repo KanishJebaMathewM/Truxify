@@ -11,6 +11,8 @@ import logging
 import math
 from typing import List, Dict, Any
 
+from ._shelf_fit_index import ShelfFitIndex
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -153,6 +155,14 @@ def _pack_packages(
     indexed = [(i, p) for i, p in enumerate(packages)]
     indexed.sort(key=lambda t: t[1]["length"] * t[1]["width"] * t[1]["height"], reverse=True)
 
+    # Avoid index overhead for small inputs and retain legacy numeric behavior.
+    numeric_values = [truck_l, truck_w, truck_h, max_weight]
+    numeric_values.extend(p[key] for p in packages for key in ("length", "width", "height", "weight"))
+    use_index = len(packages) >= 128 and all(
+        isinstance(value, (int, float)) and 0 < value <= 2 ** 53 and math.isfinite(value)
+        for value in numeric_values
+    )
+    shelf_index = ShelfFitIndex(len(packages), truck_l) if use_index else None
     shelves: List[_Shelf] = []
     arrangements = [None] * len(packages)
     unpacked: List[int] = []
@@ -175,7 +185,21 @@ def _pack_packages(
             continue
 
         placed = False
-        for i, shelf in enumerate(shelves):
+        if shelf_index is None:
+            candidate_indices = range(len(shelves))
+        else:
+            def candidates(dimensions=(pkg_length, pkg_width, pkg_height)):
+                """Yield ordered conservative candidates; exact placement may reject."""
+                start = 0
+                while True:
+                    candidate = shelf_index.find_first(dimensions, start)
+                    if candidate is None:
+                        return
+                    yield candidate
+                    start = candidate + 1
+            candidate_indices = candidates()
+        for i in candidate_indices:
+            shelf = shelves[i]
             if i + 1 < len(shelves):
                 clearance = shelves[i + 1].z_bottom - shelf.z_bottom
             else:
@@ -183,6 +207,8 @@ def _pack_packages(
 
             pos = shelf.try_place(pkg_length, pkg_width, pkg_height, max_height_limit=clearance)
             if pos is not None:
+                if shelf_index is not None:
+                    shelf_index.update(i, shelf, clearance)
                 arrangements[idx] = {
                     "package_index": idx,
                     "position": {"x": round(pos["x"], 4), "y": round(pos["y"], 4), "z": round(pos["z"], 4)},
@@ -196,6 +222,7 @@ def _pack_packages(
                 break
 
         if not placed:
+            # Keep Python's compensated float summation and boundary decisions.
             z_offset = sum(s.shelf_height for s in shelves)
             if z_offset >= truck_h:
                 arrangements[idx] = {
@@ -220,6 +247,10 @@ def _pack_packages(
                 }
                 packed_weight += pkg_weight
                 packed_volume += pkg_length * pkg_width * pkg_height
+                if shelf_index is not None:
+                    if shelves:
+                        shelf_index.update(len(shelves) - 1, shelves[-1], z_offset - shelves[-1].z_bottom)
+                    shelf_index.update(len(shelves), new_shelf, truck_h - z_offset)
                 shelves.append(new_shelf)
             else:
                 arrangements[idx] = {

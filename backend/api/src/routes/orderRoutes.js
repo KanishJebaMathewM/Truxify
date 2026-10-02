@@ -438,10 +438,9 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
  *     tags: [Orders]
  *     summary: Auto-confirm delivery via GPS geofence
  *     description: |
- *       If the driver's GPS position is within 500m of the drop location,
- *       automatically confirms delivery and releases escrow payment without
- *       requiring the customer to share an OTP. Falls back gracefully if
- *       the driver is too far away (returns autoConfirmed: false).
+ *       Auto-confirms delivery via GPS geofence using server-recorded telemetry.
+ *       Verifies that the assigned driver's recent telemetry position is within
+ *       the geofence radius (default 500m) of the drop location.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -451,25 +450,26 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
  *         schema:
  *           type: string
  *     requestBody:
- *       required: true
+ *       required: false
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [driver_lat, driver_lng]
  *             properties:
  *               driver_lat:
  *                 type: number
+ *                 description: Optional driver claimed latitude (non-authoritative; server telemetry is authoritative)
  *               driver_lng:
  *                 type: number
+ *                 description: Optional driver claimed longitude (non-authoritative; server telemetry is authoritative)
  *               geofence_radius_m:
  *                 type: number
- *                 description: Override default 500m geofence radius
+ *                 description: Override default 500m geofence radius (must be <= 500m)
  *     responses:
  *       200:
  *         description: Auto-confirm result (check autoConfirmed field)
  *       409:
- *         description: Order not in arriving status
+ *         description: Order not in arriving status or driver location outside geofence / unavailable
  */
 router.post(
   '/:id/geofence-confirm',
@@ -479,16 +479,22 @@ router.post(
   validateParams(paramIdSchema),
   async (req, res) => {
     try {
-      const { driver_lat, driver_lng, geofence_radius_m } = req.body;
+      const { driver_lat, driver_lng, geofence_radius_m } = req.body || {};
 
-      if (!driver_lat || !driver_lng) {
-        return res.status(400).json({ error: 'driver_lat and driver_lng are required.' });
-      }
-
-      const lat = parseFloat(driver_lat);
-      const lng = parseFloat(driver_lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return res.status(400).json({ error: 'driver_lat and driver_lng must be valid numbers.' });
+      let claimedLat;
+      let claimedLng;
+      if (driver_lat !== undefined || driver_lng !== undefined) {
+        if (driver_lat !== undefined && driver_lng !== undefined) {
+          const lat = parseFloat(driver_lat);
+          const lng = parseFloat(driver_lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return res.status(400).json({ error: 'driver_lat and driver_lng must be valid numbers when provided.' });
+          }
+          claimedLat = lat;
+          claimedLng = lng;
+        } else {
+          return res.status(400).json({ error: 'driver_lat and driver_lng must both be provided if submitting claimed coordinates.' });
+        }
       }
 
       let geofenceRadiusM = 500;
@@ -514,8 +520,8 @@ router.post(
       const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
         orderId: order.id,
         driverId: req.user.id,
-        driverLat: lat,
-        driverLng: lng,
+        driverLat: claimedLat,
+        driverLng: claimedLng,
         geofenceRadiusM,
       });
 

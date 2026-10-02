@@ -295,7 +295,7 @@ describe('orderRoutes implementation wiring', () => {
     const start = source.indexOf("'/:id/geofence-confirm'");
     const end = source.indexOf('// 5. FETCH MY ORDER HISTORY', start);
     const section = source.slice(start, end);
-    expect(section).toContain('driver_lat and driver_lng are required');
+    expect(section).toContain('driver_lat and driver_lng must be valid numbers');
     expect(section).toContain('Number.isFinite');
     expect(section).toContain('geofenceAutoConfirm');
     expect(section).toContain('Internal Server Error');

@@ -2,9 +2,11 @@ import logger from '../middleware/logger.js';
 import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
+import { OwnedPredictionFlights } from '../lib/ownedPredictionFlights.js';
 
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
+const predictionFlights = new OwnedPredictionFlights();
 
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
@@ -135,16 +137,20 @@ export async function predictDemand(features = {}) {
 
   const url = `${getBaseUrl()}/predict/demand`;
 
-  const response = await fetch(url, {
+  const headers = getHeaders();
+  return predictionFlights.run(JSON.stringify([url, headers, cacheKey]), async (signal) => {
+    const response = await fetch(url, {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(features),
-      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+      headers,
+      body: cacheKey,
+      signal,
+    });
+    signal.throwIfAborted();
+    const result = await handleResponse(response, url, 'POST');
+    signal.throwIfAborted();
+    demandCache.set(cacheKey, result);
+    return result;
   });
-
-  const result = await handleResponse(response, url, 'POST');
-  demandCache.set(cacheKey, result);
-  return result;
 }
 
 /**
@@ -188,72 +194,83 @@ export async function predictPrice({
       traffic_multiplier: safeMultiplier,
   };
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ML_HTTP_TIMEOUT_MS);
-  const onAbort = () => controller.abort();
-  if (signal) {
-    if (signal.aborted) controller.abort();
-    else signal.addEventListener('abort', onAbort, { once: true });
-  }
-
-  let response;
-  try {
-    response = await fetch(url, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
+  const headers = getHeaders();
+  const body = JSON.stringify(payload);
+  return predictionFlights.run(JSON.stringify([url, headers, cacheKey]), async (flightSignal) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ML_HTTP_TIMEOUT_MS);
+    const onAbort = () => controller.abort();
     if (signal) {
-      signal.removeEventListener('abort', onAbort);
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', onAbort, { once: true });
     }
-  }
+    const onFlightAbort = () => controller.abort();
+    if (flightSignal.aborted) controller.abort();
+    else flightSignal.addEventListener('abort', onFlightAbort, { once: true });
 
-  const raw = await handleResponse(response, url, 'POST');
+    let response;
+    try {
+      response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body,
+          signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+      flightSignal.removeEventListener('abort', onFlightAbort);
+    }
 
-  const initialValidation = validatePricePrediction(raw);
-  if (!initialValidation.ok) {
-      logger.warn({
-          reason: initialValidation.reason,
-          detail: initialValidation.detail,
-          response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
-      }, '[ML] Price prediction rejected by validator');
-      throw new Error(`[ML] Invalid prediction: ${initialValidation.reason} — ${initialValidation.detail}`);
-  }
+    flightSignal.throwIfAborted();
+    const raw = await handleResponse(response, url, 'POST');
+    flightSignal.throwIfAborted();
 
-  const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
-  // Only forward min_price/max_price keys when the raw response actually
-  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
-  const revalidated = validatePricePrediction({
-      ...raw,
-      estimated_price: adjustedPrice,
-      ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
-      ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
+    const initialValidation = validatePricePrediction(raw);
+    if (!initialValidation.ok) {
+        logger.warn({
+            reason: initialValidation.reason,
+            detail: initialValidation.detail,
+            response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
+        }, '[ML] Price prediction rejected by validator');
+        throw new Error(`[ML] Invalid prediction: ${initialValidation.reason} — ${initialValidation.detail}`);
+    }
+
+    const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
+    // Only forward min_price/max_price keys when the raw response actually
+    // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
+    const revalidated = validatePricePrediction({
+        ...raw,
+        estimated_price: adjustedPrice,
+        ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
+        ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
+    });
+
+    if (!revalidated.ok) {
+        logger.warn({
+            reason: revalidated.reason,
+            detail: revalidated.detail,
+            adjusted_price: adjustedPrice,
+        }, '[ML] Surge-adjusted price prediction rejected by validator');
+        throw new Error(`[ML] Invalid prediction: ${revalidated.reason} — ${revalidated.detail}`);
+    }
+
+    logger.debug({
+        estimated_price_inr: revalidated.validated.estimated_price,
+        confidence: revalidated.validated.confidence,
+    }, '[ML] Price prediction validated successfully');
+
+    const result = {
+        ...revalidated.validated,
+        estimatedPricePaisa: convertToPaisa(revalidated.validated.estimated_price),
+        estimatedPriceInr: revalidated.validated.estimated_price,
+    };
+    flightSignal.throwIfAborted();
+    priceCache.set(cacheKey, result);
+    return result;
   });
-
-  if (!revalidated.ok) {
-      logger.warn({
-          reason: revalidated.reason,
-          detail: revalidated.detail,
-          adjusted_price: adjustedPrice,
-      }, '[ML] Surge-adjusted price prediction rejected by validator');
-      throw new Error(`[ML] Invalid prediction: ${revalidated.reason} — ${revalidated.detail}`);
-  }
-
-  logger.debug({
-      estimated_price_inr: revalidated.validated.estimated_price,
-      confidence: revalidated.validated.confidence,
-  }, '[ML] Price prediction validated successfully');
-
-  const result = {
-      ...revalidated.validated,
-      estimatedPricePaisa: convertToPaisa(revalidated.validated.estimated_price),
-      estimatedPriceInr: revalidated.validated.estimated_price,
-  };
-  priceCache.set(cacheKey, result);
-  return result;
 }
 
 /**

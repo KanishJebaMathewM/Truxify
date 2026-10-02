@@ -1,0 +1,30 @@
+name: API cached prediction ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/ml.js'
+      - 'backend/api/src/lib/ownedPredictionFlights.js'
+      - 'backend/api/src/lib/predictionValidator.js'
+      - 'backend/api/src/utils/cache.js'
+      - 'backend/api/test/unit/cachedPredictionOwnership.test.js'
+      - 'backend/api/test/unit/mlService.test.js'
+      - 'tools/prediction-ownership-tests/**'
+      - '.github/workflows/api-cached-prediction-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cached-prediction-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Install locked focused test dependencies
+        run: npm ci --prefix tools/prediction-ownership-tests --ignore-scripts --no-audit --no-fund
+      - name: Verify actual prediction ownership and existing response errors
+        run: bash tools/prediction-ownership-tests/run.sh

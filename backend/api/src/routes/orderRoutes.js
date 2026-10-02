@@ -215,6 +215,14 @@ import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 const router = express.Router();
 const MAX_GEOFENCE_RADIUS_M = 500;
 
+const injectOtpIdempotencyKey = (req, res, next) => {
+  if (req.body && req.body.otp && req.params.id) {
+    const otpHash = crypto.createHash('sha256').update(String(req.body.otp).trim()).digest('hex');
+    req.headers['x-idempotency-key'] = `${req.params.id}-${otpHash}`;
+  }
+  next();
+};
+
 const milestoneStore = createStore('rl:milestone:');
 const milestoneLimiter = rateLimit({
   windowMs: 60 * 1000, 
@@ -406,7 +414,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
  *       429:
  *         description: Rate limited
  */
-router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, injectOtpIdempotencyKey, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
     const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
 
@@ -540,7 +548,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), get
 // Friendly alias of /:id/verify-delivery for the driver app. It accepts the
 // same body { otp } and delegates to the identical pipeline so the driver's
 // Confirm Delivery flow can release the escrow and credit the wallet.
-router.post('/:id/confirm-otp', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), verifyDeliveryController);
+router.post('/:id/confirm-otp', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, injectOtpIdempotencyKey, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), verifyDeliveryController);
 
 // 14. RESEND DELIVERY OTP (DRIVER)
 router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requireRole(['driver']), validateParams(paramIdSchema), resendOtp);

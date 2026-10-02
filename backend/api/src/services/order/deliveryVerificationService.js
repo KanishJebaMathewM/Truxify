@@ -555,9 +555,12 @@ export class DeliveryVerificationService {
           }
 
           try {
+            const idempotencyKeyStr = crypto.createHash('sha256').update(`${orderId}-${otp}`).digest('hex');
+            const idempotencyKeyBytes32 = '0x' + idempotencyKeyStr;
             const releaseResult = await this.escrowReleaseFn(
               order.order_display_id,
               expectedAmountWei,
+              idempotencyKeyBytes32
             );
             if (releaseResult.txHash) {
               releaseTxHash = releaseResult.txHash;

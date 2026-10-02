@@ -180,6 +180,27 @@ export class OrderRepository {
     }, 'updateDeliveryEtaState');
   }
 
+  async claimEtaGeneration(orderId, driverId, expectedStatus) {
+    return this._retryableQuery(() => this.supabase.rpc('claim_order_eta_generation', {
+      p_order_id: orderId, p_driver_id: driverId, p_expected_status: expectedStatus,
+    }), 'claimEtaGeneration');
+  }
+
+  async commitEtaGeneration({ orderId, driverId, expectedStatus, generation, etaText, arrivalEpochMs, thresholdSeconds }) {
+    return this._retryableQuery(() => this.supabase.rpc('commit_order_eta_generation', {
+      p_order_id: orderId, p_driver_id: driverId, p_expected_status: expectedStatus,
+      p_generation: generation, p_eta: etaText, p_arrival_epoch_ms: arrivalEpochMs,
+      p_change_threshold_seconds: thresholdSeconds,
+    }), 'commitEtaGeneration');
+  }
+
+  // Fresh read for best-effort continuation suppression; not an external-delivery transaction.
+  async findEtaGeneration(orderId) {
+    return this._retryableQuery(() => this.supabase.from('orders')
+      .select('eta_calculation_generation, driver_id, status')
+      .eq('id', orderId).maybeSingle(), 'findEtaGeneration');
+  }
+
   async updateOrderWithFilter(id, updates, filters, selectColumns) {
     return this._retryableQuery(() => {
       let query = this.supabase.from('orders').update(updates).eq('id', id);

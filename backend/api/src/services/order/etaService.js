@@ -177,19 +177,6 @@ async function setLastCalcPosition(driverId, lat, lng) {
   }
 }
 
-async function getLastPersistedArrivalEpoch(orderId) {
-  if (!redisClient || !orderId) return null;
-  try {
-    const raw = await redisClient.get(`${REDIS_ARRIVAL_EPOCH_PREFIX}${orderId}`);
-    if (raw == null) return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
-  } catch (err) {
-    logger.warn({ err: err?.message, orderId }, '[EtaService] Failed to read last arrival epoch');
-    return null;
-  }
-}
-
 async function setLastPersistedArrivalEpoch(orderId, arrivalEpochMs) {
   if (!redisClient || !orderId) return;
   try {
@@ -204,26 +191,20 @@ async function setLastPersistedArrivalEpoch(orderId, arrivalEpochMs) {
   }
 }
 
-async function acquireCalcToken(orderId) {
-  if (!redisClient || !orderId) return Date.now();
-  try {
-    const token = await redisClient.incr(`${REDIS_CALC_TOKEN_PREFIX}${orderId}`);
-    await redisClient.expire(`${REDIS_CALC_TOKEN_PREFIX}${orderId}`, REDIS_TTL_SECONDS);
-    return token;
-  } catch (err) {
-    logger.warn({ err: err?.message, orderId }, '[EtaService] Failed to acquire calc token');
-    return Date.now();
-  }
+async function acquireCalcToken(orderRepository, orderId, driverId, status) {
+  const { data, error } = await orderRepository.claimEtaGeneration(orderId, driverId, status);
+  if (error || !data) return null;
+  return data;
 }
 
-async function isCalcTokenCurrent(orderId, token) {
-  if (!redisClient || !orderId) return true;
+async function isCalcTokenCurrent(orderRepository, orderId, driverId, status, token) {
   try {
-    const current = await redisClient.get(`${REDIS_CALC_TOKEN_PREFIX}${orderId}`);
-    return current == null || Number(current) === Number(token);
+    const { data, error } = await orderRepository.findEtaGeneration(orderId);
+    return !error && data?.eta_calculation_generation === token &&
+      data.driver_id === driverId && data.status === status && isActiveEtaStatus(data.status);
   } catch (err) {
-    logger.warn({ err: err?.message, orderId }, '[EtaService] Failed to verify calc token');
-    return true;
+    logger.warn({ err: err?.message, orderId }, '[EtaService] Failed to verify ETA generation');
+    return false;
   }
 }
 
@@ -313,40 +294,26 @@ export async function persistAndBroadcastEta({
   etaText,
   arrivalEpochMs,
   calcToken,
+  driverId,
   currentStatus,
 }) {
-  if (!orderRepository || !orderId || !etaText) return false;
-  if (currentStatus && !isActiveEtaStatus(currentStatus)) return false;
+  if (!orderRepository || !orderId || !driverId || !etaText || !calcToken) return false;
+  if (!isActiveEtaStatus(currentStatus)) return false;
 
-  if (!(await isCalcTokenCurrent(orderId, calcToken))) {
-    logger.debug({ orderId }, '[EtaService] Discarding stale ETA calculation');
-    return false;
-  }
-
-  const lastArrivalEpoch = await getLastPersistedArrivalEpoch(orderId);
-  if (!isMeaningfulEtaChange(lastArrivalEpoch, arrivalEpochMs)) {
-    return false;
-  }
-
-  const { data, error } = await orderRepository.updateOrderWithFilter(
-    orderId,
-    {
-      eta: etaText,
-      updated_at: new Date().toISOString(),
-    },
-    [{ op: 'in', column: 'status', value: ACTIVE_ETA_STATUSES }],
-    'id, order_display_id, eta, status',
-  );
-
+  const { data, error } = await orderRepository.commitEtaGeneration({
+    orderId, driverId, expectedStatus: currentStatus, generation: calcToken,
+    etaText, arrivalEpochMs, thresholdSeconds: ETA_CHANGE_THRESHOLD_SECONDS,
+  });
   if (error || !data) {
-    if (error) {
-      logger.warn({ err: error.message, orderId }, '[EtaService] Failed to persist ETA');
-    }
+    if (error) logger.warn({ err: error.message, orderId }, '[EtaService] Failed to persist ETA');
     return false;
   }
 
+  // These checks suppress known supersession; external delivery is not atomic with SQL.
+  if (!(await isCalcTokenCurrent(orderRepository, orderId, driverId, currentStatus, calcToken))) return false;
   await setLastPersistedArrivalEpoch(orderId, arrivalEpochMs);
-  broadcastEtaUpdate(orderDisplayId || data.order_display_id, etaText);
+  if (!(await isCalcTokenCurrent(orderRepository, orderId, driverId, currentStatus, calcToken))) return false;
+  broadcastEtaUpdate(orderDisplayId || data.order_display_id, data.eta);
   return true;
 }
 
@@ -394,7 +361,8 @@ export async function calculateInitialEtaAfterAssignment({
       return;
     }
 
-    const calcToken = await acquireCalcToken(orderId);
+    const calcToken = await acquireCalcToken(orderRepository, orderId, driverId, order.status);
+    if (!calcToken) return;
     const result = await calculateRouteEta({
       originLat: driverLocation.lat,
       originLng: driverLocation.lng,
@@ -407,17 +375,20 @@ export async function calculateInitialEtaAfterAssignment({
       return;
     }
 
-    await persistAndBroadcastEta({
+    const persisted = await persistAndBroadcastEta({
       orderRepository,
       orderId,
       orderDisplayId: orderDisplayId || order.order_display_id,
       etaText: result.etaText,
       arrivalEpochMs: result.arrivalEpochMs,
       calcToken,
+      driverId,
       currentStatus: order.status,
     });
 
-    await setLastCalcPosition(driverId, driverLocation.lat, driverLocation.lng);
+    if (persisted && await isCalcTokenCurrent(orderRepository, orderId, driverId, order.status, calcToken)) {
+      await setLastCalcPosition(driverId, driverLocation.lat, driverLocation.lng);
+    }
   } catch (err) {
     logger.error({ err: err?.message, orderId, driverId }, '[EtaService] Initial ETA calculation failed');
   }
@@ -456,7 +427,8 @@ export async function maybeRecalculateEtaOnLocationUpdate({
     const destination = resolveDestinationForOrder(order);
     if (!destination) return;
 
-    const calcToken = await acquireCalcToken(orderId);
+    const calcToken = await acquireCalcToken(orderRepository, orderId, driverId, order.status);
+    if (!calcToken) return;
     const result = await calculateRouteEta({
       originLat: lat,
       originLng: lng,
@@ -473,10 +445,11 @@ export async function maybeRecalculateEtaOnLocationUpdate({
       etaText: result.etaText,
       arrivalEpochMs: result.arrivalEpochMs,
       calcToken,
+      driverId,
       currentStatus: order.status,
     });
 
-    if (persisted) {
+    if (persisted && await isCalcTokenCurrent(orderRepository, orderId, driverId, order.status, calcToken)) {
       await setLastCalcPosition(driverId, lat, lng);
     }
   } catch (err) {

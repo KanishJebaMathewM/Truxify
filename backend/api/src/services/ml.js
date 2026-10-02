@@ -9,6 +9,7 @@ const priceCache = new LRUCache(100, 15 * 60 * 1000);
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
 const ML_HTTP_TIMEOUT_MS = 5000;
+
 const ML_HTTP_TIMEOUT_MS_HEAVY = 10000;
 const ML_DEFAULT_PICKUP_LEAD_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_TRUCK_MAX_WEIGHT_KG = 25000;

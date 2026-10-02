@@ -7,11 +7,7 @@ from typing import Dict, List, Tuple, Any, Optional
 import networkx as nx
 import logging
 from datetime import datetime
-import matplotlib.pyplot as plt
-from causalnex.structure import StructureModel
 from causalnex.structure.notears import from_pandas
-from causalnex.inference import InferenceEngine
-from causalnex.evaluation import evaluation
 from dowhy import CausalModel
 import warnings
 warnings.filterwarnings('ignore')
@@ -50,18 +46,16 @@ class CausalDiscovery:
             return nx.DiGraph()
     
     def identify_causes(self, target_variable: str) -> List[str]:
-        """Identify direct causes of target variable"""
-        causes = []
-        for node in self.causal_graph.predecessors(target_variable):
-            causes.append(node)
-        return causes
+        """Identify direct causes of target variable."""
+        if target_variable not in self.causal_graph:
+            return []
+        return list(self.causal_graph.predecessors(target_variable))
     
     def identify_effects(self, source_variable: str) -> List[str]:
-        """Identify direct effects of source variable"""
-        effects = []
-        for node in self.causal_graph.successors(source_variable):
-            effects.append(node)
-        return effects
+        """Identify direct effects of source variable."""
+        if source_variable not in self.causal_graph:
+            return []
+        return list(self.causal_graph.successors(source_variable))
     
     def get_causal_paths(self, source: str, target: str) -> List[List[str]]:
         """Find all causal paths from source to target"""
@@ -123,8 +117,10 @@ class DoCalculus:
 
         return "digraph {\n" + "\n".join(lines) + "\n}"
     
-    def estimate_ate(self, treatment: str, outcome: str) -> Dict:
-        """Estimate Average Treatment Effect"""
+        def estimate_ate(self, treatment: str, outcome: str) -> Dict:
+        """Estimate the Average Treatment Effect (ATE) using backdoor
+        propensity score weighting, based on the graph built in
+        set_causal_model."""
         try:
             identified_estimand = self.causal_model.identify_effect()
             estimate = self.causal_model.estimate_effect(
@@ -299,13 +295,22 @@ class BottleneckAnalyzer:
         root_causes = []
         
         # Find all ancestors in causal graph
-        target = bottleneck['metric']
+        target = bottleneck.get('metric')
+        if target is None:
+            logger.warning("Cannot find root causes: bottleneck has no 'metric' value")
+            return []
+
+        if target not in causal_graph:
+            self.root_causes[target] = []
+            return []
+
         ancestors = nx.ancestors(causal_graph, target)
         
+        direct_causes = set(causal_graph.predecessors(target))
         for ancestor in ancestors:
             root_causes.append({
                 'cause': ancestor,
-                'type': 'direct' if ancestor in causal_graph.predecessors(target) else 'indirect',
+                'type': 'direct' if ancestor in direct_causes else 'indirect',
                 'path_length': len(nx.shortest_path(causal_graph, ancestor, target)) if nx.has_path(causal_graph, ancestor, target) else 0
             })
         

@@ -142,6 +142,21 @@ describe('documentValidation', () => {
         expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain(detected);
       }
     });
+
+    it('treats an empty or whitespace-only declared type as absent (#11030)', () => {
+      expect(validateDocumentBuffer(PDF, '')).toBe('application/pdf');
+      expect(validateDocumentBuffer(PDF, '   ')).toBe('application/pdf');
+    });
+
+    it('compares the declared type case-insensitively (#11030)', () => {
+      expect(validateDocumentBuffer(JPEG, 'IMAGE/JPEG')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, 'Image/PNG')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, ' application/pdf ')).toBe('application/pdf');
+    });
+
+    it('still rejects a declared type that does not match the content', () => {
+      expect(() => validateDocumentBuffer(PDF, 'IMAGE/JPEG')).toThrow(DocumentValidationError);
+    });
   });
 
   describe('matchesMimeSignature', () => {

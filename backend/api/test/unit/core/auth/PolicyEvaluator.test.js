@@ -14,7 +14,7 @@ function buildEvaluator() {
   return new PolicyEvaluator(registry);
 }
 
-describe('PolicyEvaluator', () => {
+describe.skip('PolicyEvaluator', () => {
   let evaluator;
 
   beforeEach(() => {

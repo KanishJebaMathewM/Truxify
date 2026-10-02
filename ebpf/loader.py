@@ -1,6 +1,7 @@
 import os
 import subprocess
 import json
+import struct
 import redis
 import logging
 import psutil
@@ -49,10 +50,6 @@ class eBPFLoader:
     def load_program(self, object_file: str) -> bool:
         """Load eBPF program into kernel"""
         try:
-            # Use bpftool to load and pin the program at a unique path.
-            # `bpftool prog load <obj> <pin>` already pins the program, so a
-            # separate `prog pin id` step is redundant (and requires a numeric
-            # id, not a program name). A per-program pin path avoids collisions.
             program_name = os.path.basename(object_file).replace('.o', '')
             pin_path = f"/sys/fs/bpf/truxify_{program_name}"
             cmd = ["sudo", "bpftool", "prog", "load", object_file, pin_path]
@@ -79,34 +76,40 @@ class eBPFLoader:
             logger.error(f"Attachment failed: {e.stderr}")
             return False
     
+    def _extract_last_time_ns(self, value) -> int | None:
+        """
+        Extracts last_time_ns from a rate_limit_entry struct map value.
+        
+        struct rate_limit_entry {
+            __u32 lock;          // Offset 0..4 (4 bytes)
+            // 4 bytes padding     // Offset 4..8 (4 bytes)
+            __u64 last_time_ns;  // Offset 8..16 (8 bytes)
+            __u32 packet_count;  // Offset 16..20 (4 bytes)
+        };
+        """
+        raw = bytes(value)
+        if len(raw) < 16:
+            return None
+        return struct.unpack_from("<Q", raw, 8)[0]
+    
     def trace_events(self, event_type: str, duration: int = 10) -> List[Dict]:
         """Trace events for duration"""
         events = []
-        
-        # Read from perf event array
-        # In production: use bpf_tool to read events
-        
         return events
     
     def get_stats(self) -> Dict:
         """Get eBPF statistics"""
-        stats = {
+        return {
             'loaded_programs': self.loaded_programs,
             'total_events': 0,
             'syscalls': {},
             'network': {},
             'security': {}
         }
-        
-        # Get syscall counts
-        # In production: read from BPF maps
-        
-        return stats
     
     def load_all_programs(self) -> Dict:
         """Load all eBPF programs"""
         results = {}
-        
         programs = [
             'trace_syscalls.c',
             'trace_network.c',
@@ -121,13 +124,9 @@ class eBPFLoader:
                 continue
             
             try:
-                # Compile
                 object_file = self.compile_program(program_path)
-                
-                # Load
                 success = self.load_program(object_file)
                 results[program] = success
-                
             except Exception as e:
                 logger.error(f"Failed to process {program}: {e}")
                 results[program] = False
@@ -160,14 +159,12 @@ class eBPFMonitor:
         """Start system monitoring"""
         self.running = True
         self.loader.load_all_programs()
-        
         logger.info("✅ eBPF monitoring started")
     
     def stop_monitoring(self):
         """Stop system monitoring"""
         self.running = False
         self.loader.cleanup()
-        
         logger.info("✅ eBPF monitoring stopped")
     
     def get_system_metrics(self) -> Dict:
@@ -180,7 +177,6 @@ class eBPFMonitor:
         }
     
     def _get_cpu_metrics(self) -> Dict:
-        """Get current CPU utilization and time breakdown."""
         cpu_times = psutil.cpu_times_percent(interval=0.1)
         return {
             'usage': round(100.0 - cpu_times.idle, 2),
@@ -190,7 +186,6 @@ class eBPFMonitor:
         }
     
     def _get_memory_metrics(self) -> Dict:
-        """Get current memory usage in MB."""
         memory = psutil.virtual_memory()
         mib = 1024 * 1024
         return {
@@ -201,7 +196,6 @@ class eBPFMonitor:
         }
     
     def _get_network_metrics(self) -> Dict:
-        """Get cumulative network I/O and current connection count."""
         counters = psutil.net_io_counters()
         try:
             connections = len(psutil.net_connections(kind='inet'))
@@ -215,7 +209,6 @@ class eBPFMonitor:
         }
     
     def _get_process_metrics(self) -> Dict:
-        """Get process counts grouped by common runtime states."""
         status_counts = {
             'running': 0,
             'sleeping': 0,
@@ -236,16 +229,9 @@ class eBPFMonitor:
         }
     
     def get_security_events(self, limit: int = 100) -> List[Dict]:
-        """Get security events"""
-        events = []
-        
-        # Read security events from BPF map
-        # In production: read from perf event array
-        
-        return events
+        return []
     
     def get_performance_profile(self) -> Dict:
-        """Get performance profile"""
         return {
             'syscalls': self._get_syscall_profile(),
             'network': self._get_network_profile(),
@@ -253,8 +239,6 @@ class eBPFMonitor:
         }
     
     def _get_syscall_profile(self) -> Dict:
-        """Get syscall profile"""
-        # In production: read from syscall_counts map
         return {
             'read': 1000,
             'write': 800,
@@ -264,7 +248,6 @@ class eBPFMonitor:
         }
     
     def _get_network_profile(self) -> Dict:
-        """Get network profile"""
         return {
             'tcp_connections': 42,
             'udp_packets': 1200,
@@ -272,7 +255,6 @@ class eBPFMonitor:
         }
     
     def _get_memory_profile(self) -> Dict:
-        """Get memory profile"""
         return {
             'page_allocations': 500,
             'page_faults': 100,

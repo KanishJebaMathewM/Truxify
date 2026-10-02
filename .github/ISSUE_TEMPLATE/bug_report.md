@@ -1,31 +1,29 @@
----
-name: Bug report
-about: Create a report to help us improve
-title: 'bug: '
-labels: bug
-assignees: ''
----
-
 **Describe the bug**
-A clear and concise description of what the bug is.
+
+The Battle Mode interface has accessibility and responsive layout issues. Some interactive elements do not provide clear accessible labels, and the card layout can be difficult to use on medium-sized screens.
 
 **To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+
+1. Go to the Battle Mode page.
+2. Open the prompt comparison section.
+3. Try using the copy prompt buttons with keyboard navigation.
+4. Resize the browser window to a tablet-sized screen.
+5. Observe the button accessibility and card layout.
 
 **Expected behavior**
-A clear and concise description of what you expected to happen.
+
+The copy buttons should have clear accessible labels and be usable with keyboard navigation. The Battle Mode cards should automatically adjust to the screen size without layout issues.
 
 **Screenshots**
-If applicable, add screenshots to help explain your problem.
 
-**Environment (please complete the following information):**
- - OS: [e.g. iOS, Android, Windows]
- - App Version [e.g. 1.0.0]
- - Browser [e.g. chrome, safari]
+Add screenshots if available.
+
+**Environment**
+
+* OS: Windows 11
+* App Version: Latest
+* Browser: Google Chrome
 
 **Additional context**
-Add any other context about the problem here.
+
+The issue affects the accessibility and responsive usability of the Battle Mode interface across different screen sizes and input methods.

@@ -1,11 +1,13 @@
 import logging
+import threading
+
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .base import save_model, load_model, model_exists
+from .base import load_model, model_exists, save_model
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +129,8 @@ class TrustScorer:
     def __init__(self):
         self.model = None
         self.scaler = None
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
 
     def train(self) -> dict:
         """Train the risk classification model on synthetic behavioural data.
@@ -134,6 +138,11 @@ class TrustScorer:
         Returns:
             Dictionary of training metrics (accuracy, classification report).
         """
+        with self._lifecycle_lock:
+            return self._train_candidate()
+
+    def _train_candidate(self) -> dict:
+        """Fit and persist a private pair before publishing any serving fields."""
         logger.info("Training trust scorer model...")
         X, y = generate_synthetic_trust_data()
 
@@ -141,18 +150,18 @@ class TrustScorer:
             X, y, test_size=0.2, random_state=42
         )
 
-        self.scaler = StandardScaler()
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
 
-        self.model = RandomForestClassifier(
+        model = RandomForestClassifier(
             n_estimators=150,
             max_depth=8,
             random_state=42,
         )
-        self.model.fit(X_train_scaled, y_train)
+        model.fit(X_train_scaled, y_train)
 
-        y_pred = self.model.predict(X_test_scaled)
+        y_pred = model.predict(X_test_scaled)
         accuracy = accuracy_score(y_test, y_pred)
         report = classification_report(y_test, y_pred, output_dict=True)
 
@@ -163,12 +172,18 @@ class TrustScorer:
             "feature_names": FEATURE_NAMES,
         }
 
-        save_model((self.model, self.scaler), MODEL_NAME, metrics)
+        save_model((model, scaler), MODEL_NAME, metrics)
+        self._publish(model, scaler)
         logger.info("Trust scorer model trained. Accuracy: %.3f", accuracy)
         return metrics
 
     def load(self) -> None:
         """Load a persisted model, training first if none exists."""
+        with self._lifecycle_lock:
+            self._load_candidate()
+
+    def _load_candidate(self) -> None:
+        """Prepare a complete loaded pair, retaining prior state on failure."""
         if not model_exists(MODEL_NAME):
             self.train()
             return
@@ -179,8 +194,32 @@ class TrustScorer:
             self.train()
             return
 
-        self.model, self.scaler = loaded
+        model, scaler = loaded
+        if not callable(getattr(model, "predict", None)) or not callable(getattr(scaler, "transform", None)):
+            raise TypeError("Trust scorer artifact must contain a classifier and scaler")
+        self._publish(model, scaler)
         logger.info("Trust scorer model loaded from persistence")
+
+    def _publish(self, model, scaler) -> None:
+        """Publish both components under the short serving-state lock."""
+        with self._state_lock:
+            self.model, self.scaler = model, scaler
+
+    def _capture_pair(self) -> tuple:
+        """Capture warm state promptly and coalesce successful cold loading."""
+        with self._state_lock:
+            if self.model is not None and self.scaler is not None:
+                return self.model, self.scaler
+        # Never wait for lifecycle ownership while holding the state lock.
+        with self._lifecycle_lock:
+            with self._state_lock:
+                needs_load = self.model is None or self.scaler is None
+            if needs_load:
+                self._load_candidate()
+            with self._state_lock:
+                if self.model is None or self.scaler is None:
+                    raise RuntimeError("Trust scorer initialization produced no complete pair")
+                return self.model, self.scaler
 
     def predict(
         self,
@@ -202,8 +241,7 @@ class TrustScorer:
         Returns:
             Dict with trust_score (0-100) and risk_category ('Low'/'Medium'/'High').
         """
-        if self.model is None or self.scaler is None:
-            self.load()
+        model, scaler = self._capture_pair()
 
         # Deterministic trust score
         trust_score = _compute_trust_score(
@@ -218,8 +256,8 @@ class TrustScorer:
             dispute_count,
             is_verified,
         ]])
-        features_scaled = self.scaler.transform(features)
-        risk_idx = int(self.model.predict(features_scaled)[0])
+        features_scaled = scaler.transform(features)
+        risk_idx = int(model.predict(features_scaled)[0])
         risk_category = RISK_LABELS.get(risk_idx, "Medium")
 
         return {

@@ -405,15 +405,10 @@ export async function predictDriverProfit({
   let upperRaw = result.confidence_interval.upper;
 
   if (typeof upperRaw !== 'number' || !isFinite(upperRaw)) {
-    // Derive a sane fallback from the prediction magnitude rather than the
-    // undocumented `predicted_profit * 2`, which can go negative for loss
-    // predictions and was not clamped.
     const margin = Math.abs(result.predicted_profit) * 0.5 || 1;
     upperRaw = Math.max(result.predicted_profit, 0) + margin;
   }
 
-  // Round only after enforcing ordering so rounding can never invert the
-  // interval (lower > upper) for tight ranges.
   let lower = Math.round(Math.max(0, lowerRaw) * 100) / 100;
   let upper = Math.round(Math.max(upperRaw, lower, predictedProfit) * 100) / 100;
   lower = Math.min(lower, upper);
@@ -472,10 +467,11 @@ export async function matchEnRouteLoads({
   truckSpecs,
   maxDetourKm = 50,
 }) {
-  if (!offers || offers.length === 0) return [];
+  if (!offers || !Array.isArray(offers) || offers.length === 0) return [];
 
   const availableLoads = offers
     .filter(o =>
+      o &&
       Number.isFinite(Number(o.pickup_lat)) &&
       Number.isFinite(Number(o.pickup_lng)) &&
       Number.isFinite(Number(o.drop_lat)) &&
@@ -526,7 +522,7 @@ export async function matchEnRouteLoads({
 
   if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
-      .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
+      .filter(o => o && Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
       .map(o => {
         const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
@@ -545,9 +541,9 @@ export async function matchEnRouteLoads({
   const recMap = new Map(recommendations.map(r => [r.load_id, r]));
 
   return offers
+    .filter(o => o && recMap.has(o.id))
     .map(o => {
       const rec = recMap.get(o.id);
-      if (!rec) return null;
       return {
         ...o,
         detour_km: rec.detour_km ?? rec.distance_to_pickup_km ?? 0,
@@ -559,7 +555,6 @@ export async function matchEnRouteLoads({
         ml_used: mlUsed,
       };
     })
-    .filter(Boolean)
     .sort((a, b) => b.match_score - a.match_score);
 }
 

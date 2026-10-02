@@ -1,0 +1,25 @@
+name: Traffic provider ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/trafficService.js'
+      - 'backend/api/src/lib/trafficProviderFlights.js'
+      - 'backend/api/test/unit/trafficProviderOwnership.test.js'
+      - 'tools/traffic-ownership-tests/**'
+      - '.github/workflows/api-traffic-provider-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Install locked focused dependencies
+        run: npm ci --ignore-scripts --prefix tools/traffic-ownership-tests
+      - name: Test actual traffic service and lint changed code
+        run: bash tools/traffic-ownership-tests/run.sh

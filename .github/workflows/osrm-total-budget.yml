@@ -1,0 +1,26 @@
+name: OSRM total budget
+on:
+  pull_request:
+    paths:
+      - backend/api/src/services/osrm.js
+      - backend/api/src/services/routing/routingBudget.js
+      - backend/api/test/unit/osrm*.test.js
+      - tools/osrm-budget-tests/**
+      - .github/workflows/osrm-total-budget.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/osrm-budget-tests/package-lock.json
+      - run: npm ci --no-fund
+        working-directory: tools/osrm-budget-tests
+      - run: bash tools/osrm-budget-tests/run.sh

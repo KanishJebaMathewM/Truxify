@@ -9,8 +9,8 @@ const priceCache = new LRUCache(100, 15 * 60 * 1000);
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
 const ML_HTTP_TIMEOUT_MS = 5000;
+
 const ML_HTTP_TIMEOUT_MS_HEAVY = 10000;
-const ML_HTTP_TIMEOUT_MS_LONG = 300000;
 const ML_DEFAULT_PICKUP_LEAD_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_TRUCK_MAX_WEIGHT_KG = 25000;
 const DEFAULT_TRUCK_MAX_LENGTH_M = 12;
@@ -207,8 +207,6 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
-  // Only forward min_price/max_price keys when the raw response actually
-  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
@@ -293,9 +291,7 @@ export async function predictEta({
 }
 
 /**
- * Calculates the proportional cancellation penalty for a trip already in
- * progress. The ML service owns the distance ratio and returns the amount in
- * the same currency unit supplied by the caller.
+ * Calculates the proportional cancellation penalty for a trip already in progress.
  *
  * @param {object} params
  * @param {number} params.distanceCoveredKm - Distance already travelled
@@ -362,7 +358,6 @@ export async function predictCancellationPenalty({
  * @param {number} params.cargoWeightKg    - Cargo weight in kg (must be > 0)
  * @param {number} params.tripDurationHours - Estimated trip duration in hours (must be > 0)
  * @returns {Promise<{predicted_profit: number, confidence_interval: {lower: number, upper: number}}>}
- * @throws {Error} if ML_API_KEY is missing, HTTP fails, or response is invalid
  */
 export async function predictDriverProfit({
   routeDistanceKm,
@@ -411,15 +406,10 @@ export async function predictDriverProfit({
   let upperRaw = result.confidence_interval.upper;
 
   if (typeof upperRaw !== 'number' || !isFinite(upperRaw)) {
-    // Derive a sane fallback from the prediction magnitude rather than the
-    // undocumented `predicted_profit * 2`, which can go negative for loss
-    // predictions and was not clamped.
     const margin = Math.abs(result.predicted_profit) * 0.5 || 1;
     upperRaw = Math.max(result.predicted_profit, 0) + margin;
   }
 
-  // Round only after enforcing ordering so rounding can never invert the
-  // interval (lower > upper) for tight ranges.
   let lower = Math.round(Math.max(0, lowerRaw) * 100) / 100;
   let upper = Math.round(Math.max(upperRaw, lower, predictedProfit) * 100) / 100;
   lower = Math.min(lower, upper);
@@ -431,28 +421,6 @@ export async function predictDriverProfit({
   };
 }
 
-/**
- * Recommends available loads for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedDrivers]   - Previously rated drivers
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
- * Recommends suitable trucks for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedLoads]     - Previously rated loads
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
 /**
  * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
  * @param {object} params
@@ -478,22 +446,20 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
     signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
-  return handleResponse(response);
+  return handleResponse(response, url, 'POST');
 }
 
 /**
  * Finds en-route load opportunities for an active driver using the Deadhead
- * Eliminator ML model. When the ML engine is unavailable (no ML_API_KEY,
- * network error, etc.) it falls back to a pure haversine-distance ranking so
- * the endpoint never returns an empty list when offers exist in the DB.
+ * Eliminator ML model. Falls back to Haversine distance ranking if unavailable.
  *
  * @param {object} params
- * @param {number}   params.currentLat       - Driver's current latitude
- * @param {number}   params.currentLng       - Driver's current longitude
- * @param {Array}    params.offers           - Raw load_offer rows from DB
- * @param {object}   [params.truckSpecs]     - Truck capacity; defaults to generous values
- * @param {number}   [params.maxDetourKm=50] - Max acceptable detour in km
- * @returns {Promise<Array>} - offers enriched with detour_km, extra_earnings, match_score
+ * @param {number} params.currentLat - Driver's current latitude
+ * @param {number} params.currentLng - Driver's current longitude
+ * @param {Array}  params.offers - Raw load_offer rows from DB
+ * @param {object} [params.truckSpecs] - Truck capacity
+ * @param {number} [params.maxDetourKm=50] - Max acceptable detour in km
+ * @returns {Promise<Array>}
  */
 export async function matchEnRouteLoads({
   currentLat,
@@ -502,14 +468,11 @@ export async function matchEnRouteLoads({
   truckSpecs,
   maxDetourKm = 50,
 }) {
-  if (!offers || offers.length === 0) return [];
+  if (!offers || !Array.isArray(offers) || offers.length === 0) return [];
 
-  // Build the available_loads list the ML model expects. load_offers stores
-  // coordinates as pickup_*/drop_*, weight as text ('3 tonnes') and dimensions
-  // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
-  // model consumes.
   const availableLoads = offers
     .filter(o =>
+      o &&
       Number.isFinite(Number(o.pickup_lat)) &&
       Number.isFinite(Number(o.pickup_lng)) &&
       Number.isFinite(Number(o.drop_lat)) &&
@@ -543,7 +506,6 @@ export async function matchEnRouteLoads({
   let recommendations = [];
   let mlUsed = false;
 
-  // Try the FastAPI ML engine first
   if (availableLoads.length > 0) {
     try {
       const result = await matchDeadhead({
@@ -559,10 +521,9 @@ export async function matchEnRouteLoads({
     }
   }
 
-  // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
-      .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
+      .filter(o => o && Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
       .map(o => {
         const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
@@ -578,29 +539,24 @@ export async function matchEnRouteLoads({
       .sort((a, b) => b.match_score - a.match_score);
   }
 
-  // Build a lookup map of ML results keyed by load_id
   const recMap = new Map(recommendations.map(r => [r.load_id, r]));
 
-  // Merge ML/haversine annotations back onto the original offer rows
-  const enriched = offers
+  return offers
+    .filter(o => o && recMap.has(o.id))
     .map(o => {
       const rec = recMap.get(o.id);
-      if (!rec) return null; // not recommended by ML — exclude
       return {
         ...o,
         detour_km: rec.detour_km ?? rec.distance_to_pickup_km ?? 0,
         extra_earnings: rec.estimated_earnings
-          ? Math.round(rec.estimated_earnings * 100) // convert to paisa for consistency
+          ? Math.round(rec.estimated_earnings * 100)
           : (o.freight_value || 0),
         match_score: rec.match_score ?? 0,
         extra_distance_km: rec.detour_km ?? 0,
         ml_used: mlUsed,
       };
     })
-    .filter(Boolean)
     .sort((a, b) => b.match_score - a.match_score);
-
-  return enriched;
 }
 
 /**
@@ -614,8 +570,8 @@ function _haversineKm(lat1, lng1, lat2, lng2) {
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 

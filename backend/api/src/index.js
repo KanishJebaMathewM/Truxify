@@ -236,8 +236,6 @@ if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development'
   logger.fatal('BYPASS_AUTH is enabled outside development. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it), and set NODE_ENV=development if you need local testing.')
   process.exit(1)
 }
-// ENABLE_TEST_AUTH allows plaintext x-user-id/x-user-role header impersonation
-// and must never be active outside a dedicated test harness (NODE_ENV=test).
 if (process.env.ENABLE_TEST_AUTH === 'true' && process.env.NODE_ENV !== 'test') {
   logger.fatal('ENABLE_TEST_AUTH is enabled outside a test harness. This is a severe security misconfiguration — it trusts client-supplied identity headers. Only set it in NODE_ENV=test processes.')
   process.exit(1)
@@ -300,7 +298,6 @@ if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
   logger.warn('WARNING: Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
-
 // ============================================================================
 // 🆕 WEBRTC VALIDATION
 // ============================================================================
@@ -318,7 +315,6 @@ if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
   logger.info('Behavioral analytics enabled by default')
 }
 
-
 // ============================================================================
 // 🆕 ZK-PROOFS VALIDATION
 // ============================================================================
@@ -328,8 +324,6 @@ if (!process.env.KYC_VERIFIER_CONTRACT) {
 if (!process.env.PRIVATE_KEY) {
   logger.warn('WARNING: PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
 }
-
-
 
 // ============================================================================
 // 🆕 MULTI-CLOUD DR VALIDATION
@@ -347,9 +341,7 @@ if (!process.env.ACTIVE_CLOUD) {
   logger.warn('WARNING: ACTIVE_CLOUD not set. Using default: aws')
 }
 
-
-// Validate escrow contract deployment — log warning if validation fails,
-// but don't crash (non-escrow functionality should still work).
+// Validate escrow contract deployment
 validateEscrowSetup().then((valid) => {
   if (!valid) {
     logger.warn('WARNING: Escrow setup validation failed. On-chain escrow features may not work correctly.')
@@ -360,50 +352,40 @@ const app = express()
 const server = http.createServer(app)
 app.use(sentryRequestHandler());
 app.use(headerSizeMonitor);
-// Trust proxy required for rate-limiting behind load balancers/Docker.
-// TRUST_PROXY env var allows each deployment to set the correct proxy count:
-//   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
-//   - Docker Compose (no proxy)                 → 0
-//   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
+
 const _parsedTrustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1
 const trustProxy = Number.isFinite(_parsedTrustProxy) ? _parsedTrustProxy : 1
 app.set('trust proxy', trustProxy)
 
 // ============================================================================
 // 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
-// Resolves missing security headers from Issues #361 and #944
 // ============================================================================
 app.use(securityHeaderDuplicates);
 app.use(cookieSecurityValidator);
 app.use(helmet({
-  // Content Security Policy (CSP) - Prevents XSS and data injection
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"], // Strict CSP enforced
+      scriptSrc: ["'self'"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: []
     }
   },
-  // HTTP Strict Transport Security (HSTS) - Enforces HTTPS
   hsts: {
-    maxAge: 31536000, // 1 year
+    maxAge: 31536000,
     includeSubDomains: true,
     preload: true
   },
-  // X-Frame-Options - Prevents clickjacking by disabling iframes
   frameguard: {
     action: 'deny'
   },
-  // X-Content-Type-Options - Prevents MIME-sniffing
   noSniff: true,
-  // Additional modern security headers
-  crossOriginEmbedderPolicy: false, // Set false if breaking third-party images/maps
+  crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: { policy: 'same-origin' },
-  crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allows Flutter app to fetch resources
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
   dnsPrefetchControl: { allow: false },
-  hidePoweredBy: true, // Removes X-Powered-By: Express
+  hidePoweredBy: true,
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   permissionsPolicy: {
     features: {
@@ -419,18 +401,8 @@ app.use(helmet({
 }))
 
 app.use(corsMiddleware)
-
-// ============================================================================
-// RESPONSE COMPRESSION
-// Registered after the security headers and before the routes that generate
-// large bodies. Clients that do not advertise Accept-Encoding: gzip continue
-// to receive identical uncompressed responses.
-// ============================================================================
 app.use(compressionMiddleware)
 
-// ── Production header sanitization (defense in depth) ────────────────
-// Even if a proxy or misconfiguration lets dev auth headers through,
-// strip them before they reach any route handler in production.
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
     delete req.headers['x-user-id']
@@ -440,11 +412,8 @@ if (process.env.NODE_ENV === 'production') {
   })
 }
 
-// Payload parsers
-const jsonBodyLimit =
-  process.env.JSON_BODY_LIMIT || '1mb';
-const urlEncodedBodyLimit =
-  process.env.URLENCODED_BODY_LIMIT || '1mb';
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
+const urlEncodedBodyLimit = process.env.URLENCODED_BODY_LIMIT || '1mb';
 
 app.use(
   express.json({
@@ -463,47 +432,24 @@ app.use(
   })
 );
 
-// Prevent NoSQL Injection attacks on body, query, and params
 app.use(mongoSanitize());
-
-// ============================================================================
-// 🆕 OPENTELEMETRY TRACING MIDDLEWARE
-// ============================================================================
 app.use(tracingMiddleware)
 
-// Track request start time
 app.use((req, res, next) => {
   req._startTime = Date.now()
   next()
 })
 
-// ============================================================================
-// CORRELATION ID + REQUEST ID + REQUEST LOGGER
-// Registered before all routes and rate limiters so that every incoming
-// request (including rate-limited or 404) is logged with a correlation ID.
-// 1. correlationIdMiddleware — sets up AsyncLocalStorage so all downstream
-//    log calls automatically include the correlationId (via logger Proxy).
-// 2. requestIdMiddleware   — adds X-Request-Id header & req.requestId.
-// 3. requestLogger         — logs request start / finish metadata.
-// ============================================================================
 app.use(correlationIdMiddleware)
 app.use(requestIdMiddleware)
 app.use(requestLogger)
 
 app.use(hppProtection)
 app.use(suspiciousRequests)
-
-// Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
-// `requireJsonContent` only rejects unrecognized media types; the three
-// allowed types match the parsers registered above.
 app.use(requireJsonContent)
 
-/// Fraud middleware is NOT registered globally here.
-// It is applied per-route after authenticate() so req.user is always set.
-// See individual route mounts below.
-
 // ============================================================================
-// RATE LIMITING
+// RATE LIMITING & ROUTING
 // ============================================================================
 app.use('/api', verifyJWT)
 app.use('/api/health', healthLimiter)
@@ -511,6 +457,11 @@ app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)
 app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
+app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
+app.use('/api/trips', tripRoutes)
+
+app.use('/api', requestCacheMiddleware)
+
 // ============================================================================
 // REQUEST-SCOPED CACHE — created per-request, destroyed after response.
 // Registers before all routes so every request handler benefits.
@@ -524,8 +475,6 @@ app.use('/api/trips', tripRoutes)
 // REST API ROUTING
 // ============================================================================
 app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
-// Cross-docking synchronization engine (#6181): handoff relay lifecycle for
-// long-haul loads. Sits behind authenticate + per-route policy checks.
 app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
 // Lumper fee escrow (broker deposit / driver receipt release). The router
@@ -536,10 +485,6 @@ app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
 app.use('/api/drone', droneRoutes)
-// Mounted here, with the other REST routes, so it sits behind the full
-// middleware chain — body parsers, correlation/request IDs, HPP protection,
-// content-type enforcement, fraud detection and the /api rate limiter.
-// Registering it earlier silently bypasses every one of them.
 app.use('/api/earnings', earningsRouter)
 app.use('/api/routes', routeRoutes)
 app.use('/api/v1/shipment', shipmentRoutes)
@@ -565,25 +510,14 @@ app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
 app.use('/api/tolls', tollOptimizationRouter)
 
-// ============================================================================
-// 🆕 WEB3 SUBSYSTEM ROUTES
-// Each router already declares its own full path prefix (e.g. `/zkid/...`,
-// `/swap/...`), so they are mounted on the `/api` base only.
-// ============================================================================
 app.use('/api', zkidRoutes)
 app.use('/api', daoRoutes)
 app.use('/api', mevRoutes)
 app.use('/api', tokenizationRoutes)
 app.use('/api', atomicSwapRoutes)
 
-// ============================================================================
-// WEBHOOK ROUTES
-// ============================================================================
 app.use('/api/webhooks', webhookRoutes)
 
-// ============================================================================
-// 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
-// ============================================================================
 app.use('/api/verify', verificationRoutes)
 app.use('/api/biometric-auth', biometricAuthRoutes)
 app.use('/api/oracle', oracleRoutes)
@@ -593,24 +527,9 @@ app.use('/api/tire-analytics', tireAnalyticsRoutes)
 app.use('/api/ar-loading', arLoadingRoutes)
 app.use('/api/relay', relayRoutes)
 
-// ============================================================================
-// 🆕 BLOCKCHAIN MONITORING ROUTES
-// Attach the monitoring services and the service-role client per request so
-// the handlers never fall back to the anon-key client (RLS would hide all
-// rows). The blockchainMonitoringRoutes router uses req.supabase (falling
-// back to the module-level client only when unmounted).
-//
-// #14307: /api/blockchain must be mounted EXACTLY once. A duplicate mount
-// registered earlier shadows this one, leaving req.supabase undefined and
-// causing silent auth/RLS failures. The marker below makes a second
-// registration of this router (duplicate import/re-evaluation or a
-// programmatic re-mount) crash the boot instead of failing silently;
-// blockchainMonitoringRoutes.test.js separately enforces that index.js
-// contains only a single literal mount.
-// ============================================================================
 const BLOCKCHAIN_MONITORING_MOUNTED = Symbol.for('truxify.api.blockchainMonitoring.mounted');
 if (blockchainMonitoringRoutes[BLOCKCHAIN_MONITORING_MOUNTED]) {
-  logger.fatal('[startup] /api/blockchain mounted more than once. A duplicate mount shadows the middleware that attaches req.supabase (service-role client). Remove the duplicate mount.')
+  logger.fatal('[startup] /api/blockchain mounted more than once. Remove the duplicate mount.')
   throw new Error('/api/blockchain must be mounted exactly once (#14307).')
 }
 blockchainMonitoringRoutes[BLOCKCHAIN_MONITORING_MOUNTED] = true;
@@ -623,19 +542,8 @@ app.use('/api/blockchain', (req, _res, next) => {
   next()
 }, blockchainMonitoringRoutes)
 
-// ============================================================================
-// 🆕 INTERNAL B2B ROUTES (n8n circuit breaker workflow)
-// Auth-gated internal endpoints consumed by automation/n8n workflows:
-//   GET  /api/internal/escrow-velocity
-//   POST /api/internal/pause-escrow
-//   POST /api/internal/defensive-pause
-// Closing the escrow circuit breaker (pause-escrow with {"paused": false}) is
-// additionally gated inside the route on the dedicated ESCROW_OPERATOR_API_KEY
-// (403 for other valid keys; fails closed when unconfigured).
-// ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
-// 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -651,12 +559,8 @@ app.get('/api/oracle/health', (req, res) => {
   })
 })
 
-// ============================================================================
-// 🆕 GEOGRAPHIC SHARDING ROUTES
-// ============================================================================
 app.use('/api', shardRoutes)
 
-// 🆕 Shard Health Check Endpoint
 app.get('/api/shard/health', async (req, res) => {
   try {
     const status = await shardManager.healthCheck();
@@ -673,15 +577,7 @@ app.get('/api/shard/health', async (req, res) => {
   }
 })
 
-
-// ============================================================================
-// 🆕 WEBRTC P2P MESH NETWORK ROUTES
-// ============================================================================
 app.use('/api', webrtcRoutes)
-
-// ============================================================================
-// 🆕 ROOT SUBSYSTEM ROUTES (eBPF, WASI, WASM, Snyk, Liquibase)
-// ============================================================================
 app.use('/api', ebpfRoutes)
 app.use('/api', wasiRoutes)
 app.use('/api', wasmRoutes)
@@ -690,7 +586,6 @@ app.use('/api', liquibaseRoutes)
 app.use('/api/wim', wimBypassRouter)
 app.use('/api/ifta-tax', iftaTaxRouter)
 
-// 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
   res.json({
     status: 'healthy',
@@ -701,12 +596,8 @@ app.get('/api/webrtc/status', (req, res) => {
   })
 })
 
-// ============================================================================
-// 🆕 FRAUD DETECTION ROUTES
-// ============================================================================
 app.use('/api', fraudRoutes)
 
-// 🆕 Fraud Health Check Endpoint
 app.get('/api/fraud/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -718,13 +609,8 @@ app.get('/api/fraud/health', (req, res) => {
   })
 })
 
-
-// ============================================================================
-// 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
-// ============================================================================
 app.use('/api/zkp', zkpRoutes)
 
-// 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -734,8 +620,6 @@ app.get('/api/zkp/health', (req, res) => {
     timestamp: new Date().toISOString()
   })
 })
-
-
 
 // ============================================================================
 // 🆕 OPENTELEMETRY HEALTH CHECK
@@ -750,193 +634,90 @@ app.get('/api/tracing/health', (req, res) => {
   })
 })
 
-
-// Setup Swagger Documentation
-setupSwagger(app)
-
-// Root route
-app.get('/', getRoot)
-
-app.use(responseSanitizer)
-
-// Handling 404 Route Not Found
+// ============================================================================
+// 404 & GLOBAL ERROR HANDLERS
+// ============================================================================
 app.use(notFound)
-// Sentry error handler must come before the generic error handler;
-// it captures the exception automatically so we don't call captureException here.
-app.use(sentryErrorHandler())
-
-// Error handling middleware
+app.use(sentryErrorHandler)
 app.use(errorHandler)
 
 // ============================================================================
-// WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
+// SERVER INITIALIZATION & LIFECYCLE MANAGEMENT
 // ============================================================================
-await waitForMongoDb()
-initWebSocketServer(server, orderRepository)
-initLocationServer(server)
+const PORT = process.env.PORT || 3000
 
-// Expose WebSocket state for health aggregation
-globalThis.__truxify_wsState = wsTesting.getShutdownState()
+server.listen(PORT, async () => {
+  logger.info(`Truxify API server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`)
 
-// ============================================================================
-// 🆕 WEBRTC SIGNALING SERVER INIT
-// ============================================================================
-initWebRTCSignaling(server)
-logger.info('🆕 WebRTC Signaling Server initialized at /webrtc')
+  try {
+    // Initialize Database Connections
+    await waitForMongoDb()
+    logger.info('Connected to MongoDB successfully')
 
-// ============================================================================
-// START SERVER
-// ============================================================================
-const PORT = process.env.PORT || 5000
+    // Start Background Workers and Reconciliation Services
+    startOutboxRelayWorker()
+    startEscrowReleaseReconciliation()
+    startEscrowRefundReconciliation()
+    startEscrowFundingReconciliation()
+    startReputationReconciliation()
+    startDocumentExpiryWorker()
+    startDlqWorker()
+    startStaleOrderWorker()
+    startDevicePruningWorker()
+    startWithdrawalSettlementWorker()
 
-server.listen(PORT, () => {
-  logger.info(`Truxify API listening on port ${PORT}`)
-  logger.info(`🆕 OpenTelemetry Tracing enabled (Jaeger: http://localhost:16686)`)
-  logger.info(`🆕 Oracle Service enabled with threshold: ${process.env.ORACLE_CONSENSUS_THRESHOLD || 2}`)
-  logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
-  logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
+    // Start State Divergence Monitoring
+    stateDivergenceDetector.startMonitoring()
 
-  logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
-  logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
+    // Initialize WebSockets and Real-time Location/Signaling Servers
+    initWebSocketServer(server)
+    initLocationServer(server)
+    initWebRTCSignaling(server)
 
-  logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
-
-
-  // Reconciliation workers sweep `orders` for stuck funding/refund states.
-  // They must run with the service-role client: the anon client has no RLS
-  // read access to `orders`, so an anon-backed repository would silently no-op.
-  const escrowReconciliationOrderRepository = supabaseAdmin
-    ? new OrderRepository(supabaseAdmin)
-    : orderRepository;
-  startEscrowRefundReconciliation(escrowReconciliationOrderRepository)
-  startEscrowReleaseReconciliation(escrowReconciliationOrderRepository)
-  startEscrowFundingReconciliation(escrowReconciliationOrderRepository)
-  startReputationReconciliation(orderRepository)
-  startDlqWorker()
-  startStaleOrderWorker(escrowReconciliationOrderRepository)
-  startDevicePruningWorker()
-  startDocumentExpiryWorker()
-  startWithdrawalSettlementWorker()
-  startOutboxRelayWorker()
-
-  // Start BlockchainMonitor during API startup.
-  // Worker health flag is set only after successful initialization.
-  let blockchainMonitorStarted = false
-  blockchainMonitor.initialize().then((initialized) => {
-    if (initialized) {
-      return blockchainMonitor.startListening()
-    }
-  }).then(() => {
-    blockchainMonitorStarted = true
-    globalThis.__truxify_workers = {
-      ...globalThis.__truxify_workers,
-      blockchainMonitor: true,
-    }
-  }).catch((err) => {
-    logger.error({ err }, '[BlockchainMonitor] Failed to initialize or start listening')
-    globalThis.__truxify_workers = {
-      ...globalThis.__truxify_workers,
-      blockchainMonitor: false,
-    }
-  })
-
-  // Start StateDivergenceDetector after blockchain monitor warms up.
-  stateDivergenceDetector.startMonitoring()
-
-  // Register worker states for health aggregation
-  globalThis.__truxify_workers = {
-    escrowRefundReconciliation: true,
-    escrowReleaseReconciliation: true,
-    escrowFundingReconciliation: true,
-    reputationReconciliation: true,
-    dlqWorker: true,
-    staleOrderWorker: true,
-    devicePruningWorker: true,
-    documentExpiryWorker: true,
-    withdrawalSettlementWorker: true,
-    // blockchainMonitor flag is set async above after successful startup
-    blockchainMonitor: blockchainMonitorStarted,
+    logger.info('All background workers, sockets, and reconciliation services started successfully')
+  } catch (err) {
+    logger.fatal({ err }, 'Failed to initialize background services during startup')
+    process.exit(1)
   }
 })
 
-// ============================================================================
-// GRACEFUL SHUTDOWN
-// ============================================================================
-const SHUTDOWN_TIMEOUT_MS = 10_000
+// Graceful Shutdown Handling
+const gracefulShutdown = async (signal) => {
+  logger.info(`Received signal ${signal}, initiating graceful shutdown...`)
 
-/** @type {boolean} */
-let shuttingDown = false
+  server.close(async () => {
+    logger.info('HTTP server closed.')
 
-async function shutdown(signal) {
-  // Guard against recursive shutdown calls (e.g. an error inside shutdown
-  // triggering uncaughtException while we're already shutting down).
-  if (shuttingDown) {
-    logger.warn(`[shutdown] ${signal} received but shutdown already in progress — forcing immediate exit.`)
-    process.exit(1)
-  }
-  shuttingDown = true
+    try {
+      // Stop Background Workers
+      stopOutboxRelayWorker()
+      stopEscrowReleaseReconciliation()
+      stopEscrowRefundReconciliation()
+      stopEscrowFundingReconciliation()
+      stopReputationReconciliation()
+      stopDocumentExpiryWorker()
+      stopDlqWorker()
+      stopStaleOrderWorker()
+      stopDevicePruningWorker()
+      stopWithdrawalSettlementWorker()
 
-  logger.info('Received shutdown signal, initiating graceful shutdown...');
+      // Close Sockets
+      closeWebSocketServer()
+      closeLocationServer()
+      closeWebRTCSignaling()
 
-  // Stop background workers
-  stopEscrowReleaseReconciliation()
-  stopEscrowRefundReconciliation()
-  stopEscrowFundingReconciliation()
-  stopReputationReconciliation()
-  stopDlqWorker()
-  stopDocumentExpiryWorker()
-  stopDevicePruningWorker()
-  stopWithdrawalSettlementWorker()
-  stopOutboxRelayWorker()
-  stopStaleOrderWorker()
-  await blockchainMonitor.stopListening()
-  stateDivergenceDetector.stopMonitoring()
-  fraudDetection.destroy()
-  CacheManager.shutdown()
+      // Close Database Connections
+      await closeDbConnections()
+      logger.info('Database connections closed.')
 
-  const forceExit = setTimeout(() => {
-    logger.error('[shutdown] Timeout exceeded — forcing exit.')
-    process.exit(1)
-  }, SHUTDOWN_TIMEOUT_MS)
-  forceExit.unref() // Don't let this timer keep the process alive
-
-  let exitCode = 0
-
-  try {
-    // 1. Stop accepting new HTTP requests; wait for in-flight ones to finish
-    await new Promise((resolve, reject) =>
-      server.close(err => (err ? reject(err) : resolve()))
-    )
-    logger.info('[shutdown] HTTP server closed.')
-
-    // 2. Flush buffered telemetry and close WebSocket resources
-    await closeWebSocketServer()
-    await closeLocationServer()
-    logger.info('[shutdown] WebSocket resources closed.')
-
-    // 3. Close shard connections
-    await shardManager.closeAllConnections()
-    logger.info('[shutdown] Shard connections closed.')
-
-    // 4. Close WebRTC signaling server
-    await closeWebRTCSignaling()
-    logger.info('[shutdown] WebRTC signaling server closed.')
-
-    // 5. Close OpenTelemetry tracing
-    await tracing.shutdown()
-    logger.info('[shutdown] OpenTelemetry tracing shut down.')
-
-    // 6. Close database/cache connections
-    await closeDbConnections()
-
-    logger.info('[shutdown] Clean exit.')
-  } catch (err) {
-    logger.error({ err }, '[shutdown] Error during shutdown')
-    exitCode = 1
-  } finally {
-    clearTimeout(forceExit)
-    process.exit(exitCode)
-  }
+      await flushSentry()
+      logger.info('Graceful shutdown completed successfully.')
+      process.exit(0)
+    } catch (err) {
+      logger.error({ err }, 'Error during graceful shutdown')
+      process.exit(1)
+    }
+  })
 } 
 
 // --- COMPLIANCE IMPORTS ---
@@ -987,25 +768,16 @@ app.use((err, req, res, next) => {
     });
   }
 
-  if (
-    err instanceof SyntaxError &&
-    err.status === 400 &&
-    'body' in err
-  ) {
-    logger.warn(
-      {
-        requestId: req.requestId,
-        ip: req.ip,
-        method: req.method,
-        path: req.originalUrl,
-      },
-      'Malformed JSON payload received'
-    );
+  // Force shutdown if cleanup takes too long
+  setTimeout(() => {
+    logger.error('Could not close connections in time, forcefully shutting down')
+    process.exit(1)
+  }, 10000)
+}
 
-    return res.status(400).json({
-      error: 'Malformed JSON payload',
-    });
-  }
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 
+export default app
   next(err);
 });

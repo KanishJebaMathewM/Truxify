@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -59,6 +59,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     // nonce is burned on success so a commitment cannot be replayed after a slot
     // is reused (e.g. cancel + recreate the same bookingId).
     mapping(address => mapping(uint256 => uint256)) public commitmentNonces;
+    mapping(bytes32 => bool) public releaseIdempotencyKeys;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
     uint256 public constant DISPUTE_TIMEOUT = 7 days;
     address public trustedRelayer;
@@ -346,12 +347,15 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking whose payment to release
      */
-    function releasePayment(uint256 bookingId)
+    function releasePayment(uint256 bookingId, bytes32 idempotencyKey)
         external
         onlyOwner
         nonReentrant
         whenNotPaused
     {
+        require(!releaseIdempotencyKeys[idempotencyKey], "TruxifyEscrow: Payment already released for this key");
+        releaseIdempotencyKeys[idempotencyKey] = true;
+
         Booking storage booking = bookings[bookingId];
 
         require(

@@ -1,3 +1,4 @@
+import { fetchTrafficData } from '../lib/trafficProviderFlights.js';
 import logger from '../middleware/logger.js';
 import { redisClient } from '../config/db.js';
 
@@ -33,18 +34,14 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     if (apiKey) {
       if (process.env.TOMTOM_API_KEY) {
         const url = `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=${process.env.TOMTOM_API_KEY}&point=${pickupLat},${pickupLng}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
-        const data = await response.json();
+        const data = await fetchTrafficData(url, 'TomTom');
         const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
         multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
       } else {
         const origin = `${pickupLat},${pickupLng}`;
         const destination = `${pickupLat + 0.01},${pickupLng + 0.01}`;
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Google API error: ${response.status}`);
-        const data = await response.json();
+        const data = await fetchTrafficData(url, 'Google');
         const duration = data.rows?.[0]?.elements?.[0]?.duration_in_traffic?.value;
         const normalDuration = data.rows?.[0]?.elements?.[0]?.duration?.value;
         if (duration && normalDuration && normalDuration > 0) {
@@ -245,9 +242,7 @@ export async function getTrafficForRoute(route, options = {}) {
     if (apiKey) {
       if (process.env.TOMTOM_API_KEY) {
         const url = `https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=${process.env.TOMTOM_API_KEY}&point=${nOriginLat},${nOriginLng}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
-        const data = await response.json();
+        const data = await fetchTrafficData(url, 'TomTom');
         const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
         multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
         delayMinutes = Math.max(0, Math.round((data.flowSegmentData?.currentDelaySec || 0) / 60));
@@ -255,9 +250,7 @@ export async function getTrafficForRoute(route, options = {}) {
         const origin = `${nOriginLat},${nOriginLng}`;
         const destination = `${nDestLat},${nDestLng}`;
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Google API error: ${response.status}`);
-        const data = await response.json();
+        const data = await fetchTrafficData(url, 'Google');
         const durationInTraffic = data.rows?.[0]?.elements?.[0]?.duration_in_traffic?.value;
         const normalDuration = data.rows?.[0]?.elements?.[0]?.duration?.value;
 

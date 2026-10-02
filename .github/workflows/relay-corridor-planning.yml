@@ -1,0 +1,28 @@
+name: Relay corridor planning
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/relayDispatchService.js'
+      - 'backend/api/src/controllers/relayController.js'
+      - 'backend/api/src/services/relayHandshakeService.js'
+      - 'backend/api/src/services/order/domainError.js'
+      - 'backend/api/test/unit/relayCorridorPlanning.test.js'
+      - 'backend/api/eslint.config.js'
+      - 'tools/relay-corridor-tests/**'
+      - '.github/workflows/relay-corridor-planning.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  relay-corridors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - run: npm ci --prefix tools/relay-corridor-tests --ignore-scripts
+      - run: bash tools/relay-corridor-tests/run.sh

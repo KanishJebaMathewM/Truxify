@@ -6,7 +6,7 @@ import { measureExecution } from '../core/performanceMetrics.js';
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {
-    await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
+    await response.text().catch(err => logger.warn({ err, url }, '[OSRM] Failed to read error body'));
     throw new Error(`[OSRM] Request failed (${response.status})`);
   }
   return response;
@@ -72,9 +72,6 @@ export async function getRouteEstimate(input = {}) {
   if (redisClient) {
     try {
       const cached = await redisClient.get(cacheKey);
-      // Only return cached result if it is a valid object.
-      // Stale null results (from transient failures) must not be served
-      // from cache — the next call should retry the OSRM API.
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed !== null) return parsed;
@@ -91,16 +88,16 @@ export async function getRouteEstimate(input = {}) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const routeUrl = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng });
 
     try {
-      const routeUrl = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng });
       const response = await osrmBreaker.fire(routeUrl, {
         signal: controller.signal,
       });
 
       if (!response.ok) {
         clearTimeout(timeout);
-        const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
+        const errBody = await response.text().catch(err => logger.warn({ err, url: routeUrl.toString() }, '[OSRM] Failed to read error body'));
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries, url: routeUrl.toString(), errorBody: errBody }, 'Server error. Retrying...');
           await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
@@ -135,17 +132,17 @@ export async function getRouteEstimate(input = {}) {
 
     } catch (err) {
       clearTimeout(timeout);
-      const routeUrlStr = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }).toString();
+      const routeUrlStr = routeUrl.toString();
       if (attempt < maxRetries - 1) {
         const delayMs = baseDelayMs * Math.pow(2, attempt);
         if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
-          logger.warn({ url: routeUrlStr, errMessage: err.message }, '[OSRM] Circuit is open. Falling back instantly.');
-          return null; // Return null so caller knows to use straight-line fallback
+          logger.warn({ err, url: routeUrlStr }, '[OSRM] Circuit is open. Falling back instantly.');
+          return null;
         }
-        logger.warn({ attempt: attempt + 1, maxRetries, errMessage: err.message, url: routeUrlStr, delayMs }, 'Fetch error. Retrying...');
+        logger.warn({ err, attempt: attempt + 1, maxRetries, url: routeUrlStr, delayMs }, 'Fetch error. Retrying...');
         await new Promise(r => setTimeout(r, delayMs));
       } else {
-        logger.error({ maxRetries, errMessage: err.message, stack: err.stack, url: routeUrlStr }, 'Fetch error after all retries:');
+        logger.error({ err, maxRetries, url: routeUrlStr }, 'Fetch error after all retries:');
         return null;
       }
     }
@@ -185,9 +182,6 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   if (redisClient) {
     try {
       const cached = await redisClient.get(cacheKey);
-      // Only return cached result if it is a valid object.
-      // Stale null results (from transient failures) must not be served
-      // from cache — the next call should retry the OSRM API.
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed !== null) return parsed;
@@ -200,15 +194,15 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   const timeoutMs = parsePositiveNumber(process.env.OSRM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const geometryUrl = buildGeometryUrl({ originLat, originLng, destLat, destLng });
 
   try {
-    const geometryUrl = buildGeometryUrl({ originLat, originLng, destLat, destLng });
     const response = await osrmBreaker.fire(
       geometryUrl,
       { signal: controller.signal },
     );
     if (!response.ok) {
-      const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
+      const errBody = await response.text().catch(err => logger.warn({ err, url: geometryUrl.toString() }, '[OSRM] Failed to read error body'));
       logger.warn({ status: response.status, statusText: response.statusText, url: geometryUrl.toString(), errorBody: errBody }, '[OSRM] Geometry HTTP request failed with non-2xx status');
       return null;
     }
@@ -242,12 +236,12 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
     return feature;
 
   } catch (err) {
-    const geometryUrlStr = buildGeometryUrl({ originLat, originLng, destLat, destLng }).toString();
+    const geometryUrlStr = geometryUrl.toString();
     if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
-      logger.warn({ url: geometryUrlStr, errMessage: err.message }, '[OSRM] Circuit is open during geometry fetch. Falling back.');
+      logger.warn({ err, url: geometryUrlStr }, '[OSRM] Circuit is open during geometry fetch. Falling back.');
       return null;
     }
-    logger.error({ errMessage: err.message, stack: err.stack, url: geometryUrlStr }, '[OSRM] Failed to fetch route geometry');
+    logger.error({ err, url: geometryUrlStr }, '[OSRM] Failed to fetch route geometry');
     return null;
   } finally {
     clearTimeout(timeout);
@@ -285,8 +279,6 @@ export const __testing = {
   DEFAULT_TIMEOUT_MS,
 };
 
-
-// === Spec 22: ===
 // === Spec 22: OSRM failover ===
 function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const nLat1 = Number(lat1);
@@ -308,15 +300,20 @@ function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
 export async function routeWithFailover(primary, _fb, coords) {
-  try { return await primary(coords); }
-  catch (err) {
-    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+  try { 
+    return await primary(coords); 
+  } catch (err) {
+    logger.warn({ err }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
     if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
       return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
     }
     const [a, b] = coords[0];
-    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+    return { 
+      distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), 
+      source: 'haversine-fallback',
+      error: err?.message 
+    };
   }
 }
-

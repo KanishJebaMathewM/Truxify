@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:truxify/l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
 import 'l10n/app_localizations.dart' as app_loc;
 import 'providers/language_provider.dart';
@@ -87,6 +87,8 @@ class _TruxifyAppState extends State<TruxifyApp> {
                 Locale('en'),
                 Locale('hi'),
                 Locale('ta'),
+                Locale('kn'),
+                Locale('mr'),
               ],
               home: const SplashScreen(),
             );

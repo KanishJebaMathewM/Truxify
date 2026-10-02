@@ -58,17 +58,10 @@ function parseWeightKg(weight) {
   return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
-function parseWeightKgSafe(weight) {
-  if (weight == null || weight === '') {
-    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
-    return null;
-  }
-  const result = parseWeightKg(weight);
-  if (result == null) {
-    logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return null;
-  }
-  return result;
+export function parseWeightKgSafe(weightInput, defaultKg = 1000) {
+  if (weightInput == null) return defaultKg;
+  const parsed = typeof weightInput === 'number' ? weightInput : parseFloat(weightInput);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultKg;
 }
 
 /**
@@ -412,12 +405,28 @@ export async function predictDriverProfit({
     throw new Error('[ML] Invalid driver profit prediction: missing confidence_interval');
   }
 
+  const predictedProfit = Math.round(result.predicted_profit * 100) / 100;
+
+  let lowerRaw = result.confidence_interval.lower ?? 0;
+  let upperRaw = result.confidence_interval.upper;
+
+  if (typeof upperRaw !== 'number' || !isFinite(upperRaw)) {
+    // Derive a sane fallback from the prediction magnitude rather than the
+    // undocumented `predicted_profit * 2`, which can go negative for loss
+    // predictions and was not clamped.
+    const margin = Math.abs(result.predicted_profit) * 0.5 || 1;
+    upperRaw = Math.max(result.predicted_profit, 0) + margin;
+  }
+
+  // Round only after enforcing ordering so rounding can never invert the
+  // interval (lower > upper) for tight ranges.
+  let lower = Math.round(Math.max(0, lowerRaw) * 100) / 100;
+  let upper = Math.round(Math.max(upperRaw, lower, predictedProfit) * 100) / 100;
+  lower = Math.min(lower, upper);
+
   return {
-    predicted_profit: Math.round(result.predicted_profit * 100) / 100,
-    confidence_interval: {
-      lower: Math.max(0, Math.round((result.confidence_interval.lower ?? 0) * 100) / 100),
-      upper: Math.round((result.confidence_interval.upper ?? result.predicted_profit * 2) * 100) / 100,
-    },
+    predicted_profit: predictedProfit,
+    confidence_interval: { lower, upper },
     currency: 'INR',
   };
 }
@@ -500,7 +509,12 @@ export async function matchEnRouteLoads({
   // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
   // model consumes.
   const availableLoads = offers
-    .filter(o => o.pickup_lat && o.pickup_lng && o.drop_lat && o.drop_lng)
+    .filter(o =>
+      Number.isFinite(Number(o.pickup_lat)) &&
+      Number.isFinite(Number(o.pickup_lng)) &&
+      Number.isFinite(Number(o.drop_lat)) &&
+      Number.isFinite(Number(o.drop_lng))
+    )
     .map(o => {
       const dims = parseDimensions(o.dimensions);
       return {
@@ -548,7 +562,7 @@ export async function matchEnRouteLoads({
   // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
-      .filter(o => o.pickup_lat && o.pickup_lng)
+      .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
       .map(o => {
         const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
@@ -662,6 +676,7 @@ export default {
   matchEnRouteLoads,
   getAbTestingStatus,
   rollbackAbTest,
+  parseWeightKgSafe,
   handleResponse,
   __testing,
 };

@@ -187,7 +187,7 @@ let telemetryMonitorInterval = null;
 let driverStateSweepInterval = null;
 let wsUpgradeLimitsCleanupInterval = null;
 let messageRateTrackerCleanupInterval = null;
-const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
+const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 30000; // 30 seconds
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
@@ -711,7 +711,7 @@ export function initWebSocketServer(server, orderRepository) {
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('Terminating unresponsive WebSocket client');
+        logger.warn({ driverId: ws.driverId, socketId: ws.socketId }, '[WS][heartbeat] Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -805,6 +805,9 @@ export async function isMessageRateLimited(ws) {
 }
 
 export async function handleTrackingMessage(ws, message, req) {
+  // Any incoming message means the connection is alive
+  ws.isAlive = true;
+
   if (await isMessageRateLimited(ws)) {
     ws.send(JSON.stringify({ error: 'Rate limit exceeded: too many messages per second', code: 429, retryAfter: 1 }));
     return;
@@ -1167,7 +1170,12 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
-  // Resolve order details from Supabase and verify driver ownership with fail-closed security (#14789)
+  // Orders in these statuses no longer keep a driver pinned to an active trip:
+// pings after delivery/cancellation must not be bound to the finished order
+// (issue #10676).
+const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_released']);
+
+// Resolve order details from Supabase and verify driver ownership with fail-closed security (#14789)
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
@@ -1180,12 +1188,12 @@ export async function handleLocationPing(ws, data, req) {
       if (cached && (cached.orderId === idToLookup || cached.orderDisplayId === idToLookup)) {
         orderUUID = cached.orderId;
         orderDisplayId = cached.orderDisplayId;
-        const { data: freshOrder } = await _orderRepository.findOrderByAnyId(orderUUID, 'id, order_display_id, driver_id');
+        const { data: freshOrder } = await _orderRepository.findOrderByAnyId(orderUUID, 'id, order_display_id, driver_id, status');
         verifiedOrder = freshOrder;
       }
 
       if (!verifiedOrder) {
-        const { data: foundOrder } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        const { data: foundOrder } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id, status');
         verifiedOrder = foundOrder;
       }
 
@@ -1212,11 +1220,29 @@ export async function handleLocationPing(ws, data, req) {
         }));
       }
 
-      orderUUID = verifiedOrder.id;
-      orderDisplayId = verifiedOrder.order_display_id;
-      await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+      if (TERMINAL_ORDER_STATUSES.has(verifiedOrder.status)) {
+        // The trip has ended: keep the driver's live location, but do not bind
+        // telemetry, ETA or order-room broadcasts to the finished order.
+        orderUUID = null;
+        orderDisplayId = null;
+        await invalidateDriverOrderCache(driver_id);
+      } else {
+        orderUUID = verifiedOrder.id;
+        orderDisplayId = verifiedOrder.order_display_id;
+        await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+      }
     } catch (err) {
       logger.error({ err }, 'Failed to resolve order details in tracker');
+      // Ownership could not be verified, so the client-supplied order id must
+      // not be trusted for this ping: drop the binding and the cached mapping
+      // so the next ping does a fresh lookup (issue #11190).
+      orderUUID = null;
+      orderDisplayId = null;
+      try {
+        await invalidateDriverOrderCache(driver_id);
+      } catch (cacheErr) {
+        logger.warn({ err: cacheErr }, 'Failed to invalidate driver order cache in tracker');
+      }
     }
   }
 

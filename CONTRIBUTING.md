@@ -141,7 +141,7 @@ Copy `.env.example` at the repository root or in component directories to set yo
 
 | Variable | Description | Default / Example |
 |---|---|---|
-| `PORT` | Node.js Backend API Port | `8080` |
+| `PORT` | Node.js Backend API Port | `5000` |
 | `JWT_SECRET` | Backend JWT signing secret | `truxify-jwt-secret-key` |
 | `POLYGON_RPC_URL` | Polygon JSON-RPC Endpoint | `https://polygon-mumbai.g.alchemy.com/v2/...` |
 | `ESCROW_CONTRACT_ADDRESS` | Deployed TruxifyEscrow contract | `0x1234567890abcdef1234567890abcdef12345678` |
@@ -200,6 +200,19 @@ git commit --no-verify -m "fix(cache): resolve Redis cache-aside TTL expiry on d
 5. **No Verification Bypass in PRs**: Ensure pre-commit hooks pass.
 
 ---
+
+### ✅ Before Opening a Pull Request
+
+Before opening your PR, verify:
+
+- [ ] You are working on a dedicated branch and not `main`.
+- [ ] Your changes are limited to the scope of the issue.
+- [ ] Relevant tests have been run and pass successfully.
+- [ ] Code formatting and linting checks have been completed.
+- [ ] No API keys, passwords, tokens, or other secrets are included.
+- [ ] Documentation has been updated if your changes require it.
+- [ ] The related issue is linked in the PR description.
+- [ ] You have reviewed your changes and confirmed the PR is ready for review.
 
 ## 🏷️ Issue Labels Guide
 

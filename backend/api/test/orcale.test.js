@@ -117,25 +117,25 @@ describe('OracleService', () => {
   describe('verifyCrossChain', () => {
     it('returns verified:true when blockchain hash matches', async () => {
       const supabase = createMockSupabase({
-        orders: [{ id: 'order-1', blockchain_tx_hash: '0xabc123', escrow_status: 'funded' }],
+        orders: [{ id: 'order-1', blockchain_tx_hash: '0xabc1230000000000000000000000000000000000000000000000000000000000', escrow_status: 'funded' }],
       });
 
       const service = new OracleService({ supabase });
-      const result = await service.verifyCrossChain('order-1', '0xabc123');
+      const result = await service.verifyCrossChain('order-1', '0xabc1230000000000000000000000000000000000000000000000000000000000');
 
       expect(result.verified).toBe(true);
-      expect(result.ipfsHash).toBe('0xabc123');
-      expect(result.blockchainHash).toBe('0xabc123');
-      expect(result.verificationUrl).toContain('0xabc123');
+      expect(result.ipfsHash).toBe('0xabc1230000000000000000000000000000000000000000000000000000000000');
+      expect(result.blockchainHash).toBe('0xabc1230000000000000000000000000000000000000000000000000000000000');
+      expect(result.verificationUrl).toContain('0xabc1230000000000000000000000000000000000000000000000000000000000');
     });
 
     it('returns verified:false when hash does not match', async () => {
       const supabase = createMockSupabase({
-        orders: [{ id: 'order-2', blockchain_tx_hash: '0xdef456', escrow_status: 'funded' }],
+        orders: [{ id: 'order-2', blockchain_tx_hash: '0xdef4560000000000000000000000000000000000000000000000000000000000', escrow_status: 'funded' }],
       });
 
       const service = new OracleService({ supabase });
-      const result = await service.verifyCrossChain('order-2', '0xabc123');
+      const result = await service.verifyCrossChain('order-2', '0xabc1230000000000000000000000000000000000000000000000000000000000');
 
       expect(result.verified).toBe(false);
     });
@@ -144,7 +144,7 @@ describe('OracleService', () => {
       const supabase = createMockSupabase({ orders: [] });
 
       const service = new OracleService({ supabase });
-      const result = await service.verifyCrossChain('nonexistent', '0xabc123');
+      const result = await service.verifyCrossChain('nonexistent', '0xabc1230000000000000000000000000000000000000000000000000000000000');
 
       expect(result.verified).toBe(false);
       expect(result.error).toBe('Order not found');
@@ -152,22 +152,22 @@ describe('OracleService', () => {
 
     it('returns verified:false when escrow is not funded or released', async () => {
       const supabase = createMockSupabase({
-        orders: [{ id: 'order-3', blockchain_tx_hash: '0xabc123', escrow_status: 'pending' }],
+        orders: [{ id: 'order-3', blockchain_tx_hash: '0xabc1230000000000000000000000000000000000000000000000000000000000', escrow_status: 'pending' }],
       });
 
       const service = new OracleService({ supabase });
-      const result = await service.verifyCrossChain('order-3', '0xabc123');
+      const result = await service.verifyCrossChain('order-3', '0xabc1230000000000000000000000000000000000000000000000000000000000');
 
       expect(result.verified).toBe(false);
     });
 
     it('is case-insensitive for blockchain hash comparison', async () => {
       const supabase = createMockSupabase({
-        orders: [{ id: 'order-4', blockchain_tx_hash: '0xABC123', escrow_status: 'released' }],
+        orders: [{ id: 'order-4', blockchain_tx_hash: '0xABC1230000000000000000000000000000000000000000000000000000000000', escrow_status: 'released' }],
       });
 
       const service = new OracleService({ supabase });
-      const result = await service.verifyCrossChain('order-4', '0xabc123');
+      const result = await service.verifyCrossChain('order-4', '0xabc1230000000000000000000000000000000000000000000000000000000000');
 
       expect(result.verified).toBe(true);
     });

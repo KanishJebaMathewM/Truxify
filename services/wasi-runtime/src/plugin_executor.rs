@@ -1,4 +1,4 @@
-use anyhow::Result;
+﻿use anyhow::Result;
 use wasmtime::{
     Config, Engine, Instance, Memory, Module, Store, StoreLimitsBuilder, Trap,
 };
@@ -55,18 +55,17 @@ impl WasiPluginExecutor {
 
         // The output region is placed immediately after the input so the guest
         // cannot clobber the input, and so the host reads output from a location
-        // the guest was explicitly told to write to. Previously the host read
-        // from offset 0 (where the guest was never told to write), which silently
-        // returned garbage for any real plugin that wrote its output elsewhere.
+        // the guest was explicitly told to write to.
         let out_offset = input_offset
             .checked_add(input_bytes.len())
             .ok_or_else(|| anyhow::anyhow!("input length overflow"))?;
 
+        let out_cap = mem_bytes.checked_sub(out_offset)
+            .ok_or_else(|| anyhow::anyhow!("plugin output capacity underflow"))?;
+
         if out_offset > mem_bytes {
             anyhow::bail!("input data does not fit in plugin linear memory");
         }
-
-        let out_cap = mem_bytes - out_offset;
 
         memory.write(&mut store, input_offset, input_bytes)?;
 
@@ -74,7 +73,8 @@ impl WasiPluginExecutor {
         // The host tells the guest exactly where to write its output and how much
         // room is available; it must never trust a guest-supplied length blindly.
         let run = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "run")?;
-        let out_len = match run.call(
+        
+        let raw_out_len = match run.call(
             &mut store,
             (
                 input_offset as i32,
@@ -96,10 +96,14 @@ impl WasiPluginExecutor {
             Err(e) => return Err(e.into()),
         };
 
+        // Guard against negative guest-reported lengths (preventing malicious wrap-arounds)
+        if raw_out_len < 0 {
+            anyhow::bail!("plugin returned an invalid negative output length: {}", raw_out_len);
+        }
+        let out_len = raw_out_len as usize;
+
         // Bounds-check the guest-reported length against the agreed capacity
-        // before allocating or reading. This prevents a malicious guest from
-        // triggering a multi-gigabyte host allocation (host OOM DoS) via a bogus
-        // `out_len` (e.g. returning -1 => ~4 GiB).
+        // before allocating or reading (prevents host OOM DoS and OOB reads).
         if out_len > out_cap {
             anyhow::bail!(
                 "plugin reported output length {out_len} exceeds available capacity {out_cap}"
@@ -108,6 +112,7 @@ impl WasiPluginExecutor {
 
         let mut out_buf = vec![0u8; out_len];
         memory.read(&store, out_offset, &mut out_buf)?;
+        
         let output = String::from_utf8(out_buf)
             .map_err(|e| anyhow::anyhow!("plugin returned non-utf8 output: {e}"))?;
 

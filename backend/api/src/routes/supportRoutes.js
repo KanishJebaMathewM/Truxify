@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -102,6 +102,7 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(userLimiter);
@@ -451,14 +452,12 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
@@ -771,14 +770,12 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);

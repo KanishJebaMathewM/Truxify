@@ -18,7 +18,10 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
-    supabase: {}
+    
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: {}
 }));
 
 vi.mock('axios', () => ({

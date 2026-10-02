@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: {
+    rpc: vi.fn(),
     from: vi.fn(() => ({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -296,17 +297,8 @@ describe('FraudDetectionService - Complete Core & Edge Case Test Suite', () => {
       expect(queue[0].user_id).toBe('user-A');
     });
 
-    it('computes fraud statistics with paging correctly', async () => {
-      const mockScores = [
-        { risk_score: 0.8, created_at: Date.now() },
-        { risk_score: 0.5, created_at: Date.now() },
-        { risk_score: 0.2, created_at: Date.now() }
-      ];
-      supabaseAdmin.from.mockReturnValueOnce({
-        select: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        range: vi.fn().mockResolvedValue({ data: mockScores, error: null })
-      });
+    it('computes fraud statistics with a single aggregate correctly', async () => {
+      supabaseAdmin.rpc.mockResolvedValueOnce({ data: { total: 3, highRisk: 1, mediumRisk: 1, lowRisk: 1, avgScore: (0.8 + 0.5 + 0.2) / 3 }, error: null });
 
       const stats = await fraudService.getFraudStats();
       expect(stats.total).toBe(3);

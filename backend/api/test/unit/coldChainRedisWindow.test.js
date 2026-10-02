@@ -41,7 +41,7 @@ beforeAll(async () => {
     server.stderr.on('data', (data) => { output += data; });
     server.stdout.on('data', (data) => {
       output += data;
-      if (output.includes('Ready to accept connections')) { clearTimeout(timer); resolve(); }
+      if (output.toLowerCase().includes('ready to accept connections')) { clearTimeout(timer); resolve(); }
     });
   });
   clients = Array.from({ length: 4 }, () => new Redis(socket));

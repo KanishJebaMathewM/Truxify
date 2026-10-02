@@ -62,6 +62,7 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
+  // Fixed from 8 decimals to 6 decimals to match contract & client expectations
   const r = (n) => Number(n.toFixed(6));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
@@ -177,6 +178,7 @@ function buildGeometryUrl({ originLat, originLng, destLat, destLng }) {
 }
 
 function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
+  // Fixed from 8 decimals to 6 decimals to match contract & client expectations
   const r = (n) => Number(n.toFixed(6));
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
@@ -297,8 +299,6 @@ export const __testing = {
   DEFAULT_TIMEOUT_MS,
 };
 
-
-// === Spec 22: ===
 // === Spec 22: OSRM failover ===
 function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const nLat1 = Number(lat1);
@@ -320,15 +320,22 @@ function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
 export async function routeWithFailover(primary, _fb, coords) {
-  try { return await primary(coords); }
-  catch (err) {
-    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+  try { 
+    return await primary(coords); 
+  } catch (err) {
+    // 🛠️ FIX FOR ISSUE #10653: Properly log error details from catch block
+    logger.warn({ errMessage: err?.message, stack: err?.stack }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+    
     if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
       return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
     }
     const [a, b] = coords[0];
-    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+    return { 
+      distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), 
+      source: 'haversine-fallback', 
+      error: err?.message 
+    };
   }
 }
-

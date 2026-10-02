@@ -418,6 +418,142 @@ def restore_previous_model(model_name: str) -> bool:
         return True
 
 
+def backup_model(model_name: str) -> Optional[str]:
+    """Create an explicit backup generation for *model_name*.
+
+    Copies the currently active generation into a backup generation and updates
+    the previous generation pointer, so that a subsequent rollback can restore it.
+    Returns the backup generation ID, or None if no active model exists.
+    """
+    with _get_write_lock(model_name):
+        current_gen = get_active_generation(model_name)
+        if not current_gen or not _generation_exists(model_name, current_gen):
+            if not os.path.exists(get_model_path(model_name)):
+                logger.warning("Cannot backup model '%s': no active model exists", model_name)
+                return None
+            current_gen = _generate_generation_id(model_name)
+            current_dir = _generation_dir(model_name, current_gen)
+            os.makedirs(current_dir, exist_ok=True)
+            shutil.copy2(get_model_path(model_name), _generation_model_path(model_name, current_gen))
+            if os.path.exists(get_meta_path(model_name)):
+                shutil.copy2(get_meta_path(model_name), _generation_meta_path(model_name, current_gen))
+            _sign_artifact(_generation_model_path(model_name, current_gen))
+            _atomic_write_json(_active_ptr_path(model_name), {"generation": current_gen})
+
+        backup_gen = _generate_generation_id(model_name)
+        backup_dir = _generation_dir(model_name, backup_gen)
+        os.makedirs(backup_dir, exist_ok=True)
+
+        source_model = _generation_model_path(model_name, current_gen)
+        target_model = _generation_model_path(model_name, backup_gen)
+        shutil.copy2(source_model, target_model)
+
+        source_meta = _generation_meta_path(model_name, current_gen)
+        target_meta = _generation_meta_path(model_name, backup_gen)
+        if os.path.exists(source_meta):
+            with open(source_meta, "r") as f:
+                meta = json.load(f)
+            meta["backup_from_generation"] = current_gen
+            meta["backup_timestamp"] = datetime.now().isoformat()
+            with open(target_meta, "w") as f:
+                json.dump(meta, f, indent=2)
+        else:
+            with open(target_meta, "w") as f:
+                json.dump({"model_name": model_name, "generation": backup_gen, "saved_at": datetime.now().isoformat()}, f, indent=2)
+
+        _sign_artifact(target_model)
+        _atomic_write_json(_previous_ptr_path(model_name), {"generation": backup_gen})
+        logger.info("Created explicit backup generation '%s' for model '%s'", backup_gen, model_name)
+        return backup_gen
+
+
+def rollback_model(model_name: str) -> dict:
+    """Roll back *model_name* to its previous generation and return detailed status.
+
+    Returns a dict with 'rolled_back' (bool), 'active_generation', 'previous_generation',
+    and the restored generation's metrics.
+    """
+    restored = restore_previous_model(model_name)
+    active_gen = get_active_generation(model_name)
+    meta = get_model_meta(model_name) or {}
+    metrics = meta.get("metrics", {})
+
+    if restored:
+        logger.warning("Model '%s' successfully rolled back to generation %s", model_name, active_gen)
+        return {
+            "rolled_back": True,
+            "model_name": model_name,
+            "active_generation": active_gen,
+            "metrics": metrics,
+            "message": f"Successfully rolled back {model_name} to generation {active_gen}",
+        }
+
+    return {
+        "rolled_back": False,
+        "model_name": model_name,
+        "active_generation": active_gen,
+        "metrics": metrics,
+        "reason": f"No previous generation available to roll back to for model '{model_name}'.",
+    }
+
+
+def validate_model_performance(new_metrics: dict, previous_metrics: Optional[dict] = None, r2_threshold: float = 0.05) -> dict:
+    """Validate new model performance against previous model baseline.
+
+    Rejection Rule (from issue #822):
+        If New R² < Previous R² - 0.05 Reject Model
+    Also computes percentage change and MAE/RMSE comparisons.
+    """
+    new_r2 = float(new_metrics.get("r2", 0.0))
+    new_mae = float(new_metrics.get("mae", 0.0))
+    new_rmse = float(new_metrics.get("rmse", 0.0))
+
+    if not previous_metrics:
+        return {
+            "should_reject": False,
+            "accepted": True,
+            "reason": "No previous baseline available; initial model accepted.",
+            "r2_diff": 0.0,
+            "r2_pct_change": 0.0,
+            "new_metrics": new_metrics,
+            "previous_metrics": None,
+        }
+
+    prev_r2 = float(previous_metrics.get("r2", 0.0))
+    prev_mae = float(previous_metrics.get("mae", 0.0))
+    prev_rmse = float(previous_metrics.get("rmse", 0.0))
+
+    r2_diff = new_r2 - prev_r2
+    r2_pct_change = ((r2_diff) / abs(prev_r2) * 100) if prev_r2 != 0 else (100.0 if r2_diff > 0 else 0.0)
+
+    should_reject = new_r2 < (prev_r2 - r2_threshold)
+
+    if should_reject:
+        reason = (
+            f"Performance regression detected: New R² ({new_r2:.4f}) dropped more than "
+            f"threshold {r2_threshold} below previous R² ({prev_r2:.4f}), delta {r2_pct_change:.1f}%."
+        )
+    else:
+        improved = r2_diff > 0
+        direction = "improved" if improved else "maintained"
+        reason = (
+            f"Performance validation passed: New R² ({new_r2:.4f}) vs previous R² ({prev_r2:.4f}), "
+            f"{direction} by {r2_pct_change:+.1f}%."
+        )
+
+    return {
+        "should_reject": should_reject,
+        "accepted": not should_reject,
+        "reason": reason,
+        "r2_diff": round(r2_diff, 4),
+        "r2_pct_change": round(r2_pct_change, 2),
+        "mae_diff": round(new_mae - prev_mae, 4),
+        "rmse_diff": round(new_rmse - prev_rmse, 4),
+        "new_metrics": {"r2": new_r2, "mae": new_mae, "rmse": new_rmse},
+        "previous_metrics": {"r2": prev_r2, "mae": prev_mae, "rmse": prev_rmse},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Readers
 # ---------------------------------------------------------------------------

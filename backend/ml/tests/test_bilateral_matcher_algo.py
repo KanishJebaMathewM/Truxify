@@ -4,7 +4,10 @@ Run with: python3 -m pytest tests/test_bilateral_matcher_algo.py -v --no-header
 """
 import math
 
+import pytest
+
 from app.models.bilateral_matcher import (
+    _deadline_urgency,
     _haversine,
     _distance_cost,
     match_bilateral,
@@ -33,6 +36,12 @@ def make_driver(**overrides):
     return driver
 
 
+@pytest.fixture(autouse=True)
+def disable_external_routing(monkeypatch):
+    """Keep the unit suite offline; routing-specific tests opt in explicitly."""
+    monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "false")
+
+
 class TestHaversine:
     """Tests for the great-circle distance helper."""
 
@@ -49,6 +58,17 @@ class TestHaversine:
         load = make_load(origin_lat=12.0, origin_lng=77.0)
         expected = _haversine(12.05, 77.05, 12.0, 77.0)
         assert math.isclose(_distance_cost(driver, load), expected, rel_tol=1e-9)
+
+    def test_route_duration_can_make_an_otherwise_feasible_load_infeasible(self):
+        load = make_load(deadline_hours=1)
+        distance_km = _haversine(12.0, 77.0, 12.0, 77.0)
+        assert _deadline_urgency(load, distance_km) < 1e5
+        assert _deadline_urgency(load, distance_km, route_duration_seconds=7200) >= 1e5
+
+    def test_unreachable_route_duration_is_infeasible(self):
+        load = make_load(deadline_hours=24)
+        distance_km = _haversine(12.0, 77.0, 12.0, 77.0)
+        assert _deadline_urgency(load, distance_km, route_duration_seconds=float("inf")) >= 1e5
 
 
 class TestMatchBilateral:
@@ -105,3 +125,47 @@ class TestMatchBilateral:
         result = match_bilateral(loads, drivers)
         assert len(result["assignments"]) == 1
         assert result["assignments"][0]["driver_index"] == 0
+
+    def test_road_eta_is_used_for_deadline_feasibility(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[7200.0]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.bilateral_matcher.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        load = make_load(
+            origin_lat=12.0,
+            origin_lng=77.0,
+            deadline_hours=1,
+        )
+        driver = make_driver(current_lat=12.0, current_lng=77.0)
+        result = match_bilateral([load], [driver])
+        assert result["assignments"] == []
+        assert result["unmatched_loads"] == [0]
+        assert result["unmatched_drivers"] == [0]
+
+    def test_unreachable_road_route_is_not_replaced_by_haversine_fallback(self, monkeypatch):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"durations": [[None]]}
+
+        monkeypatch.setenv("TRUXIFY_ML_USE_OSRM", "true")
+        monkeypatch.setattr(
+            "app.models.bilateral_matcher.requests.get",
+            lambda *args, **kwargs: FakeResponse(),
+        )
+        load = make_load(deadline_hours=24)
+        driver = make_driver(current_lat=12.0, current_lng=77.0)
+        result = match_bilateral([load], [driver])
+        assert result["assignments"] == []
+        assert result["unmatched_loads"] == [0]
+        assert result["unmatched_drivers"] == [0]

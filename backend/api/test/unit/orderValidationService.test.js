@@ -8,7 +8,10 @@ const mockOrderRepository = {
 
 const mockSupabase = { from: vi.fn() };
 
-vi.mock('../../src/config/db.js', () => ({ supabase: mockSupabase }));
+vi.mock('../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: mockSupabase }));
 vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 describe('orderValidationService', () => {

@@ -1,4 +1,5 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
 import { compressionMiddleware } from './config/compression.js'
@@ -62,6 +63,7 @@ import webhookRoutes from './routes/webhookRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
 import droneRoutes from './routes/droneRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
+import lumperEscrowRoutes from './routes/lumperEscrowRoutes.js'
 import tollOptimizationRouter from './routes/tollOptimization.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
@@ -73,6 +75,7 @@ import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
 import arLoadingRoutes from './routes/arLoadingRoutes.js'
+import relayRoutes from './routes/relayRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -179,6 +182,11 @@ import {
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
+
+// --- AUDIT LOGGING IMPORTS ---
+import auditRoutes from './routes/auditRoutes.js';
+import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
+
 
 // Configuration load from root folder is handled in db.js
 
@@ -454,9 +462,25 @@ app.use('/api/trips', tripRoutes)
 
 app.use('/api', requestCacheMiddleware)
 
+// ============================================================================
+// REQUEST-SCOPED CACHE — created per-request, destroyed after response.
+// Registers before all routes so every request handler benefits.
+// ============================================================================
+app.use('/api', requestCacheMiddleware)
+
+app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
+app.use('/api/trips', tripRoutes)
+
+// ============================================================================
+// REST API ROUTING
+// ============================================================================
 app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
 app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
+// Lumper fee escrow (broker deposit / driver receipt release). The router
+// already applies `authenticate` + `userLimiter` on each of its own routes,
+// so no additional middleware is layered on here.
+app.use('/api/lumper-escrow', lumperEscrowRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
@@ -472,7 +496,6 @@ app.use('/api/users', userRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
 app.use('/api/maintenance', maintenancePhotoRoutes)
-app.use('/api/webhooks', webhookRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
@@ -485,6 +508,7 @@ app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
+app.use('/api/tolls', tollOptimizationRouter)
 
 app.use('/api', zkidRoutes)
 app.use('/api', daoRoutes)
@@ -501,6 +525,7 @@ app.use('/api/carbon-credits', carbonTokenRoutes)
 app.use('/api/ml', mlRoutes)
 app.use('/api/tire-analytics', tireAnalyticsRoutes)
 app.use('/api/ar-loading', arLoadingRoutes)
+app.use('/api/relay', relayRoutes)
 
 const BLOCKCHAIN_MONITORING_MOUNTED = Symbol.for('truxify.api.blockchainMonitoring.mounted');
 if (blockchainMonitoringRoutes[BLOCKCHAIN_MONITORING_MOUNTED]) {
@@ -559,6 +584,7 @@ app.use('/api', wasmRoutes)
 app.use('/api', snykRoutes)
 app.use('/api', liquibaseRoutes)
 app.use('/api/wim', wimBypassRouter)
+app.use('/api/ifta-tax', iftaTaxRouter)
 
 app.get('/api/webrtc/status', (req, res) => {
   res.json({
@@ -692,6 +718,55 @@ const gracefulShutdown = async (signal) => {
       process.exit(1)
     }
   })
+} 
+
+// --- COMPLIANCE IMPORTS ---
+import complianceRoutes from './routes/complianceRoutes.js';
+
+// Mount compliance routes
+app.use('/api/compliance', complianceRoutes);
+
+// Handle uncaught exceptions and unhandled rejections.
+// Both handlers route through shutdown() so that connections are drained
+// before exit. The forceExit timer inside shutdown() catches hangs.
+process.on('uncaughtException', async (err) => {
+  logger.fatal({ err }, 'Uncaught exception — exiting')
+  await flushSentry(2000)
+  await shutdown('uncaughtException')
+})
+
+process.on('unhandledRejection', async (reason) => {
+  logger.error({ reason }, 'Unhandled promise rejection')
+  captureException(reason)
+  await flushSentry(2000)
+  await shutdown('unhandledRejection')
+})
+
+// --- FLEET ANALYTICS IMPORTS ---
+import analyticsRoutes from './routes/analyticsRoutes.js';
+
+// Mount analytics routes
+app.use('/api/analytics', analyticsRoutes);
+
+process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop 
+process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Request payload exceeded configured limit'
+    );
+
+    return res.status(413).json({
+      error: 'Payload too large',
+    });
+  }
 
   // Force shutdown if cleanup takes too long
   setTimeout(() => {
@@ -704,3 +779,5 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 
 export default app
+  next(err);
+});

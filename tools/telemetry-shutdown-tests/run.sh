@@ -5,6 +5,7 @@ tools_dir="$root/tools/telemetry-shutdown-tests"
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/src/sockets" "$fixture/src/middleware" "$fixture/src/config" "$fixture/test/unit"
+cp "$root/backend/api/src/sockets/"*.js "$fixture/src/sockets/"
 cp "${TELEMETRY_BASELINE_SOURCE:-$root/backend/api/src/sockets/telemetryBuffer.js}" "$fixture/src/sockets/telemetryBuffer.js"
 cp "$root/backend/api/test/unit/telemetryShutdown.test.js" "$fixture/test/unit/"
 cp "$root/backend/api/eslint.config.js" "$fixture/"

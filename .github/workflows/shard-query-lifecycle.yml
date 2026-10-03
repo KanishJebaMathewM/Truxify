@@ -1,0 +1,30 @@
+name: Shard query lifecycle
+on:
+  pull_request:
+    paths:
+      - backend/api/src/services/sharding/**
+      - backend/api/test/unit/ownedShardQuery.test.js
+      - backend/api/test/unit/ShardManager.test.js
+      - backend/api/test/unit/shardingParallelQuery.test.js
+      - backend/api/test/unit/shardManagerPasswords.test.js
+      - tools/shard-query-tests/**
+      - .github/workflows/shard-query-lifecycle.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/shard-query-tests/package-lock.json
+      - run: npm ci --no-fund --ignore-scripts
+        working-directory: tools/shard-query-tests
+      - run: bash tools/shard-query-tests/run.sh

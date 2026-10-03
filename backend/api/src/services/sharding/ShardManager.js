@@ -1,3 +1,4 @@
+import { executeOwnedShardQuery, validateShardQueryTimeout, DEFAULT_SHARD_QUERY_TIMEOUT_MS } from './ownedShardQuery.js';
 import pkg from 'pg';
 const { Pool } = pkg;
 import logger from '../../middleware/logger.js';
@@ -137,6 +138,7 @@ class ShardManager {
           user: config.user,
           password: config.password,
           max: 10,
+          connectionTimeoutMillis: DEFAULT_SHARD_QUERY_TIMEOUT_MS,
         });
         logger.info(`[OK] Shard ${name} initialized`);
       } catch (error) {
@@ -285,6 +287,8 @@ class ShardManager {
       throw new Error('Query string is required for executeCrossShardQuery');
     }
 
+    const timeoutMs = validateShardQueryTimeout(options.timeoutMs);
+
     // Execute same query across all shards concurrently via Promise.allSettled
     const promises = Array.from(this.shards.entries()).map(async ([name, shard]) => {
       if (!shard.pool) {
@@ -295,35 +299,7 @@ class ShardManager {
       }
 
       try {
-        const hasTimeout = Boolean(options.timeoutMs && options.timeoutMs > 0);
-        const queryConfig = hasTimeout
-          ? {
-              text: queryText,
-              values: queryParams,
-              statement_timeout: options.timeoutMs,
-              query_timeout: options.timeoutMs,
-            }
-          : null;
-
-        let queryPromise = queryConfig
-          ? shard.pool.query(queryConfig, queryParams)
-          : shard.pool.query(queryText, queryParams);
-
-        if (hasTimeout) {
-          let timer;
-          const timeoutPromise = new Promise((_, reject) => {
-            timer = setTimeout(() => {
-              const timeoutErr = new Error(`Query timed out on shard ${name}`);
-              timeoutErr.code = 'ETIMEDOUT';
-              timeoutErr.shard = name;
-              reject(timeoutErr);
-            }, options.timeoutMs);
-          });
-          queryPromise = Promise.race([queryPromise, timeoutPromise]).finally(() => {
-            clearTimeout(timer);
-          });
-        }
-        const result = await queryPromise;
+        const result = await executeOwnedShardQuery(shard.pool, queryText, queryParams, { timeoutMs, shard: name });
         return {
           shard: name,
           data: result.rows,

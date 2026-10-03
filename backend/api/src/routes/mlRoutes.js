@@ -11,6 +11,39 @@ import { haversineKm } from '../lib/pricing.js';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     MlEtaResponse:
+ *       type: object
+ *       required:
+ *         - eta_minutes
+ *         - confidence_interval
+ *       properties:
+ *         eta_minutes:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           example: 25.5
+ *         confidence_interval:
+ *           type: object
+ *           required:
+ *             - lower
+ *             - upper
+ *           properties:
+ *             lower:
+ *               type: number
+ *               format: float
+ *               minimum: 0
+ *               example: 20
+ *             upper:
+ *               type: number
+ *               format: float
+ *               minimum: 0
+ *               example: 30
+ */
+
 function parseCoord(value, min, max) {
   const n = Number(value);
   return Number.isFinite(n) && n >= min && n <= max ? n : null;
@@ -49,6 +82,93 @@ router.get(
 // 3. GET ETA PREDICTION
 // GET /api/ml/eta
 // ============================================================================
+/**
+ * @swagger
+ * /api/ml/eta:
+ *   get:
+ *     summary: Get an ML-based ETA prediction
+ *     description: Predicts ETA from route distance, time-of-day, day-of-week, route type, and historical speed. Optional trip and GPS query values are also included in the short-lived response-cache key.
+ *     tags:
+ *       - Machine Learning
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: routeDistance
+ *         required: false
+ *         description: Route distance in kilometres. Defaults to 10.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           default: 10
+ *       - in: query
+ *         name: timeOfDay
+ *         required: false
+ *         description: Hour of day used by the ETA model. Defaults to 12.
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 23
+ *           default: 12
+ *       - in: query
+ *         name: dayOfWeek
+ *         required: false
+ *         description: Day of week where 0 is Sunday and 6 is Saturday. Defaults to 1.
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 6
+ *           default: 1
+ *       - in: query
+ *         name: routeType
+ *         required: false
+ *         description: Route classification supplied to the ETA model.
+ *         schema:
+ *           type: string
+ *           default: highway
+ *           example: highway
+ *       - in: query
+ *         name: historicalSpeed
+ *         required: false
+ *         description: Historical average speed in kilometres per hour. Defaults to 60.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: 0
+ *           default: 60
+ *       - in: query
+ *         name: tripId
+ *         required: false
+ *         description: Optional trip identifier used to separate cached ETA responses.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lat
+ *         required: false
+ *         description: Optional latitude value used in the response-cache key.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -90
+ *           maximum: 90
+ *       - in: query
+ *         name: lng
+ *         required: false
+ *         description: Optional longitude value used in the response-cache key.
+ *         schema:
+ *           type: number
+ *           format: float
+ *           minimum: -180
+ *           maximum: 180
+ *     responses:
+ *       '200':
+ *         description: ETA prediction from the ML engine or deterministic fallback.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/MlEtaResponse'
+ */
 router.get(
   '/eta',
   authenticate,

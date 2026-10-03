@@ -6,6 +6,7 @@ import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 
 let devicePruningTask = null;
 let devicePruningRunning = false;
+let devicePruningGeneration = 0;
 
 // Distributed lock: only ONE replica may run the daily sweep at a time.
 // Same pattern as staleOrderWorker / escrow reconciliations.
@@ -154,7 +155,9 @@ export const startDevicePruningWorker = () => {
     return devicePruningTask;
   }
 
+  const generation = ++devicePruningGeneration;
   const tracedHandler = WorkerTracer.wrapCronJob('device-pruning-worker', async () => {
+    if (generation !== devicePruningGeneration || !devicePruningTask) return;
     await pruneStaleDevices();
   }, { schedule: '15 3 * * *' });
 
@@ -166,6 +169,7 @@ export const startDevicePruningWorker = () => {
 };
 
 export const stopDevicePruningWorker = () => {
+  devicePruningGeneration++;
   if (!devicePruningTask) return;
   devicePruningTask.stop();
   devicePruningTask = null;

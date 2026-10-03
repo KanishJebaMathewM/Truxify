@@ -9,7 +9,10 @@ that endpoint and its authorization are separate and unchanged.
 A run retains its process-local running flag until all already-dispatched
 operations and final cleanup settle. Database/Redis clients are captured for the
 run so a module-level client replacement does not switch its ownership domain. Concurrent local invocations return. Stop
-only stops scheduling; it does not falsely release ownership of pending work.
+invalidates the current scheduling generation. A captured cron callback cannot
+start a new sweep after stop or restart. Stop does not cancel an already admitted
+sweep or falsely release its native ownership; restart retains the running guard
+until that sweep actually settles.
 
 With Redis configured, a run claims `device:pruning:lock` using a random UUID and
 `SET NX EX` with a 600-second lease. It atomically compares the UUID and renews
@@ -64,7 +67,9 @@ an isolated temporary tree, mocking only database/Redis/cron/tracing/logging
 boundaries. It does not transform the production worker. The temporary tree is
 removed by its own cleanup trap.
 
-22 tests pass: 18 new lifecycle cases plus four existing worker tests. Twelve
+25 tests pass: 21 lifecycle cases plus four existing worker tests. Two new
+stopped/restarted cron regressions fail the previous PR head; the third confirms
+that restart retains already admitted native work through actual settlement. Twelve
 new tests fail against actual unchanged main, as does the adjusted cleanup
 expectation in one existing test. Freshness is additionally verified by running
 the actual worker's query-builder predicates against PGlite 0.5.8 (real

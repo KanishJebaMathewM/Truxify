@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
+import cron from 'node-cron';
 
 const state = vi.hoisted(() => ({ database: null, redis: null, log: null }));
 vi.mock('../../src/config/db.js', () => ({
@@ -278,5 +279,56 @@ describe('bounded device-pruning lifecycle', () => {
         { id: 'stale', is_active: false, changed: true },
       ]);
     } finally { await db.close(); }
+  });
+});
+
+
+describe('scheduled device-pruning generation ownership', () => {
+  it('a captured stopped cron callback cannot claim another sweep', async () => {
+    worker.startDevicePruningWorker();
+    const callback = cron.schedule.mock.calls.at(-1)[1];
+    worker.stopDevicePruningWorker();
+    await callback();
+    expect(state.redis.set).not.toHaveBeenCalled();
+    expect(state.database.reads).toEqual([]);
+  });
+
+  it('a callback from the old schedule stays fenced after restart', async () => {
+    worker.startDevicePruningWorker();
+    const oldCallback = cron.schedule.mock.calls.at(-1)[1];
+    worker.stopDevicePruningWorker();
+    worker.startDevicePruningWorker();
+    const newCallback = cron.schedule.mock.calls.at(-1)[1];
+    await oldCallback();
+    expect(state.database.reads).toEqual([]);
+    await newCallback();
+    expect(state.database.rows[0].is_active).toBe(false);
+    worker.stopDevicePruningWorker();
+  });
+
+  it('restart retains an admitted native sweep until actual settlement', async () => {
+    const gate = deferred();
+    state.database.readHook = () => gate.promise;
+    worker.startDevicePruningWorker();
+    const oldCallback = cron.schedule.mock.calls.at(-1)[1];
+    const admitted = oldCallback();
+    try {
+      await tick();
+      expect(state.database.reads).toHaveLength(1);
+      worker.stopDevicePruningWorker();
+      worker.startDevicePruningWorker();
+      const newCallback = cron.schedule.mock.calls.at(-1)[1];
+      await newCallback();
+      expect(state.redis.set).toHaveBeenCalledTimes(1);
+      expect(state.database.reads).toHaveLength(1);
+    } finally {
+      gate.resolve();
+      await admitted;
+    }
+    state.database = databaseFixture(devices(1));
+    const newCallback = cron.schedule.mock.calls.at(-1)[1];
+    await newCallback();
+    expect(state.database.rows[0].is_active).toBe(false);
+    worker.stopDevicePruningWorker();
   });
 });

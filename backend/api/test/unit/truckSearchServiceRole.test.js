@@ -300,6 +300,39 @@ describe('GET /api/trucks/search — service-role client', () => {
 
     const [upstashKey2] = mockUpstashRedisClient.set.mock.calls[0];
     expect(upstashKey2).not.toEqual(upstashKey1);
+
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    // 3. Search with untrimmed truckId param: should normalize to same cache key as truck-open
+    const res3 = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}&truckId=%20%20truck-open%20%20`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res3.status).toBe(200);
+    const [redisKey3] = mockRedisClient.set.mock.calls[0];
+    const [upstashKey3] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(redisKey3).toEqual(redisKey1);
+    expect(upstashKey3).toEqual(upstashKey1);
+
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    // 4. Search without truck_id: cannot reuse cache entry created with truck_id
+    const res4 = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res4.status).toBe(200);
+    const [redisKey4] = mockRedisClient.set.mock.calls[0];
+    const [upstashKey4] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(redisKey4).toContain('"truckId":""');
+    expect(redisKey4).not.toEqual(redisKey1);
+    expect(redisKey4).not.toEqual(redisKey2);
+    expect(upstashKey4).not.toEqual(upstashKey1);
+    expect(upstashKey4).not.toEqual(upstashKey2);
   });
 
   it('isolates truck-search cache keys by authenticated user to prevent authorization leakage', async () => {

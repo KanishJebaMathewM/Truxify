@@ -426,10 +426,13 @@ router.get(
     const version = await getTruckSearchVersion();
     const userId = req.user?.id || 'anon';
     const explicitTruckId = req.query.truck_id !== undefined ? req.query.truck_id : req.query.truckId;
+    const normalizedTruckId = (typeof explicitTruckId === 'string' && explicitTruckId.trim() !== '') ? explicitTruckId.trim() : null;
     const q = { ...req.query };
-    if (explicitTruckId !== undefined) {
-      q.truck_id = explicitTruckId;
-      delete q.truckId;
+    delete q.truckId;
+    if (normalizedTruckId) {
+      q.truck_id = normalizedTruckId;
+    } else {
+      delete q.truck_id;
     }
     const sorted = Object.keys(q).sort().reduce((acc, key) => {
       acc[key] = q[key];

@@ -117,7 +117,7 @@ describe('OrderLifecycleService.cancelOrder (transactional outbox)', () => {
     expect(params).toMatchObject({
       p_order_id: 'ord-1',
       p_status: 'cancelled',
-      p_not_statuses: ['delivered', 'payment_released', 'cancelled'],
+      p_not_statuses: ['picked_up', 'en_route_dropoff', 'in_transit', 'arriving', 'arrived_dropoff', 'delivered', 'payment_released', 'cancelled'],
       p_event_type: 'ORDER_CANCELLED',
     });
     expect(orderTimelineService.insertCancelEvent).toHaveBeenCalledWith('ORD-1');

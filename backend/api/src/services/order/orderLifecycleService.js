@@ -765,16 +765,23 @@ export class OrderLifecycleService {
     });
   }
 
-  async cancelOrder(orderId, customerId, reason, userClient) {
+  async cancelOrder(orderId, customerId, reason, userClient, idempotencyKey = null) {
     return measureExecution('OrderLifecycleService.cancelOrder', async () => {
       const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
       if (orderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: orderErr.message });
       if (!order) throw new DomainError(404, { error: 'Order not found.' });
       if (order.customer_id !== customerId) throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
 
-      const lockKey = `escrow_lock:${order.id}`;
-      const lock = await acquireLockOrFallback(lockKey, 30000);
-      if (!lock.ok) {
+      const cancelLockKey = `lock:order:cancel:${order.id}`;
+      const cancelLock = await acquireLockOrFallback(cancelLockKey, 30000);
+      if (!cancelLock.ok) {
+        throw new DomainError(409, { error: 'Cancellation is currently being processed. Please try again later.' });
+      }
+
+      const escrowLockKey = `escrow_lock:${order.id}`;
+      const escrowLock = await acquireLockOrFallback(escrowLockKey, 30000);
+      if (!escrowLock.ok) {
+        await cancelLock.release();
         throw new DomainError(409, { error: 'Cancellation is currently being processed. Please try again later.' });
       }
 
@@ -783,6 +790,25 @@ export class OrderLifecycleService {
         const { data: currentOrder, error: currentOrderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
         if (currentOrderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: currentOrderErr.message });
         if (!currentOrder) throw new DomainError(404, { error: 'Order not found.' });
+
+        const requiresRefund = ['funding', 'funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
+
+        // Idempotency check: return cached 200 only when no refund is required or escrow refund has completed.
+        // If escrow_status is refund_pending or refund_failed, continue to the retry/reconciliation flow.
+        const isCancelledOrIdempotent = currentOrder.status === 'cancelled'
+          || Boolean(idempotencyKey && currentOrder.cancellation_idempotency_key === idempotencyKey);
+
+        if (isCancelledOrIdempotent && (!requiresRefund || currentOrder.escrow_status === 'refunded')) {
+          await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
+          return {
+            status: 200,
+            body: {
+              message: currentOrder.escrow_status === 'refunded' ? 'Order was already cancelled and refunded.' : 'Order was already cancelled.',
+              cancellation_fee: currentOrder.cancellation_fee ?? 0,
+              order: currentOrder,
+            },
+          };
+        }
 
         // Runs under the caller's identity so RLS resolves get_profile_id() to
         // the customer; the shared anon-key client always returns null here
@@ -796,14 +822,13 @@ export class OrderLifecycleService {
         // The driver has already started the trip — a full-refund cancellation is
         // no longer possible. On-chain, cancelBooking / cancelWithPenalty revert
         // once the booking has been marked as started, so reject here first.
-        if (['picked_up', 'in_transit', 'arriving', 'arrived_dropoff'].includes(currentOrder.status)) {
+        if (['picked_up', 'en_route_dropoff', 'in_transit', 'arriving', 'arrived_dropoff', 'delivered'].includes(currentOrder.status)) {
           throw new DomainError(409, { error: 'Cannot cancel: the shipment has already been picked up and is in transit.' });
         }
 
-        const requiresRefund = ['funding', 'funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
         const penaltyBps = currentOrder.status === 'truck_assigned'
           ? 1000
-          : ['arrived_pickup', 'picked_up', 'in_transit', 'delivered'].includes(currentOrder.status)
+          : ['arrived_pickup'].includes(currentOrder.status)
             ? 5000
             : 0;
         const cancellationFee = currentOrder.total_amount && penaltyBps > 0
@@ -811,18 +836,6 @@ export class OrderLifecycleService {
           : currentOrder.cancellation_fee ?? 0;
         const escrowAmountWei = currentOrder.escrow_amount_wei ? BigInt(currentOrder.escrow_amount_wei) : 0n;
         const driverFeeWei = (escrowAmountWei * BigInt(penaltyBps)) / 10_000n;
-
-        if (currentOrder.status === 'cancelled' && (!requiresRefund || currentOrder.escrow_status === 'refunded')) {
-          await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
-          return {
-            status: 200,
-            body: {
-              message: currentOrder.escrow_status === 'refunded' ? 'Order was already cancelled and refunded.' : 'Order was already cancelled.',
-              cancellation_fee: currentOrder.cancellation_fee ?? 0,
-              order: currentOrder,
-            },
-          };
-        }
 
         let workingOrder = currentOrder;
 
@@ -833,7 +846,9 @@ export class OrderLifecycleService {
             {
               p_order_id: currentOrder.id,
               p_status: 'cancelled',
-              p_not_statuses: ['delivered', 'payment_released'],
+              p_not_statuses: currentOrder.status === 'cancelled'
+                ? ['delivered', 'payment_released']
+                : ['picked_up', 'en_route_dropoff', 'in_transit', 'arriving', 'arrived_dropoff', 'delivered', 'payment_released'],
               p_cancellation_reason: reason ?? currentOrder.cancellation_reason,
               p_cancellation_fee: cancellationFee,
               p_escrow_status: 'refund_pending',
@@ -844,6 +859,7 @@ export class OrderLifecycleService {
               p_payload_extra: {
                 cancellation_reason: reason ?? currentOrder.cancellation_reason,
                 cancellation_fee: cancellationFee,
+                cancellation_idempotency_key: idempotencyKey,
               },
             },
             supabaseAdmin
@@ -856,9 +872,15 @@ export class OrderLifecycleService {
             });
           }
           if (!pendingRows || pendingRows.length === 0) {
-            throw new DomainError(409, { error: 'Order was already delivered or payment released. Cannot cancel.' });
+            throw new DomainError(409, { error: 'Order was already picked up, delivered, or payment released. Cannot cancel.' });
           }
           workingOrder = pendingRows[0];
+          if (idempotencyKey) {
+            await this.orderRepository.updateOrder(currentOrder.id, {
+              cancellation_idempotency_key: idempotencyKey,
+              cancellation_status: 'refund_pending',
+            }).catch(() => {});
+          }
         }
 
         if (requiresRefund) {
@@ -871,8 +893,8 @@ export class OrderLifecycleService {
               receipt = await confirmEscrowRefund(refundTxHash);
             } else {
               const submitted = driverFeeWei > 0n
-                ? await submitEscrowCancelWithPenalty(workingOrder.order_display_id, driverFeeWei)
-                : await submitEscrowRefund(workingOrder.order_display_id);
+                ? await submitEscrowCancelWithPenalty(workingOrder.order_display_id, driverFeeWei, idempotencyKey)
+                : await submitEscrowRefund(workingOrder.order_display_id, idempotencyKey);
               refundTxHash = submitted.txHash;
               if (!refundTxHash || !submitted.waitForConfirmation) {
                 throw new Error('Escrow refund transaction was not submitted.');
@@ -883,6 +905,7 @@ export class OrderLifecycleService {
                 refund_tx_hash: refundTxHash,
                 escrow_refund_submitted_at: submittedAt,
                 updated_at: submittedAt,
+                cancellation_idempotency_key: idempotencyKey ?? currentOrder.cancellation_idempotency_key,
               });
 
               receipt = await submitted.waitForConfirmation();
@@ -906,6 +929,7 @@ export class OrderLifecycleService {
                   escrow_status: 'refunded',
                   refund_tx_hash: receipt.hash ?? refundTxHash,
                   escrow_refunded_at: refundedAt,
+                  cancellation_idempotency_key: idempotencyKey,
                 },
               },
               supabaseAdmin
@@ -930,6 +954,12 @@ export class OrderLifecycleService {
             }
 
             const updatedOrder = updatedRows[0];
+            if (idempotencyKey) {
+              await this.orderRepository.updateOrder(currentOrder.id, {
+                cancellation_idempotency_key: idempotencyKey,
+                cancellation_status: 'refunded',
+              }).catch(() => {});
+            }
 
             await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
             await expireDeliveryOtps(currentOrder.id);
@@ -962,6 +992,7 @@ export class OrderLifecycleService {
                   escrow_status: nextEscrowStatus,
                   escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
                   retryable: true,
+                  cancellation_idempotency_key: idempotencyKey,
                 },
               },
               supabaseAdmin
@@ -974,7 +1005,8 @@ export class OrderLifecycleService {
               escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
               escrow_refund_last_attempt_at: failedAt,
               updated_at: failedAt,
-            });
+              cancellation_idempotency_key: idempotencyKey ?? currentOrder.cancellation_idempotency_key,
+            }).catch(() => {});
 
             return {
               status: 202,
@@ -995,13 +1027,14 @@ export class OrderLifecycleService {
           {
             p_order_id: currentOrder.id,
             p_status: 'cancelled',
-            p_not_statuses: ['delivered', 'payment_released', 'cancelled'],
+            p_not_statuses: ['picked_up', 'en_route_dropoff', 'in_transit', 'arriving', 'arrived_dropoff', 'delivered', 'payment_released', 'cancelled'],
             p_cancellation_reason: reason,
             p_cancellation_fee: cancellationFee,
             p_event_type: 'ORDER_CANCELLED',
             p_payload_extra: {
               cancellation_reason: reason,
               cancellation_fee: cancellationFee,
+              cancellation_idempotency_key: idempotencyKey,
             },
           },
           supabaseAdmin
@@ -1014,6 +1047,12 @@ export class OrderLifecycleService {
           throw new DomainError(409, { error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
         }
         const updatedOrder = updatedRows[0];
+        if (idempotencyKey) {
+          await this.orderRepository.updateOrder(currentOrder.id, {
+            cancellation_idempotency_key: idempotencyKey,
+            cancellation_status: 'cancelled',
+          }).catch(() => {});
+        }
 
         const persistedCancellationFee = updatedOrder?.cancellation_fee ?? cancellationFee;
 
@@ -1026,7 +1065,8 @@ export class OrderLifecycleService {
           body: { message: 'Order cancelled successfully.', cancellation_fee: persistedCancellationFee, order: updatedOrder },
         };
       } finally {
-        await lock.release();
+        await escrowLock.release();
+        await cancelLock.release();
       }
     });
   }

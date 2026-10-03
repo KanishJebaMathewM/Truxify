@@ -1,10 +1,10 @@
-import { supabase, mongoDb } from '../config/db.js';
+import { supabase, mongoDb, createUserClient } from '../config/db.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
 import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
 import { OrderTimelineService } from '../services/order/orderTimelineService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
 import { OrderValidationService } from '../services/order/orderValidationService.js';
-import { buildDepositTx, recordDepositTx, submitEscrowRefund as escrowRefund } from '../services/escrow.js';
+import { buildDepositTx, recordDepositTx, submitEscrowRefund } from '../services/escrow.js';
 import { predictDemand } from '../services/ml.js';
 import { buildStraightLineGeometry, getRouteGeometry } from '../services/osrm.js';
 import logger from '../middleware/logger.js';
@@ -221,7 +221,14 @@ export const changeDrop = async (req, res, next) => {
 
 export const cancelOrder = async (req, res, next) => {
   try {
-    const result = await orderLifecycleService.cancelOrder(req.params.id, req.user.id, req.body.reason);
+    const idempotencyKey = req.idempotencyKey || req.headers['idempotency-key'] || req.headers['x-idempotency-key'] || null;
+    const result = await orderLifecycleService.cancelOrder(
+      req.params.id,
+      req.user.id,
+      req.body.reason,
+      req.token ? createUserClient(req.token) : undefined,
+      idempotencyKey
+    );
     res.status(result.status || 200).json(result.body || result);
   } catch (err) {
     if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));

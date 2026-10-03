@@ -21,7 +21,6 @@ export async function getProfile(userId) {
     try {
       const cached = await getCachedSupabaseProfile(userId);
       if (cached && isValidCachedProfile(userId, cached)) {
-        logger.debug({ userId }, 'Profile cache hit');
         return cached;
       }
     } catch (err) {
@@ -60,7 +59,6 @@ export async function getCustomerStats(userId) {
     try {
       const cached = await getCachedCustomerStats(userId);
       if (cached) {
-        logger.debug({ userId }, 'Customer stats cache hit');
         return cached;
       }
     } catch (err) {
@@ -108,7 +106,6 @@ export async function getDriverDetails(userId) {
     try {
       const cached = await getCachedDriverDetails(userId);
       if (cached) {
-        logger.debug({ userId }, 'Driver details cache hit');
         return cached;
       }
     } catch (err) {
@@ -205,4 +202,3 @@ export const ProfileService = {
 };
 
 export default ProfileService;
-

@@ -2,7 +2,8 @@
 
 ## Persistence guarantee
 
-Both `calculateInitialEtaAfterAssignment` and `maybeRecalculateEtaOnLocationUpdate`
+`calculateInitialEtaAfterAssignment`, `maybeRecalculateEtaOnLocationUpdate` and the
+tracker-mounted `DeliveryDelayService.processLocation`
 claim an opaque PostgreSQL UUID generation before routing. The mounted tracker
 calls `scheduleEtaRecalculationOnLocationUpdate`. The initial scheduling/calculation
 helpers currently have no production assignment caller; this change preserves
@@ -27,6 +28,20 @@ so their first admitted calculation initializes it. UUIDs are compared as string
 in JavaScript, avoiding number rollover. Claims and commits preserve existing
 invoker/RLS/table privileges and grant function execution only to service_role.
 No table policy or caller privilege is widened.
+
+The delivery-delay writer claims the same generation before its independent
+routing call. Its conditional table UPDATE checks the generation, driver and
+exact lifecycle status alongside the existing previous-ETA/delay-state CAS.
+It writes its ISO ETA and durable arrival epoch together. This prevents either
+mounted writer from overwriting a newer generation from the other. The legacy
+`active` status remains admitted for delivery delay. Missing ownership makes
+`updateDeliveryEtaState` return no row; there is no unguarded fallback. Failed
+claims skip routing, writes and pushes. Before a delay/recovery push, a fresh
+ownership read suppresses known supersession or read failure. An already-started
+push can finish late, and a committed state transition may have no push. Existing
+ISO delivery-delay payloads and human-readable location ETA payloads remain as
+before; this protocol does not unify their formats or change delay evaluation.
+
 
 ## Publication and failure limits
 
@@ -87,6 +102,6 @@ migration replay or live PostgREST/production RLS deployment test. PGlite is a
 single local engine, so tests demonstrate deterministic protocol interleavings,
 not independent-session PostgreSQL lock contention. Existing repository lifecycle,
 transactional outbox and lookup tests also run. No remote provider is contacted.
-Scoped ESLint runs against both changed production files and the protocol fixture.
+Scoped ESLint runs against all changed production files and the protocol fixture.
 The dedicated GitHub workflow uses the same lock and runner; the full monorepo
 suite is a separate gate with existing unrelated failures.

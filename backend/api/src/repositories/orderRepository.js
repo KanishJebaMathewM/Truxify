@@ -168,12 +168,18 @@ export class OrderRepository {
       .single(), 'updateOrder');
   }
 
-  async updateDeliveryEtaState(id, updates, previousEta, previousState) {
+  async updateDeliveryEtaState(id, updates, previousEta, previousState, ownership) {
+    if (!ownership?.driverId || !ownership?.expectedStatus || !ownership?.generation) {
+      return { data: null, error: null };
+    }
     return this._retryableQuery(() => {
       let query = this.supabase
         .from('orders')
         .update(updates)
         .eq('id', id)
+        .eq('driver_id', ownership.driverId)
+        .eq('status', ownership.expectedStatus)
+        .eq('eta_calculation_generation', ownership.generation)
         .eq('delivery_delay_state', previousState);
       query = previousEta == null ? query.is('eta', null) : query.eq('eta', previousEta);
       return query.select('id, eta, delivery_delay_state').maybeSingle();

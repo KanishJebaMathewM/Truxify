@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+vi.mock('../../src/config/db.js', () => ({ mongoDb: null }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 let directory, recovery, pipeline;
 const deferred = () => {
@@ -41,7 +43,15 @@ afterEach(() => {
 
 describe('shared telemetry drain and recovery ownership', () => {
   it('returns and checkpoints a never-settling owned insert with native timers in a fresh Node process', () => {
-    const sourceUrl = pathToFileURL(path.resolve('src/sockets/telemetryBuffer.js')).href;
+    // The normal API test runner must also avoid importing provider startup in
+    // this child: copy source unchanged with explicit dependency-only seams.
+    const nativeRoot = path.join(directory, 'native');
+    for (const sub of ['sockets', 'middleware', 'config']) fs.mkdirSync(path.join(nativeRoot, 'src', sub), { recursive: true });
+    fs.writeFileSync(path.join(nativeRoot, 'package.json'), '{"type":"module"}');
+    fs.copyFileSync(fileURLToPath(new URL('../../src/sockets/telemetryBuffer.js', import.meta.url)), path.join(nativeRoot, 'src/sockets/telemetryBuffer.js'));
+    fs.writeFileSync(path.join(nativeRoot, 'src/middleware/logger.js'), 'export default {info(){},warn(){},error(){}};');
+    fs.writeFileSync(path.join(nativeRoot, 'src/config/db.js'), 'export const mongoDb=null;');
+    const sourceUrl = pathToFileURL(path.join(nativeRoot, 'src/sockets/telemetryBuffer.js')).href;
     const script = `
       import fs from 'node:fs';
       const {default:p}=await import(${JSON.stringify(sourceUrl)});

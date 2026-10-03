@@ -75,17 +75,66 @@ def _generate_synthetic_data() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _prepare_svd_matrix(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Center observed ratings and represent missing interactions neutrally.
+
+    Zero-valued cells mean "no interaction", not an explicit zero rating.
+    Missing cells are therefore imputed with each user's observed mean before
+    centering. Users without observations fall back to the global observed
+    mean. The returned matrix is what the factorization sees, while the user
+    means are added back after reconstruction.
+    """
+    matrix = np.asarray(matrix, dtype=np.float64)
+    observed = matrix > 0
+
+    if matrix.ndim != 2:
+        raise ValueError("ratings matrix must be two-dimensional")
+
+    if not np.any(observed):
+        return np.zeros_like(matrix), np.zeros(matrix.shape[0], dtype=np.float64)
+
+    counts = observed.sum(axis=1)
+    sums = matrix.sum(axis=1)
+    global_mean = float(matrix[observed].mean())
+    user_means = np.divide(
+        sums,
+        counts,
+        out=np.full(matrix.shape[0], global_mean, dtype=np.float64),
+        where=counts > 0,
+    )
+
+    filled = np.where(observed, matrix, user_means[:, None])
+    centered = filled - user_means[:, None]
+    return centered, user_means
+
+
 def _svd_reconstruct(matrix: np.ndarray, k: int) -> np.ndarray:
-    """Return the rank-*k* approximation of *matrix* via truncated SVD."""
-    U, s, Vt = np.linalg.svd(matrix, full_matrices=False)
+    """Return a rank-*k* approximation using neutral treatment of missing ratings."""
+    centered, user_means = _prepare_svd_matrix(matrix)
+    U, s, Vt = np.linalg.svd(centered, full_matrices=False)
     k = min(k, len(s))
-    return (U[:, :k] * s[:k]) @ Vt[:k, :]
+    reconstructed = (U[:, :k] * s[:k]) @ Vt[:k, :]
+    return reconstructed + user_means[:, None]
 
 
 def _popularity_ranking(matrix: np.ndarray) -> np.ndarray:
     """Return item indices sorted by total interaction score (descending)."""
     totals = matrix.sum(axis=0)
     return np.argsort(-totals)
+
+
+TOP_N_MIN = 1
+TOP_N_MAX = 50
+
+
+def _validate_top_n(top_n: int) -> None:
+    """Reject invalid recommendation counts at the model boundary."""
+    if isinstance(top_n, bool) or not isinstance(top_n, int):
+        raise ValueError("top_n must be an integer between 1 and 50")
+    if top_n < TOP_N_MIN or top_n > TOP_N_MAX:
+        raise ValueError(
+            f"top_n must be between {TOP_N_MIN} and {TOP_N_MAX}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +275,12 @@ class CollaborativeFilter:
         dict
             ``{"recommendations": [{entity_type + "_id": ..., "relevance_score": ...}, ...]}``
         """
+        _validate_top_n(top_n)
         idx = self._user_index(user_id)
+
+        # The exclusion set must be built before the cold-start branch so
+        # popularity fallback never recommends an entity already booked.
+        booked_ids = {b.get(booking_key) for b in booking_history if b.get(booking_key)}
 
         # Cold-start fallback
         if idx is None:
@@ -234,17 +288,22 @@ class CollaborativeFilter:
                 "Cold start for user '%s'; returning popular %ss.", user_id, entity_type,
             )
             recs = []
-            for rank, ei in enumerate(popular[:top_n]):
+            for ei in popular:
+                entity_id = ids[int(ei)]
+                if entity_id in booked_ids:
+                    continue
+                rank = len(recs)
                 recs.append({
-                    f"{entity_type}_id": ids[int(ei)],
+                    f"{entity_type}_id": entity_id,
                     "relevance_score": round(1.0 - rank * 0.05, 4),
                 })
+                if len(recs) >= top_n:
+                    break
             return {"recommendations": recs}
 
         scores = approx[idx]
 
         # Exclude already-booked entities
-        booked_ids = {b.get(booking_key) for b in booking_history if booking_key in b}
         masked_scores = scores.copy()
         for i, eid in enumerate(ids):
             if eid in booked_ids:
@@ -286,6 +345,7 @@ class CollaborativeFilter:
         dict
             ``recommendations`` – list of ``{load_id, relevance_score}``.
         """
+        _validate_top_n(top_n)
         self._ensure_loaded()
         return self._recommend(
             user_id, "load", self.load_ids, self._popular_loads,
@@ -314,6 +374,7 @@ class CollaborativeFilter:
         dict
             ``recommendations`` – list of ``{truck_id, relevance_score}``.
         """
+        _validate_top_n(top_n)
         self._ensure_loaded()
         return self._recommend(
             user_id, "truck", self.truck_ids, self._popular_trucks,

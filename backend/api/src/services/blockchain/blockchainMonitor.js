@@ -144,8 +144,8 @@ class BlockchainMonitor {
         return;
       }
 
-      if (!this.contract) {
-        logger.error('[BlockchainMonitor] Contract not initialized. Cannot start listening.');
+      if (!this.provider || !this.contract) {
+        logger.error('[BlockchainMonitor] Provider or contract not initialized. Cannot start listening.');
         return;
       }
 
@@ -213,6 +213,11 @@ class BlockchainMonitor {
       return;
     }
 
+    if (!this.provider) {
+      logger.warn('[BlockchainMonitor] Provider not initialized. Cannot start polling blocks.');
+      return;
+    }
+
     const pollInterval = parseInt(process.env.BLOCKCHAIN_POLL_INTERVAL_MS || '12000', 10);
 
     this.pollTimer = setInterval(async () => {
@@ -222,7 +227,7 @@ class BlockchainMonitor {
       }
 
       try {
-        if (!this.isListening || !this.provider) return;
+        if (!this.isListening || !this.provider || typeof this.provider.getBlockNumber !== 'function') return;
 
         this.isScanning = true;
         const currentBlock = await this.provider.getBlockNumber();
@@ -287,7 +292,7 @@ class BlockchainMonitor {
   async scanBlockRange(fromBlock, toBlock) {
     return measureExecution('BlockchainMonitor.scanBlockRange', async () => {
       if (fromBlock > toBlock) return;
-      if (typeof this.provider?.getLogs !== 'function') {
+      if (!this.provider || typeof this.provider.getLogs !== 'function') {
         logger.warn('[BlockchainMonitor] provider.getLogs not available. Skipping log scan.');
         return;
       }
@@ -297,11 +302,14 @@ class BlockchainMonitor {
       const CHUNK_SIZE = 500;
       for (let start = fromBlock; start <= toBlock; start += CHUNK_SIZE) {
         const end = Math.min(start + CHUNK_SIZE - 1, toBlock);
-        const logs = await this.provider.getLogs({
-          address: this.contractAddress,
+        const filter = {
           fromBlock: start,
           toBlock: end,
-        });
+        };
+        if (this.contractAddress) {
+          filter.address = this.contractAddress;
+        }
+        const logs = await this.provider.getLogs(filter);
 
         for (const log of logs) {
           await this.processLog(log);

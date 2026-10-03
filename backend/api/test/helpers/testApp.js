@@ -8,7 +8,10 @@
  *   import { createSupabaseMock } from './supabaseMock.js';
  *
  *   const m = createSupabaseMock();
- *   vi.mock('../../src/config/db.js', () => ({ supabase: m.supabase }));
+ *   vi.mock('../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: m.supabase }));
  *   const app = buildTestApp();
  *   ...
  */

@@ -1,12 +1,15 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
 class DAOService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        // The signer and contract clients are created on first use (see the getters
+        // below). Building them here made the whole API fail to start whenever
+        // PRIVATE_KEY or a contract address was not configured, because ethers
+        // throws on an undefined private key or contract target.
+        this._wallet = null;
         this.daoAddress = process.env.DAO_CONTRACT_ADDRESS;
         this.tokenAddress = process.env.DAO_TOKEN_ADDRESS;
 
@@ -20,11 +23,40 @@ class DAOService {
             'event VotedQuadratic(uint256 indexed proposalId, address indexed voter, uint256 votes, uint256 tokenCost)'
         ];
 
-        this.dao = new ethers.Contract(this.daoAddress, this.daoABI, this.wallet);
 
         this.proposalDuration = 604800;
 
         logger.info('✅ DAO Service initialized');
+    }
+
+    // ============ Chain clients (created on first use) ============
+
+    get wallet() {
+        if (!this._wallet) {
+            if (!process.env.PRIVATE_KEY) {
+                throw new Error('DAO chain access is not configured: set PRIVATE_KEY');
+            }
+            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        }
+        return this._wallet;
+    }
+
+    set wallet(value) {
+        this._wallet = value;
+    }
+
+    get dao() {
+        if (!this._dao) {
+            if (!this.daoAddress) {
+                throw new Error('DAO chain access is not configured: set DAO_CONTRACT_ADDRESS');
+            }
+            this._dao = new ethers.Contract(this.daoAddress, this.daoABI, this.wallet);
+        }
+        return this._dao;
+    }
+
+    set dao(value) {
+        this._dao = value;
     }
 
     // ============ Membership ============

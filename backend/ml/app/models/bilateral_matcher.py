@@ -6,9 +6,13 @@ and driver rating, then solves the optimal assignment via
 ``scipy.optimize.linear_sum_assignment``.
 """
 
+import json
 import logging
 import math
 import os
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import List, Dict, Any
 
 import numpy as np
@@ -25,6 +29,15 @@ _EARTH_RADIUS_KM = 6_371.0
 _DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
 _OSRM_TIMEOUT_SECONDS = 1.5
 _FALLBACK_AVG_SPEED_KMH = 50.0
+_OSRM_COORDINATE_LIMIT = 100
+_OSRM_MAX_MATRIX_CELLS = 1_000_000
+_OSRM_MATRIX_DEADLINE_SECONDS = 3.0
+_OSRM_MAX_BODY_BYTES = 256 * 1024
+_OSRM_NATIVE_LIMIT = 4
+_route_slots = threading.BoundedSemaphore(_OSRM_NATIVE_LIMIT)
+_route_executor = ThreadPoolExecutor(max_workers=_OSRM_NATIVE_LIMIT, thread_name_prefix="bilateral-osrm")
+# A provider failure is unknown, unlike OSRM's explicit null (unreachable).
+_ROUTE_UNAVAILABLE = object()
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -40,52 +53,108 @@ def _osrm_enabled() -> bool:
     return os.getenv("TRUXIFY_ML_USE_OSRM", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _fetch_duration_tile(drivers, loads, deadline):
+    """One native request; bounded bytes and monotonic total budget."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Bilateral routing deadline elapsed")
+    coordinates = [f"{d['current_lng']},{d['current_lat']}" for d in drivers]
+    coordinates += [f"{load['origin_lng']},{load['origin_lat']}" for load in loads]
+    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
+    response = requests.get(
+        f"{base_url}/table/v1/driving/{';'.join(coordinates)}",
+        params={
+            "sources": ";".join(str(i) for i in range(len(drivers))),
+            "destinations": ";".join(str(len(drivers) + i) for i in range(len(loads))),
+            "annotations": "duration",
+        },
+        timeout=min(_OSRM_TIMEOUT_SECONDS, remaining),
+        stream=True,
+    )
+    try:
+        response.raise_for_status()
+        length = response.headers.get("Content-Length")
+        if length is not None and int(length) > _OSRM_MAX_BODY_BYTES:
+            raise ValueError("Bilateral routing body exceeds byte limit")
+        body = bytearray()
+        for chunk in response.iter_content(chunk_size=4096):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Bilateral routing body deadline elapsed")
+            if len(body) + len(chunk) > _OSRM_MAX_BODY_BYTES:
+                raise ValueError("Bilateral routing body exceeds byte limit")
+            body.extend(chunk)
+        payload = json.loads(body)
+        if not isinstance(payload, dict) or payload.get("code", "Ok") != "Ok":
+            raise ValueError("Invalid bilateral routing response")
+        durations = payload.get("durations")
+        if not isinstance(durations, list) or len(durations) != len(drivers):
+            raise ValueError("Invalid bilateral routing matrix")
+        if any(not isinstance(row, list) or len(row) != len(loads) for row in durations):
+            raise ValueError("Invalid bilateral routing row")
+        return durations
+    finally:
+        response.close()
+
+
 def _fetch_route_duration_matrix(
     drivers: List[Dict[str, Any]],
     loads: List[Dict[str, Any]],
-) -> list[list[float | None]] | None:
-    """Fetch road travel durations from every driver to every load origin."""
+) -> list[list[Any]] | None:
+    """Tile road durations, preserving unknown versus explicitly unreachable cells.
+
+    Provider admission has no executor queue: caller expiry does not release a
+    slot until its native future settles. Allocation is optional and capped;
+    the existing geometric fallback remains available on provider failure.
+    """
     if not _osrm_enabled() or not drivers or not loads:
         return None
-
-    coordinates = [
-        f"{driver['current_lng']},{driver['current_lat']}"
-        for driver in drivers
-    ] + [
-        f"{load['origin_lng']},{load['origin_lat']}"
-        for load in loads
-    ]
-    source_indexes = ";".join(str(i) for i in range(len(drivers)))
-    destination_offset = len(drivers)
-    destination_indexes = ";".join(
-        str(destination_offset + i) for i in range(len(loads))
-    )
-    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
-    url = f"{base_url}/table/v1/driving/{';'.join(coordinates)}"
-
-    try:
-        response = requests.get(
-            url,
-            params={
-                "sources": source_indexes,
-                "destinations": destination_indexes,
-                "annotations": "duration",
-            },
-            timeout=_OSRM_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        durations = payload.get("durations") if isinstance(payload, dict) else None
-        if not isinstance(durations, list) or len(durations) != len(drivers):
-            logger.warning("OSRM returned an invalid bilateral duration matrix")
-            return None
-        if any(not isinstance(row, list) or len(row) != len(loads) for row in durations):
-            logger.warning("OSRM returned an invalid bilateral duration row")
-            return None
-        return durations
-    except (requests.RequestException, ValueError, TypeError) as exc:
-        logger.warning("OSRM bilateral duration lookup failed: %s", exc)
+    if len(drivers) * len(loads) > _OSRM_MAX_MATRIX_CELLS:
         return None
+    deadline = time.monotonic() + _OSRM_MATRIX_DEADLINE_SECONDS
+    matrix = [[_ROUTE_UNAVAILABLE] * len(loads) for _ in drivers]
+    source_size = min(len(drivers), _OSRM_COORDINATE_LIMIT - min(len(loads), _OSRM_COORDINATE_LIMIT // 2))
+    destination_size = _OSRM_COORDINATE_LIMIT - source_size
+    completed = False
+    for source_start in range(0, len(drivers), source_size):
+        for destination_start in range(0, len(loads), destination_size):
+            remaining = deadline - time.monotonic()
+            slots = _route_slots
+            if remaining <= 0 or not slots.acquire(blocking=False):
+                return matrix if completed else None
+            try:
+                native = _route_executor.submit(
+                    _fetch_duration_tile,
+                    drivers[source_start:source_start + source_size],
+                    loads[destination_start:destination_start + destination_size],
+                    deadline,
+                )
+            except BaseException as exc:
+                slots.release()
+                if not isinstance(exc, Exception):
+                    raise
+                logger.warning("OSRM bilateral provider executor unavailable")
+                return matrix if completed else None
+            native.add_done_callback(lambda _future, owner=slots: owner.release())
+            try:
+                tile = native.result(timeout=max(0.0, deadline - time.monotonic()))
+            except (requests.RequestException, ValueError, TypeError, FutureTimeoutError) as exc:
+                logger.warning("OSRM bilateral duration tile unavailable: %s", exc)
+                continue
+            completed = True
+            for row_index, row in enumerate(tile):
+                for col_index, value in enumerate(row):
+                    # Invalid provider cells remain infeasible, as before;
+                    # only transport/shape failures use geometric fallback.
+                    valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+                    normalized = float("inf")
+                    if valid:
+                        try:
+                            if math.isfinite(value) and value >= 0:
+                                normalized = float(value)
+                        except OverflowError:
+                            pass
+                    matrix[source_start + row_index][destination_start + col_index] = None if value is None else normalized
+    return matrix if completed else None
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +410,9 @@ def match_bilateral(
             route_duration_seconds = None
             if route_durations is not None:
                 candidate_duration = route_durations[j][i]
-                if candidate_duration is None:
+                if candidate_duration is _ROUTE_UNAVAILABLE:
+                    route_duration_seconds = None
+                elif candidate_duration is None:
                     route_duration_seconds = float("inf")
                 elif isinstance(candidate_duration, (int, float)) and math.isfinite(candidate_duration):
                     route_duration_seconds = float(candidate_duration)

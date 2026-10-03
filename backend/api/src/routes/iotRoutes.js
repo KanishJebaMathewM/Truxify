@@ -204,7 +204,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
     let prevOutOfRange = false;
     let prevErr = null;
     if (isOutOfRange) {
-      logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
+      logger.warn({ event: 'COLD_CHAIN_VIOLATION', requestId: req.requestId || req.id, loadId, temperature, targetMin: load.target_temperature_min, targetMax: load.target_temperature_max }, 'Cold chain violation detected');
 
       const { data: prevTelemetry, error: pErr } = await supabaseAdmin
         .from('temperature_telemetry')

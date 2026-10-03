@@ -692,7 +692,7 @@ Base Path
 |---------|----------|
 |GET|/webrtc/stats|
 |GET|/webrtc/nearby|
-|GET|/webrtc/offline/:peerId|
+|GET|/webrtc/offline/:peerId|Retrieve bounded offline GPS data for an accessible peer|
 |POST|/webrtc/sync/:peerId|Acknowledge synchronized offline GPS rows for an accessible peer|
 
 ---
@@ -711,6 +711,43 @@ Base Path
 |GET|/zkp/status/:userId|
 |GET|/zkp/document-hash/:userId|
 |GET|/zkp/stats|
+
+
+### GET /api/webrtc/offline/{peerId}
+
+Requires a Bearer token and the `webrtc:view-offline` policy.
+
+Query parameters:
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+|`since`|Yes|Unix timestamp in milliseconds; only newer rows are returned|
+
+Successful responses return bounded offline GPS rows:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "row-1",
+      "data": {},
+      "timestamp": 1726339200000,
+      "synced": false
+    }
+  ]
+}
+```
+
+Responses:
+
+| Status | Meaning |
+|--------|---------|
+|200|Offline GPS data retrieved|
+|400|Invalid or missing `since`|
+|403|Authenticated user cannot access the peer|
+|500|Retrieval failed|
+|503|WebRTC signaling server is not initialized|
 
 
 ### POST /api/webrtc/sync/{peerId}

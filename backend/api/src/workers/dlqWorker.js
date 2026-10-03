@@ -13,10 +13,13 @@ let intervalId = null;
 // In-process guard preventing overlapping cycles within THIS process. It is NOT
 // the distributed coordination mechanism — cross-replica exclusivity is
 // provided by the database-level lease claim (claim_webhook_failure_batch).
-let cycleRunning = false;
+let cycleOwner = null;
+let workerRun = null;
 
 export const startDlqWorker = () => {
   if (intervalId) return;
+  const run = {};
+  workerRun = run;
 
   const configuredInterval = Number(process.env.DLQ_WORKER_INTERVAL_MS);
   const intervalMs = Number.isFinite(configuredInterval) && configuredInterval > 0
@@ -24,15 +27,17 @@ export const startDlqWorker = () => {
     : DEFAULT_INTERVAL_MS;
 
   const tracedHandler = WorkerTracer.wrapIntervalWorker('dlq-worker', async () => {
-    if (cycleRunning) {
+    if (workerRun !== run) return;
+    if (cycleOwner) {
       logger.warn('[DLQ Worker] Previous cycle still running — skipping overlapping interval.');
       return;
     }
-    cycleRunning = true;
+    const owner = {};
+    cycleOwner = owner;
     try {
       await dlqService.processQueue(processFnMap);
     } finally {
-      cycleRunning = false;
+      if (cycleOwner === owner) cycleOwner = null;
     }
   }, { intervalMs });
 
@@ -51,10 +56,11 @@ export const startDlqWorker = () => {
 };
 
 export const stopDlqWorker = () => {
+  workerRun = null;
+  // A stopped timer does not prove that an admitted native batch settled.
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    cycleRunning = false;
     logger.info('[DLQ Worker] Stopped Dead Letter Queue polling worker.');
   }
 };

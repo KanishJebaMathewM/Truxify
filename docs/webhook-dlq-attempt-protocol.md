@@ -29,3 +29,19 @@ bash tools/dlq-attempt-tests/run.sh
 ```
 
 The isolated locked harness executes actual DLQ source and migrations. Its PostgreSQL fixture lives under tools/dlq-attempt-tests/fixtures and is materialized into the temporary API test tree, so ordinary API discovery does not require a new PGlite dependency. Database/provider imports are controlled by test mocks; actual escrow business processing is not invoked. Database-backed tests run in-memory PostgreSQL/PGlite, including stale generations, expired/missing leases, normal transitions, same-worker reclaim, queued admission loss and database-clock behavior inside an earlier-started transaction. Existing DLQ service and worker lifecycle fixtures also run. This focused check does not claim the entire monorepo suite is green.
+
+## Polling lifecycle ownership
+
+A captured interval callback belongs to one worker start generation. Stop
+invalidates that generation, so an already captured but unstarted callback
+cannot claim a batch after stop or restart. An admitted cycle keeps one native
+process-local owner until `processQueue` actually resolves or rejects. Stop
+and restart do not clear it: a newer interval skips until the old batch
+settles. The old owner's finally can release only itself.
+
+Stop remains synchronous and does not cancel or await an already started
+batch. That batch may finish its existing work, with the same exact-attempt
+database checks. This is not a shutdown drain guarantee or a distributed
+lease replacement. A hung native cycle deliberately blocks further local
+admission rather than accumulating overlapping batches. Four added lifecycle
+regressions fail on the old worker; all 48 focused cases pass after integration.

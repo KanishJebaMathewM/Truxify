@@ -22,4 +22,4 @@ if [[ -n "${DLQ_BASELINE_PATTERN:-}" ]]; then
 else
   "$runner/node_modules/.bin/vitest" run test/unit/dlqService.test.js test/unit/dlqWorker.test.js test/unit/dlqAttemptProtocol.test.js
 fi
-"$runner/node_modules/.bin/eslint" src/services/webhook/dlqService.js test/unit/dlqService.test.js test/unit/dlqAttemptProtocol.test.js
+"$runner/node_modules/.bin/eslint" src/services/webhook/dlqService.js src/workers/dlqWorker.js test/unit/dlqService.test.js test/unit/dlqWorker.test.js test/unit/dlqAttemptProtocol.test.js

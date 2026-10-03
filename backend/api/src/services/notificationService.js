@@ -176,66 +176,23 @@ function classifyError(code) {
   return 'unknown';
 }
 
-/**
- * Deactivate permanently-invalid devices and clear the profile fallback token
- * if it pointed at one of the invalidated tokens.
- */
-async function deactivateInvalidDevices(deviceIds, userId, invalidatedTokens) {
-  if (!supabaseAdmin) return 0;
-  if (deviceIds.length === 0 && invalidatedTokens.length === 0) return 0;
-
-  let deactivated = 0;
-  if (deviceIds.length > 0) {
-    try {
-      const { error } = await supabaseAdmin
-        .from('user_devices')
-        .update({
-          is_active: false,
-          deactivated_at: new Date().toISOString(),
-        })
-        .in('id', deviceIds);
-      if (error) {
-        logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${error.message}`);
-      } else {
-        deactivated = deviceIds.length;
-        logger.info(`[FCM] Deactivated ${deactivated} invalid device(s) for user ${userId}.`);
-      }
-    } catch (dbErr) {
-      logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${dbErr.message}`);
-    }
-  }
-
-  if (invalidatedTokens.length > 0) {
-    try {
-      await supabaseAdmin
-        .from('profiles')
-        .update({
-          fcm_token: null,
-          fcm_token_updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-        .in('fcm_token', invalidatedTokens);
-    } catch (dbErr) {
-      logger.error(`[FCM] Failed to clear invalid profile FCM token for user ${userId}: ${dbErr.message}`);
-    }
-  }
-
-  return deactivated;
-}
-
-/**
- * Record successful delivery as a last-seen touchpoint so active devices are
- * never swept by the stale-device policy.
- */
-async function touchDevicesLastSeen(deviceIds) {
-  if (!supabaseAdmin || deviceIds.length === 0) return;
+/** Apply captured token outcomes in one conditional database transaction. */
+async function applyFcmLifecycleOutcomes(userId, outcomes) {
+  if (!supabaseAdmin || !userId || outcomes.length === 0) return null;
   try {
-    await supabaseAdmin
-      .from('user_devices')
-      .update({ last_seen: new Date().toISOString() })
-      .in('id', deviceIds);
-  } catch (dbErr) {
-    logger.warn(`[FCM] Failed to update device last_seen: ${dbErr.message}`);
+    const { data, error } = await supabaseAdmin.rpc('apply_fcm_lifecycle_outcomes', {
+      p_user_id: userId, p_outcomes: outcomes,
+    });
+    if (error) throw error;
+    if (!Number.isSafeInteger(data?.deactivated) || data.deactivated < 0) {
+      throw new Error('Invalid FCM lifecycle acknowledgement');
+    }
+    return data;
+  } catch (error) {
+    logger.warn({ err: error, userId }, '[FCM] Failed to apply captured lifecycle outcomes');
+    // Delivery may already have succeeded. A missing RPC/database failure must
+    // never fall back to an ID-only mutation of a replacement registration.
+    return null;
   }
 }
 
@@ -365,9 +322,7 @@ export async function sendFcmNotification(userId, notification, data = {}) {
       }
 
       const responses = sent.batchResponse?.responses ?? [];
-      const invalidDeviceIds = [];
-      const invalidTokens = [];
-      const touchedDeviceIds = [];
+      const lifecycleOutcomes = [];
 
       for (let j = 0; j < responses.length; j++) {
         const resp = responses[j];
@@ -378,7 +333,7 @@ export async function sendFcmNotification(userId, notification, data = {}) {
         if (resp?.success) {
           summary.delivered += 1;
           if (resp.messageId) messageIds.push(resp.messageId);
-          touchedDeviceIds.push(...deviceIds);
+          lifecycleOutcomes.push(...deviceIds.map(id => ({ id, token, outcome: 'success' })));
           continue;
         }
 
@@ -386,8 +341,7 @@ export async function sendFcmNotification(userId, notification, data = {}) {
         const category = classifyError(code);
         if (category === 'permanent') {
           summary.permanent += 1;
-          invalidDeviceIds.push(...deviceIds);
-          invalidTokens.push(token);
+          lifecycleOutcomes.push(...(deviceIds.length ? deviceIds : [null]).map(id => ({ id, token, outcome: 'invalid' })));
           logger.warn(
             `[FCM] Permanent token error for user ${userId} — deactivating device (code: ${code}, token fp: ${tokenFingerprint(token)})`
           );
@@ -408,15 +362,9 @@ export async function sendFcmNotification(userId, notification, data = {}) {
         }
       }
 
-      if (touchedDeviceIds.length > 0) {
-        await touchDevicesLastSeen([...new Set(touchedDeviceIds)]);
-      }
-      if (invalidDeviceIds.length > 0 || invalidTokens.length > 0) {
-        summary.deactivated += await deactivateInvalidDevices(
-          [...new Set(invalidDeviceIds)],
-          userId,
-          [...new Set(invalidTokens)]
-        );
+      if (lifecycleOutcomes.length > 0) {
+        const applied = await applyFcmLifecycleOutcomes(userId, lifecycleOutcomes);
+        summary.deactivated += applied?.deactivated ?? 0;
       }
     }
 
@@ -733,7 +681,7 @@ export async function clearInvalidToken(userId, token) {
   if (!supabaseAdmin) return null;
   try {
     if (targetToken) {
-      await deactivateInvalidDevices([], targetUserId || '', [targetToken]);
+      return (await applyFcmLifecycleOutcomes(targetUserId, [{ id: null, token: targetToken, outcome: 'invalid' }])) ? true : null;
     }
     if (targetUserId) {
       const { error } = await supabaseAdmin
@@ -910,7 +858,7 @@ export async function sendNotification(userId, payload) {
         });
 
         if (!result.success && PERMANENT_TOKEN_ERROR_CODES.has(result.error)) {
-          await deactivateInvalidDevices([device.id], userId, [device.fcm_token]);
+          await applyFcmLifecycleOutcomes(userId, [{ id: device.id, token: device.fcm_token, outcome: 'invalid' }]);
         }
       }
     }

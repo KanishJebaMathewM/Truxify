@@ -4,7 +4,6 @@ import os
 import threading
 import time
 from collections import OrderedDict
-import httpx
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -55,7 +54,33 @@ _now = time.monotonic
 # city -> (multiplier, expires_at_monotonic). Ordered by insertion so the LRU
 # eviction on overflow stays deterministic.
 _WEATHER_CACHE: "OrderedDict[str, Tuple[float, float]]" = OrderedDict()
-_WEATHER_CACHE_LOCK = threading.Lock()
+_WEATHER_CACHE_LOCK = threading.RLock()
+_WEATHER_GENERATION = 0
+
+
+def _bounded_weather_setting(name: str, default: float, maximum: float) -> float:
+    """Keep admission settings finite and positive even with invalid config."""
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return min(value, maximum) if math.isfinite(value) and value > 0 else default
+
+
+ML_WEATHER_MAX_INFLIGHT = max(1, int(_bounded_weather_setting("ML_WEATHER_MAX_INFLIGHT", 4, 32)))
+ML_WEATHER_COALESCE_WAIT_SECONDS = _bounded_weather_setting(
+    "ML_WEATHER_COALESCE_WAIT_SECONDS", 2, 30
+)
+
+
+class _WeatherFlight:
+    def __init__(self, generation: int):
+        self.generation = generation
+        self.done = threading.Event()
+        self.result = 1.0
+
+
+_WEATHER_FLIGHTS: dict[str, _WeatherFlight] = {}
 
 _WEATHER_CLIENT = httpx.Client(
     timeout=httpx.Timeout(ML_WEATHER_TIMEOUT_SECONDS),
@@ -69,8 +94,10 @@ _WEATHER_CLIENT = httpx.Client(
 
 
 def reset_weather_cache() -> None:
-    """Drop every cached weather multiplier (used by tests)."""
+    """Invalidate cached results without releasing unsettled provider owners."""
+    global _WEATHER_GENERATION
     with _WEATHER_CACHE_LOCK:
+        _WEATHER_GENERATION += 1
         _WEATHER_CACHE.clear()
 
 
@@ -89,7 +116,9 @@ def _cached_weather_multiplier(city: str) -> Optional[float]:
         return None
 
 
-def _cache_weather_multiplier(city: str, multiplier: float, ok: bool = True) -> None:
+def _cache_weather_multiplier(
+    city: str, multiplier: float, ok: bool = True, *, generation: int | None = None
+) -> None:
     """Cache a weather multiplier with a TTL; failures use a short TTL.
 
     The TTL is chosen from an explicit success flag so that a successful
@@ -97,6 +126,8 @@ def _cache_weather_multiplier(city: str, multiplier: float, ok: bool = True) -> 
     while failed lookups (also neutral 1.0) still use the short failure TTL.
     """
     with _WEATHER_CACHE_LOCK:
+        if generation is not None and generation != _WEATHER_GENERATION:
+            return
         ttl = (
             ML_WEATHER_CACHE_TTL_SECONDS
             if ok
@@ -366,11 +397,36 @@ def _get_weather_multiplier(city: str) -> float:
     """
     if not city:
         return 1.0
-    cached = _cached_weather_multiplier(city)
-    if cached is not None:
-        return cached
-    multiplier, ok = _fetch_weather_multiplier_http(city)
-    _cache_weather_multiplier(city, multiplier, ok)
+    with _WEATHER_CACHE_LOCK:
+        cached = _cached_weather_multiplier(city)
+        if cached is not None:
+            return cached
+        flight = _WEATHER_FLIGHTS.get(city)
+        owner = flight is None
+        if flight is not None and flight.generation != _WEATHER_GENERATION:
+            return 1.0
+        if owner:
+            if len(_WEATHER_FLIGHTS) >= ML_WEATHER_MAX_INFLIGHT:
+                return 1.0
+            flight = _WeatherFlight(_WEATHER_GENERATION)
+            _WEATHER_FLIGHTS[city] = flight
+    if not owner:
+        return flight.result if flight.done.wait(ML_WEATHER_COALESCE_WAIT_SECONDS) else 1.0
+
+    multiplier, ok = 1.0, False
+    try:
+        multiplier, ok = _fetch_weather_multiplier_http(city)
+    except Exception:
+        logger.exception("Unexpected weather provider failure for %s", city)
+    finally:
+        with _WEATHER_CACHE_LOCK:
+            try:
+                _cache_weather_multiplier(city, multiplier, ok, generation=flight.generation)
+            finally:
+                flight.result = multiplier
+                if _WEATHER_FLIGHTS.get(city) is flight:
+                    del _WEATHER_FLIGHTS[city]
+                flight.done.set()
     return multiplier
 
 
@@ -402,9 +458,11 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
     """
     if not city:
         return 1.0
-    cached = _cached_weather_multiplier(city)
-    if cached is not None:
-        return cached
+    with _WEATHER_CACHE_LOCK:
+        cached = _cached_weather_multiplier(city)
+        if cached is not None:
+            return cached
+        generation = _WEATHER_GENERATION
     api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
     if not api_key:
         return 1.0
@@ -415,11 +473,11 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
         )
         response = await client.get(url, timeout=ML_WEATHER_TIMEOUT_SECONDS)
         multiplier, ok = _parse_weather_multiplier(response)
-        _cache_weather_multiplier(city, multiplier, ok)
+        _cache_weather_multiplier(city, multiplier, ok, generation=generation)
         return multiplier
     except Exception as e:
         logger.warning("Weather API failed for %s: %s", city, e)
-        _cache_weather_multiplier(city, 1.0, ok=False)
+        _cache_weather_multiplier(city, 1.0, ok=False, generation=generation)
         return 1.0
 
 

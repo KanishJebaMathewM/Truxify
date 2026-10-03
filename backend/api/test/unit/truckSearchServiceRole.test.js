@@ -30,6 +30,10 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
+  upstashRedisClient: {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+  },
   mongoDb: {
     collection: () => ({
       find: () => ({
@@ -129,4 +133,93 @@ describe('GET /api/trucks/search — service-role client', () => {
       { col: 'user_id', op: 'in', val: ['driver-uuid-456'] },
     ]);
   });
+
+  it('returns empty array early when drivers have null/undefined truck_id and does not query trucks table', async () => {
+    m.programData([
+      { user_id: 'driver-uuid-456', is_online: true, truck_id: null, rating: 4.5, total_trips: 100, completion_rate: 95 },
+    ]);
+
+    const res = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+
+    const readTables = m.calls.map(c => c.table);
+    expect(readTables).toContain('driver_details');
+    expect(readTables).not.toContain('trucks');
+    expect(readTables).not.toContain('profiles');
+  });
+
+  it('filters out drivers with null/undefined truck_id and enriches only valid drivers', async () => {
+    mockTelemetryResults = [
+      { driver_id: 'driver-uuid-456' },
+      { driver_id: 'driver-uuid-789' },
+    ];
+    m.store.profiles = [
+      { id: 'driver-uuid-456', full_name: 'Ravi Kumar' },
+      { id: 'driver-uuid-789', full_name: 'Suresh Singh' },
+    ];
+    m.programData([
+      { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-open', rating: 4.5, total_trips: 100, completion_rate: 95 },
+      { user_id: 'driver-uuid-789', is_online: true, truck_id: null, rating: 4.0, total_trips: 50, completion_rate: 90 },
+    ]);
+
+    const res = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBe(1);
+    expect(res.body[0].driverId).toBe('driver-uuid-456');
+    expect(res.body[0].driver).toBe('Ravi Kumar');
+    expect(res.body[0].truck).toBe('Open Body Truck');
+  });
+
+  it('returns empty array immediately when truck_id / truckId query param is null, undefined, or empty without making DB calls', async () => {
+    for (const param of ['truck_id=null', 'truck_id=undefined', 'truck_id=', 'truckId=null', 'truckId=undefined']) {
+      m.calls.length = 0;
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&${param}`)
+        .set('x-user-id', 'customer-uuid-123')
+        .set('x-user-role', 'customer');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+      expect(m.calls.length).toBe(0);
+    }
+  });
+
+  it('filters by valid truck_id query param', async () => {
+    const res = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_id=truck-open`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBe(1);
+    expect(res.body[0].truck).toBe('Open Body Truck');
+
+    const driverDetailsCall = m.calls.find(c => c.table === 'driver_details');
+    expect(driverDetailsCall.filters).toContainEqual({ col: 'truck_id', op: 'eq', val: 'truck-open' });
+  });
+
+  it('gracefully handles missing truck record without throwing null-reference errors', async () => {
+    m.store.driver_details = [
+      { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-nonexistent', rating: 4.5, total_trips: 100, completion_rate: 95 },
+    ];
+    m.store.trucks = [];
+
+    const res = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
 });
+

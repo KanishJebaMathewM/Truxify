@@ -340,11 +340,16 @@ const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
 });
 
 async function canViewTruckNumber(user, truck) {
+  if (!truck || !truck.id) {
+    return { allowed: false };
+  }
+
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
   }
 
-  const { data: order, error } = await supabase
+  const client = supabaseAdmin || supabase;
+  const { data: order, error } = await client
     .from('orders')
     .select('id')
     .eq('truck_id', truck.id)
@@ -436,6 +441,13 @@ router.get(
     is_fragile, is_stackable,
     truck_type, min_capacity, max_capacity, material_type
   } = req.query;
+
+  const explicitTruckId = req.query.truck_id !== undefined ? req.query.truck_id : req.query.truckId;
+  if (explicitTruckId !== undefined) {
+    if (!explicitTruckId || explicitTruckId === 'null' || explicitTruckId === 'undefined' || typeof explicitTruckId !== 'string' || explicitTruckId.trim() === '') {
+      return res.json([]);
+    }
+  }
 
   if (pickup_lat == null || pickup_lng == null || drop_lat == null || drop_lng == null || weight_tonnes == null) {
     return res.status(400).json({ error: 'Missing required query parameters: pickup_lat, pickup_lng, drop_lat, drop_lng, weight_tonnes' });
@@ -620,12 +632,18 @@ router.get(
     // driver_details / trucks / profiles are RLS-protected with all anon
     // privileges revoked, so the marketplace search must use the service-role
     // client (scope is enforced by the search criteria, never the raw anon key).
-    const { data: drivers, error: driversErr } = await supabaseAdmin
+    let driverQuery = supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
       .not('truck_id', 'is', null)
       .in('user_id', nearbyDriverIds);
+
+    if (explicitTruckId) {
+      driverQuery = driverQuery.eq('truck_id', explicitTruckId.trim());
+    }
+
+    const { data: drivers, error: driversErr } = await driverQuery;
 
     if (driversErr) {
       logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
@@ -636,8 +654,16 @@ router.get(
       return res.json([]);
     }
 
-    const truckIds = drivers.map(d => d.truck_id).filter(Boolean);
-    const driverIds = drivers.map(d => d.user_id);
+    const validDrivers = drivers.filter(d => Boolean(d && d.truck_id));
+    if (validDrivers.length === 0) {
+      return res.json([]);
+    }
+
+    const truckIds = [...new Set(validDrivers.map(d => d.truck_id).filter(Boolean))];
+    if (truckIds.length === 0) {
+      return res.json([]);
+    }
+    const driverIds = validDrivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
       supabaseAdmin.from('trucks').select('id, driver_id, name, truck_type, number_plate, max_capacity_tons, supported_cargo_types').in('id', truckIds),
@@ -661,14 +687,14 @@ router.get(
       ? Math.round(routeEstimate.durationSeconds / 60)
       : null;
 
-    let results = await Promise.all(drivers.map(async (d) => {
+    let results = await Promise.all(validDrivers.map(async (d) => {
       const profile = profileMap[d.user_id] || {};
-      const truck = truckMap[d.truck_id] || {};
-      let truckNumber = '';
-      if (truck.id) {
-        const access = await canViewTruckNumber(req.user, truck);
-        truckNumber = access.allowed ? (truck.number_plate || '') : '';
+      const truck = truckMap[d.truck_id];
+      if (!truck || !truck.id) {
+        return null;
       }
+      const access = await canViewTruckNumber(req.user, truck);
+      const truckNumber = access.allowed ? (truck.number_plate || '') : '';
       return {
         driver: profile.full_name || 'Unknown Driver',
         driverId: d.user_id,
@@ -688,6 +714,8 @@ router.get(
         isDigilockerVerified: profile.is_digilocker_verified || false,
       };
     }));
+
+    results = results.filter(Boolean);
 
     if (parsedTruckTypes.length > 0) {
       const normalizedTypes = parsedTruckTypes.map(t => t.toLowerCase());

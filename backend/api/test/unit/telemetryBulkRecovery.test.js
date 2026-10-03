@@ -1,5 +1,8 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { mongoBulkWire } from './fixtures/mongoBulkWire.js';
+// The ordinary API setup mocks MongoClient globally. These wire fixtures must
+// exercise the real driver's native result/error construction in both runners.
+vi.unmock('mongodb');
 vi.mock('../../src/config/db.js', () => ({ mongoDb: null }));
 vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 let pipeline;

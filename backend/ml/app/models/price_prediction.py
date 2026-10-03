@@ -15,7 +15,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .base import get_model_meta, load_model, save_model
+from .base import get_model_meta, load_model_snapshot, save_model
 
 logger = logging.getLogger(__name__)
 
@@ -566,10 +566,13 @@ def predict_price(
     if cargo_weight_kg <= 0:
         raise ValueError("cargo_weight_kg must be positive")
 
-    if not _model_is_real():
+    snapshot = load_model_snapshot(MODEL_NAME)
+    if snapshot is None or not bool(
+        ((snapshot.metadata or {}).get("metrics") or {}).get("is_real_model")
+    ):
         return None
 
-    loaded = load_model(MODEL_NAME)
+    loaded = snapshot.model
     if loaded is None or not isinstance(loaded, (list, tuple)) or len(loaded) != 3:
         logger.warning("Persisted price model is not a real-data model; ignoring.")
         return None

@@ -17,7 +17,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from .base import save_model, load_model, model_exists, get_model_meta
+from .base import save_model, load_model_snapshot, model_exists
 
 logger = logging.getLogger(__name__)
 
@@ -169,12 +169,13 @@ class DriverProfitPredictor:
             self.train()
             return
 
-        loaded = load_model(MODEL_NAME)
-        if loaded is None:
+        snapshot = load_model_snapshot(MODEL_NAME)
+        if snapshot is None or snapshot.model is None:
             self.train()
             return
 
-        meta = get_model_meta(MODEL_NAME) or {}
+        loaded = snapshot.model
+        meta = snapshot.metadata or {}
         training_meta = meta.get("training_meta") or {}
         feature_ranges = training_meta.get("feature_ranges")
         if not isinstance(feature_ranges, dict) or set(feature_ranges) != set(FEATURE_NAMES):

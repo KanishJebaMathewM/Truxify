@@ -1,14 +1,16 @@
 import asyncio
-import inspect
-import json
 import hashlib
 import hmac
+import inspect
+import json
 import logging
 import os
 import pickle
 import shutil
 import threading
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
@@ -46,6 +48,9 @@ MODEL_STORAGE_DIR = os.environ.get(
 _model_locks: dict[str, asyncio.Lock] = {}
 _model_write_locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+# Counts are accessed only under the corresponding per-model writer lock.
+_generation_readers: dict[str, dict[str, int]] = {}
+_deleted_reader_models: set[str] = set()
 
 
 def _get_lock(model_name: str) -> "asyncio.Lock":
@@ -108,9 +113,9 @@ def _raise_if_cancelled(model_name: str) -> None:
 #       meta.json                 # generation metadata (matches the artifact)
 #
 # Internal readers (load_model / get_model_meta / model_exists) resolve the
-# active generation through the pointer, so they can never observe a mixed
-# model/metadata state: the pointer is swapped atomically and only after a
-# fully validated generation has been written.
+# active generation through the pointer. load_model_snapshot reads a matched
+# pair under one reservation; separate model/metadata calls remain independent.
+# Publication swaps the pointer only after a validated generation is written.
 # ---------------------------------------------------------------------------
 
 def get_model_path(model_name: str) -> str:
@@ -212,11 +217,23 @@ def _mirror_to_flat(model_name: str, generation: str) -> None:
 def _prune_generations(model_name: str, keep: set[str]) -> None:
     root = _generations_root(model_name)
     if not os.path.isdir(root):
+        if not _generation_readers.get(model_name):
+            _deleted_reader_models.discard(model_name)
         return
-    for generation in os.listdir(root):
-        if generation in keep:
+    reserved = _generation_readers.get(model_name, {})
+    try:
+        generations = os.listdir(root)
+    except FileNotFoundError:
+        return  # An independent process may have removed the storage root.
+    for generation in generations:
+        if generation in keep or reserved.get(generation, 0):
             continue
         shutil.rmtree(_generation_dir(model_name, generation), ignore_errors=True)
+    try:
+        os.rmdir(root)  # Empty after deferred deletion finishes.
+        _deleted_reader_models.discard(model_name)
+    except OSError:
+        pass
 
 
 def _artifact_signature_path(path: str) -> str:
@@ -362,6 +379,7 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
             if current:
                 _atomic_write_json(previous_path, {"generation": current})
             _atomic_write_json(active_path, {"generation": generation})
+            _deleted_reader_models.discard(model_name)
             _mirror_to_flat(model_name, generation)
             _sign_artifact(get_model_path(model_name))
             _prune_generations(model_name, {generation, current} - {None})
@@ -383,6 +401,8 @@ def publish_model(model: Any, model_name: str, metrics: Optional[dict] = None) -
 def delete_model(model_name: str) -> None:
     """Remove persisted generations and compatibility mirrors for a model."""
     with _get_write_lock(model_name):
+        if _generation_readers.get(model_name):
+            _deleted_reader_models.add(model_name)
         for path in (
             get_model_path(model_name),
             get_meta_path(model_name),
@@ -393,7 +413,9 @@ def delete_model(model_name: str) -> None:
                 os.remove(path)
             except OSError:
                 pass
-        shutil.rmtree(_generations_root(model_name), ignore_errors=True)
+        # Active readers may finish their admitted immutable snapshots. Removing
+        # pointers makes new reads miss; reclaim their generations on release.
+        _prune_generations(model_name, set())
 
 def restore_previous_model(model_name: str) -> bool:
     """Roll back *model_name* to its previously-published generation.
@@ -446,49 +468,123 @@ def _generation_candidates(model_name: str):
         yield model_path, _generation_meta_path(model_name, gen)
     yield get_model_path(model_name), get_meta_path(model_name)
 
-def load_model(model_name: str) -> Optional[Any]:
-    for path, _ in _generation_candidates(model_name):
-        if os.path.exists(path):
-            if not _verify_artifact(path):
-                logger.error(" refusing to load unsigned or invalid model artifact: %s", path)
+@dataclass(frozen=True)
+class ModelSnapshot:
+    """One admitted model generation and its metadata (None when unavailable).
+
+    Separate load_model/get_model_meta calls remain independent snapshots.
+    Callers needing a matched pair should use load_model_snapshot instead.
+    """
+    model: Any
+    metadata: dict | None
+    generation: str | None
+
+
+@contextmanager
+def _candidate_lease(model_name: str, model_path: str):
+    """Reserve immutable storage before a reader opens it.
+
+    The existing writer lock coordinates process-local readers/reclamation.
+    Legacy flat mirrors are mutable, so their complete read holds that lock.
+    This does not coordinate independent OS processes sharing the same store.
+    """
+    lock = _get_write_lock(model_name)
+    if model_path == get_model_path(model_name):
+        with lock:
+            yield model_name not in _deleted_reader_models and os.path.exists(model_path)
+        return
+    generation = os.path.basename(os.path.dirname(model_path))
+    with lock:
+        admitted = model_name not in _deleted_reader_models and os.path.exists(model_path)
+        if admitted:
+            readers = _generation_readers.setdefault(model_name, {})
+            readers[generation] = readers.get(generation, 0) + 1
+    try:
+        yield admitted
+    finally:
+        if admitted:
+            with lock:
+                readers = _generation_readers[model_name]
+                readers[generation] -= 1
+                if readers[generation] == 0:
+                    del readers[generation]
+                if not readers:
+                    del _generation_readers[model_name]
+                keep = {get_active_generation(model_name), get_previous_generation(model_name)} - {None}
+                _prune_generations(model_name, keep)
+
+
+def _reader_candidates(model_name: str):
+    with _get_write_lock(model_name):
+        return [] if model_name in _deleted_reader_models else list(_generation_candidates(model_name))
+
+
+def _read_candidate_meta(model_name: str, model_path: str, meta_path: str) -> dict | None:
+    try:
+        with open(meta_path, "r") as file:
+            meta = json.load(file)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    if model_path != get_model_path(model_name):
+        generation = os.path.basename(os.path.dirname(model_path))
+        if meta.get("generation") != generation:
+            return None  # Never attach another generation's metadata to this model.
+    return meta
+
+
+def load_model_snapshot(model_name: str) -> ModelSnapshot | None:
+    for model_path, meta_path in _reader_candidates(model_name):
+        with _candidate_lease(model_name, model_path) as admitted:
+            if not admitted:
                 continue
-            with open(path, "rb") as file:
-                return pickle.load(file)
+            if not _verify_artifact(model_path):
+                logger.error("refusing to load unsigned or invalid model artifact: %s", model_path)
+                continue
+            try:
+                with open(model_path, "rb") as file:
+                    model = pickle.load(file)
+                meta = _read_candidate_meta(model_name, model_path, meta_path)
+            except OSError:
+                # Another OS process is outside our thread-level reservations;
+                # recover to a currently available candidate rather than crash.
+                continue
+            generation = (os.path.basename(os.path.dirname(model_path))
+                          if model_path != get_model_path(model_name) else None)
+            return ModelSnapshot(model, meta, generation)
     logger.warning("Model '%s' not found", model_name)
     return None
 
+
+def load_model(model_name: str) -> Any | None:
+    snapshot = load_model_snapshot(model_name)
+    return snapshot.model if snapshot is not None else None
+
+
 def model_exists(model_name: str) -> bool:
-    for model_path, _ in _generation_candidates(model_name):
-        if os.path.exists(model_path):
-            return True
-    return False
+    with _get_write_lock(model_name):
+        return model_name not in _deleted_reader_models and any(
+            os.path.exists(path) for path, _ in _generation_candidates(model_name))
 
 
-def get_model_meta(model_name: str) -> Optional[dict]:
-    """Return the persisted metadata dict for the active model, or None."""
-    for _, meta_path in _generation_candidates(model_name):
-        if not os.path.exists(meta_path):
-            continue
-        try:
-            with open(meta_path, "r") as f:
-                return json.load(f)
-        except Exception:
-            logger.warning("Failed to read metadata for model '%s'", model_name)
-            continue
+def get_model_meta(model_name: str) -> dict | None:
+    """Read one available generation's metadata under its storage reservation."""
+    for model_path, meta_path in _reader_candidates(model_name):
+        with _candidate_lease(model_name, model_path) as admitted:
+            if admitted:
+                meta = _read_candidate_meta(model_name, model_path, meta_path)
+                if meta is not None:
+                    return meta
     return None
 
 
-def get_generation_meta(model_name: str, generation: str) -> Optional[dict]:
-    """Return the metadata for a specific (already persisted) generation."""
-    path = _generation_meta_path(model_name, generation)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        logger.warning("Failed to read metadata for model '%s' generation %s", model_name, generation)
-        return None
+def get_generation_meta(model_name: str, generation: str) -> dict | None:
+    model_path = _generation_model_path(model_name, generation)
+    with _candidate_lease(model_name, model_path) as admitted:
+        if not admitted:
+            return None
+        return _read_candidate_meta(model_name, model_path, _generation_meta_path(model_name, generation))
 
 
 # ---------------------------------------------------------------------------

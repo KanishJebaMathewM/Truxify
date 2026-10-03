@@ -44,14 +44,15 @@ def reset_model_cache():
 
 
 def generate_synthetic_demand_data(n_samples: int = 2000) -> tuple:
-    np.random.seed(42)
-    hour = np.random.randint(0, 24, n_samples)
-    day_of_week = np.random.randint(0, 7, n_samples)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
+    hour = rng.randint(0, 24, n_samples)
+    day_of_week = rng.randint(0, 7, n_samples)
     is_weekend = (day_of_week >= 5).astype(int)
-    temperature = np.random.normal(25, 10, n_samples)
-    precipitation = np.random.exponential(2, n_samples)
-    historical_volume = np.random.poisson(50, n_samples)
-    nearby_drivers = np.random.poisson(15, n_samples)
+    temperature = rng.normal(25, 10, n_samples)
+    precipitation = rng.exponential(2, n_samples)
+    historical_volume = rng.poisson(50, n_samples)
+    nearby_drivers = rng.poisson(15, n_samples)
 
     demand = (
         20
@@ -61,7 +62,7 @@ def generate_synthetic_demand_data(n_samples: int = 2000) -> tuple:
         - 2 * precipitation
         + 0.3 * historical_volume
         + 1.5 * nearby_drivers
-        + np.random.normal(0, 5, n_samples)
+        + rng.normal(0, 5, n_samples)
     )
     demand = np.maximum(demand, 0)
 

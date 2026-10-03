@@ -30,22 +30,23 @@ def generate_synthetic_trust_data(n_samples: int = 1500) -> tuple:
     Returns:
         Tuple of (X feature array, y risk label array, trust_scores array).
     """
-    np.random.seed(42)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
 
     # Cancellation rate: beta distribution skewed toward low values
-    cancellation_rate = np.random.beta(2, 8, n_samples) * 0.5  # 0.0 - 0.5
+    cancellation_rate = rng.beta(2, 8, n_samples) * 0.5  # 0.0 - 0.5
 
     # On-time percentage: skewed high (50-100%)
-    on_time_pct = 50 + np.random.beta(5, 2, n_samples) * 50
+    on_time_pct = 50 + rng.beta(5, 2, n_samples) * 50
 
     # Average rating: 1.0 - 5.0
-    avg_rating = 1.0 + np.random.beta(5, 2, n_samples) * 4.0
+    avg_rating = 1.0 + rng.beta(5, 2, n_samples) * 4.0
 
     # Dispute count: Poisson with lambda=2, capped at 20
-    dispute_count = np.minimum(np.random.poisson(2, n_samples), 20)
+    dispute_count = np.minimum(rng.poisson(2, n_samples), 20)
 
     # Verification: 80% verified
-    is_verified = (np.random.random(n_samples) < 0.8).astype(int)
+    is_verified = (rng.random(n_samples) < 0.8).astype(int)
 
     # Assign risk labels
     risk_labels = np.full(n_samples, 1, dtype=int)  # Default: Medium (1)

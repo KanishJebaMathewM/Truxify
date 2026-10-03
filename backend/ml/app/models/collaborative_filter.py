@@ -42,7 +42,8 @@ def _generate_synthetic_data() -> dict:
         ``load_ids``          – list of synthetic load-id strings
         ``truck_ids``         – list of synthetic truck-id strings
     """
-    np.random.seed(42)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
 
     user_ids = [f"user_{i:03d}" for i in range(N_USERS)]
     load_ids = [f"load_{i:03d}" for i in range(N_LOADS)]
@@ -51,15 +52,15 @@ def _generate_synthetic_data() -> dict:
     # ~20% density – most cells are 0 (no interaction)
     ul = np.zeros((N_USERS, N_LOADS), dtype=np.float64)
     for i in range(N_USERS):
-        n_interactions = np.random.randint(1, max(2, int(N_LOADS * 0.3)))
-        cols = np.random.choice(N_LOADS, size=n_interactions, replace=False)
-        ul[i, cols] = np.random.randint(1, 6, size=n_interactions).astype(np.float64)
+        n_interactions = rng.randint(1, max(2, int(N_LOADS * 0.3)))
+        cols = rng.choice(N_LOADS, size=n_interactions, replace=False)
+        ul[i, cols] = rng.randint(1, 6, size=n_interactions).astype(np.float64)
 
     ut = np.zeros((N_USERS, N_TRUCKS), dtype=np.float64)
     for i in range(N_USERS):
-        n_interactions = np.random.randint(1, max(2, int(N_TRUCKS * 0.3)))
-        cols = np.random.choice(N_TRUCKS, size=n_interactions, replace=False)
-        ut[i, cols] = np.random.randint(1, 6, size=n_interactions).astype(np.float64)
+        n_interactions = rng.randint(1, max(2, int(N_TRUCKS * 0.3)))
+        cols = rng.choice(N_TRUCKS, size=n_interactions, replace=False)
+        ut[i, cols] = rng.randint(1, 6, size=n_interactions).astype(np.float64)
 
     return {
         "user_load_matrix": ul,

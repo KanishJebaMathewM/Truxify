@@ -6,10 +6,12 @@ const state = vi.hoisted(() => ({ redis: null, route: null, cacheHook: null }));
 vi.mock('../../src/config/db.js', () => ({ get redisClient() { return state.redis; }, supabaseAdmin: null }));
 vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock('../../src/services/osrm.js', () => ({ getRouteEstimate: args => state.route(args) }));
+vi.mock('../../src/services/notificationService.js', () => ({ sendPushNotification: vi.fn() }));
 vi.mock('../../src/services/trafficService.js', () => ({ getLiveTrafficMultiplier: async () => 1 }));
 vi.mock('../../src/services/routingService.js', () => ({ getHaversineDistance: (a, b, c, d) => Math.hypot(a-c, b-d)*111 }));
 vi.mock('../../src/sockets/tracker.js', () => ({ broadcastOrderEta: vi.fn() }));
 vi.mock('../../src/sockets/locationServer.js', () => ({ emitEtaUpdateToBooking: vi.fn() }));
+import { DeliveryDelayService } from '../../src/services/order/deliveryDelayService.js';
 import { OrderRepository } from '../../src/repositories/orderRepository.js';
 import { calculateInitialEtaAfterAssignment, maybeRecalculateEtaOnLocationUpdate, persistAndBroadcastEta,
   scheduleEtaRecalculationOnLocationUpdate, scheduleInitialEtaAfterAssignment, resolveDestinationForOrder,
@@ -37,7 +39,7 @@ beforeAll(async () => {
   pg = new PGlite();
   await pg.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
     CREATE TABLE orders(id uuid PRIMARY KEY,driver_id uuid,status text,order_display_id text,eta text,updated_at timestamptz,
-      pickup_lat double precision,pickup_lng double precision,drop_lat double precision,drop_lng double precision);`);
+      customer_id uuid,previous_eta text,delivery_delay_state text DEFAULT 'normal',pickup_lat double precision,pickup_lng double precision,drop_lat double precision,drop_lng double precision);`);
   await pg.exec(migration);
 },30000);
 beforeEach(async () => {
@@ -58,6 +60,7 @@ beforeEach(async () => {
       function safe(column){if(!/^[a-z_]+$/.test(column))throw new Error('Unsafe fixture column');return column;}
       const q={
         select(c){ columns=c; return q; }, update(p){patch=p;return q;},
+        is(k,v){expect(v).toBeNull();clauses.push(`${safe(k)} IS NULL`);return q;},
         eq(k,v){values.push(v);clauses.push(`${safe(k)}=$${values.length}`);return q;},
         in(k,v){values.push(v);clauses.push(`${safe(k)}=ANY($${values.length})`);return q;},
         async maybeSingle(){return q.single();},
@@ -217,5 +220,74 @@ describe('ETA compatibility helpers',()=>{
   it('display, movement and ETA threshold helpers preserve results',()=>{
     expect(formatEtaDisplay(new Date(NaN))).toBeNull();expect(formatEtaDisplay(new Date(0))).toBe('Arriving soon');
     expect(hasMeaningfulMovement(null,10,20)).toBe(true);expect(isMeaningfulEtaChange(1000,120999,120)).toBe(false);expect(isMeaningfulEtaChange(1000,121000,120)).toBe(true);
+  });
+});
+
+
+describe('mounted delivery delay writer shares persistence ownership',()=>{
+  function service(routeEstimate) {
+    const notify=vi.fn(async()=>({success:true}));
+    return {notify,delay:new DeliveryDelayService({orderRepository:repo,routeEstimate,notify})};
+  }
+  const location=()=>({orderId:id,driverId:driver,latitude:10,longitude:20});
+  for(const change of ["status='delivered'","status='arriving'",`driver_id='${other}'`]){
+    it(`delay lifecycle change ${change} while routing rejects write and notification`,async()=>{
+      const {delay,notify}=service(async()=>{await pg.exec(`UPDATE orders SET ${change}`);return {durationSeconds:600};});
+      expect(await delay.processLocation(location())).toBeNull();
+      expect((await row()).eta).toBeNull();expect(notify).not.toHaveBeenCalled();
+    });
+  }
+  it('delay older provider result loses to a newer delay generation',async()=>{
+    const started=deferred(),release=deferred();let n=0;
+    const {delay}=service(async()=>{if(++n===1){started.resolve();await release.promise;return {durationSeconds:1800};}return {durationSeconds:600};});
+    const old=delay.processLocation(location());await started.promise;
+    await delay.processLocation(location());const latest=await row();release.resolve();expect(await old).toBeNull();
+    expect((await row()).eta).toBe(latest.eta);
+  });
+  it('delay older provider result loses to location ETA generation',async()=>{
+    const started=deferred(),release=deferred();
+    const {delay}=service(async()=>{started.resolve();await release.promise;return {durationSeconds:1800};});
+    const old=delay.processLocation(location());await started.promise;
+    await maybeRecalculateEtaOnLocationUpdate(params);const latest=await row();release.resolve();expect(await old).toBeNull();
+    expect((await row()).eta).toBe(latest.eta);
+  });
+  it('location older provider result loses to delay ETA generation',async()=>{
+    const started=deferred(),release=deferred();state.route=async()=>{started.resolve();await release.promise;return {durationSeconds:1800};};
+    const old=maybeRecalculateEtaOnLocationUpdate(params);await started.promise;
+    const {delay}=service(async()=>({durationSeconds:600}));await delay.processLocation(location());const latest=await row();
+    release.resolve();await old;expect((await row()).eta).toBe(latest.eta);expect(broadcastOrderEta).not.toHaveBeenCalled();
+  });
+  it('delay driver switching away and back cannot revive its generation',async()=>{
+    const {delay}=service(async()=>{await pg.query('UPDATE orders SET driver_id=$1',[other]);await pg.query('UPDATE orders SET driver_id=$1',[driver]);return {durationSeconds:600};});
+    expect(await delay.processLocation(location())).toBeNull();expect((await row()).eta).toBeNull();
+  });
+  it('delay claim failure skips routing and persistence',async()=>{
+    vi.spyOn(repo,'claimEtaGeneration').mockResolvedValue({data:null,error:{message:'missing RPC'}});
+    const route=vi.fn(async()=>({durationSeconds:600}));const {delay}=service(route);
+    expect(await delay.processLocation(location())).toBeNull();expect(route).not.toHaveBeenCalled();
+  });
+  it('delay writes matching ISO ETA and durable arrival epoch together',async()=>{
+    const {delay}=service(async()=>({durationSeconds:600}));const result=await delay.processLocation(location());
+    expect(result.state).toBe('normal');const stored=await row();expect(Number(stored.eta_arrival_epoch_ms)).toBe(Date.parse(stored.eta));
+  });
+  it('delay active legacy status remains supported',async()=>{
+    await pg.exec("UPDATE orders SET status='active'");const {delay}=service(async()=>({durationSeconds:600}));
+    expect((await delay.processLocation(location())).state).toBe('normal');
+  });
+  for(const mode of ['successor','read error']){
+    it(`delay ${mode} after commit suppresses obsolete notification`,async()=>{
+      await pg.query('UPDATE orders SET eta=$1',[new Date(Date.now()).toISOString()]);
+      const update=repo.updateDeliveryEtaState.bind(repo);
+      vi.spyOn(repo,'updateDeliveryEtaState').mockImplementation(async(...args)=>{
+        const result=await update(...args);
+        if(mode==='successor')await claim();else vi.spyOn(repo,'findEtaGeneration').mockRejectedValue(new Error('offline'));
+        return result;
+      });
+      const {delay,notify}=service(async()=>({durationSeconds:1800}));
+      expect(await delay.processLocation(location())).toBeNull();expect(notify).not.toHaveBeenCalled();expect((await row()).eta).not.toBeNull();
+    });
+  }
+  it('unguarded direct delay write fails closed',async()=>{
+    expect((await repo.updateDeliveryEtaState(id,{eta:'stale'},null,'normal')).data).toBeNull();expect((await row()).eta).toBeNull();
   });
 });

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../src/services/osrm.js', () => ({ getRouteEstimate: vi.fn() }));
+vi.mock('../../src/services/notificationService.js', () => ({ sendPushNotification: vi.fn() }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
 import {
   DELIVERY_DELAY_THRESHOLD_MINUTES,
   DeliveryDelayService,
@@ -20,6 +24,8 @@ const baseOrder = {
 
 function setup({ durationSeconds, order = baseOrder, thresholdMinutes = 15 } = {}) {
   const orderRepository = {
+    claimEtaGeneration: vi.fn().mockResolvedValue({data:'generation-1',error:null}),
+    findEtaGeneration: vi.fn().mockResolvedValue({data:{eta_calculation_generation:'generation-1',driver_id:order.driver_id,status:order.status},error:null}),
     findOrderById: vi.fn().mockResolvedValue({ data: { ...order }, error: null }),
     updateDeliveryEtaState: vi.fn().mockResolvedValue({ data: { id: order.id }, error: null }),
   };

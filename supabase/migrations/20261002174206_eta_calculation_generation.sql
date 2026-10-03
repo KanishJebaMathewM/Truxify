@@ -31,7 +31,7 @@ BEGIN
   SET eta_calculation_generation = pg_catalog.gen_random_uuid()
   WHERE o.id = p_order_id AND o.driver_id = p_driver_id
     AND o.status::text = p_expected_status
-    AND o.status::text = ANY(ARRAY['truck_assigned','en_route_pickup','arrived_pickup','picked_up','in_transit','arriving'])
+    AND o.status::text = ANY(ARRAY['active','truck_assigned','en_route_pickup','arrived_pickup','picked_up','in_transit','arriving'])
   RETURNING o.eta_calculation_generation INTO v_generation;
   RETURN v_generation;
 END;
@@ -56,7 +56,7 @@ BEGIN
   WHERE o.id = p_order_id AND o.driver_id = p_driver_id
     AND o.eta_calculation_generation = p_generation
     AND o.status::text = p_expected_status
-    AND o.status::text = ANY(ARRAY['truck_assigned','en_route_pickup','arrived_pickup','picked_up','in_transit','arriving'])
+    AND o.status::text = ANY(ARRAY['active','truck_assigned','en_route_pickup','arrived_pickup','picked_up','in_transit','arriving'])
     AND (o.eta_arrival_epoch_ms IS NULL OR
          pg_catalog.abs(o.eta_arrival_epoch_ms::numeric - p_arrival_epoch_ms::numeric)
            >= p_change_threshold_seconds::numeric * 1000)

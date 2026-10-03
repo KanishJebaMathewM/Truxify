@@ -365,62 +365,118 @@ const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
  *   post:
  *     tags: [Authentication]
  *     summary: Exchange Firebase/Supabase ID Token for Backend JWT
- *     description: Verifies Firebase or Supabase ID token and returns a signed backend JWT token.
+ *   description: Verifies a Firebase ID token and returns a signed backend JWT token.
+ *     Identity and role are derived exclusively from the verified token and the
+ *     stored profile; caller-supplied identity or role fields are ignored.
  *     responses:
  *       200:
  *         description: JWT exchanged successfully
  *       400:
- *         description: Missing token or email
+ *         description: Missing idToken
+ *       401:
+ *         description: Invalid or expired idToken
+ *       403:
+ *         description: No provisioned profile for this identity
+ *       503:
+ *         description: Token verification unavailable
  */
 router.post("/verify", async (req, res) => {
   try {
-    const { idToken, token, email, role, phone, uid } = req.body || {};
+    const { idToken, token } = req.body || {};
     const inputToken = idToken || token;
 
-    if (!inputToken && !email) {
+    if (!inputToken) {
       return res.status(400).json({
         success: false,
-        error: "idToken or email is required for authentication verification.",
+        error: "idToken is required for authentication verification.",
       });
     }
 
-    let verifiedUid = uid || `uid-${Date.now()}`;
-    let verifiedEmail = email || "user@truxify.com";
-    let verifiedRole = role || "customer";
-
-    if (inputToken && firebaseAdmin) {
-      try {
-        const decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
-        verifiedUid = decoded.uid || verifiedUid;
-        verifiedEmail = decoded.email || verifiedEmail;
-      } catch (err) {
-        logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
-      }
+    // Fail closed. Without the Admin SDK there is no way to establish that the
+    // caller owns the identity they are asking for, so no token is issued.
+    if (!firebaseAdmin) {
+      logger.error("[auth/verify] Firebase Admin SDK unavailable; refusing to issue a token");
+      return res.status(503).json({
+        success: false,
+        error: "Token verification is unavailable. Please try again later.",
+      });
     }
 
-    let userId = `usr-${verifiedUid.slice(-8)}`;
-    if (supabase) {
-      try {
-        const { data: profile } = await supabase
+    // The token is the only accepted proof of identity. A verification failure is
+    // terminal: previously it was only logged, which left the caller-supplied
+    // uid/email/role in place and turned this endpoint into an account takeover.
+    let decoded;
+    try {
+      decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
+    } catch (err) {
+      logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired idToken.",
+      });
+    }
+
+    const verifiedUid = decoded.uid;
+    const verifiedEmail = typeof decoded.email === "string" ? decoded.email : null;
+
+    if (!verifiedUid) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired idToken.",
+      });
+    }
+
+    if (!supabase) {
+      logger.error("[auth/verify] Supabase client unavailable; refusing to issue a token");
+      return res.status(503).json({
+        success: false,
+        error: "Token verification is unavailable. Please try again later.",
+      });
+    }
+
+    // Match on the verified uid. The verified email is accepted as a fallback for
+    // rows provisioned before the uid was recorded, never the other way round.
+    let profile = null;
+    try {
+      const byUid = await supabase
+        .from("profiles")
+        .select("id, role, full_name, phone, email, firebase_uid")
+        .eq("firebase_uid", verifiedUid)
+        .maybeSingle();
+
+      profile = byUid.data || null;
+
+      if (!profile && verifiedEmail) {
+        const byEmail = await supabase
           .from("profiles")
-          .select("id, role, full_name, phone")
-          .or(`firebase_uid.eq.${verifiedUid},email.eq.${verifiedEmail}`)
+          .select("id, role, full_name, phone, email, firebase_uid")
+          .eq("email", verifiedEmail)
           .maybeSingle();
-
-        if (profile) {
-          userId = profile.id;
-          verifiedRole = profile.role || verifiedRole;
-        }
-      } catch (dbErr) {
-        logger.warn(`[auth/verify] Supabase profile lookup skipped: ${dbErr.message}`);
+        profile = byEmail.data || null;
       }
+    } catch (dbErr) {
+      logger.warn(`[auth/verify] Supabase profile lookup failed: ${dbErr.message}`);
     }
+
+    // Fail closed rather than minting a token for an unprovisioned identity.
+    if (!profile) {
+      logger.warn(`[auth/verify] No profile provisioned for verified uid ${verifiedUid}`);
+      return res.status(403).json({
+        success: false,
+        error: "No account is provisioned for this identity.",
+      });
+    }
+
+    // Role comes only from the stored profile, so a caller can never escalate by
+    // sending {"role":"admin"}.
+    const verifiedRole =
+      typeof profile.role === "string" && profile.role.trim() ? profile.role : "customer";
 
     const backendJwt = jwt.sign(
       {
-        id: userId,
+        id: profile.id,
         uid: verifiedUid,
-        email: verifiedEmail,
+        email: verifiedEmail || profile.email || null,
         role: verifiedRole,
         iss: "truxify-backend-api",
       },
@@ -432,15 +488,15 @@ router.post("/verify", async (req, res) => {
       success: true,
       token: backendJwt,
       user: {
-        id: userId,
+        id: profile.id,
         uid: verifiedUid,
-        email: verifiedEmail,
+        email: verifiedEmail || profile.email || null,
         role: verifiedRole,
       },
     });
   } catch (err) {
     logger.error("[auth/verify] Error during token verification:", err.stack || err.message);
-    return res.status(500).json({ success: false, error: "Internal server error.", details: err.message });
+    return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
 

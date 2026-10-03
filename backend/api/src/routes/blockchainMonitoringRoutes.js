@@ -11,6 +11,308 @@ import {
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     BlockchainHealth:
+ *       type: object
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         status:
+ *           type: string
+ *         running:
+ *           type: boolean
+ *         lastScannedBlock:
+ *           type: integer
+ *         currentChainHead:
+ *           type: integer
+ *           nullable: true
+ *         blockLag:
+ *           type: integer
+ *           nullable: true
+ *         lastSuccessfulScan:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         lastError:
+ *           type: string
+ *           nullable: true
+ *     BlockchainMetricsResponse:
+ *       type: object
+ *       required:
+ *         - timestamp
+ *         - metrics
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         metrics:
+ *           type: object
+ *           additionalProperties: true
+ *     ActiveAlertsResponse:
+ *       type: object
+ *       required:
+ *         - timestamp
+ *         - activeAlerts
+ *         - count
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         activeAlerts:
+ *           type: array
+ *           items:
+ *             type: object
+ *             additionalProperties: true
+ *         count:
+ *           type: integer
+ *           minimum: 0
+ *     ResolveAlertResponse:
+ *       type: object
+ *       required:
+ *         - message
+ *         - alertId
+ *       properties:
+ *         message:
+ *           type: string
+ *           example: Alert resolved successfully
+ *         alertId:
+ *           type: string
+ *     BlockchainEventsResponse:
+ *       type: object
+ *       required:
+ *         - timestamp
+ *         - count
+ *         - events
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         count:
+ *           type: integer
+ *           minimum: 0
+ *         events:
+ *           type: array
+ *           items:
+ *             type: object
+ *             additionalProperties: true
+ *     EscalationResponse:
+ *       type: object
+ *       required:
+ *         - timestamp
+ *         - escalation
+ *       properties:
+ *         timestamp:
+ *           type: string
+ *           format: date-time
+ *         escalation:
+ *           type: object
+ *           additionalProperties: true
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/health:
+ *   get:
+ *     summary: Get blockchain monitor health
+ *     tags:
+ *       - Blockchain Monitoring
+ *     responses:
+ *       '200':
+ *         description: Current monitor health and block lag.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BlockchainHealth'
+ *       '500':
+ *         description: Failed to fetch monitor health.
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/metrics:
+ *   get:
+ *     summary: Get current blockchain metrics
+ *     tags:
+ *       - Blockchain Monitoring
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Current metrics.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BlockchainMetricsResponse'
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Admin or support role required.
+ *       '500':
+ *         description: Failed to fetch metrics.
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/alerts/active:
+ *   get:
+ *     summary: Get active blockchain alerts
+ *     tags:
+ *       - Blockchain Monitoring
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       '200':
+ *         description: Active alerts and count.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ActiveAlertsResponse'
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Admin or support role required.
+ *       '500':
+ *         description: Failed to fetch active alerts.
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/alerts/{alertId}/resolve:
+ *   post:
+ *     summary: Resolve an active blockchain alert
+ *     tags:
+ *       - Blockchain Monitoring
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: alertId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: '^[a-zA-Z0-9_-]+$'
+ *           maxLength: 100
+ *     responses:
+ *       '200':
+ *         description: Alert resolved successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ResolveAlertResponse'
+ *       '400':
+ *         description: Invalid alert ID.
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Admin or support role required.
+ *       '404':
+ *         description: Alert not found or already resolved.
+ *       '500':
+ *         description: Failed to resolve alert.
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/events:
+ *   get:
+ *     summary: Get blockchain monitoring events
+ *     tags:
+ *       - Blockchain Monitoring
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - PAYMENT_RECEIVED
+ *             - PAYMENT_RELEASED
+ *             - BOOKING_CANCELLED
+ *             - BOOKING_STARTED
+ *             - BOOKING_DISPUTED
+ *             - DISPUTE_RESOLVED
+ *             - BOOKING_CREATED
+ *             - BLOCKCHAIN_STATE_DIVERGENCE
+ *             - SCAN_CHECKPOINT
+ *             - INSURANCE_CLAIM_APPROVED
+ *             - INSURANCE_CLAIM_REJECTED
+ *             - GEOFENCE_BREACH
+ *             - BALANCE_UPDATE_FAILED
+ *             - SMART_CONTRACT_REVERT
+ *       - in: query
+ *         name: severity
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - LOW
+ *             - MEDIUM
+ *             - HIGH
+ *             - CRITICAL
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 1000
+ *           default: 50
+ *     responses:
+ *       '200':
+ *         description: Filtered monitoring events.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BlockchainEventsResponse'
+ *       '400':
+ *         description: Invalid filter or limit.
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Admin or support role required.
+ *       '500':
+ *         description: Failed to fetch events.
+ */
+
+/**
+ * @swagger
+ * /api/blockchain/escalations/{alertId}:
+ *   get:
+ *     summary: Get escalation history for an alert
+ *     tags:
+ *       - Blockchain Monitoring
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: alertId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: '^[a-zA-Z0-9_-]+$'
+ *           maxLength: 100
+ *     responses:
+ *       '200':
+ *         description: Escalation history.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EscalationResponse'
+ *       '400':
+ *         description: Invalid alert ID.
+ *       '401':
+ *         description: Authentication required.
+ *       '403':
+ *         description: Admin or support role required.
+ *       '404':
+ *         description: Escalation not found.
+ *       '500':
+ *         description: Failed to fetch escalation.
+ */
+
 // Canonical shared singleton fallback instances — ensure in-memory state
 // (escalation timers, alert maps) remains uniform across requests and tests.
 const blockchainMetrics = defaultBlockchainMetrics;

@@ -138,6 +138,8 @@ class ShardManager {
           user: config.user,
           password: config.password,
           max: 10,
+          // Native pg applies this cap to startup AND queued checkout.
+          // timeoutMs in cross-shard calls is an upper bound, not a minimum.
           connectionTimeoutMillis: DEFAULT_SHARD_QUERY_TIMEOUT_MS,
         });
         logger.info(`[OK] Shard ${name} initialized`);

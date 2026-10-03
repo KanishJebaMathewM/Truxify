@@ -12,8 +12,17 @@ including calls without `timeoutMs`. An explicit timeout must be a number that i
 finite, positive and at most **30000ms**; invalid values reject before admission.
 A monotonic deadline covers native `Pool.connect()` checkout/startup and SQL
 execution. Query-timeout configuration alone cannot bound native pool checkout.
-Initialized shard pools also use a 5000ms native connection-startup timeout;
-existing shard credentials, placement and pool size10 are unchanged.
+Initialized shard pools also use `connectionTimeoutMillis: 5000`, which native
+pg applies to both connection startup **and queued checkout**. The caller's
+explicit budget is an upper bound, not a promise to wait that long: a full pool
+may reject checkout after5000ms even when timeoutMs is30000. Native checkout
+failures retain their driver message (`timeout exceeded when trying to connect`)
+in the existing per-shard errors metadata; they are not relabeled as the helper's
+ETIMEDOUT. Existing shard credentials, placement and pool size10 are unchanged.
+The shared pool setting also caps startup/queued acquisition in executeQuery and
+healthCheck, although their SQL execution is outside this helper's total budget.
+This replaces the old ineffective connectionTimeoutMs spelling; callers relying
+on an indefinite checkout must handle the new native failure.
 
 The owner checks the deadline after checkout and after query completion. A client
 acquired after expiry is retired using `release(error)` without sending SQL.
@@ -67,8 +76,10 @@ tree, with explicit logger/config import seams. Existing geographic placement,
 credential, single-shard, health/shutdown and scatter-gather tests run alongside
 owned lifecycle tests. Older query-only fixtures now model checkout/release;
 these tests call the actual manager and preserve their existing result assertions.
-Three native pg8.22.0 tests use a loopback PostgreSQL wire fixture for delayed
-startup, stalled query and successful return-to-pool. This exercises native driver,
+Four native pg8.22.0 tests use a loopback PostgreSQL wire fixture for delayed
+startup, stalled query, successful return-to-pool, and a full ten-client pool
+with a30s caller upper bound and actual5s queued-checkout rejection. The latter
+also verifies ordinary single-shard and health success after foreign release. This exercises native driver,
 sockets and pool ownership, not a deployed PostgreSQL query engine or transactional
 cancellation. No remote database or provider is contacted. Scoped ESLint and the
 locked focused GitHub workflow use the same production files and tests.

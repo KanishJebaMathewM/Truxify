@@ -90,7 +90,7 @@ async function waitClosed(wire) {
  finally { clearTimeout(timer); }
 }
 
-async function wireFixture({delayStartup=false,stallQuery=false}={}){
+async function wireFixture({delayStartup=false,stallQuery=false,max=1,connectionTimeoutMillis=1000}={}){
  const sockets=new Set(),startup=deferred(),querySeen=deferred(),closed=deferred();let queries=0;
  const ready=Buffer.from([82,0,0,0,8,0,0,0,0,90,0,0,0,5,73]);
  const server=net.createServer(socket=>{
@@ -106,11 +106,29 @@ async function wireFixture({delayStartup=false,stallQuery=false}={}){
    });
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const pool=new pg.Pool({host:'127.0.0.1',port:server.address().port,user:'fixture',database:'fixture',max:1,connectionTimeoutMillis:1000});
+ const pool=new pg.Pool({host:'127.0.0.1',port:server.address().port,user:'fixture',database:'fixture',max,connectionTimeoutMillis});
  return {pool,startup,querySeen,closed,ready,get queries(){return queries;},async cleanup(){for(const socket of sockets)socket.destroy();await pool.end();await new Promise(r=>server.close(r));}};
 }
 
 describe('native pg loopback protocol lifecycle (no remote database)',()=>{
+ it('full native pool caps queued checkout at 5s even with a 30s cross-shard upper bound',async()=>{
+   const wire=await wireFixture({max:10,connectionTimeoutMillis:DEFAULT_SHARD_QUERY_TIMEOUT_MS});install(wire.pool);
+   const held=[];
+   try{
+     held.push(...await Promise.all(Array.from({length:10},()=>wire.pool.connect())));
+     expect(wire.pool.totalCount).toBe(10);expect(wire.pool.idleCount).toBe(0);
+     const response=await manager.executeCrossShardQuery('SELECT 1',{timeoutMs:30000});
+     expect(response.failed).toContain('north');
+     expect(response.errors.north).toBe('timeout exceeded when trying to connect');
+     expect(wire.pool.waitingCount).toBe(0);expect(wire.queries).toBe(0);
+     // Foreign clients remain owned by their callers; after release the normal
+     // single-shard and health paths still succeed with the same native pool.
+     for(const client of held.splice(0))client.release();
+     expect(await manager.executeQuery('SELECT 1',[])).toEqual([]);
+     expect((await manager.healthCheck()).north).toBe('healthy');
+   }finally{for(const client of held)client.release();await wire.cleanup();}
+ },10000);
+
  it('native late startup cannot dispatch SQL after the manager timeout',async()=>{
    const wire=await wireFixture({delayStartup:true});install(wire.pool);
    try{const result=manager.executeCrossShardQuery('SELECT 1',{timeoutMs:100});const socket=await wire.startup.promise;

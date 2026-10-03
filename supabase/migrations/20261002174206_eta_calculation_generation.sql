@@ -4,6 +4,24 @@ ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS eta_calculation_generation uuid,
   ADD COLUMN IF NOT EXISTS eta_arrival_epoch_ms bigint;
 
+-- A reassigned driver starts a new ETA leg, even when the arrival barely changes.
+CREATE OR REPLACE FUNCTION public.reset_order_eta_on_driver_change()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
+BEGIN
+  IF NEW.driver_id IS DISTINCT FROM OLD.driver_id THEN
+    NEW.eta_calculation_generation := NULL;
+    NEW.eta_arrival_epoch_ms := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS orders_reset_eta_on_driver_change ON public.orders;
+CREATE TRIGGER orders_reset_eta_on_driver_change
+  BEFORE UPDATE OF driver_id ON public.orders FOR EACH ROW
+  EXECUTE FUNCTION public.reset_order_eta_on_driver_change();
+REVOKE ALL ON FUNCTION public.reset_order_eta_on_driver_change() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reset_order_eta_on_driver_change() TO service_role;
+
 CREATE OR REPLACE FUNCTION public.claim_order_eta_generation(
   p_order_id uuid, p_driver_id uuid, p_expected_status text
 ) RETURNS uuid LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$

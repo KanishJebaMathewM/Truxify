@@ -15,7 +15,10 @@ status and the persisted arrival change threshold while updating the ETA row.
 PostgreSQL's conditional UPDATE serializes competing writers on the row and
 rechecks its predicate after waiting. A newer claim prevents an older generation
 from overwriting its ETA. A driver/status change observed at commit rejects the
-estimate even if routing already completed. An unsuccessful newer calculation
+estimate even if routing already completed. A driver-change trigger clears the
+current generation and arrival epoch, so the first new-driver estimate is not
+suppressed by the former driver’s threshold, and switching back cannot revive an
+old claim. An update that retains the same driver preserves threshold state. An unsuccessful newer calculation
 still supersedes an older one; it does not revive that older estimate.
 
 Arrival epochs persist with the ETA; loss of the advisory Redis arrival cache

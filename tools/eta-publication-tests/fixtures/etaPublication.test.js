@@ -152,6 +152,22 @@ describe('real PostgreSQL protocol through actual OrderRepository',()=>{
     expect((await commit(fresh,{arrivalEpochMs:1700000119999})).data).toBeNull();
     expect((await commit(fresh,{arrivalEpochMs:1700000120000})).data).not.toBeNull();
   });
+  it('driver reassignment clears generation and admits a first near-identical arrival',async()=>{
+    const generation=await claim();await commit(generation);
+    await pg.query('UPDATE orders SET driver_id=$1 WHERE id=$2',[other,id]);
+    expect((await row()).eta_calculation_generation).toBeNull();expect((await row()).eta_arrival_epoch_ms).toBeNull();
+    const next=(await repo.claimEtaGeneration(id,other,'in_transit')).data;
+    expect((await commit(next,{driverId:other,etaText:'new driver',arrivalEpochMs:1700000000001})).data.eta).toBe('new driver');
+    // Returning the driver to its original identity cannot revive the old claim.
+    await pg.query('UPDATE orders SET driver_id=$1 WHERE id=$2',[driver,id]);
+    expect((await commit(generation,{arrivalEpochMs:1700001000000})).data).toBeNull();
+  });
+  it('updating the same driver preserves durable threshold and current generation',async()=>{
+    const generation=await claim();await commit(generation);
+    await pg.query('UPDATE orders SET driver_id=$1 WHERE id=$2',[driver,id]);
+    expect((await row()).eta_calculation_generation).toBe(generation);
+    expect((await commit(generation,{arrivalEpochMs:1700000000001})).data).toBeNull();
+  });
   it('fresh generation lookup never returns the former generation',async()=>{
     const first=await claim();expect((await repo.findEtaGeneration(id)).data.eta_calculation_generation).toBe(first);
     const next=await claim();expect((await repo.findEtaGeneration(id)).data.eta_calculation_generation).toBe(next);

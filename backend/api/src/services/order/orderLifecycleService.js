@@ -24,6 +24,7 @@ import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { eventBus } from '../../core/events/index.js';
 import logger from '../../middleware/logger.js';
 import { CircuitBreaker } from '../../lib/circuitBreaker.js';
+import { SagaCoordinator } from '../../core/saga/index.js';
 
 const osrmCircuitBreaker = new CircuitBreaker('osrmRouting', {
   failureThreshold: 3,
@@ -76,12 +77,22 @@ const ORDER_DETAIL_FIELDS = [
 ].join(', ');
 
 export class OrderLifecycleService {
-  constructor({ orderRepository, orderTimelineService, bidAcceptanceService, deliveryVerificationService, trackingTokenService }) {
+  constructor({
+    orderRepository,
+    orderTimelineService,
+    bidAcceptanceService,
+    deliveryVerificationService,
+    trackingTokenService,
+    sagaCoordinatorFactory,
+    sagaPersister,
+  }) {
     this.orderRepository = orderRepository;
     this.orderTimelineService = orderTimelineService;
     this.bidAcceptanceService = bidAcceptanceService;
     this.deliveryVerification = deliveryVerificationService || new DeliveryVerificationService(orderRepository);
     this.trackingTokenService = trackingTokenService || null;
+    this.sagaCoordinatorFactory = sagaCoordinatorFactory || ((options) => new SagaCoordinator(options));
+    this.sagaPersister = sagaPersister || null;
   }
 
   async revokeTrackingTokensForOrder(orderDisplayId) {
@@ -826,115 +837,206 @@ export class OrderLifecycleService {
 
         let workingOrder = currentOrder;
 
-        if (requiresRefund && (currentOrder.status !== 'cancelled' || currentOrder.escrow_status !== 'refund_pending')) {
-          const attemptAt = new Date().toISOString();
-          const { data: pendingRows, error: pendingErr } = await this.orderRepository.executeRpc(
-            'update_order_status_tx',
-            {
-              p_order_id: currentOrder.id,
-              p_status: 'cancelled',
-              p_not_statuses: ['delivered', 'payment_released'],
-              p_cancellation_reason: reason ?? currentOrder.cancellation_reason,
-              p_cancellation_fee: cancellationFee,
-              p_escrow_status: 'refund_pending',
-              p_escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
-              p_escrow_refund_last_attempt_at: attemptAt,
-              p_clear_escrow_refund_error: true,
-              p_event_type: 'ORDER_CANCELLED',
-              p_payload_extra: {
-                cancellation_reason: reason ?? currentOrder.cancellation_reason,
-                cancellation_fee: cancellationFee,
-              },
-            },
-            supabaseAdmin
-          );
-
-          if (pendingErr) {
-            throw new DomainError(500, {
-              error: 'Failed to place the order into refund reconciliation.',
-              details: pendingErr.message,
-            });
-          }
-          if (!pendingRows || pendingRows.length === 0) {
-            throw new DomainError(409, { error: 'Order was already delivered or payment released. Cannot cancel.' });
-          }
-          workingOrder = pendingRows[0];
-        }
-
         if (requiresRefund) {
-          let refundTxHash = workingOrder.refund_tx_hash ?? null;
+          const cancelSaga = this.sagaCoordinatorFactory({
+            name: 'OrderCancellationSaga',
+            statePersister: this.sagaPersister,
+            logger,
+          });
 
-          try {
-            let receipt;
+          // Step 1: Record Pre-Cancellation status in DB (refund_pending)
+          cancelSaga.addStep({
+            name: 'record_refund_pending',
+            execute: async (ctx) => {
+              if (currentOrder.status !== 'cancelled' || currentOrder.escrow_status !== 'refund_pending') {
+                const attemptAt = new Date().toISOString();
+                const { data: pendingRows, error: pendingErr } = await this.orderRepository.executeRpc(
+                  'update_order_status_tx',
+                  {
+                    p_order_id: currentOrder.id,
+                    p_status: 'cancelled',
+                    p_not_statuses: ['delivered', 'payment_released'],
+                    p_cancellation_reason: reason ?? currentOrder.cancellation_reason,
+                    p_cancellation_fee: cancellationFee,
+                    p_escrow_status: 'refund_pending',
+                    p_escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
+                    p_escrow_refund_last_attempt_at: attemptAt,
+                    p_clear_escrow_refund_error: true,
+                    p_event_type: 'ORDER_CANCELLED',
+                    p_payload_extra: {
+                      cancellation_reason: reason ?? currentOrder.cancellation_reason,
+                      cancellation_fee: cancellationFee,
+                    },
+                  },
+                  supabaseAdmin
+                );
 
-            if (refundTxHash) {
-              receipt = await confirmEscrowRefund(refundTxHash);
-            } else {
-              const submitted = driverFeeWei > 0n
-                ? await submitEscrowCancelWithPenalty(workingOrder.order_display_id, driverFeeWei)
-                : await submitEscrowRefund(workingOrder.order_display_id);
-              refundTxHash = submitted.txHash;
-              if (!refundTxHash || !submitted.waitForConfirmation) {
-                throw new Error('Escrow refund transaction was not submitted.');
+                if (pendingErr) {
+                  throw new DomainError(500, {
+                    error: 'Failed to place the order into refund reconciliation.',
+                    details: pendingErr.message,
+                  });
+                }
+                if (!pendingRows || pendingRows.length === 0) {
+                  throw new DomainError(409, { error: 'Order was already delivered or payment released. Cannot cancel.' });
+                }
+                ctx.workingOrder = pendingRows[0];
+              } else {
+                ctx.workingOrder = currentOrder;
+              }
+              return { workingOrder: ctx.workingOrder };
+            },
+            compensate: async (ctx, compErr) => {
+              logger.warn(`[Saga:OrderCancellationSaga] Pre-cancel step compensated for order ${currentOrder.id}: ${compErr?.message}`);
+            },
+          });
+
+          // Step 2: Submit on-chain escrow refund transaction
+          cancelSaga.addStep({
+            name: 'submit_on_chain_refund',
+            execute: async (ctx) => {
+              let refundTxHash = ctx.workingOrder?.refund_tx_hash ?? null;
+              let receipt;
+
+              if (refundTxHash) {
+                receipt = await confirmEscrowRefund(refundTxHash);
+              } else {
+                const submitted = driverFeeWei > 0n
+                  ? await submitEscrowCancelWithPenalty(ctx.workingOrder.order_display_id, driverFeeWei)
+                  : await submitEscrowRefund(ctx.workingOrder.order_display_id);
+                refundTxHash = submitted.txHash;
+                if (!refundTxHash || !submitted.waitForConfirmation) {
+                  throw new Error('Escrow refund transaction was not submitted.');
+                }
+
+                const submittedAt = new Date().toISOString();
+                await this.orderRepository.updateOrder(currentOrder.id, {
+                  refund_tx_hash: refundTxHash,
+                  escrow_refund_submitted_at: submittedAt,
+                  updated_at: submittedAt,
+                });
+
+                receipt = await submitted.waitForConfirmation();
               }
 
-              const submittedAt = new Date().toISOString();
-              await this.orderRepository.updateOrder(currentOrder.id, {
-                refund_tx_hash: refundTxHash,
-                escrow_refund_submitted_at: submittedAt,
-                updated_at: submittedAt,
-              });
+              return { receipt, refundTxHash };
+            },
+            compensate: async (ctx, compErr) => {
+              const refundTxHash = ctx.refundTxHash ?? ctx.workingOrder?.refund_tx_hash ?? null;
+              const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
+              logger.error('[escrow] Refund failed for order', orderId, ':', compErr?.message);
+              const failedAt = new Date().toISOString();
 
-              receipt = await submitted.waitForConfirmation();
-            }
-
-            const refundedAt = new Date().toISOString();
-            const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
-              'update_order_status_tx',
-              {
-                p_order_id: currentOrder.id,
-                p_status: 'cancelled',
-                p_escrow_in_statuses: ['refund_pending', 'refund_failed'],
-                p_cancellation_reason: reason ?? workingOrder.cancellation_reason,
-                p_cancellation_fee: cancellationFee,
-                p_escrow_status: 'refunded',
-                p_refund_tx_hash: receipt.hash ?? refundTxHash,
-                p_escrow_refunded_at: refundedAt,
-                p_clear_escrow_refund_error: true,
-                p_event_type: 'ORDER_UPDATED',
-                p_payload_extra: {
-                  escrow_status: 'refunded',
-                  refund_tx_hash: receipt.hash ?? refundTxHash,
-                  escrow_refunded_at: refundedAt,
+              await this.orderRepository.executeRpc(
+                'update_order_status_tx',
+                {
+                  p_order_id: currentOrder.id,
+                  p_status: 'cancelled',
+                  p_cancellation_fee: cancellationFee,
+                  p_escrow_status: nextEscrowStatus,
+                  p_refund_tx_hash: refundTxHash,
+                  p_escrow_refund_error: String(compErr?.message || compErr).slice(0, 1000),
+                  p_escrow_refund_last_attempt_at: failedAt,
+                  p_event_type: 'ORDER_UPDATED',
+                  p_payload_extra: {
+                    escrow_status: nextEscrowStatus,
+                    escrow_refund_error: String(compErr?.message || compErr).slice(0, 1000),
+                    retryable: true,
+                  },
                 },
-              },
-              supabaseAdmin
-            );
-
-            if (updateErr || !updatedRows || updatedRows.length === 0) {
-              logger.error(
-                '[escrow] Refund confirmed but final order update failed for',
-                orderId,
-                ':',
-                updateErr?.message ?? 'escrow-status guard rejected the update'
+                supabaseAdmin
               );
+
+              await this.orderRepository.updateOrder(currentOrder.id, {
+                status: 'cancelled',
+                cancellation_fee: cancellationFee,
+                escrow_status: nextEscrowStatus,
+                refund_tx_hash: refundTxHash,
+                escrow_refund_error: String(compErr?.message || compErr).slice(0, 1000),
+                escrow_refund_last_attempt_at: failedAt,
+                updated_at: failedAt,
+              });
+            },
+          });
+
+          // Step 3: Confirm final status in DB (refunded)
+          cancelSaga.addStep({
+            name: 'confirm_order_refunded',
+            execute: async (ctx) => {
+              const refundedAt = new Date().toISOString();
+              const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
+                'update_order_status_tx',
+                {
+                  p_order_id: currentOrder.id,
+                  p_status: 'cancelled',
+                  p_escrow_in_statuses: ['refund_pending', 'refund_failed'],
+                  p_cancellation_reason: reason ?? ctx.workingOrder.cancellation_reason,
+                  p_cancellation_fee: cancellationFee,
+                  p_escrow_status: 'refunded',
+                  p_refund_tx_hash: ctx.receipt?.hash ?? ctx.refundTxHash,
+                  p_escrow_refunded_at: refundedAt,
+                  p_clear_escrow_refund_error: true,
+                  p_event_type: 'ORDER_UPDATED',
+                  p_payload_extra: {
+                    escrow_status: 'refunded',
+                    refund_tx_hash: ctx.receipt?.hash ?? ctx.refundTxHash,
+                    escrow_refunded_at: refundedAt,
+                  },
+                },
+                supabaseAdmin
+              );
+
+              if (updateErr || !updatedRows || updatedRows.length === 0) {
+                logger.error(
+                  '[escrow] Refund confirmed but final order update failed for',
+                  orderId,
+                  ':',
+                  updateErr?.message ?? 'escrow-status guard rejected the update'
+                );
+                ctx.reconciliationPending = true;
+                return { reconciliationPending: true };
+              }
+
+              return { updatedOrder: updatedRows[0] };
+            },
+          });
+
+          // Step 4: Cleanup & Side Effects
+          cancelSaga.addStep({
+            name: 'cleanup_and_side_effects',
+            execute: async (ctx) => {
+              if (!ctx.reconciliationPending) {
+                await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
+                await expireDeliveryOtps(currentOrder.id);
+                await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
+              }
+            },
+          });
+
+          try {
+            const sagaResult = await cancelSaga.execute({
+              orderId: currentOrder.id,
+              orderDisplayId: currentOrder.order_display_id,
+              customerId,
+              reason,
+              cancellationFee,
+              driverFeeWei,
+              workingOrder,
+            });
+
+            if (sagaResult.context.reconciliationPending) {
               return {
                 status: 202,
                 body: {
                   message: 'Order cancelled and escrow refund confirmed. Database reconciliation is pending.',
-                  refund_tx_hash: receipt.hash ?? refundTxHash,
+                  refund_tx_hash: sagaResult.context.receipt?.hash ?? sagaResult.context.refundTxHash,
                   escrow_status: 'refund_pending',
                   reconciliation_required: true,
                 },
               };
             }
 
-            const updatedOrder = updatedRows[0];
-
-            await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
-            await expireDeliveryOtps(currentOrder.id);
-            await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
-
+            const updatedOrder = sagaResult.context.updatedOrder;
             return {
               status: 200,
               body: {
@@ -943,39 +1045,14 @@ export class OrderLifecycleService {
                 order: updatedOrder,
               },
             };
-          } catch (refundErr) {
-            logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
-            const failedAt = new Date().toISOString();
-            const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
-            await this.orderRepository.executeRpc(
-              'update_order_status_tx',
-              {
-                p_order_id: currentOrder.id,
-                p_status: 'cancelled',
-                p_cancellation_fee: cancellationFee,
-                p_escrow_status: nextEscrowStatus,
-                p_refund_tx_hash: refundTxHash,
-                p_escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
-                p_escrow_refund_last_attempt_at: failedAt,
-                p_event_type: 'ORDER_UPDATED',
-                p_payload_extra: {
-                  escrow_status: nextEscrowStatus,
-                  escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
-                  retryable: true,
-                },
-              },
-              supabaseAdmin
-            );
-            await this.orderRepository.updateOrder(currentOrder.id, {
-              status: 'cancelled',
-              cancellation_fee: cancellationFee,
-              escrow_status: nextEscrowStatus,
-              refund_tx_hash: refundTxHash,
-              escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
-              escrow_refund_last_attempt_at: failedAt,
-              updated_at: failedAt,
-            });
+          } catch (sagaErr) {
+            const originalError = sagaErr.triggerError || sagaErr;
+            if (originalError instanceof DomainError) {
+              throw originalError;
+            }
 
+            const refundTxHash = cancelSaga.getContext().refundTxHash ?? workingOrder.refund_tx_hash ?? null;
+            const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
             return {
               status: 202,
               body: {

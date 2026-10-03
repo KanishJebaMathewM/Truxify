@@ -692,6 +692,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ping TelemetryPing
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	if err := json.NewDecoder(r.Body).Decode(&ping); err != nil {
 		http.Error(w, fmt.Sprintf("Invalid telemetry payload: %v", err), http.StatusBadRequest)
 		return
@@ -784,7 +785,7 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req geofenceRequest
-
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return

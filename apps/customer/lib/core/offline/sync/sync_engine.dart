@@ -27,10 +27,10 @@ class SyncEngine {
     ConflictResolver? resolver,
     this.maxRetries = 5,
     this.batchSize = 20,
-    this.httpClient = _defaultHttpClient,
-    this.getCurrentToken = _defaultGetCurrentToken,
-    this.refreshAuthToken = _defaultRefreshAuthToken,
-  }) : resolver = resolver ?? ConflictResolver();
+    http.Client? httpClient,
+    Future<String?> Function()? getCurrentToken,
+    Future<bool> Function()? refreshAuthToken,
+  }) : resolver = resolver ?? ConflictResolver(), httpClient = httpClient ?? _defaultHttpClient, getCurrentToken = getCurrentToken ?? _defaultGetCurrentToken, refreshAuthToken = refreshAuthToken ?? _defaultRefreshAuthToken;
 
   final OfflineEventDb db;
   final String apiBaseUrl;
@@ -131,7 +131,7 @@ class SyncEngine {
 
     await _markAsSyncing(resolved);
 
-    final SyncUploadOutcome uploadOutcome;
+    SyncUploadOutcome uploadOutcome;
     try {
       uploadOutcome = await _uploadBatch(resolved);
     } catch (e) {

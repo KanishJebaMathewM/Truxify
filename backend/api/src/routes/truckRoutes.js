@@ -348,8 +348,7 @@ async function canViewTruckNumber(user, truck) {
     return { allowed: true };
   }
 
-  const client = supabaseAdmin || supabase;
-  const { data: order, error } = await client
+  const { data: order, error } = await supabase
     .from('orders')
     .select('id')
     .eq('truck_id', truck.id)
@@ -425,13 +424,19 @@ router.get(
   userLimiter,
   cacheMiddleware(30, 'truck_search', async (req) => {
     const version = await getTruckSearchVersion();
-    const q = req.query;
+    const userId = req.user?.id || 'anon';
+    const explicitTruckId = req.query.truck_id !== undefined ? req.query.truck_id : req.query.truckId;
+    const q = { ...req.query };
+    if (explicitTruckId !== undefined) {
+      q.truck_id = explicitTruckId;
+      delete q.truckId;
+    }
     const sorted = Object.keys(q).sort().reduce((acc, key) => {
       acc[key] = q[key];
       return acc;
     }, {});
-    const hash = crypto.createHash('md5').update(JSON.stringify(sorted)).digest('hex');
-    return `v${version}:${hash}`;
+    const hash = crypto.createHash('md5').update(JSON.stringify({ userId, ...sorted })).digest('hex');
+    return `u:${userId}:v${version}:${hash}`;
   }),
   async (req, res) => {
   const {
@@ -526,6 +531,8 @@ router.get(
   }
 
   const searchCacheFilters = {
+    userId: req.user?.id || '',
+    truckId: explicitTruckId ? explicitTruckId.trim() : '',
     pickupLat: numPickupLat,
     pickupLng: numPickupLng,
     dropLat: numDropLat,

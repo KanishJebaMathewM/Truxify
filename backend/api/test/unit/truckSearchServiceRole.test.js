@@ -19,21 +19,39 @@ const m = createSupabaseMock();
 
 let mockTelemetryResults = [];
 
-const { anonFrom } = vi.hoisted(() => ({
-  anonFrom: vi.fn(() => {
-    throw new Error('anon supabase must never be used by the truck search path');
+const { anonFrom, mockRedisClient, mockUpstashRedisClient } = vi.hoisted(() => ({
+  anonFrom: vi.fn((table) => {
+    if (['driver_details', 'trucks', 'profiles'].includes(table)) {
+      throw new Error(`anon supabase must never be used for ${table}`);
+    }
+    return {
+      select: () => ({
+        eq: () => ({
+          or: () => ({
+            limit: () => ({
+              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+            }),
+          }),
+        }),
+      }),
+    };
   }),
+  mockRedisClient: {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+  },
+  mockUpstashRedisClient: {
+    get: vi.fn().mockResolvedValue(null),
+    set: vi.fn().mockResolvedValue('OK'),
+  },
 }));
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: anonFrom, rpc: vi.fn() },
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
-  redisClient: null,
-  upstashRedisClient: {
-    get: vi.fn().mockResolvedValue(null),
-    set: vi.fn().mockResolvedValue('OK'),
-  },
+  redisClient: mockRedisClient,
+  upstashRedisClient: mockUpstashRedisClient,
   mongoDb: {
     collection: () => ({
       find: () => ({
@@ -100,6 +118,10 @@ describe('GET /api/trucks/search — service-role client', () => {
     ];
     mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
     m.calls.length = 0;
+    mockRedisClient.get.mockResolvedValue(null);
+    mockRedisClient.set.mockResolvedValue('OK');
+    mockUpstashRedisClient.get.mockResolvedValue(null);
+    mockUpstashRedisClient.set.mockResolvedValue('OK');
     vi.clearAllMocks();
   });
 
@@ -122,7 +144,9 @@ describe('GET /api/trucks/search — service-role client', () => {
       .set('x-user-role', 'customer');
 
     expect(res.status).toBe(200);
-    expect(anonFrom).not.toHaveBeenCalled();
+    expect(anonFrom).not.toHaveBeenCalledWith('driver_details');
+    expect(anonFrom).not.toHaveBeenCalledWith('trucks');
+    expect(anonFrom).not.toHaveBeenCalledWith('profiles');
 
     const readTables = m.calls.map(c => c.table);
     expect(readTables).toEqual(expect.arrayContaining(['driver_details', 'trucks', 'profiles']));
@@ -220,6 +244,95 @@ describe('GET /api/trucks/search — service-role client', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
+  });
+
+  it('includes explicit truck_id in truck-search cache keys to prevent cross-truck cache collisions', async () => {
+    m.store.trucks.push({
+      id: 'truck-other',
+      name: 'Other Truck',
+      number_plate: 'MH12AB0002',
+      max_capacity_tons: 10,
+      owner_id: 'driver-uuid-789',
+    });
+    m.store.driver_details.push({
+      user_id: 'driver-uuid-789',
+      is_online: true,
+      truck_id: 'truck-other',
+      rating: 4.8,
+      total_trips: 80,
+      completion_rate: 98,
+    });
+    m.store.profiles.push({
+      id: 'driver-uuid-789',
+      full_name: 'Vikram Patel',
+    });
+    mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }, { driver_id: 'driver-uuid-789' }];
+
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    const res1 = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_id=truck-open`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res1.status).toBe(200);
+    expect(mockRedisClient.set).toHaveBeenCalledTimes(1);
+    const [redisKey1] = mockRedisClient.set.mock.calls[0];
+    expect(redisKey1).toContain('"truckId":"truck-open"');
+
+    const [upstashKey1] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(upstashKey1).toContain('cache:truck_search:u:customer-uuid-123:v');
+
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    const res2 = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_id=truck-other`)
+      .set('x-user-id', 'customer-uuid-123')
+      .set('x-user-role', 'customer');
+
+    expect(res2.status).toBe(200);
+    expect(mockRedisClient.set).toHaveBeenCalledTimes(1);
+    const [redisKey2] = mockRedisClient.set.mock.calls[0];
+    expect(redisKey2).toContain('"truckId":"truck-other"');
+    expect(redisKey2).not.toEqual(redisKey1);
+
+    const [upstashKey2] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(upstashKey2).not.toEqual(upstashKey1);
+  });
+
+  it('isolates truck-search cache keys by authenticated user to prevent authorization leakage', async () => {
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    const resUserA = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'user-A')
+      .set('x-user-role', 'customer');
+
+    expect(resUserA.status).toBe(200);
+    const [redisKeyA] = mockRedisClient.set.mock.calls[0];
+    const [upstashKeyA] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(redisKeyA).toContain('"userId":"user-A"');
+    expect(upstashKeyA).toContain('cache:truck_search:u:user-A:v');
+
+    mockRedisClient.set.mockClear();
+    mockUpstashRedisClient.set.mockClear();
+
+    const resUserB = await request(buildApp())
+      .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+      .set('x-user-id', 'user-B')
+      .set('x-user-role', 'customer');
+
+    expect(resUserB.status).toBe(200);
+    const [redisKeyB] = mockRedisClient.set.mock.calls[0];
+    const [upstashKeyB] = mockUpstashRedisClient.set.mock.calls[0];
+    expect(redisKeyB).toContain('"userId":"user-B"');
+    expect(upstashKeyB).toContain('cache:truck_search:u:user-B:v');
+
+    expect(redisKeyA).not.toEqual(redisKeyB);
+    expect(upstashKeyA).not.toEqual(upstashKeyB);
   });
 });
 

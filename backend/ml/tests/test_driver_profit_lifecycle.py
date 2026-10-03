@@ -1,10 +1,24 @@
 """Serving behavior under controlled native-thread lifecycle interleavings."""
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from threading import Event
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from app.models import driver_profit as module
+
+
+@pytest.fixture(autouse=True)
+def paired_load_seam(monkeypatch):
+    if hasattr(module, "load_model_snapshot"):
+        # Lifecycle tests control disk outcomes; native snapshot coherence has
+        # its own real-file regressions in the model-reader PR (#16937).
+        from app.models import base
+        monkeypatch.setattr(module, "load_model", base.load_model, raising=False)
+        monkeypatch.setattr(module, "get_model_meta", base.get_model_meta, raising=False)
+        monkeypatch.setattr(module, "load_model_snapshot", lambda name:
+            SimpleNamespace(model=module.load_model(name),
+                            metadata=module.get_model_meta(name)))
 
 ARGS = (500.0, 105.0, 1200.0, 5.0, 8000.0, 10.0)
 

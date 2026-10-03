@@ -16,6 +16,8 @@
 // GF(256) with primitive polynomial 0x11d and generator alpha = 0x02.
 const GF_EXP = new Uint8Array(512);
 const GF_LOG = new Uint8Array(256);
+const GF_INV = new Uint8Array(256);
+
 (function initGaloisField() {
   let x = 1;
   for (let i = 0; i < 255; i++) {
@@ -24,21 +26,42 @@ const GF_LOG = new Uint8Array(256);
     x <<= 1;
     if (x & 0x100) x ^= 0x11d;
   }
-  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+  for (let i = 255; i < 512; i++) {
+    GF_EXP[i] = GF_EXP[i - 255];
+  }
+  GF_INV[0] = 0;
+  for (let i = 1; i < 256; i++) {
+    GF_INV[i] = GF_EXP[(255 - (GF_LOG[i] % 255)) % 255];
+  }
 })();
 
-function gmul(a, b) {
+export function gmul(a, b) {
   if (a === 0 || b === 0) return 0;
-  return GF_EXP[GF_LOG[a] + GF_LOG[b]];
+  const logSum = (GF_LOG[a & 0xff] + GF_LOG[b & 0xff]) % 255;
+  return GF_EXP[logSum];
 }
 
-function gpow(a, power) {
+export function gdiv(a, b) {
+  if (b === 0) throw new Error('Division by zero in GF(256)');
+  if (a === 0) return 0;
+  const logDiff = ((GF_LOG[a & 0xff] - GF_LOG[b & 0xff]) % 255 + 255) % 255;
+  return GF_EXP[logDiff];
+}
+
+export function ginv(a) {
+  if (a === 0) throw new Error('Division by zero in GF(256)');
+  return GF_INV[a & 0xff];
+}
+
+export function gpow(a, power) {
   if (power === 0) return 1;
   if (a === 0) return 0;
-  return GF_EXP[(GF_LOG[a] * power) % 255];
+  const p = ((power % 255) + 255) % 255;
+  const logExp = (GF_LOG[a & 0xff] * p) % 255;
+  return GF_EXP[logExp];
 }
 
-function invertSquareMatrix(matrix) {
+export function invertSquareMatrix(matrix) {
   // Gauss-Jordan elimination over GF(256).
   const n = matrix.length;
   const m = matrix.map((row) => row.slice());
@@ -64,9 +87,10 @@ function invertSquareMatrix(matrix) {
     }
 
     const pivotVal = m[col][col];
+    const invPivot = GF_INV[pivotVal & 0xff];
     for (let j = 0; j < n; j++) {
-      m[col][j] = gmul(m[col][j], GF_EXP[(255 - GF_LOG[pivotVal]) % 255]);
-      inv[col][j] = gmul(inv[col][j], GF_EXP[(255 - GF_LOG[pivotVal]) % 255]);
+      m[col][j] = gmul(m[col][j], invPivot);
+      inv[col][j] = gmul(inv[col][j], invPivot);
     }
 
     for (let row = 0; row < n; row++) {

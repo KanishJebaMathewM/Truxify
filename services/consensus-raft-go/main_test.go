@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -571,7 +572,9 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	if !updatedSeen.After(oldTime) {
 		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
 	}
-}func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
+}
+
+func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
 	bypassAuth = true
 	defer func() { bypassAuth = false }()
 
@@ -594,6 +597,14 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var res map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if res["already_committed"] != true {
+		t.Errorf("expected already_committed=true on duplicate submission, got %v", res["already_committed"])
 	}
 
 	// Verify no new entry was appended
@@ -645,10 +656,11 @@ func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
 	// Transition manually to leader (simulating startElection election win)
 	node.mu.Lock()
 	node.Role = Leader
+	node.LeaderID = "node1"
 	node.CurrentTerm = 1
 	node.nextIndex = map[string]uint64{"http://localhost:9999": 1}
 	node.matchIndex = map[string]uint64{"http://localhost:9999": 0}
-	node.peerLive = map[string]bool{"http://localhost:9999": false}
+	node.liveAck = map[string]bool{"http://localhost:9999": false}
 	node.mu.Unlock()
 
 	// Try to commit order command
@@ -693,7 +705,12 @@ func TestRaftStatePersistAndLoad(t *testing.T) {
 	}
 
 	// Persist
-	node.persistState()
+	if err := node.persister.SaveState(node.CurrentTerm, node.VotedFor); err != nil {
+		t.Fatalf("SaveState failed: %v", err)
+	}
+	if err := node.persister.SaveLog(node.Log); err != nil {
+		t.Fatalf("SaveLog failed: %v", err)
+	}
 
 	// Create new node and load
 	node2 := NewRaftNode("test-node-1", nil, nil)
@@ -748,3 +765,594 @@ func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
 		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
 	}
 }
+
+// TestSingleNodeOrElectionSeedDoesNotFalselyClaimQuorum verifies that an isolated
+// leader with optimistic election seeds or unacknowledged peers cannot falsely claim
+// quorum: /commit must reject with 503 rather than prematurely succeeding.
+func TestSingleNodeOrElectionSeedDoesNotFalselyClaimQuorum(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	// 3-node cluster: node1 is leader, node2 & node3 have not acknowledged in current term.
+	node := NewRaftNode("node1", []string{"node2", "node3"}, []string{"http://127.0.0.1:54321", "http://127.0.0.1:54322"})
+	node.mu.Lock()
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 2
+	// Optimistic election seeds must NOT count as acknowledgment for new entries
+	node.nextIndex = map[string]uint64{"http://127.0.0.1:54321": 10, "http://127.0.0.1:54322": 10}
+	node.matchIndex = map[string]uint64{"http://127.0.0.1:54321": 9, "http://127.0.0.1:54322": 9}
+	// liveAck is empty (no current-term heartbeat round has completed)
+	node.liveAck = make(map[string]bool)
+	node.mu.Unlock()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-seed-1","command":"CREATED"}`))
+	w := httptest.NewRecorder()
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable without current-term quorum acknowledgment, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.Log) != 0 {
+		t.Errorf("expected no entry to be appended to log without quorum, got %d entries", len(node.Log))
+	}
+}
+
+// TestSuccessfulRealQuorumCommit verifies /commit succeeds only after the entry
+// has real current-term quorum acknowledgment replicated to followers.
+func TestSuccessfulRealQuorumCommit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node1 := NewRaftNode("node1", []string{"node2", "node3"}, nil)
+	node2 := NewRaftNode("node2", []string{"node1", "node3"}, nil)
+	node3 := NewRaftNode("node3", []string{"node1", "node2"}, nil)
+
+	s1 := httptest.NewServer(raftHandlers(node1))
+	defer s1.Close()
+	s2 := httptest.NewServer(raftHandlers(node2))
+	defer s2.Close()
+	s3 := httptest.NewServer(raftHandlers(node3))
+	defer s3.Close()
+
+	node1.PeerURLs = []string{s2.URL, s3.URL}
+	node2.PeerURLs = []string{s1.URL, s3.URL}
+	node3.PeerURLs = []string{s1.URL, s2.URL}
+
+	node1.mu.Lock()
+	node1.Role = Leader
+	node1.LeaderID = "node1"
+	node1.CurrentTerm = 1
+	node1.nextIndex = map[string]uint64{s2.URL: 1, s3.URL: 1}
+	node1.matchIndex = map[string]uint64{s2.URL: 0, s3.URL: 0}
+	node1.liveAck = map[string]bool{s2.URL: true, s3.URL: true}
+	node1.mu.Unlock()
+
+	body := strings.NewReader(`{"order_id":"ord-quorum-ok","command":"CREATED"}`)
+	resp, err := http.Post(s1.URL+"/api/v1/raft/commit", "application/json", body)
+	if err != nil {
+		t.Fatalf("commit request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from leader, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Success   bool   `json:"success"`
+		RaftIndex uint64 `json:"raft_index"`
+		OrderID   string `json:"order_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if !payload.Success || payload.RaftIndex != 1 || payload.OrderID != "ord-quorum-ok" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+
+	// Verify replicated and committed on both followers
+	for name, n := range map[string]*RaftNode{"node2": node2, "node3": node3} {
+		n.mu.Lock()
+		logLen := len(n.Log)
+		commit := n.CommitIndex
+		n.mu.Unlock()
+		if logLen != 1 {
+			t.Errorf("%s: expected 1 log entry, got %d", name, logLen)
+		}
+		if commit != 1 {
+			t.Errorf("%s: expected commit_index 1, got %d", name, commit)
+		}
+	}
+}
+
+// TestDuplicateOrderSubmissionIdempotency verifies duplicate (order_id, command)
+// submissions do not append a new entry and return 200 with already_committed=true.
+func TestDuplicateOrderSubmissionIdempotency(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.mu.Lock()
+	node.Role = Leader
+	node.LeaderID = "node1"
+	node.CurrentTerm = 1
+	node.mu.Unlock()
+
+	// First submission
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-idem-1","command":"CREATED"}`))
+	w1 := httptest.NewRecorder()
+	node.HandleCommitOrder(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for first submission, got %d. Body: %s", w1.Code, w1.Body.String())
+	}
+	var res1 map[string]interface{}
+	json.NewDecoder(w1.Body).Decode(&res1)
+	if res1["already_committed"] == true {
+		t.Errorf("first submission should not have already_committed=true")
+	}
+
+	// Duplicate submission with exact same (order_id, command)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(`{"order_id":"ord-idem-1","command":"CREATED"}`))
+	w2 := httptest.NewRecorder()
+	node.HandleCommitOrder(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for duplicate submission, got %d. Body: %s", w2.Code, w2.Body.String())
+	}
+	var res2 map[string]interface{}
+	json.NewDecoder(w2.Body).Decode(&res2)
+	if res2["already_committed"] != true {
+		t.Errorf("expected already_committed=true on duplicate submission, got %v", res2["already_committed"])
+	}
+	if res2["raft_index"] != res1["raft_index"] {
+		t.Errorf("expected same raft_index %v, got %v", res1["raft_index"], res2["raft_index"])
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if len(node.Log) != 1 {
+		t.Errorf("expected log length to remain 1, got %d", len(node.Log))
+	}
+}
+
+// TestMultiEntryLogIndexCorrectness verifies canonical 1-based log indexing 1..N
+// using the logIndex helper across normal and compacted snapshots.
+func TestMultiEntryLogIndexCorrectness(t *testing.T) {
+	node := NewRaftNode("node1", nil, nil)
+	now := time.Now()
+
+	const n = 10
+	for i := uint64(1); i <= n; i++ {
+		node.Log = append(node.Log, LogEntry{
+			Index:     i,
+			Term:      1,
+			Command:   "CREATED",
+			OrderID:   fmt.Sprintf("ord-%d", i),
+			Timestamp: now,
+		})
+	}
+
+	// Canonical 1-based log indexing: index i in [1..N] maps to slice index i-1
+	for i := uint64(1); i <= n; i++ {
+		idx := node.logIndex(i)
+		if idx != int(i-1) {
+			t.Errorf("expected logIndex(%d) == %d, got %d", i, i-1, idx)
+		}
+		if node.Log[idx].Index != i {
+			t.Errorf("expected entry at logIndex(%d) to have Index %d, got %d", i, i, node.Log[idx].Index)
+		}
+	}
+
+	// Verify behavior with compacted snapshotIndex
+	node.snapshotIndex = 4
+	node.Log = node.Log[4:] // retained entries have Index 5..10
+
+	for i := uint64(5); i <= n; i++ {
+		idx := node.logIndex(i)
+		expected := int(i - 4 - 1)
+		if idx != expected {
+			t.Errorf("with snapshotIndex=4, expected logIndex(%d) == %d, got %d", i, expected, idx)
+		}
+		if node.Log[idx].Index != i {
+			t.Errorf("with snapshotIndex=4, expected entry at logIndex(%d) to have Index %d, got %d", i, i, node.Log[idx].Index)
+		}
+	}
+}
+
+
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// TestWALBasicOperations tests basic WAL functionality.
+func TestWALBasicOperations(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	// Test term change
+	if err := wal.AppendTermChange(1); err != nil {
+		t.Fatalf("Failed to append term: %v", err)
+	}
+
+	// Test vote
+	if err := wal.AppendVote(1, "node-1"); err != nil {
+		t.Fatalf("Failed to append vote: %v", err)
+	}
+
+	// Test log entry
+	if err := wal.AppendLogEntry(1, 1, map[string]string{"type": "order", "id": "123"}); err != nil {
+		t.Fatalf("Failed to append log: %v", err)
+	}
+
+	// Test commit
+	if err := wal.AppendCommit(1); err != nil {
+		t.Fatalf("Failed to append commit: %v", err)
+	}
+
+	// Replay and verify
+	entries, err := wal.Replay()
+	if err != nil {
+		t.Fatalf("Failed to replay: %v", err)
+	}
+
+	if len(entries) != 4 {
+		t.Errorf("Expected 4 entries, got %d", len(entries))
+	}
+
+	if entries[0].Type != "term" || entries[0].Term != 1 {
+		t.Errorf("First entry should be term change")
+	}
+
+	if entries[1].Type != "vote" || entries[1].VotedFor != "node-1" {
+		t.Errorf("Second entry should be vote for node-1")
+	}
+}
+
+// TestWALRecovery tests that state is recovered after restart.
+func TestWALRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// First "session"
+	wal1, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Simulate Raft operations
+	wal1.AppendTermChange(5)
+	wal1.AppendVote(5, "node-2")
+	wal1.AppendLogEntry(5, 1, "order_created")
+	wal1.AppendLogEntry(5, 2, "order_dispatched")
+	wal1.AppendCommit(2)
+	wal1.Close()
+
+	// Second "session" (simulating restart)
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover state: %v", err)
+	}
+
+	if state.CurrentTerm != 5 {
+		t.Errorf("Expected term 5, got %d", state.CurrentTerm)
+	}
+
+	if state.VotedFor != "node-2" {
+		t.Errorf("Expected voted for node-2, got %s", state.VotedFor)
+	}
+
+	if len(state.Log) != 2 {
+		t.Errorf("Expected 2 log entries, got %d", len(state.Log))
+	}
+
+	if state.CommitIndex != 2 {
+		t.Errorf("Expected commit index 2, got %d", state.CommitIndex)
+	}
+}
+
+// TestWALVoteSafety tests that votedFor is durable across term changes.
+func TestWALVoteSafety(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	// Term 1: vote for node-A
+	wal.AppendTermChange(1)
+	wal.AppendVote(1, "node-A")
+	
+	// Term 2: vote for node-B (different term, different vote allowed)
+	wal.AppendTermChange(2)
+	wal.AppendVote(2, "node-B")
+	
+	wal.Close()
+
+	// Recover and verify
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover: %v", err)
+	}
+
+	if state.CurrentTerm != 2 {
+		t.Errorf("Expected term 2, got %d", state.CurrentTerm)
+	}
+
+	// Should have vote from term 2
+	if state.VotedFor != "node-B" {
+		t.Errorf("Expected vote for node-B in term 2, got %s", state.VotedFor)
+	}
+}
+
+// TestWALCrashBetweenAppendAndFsync tests that uncommitted entries are lost.
+func TestWALCrashBetweenAppendAndFsync(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create WAL with sync mode disabled (simulating crash before fsync)
+	wal, err := NewWAL(tmpDir, false)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+
+	wal.AppendTermChange(1)
+	wal.AppendVote(1, "node-1")
+	
+	// Don't call Close() - simulate crash
+	// (In real scenario, data might not be on disk)
+	
+	// For this test, we just verify the file exists
+	walPath := filepath.Join(tmpDir, "raft.wal")
+	if _, err := os.Stat(walPath); os.IsNotExist(err) {
+		t.Error("WAL file should exist")
+	}
+}
+
+// TestSnapshotCreation tests snapshot creation and loading.
+func TestSnapshotCreation(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Create snapshot
+	state := map[string]interface{}{
+		"orders": []string{"order-1", "order-2"},
+		"count":  2,
+	}
+
+	if err := sm.Save(100, 5, state); err != nil {
+		t.Fatalf("Failed to save snapshot: %v", err)
+	}
+
+	// Load and verify
+	snapshot, err := sm.Load()
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+
+	if snapshot.LastIncludedIndex != 100 {
+		t.Errorf("Expected index 100, got %d", snapshot.LastIncludedIndex)
+	}
+
+	if snapshot.LastIncludedTerm != 5 {
+		t.Errorf("Expected term 5, got %d", snapshot.LastIncludedTerm)
+	}
+}
+
+// TestSnapshotCompaction tests log compaction after snapshot.
+func TestSnapshotCompaction(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Create snapshot at index 50
+	sm.Save(50, 3, nil)
+
+	// Create log with entries 1-100
+	var log []LogEntry
+	for i := uint64(1); i <= 100; i++ {
+		log = append(log, LogEntry{Index: i, Term: 3})
+	}
+
+	// Compact
+	compacted := sm.CompactLog(log)
+
+	// Should only have entries 51-100
+	if len(compacted) != 50 {
+		t.Errorf("Expected 50 entries after compaction, got %d", len(compacted))
+	}
+
+	if compacted[0].Index != 51 {
+		t.Errorf("First entry should be index 51, got %d", compacted[0].Index)
+	}
+}
+
+// TestShouldSnapshot tests the snapshot threshold logic.
+func TestShouldSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// No snapshot yet - should snapshot at threshold
+	if !sm.ShouldSnapshot(100, 100) {
+		t.Error("Should snapshot at threshold")
+	}
+
+	// Create snapshot at index 100
+	sm.Save(100, 1, nil)
+
+	// 50 entries since snapshot - should not snapshot yet
+	if sm.ShouldSnapshot(150, 100) {
+		t.Error("Should not snapshot before threshold")
+	}
+
+	// 100 entries since snapshot - should snapshot
+	if !sm.ShouldSnapshot(200, 100) {
+		t.Error("Should snapshot at threshold")
+	}
+}
+
+// TestIntegrationWALAndSnapshot tests WAL + snapshot working together.
+func TestIntegrationWALAndSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	
+	// Create WAL and snapshot manager
+	wal, err := NewWAL(tmpDir, true)
+	if err != nil {
+		t.Fatalf("Failed to create WAL: %v", err)
+	}
+	defer wal.Close()
+
+	sm, err := NewSnapshotManager(tmpDir, "node-1")
+	if err != nil {
+		t.Fatalf("Failed to create snapshot manager: %v", err)
+	}
+
+	// Simulate Raft operations
+	wal.AppendTermChange(1)
+	
+	for i := uint64(1); i <= 100; i++ {
+		wal.AppendLogEntry(1, i, map[string]string{"order": "test"})
+	}
+	
+	wal.AppendCommit(100)
+
+	// Take snapshot at index 100
+	sm.Save(100, 1, "state-at-100")
+
+	// Continue with more entries
+	for i := uint64(101); i <= 150; i++ {
+		wal.AppendLogEntry(1, i, map[string]string{"order": "test"})
+	}
+
+	// Recover state
+	state, err := RecoverState(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to recover: %v", err)
+	}
+
+	// Should have all 150 entries in WAL
+	if len(state.Log) != 150 {
+		t.Errorf("Expected 150 log entries, got %d", len(state.Log))
+	}
+
+	// Snapshot should be at 100
+	if sm.LastIncludedIndex() != 100 {
+		t.Errorf("Snapshot should be at 100")
+	}
+}
+
+// TestRaftNodeRestart tests full Raft node restart with durability.
+func TestRaftNodeRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	nodeID := "test-node-1"
+	
+	// First run: create node and commit some orders
+	node1 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Simulate becoming leader and committing
+	node1.CurrentTerm = 3
+	node1.Role = Leader
+	
+	// Commit 5 orders
+	for i := 0; i < 5; i++ {
+		cmd := map[string]string{
+			"type":    "commit_order",
+			"orderID": "order-" + string(rune('A'+i)),
+			"status":  "DISPATCHED",
+		}
+		node1.HandleCommitOrder(cmd)
+		time.Sleep(10 * time.Millisecond)
+	}
+	
+	if len(node1.Log) != 5 {
+		t.Errorf("Expected 5 log entries, got %d", len(node1.Log))
+	}
+
+	// "Crash" - just stop using node1
+	
+	// Second run: restart node
+	node2 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Should restore state
+	if node2.CurrentTerm != 3 {
+		t.Errorf("Expected term 3 after restart, got %d", node2.CurrentTerm)
+	}
+
+	if len(node2.Log) != 5 {
+		t.Errorf("Expected 5 log entries after restart, got %d", len(node2.Log))
+	}
+
+	// Verify committed orders are still there
+	if node2.CommitIndex != 5 {
+		t.Errorf("Expected commit index 5 after restart, got %d", node2.CommitIndex)
+	}
+}
+
+// TestVoteNotRegrantedAfterRestart tests that a node doesn't re-vote in same term.
+func TestVoteNotRegrantedAfterRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	nodeID := "test-node-1"
+	
+	// First run: vote for candidate-A in term 5
+	node1 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	node1.CurrentTerm = 5
+	node1.VotedFor = "candidate-A"
+	
+	// Persist the vote
+	if node1.wal != nil {
+		node1.wal.AppendTermChange(5)
+		node1.wal.AppendVote(5, "candidate-A")
+	}
+	
+	// "Restart"
+	node2 := NewRaftNodeWithPersistence(nodeID, tmpDir)
+	
+	// Should remember it voted for candidate-A
+	if node2.CurrentTerm != 5 {
+		t.Errorf("Expected term 5 after restart")
+	}
+	
+	if node2.VotedFor != "candidate-A" {
+		t.Errorf("Expected VotedFor=candidate-A after restart, got %s", node2.VotedFor)
+	}
+}
+
+// Helper to create RaftNode with persistence (if not already in main.go)
+func NewRaftNodeWithPersistence(id, dataDir string) *RaftNode {
+	// This would be implemented in main.go
+	// For testing, we create a minimal node
+	return &RaftNode{
+		NodeID:      id,
+		CurrentTerm: 0,
+		VotedFor:    "",
+		Role:        Follower,
+		Log:         make([]LogEntry, 0),
+		CommitIndex: 0,
+		LastApplied: 0,
+	}
+}
+

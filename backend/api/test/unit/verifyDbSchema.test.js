@@ -372,17 +372,20 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     expect(sqlContent).toMatch(/drop\s+type\s+if\s+exists\s+public\.bid_status/i);
   });
 
-  it('verifies that database table counts and metadata are correct and in sync', async () => {
-    const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
-    const schemaMdPath = path.resolve(__dirname, '../../../../docs/schema.md');
+  it('verifies that the key_ownership_transfers table migration exists with RLS and required columns', async () => {
+    const migrationPath = path.resolve(
+      __dirname,
+      '../../../../supabase/migrations/20260809000010_create_key_ownership_transfers_table.sql'
+    );
+    const sqlContent = await fs.readFile(migrationPath, 'utf8');
 
-    const setupSql = await fs.readFile(setupSqlPath, 'utf8');
-    const schemaMd = await fs.readFile(schemaMdPath, 'utf8');
-
-    expect(setupSql).toContain('All 28 tables');
-    expect(setupSql).toContain('PART 1: TABLE DEFINITIONS (28 tables)');
-    expect(setupSql).toContain('26 tables with indexes');
-    expect(schemaMd).toContain('28 tables · 4 RPC functions');
-    expect(schemaMd).not.toContain('0 foreign keys');
+    expect(sqlContent).toMatch(/create\s+table\s+if\s+not\s+exists\s+key_ownership_transfers/i);
+    expect(sqlContent).toMatch(/wallet_address\s+varchar\(255\)/i);
+    expect(sqlContent).toMatch(/tx_hash\s+varchar\(255\)/i);
+    expect(sqlContent).toMatch(/block_number\s+bigint/i);
+    expect(sqlContent).toMatch(/completed_at\s+timestamptz/i);
+    expect(sqlContent).toMatch(/alter\s+table\s+key_ownership_transfers\s+enable\s+row\s+level\s+security/i);
+    expect(sqlContent).toMatch(/create\s+policy\s+"Service role full access on key_ownership_transfers"/i);
+    expect(sqlContent).toMatch(/revoke\s+all\s+on\s+table\s+key_ownership_transfers\s+from\s+anon,\s*authenticated/i);
   });
 });

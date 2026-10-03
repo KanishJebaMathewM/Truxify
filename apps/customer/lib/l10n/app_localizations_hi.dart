@@ -108,8 +108,7 @@ class AppLocalizationsHi extends AppLocalizations {
   String get biometricAuthSuccessful => 'बायोमेट्रिक प्रमाणीकरण सफल';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'कोई सहेजा गया सत्र नहीं मिला। कृपया पहले अपने फ़ोन नंबर से साइन इन करें।';
+  String get biometricAuthRequiresSession => 'कोई सहेजा गया सत्र नहीं मिला। कृपया पहले अपने फ़ोन नंबर से साइन इन करें।';
 
   @override
   String get pleaseEnterPhone => 'कृपया अपना फ़ोन नंबर दर्ज करें';

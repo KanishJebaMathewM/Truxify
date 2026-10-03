@@ -1,13 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { requestCacheMiddleware } from '../../src/middleware/requestCacheMiddleware.js';
-import { getRequestCache } from '../../src/lib/requestContext.js';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { requestCacheMiddleware } from "../../src/middleware/requestCacheMiddleware.js";
+import {
+  getRequestCache,
+  requestContext,
+} from "../../src/lib/requestContext.js";
 
-describe('requestCacheMiddleware', () => {
+describe("requestCacheMiddleware", () => {
   let finishCallback;
 
   const mockRes = () => ({
     once: vi.fn((event, cb) => {
-      if (event === 'finish') finishCallback = cb;
+      if (event === "finish") finishCallback = cb;
     }),
   });
 
@@ -15,21 +18,46 @@ describe('requestCacheMiddleware', () => {
     finishCallback = undefined;
   });
 
-  it('calls next immediately', () => {
+  it("calls next immediately", () => {
     const res = mockRes();
     const next = vi.fn();
     requestCacheMiddleware({}, res, next);
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it('attaches finish listener to response', () => {
-    const res = mockRes();
-    requestCacheMiddleware({}, res, vi.fn());
-    expect(res.once).toHaveBeenCalledWith('finish', expect.any(Function));
-    expect(typeof finishCallback).toBe('function');
+  it("generates and stores a sessionId when it is missing", () => {
+    const req = {};
+    let capturedSessionId;
+
+    requestCacheMiddleware(req, mockRes(), () => {
+      capturedSessionId = requestContext.getStore().sessionId;
+    });
+
+    expect(req.sessionId).toEqual(expect.any(String));
+    expect(req.sessionId).not.toBe("");
+    expect(capturedSessionId).toBe(req.sessionId);
   });
 
-  it('sets a requestCache in the requestContext store accessible via getRequestCache', () => {
+  it("replaces a blank sessionId and preserves a non-empty sessionId", () => {
+    const blankRequest = { sessionId: "   " };
+    const existingRequest = { sessionId: "session-123" };
+
+    requestCacheMiddleware(blankRequest, mockRes(), vi.fn());
+    requestCacheMiddleware(existingRequest, mockRes(), vi.fn());
+
+    expect(blankRequest.sessionId).toEqual(expect.any(String));
+    expect(blankRequest.sessionId).not.toBe("   ");
+    expect(existingRequest.sessionId).toBe("session-123");
+  });
+
+  it("attaches finish listener to response", () => {
+    const res = mockRes();
+    requestCacheMiddleware({}, res, vi.fn());
+    expect(res.once).toHaveBeenCalledWith("finish", expect.any(Function));
+    expect(typeof finishCallback).toBe("function");
+  });
+
+  it("sets a requestCache in the requestContext store accessible via getRequestCache", () => {
     let capturedCache;
     const res = mockRes();
 
@@ -39,12 +67,12 @@ describe('requestCacheMiddleware', () => {
 
     expect(capturedCache).toBeDefined();
     expect(capturedCache).not.toBeNull();
-    expect(typeof capturedCache.set).toBe('function');
-    expect(typeof capturedCache.get).toBe('function');
-    expect(typeof capturedCache.clear).toBe('function');
+    expect(typeof capturedCache.set).toBe("function");
+    expect(typeof capturedCache.get).toBe("function");
+    expect(typeof capturedCache.clear).toBe("function");
   });
 
-  it('clears the cache when response finishes', () => {
+  it("clears the cache when response finishes", () => {
     const res = mockRes();
     let cacheRef;
 
@@ -53,7 +81,7 @@ describe('requestCacheMiddleware', () => {
     });
 
     expect(finishCallback).toBeDefined();
-    expect(typeof cacheRef.clear).toBe('function');
+    expect(typeof cacheRef.clear).toBe("function");
     // Simulate finish event - cache should be cleared
     finishCallback();
     // getRequestCache returns null after clear since the store is gone

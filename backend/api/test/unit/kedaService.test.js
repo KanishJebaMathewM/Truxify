@@ -175,10 +175,11 @@ describe('KEDAService.getScaledObjectStatus', () => {
       error: 'timeout of 5000ms exceeded',
     })
     expectTimestamp(result)
-    expect(mockLogger.error).toHaveBeenCalledWith(
+    expect(mockLogger.warn).toHaveBeenCalledWith(
       {
         event: 'KEDA_SCALED_OBJECT_STATUS_ERROR',
         error: 'timeout of 5000ms exceeded',
+        stack: undefined,
       },
       'KEDA scaled object status request failed',
     )
@@ -326,6 +327,10 @@ describe('KEDAService.waitForScaledObjectStatus', () => {
       error: 'Timed out waiting for KEDA scaled object status',
     })
     expect(axios.get).toHaveBeenCalledTimes(3)
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ namespace, scaledObjectName, timeoutMs: 250 }),
+      'Timed out waiting for KEDA scaled object status',
+    )
   })
 
   it('continues polling after a transient request failure', async () => {
@@ -561,5 +566,234 @@ describe('KEDAService Prometheus helpers', () => {
     await expect(
       kedaService.getScaleRecommendation(namespace, 'api'),
     ).resolves.toBe(failure)
+  })
+})
+
+describe('KEDAService active workload and queue metrics', () => {
+  it('generates active orders metric from database count', async () => {
+    const mockDb = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          in: vi.fn().mockResolvedValue({ count: 42, error: null }),
+        })),
+      })),
+    }
+
+    const result = await kedaService.getActiveOrders(mockDb)
+
+    expect(result).toMatchObject({
+      success: true,
+      metric: 'active_orders',
+      value: 42,
+    })
+    expectTimestamp(result)
+    expect(mockDb.from).toHaveBeenCalledWith('orders')
+  })
+
+  it('handles database errors gracefully when fetching active orders', async () => {
+    const mockDb = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          in: vi.fn().mockResolvedValue({ count: null, error: { message: 'Database connection failed' } }),
+        })),
+      })),
+    }
+
+    const result = await kedaService.getActiveOrders(mockDb)
+
+    expect(result).toMatchObject({
+      success: false,
+      metric: 'active_orders',
+      error: 'Database connection failed',
+    })
+    expectTimestamp(result)
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'KEDA_ACTIVE_ORDERS_ERROR' }),
+      expect.stringContaining('Failed to fetch active orders count'),
+    )
+  })
+
+  it('generates active drivers metric from database count', async () => {
+    const mockDb = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ count: 18, error: null }),
+          })),
+        })),
+      })),
+    }
+
+    const result = await kedaService.getActiveDrivers(mockDb)
+
+    expect(result).toMatchObject({
+      success: true,
+      metric: 'active_drivers',
+      value: 18,
+    })
+    expectTimestamp(result)
+    expect(mockDb.from).toHaveBeenCalledWith('profiles')
+  })
+
+  it('handles database errors gracefully when fetching active drivers', async () => {
+    const mockDb = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ count: null, error: { message: 'Profiles table unavailable' } }),
+          })),
+        })),
+      })),
+    }
+
+    const result = await kedaService.getActiveDrivers(mockDb)
+
+    expect(result).toMatchObject({
+      success: false,
+      metric: 'active_drivers',
+      error: 'Profiles table unavailable',
+    })
+    expectTimestamp(result)
+  })
+
+  it('generates queue depth metric via Prometheus with query sanitization', async () => {
+    axios.get.mockResolvedValue({
+      data: {
+        status: 'success',
+        data: { result: [{ value: [1710000000, '128'] }] },
+      },
+    })
+
+    const result = await kedaService.getQueueDepth('delivery-events')
+
+    expect(result).toMatchObject({
+      success: true,
+      queue: 'delivery-events',
+      depth: 128,
+    })
+    expect(axios.get).toHaveBeenCalledWith(
+      'http://prometheus.istio-system:9090/api/v1/query',
+      expect.objectContaining({
+        params: {
+          query: 'sum(truxify_queue_depth{queue="delivery-events"})',
+        },
+      }),
+    )
+  })
+
+  it('handles queue depth query failure gracefully', async () => {
+    axios.get.mockRejectedValue(new Error('Prometheus timeout'))
+
+    const result = await kedaService.getQueueDepth('orders')
+
+    expect(result).toMatchObject({
+      success: false,
+      queue: 'orders',
+      error: 'Prometheus timeout',
+    })
+  })
+})
+
+describe('KEDAService.generateScaledObjectConfig', () => {
+  it('generates a valid Kubernetes ScaledObject specification with defaults', () => {
+    const config = kedaService.generateScaledObjectConfig({
+      name: 'api-scaler',
+      namespace: 'truxify',
+      targetDeployment: 'api-deployment',
+    })
+
+    expect(config).toEqual({
+      apiVersion: 'keda.sh/v1alpha1',
+      kind: 'ScaledObject',
+      metadata: {
+        name: 'api-scaler',
+        namespace: 'truxify',
+        labels: {
+          'app.kubernetes.io/name': 'api-scaler',
+          'app.kubernetes.io/part-of': 'truxify',
+        },
+      },
+      spec: {
+        scaleTargetRef: {
+          apiVersion: 'apps/v1',
+          kind: 'Deployment',
+          name: 'api-deployment',
+        },
+        minReplicaCount: 1,
+        maxReplicaCount: 10,
+        pollingInterval: 30,
+        cooldownPeriod: 300,
+        triggers: [
+          {
+            type: 'prometheus',
+            metadata: {
+              serverAddress: 'http://prometheus.istio-system:9090',
+              metricName: 'api_requests',
+              query:
+                'sum(rate(istio_requests_total{reporter="destination",destination_service=~"api-service.*"}[5m]))',
+              threshold: '100',
+            },
+          },
+        ],
+      },
+    })
+  })
+
+  it('generates custom ScaledObject specification with custom triggers and replicas', () => {
+    const customTriggers = [
+      {
+        type: 'redis',
+        metadata: {
+          address: 'redis-service:6379',
+          listName: 'order-queue',
+          listLength: '50',
+        },
+      },
+      {
+        type: 'kafka',
+        metadata: {
+          bootstrapServers: 'kafka-1:9092',
+          topic: 'orders',
+          consumerGroup: 'order-processor',
+          lagThreshold: '10',
+        },
+      },
+    ]
+
+    const config = kedaService.generateScaledObjectConfig({
+      name: 'order-worker-scaler',
+      namespace: 'production',
+      targetDeployment: 'order-worker',
+      minReplicas: 2,
+      maxReplicas: 25,
+      pollingInterval: 15,
+      cooldownPeriod: 120,
+      triggers: customTriggers,
+    })
+
+    expect(config.metadata.name).toBe('order-worker-scaler')
+    expect(config.metadata.namespace).toBe('production')
+    expect(config.spec.scaleTargetRef.name).toBe('order-worker')
+    expect(config.spec.minReplicaCount).toBe(2)
+    expect(config.spec.maxReplicaCount).toBe(25)
+    expect(config.spec.pollingInterval).toBe(15)
+    expect(config.spec.cooldownPeriod).toBe(120)
+    expect(config.spec.triggers).toEqual(customTriggers)
+  })
+
+  it('validates required fields for ScaledObject generation', () => {
+    expect(() => kedaService.generateScaledObjectConfig({ name: '' })).toThrow(
+      'ScaledObject name is required',
+    )
+    expect(() =>
+      kedaService.generateScaledObjectConfig({ name: 'test', namespace: '' }),
+    ).toThrow('ScaledObject namespace is required')
+    expect(() =>
+      kedaService.generateScaledObjectConfig({
+        name: 'test',
+        namespace: 'ns',
+        targetDeployment: '',
+      }),
+    ).toThrow('targetDeployment is required')
   })
 })

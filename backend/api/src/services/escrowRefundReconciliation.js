@@ -1,6 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking, getEscrowBookingId } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getOnChainEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import os from 'os';
 
@@ -119,11 +119,9 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // bookings, and cancelWithPenalty also reverts on started bookings,
           // so submitting either would waste gas and revert on every retry.
           // Escalate for manual review instead of retrying forever.
-          const escrowBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+          const escrowBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
           if (escrowBooking && escrowBooking.started) {
-            logger.error(
-              `[escrow-reconciliation] Order ${order.order_display_id} booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.`
-            );
+            logger.error({ orderId: order.order_display_id }, '[escrow-reconciliation] Booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.');
             await orderRepository.updateOrder(order.id, {
               escrow_refund_attempts: MAX_RETRIES,
               escrow_refund_error: 'Booking started on-chain — cancel/refund reverted; requires manual review.',
@@ -157,7 +155,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           // cancellation_fee is 0 so the driver is compensated; if no fee can
           // be derived, refuse to refund and leave the order for review.
           if (driverFeeWei === 0n) {
-            const onChainBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+            const onChainBooking = await getOnChainEscrowBooking(getEscrowBookingId(order.order_display_id));
             if (onChainBooking?.started) {
               throw new Error(
                 `Escrow refund for ${order.order_display_id} aborted: on-chain booking is already started ` +
@@ -219,10 +217,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         }, [{ op: 'in', column: 'escrow_status', value: ['refund_pending', 'refund_failed'] }, { op: 'eq', column: 'reconciled_by', value: instanceId }], 'id');
 
         if (updateError) {
-          logger.error(
-            `[escrow-reconciliation] Failed to finalize refund for ${order.order_display_id}:`,
-            updateError.message
-          );
+          logger.error({ err: updateError, orderId: order.order_display_id }, '[escrow-reconciliation] Failed to finalize refund');
         }
       } catch (err) {
         const newRetryCount = (order.escrow_refund_attempts ?? 0) + 1;
@@ -232,10 +227,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           reconciled_by: null,
           updated_at: new Date().toISOString(),
         });
-        logger.warn(
-          `[escrow-reconciliation] Refund for ${order.order_display_id} is not confirmed yet (retry ${newRetryCount}/${MAX_RETRIES}):`,
-          err.message
-        );
+        logger.warn({ err, orderId: order.order_display_id, retryCount: newRetryCount, maxRetries: MAX_RETRIES }, '[escrow-reconciliation] Refund is not confirmed yet');
       } finally {
         await releaseLock(lockKey, lockValue);
       }

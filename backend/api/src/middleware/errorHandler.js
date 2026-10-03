@@ -9,7 +9,11 @@ export function errorHandler(err, req, res, next) {
     );
     return res.status(413).json({
       success: false,
-      error: 'Payload too large'
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Payload too large',
+        details: {}
+      }
     });
   }
 
@@ -20,7 +24,11 @@ export function errorHandler(err, req, res, next) {
     );
     return res.status(400).json({
       success: false,
-      error: 'Malformed JSON payload'
+      error: {
+        code: 'MALFORMED_JSON',
+        message: 'Malformed JSON payload',
+        details: {}
+      }
     });
   }
 
@@ -28,8 +36,11 @@ export function errorHandler(err, req, res, next) {
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
     return res.status(status).json({
       success: false,
-      error: `File upload error: ${err.message}`,
-      code: err.code
+      error: {
+        code: err.code === 'LIMIT_FILE_SIZE' ? 'PAYLOAD_TOO_LARGE' : 'UPLOAD_ERROR',
+        message: `File upload error: ${err.message}`,
+        details: { multerCode: err.code }
+      }
     });
   }
 
@@ -38,15 +49,25 @@ export function errorHandler(err, req, res, next) {
     logger.warn({ requestId: req.requestId, errors: err.issues }, 'Zod validation failed');
     return res.status(400).json({
       success: false,
-      error: 'Validation failed',
-      details: err.issues.map(e => ({ field: e.path.join('.'), message: e.message })),
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        details: err.issues.reduce((acc, e) => {
+          acc[e.path.join('.')] = e.message;
+          return acc;
+        }, {})
+      }
     });
   }
 
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
       success: false,
-      error: err.message
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details || {}
+      }
     });
   }
 
@@ -54,6 +75,10 @@ export function errorHandler(err, req, res, next) {
   
   res.status(500).json({
     success: false,
-    error: 'Critical Internal Server Error.'
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'Critical Internal Server Error.',
+      details: {}
+    }
   });
 }

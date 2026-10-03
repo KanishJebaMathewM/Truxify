@@ -71,6 +71,30 @@ void main() {
     expect(find.text('Please select a drop location.'), findsNothing);
   });
 
+  testWidgets('rebooking an ISO pickup date preserves its date and time', (WidgetTester tester) async {
+    final controller = TruxifyController();
+    controller.openFindTrucks(
+      draft: RouteDraft(
+        pickup: 'Surat, Gujarat',
+        drop: 'Jaipur, Rajasthan',
+        dateLabel: DateTime(2030, 5, 17, 14, 30).toIso8601String(),
+        goodsType: 'Textile',
+        weightTonnes: '3',
+        dimensions: '12 × 6 × 6',
+        stacked: true,
+        fragile: false,
+        requirements: const [],
+      ),
+    );
+
+    await tester.pumpWidget(createTestWidget(tester, controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('17 May 2030'), findsOneWidget);
+    expect(find.text('2:30 PM'), findsOneWidget);
+    expect(find.text('Tomorrow'), findsNothing);
+  });
+
   testWidgets('missing pickup location shows error and prevents submission', (WidgetTester tester) async {
     await tester.pumpWidget(createTestWidget(tester));
     await tester.pumpAndSettle();

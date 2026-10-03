@@ -200,6 +200,32 @@ describe('Driver Active Trip — Confirm Stop API', () => {
     expect(res.body.error).toContain('Invalid delivery OTP');
   });
 
+  it('should reject the default demo OTP (123456) when the order has a real delivery OTP configured', async () => {
+    const res = await request(app)
+      .post('/api/trips/TX-101/confirm-stop')
+      .set(devAuthHeaders)
+      .send({ stopId: 'stop-111', otp: '123456' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid delivery OTP');
+  });
+
+  it('should accept the demo OTP (123456) only when the order has no delivery OTP configured in non-production', async () => {
+    const originalOtp = mockOrder.delivery_otp;
+    mockOrder.delivery_otp = null;
+    try {
+      const res = await request(app)
+        .post('/api/trips/TX-101/confirm-stop')
+        .set(devAuthHeaders)
+        .send({ stopId: 'stop-111', otp: '123456' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    } finally {
+      mockOrder.delivery_otp = originalOtp;
+    }
+  });
+
   it('should confirm stop-1 with valid OTP (654321) and advance current stop marker', async () => {
     const res = await request(app)
       .post('/api/trips/TX-101/confirm-stop')

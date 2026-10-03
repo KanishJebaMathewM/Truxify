@@ -21,11 +21,10 @@ COPY backend/api/package.json ./
 RUN npm install --omit=dev --legacy-peer-deps
 
 # The API source imports modules that live outside backend/api/src (the
-# earnings router, the did service, and the root subsystem routers), so the
+# earnings router, the did service, the web3 subsystems, and the root subsystem routers), so the
 # repository layout is mirrored inside the image to keep those relative
 # imports valid.
-COPY --chown=appuser:appgroup backend/api ./backend/api
-COPY --chown=appuser:appgroup backend/did ./backend/did
+COPY --chown=appuser:appgroup backend ./backend
 COPY --chown=appuser:appgroup ebpf ./ebpf
 COPY --chown=appuser:appgroup wasi ./wasi
 COPY --chown=appuser:appgroup wasm ./wasm

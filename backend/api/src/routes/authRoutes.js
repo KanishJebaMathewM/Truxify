@@ -58,6 +58,7 @@ import {
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
+import { refreshToken } from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -73,6 +74,11 @@ const authLimiter = rateLimit({
 });
 
 router.use(authLimiter);
+
+/**
+ * Exchange a valid rotating refresh token for a backend JWT and a new refresh token.
+ */
+router.post("/refresh", refreshToken);
 
 export function withTimeout(operation, timeoutMs, message) {
   let timer;
@@ -192,7 +198,13 @@ async function checkAuthOtpLockout(phone) {
       const isLocked = await redisClient.get(`auth_otp_lockout:${phoneKey}`);
       return !!isLocked;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in checkAuthOtpLockout, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_LOCKOUT_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in checkAuthOtpLockout, falling back to memory"
+      );
     }
   }
   const record = authOtpFailedAttempts.get(phoneKey);
@@ -217,7 +229,13 @@ async function recordAuthOtpFailure(phone) {
       }
       return count;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in recordAuthOtpFailure, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_FAILURE_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in recordAuthOtpFailure, falling back to memory"
+      );
     }
   }
 
@@ -244,7 +262,13 @@ async function clearAuthOtpFailures(phone) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in clearAuthOtpFailures, falling back to memory"
+      );
     }
   }
   authOtpFailedAttempts.delete(phoneKey);
@@ -254,6 +278,57 @@ const verifyOtpSchema = z.object({
   phone: z.string().min(10).max(20),
   otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
 }).strict();
+
+import { requestOtp } from '../services/otpService.js';
+
+/**
+ * POST /api/auth/request-otp
+ * Generates and delivers an OTP for phone number verification.
+ * Resolves Issue #10471 - the producer half of the OTP flow.
+ */
+router.post('/request-otp', 
+  rateLimit({ 
+    windowMs: 15 * 60 * 1000, 
+    max: 10,
+    message: 'Too many OTP requests from this IP'
+  }),
+  async (req, res) => {
+    try {
+      const { phone, channel, purpose } = req.body;
+
+      if (!phone) {
+        return res.status(400).json({ 
+          error: 'INVALID_REQUEST',
+          message: 'phone is required' 
+        });
+      }
+
+      const result = await requestOtp(phone, { channel, purpose });
+
+      if (!result.success) {
+        const statusCode = result.error === 'RATE_LIMIT_EXCEEDED' ? 429 : 400;
+        return res.status(statusCode).json({
+          error: result.error,
+          message: result.message,
+          retryAfter: result.retryAfter
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        otpId: result.otpId,
+        expiresAt: result.expiresAt,
+        ttlMinutes: result.ttlMinutes
+      });
+    } catch (err) {
+      logger.error({ err }, 'request-otp handler error');
+      return res.status(500).json({ 
+        error: 'INTERNAL_ERROR',
+        message: 'Failed to process OTP request'
+      });
+    }
+  }
+);
 
 /**
  * @openapi
@@ -290,11 +365,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, unexpired OTP for this phone number
+    // Look up the latest unused, active, unexpired OTP for this phone number
     const { data: otpRecord, error: fetchErr } = await supabase
       .from("phone_otps")
-      .select("id, otp_hash, otp_salt, expires_at, verified")
+      .select("id, otp_hash, otp_salt, expires_at, verified, is_active")
       .eq("phone", phone)
+      .eq("is_active", true)
       .eq("verified", false)
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false })
@@ -302,7 +378,13 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .maybeSingle();
 
     if (fetchErr) {
-      logger.error("[auth/verify-otp] DB fetch error:", fetchErr.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_DB_FETCH_ERROR",
+          error: fetchErr.message,
+        },
+        "DB fetch error"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
@@ -340,24 +422,50 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     // Consume the OTP so it cannot be reused
     const { error: updateErr } = await supabase
       .from("phone_otps")
-      .update({ verified: true, verified_at: new Date().toISOString() })
+      .update({ verified: true, verified_at: new Date().toISOString(), is_active: false })
       .eq("id", otpRecord.id);
 
     if (updateErr) {
-      logger.error("[auth/verify-otp] Failed to mark OTP as verified:", updateErr.message);
+      logger.error(
+        {
+          event: "AUTH_OTP_VERIFICATION_UPDATE_ERROR",
+          error: updateErr.message,
+        },
+        "Failed to mark OTP as verified"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
     await clearAuthOtpFailures(phone);
-    logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
+    logger.info(
+      {
+        event: "OTP_VERIFIED",
+        phone,
+      },
+      "OTP verified"
+    );
     return res.status(200).json({ success: true, message: "OTP verified successfully." });
   } catch (err) {
-    logger.error("[auth/verify-otp] Unexpected error:", err.message);
+    logger.error(
+      {
+        event: "AUTH_OTP_UNEXPECTED_ERROR",
+        error: err.message,
+      },
+      "Unexpected error"
+    );
     return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
 
+// Development-only fallback: this literal is public, so it must never protect
+// a production deployment. validateConfig() refuses to boot production without
+// JWT_SECRET (see config/db.js); this warning covers non-production runtimes.
 const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+if (!process.env.JWT_SECRET) {
+  logger.warn(
+    '[auth/verify] JWT_SECRET is not set. Falling back to the built-in development secret — never use this in production.',
+  );
+}
 
 /**
  * @openapi

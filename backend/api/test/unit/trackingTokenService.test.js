@@ -15,6 +15,7 @@ function createMockSupabase(store = {}) {
           _mode: null,
           eq(col, val) { this._filters.push({ col, val }); return this },
           gt(col, val) { this._filters.push({ col, val, op: 'gt' }); return this },
+          gte(col, val) { this._filters.push({ col, val, op: 'gte' }); return this },
           lt(col, val) { this._filters.push({ col, val, op: 'lt' }); return this },
           order() { return this },
           limit(n) { this._limit = n; return this },
@@ -79,6 +80,8 @@ function createMockSupabase(store = {}) {
               for (const f of this._filters) {
                 if (f.op === 'gt') {
                   rows = rows.filter(r => r[f.col] > f.val)
+                } else if (f.op === 'gte') {
+                  rows = rows.filter(r => r[f.col] >= f.val)
                 } else if (f.op === 'lt') {
                   rows = rows.filter(r => r[f.col] < f.val)
                 } else {
@@ -372,6 +375,7 @@ describe('TrackingTokenService', () => {
       mockData.store.orders = []
       mockData.store.order_timeline = []
       mockData.store.driver_locations = []
+      mockData.store.trips = []
     })
 
     it('fetches public order tracking details by orderDisplayId', async () => {
@@ -430,8 +434,14 @@ describe('TrackingTokenService', () => {
 
     it('fetches latest active driver location for an order', async () => {
       mockData.store.orders.push({
+        id: 'order-loc-id',
         order_display_id: '#TRX-LOC',
         driver_id: 'drv-99',
+      })
+      mockData.store.trips.push({
+        order_id: 'order-loc-id',
+        driver_id: 'drv-99',
+        status: 'active',
       })
       mockData.store.driver_locations.push({
         driver_id: 'drv-99',
@@ -445,6 +455,80 @@ describe('TrackingTokenService', () => {
       expect(loc).not.toBeNull()
       expect(loc.latitude).toBe(26.912)
       expect(loc.longitude).toBe(75.787)
+    })
+
+    it('returns a fresh active driver location within the 15-minute freshness window', async () => {
+      mockData.store.orders.push({
+        id: 'order-fresh-id',
+        order_display_id: '#TRX-FRESH',
+        driver_id: 'drv-fresh',
+      })
+      mockData.store.trips.push({
+        order_id: 'order-fresh-id',
+        driver_id: 'drv-fresh',
+        status: 'active',
+      })
+      mockData.store.driver_locations.push({
+        driver_id: 'drv-fresh',
+        latitude: 26.91,
+        longitude: 75.78,
+        last_updated_at: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+        is_active: true,
+      })
+
+      const loc = await service.getDriverLocation('#TRX-FRESH')
+
+      expect(loc).not.toBeNull()
+      expect(loc.latitude).toBe(26.91)
+      expect(loc.longitude).toBe(75.78)
+    })
+
+    it('returns null for an active driver location older than 15 minutes', async () => {
+      mockData.store.orders.push({
+        id: 'order-stale-id',
+        order_display_id: '#TRX-STALE',
+        driver_id: 'drv-stale',
+      })
+      mockData.store.trips.push({
+        order_id: 'order-stale-id',
+        driver_id: 'drv-stale',
+        status: 'active',
+      })
+      mockData.store.driver_locations.push({
+        driver_id: 'drv-stale',
+        latitude: 26.91,
+        longitude: 75.78,
+        last_updated_at: new Date(Date.now() - 15 * 60 * 1000 - 1000).toISOString(),
+        is_active: true,
+      })
+
+      const loc = await service.getDriverLocation('#TRX-STALE')
+
+      expect(loc).toBeNull()
+    })
+
+    it('returns null for a driver location 20 minutes old (regression: stale location exposure)', async () => {
+      mockData.store.orders.push({
+        id: 'order-regression-id',
+        order_display_id: '#TRX-REGRESSION',
+        driver_id: 'drv-regression',
+      })
+      mockData.store.trips.push({
+        order_id: 'order-regression-id',
+        driver_id: 'drv-regression',
+        status: 'active',
+      })
+      mockData.store.driver_locations.push({
+        driver_id: 'drv-regression',
+        latitude: 12.971,
+        longitude: 77.594,
+        last_updated_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+        is_active: true,
+      })
+
+      const loc = await service.getDriverLocation('#TRX-REGRESSION')
+
+      expect(loc).toBeNull()
     })
   })
 })

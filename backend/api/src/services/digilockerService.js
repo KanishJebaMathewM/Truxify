@@ -1,10 +1,14 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
+
+// Sentinel stored on profiles that have not linked a wallet yet. It is a
+// truthy string, so it must be compared explicitly before any on-chain write.
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 class DigilockerService {
   constructor() {
@@ -140,6 +144,8 @@ class DigilockerService {
       return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };
     }
     logger.info(`[DigilockerService] Verifying documents for user ${userId} with token ${accessToken}`);
+
+
 
     const dlData = {
       doc_type: 'driving_licence',
@@ -299,12 +305,21 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
-      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+      // The zero address is the sentinel the code already recognises, but it is
+      // a truthy string, so the old `if (this.documentRegistry && walletAddress)`
+      // guard let it through and submitted a real registerDocument transaction
+      // to 0x0 while the log claimed the write was skipped.
+      const hasUsableWallet =
+        !!walletAddress &&
+        walletAddress !== ZERO_ADDRESS &&
+        String(walletAddress).trim() !== '';
+
+      if (!hasUsableWallet) {
         logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
       }
       let txHash = null;
 
-      if (this.documentRegistry && walletAddress) {
+      if (this.documentRegistry && hasUsableWallet) {
         try {
           const tx = await this.documentRegistry.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();
@@ -387,16 +402,30 @@ class DigilockerService {
         error: syncErrors.join('; '),
         syncedDocumentsCount: syncResults.length,
         documents: syncResults,
-        isMock
+        isMock,
+        is_digilocker_verified: false,
       };
+    }
+
+    if (syncResults.length > 0) {
+      const { error: profileUpdateErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ is_digilocker_verified: true })
+        .eq('id', driverId);
+
+      if (profileUpdateErr) {
+        logger.error(`[DigilockerService] Failed to update profile is_digilocker_verified for ${driverId}:`, profileUpdateErr.message);
+      }
     }
 
     return {
       success: true,
       syncedDocumentsCount: syncResults.length,
       documents: syncResults,
-      isMock
+      isMock,
+      is_digilocker_verified: syncResults.length > 0,
     };
+
   }
 }
 

@@ -28,28 +28,36 @@ export function validatePagination(options = {}) {
 
     // 2. Parse offset (or page)
     let offset = defaultOffset;
-    if (req.query.offset) {
-      const parsed = parseInteger(req.query.offset);
-      if (Number.isFinite(parsed) && parsed >= 0) {
-        offset = Math.min(parsed, maxOffset);
-      } else {
-        return res.status(400).json({ error: 'Invalid offset parameter' });
+if (req.query.offset) {
+  const rawOffset = String(req.query.offset);
+
+  if (!/^-?\d+$/.test(rawOffset)) {
+    return res.status(400).json({ error: 'Invalid offset parameter' });
+  }
+
+  const parsed = Number.parseInt(rawOffset, 10);
+
+  if (Number.isFinite(parsed)) {
+    offset = Math.max(0, Math.min(parsed, maxOffset));
+  } else {
+    return res.status(400).json({ error: 'Invalid offset parameter' });
+  }
+} else if (req.query.page) {
+      const parsedPage = parseInteger(req.query.page);
+      if (parsedPage !== null && parsedPage < 1) {
+        return res.status(400).json({ error: 'Invalid page parameter: must be >= 1' });
       }
-    } else if (req.query.page) {
-       const parsedPage = parseInteger(req.query.page);
-       if (parsedPage !== null && parsedPage < 1) {
-         return res.status(400).json({ error: 'Invalid page parameter: must be >= 1' });
-       }
-       if (Number.isFinite(parsedPage) && parsedPage > 0) {
-          const computedOffset = (parsedPage - 1) * limit;
-          // Guard against NaN (e.g., if limit is 0) and cap at maxOffset
-          offset = Number.isNaN(computedOffset) ? defaultOffset : Math.min(computedOffset, maxOffset);
-       } else {
-          return res.status(400).json({ error: 'Invalid page parameter' });
-       }
+      if (Number.isFinite(parsedPage) && parsedPage > 0) {
+        const computedOffset = (parsedPage - 1) * limit;
+        // Guard against NaN (e.g., if limit is 0) and cap at maxOffset
+        offset = Number.isNaN(computedOffset) ? defaultOffset : Math.min(computedOffset, maxOffset);
+      } else {
+        return res.status(400).json({ error: 'Invalid page parameter' });
+      }
     }
 
     // Reassign normalized values back to query so downstream controllers see capped values safely
+    offset = Math.max(0, offset);
     req.query.limit = limit;
     req.query.offset = offset;
     

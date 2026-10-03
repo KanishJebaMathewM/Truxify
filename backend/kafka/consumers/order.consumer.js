@@ -248,12 +248,14 @@ class OrderConsumer {
     }
   }
 
-  async replayDeadLetters({ topic = null, limit = 50 } = {}) {
+  async replayDeadLetters({ topic = null, limit = 50, consumerGroup = CONSUMER_GROUPS.ORDER_SERVICE } = {}) {
     const pending = await deadLetterRepository.listPending({ topic, limit });
     const results = { attempted: pending.length, succeeded: 0, failed: 0 };
+    const groupId = consumerGroup || CONSUMER_GROUPS.ORDER_SERVICE;
 
     for (const entry of pending) {
-      const topicHandlers = this.handlers.get(entry.topic) || [];
+      const currentTopic = entry.topic;
+      const topicHandlers = this.handlers.get(currentTopic) || [];
 
       // entry.message is the DLQ wrapper object
       // ({ topic, message, error, timestamp, retryCount }); its `message` field
@@ -267,10 +269,10 @@ class OrderConsumer {
           : entry.message?.message;
         parsedMessage = JSON.parse(serialized);
       } catch (error) {
-        logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
+        logger.error(`Replay failed for dead letter ${entry.id} (${currentTopic}): message is not valid JSON:`, error);
         if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
           await deadLetterRepository.markStatus(entry.id, 'failed');
-          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+          logger.error(`Dead letter ${entry.id} (${currentTopic}) marked failed after ${entry.retry_count ?? 0} retries`);
         } else {
           await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
         }
@@ -278,6 +280,115 @@ class OrderConsumer {
         continue;
       }
 
+      // Order read-model topics: apply the event atomically via orderReadModel.
+      // If the event was already applied, applyEvent returns false and we skip only
+      // the projection. In either case we proceed to run registered handlers so failed
+      // handlers can be recovered upon replay.
+      if (ORDER_READ_MODEL_TOPICS.has(currentTopic)) {
+        const eventId = parsedMessage?.eventId || parsedMessage?.metadata?.eventId || null;
+        const orderId = parsedMessage?.aggregateId || parsedMessage?.orderId || parsedMessage?.payload?.orderId || null;
+
+        let applied = false;
+        try {
+          applied = await orderReadModel.applyEvent({
+            topic: currentTopic,
+            eventId,
+            orderId,
+            eventType: parsedMessage?.eventType,
+            payload: parsedMessage?.payload,
+            version: parsedMessage?.version,
+            consumerGroup: groupId,
+          });
+        } catch (error) {
+          logger.error(`Replay read-model applyEvent error for dead letter ${entry.id} (${currentTopic}):`, error);
+          if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+            await deadLetterRepository.markStatus(entry.id, 'failed');
+          } else {
+            await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+          }
+          results.failed += 1;
+          continue;
+        }
+
+        if (!applied) {
+          logger.info(`[OrderConsumer] Read-model projection already applied for event ${eventId} on ${currentTopic}; continuing to registered handlers`);
+        }
+
+        // Run registered handlers
+        try {
+          for (const handler of topicHandlers) {
+            await handler(parsedMessage, { value: parsedMessage });
+          }
+          await deadLetterRepository.markStatus(entry.id, 'replayed');
+          results.succeeded += 1;
+        } catch (error) {
+          logger.error(`Replay failed for dead letter ${entry.id} (${currentTopic}):`, error);
+          if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+            await deadLetterRepository.markStatus(entry.id, 'failed');
+            logger.error(`Dead letter ${entry.id} (${currentTopic}) marked failed after ${entry.retry_count ?? 0} retries`);
+          } else {
+            await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+          }
+          results.failed += 1;
+        }
+        continue;
+      }
+
+      // Side-effect topics (payment.confirmed, escrow.released, notifications, etc.):
+      // Claim processing first so a replayed dead letter never re-applies side effects
+      // if it was already completed (Issue #11218).
+      const eventId = parsedMessage?.metadata?.eventId || parsedMessage?.eventId || null;
+      const orderId = parsedMessage?.orderId || parsedMessage?.payload?.orderId || parsedMessage?.aggregateId || null;
+
+      let claimedEventId = null;
+      if (eventId) {
+        let isNew = false;
+        try {
+          isNew = await processedEventRepository.claimProcessing(
+            currentTopic,
+            eventId,
+            orderId,
+            groupId
+          );
+        } catch (error) {
+          logger.error(`Failed to claim processing during replay for dead letter ${entry.id} (${currentTopic}):`, error);
+          if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+            await deadLetterRepository.markStatus(entry.id, 'failed');
+          } else {
+            await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+          }
+          results.failed += 1;
+          continue;
+        }
+
+        if (!isNew) {
+          // Event was not newly claimed. Check if it already successfully completed.
+          const status = typeof processedEventRepository.getStatus === 'function'
+            ? await processedEventRepository.getStatus(currentTopic, eventId, groupId)
+            : 'completed';
+
+          if (status === 'completed') {
+            logger.info(
+              `[OrderConsumer] Skipping replay for already-completed side-effect event ${eventId} on ${currentTopic}; marking DLQ entry replayed.`
+            );
+            await deadLetterRepository.markStatus(entry.id, 'replayed');
+            results.succeeded += 1;
+            continue;
+          }
+
+          // If status is 'processing', another replica or consumer currently holds an active lock/claim.
+          // Leave it in DLQ as pending so the in-flight worker can finish, without prematurely marking replayed.
+          logger.warn(
+            `[OrderConsumer] Dead letter ${entry.id} (${currentTopic}, event ${eventId}) is actively being processed by another worker; skipping for retry.`
+          );
+          results.failed += 1;
+          continue;
+        }
+
+        claimedEventId = eventId;
+      }
+
+      let handlerFailed = false;
       try {
         for (const handler of topicHandlers) {
           await handler(parsedMessage, { value: parsedMessage });
@@ -285,18 +396,30 @@ class OrderConsumer {
         await deadLetterRepository.markStatus(entry.id, 'replayed');
         results.succeeded += 1;
       } catch (error) {
-        logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}):`, error);
-        // Cap replay attempts so a poison message is not retried forever.
-        // After the cap the dead letter is marked failed and no longer
-        // picked up by listPending(), otherwise each replay cycles the same
-        // failing entry back into the pending queue indefinitely.
+        handlerFailed = true;
+        logger.error(`Replay failed for dead letter ${entry.id} (${currentTopic}):`, error);
         if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
           await deadLetterRepository.markStatus(entry.id, 'failed');
-          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+          logger.error(`Dead letter ${entry.id} (${currentTopic}) marked failed after ${entry.retry_count ?? 0} retries`);
         } else {
           await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
         }
         results.failed += 1;
+      } finally {
+        if (claimedEventId) {
+          try {
+            if (handlerFailed) {
+              await processedEventRepository.markFailed(currentTopic, claimedEventId, groupId);
+            } else {
+              const completed = await processedEventRepository.markCompleted(currentTopic, claimedEventId, groupId);
+              if (completed === false) {
+                logger.warn(`[OrderConsumer] Claim for event ${claimedEventId} on ${currentTopic} was superseded or expired before replay completion`);
+              }
+            }
+          } catch (error) {
+            logger.error(`Failed to resolve processing claim during replay for event ${claimedEventId} on ${currentTopic}:`, error);
+          }
+        }
       }
     }
 

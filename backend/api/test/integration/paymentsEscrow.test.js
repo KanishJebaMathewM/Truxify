@@ -23,6 +23,9 @@ const mockOrderRepository = {
 
 const mockOrderLifecycleService = {
   verifyDeliveryFn: vi.fn(),
+  deliveryVerification: {
+    geofenceAutoConfirm: vi.fn(),
+  },
 };
 
 const mockLockPayment = vi.fn();
@@ -32,6 +35,7 @@ const mockSendFcmNotification = vi.fn();
 // Register mocks BEFORE importing routes
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (req, res, next) => next(),
+  createStore: () => undefined,
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({
@@ -41,6 +45,12 @@ vi.mock('../../src/middleware/auth.js', () => ({
   },
 }));
 
+vi.mock('../../src/lib/redisLock.js', () => ({
+  acquireLock: vi.fn().mockResolvedValue('mock-lock-token'),
+  releaseLock: vi.fn().mockResolvedValue(),
+  LockAcquisitionError: class LockAcquisitionError extends Error {},
+}));
+
 vi.mock('../../src/core/container.js', () => ({
   orderRepository: {
     findOrderByAnyId: (...args) => mockOrderRepository.findOrderByAnyId(...args),
@@ -48,8 +58,18 @@ vi.mock('../../src/core/container.js', () => ({
     findCustomerWallet: (...args) => mockOrderRepository.findCustomerWallet(...args),
     updateOrder: (...args) => mockOrderRepository.updateOrder(...args),
   },
+  orderValidationService: {
+    findOrderByIdOrDisplayId: async (...args) => {
+      const res = await mockOrderRepository.findOrderByAnyId(...args);
+      return res?.data || res;
+    },
+  },
   orderLifecycleService: {
     verifyDeliveryFn: (...args) => mockOrderLifecycleService.verifyDeliveryFn(...args),
+    deliveryVerification: {
+      geofenceAutoConfirm: (...args) =>
+        mockOrderLifecycleService.deliveryVerification.geofenceAutoConfirm(...args),
+    },
   },
   logger: {
     info: vi.fn(),
@@ -172,6 +192,10 @@ describe('Payment & Escrow Endpoints', () => {
     });
 
     it('auto-confirms delivery via GPS geofence fallback (within 500m)', async () => {
+      mockOrderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockResolvedValueOnce({
+        autoConfirmed: true,
+        message: 'Driver confirmed at the drop-off via server telemetry. Enter the customer OTP to release payment.',
+      });
       // Lat/Lng is very close to Bangalore drop location (12.9716, 77.5946)
       const res = await request(app)
         .post('/api/deliveries/order-123/confirm-otp')
@@ -182,16 +206,20 @@ describe('Payment & Escrow Endpoints', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body.isGeofenced).toBe(true);
-      expect(mockStoreDeliveryOtp).toHaveBeenCalledWith('order-123', 'GEOF', 5);
-      expect(mockOrderLifecycleService.verifyDeliveryFn).toHaveBeenCalledWith(
-        'order-123',
-        'driver-user-id',
-        'GEOF'
-      );
+      expect(res.body.autoConfirmed).toBe(true);
+      expect(mockOrderLifecycleService.deliveryVerification.geofenceAutoConfirm).toHaveBeenCalledWith({
+        orderId: 'order-123',
+        driverId: 'driver-user-id',
+        driverLat: 12.9718,
+        driverLng: 77.5948,
+        geofenceRadiusM: 500,
+      });
     });
 
     it('rejects with 400 if outside geofence and no OTP is provided', async () => {
+      mockOrderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockRejectedValueOnce(
+        new Error('outside geofence')
+      );
       // Coordinates are far away (e.g. Mumbai)
       const res = await request(app)
         .post('/api/deliveries/order-123/confirm-otp')
@@ -202,7 +230,7 @@ describe('Payment & Escrow Endpoints', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toContain('OTP is required');
+      expect(res.body.error).toBe('outside geofence');
     });
   });
 });

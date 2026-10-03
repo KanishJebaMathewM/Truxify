@@ -307,6 +307,9 @@ class SupabaseQueryBuilder {
       if (this._single) {
         return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
       }
+      if (this._maybeSingle) {
+        return { data: updatedRows[0] ?? null, error: null };
+      }
       return { data: updatedRows, error: null };
     }
 
@@ -323,7 +326,7 @@ class SupabaseQueryBuilder {
         }
       }
       this._store[this._table] = remaining;
-      return { data: deleted, error: null };
+      return { data: deleted, error: null, count: deleted.length };
     }
 
     if (this._mode === 'select' || this._mode === null) {
@@ -468,10 +471,12 @@ export function createSupabaseMock(initialStore = {}) {
         // Only the CURRENT user's matching device may be deactivated; a shared
         // token owned by another user is never touched.
         const row = store.user_devices?.find((d) => d.fcm_token === token && d.user_id === userId);
+        let deletedCount = 0;
         if (row) {
           row.is_active = false;
           row.deactivated_at = nowIso;
           row.updated_at = nowIso;
+          deletedCount = 1;
         }
         // Profile fallback: point to another active device, or null.
         const nextActive = store.user_devices?.find(
@@ -482,6 +487,7 @@ export function createSupabaseMock(initialStore = {}) {
           profile.fcm_token = nextActive?.fcm_token ?? null;
           profile.fcm_token_updated_at = nowIso;
         }
+        return Promise.resolve({ data: deletedCount, error: null });
       }
       // Simulate the append_maintenance_photos PL/pgSQL RPC (see
       // migrations/20260811000000_create_append_maintenance_photos.sql)

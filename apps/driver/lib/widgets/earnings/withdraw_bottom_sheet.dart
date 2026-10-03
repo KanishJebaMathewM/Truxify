@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:uuid/uuid.dart';
 import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import '../../l10n/app_localizations.dart';
@@ -40,6 +41,12 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _amountFocusNode = FocusNode();
+  final Uuid _uuid = Uuid();
+
+  // Stable idempotency key tied to this withdrawal attempt intent.
+  // Reused across user retries (timeouts, network drops) to prevent double withdrawals (#14824).
+  late String _currentIdempotencyKey;
+
   bool _isSubmitting = false;
   String? _serverError;
 
@@ -69,6 +76,7 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
   @override
   void initState() {
     super.initState();
+    _currentIdempotencyKey = _uuid.v4();
     _earningsService = DriverEarningsService();
   }
 
@@ -88,7 +96,7 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
             : amountRupees.toStringAsFixed(2);
     _amountController.text = display;
     _amountController.selection = TextSelection.fromPosition(
-      TextPosition(offset: _amountController.text.length),
+      TextSelection(offset: _amountController.text.length),
     );
     setState(() => _serverError = null);
   }
@@ -107,8 +115,15 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
     final amountPaisa = _amountPaisa!;
 
     try {
-      await _earningsService.withdrawFunds(amountPaisa);
+      // Pass the stable idempotency key so retries do not trigger duplicate charges (#14824)
+      await _earningsService.withdrawFunds(
+        amountPaisa,
+        idempotencyKey: _currentIdempotencyKey,
+      );
       if (!mounted) return;
+
+      // On success, generate a new key for future distinct withdrawal attempts
+      _currentIdempotencyKey = _uuid.v4();
       Navigator.of(context).pop(true);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -116,12 +131,15 @@ class _WithdrawBottomSheetState extends State<WithdrawBottomSheet> {
         _serverError = _humanizeApiError(e);
         _isSubmitting = false;
       });
+      // NOTE: We intentionally retain _currentIdempotencyKey on error/retry
+      // so that if the user taps "Withdraw" again, the exact same key is reused.
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _serverError = e.toString().replaceFirst('Exception: ', '');
         _isSubmitting = false;
       });
+      // Retain key on network failure retries as well.
     }
   }
 

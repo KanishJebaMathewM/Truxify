@@ -1,13 +1,24 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import {
+    createVerificationChallenge,
+    getZkidChainId,
+    validateVerificationChallenge,
+    recoverChallengeSigner,
+    consumeVerificationChallenge
+} from './verificationChallenge.js';
 
-class ZKIDService {
+export class ZKIDService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
-        this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        // The signer and contract clients are created on first use (see the getters
+        // below). Building them here made the whole API fail to start whenever
+        // PRIVATE_KEY or a contract address was not configured, because ethers
+        // throws on an undefined private key or contract target.
+        this._wallet = null;
         this.zkidAddress = process.env.ZKID_CONTRACT_ADDRESS;
 
         this.zkidABI = [
@@ -23,40 +34,53 @@ class ZKIDService {
             'function isCredentialValid(bytes32 credentialHash) external view returns (bool)'
         ];
 
-        this.zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
-
-        // Generate identity secret
         this.identitySecret = crypto.randomBytes(32);
-
         logger.info('✅ ZK-ID Service initialized');
+    }
+
+    // ============ Chain clients (created on first use) ============
+
+    get wallet() {
+        if (!this._wallet) {
+            if (!process.env.PRIVATE_KEY) {
+                throw new Error('ZK-ID chain access is not configured: set PRIVATE_KEY');
+            }
+            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        }
+        return this._wallet;
+    }
+
+    set wallet(value) {
+        this._wallet = value;
+    }
+
+    get zkid() {
+        if (!this._zkid) {
+            if (!this.zkidAddress) {
+                throw new Error('ZK-ID chain access is not configured: set ZKID_CONTRACT_ADDRESS');
+            }
+            this._zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
+        }
+        return this._zkid;
+    }
+
+    set zkid(value) {
+        this._zkid = value;
     }
 
     // ============ Identity Management ============
 
     async createIdentity(userAddress) {
         try {
-            // Generate identity hash
             const identityHash = ethers.keccak256(
                 ethers.toUtf8Bytes(`${userAddress}:${Date.now()}:${uuidv4()}`)
             );
-
-            const tx = await this.zkid.createIdentity(identityHash, {
-                gasLimit: 200000
-            });
+            const tx = await this.zkid.createIdentity(identityHash, { gasLimit: 200000 });
             const receipt = await tx.wait();
 
-            await this.storeIdentity({
-                identityHash,
-                userAddress,
-                txHash: receipt.hash
-            });
-
+            await this.storeIdentity({ identityHash, userAddress, txHash: receipt.hash });
             logger.info(`✅ Identity created: ${identityHash}`);
-            return {
-                success: true,
-                identityHash,
-                txHash: receipt.hash
-            };
+            return { success: true, identityHash, txHash: receipt.hash };
         } catch (error) {
             logger.error('Identity creation failed:', error);
             throw error;
@@ -67,11 +91,9 @@ class ZKIDService {
 
     async issueCredential(identityHash, credentialType, schemaHash) {
         try {
-            // Generate credential hash
             const credentialHash = ethers.keccak256(
                 ethers.toUtf8Bytes(`${identityHash}:${credentialType}:${Date.now()}`)
             );
-
             const tx = await this.zkid.issueCredential(
                 identityHash,
                 credentialType,
@@ -81,19 +103,9 @@ class ZKIDService {
             );
             const receipt = await tx.wait();
 
-            await this.storeCredential({
-                identityHash,
-                credentialHash,
-                credentialType,
-                txHash: receipt.hash
-            });
-
+            await this.storeCredential({ identityHash, credentialHash, credentialType, txHash: receipt.hash });
             logger.info(`✅ Credential issued: ${credentialHash}`);
-            return {
-                success: true,
-                credentialHash,
-                txHash: receipt.hash
-            };
+            return { success: true, credentialHash, txHash: receipt.hash };
         } catch (error) {
             logger.error('Credential issuance failed:', error);
             throw error;
@@ -102,19 +114,11 @@ class ZKIDService {
 
     async revokeCredential(credentialHash) {
         try {
-            const tx = await this.zkid.revokeCredential(credentialHash, {
-                gasLimit: 100000
-            });
+            const tx = await this.zkid.revokeCredential(credentialHash, { gasLimit: 100000 });
             const receipt = await tx.wait();
-
             await this.updateCredentialStatus(credentialHash, true);
-
             logger.info(`✅ Credential revoked: ${credentialHash}`);
-            return {
-                success: true,
-                credentialHash,
-                txHash: receipt.hash
-            };
+            return { success: true, credentialHash, txHash: receipt.hash };
         } catch (error) {
             logger.error('Credential revocation failed:', error);
             throw error;
@@ -125,7 +129,6 @@ class ZKIDService {
         try {
             const isValid = await this.zkid.isCredentialValid(credentialHash);
             const credential = await this.zkid.getCredential(credentialHash);
-
             return {
                 success: true,
                 isValid,
@@ -147,48 +150,59 @@ class ZKIDService {
         }
     }
 
-    // ============ Verification Request ============
+    // ============ Replay-resistant Verification ============
 
-    /**
-     * Validate a zero-knowledge verification proof before trusting it.
-     *
-     * The prover must sign the verification challenge (the keccak256 hash of
-     * the identity and credential hashes) with the wallet that owns the
-     * identity. We recover the prover's address from that signature so the
-     * `verified` flag reflects an actual, attributable proof rather than a
-     * hardcoded `true`. Missing, malformed, zero, or non-recoverable proofs
-     * are rejected.
-     *
-     * @returns {{ verified: boolean, prover?: string, reason?: string }}
-     */
-    verifyProof(proofData, identityHash, credentialHash) {
-        if (!proofData || !ethers.isHexString(proofData) || proofData === ethers.ZeroHash) {
-            return { verified: false, reason: 'Missing or invalid proofData' };
-        }
-
-        const challenge = ethers.keccak256(
-            ethers.AbiCoder.defaultAbiCoder().encode(
-                ['bytes32', 'bytes32'],
-                [identityHash, credentialHash]
-            )
-        );
-
-        try {
-            const prover = ethers.verifyMessage(ethers.getBytes(challenge), proofData);
-            return { verified: true, prover };
-        } catch (err) {
-            logger.error('Proof signature recovery failed:', err);
-            return { verified: false, reason: 'Proof signature recovery failed' };
-        }
+    async createVerificationChallenge(identityHash, credentialHash) {
+        return createVerificationChallenge({
+            provider: this.provider,
+            zkidAddress: this.zkidAddress,
+            identityHash,
+            credentialHash
+        });
     }
 
-    async requestVerification(identityHash, credentialHash, proofData) {
+    async verifyProof(proofData, identityHash, credentialHash, challengeData) {
+        const identity = await this.getIdentity(identityHash);
+        if (!identity) return { verified: false, reason: 'Identity not found' };
+        if (!identity.isActive) return { verified: false, reason: 'Identity is revoked' };
+
+        const expectedChainId = await getZkidChainId(this.provider);
+        const challengeValidation = await validateVerificationChallenge({
+            challengeData,
+            identityHash,
+            credentialHash,
+            zkidAddress: this.zkidAddress,
+            expectedChainId
+        });
+        if (!challengeValidation.valid) return { verified: false, reason: challengeValidation.reason };
+
+        const recovered = recoverChallengeSigner(proofData, challengeData.challenge);
+        if (!recovered.verified) return recovered;
+        if (identity.owner.toLowerCase() !== recovered.prover.toLowerCase()) {
+            return {
+                verified: false,
+                prover: recovered.prover,
+                reason: 'Proof signer does not own the registered identity'
+            };
+        }
+
+        const consumed = await consumeVerificationChallenge({
+            nonce: challengeData.nonce,
+            identityHash,
+            credentialHash,
+            chainId: challengeValidation.chainId
+        });
+        if (!consumed) {
+            return { verified: false, prover: recovered.prover, reason: 'Verification challenge is unknown or already used' };
+        }
+
+        return { verified: true, prover: recovered.prover };
+    }
+
+    async requestVerification(identityHash, credentialHash, proofData, challengeData) {
         try {
-            // Never submit or record a verification without a passing proof.
-            const proof = this.verifyProof(proofData, identityHash, credentialHash);
-            if (!proof.verified) {
-                throw new Error(proof.reason || 'Proof verification failed');
-            }
+            const proof = await this.verifyProof(proofData, identityHash, credentialHash, challengeData);
+            if (!proof.verified) throw new Error(proof.reason || 'Proof verification failed');
 
             const tx = await this.zkid.requestVerification(
                 identityHash,
@@ -198,9 +212,6 @@ class ZKIDService {
             );
             const receipt = await tx.wait();
 
-            // Derive the request id from the on-chain event if present,
-            // otherwise anchor it to the actual transaction hash instead of
-            // fabricating a keccak of a client-side timestamp
             let requestId = null;
             for (const log of receipt.logs) {
                 const parsed = this.zkid.interface.parseLog(log);
@@ -209,9 +220,7 @@ class ZKIDService {
                     break;
                 }
             }
-            if (!requestId) {
-                requestId = receipt.hash;
-            }
+            if (!requestId) requestId = receipt.hash;
 
             await this.storeVerificationRequest({
                 requestId,
@@ -247,7 +256,6 @@ class ZKIDService {
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();
-
             const disclosureId = ethers.keccak256(
                 ethers.toUtf8Bytes(`${identityHash}:${Date.now()}:${recipient}`)
             );
@@ -259,13 +267,8 @@ class ZKIDService {
                 recipient,
                 txHash: receipt.hash
             });
-
             logger.info(`✅ Selective disclosure created: ${disclosureId}`);
-            return {
-                success: true,
-                disclosureId,
-                txHash: receipt.hash
-            };
+            return { success: true, disclosureId, txHash: receipt.hash };
         } catch (error) {
             logger.error('Selective disclosure creation failed:', error);
             throw error;
@@ -274,17 +277,10 @@ class ZKIDService {
 
     async revokeSelectiveDisclosure(disclosureId) {
         try {
-            const tx = await this.zkid.revokeSelectiveDisclosure(disclosureId, {
-                gasLimit: 100000
-            });
+            const tx = await this.zkid.revokeSelectiveDisclosure(disclosureId, { gasLimit: 100000 });
             const receipt = await tx.wait();
-
             logger.info(`✅ Selective disclosure revoked: ${disclosureId}`);
-            return {
-                success: true,
-                disclosureId,
-                txHash: receipt.hash
-            };
+            return { success: true, disclosureId, txHash: receipt.hash };
         } catch (error) {
             logger.error('Selective disclosure revocation failed:', error);
             throw error;
@@ -332,27 +328,23 @@ class ZKIDService {
     // ============ Database Operations ============
 
     async storeIdentity(data) {
-        const { error } = await supabase
-            .from('zkid_identities')
-            .insert([{
-                identity_hash: data.identityHash,
-                user_address: data.userAddress,
-                tx_hash: data.txHash,
-                created_at: new Date().toISOString()
-            }]);
+        const { error } = await supabase.from('zkid_identities').insert([{
+            identity_hash: data.identityHash,
+            user_address: data.userAddress,
+            tx_hash: data.txHash,
+            created_at: new Date().toISOString()
+        }]);
         if (error) throw error;
     }
 
     async storeCredential(data) {
-        const { error } = await supabase
-            .from('zkid_credentials')
-            .insert([{
-                identity_hash: data.identityHash,
-                credential_hash: data.credentialHash,
-                credential_type: data.credentialType,
-                tx_hash: data.txHash,
-                issued_at: new Date().toISOString()
-            }]);
+        const { error } = await supabase.from('zkid_credentials').insert([{
+            identity_hash: data.identityHash,
+            credential_hash: data.credentialHash,
+            credential_type: data.credentialType,
+            tx_hash: data.txHash,
+            issued_at: new Date().toISOString()
+        }]);
         if (error) throw error;
     }
 
@@ -365,31 +357,27 @@ class ZKIDService {
     }
 
     async storeVerificationRequest(data) {
-        const { error } = await supabase
-            .from('zkid_verifications')
-            .insert([{
-                request_id: data.requestId,
-                identity_hash: data.identityHash,
-                credential_hash: data.credentialHash,
-                tx_hash: data.txHash,
-                verified: !!data.verified,
-                prover: data.prover || null,
-                created_at: new Date().toISOString()
-            }]);
+        const { error } = await supabase.from('zkid_verifications').insert([{
+            request_id: data.requestId,
+            identity_hash: data.identityHash,
+            credential_hash: data.credentialHash,
+            tx_hash: data.txHash,
+            verified: !!data.verified,
+            prover: data.prover || null,
+            created_at: new Date().toISOString()
+        }]);
         if (error) throw error;
     }
 
     async storeSelectiveDisclosure(data) {
-        const { error } = await supabase
-            .from('zkid_disclosures')
-            .insert([{
-                disclosure_id: data.disclosureId,
-                identity_hash: data.identityHash,
-                disclosed_attributes: data.disclosedAttributes,
-                recipient: data.recipient,
-                tx_hash: data.txHash,
-                created_at: new Date().toISOString()
-            }]);
+        const { error } = await supabase.from('zkid_disclosures').insert([{
+            disclosure_id: data.disclosureId,
+            identity_hash: data.identityHash,
+            disclosed_attributes: data.disclosedAttributes,
+            recipient: data.recipient,
+            tx_hash: data.txHash,
+            created_at: new Date().toISOString()
+        }]);
         if (error) throw error;
     }
 
@@ -397,21 +385,10 @@ class ZKIDService {
 
     async getZKIDStats() {
         try {
-            const { data: identities } = await supabase
-                .from('zkid_identities')
-                .select('*');
-
-            const { data: credentials } = await supabase
-                .from('zkid_credentials')
-                .select('*');
-
-            const { data: verifications } = await supabase
-                .from('zkid_verifications')
-                .select('*');
-
-            const { data: disclosures } = await supabase
-                .from('zkid_disclosures')
-                .select('*');
+            const { data: identities } = await supabase.from('zkid_identities').select('*');
+            const { data: credentials } = await supabase.from('zkid_credentials').select('*');
+            const { data: verifications } = await supabase.from('zkid_verifications').select('*');
+            const { data: disclosures } = await supabase.from('zkid_disclosures').select('*');
 
             return {
                 totalIdentities: identities?.length || 0,

@@ -55,10 +55,22 @@ class AlertRouter {
     try {
       switch (channel) {
         case ALERT_CHANNELS.SLACK:
+          if (!this.slackClient) {
+            logger.warn({ channel }, '[AlertRouter] Slack client not configured');
+            return Promise.reject(new Error('Slack client not configured'));
+          }
           return await this.sendSlackAlert(alert);
         case ALERT_CHANNELS.EMAIL:
+          if (!this.emailService) {
+            logger.warn({ channel }, '[AlertRouter] Email service not configured');
+            return Promise.reject(new Error('Email service not configured'));
+          }
           return await this.sendEmailAlert(alert);
         case ALERT_CHANNELS.SMS:
+          if (!this.smsService) {
+            logger.warn({ channel }, '[AlertRouter] SMS service not configured');
+            return Promise.reject(new Error('SMS service not configured'));
+          }
           return await this.sendSMSAlert(alert);
         case ALERT_CHANNELS.DASHBOARD:
           return await this.logToDashboard(alert);
@@ -87,8 +99,13 @@ class AlertRouter {
     const typeEmoji = this.getTypeEmoji(alert.type);
 
     let text = `${typeEmoji} *${alert.type}* (${alert.severity})`;
+    if (alert.bookingId) text += `\n*Booking ID:* ${alert.bookingId}`;
     if (alert.reason) text += `\n*Reason:* ${alert.reason}`;
     if (alert.driver) text += `\n*Driver:* ${alert.driver}`;
+    if (alert.customer) text += `\n*Customer:* ${alert.customer}`;
+    if (alert.amount) text += `\n*Amount:* ${alert.amount}`;
+    if (alert.refundAmount) text += `\n*Refund Amount:* ${alert.refundAmount}`;
+    if (alert.driverAmount) text += `\n*Driver Amount:* ${alert.driverAmount}`;
     if (alert.wallet) text += `\n*Wallet:* ${alert.wallet}`;
     if (alert.txHash) text += `\n*TX:* \`${alert.txHash}\``;
 
@@ -128,8 +145,13 @@ class AlertRouter {
       `Details:`,
     ];
 
+    if (alert.bookingId) lines.push(`  Booking ID: ${alert.bookingId}`);
     if (alert.reason) lines.push(`  Reason: ${alert.reason}`);
     if (alert.driver) lines.push(`  Driver: ${alert.driver}`);
+    if (alert.customer) lines.push(`  Customer: ${alert.customer}`);
+    if (alert.amount) lines.push(`  Amount: ${alert.amount}`);
+    if (alert.refundAmount) lines.push(`  Refund Amount: ${alert.refundAmount}`);
+    if (alert.driverAmount) lines.push(`  Driver Amount: ${alert.driverAmount}`);
     if (alert.wallet) lines.push(`  Wallet: ${alert.wallet}`);
     if (alert.shipmentId) lines.push(`  Shipment ID: ${alert.shipmentId}`);
     if (alert.claimId) lines.push(`  Claim ID: ${alert.claimId}`);
@@ -145,7 +167,7 @@ class AlertRouter {
       return null;
     }
 
-    const message = `[${alert.severity}] ${alert.type}: ${alert.reason || 'Check dashboard for details'}`;
+    const message = `[${alert.severity}] ${alert.type}: ${alert.reason || alert.message || 'Check dashboard for details'}`;
     const phoneNumbers = (process.env.ALERT_SMS_RECIPIENTS || '').split(',').filter(p => p.trim());
 
     for (const phone of phoneNumbers) {
@@ -175,6 +197,13 @@ class AlertRouter {
   getTypeEmoji(type) {
     const emojis = {
       PAYMENT_RECEIVED: '💰',
+      PAYMENT_RELEASED: '💸',
+      BOOKING_CANCELLED: '🚫',
+      BOOKING_STARTED: '🚚',
+      BOOKING_DISPUTED: '⚠️',
+      DISPUTE_RESOLVED: '⚖️',
+      BOOKING_CREATED: '📦',
+      BLOCKCHAIN_STATE_DIVERGENCE: '⚡',
       INSURANCE_CLAIM_APPROVED: '✅',
       INSURANCE_CLAIM_REJECTED: '❌',
       GEOFENCE_BREACH: '[WARNING]',

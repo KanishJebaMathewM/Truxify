@@ -318,7 +318,6 @@ class MEVService {
                 amount: ethers.formatEther(escrow[2]),
                 released: escrow[3],
                 blockMin: escrow[4].toString(),
-                secretHash: escrow[5]
             };
         } catch (error) {
             logger.error('Escrow details fetch failed:', error);

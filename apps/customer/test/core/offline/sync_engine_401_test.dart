@@ -65,10 +65,10 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () => 'expired-token',
+      getCurrentToken: () async => 'expired-token',
       refreshAuthToken: () async {
         refreshCalls++;
-        return 'refreshed-token';
+        return true;
       },
     );
 
@@ -97,8 +97,8 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () => 'expired-token',
-      refreshAuthToken: () async => null,
+      getCurrentToken: () async => 'expired-token',
+      refreshAuthToken: () async => false,
     );
 
     final uploaded = await engine.syncPending();
@@ -128,8 +128,8 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () => 'expired-token',
-      refreshAuthToken: () async => 'refreshed-token',
+      getCurrentToken: () async => 'expired-token',
+      refreshAuthToken: () async => true,
     );
 
     final uploaded = await engine.syncPending();

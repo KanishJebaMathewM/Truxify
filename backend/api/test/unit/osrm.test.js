@@ -436,4 +436,40 @@ describe('routeWithFailover edge cases', () => {
     );
     expect(result).toEqual(primaryResult);
   });
+
+  it('logs warning and falls back to haversine when primary fails with valid coordinates', async () => {
+    const primaryError = new Error('OSRM connection reset');
+    const primary = vi.fn().mockRejectedValue(primaryError);
+    const coords = [
+      [
+        [77.5946, 12.9716],
+        [77.6412, 12.9352],
+      ],
+    ];
+
+    const result = await osrm.routeWithFailover(primary, null, coords);
+
+    expect(result.source).toBe('haversine-fallback');
+    expect(result.distance).toBeGreaterThan(0);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ errMessage: 'OSRM connection reset' }),
+      expect.stringContaining('routeWithFailover: primary call failed')
+    );
+  });
+});
+
+describe('osrm - retryDelayMs backoff clamp (#11014)', () => {
+  const { retryDelayMs, MAX_RETRY_DELAY_MS } = __testing;
+
+  it('doubles the delay per attempt', () => {
+    expect(retryDelayMs(500, 0)).toBe(500);
+    expect(retryDelayMs(500, 1)).toBe(1000);
+    expect(retryDelayMs(500, 2)).toBe(2000);
+  });
+
+  it('clamps the delay at MAX_RETRY_DELAY_MS', () => {
+    expect(MAX_RETRY_DELAY_MS).toBe(10_000);
+    expect(retryDelayMs(500, 10)).toBe(MAX_RETRY_DELAY_MS);
+    expect(retryDelayMs(10000, 3)).toBe(MAX_RETRY_DELAY_MS);
+  });
 });

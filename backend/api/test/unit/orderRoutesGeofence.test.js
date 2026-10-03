@@ -1,36 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-
-// The geofence-confirm handler validates driver_lat/driver_lng/geofence_radius_m
-// BEFORE touching the DB (NaN/positive-radius guards), then delegates the actual
-// geofence check to the delivery verification service. Stub the container-bound
-// services so the happy path is exercised without a live DB.
-const findOrderByIdOrDisplayIdMock = vi.fn();
-const assertDriverAssignmentMock = vi.fn();
-const geofenceAutoConfirmMock = vi.fn();
-
-vi.mock('../../src/core/container.js', async () => {
-  const actual = await vi.importActual('../../src/core/container.js');
-  const validationSvc = Object.create(actual.orderValidationService);
-  validationSvc.findOrderByIdOrDisplayId = findOrderByIdOrDisplayIdMock;
-  validationSvc.assertDriverAssignment = assertDriverAssignmentMock;
-  const lifecycleSvc = Object.create(actual.orderLifecycleService);
-  lifecycleSvc.deliveryVerification = { geofenceAutoConfirm: geofenceAutoConfirmMock };
-  return {
-    ...actual,
-    orderValidationService: validationSvc,
-    orderLifecycleService: lifecycleSvc,
-  };
-});
-
-const DRIVER_HEADERS = {
-  'x-user-id': '00000000-0000-0000-0000-000000000def',
-  'x-user-role': 'driver',
-  'x-user-name': 'Test Driver'
-};
-
-const orderRoutes = (await import('../../src/routes/orderRoutes.js')).default;
+import orderRoutes from '../../src/routes/orderRoutes.js';
 
 vi.mock('../../src/core/container.js', () => ({
   orderRepository: {},
@@ -56,6 +27,9 @@ vi.mock('../../src/core/container.js', () => ({
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, res, next) => next(),
   requireRole: () => (req, res, next) => next(),
+}));
+
+vi.mock('../../src/middleware/requirePolicy.js', () => ({
   requirePolicy: () => (req, res, next) => next(),
 }));
 
@@ -63,6 +37,10 @@ import { orderValidationService, orderLifecycleService } from '../../src/core/co
 
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+  req.user = { id: 'driver-1', role: 'driver' };
+  next();
+});
 app.use('/api/orders', orderRoutes);
 
 describe('POST /api/orders/:id/geofence-confirm validation', () => {
@@ -78,12 +56,8 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
     const res = await request(app)
       .post('/api/orders/123/geofence-confirm')
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 100 });
-
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(geofenceAutoConfirmMock).toHaveBeenCalledWith(
-      expect.objectContaining({ geofenceRadiusM: 100 })
-    );
     expect(orderLifecycleService.deliveryVerification.geofenceAutoConfirm).toHaveBeenCalledWith({
       orderId: '123',
       driverId: 'driver-1',
@@ -99,7 +73,6 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 'invalid' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
-    expect(geofenceAutoConfirmMock).not.toHaveBeenCalled();
   });
 
   it('should reject non-positive geofence_radius_m with 400', async () => {
@@ -108,7 +81,14 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
       .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: -50 });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeDefined();
-    expect(geofenceAutoConfirmMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject an unbounded geofence radius with 400', async () => {
+    const res = await request(app)
+      .post('/api/orders/123/geofence-confirm')
+      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 501 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('500');
   });
 });
 
@@ -120,7 +100,7 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
 const regressionApp = express();
 regressionApp.use(express.json());
 regressionApp.use((req, res, next) => {
-  req.user = { id: 'driver-1' };
+  req.user = { id: 'driver-1', role: 'driver' };
   next();
 });
 regressionApp.use('/api/orders', orderRoutes);

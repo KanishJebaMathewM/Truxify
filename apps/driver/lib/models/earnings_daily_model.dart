@@ -38,11 +38,11 @@ class EarningsDailyModel {
     // otherwise fall back to the 15% estimate.
     final rawDeduction = map['fuel_toll_deduction'];
     double deduction;
-    if (rawDeduction is num) {
-      deduction = (rawDeduction / 100.0).toDouble();
-    } else if (rawDeduction is String) {
-      final parsedDeduction = num.tryParse(rawDeduction);
-      deduction = parsedDeduction != null ? parsedDeduction.toDouble() / 100.0 : gross * 0.15;
+    if (rawDeduction != null) {
+      final num deductionVal = (rawDeduction is num)
+          ? rawDeduction as num
+          : (double.tryParse(rawDeduction?.toString() ?? '') ?? 0.0);
+      deduction = (deductionVal / 100.0).toDouble();
     } else {
       deduction = gross * 0.15;
     }

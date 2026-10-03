@@ -182,7 +182,7 @@ class HistoryOrderCard extends StatelessWidget {
                 ),
                 if (order.ratingGiven != null)
                   Text(
-                    '⭐' * order.ratingGiven!,
+                    '⭐' * order.ratingGiven!.toInt(),
                     style: const TextStyle(fontSize: 13),
                   )
                 else

@@ -1,9 +1,9 @@
 import rateLimit, { MemoryStore } from "express-rate-limit";
-import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
 import crypto from "crypto";
 import logger from "./logger.js";
+import { checkRateLimit } from "../utils/redisSlidingWindow.js";
 
 function isRedisReady() {
   return !!(redisClient && redisClient.status === "ready");
@@ -42,6 +42,8 @@ class DeferredRedisStore {
     this.memoryStore = new MemoryStore();
     this.redisStore = null;
     this.redisInitFailed = false;
+    this.redisHealthy = true;
+
     // Timestamp of the last (failed) Redis promotion attempt, used to back
     // off retries so a transient init error isn't retried on every request.
     this.lastRedisAttempt = 0;
@@ -54,22 +56,31 @@ class DeferredRedisStore {
 
   activeStore() {
     // Already promoted and Redis is still healthy: keep using it.
-    if (this.redisStore && isRedisReady()) return this.redisStore;
+    if (this.redisStore && isRedisReady() && this.redisHealthy) {
+      return this.redisStore;
+    }
 
     // Redis is not ready (down, or not yet connected). Serve from the
     // in-memory fallback so local rate limiting still works, and so a dead
-    // Redis *after* promotion doesn't leave us pinned to a throwing store.
-    if (!isRedisReady()) return this.memoryStore;
+    // Redis after promotion doesn't leave us pinned to a throwing store.
+    if (!isRedisReady()) {
+      return this.memoryStore;
+    }
 
     // Redis just became reachable again (or we never promoted). Try to
     // (re)build the Redis-backed store. A previous failure is NOT permanent:
     // once Redis recovers we retry after a cooldown, so a transient init
-    // error can't pin the limiter to the in-memory store for the life of
-    // the process (see issue #11213).
+    // error can't pin the limiter to the in-memory store for the life
+    // of the process.
     const now = Date.now();
-    if (this.redisInitFailed && now - this.lastRedisAttempt < REDIS_PROMOTE_RETRY_MS) {
+
+    if (
+      (this.redisInitFailed || !this.redisHealthy) &&
+      now - this.lastRedisAttempt < REDIS_PROMOTE_RETRY_MS
+    ) {
       return this.memoryStore;
     }
+
     this.lastRedisAttempt = now;
 
     try {
@@ -77,39 +88,126 @@ class DeferredRedisStore {
         prefix: this.prefix,
         sendCommand: (command, ...args) => redisClient.call(command, ...args),
       });
+
       store.init(this.options);
       this.redisStore = store;
       this.redisInitFailed = false;
+      this.redisHealthy = true;
+
       logger.info(`Rate limiter "${this.prefix}" now backed by Redis.`);
+
       return store;
     } catch (err) {
       this.redisInitFailed = true;
+      this.redisHealthy = false;
+
       logger.error(
         { err },
         `Failed to initialise Redis rate limiter store "${this.prefix}". Using in-memory fallback.`,
       );
+
       return this.memoryStore;
     }
   }
 
-  increment(key) {
-    return this.activeStore().increment(key);
+  async increment(key) {
+    const store = this.activeStore();
+
+    if (store === this.redisStore) {
+      try {
+        return await store.increment(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.increment failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+
+        return this.memoryStore.increment(key);
+      }
+    }
+
+    return store.increment(key);
   }
 
-  decrement(key) {
-    return this.activeStore().decrement(key);
+  async decrement(key) {
+    const store = this.activeStore();
+
+    if (store === this.redisStore) {
+      try {
+        return await store.decrement(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.decrement failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+
+        return this.memoryStore.decrement(key);
+      }
+    }
+
+    return store.decrement(key);
   }
 
-  resetKey(key) {
-    return this.activeStore().resetKey(key);
+  async resetKey(key) {
+    const store = this.activeStore();
+
+    if (store === this.redisStore) {
+      try {
+        return await store.resetKey(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+
+        logger.warn(
+          { err, key, prefix: this.prefix },
+          `RedisStore.resetKey failed for "${this.prefix}". Falling back to in-memory store.`,
+        );
+
+        return this.memoryStore.resetKey(key);
+      }
+    }
+
+    return store.resetKey(key);
   }
 
-  resetAll() {
-    return this.activeStore().resetAll?.();
+  async resetAll() {
+    const store = this.activeStore();
+
+    if (store === this.redisStore) {
+      try {
+        return await store.resetAll?.();
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+
+        return this.memoryStore.resetAll?.();
+      }
+    }
+
+    return store.resetAll?.();
   }
 
-  get(key) {
-    return this.activeStore().get?.(key);
+  async get(key) {
+    const store = this.activeStore();
+
+    if (store === this.redisStore) {
+      try {
+        return await store.get?.(key);
+      } catch (err) {
+        this.redisHealthy = false;
+        this.lastRedisAttempt = Date.now();
+
+        return this.memoryStore.get?.(key);
+      }
+    }
+
+    return store.get?.(key);
   }
 }
 
@@ -125,13 +223,23 @@ class DeferredRedisStore {
 function expandIpv6Groups(ip) {
   if (ip.includes("::")) {
     const [left, right] = ip.split("::");
+
     const leftGroups = left ? left.split(":") : [];
     const rightGroups = right ? right.split(":") : [];
+
     const missing = 8 - leftGroups.length - rightGroups.length;
+
     if (missing < 1) return null;
-    return [...leftGroups, ...Array(missing).fill("0"), ...rightGroups];
+
+    return [
+      ...leftGroups,
+      ...Array(missing).fill("0"),
+      ...rightGroups,
+    ];
   }
+
   const groups = ip.split(":");
+
   return groups.length === 8 ? groups : null;
 }
 
@@ -140,17 +248,25 @@ function expandIpv6Groups(ip) {
  */
 export function normalizeIp(rawIp) {
   if (!rawIp || typeof rawIp !== "string") return "unknown";
+
   let ip = rawIp.trim();
-  if (ip.includes(",")) ip = ip.split(",")[0].trim();
+
+  if (ip.includes(",")) {
+    ip = ip.split(",")[0].trim();
+  }
+
   ip = ip.replace(/^::ffff:/, "");
+
   if (ip === "::1") return "127.0.0.1";
 
   if (ip.includes(":")) {
     const groups = expandIpv6Groups(ip);
+
     if (groups) {
       return `${groups.slice(0, 4).join(":").toLowerCase()}::/64`;
     }
   }
+
   return ip;
 }
 
@@ -170,12 +286,18 @@ export function safeIpKeyGenerator(req) {
       {
         requestId: req.requestId,
         header: forwarded,
-        socketIp: req.socket?.remoteAddress,
+        socketIp:
+          req.socket?.remoteAddress,
       },
       "Suspicious X-Forwarded-For header detected",
     );
+
     // Use socket address instead of the spoofed header value.
-    const socketIp = req.socket?.remoteAddress || req.connection?.remoteAddress || "unknown";
+    const socketIp =
+      req.socket?.remoteAddress ||
+      req.connection?.remoteAddress ||
+      "unknown";
+
     return normalizeIp(socketIp);
   }
 
@@ -198,6 +320,7 @@ export function safeIpKeyGenerator(req) {
 export function userKeyGenerator(req) {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.user?.uid) return `uid:${req.user.uid}`;
+
   return safeIpKeyGenerator(req);
 }
 
@@ -216,8 +339,14 @@ function sentryAlertHandler(limiterName) {
       },
       `Rate limit exceeded (${limiterName})`,
     );
-    Sentry.captureMessage(`Rate limit exceeded: ${limiterName}`, "warning");
+
+    Sentry.captureMessage(
+      `Rate limit exceeded: ${limiterName}`,
+      "warning",
+    );
+
     const retryAfter = options?.message?.retryAfter ?? 60;
+
     res.status(429).json({
       error: "Rate limit exceeded",
       retryAfter,
@@ -229,37 +358,48 @@ function sentryAlertHandler(limiterName) {
 // key by IP; kept generous so that legitimate users sharing a NAT'd IP are not
 // throttled by each other. Per-user fairness is enforced by userLimiter once
 // the request is authenticated.
+
 // Configurable rate limiter settings (defaults preserve existing behaviour)
 const GLOBAL_WINDOW_MS =
   Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+
 const GLOBAL_MAX_REQUESTS =
   Number(process.env.GLOBAL_RATE_LIMIT_MAX_REQUESTS) || 1000;
 
 const USER_WINDOW_MS =
   Number(process.env.USER_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+
 const USER_MAX_REQUESTS =
   Number(process.env.USER_RATE_LIMIT_MAX_REQUESTS) || 300;
 
 const HEALTH_WINDOW_MS =
   Number(process.env.HEALTH_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+
 const HEALTH_MAX_REQUESTS =
   Number(process.env.HEALTH_RATE_LIMIT_MAX_REQUESTS) || 60;
 
 const AUTH_WINDOW_MS =
   Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+
 const AUTH_MAX_REQUESTS =
   Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10;
 
-const BID_WINDOW_MS = Number(process.env.BID_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
-const BID_MAX_REQUESTS = Number(process.env.BID_RATE_LIMIT_MAX_REQUESTS) || 30;
+const BID_WINDOW_MS =
+  Number(process.env.BID_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+
+const BID_MAX_REQUESTS =
+  Number(process.env.BID_RATE_LIMIT_MAX_REQUESTS) || 30;
 
 const DEVICE_WINDOW_MS =
   Number(process.env.DEVICE_RATE_LIMIT_WINDOW_MS) || 10 * 60 * 1000;
+
 const DEVICE_MAX_REQUESTS =
   Number(process.env.DEVICE_RATE_LIMIT_MAX_REQUESTS) || 10;
 
 const OTP_VERIFICATION_WINDOW_MS =
-  Number(process.env.OTP_VERIFICATION_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+  Number(process.env.OTP_VERIFICATION_RATE_LIMIT_WINDOW_MS) ||
+  15 * 60 * 1000;
+
 const OTP_VERIFICATION_MAX_REQUESTS =
   Number(process.env.OTP_VERIFICATION_RATE_LIMIT_MAX_REQUESTS) || 5;
 
@@ -272,8 +412,34 @@ export const globalLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:global:"),
   handler: sentryAlertHandler("globalLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 900 },
-  skip: (req) => req.path === "/health" || req.path.startsWith("/health/"),
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: 900,
+  },
+  skip: (req) =>
+    req.path === "/health" || req.path.startsWith("/health/"),
+});
+
+const WEBRTC_NEARBY_WINDOW_MS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+
+const WEBRTC_NEARBY_MAX_REQUESTS =
+  Number(process.env.WEBRTC_NEARBY_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+export const nearbyLimiter = rateLimit({
+  windowMs: WEBRTC_NEARBY_WINDOW_MS,
+  max: WEBRTC_NEARBY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:webrtc-nearby:"),
+  handler: sentryAlertHandler("nearbyLimiter"),
+  message: {
+    error:
+      "Too many nearby peer discovery requests. Please try again later.",
+    retryAfter: 60,
+  },
 });
 
 export const userLimiter = rateLimit({
@@ -285,7 +451,10 @@ export const userLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:user:"),
   handler: sentryAlertHandler("userLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 900 },
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: 900,
+  },
 });
 
 export const healthLimiter = rateLimit({
@@ -297,7 +466,10 @@ export const healthLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:health:"),
   handler: sentryAlertHandler("healthLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 60 },
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: 60,
+  },
 });
 
 export const authLimiter = rateLimit({
@@ -337,7 +509,10 @@ export const bidLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:bid:"),
   handler: sentryAlertHandler("bidLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 60 },
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: 60,
+  },
 });
 
 export const deviceLimiter = rateLimit({
@@ -348,12 +523,16 @@ export const deviceLimiter = rateLimit({
   keyGenerator: (req) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;
+
     return safeIpKeyGenerator(req);
   },
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:device:"),
   handler: sentryAlertHandler("deviceLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 600 },
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: 600,
+  },
 });
 
 export const otpVerificationLimiter = rateLimit({
@@ -361,17 +540,30 @@ export const otpVerificationLimiter = rateLimit({
   max: OTP_VERIFICATION_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
+
   keyGenerator: (req) => {
-    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    const phone =
+      typeof req.body?.phone === "string"
+        ? req.body.phone.trim()
+        : "";
+
     if (phone) {
-      const phoneHash = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+      const phoneHash = crypto
+        .createHash("sha256")
+        .update(phone)
+        .digest("hex")
+        .slice(0, 16);
+
       return `otp-verify:${phoneHash}:${safeIpKeyGenerator(req)}`;
     }
+
     return safeIpKeyGenerator(req);
   },
+
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:otp-verification:"),
   handler: sentryAlertHandler("otpVerificationLimiter"),
+
   message: {
     error:
       "Too many OTP verification attempts. Please try again after 15 minutes.",
@@ -380,23 +572,29 @@ export const otpVerificationLimiter = rateLimit({
 
 const POD_WINDOW_MS =
   Number(process.env.POD_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
-const POD_MAX_REQUESTS = Number(process.env.POD_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+const POD_MAX_REQUESTS =
+  Number(process.env.POD_RATE_LIMIT_MAX_REQUESTS) || 10;
 
 // PoD uploads carry up to 20MB each (signature + photo) and run a malware scan
-// per file, so they are throttled per driver *and* per order: a single assigned
+// per file, so they are throttled per driver and per order: a single assigned
 // driver can no longer fire an unbounded stream of uploads for one order.
 export const podUploadLimiter = rateLimit({
   windowMs: POD_WINDOW_MS,
   max: POD_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
+
   keyGenerator: (req) => {
     const userKey = userKeyGenerator(req);
     const orderId = req.params?.id || "unknown";
+
     return `${userKey}:order:${orderId}`;
   },
+
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:pod:"),
+
   handler: (req, res) => {
     logger.warn(
       {
@@ -407,19 +605,23 @@ export const podUploadLimiter = rateLimit({
       },
       "PoD upload rate limit exceeded",
     );
-    Sentry.captureMessage("Rate limit exceeded: podUploadLimiter", "warning");
-    res
-      .status(429)
-      .json({
-        error: "Rate limit exceeded",
-        retryAfter: Math.ceil(POD_WINDOW_MS / 1000),
-      });
+
+    Sentry.captureMessage(
+      "Rate limit exceeded: podUploadLimiter",
+      "warning",
+    );
+
+    res.status(429).json({
+      error: "Rate limit exceeded",
+      retryAfter: Math.ceil(POD_WINDOW_MS / 1000),
+    });
   },
 });
 
-
 const VERIFY_DELIVERY_WINDOW_MS =
-  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) ||
+  15 * 60 * 1000;
+
 const VERIFY_DELIVERY_MAX_REQUESTS =
   Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
 
@@ -434,6 +636,7 @@ export const verifyDeliveryLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:verify-delivery:"),
   handler: sentryAlertHandler("verifyDeliveryLimiter"),
+
   message: {
     error:
       "Too many delivery OTP verification attempts. Please try again later.",
@@ -441,7 +644,9 @@ export const verifyDeliveryLimiter = rateLimit({
 });
 
 const RESEND_OTP_WINDOW_MS =
-  Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+  Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) ||
+  15 * 60 * 1000;
+
 const RESEND_OTP_MAX_REQUESTS =
   Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5;
 
@@ -456,13 +661,17 @@ export const resendOtpLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:resend-otp:"),
   handler: sentryAlertHandler("resendOtpLimiter"),
+
   message: {
-    error: "Too many OTP resend requests. Please try again after 15 minutes.",
+    error:
+      "Too many OTP resend requests. Please try again after 15 minutes.",
   },
 });
 
 const CHANGE_DROP_WINDOW_MS =
-  Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) ||
+  15 * 60 * 1000;
+
 const CHANGE_DROP_MAX_REQUESTS =
   Number(process.env.CHANGE_DROP_RATE_LIMIT_MAX_REQUESTS) || 30;
 
@@ -475,11 +684,17 @@ export const changeDropLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:change-drop:"),
   handler: sentryAlertHandler("changeDropLimiter"),
-  message: { error: "Too many change-drop requests. Please try again later." },
+
+  message: {
+    error:
+      "Too many change-drop requests. Please try again later.",
+  },
 });
 
 const PREDICT_DEMAND_WINDOW_MS =
-  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) ||
+  60 * 60 * 1000;
+
 const PREDICT_DEMAND_MAX_REQUESTS =
   Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 60;
 
@@ -494,13 +709,17 @@ export const predictDemandLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:predict-demand:"),
   handler: sentryAlertHandler("predictDemandLimiter"),
+
   message: {
-    error: "Too many demand prediction requests. Please try again later.",
+    error:
+      "Too many demand prediction requests. Please try again later.",
   },
 });
 
 const TELEMETRY_WINDOW_MS =
-  Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+  Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) ||
+  15 * 60 * 1000;
+
 const TELEMETRY_MAX_REQUESTS =
   Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 300;
 
@@ -515,8 +734,10 @@ export const telemetryLimiter = rateLimit({
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:telemetry:"),
   handler: sentryAlertHandler("telemetryLimiter"),
+
   message: {
-    error: "Too many telemetry requests. Please try again later.",
+    error:
+      "Too many telemetry requests. Please try again later.",
   },
 });
 
@@ -529,4 +750,7 @@ export function createStore(prefix) {
   return new DeferredRedisStore(prefix);
 }
 
-export const __testing = { DeferredRedisStore, isRedisReady };
+export const __testing = {
+  DeferredRedisStore,
+  isRedisReady,
+};

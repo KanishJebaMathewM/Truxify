@@ -80,6 +80,7 @@
  */
 
 import express from 'express';
+import crypto from 'crypto';
 import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -838,6 +839,10 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
 
+  if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: fuel advice is restricted to assigned drivers and admins' });
+  }
+
   // Ensure truck belongs to the caller (if driver) or caller is admin
   if (req.user.role === 'driver') {
     const { data: truck, error: truckErr } = await supabase
@@ -863,4 +868,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
 
 // Resolves #2053: Prevent race conditions in truck allocation
 
+// ============================================================================
+// EXPORT ROUTER (MOVED TO END TO ENSURE ALL ENDPOINTS ARE REACHABLE - #14304)
+// ============================================================================
 export default router;

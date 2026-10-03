@@ -11,9 +11,13 @@ const router = express.Router();
 // ============================================================================
 router.get('/estimate', authenticate, userLimiter, async (req, res) => {
   try {
-    const { pickup_lat, pickup_lng, drop_lat, drop_lng } = req.query;
+    const { pickup_lat, pickup_lng, drop_lat, drop_lng, routeId } = req.query;
 
     const isBlank = (str) => !str || String(str).trim() === '';
+    if (routeId !== undefined && (typeof routeId !== 'string' || routeId.trim() === '')) {
+      return res.status(400).json({ error: 'Invalid routeId provided.' });
+    }
+
     if (isBlank(pickup_lat) || isBlank(pickup_lng) || isBlank(drop_lat) || isBlank(drop_lng)) {
       return res.status(400).json({ error: 'Invalid coordinates provided.' });
     }

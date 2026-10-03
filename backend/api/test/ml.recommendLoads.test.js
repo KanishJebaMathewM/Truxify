@@ -71,7 +71,7 @@ describe('ml.recommendLoads (issue #4512)', () => {
     fetchMock.mockResolvedValue(jsonResponse({ detail: 'boom' }, 500));
 
     await expect(recommendLoads({ userId: 'u-1' })).rejects.toThrow(
-      /Request failed \(500\)/,
+      /Request failed: \S+ \S+ 500/,
     );
   });
 

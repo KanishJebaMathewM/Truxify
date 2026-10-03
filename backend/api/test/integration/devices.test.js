@@ -339,11 +339,20 @@ describe('Device Routes Integration Tests', () => {
     });
 
     it('does not remove another user\'s device record for the same token', async () => {
-      m.store.user_devices.push({
-        user_id: 'other-user-uuid',
-        fcm_token: 'shared-device-token',
-        platform: 'android',
-      });
+      m.store.user_devices.push(
+        {
+          user_id: 'unregister-test-user-uuid',
+          fcm_token: 'shared-device-token',
+          platform: 'android',
+          is_active: true,
+        },
+        {
+          user_id: 'other-user-uuid',
+          fcm_token: 'shared-device-token',
+          platform: 'android',
+          is_active: true,
+        }
+      );
 
       const res = await request(buildApp())
         .delete('/api/devices/unregister')
@@ -356,6 +365,7 @@ describe('Device Routes Integration Tests', () => {
         (d) => d.user_id === 'other-user-uuid' && d.fcm_token === 'shared-device-token'
       );
       expect(stillThere).toBeTruthy();
+      expect(stillThere.is_active).toBe(true);
     });
 
     it('returns 500 if database deletion fails and does not expose internal error details', async () => {
@@ -383,6 +393,7 @@ describe('Device Routes Integration Tests', () => {
         user_id: 'unregister-test-user-uuid',
         fcm_token: 'logout-token-123456',
         platform: 'android',
+        is_active: true,
       });
       m.store.profiles.push({
         id: 'unregister-test-user-uuid',
@@ -404,7 +415,9 @@ describe('Device Routes Integration Tests', () => {
       const remainingDevice = m.store.user_devices.find(
         (d) => d.user_id === 'unregister-test-user-uuid' && d.fcm_token === 'logout-token-123456'
       );
-      expect(remainingDevice).toBeUndefined();
+      expect(remainingDevice).toBeTruthy();
+      expect(remainingDevice.is_active).toBe(false);
+      expect(remainingDevice.deactivated_at).toBeTruthy();
     });
   });
 });

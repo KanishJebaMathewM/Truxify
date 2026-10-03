@@ -61,7 +61,7 @@ async def build_graph(request: GraphRequest):
             [edge.dict() for edge in request.edges]
         )
         data = builder.get_pytorch_data()
-        
+
         return {
             'success': True,
             'data': {
@@ -88,15 +88,14 @@ async def predict_traffic(request: GraphRequest):
             [edge.dict() for edge in request.edges]
         )
         data = builder.get_pytorch_data()
-        
+
         # Generate synthetic node features for time steps
         # Model expects (batch_size, num_nodes, time_steps, features); build
         # (1, num_nodes, 1, features) so batch_size == 1 and time_steps == 1.
-        node_features = data.x.unsqueeze(0).unsqueeze(2).contiguous()
-        
-        # Predict
+        node_features = data.x.unsqueeze(0)        # (1, num_nodes, features)
+        node_features = node_features.unsqueeze(2) # (1, num_nodes, 1, features) - aligns with (batch, num_nodes, time_steps, features)
         predictions = trainer.model.predict_traffic(node_features, data.edge_index)
-        
+
         return {
             'success': True,
             'data': {
@@ -123,13 +122,13 @@ async def train_model(request: GraphRequest):
             [edge.dict() for edge in request.edges]
         )
         data = builder.get_pytorch_data()
-        
+
         # Generate synthetic targets
         targets = torch.randn(data.x.shape[0], trainer.model.prediction_horizon)
-        
+
         # Train
         results = trainer.train(data, targets, epochs=50)
-        
+
         return {
             'success': True,
             'data': results,

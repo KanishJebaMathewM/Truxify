@@ -28,7 +28,7 @@ void main() {
   group('MarketplaceRepository.fetchLoadOffers', () {
     test('returns parsed LoadOffer list on success', () async {
       final client = MockClient((request) async {
-        expect(request.url.path, '/api/orders/load-offers');
+        expect(request.url.path, '/api/loads');
         return http.Response(jsonEncode([_loadOfferRow]), 200);
       });
 
@@ -57,7 +57,7 @@ void main() {
 
     test('unwraps { loads } envelope returned by the marketplace endpoint', () async {
       final client = MockClient((request) async {
-        expect(request.url.path, '/api/orders/load-offers');
+        expect(request.url.path, '/api/loads');
         return http.Response(
           jsonEncode({
             'page': 1,

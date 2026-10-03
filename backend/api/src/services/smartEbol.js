@@ -6,6 +6,16 @@ const DEFAULT_GEOFENCE_RADIUS_METERS = 200; // Facility boundary threshold
  * Calculates straight-line distance (haversine formula) in meters between two GPS coordinates.
  */
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+    if (
+        typeof lat1 !== 'number' || typeof lon1 !== 'number' ||
+        typeof lat2 !== 'number' || typeof lon2 !== 'number' ||
+        !Number.isFinite(lat1) || !Number.isFinite(lon1) ||
+        !Number.isFinite(lat2) || !Number.isFinite(lon2) ||
+        lat1 < -90 || lat1 > 90 || lat2 < -90 || lat2 > 90 ||
+        lon1 < -180 || lon1 > 180 || lon2 < -180 || lon2 > 180
+    ) {
+        return NaN;
+    }
     const R = 6371000; // Earth radius in meters
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLon = (lon2 - lon1) * (Math.PI / 180);
@@ -23,7 +33,7 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
  * @param {Object} signParams - { ebolId, receiverId, receiverName, facilityCoordinates, receiverCoordinates, signatureData, biometricAuthToken }
  * @returns {Object} Signature verification result and immutable audit record
  */
-export function processGeofencedSignature(signParams) {
+export function processGeofencedSignature(signParams = {}) {
     const {
         ebolId,
         receiverId,
@@ -39,7 +49,7 @@ export function processGeofencedSignature(signParams) {
 
     // Calculate receiver proximity to facility center point
     const distanceMeters = calculateDistanceMeters(facLat, facLon, recLat, recLon);
-    const isWithinGeofence = distanceMeters <= geofenceRadiusMeters;
+    const isWithinGeofence = !Number.isNaN(distanceMeters) && distanceMeters <= geofenceRadiusMeters;
 
     if (!isWithinGeofence) {
         return {
@@ -87,3 +97,6 @@ export function processGeofencedSignature(signParams) {
         data: signedEbolRecord
     };
 }
+
+export { calculateDistanceMeters, DEFAULT_GEOFENCE_RADIUS_METERS };
+

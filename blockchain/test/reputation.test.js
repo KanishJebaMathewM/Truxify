@@ -197,6 +197,63 @@ describe("Reputation", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // increaseReputationWithIdempotency
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe("increaseReputationWithIdempotency", function () {
+    it("increases reputation score on first call with awardId", async function () {
+      const { reputation, relayer, driver } = await deployReputation();
+      const awardId = ethers.keccak256(ethers.toUtf8Bytes("order:101:rating:driver"));
+
+      assert.equal(await reputation.isAwardExecuted(awardId), false);
+      await reputation.connect(relayer).increaseReputationWithIdempotency(driver.address, 5, awardId);
+      assert.equal(await reputation.getReputation(driver.address), 5n);
+      assert.equal(await reputation.isAwardExecuted(awardId), true);
+    });
+
+    it("reverts on duplicate call with same awardId", async function () {
+      const { reputation, relayer, driver } = await deployReputation();
+      const awardId = ethers.keccak256(ethers.toUtf8Bytes("order:102:rating:driver"));
+
+      await reputation.connect(relayer).increaseReputationWithIdempotency(driver.address, 5, awardId);
+      await assertRejectsWith(
+        reputation.connect(relayer).increaseReputationWithIdempotency(driver.address, 5, awardId),
+        "Award already executed"
+      );
+      assert.equal(await reputation.getReputation(driver.address), 5n);
+    });
+
+    it("reverts with bytes32(0) awardId", async function () {
+      const { reputation, relayer, driver } = await deployReputation();
+
+      await assertRejectsWith(
+        reputation.connect(relayer).increaseReputationWithIdempotency(driver.address, 5, ethers.ZeroHash),
+        "Invalid awardId"
+      );
+    });
+
+    it("reverts when called by non-relayer", async function () {
+      const { reputation, outsider, driver } = await deployReputation();
+      const awardId = ethers.keccak256(ethers.toUtf8Bytes("order:103:rating:driver"));
+
+      await assertRejectsWith(
+        reputation.connect(outsider).increaseReputationWithIdempotency(driver.address, 5, awardId),
+        "Not authorized relayer"
+      );
+    });
+
+    it("reverts when contract is paused", async function () {
+      const { reputation, owner, relayer, driver } = await deployReputation();
+      const awardId = ethers.keccak256(ethers.toUtf8Bytes("order:104:rating:driver"));
+
+      await reputation.connect(owner).pause();
+      await assertRejectsWith(
+        reputation.connect(relayer).increaseReputationWithIdempotency(driver.address, 5, awardId),
+        "EnforcedPause"
+      );
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // decreaseReputation
   // ═══════════════════════════════════════════════════════════════════════════
   describe("decreaseReputation", function () {

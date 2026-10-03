@@ -11,12 +11,8 @@ router.post('/zkid/identity/create', authenticate, requirePolicy('zkid:create-id
     try {
         const { userAddress } = req.body;
         if (!userAddress) {
-            return res.status(400).json({
-                success: false,
-                error: 'userAddress required'
-            });
+            return res.status(400).json({ success: false, error: 'userAddress required' });
         }
-
         const result = await zkidService.createIdentity(userAddress);
         res.json({ success: true, data: result });
     } catch (error) {
@@ -30,12 +26,8 @@ router.post('/zkid/credential/issue', authenticate, requirePolicy('zkid:issue-cr
     try {
         const { identityHash, credentialType, schemaHash } = req.body;
         if (!identityHash || !credentialType) {
-            return res.status(400).json({
-                success: false,
-                error: 'identityHash and credentialType required'
-            });
+            return res.status(400).json({ success: false, error: 'identityHash and credentialType required' });
         }
-
         const result = await zkidService.issueCredential(identityHash, credentialType, schemaHash);
         res.json({ success: true, data: result });
     } catch (error) {
@@ -61,12 +53,8 @@ router.post('/zkid/credential/revoke', authenticate, requirePolicy('zkid:revoke-
     try {
         const { credentialHash } = req.body;
         if (!credentialHash) {
-            return res.status(400).json({
-                success: false,
-                error: 'credentialHash required'
-            });
+            return res.status(400).json({ success: false, error: 'credentialHash required' });
         }
-
         const result = await zkidService.revokeCredential(credentialHash);
         res.json({ success: true, data: result });
     } catch (error) {
@@ -75,18 +63,38 @@ router.post('/zkid/credential/revoke', authenticate, requirePolicy('zkid:revoke-
     }
 });
 
-// Request verification
+// Issue a fresh replay-resistant verification challenge.
+router.post('/zkid/verification/challenge', authenticate, requirePolicy('zkid:request-verification'), async (req, res) => {
+    try {
+        const { identityHash, credentialHash } = req.body;
+        if (!identityHash || !credentialHash) {
+            return res.status(400).json({ success: false, error: 'identityHash and credentialHash required' });
+        }
+        const challenge = await zkidService.createVerificationChallenge(identityHash, credentialHash);
+        res.json({ success: true, data: challenge });
+    } catch (error) {
+        logger.error('Verification challenge error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Request verification using a previously issued, single-use challenge.
 router.post('/zkid/verification/request', authenticate, requirePolicy('zkid:request-verification'), async (req, res) => {
     try {
-        const { identityHash, credentialHash, proofData } = req.body;
-        if (!identityHash || !credentialHash) {
+        const { identityHash, credentialHash, proofData, challenge } = req.body;
+        if (!identityHash || !credentialHash || !proofData || !challenge) {
             return res.status(400).json({
                 success: false,
-                error: 'identityHash and credentialHash required'
+                error: 'identityHash, credentialHash, proofData, and challenge required'
             });
         }
 
-        const result = await zkidService.requestVerification(identityHash, credentialHash, proofData);
+        const result = await zkidService.requestVerification(
+            identityHash,
+            credentialHash,
+            proofData,
+            challenge
+        );
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Verification request error:', error);
@@ -104,12 +112,7 @@ router.post('/zkid/disclosure/create', authenticate, requirePolicy('zkid:create-
                 error: 'identityHash, disclosedAttributes, and recipient required'
             });
         }
-
-        const result = await zkidService.createSelectiveDisclosure(
-            identityHash,
-            disclosedAttributes,
-            recipient
-        );
+        const result = await zkidService.createSelectiveDisclosure(identityHash, disclosedAttributes, recipient);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Disclosure creation error:', error);
@@ -122,12 +125,8 @@ router.post('/zkid/disclosure/revoke', authenticate, requirePolicy('zkid:revoke-
     try {
         const { disclosureId } = req.body;
         if (!disclosureId) {
-            return res.status(400).json({
-                success: false,
-                error: 'disclosureId required'
-            });
+            return res.status(400).json({ success: false, error: 'disclosureId required' });
         }
-
         const result = await zkidService.revokeSelectiveDisclosure(disclosureId);
         res.json({ success: true, data: result });
     } catch (error) {

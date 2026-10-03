@@ -14,12 +14,11 @@ describe('toPaisa', () => {
     expect(toPaisa(0.01)).toBe(1);
   });
 
-  it('uses banker\'s rounding for edge cases', () => {
-    // 1.235 rounds to 123.5 -> 124 with EPSILON adjustment
-    expect(toPaisa(1.235)).toBe(124);
-    // 1.225 should round to 122 or 123 depending on JS behavior
-    const result = toPaisa(1.225);
-    expect([122, 123]).toContain(result);
+  it('floors fractional paisa without rounding upward', () => {
+    // Fractional paisa is always floored down
+    expect(toPaisa(1.235)).toBe(123);
+    expect(toPaisa(1.225)).toBe(122);
+    expect(toPaisa(1.996)).toBe(199);
   });
 
   it('returns null for negative values', () => {

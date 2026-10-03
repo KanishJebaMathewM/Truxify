@@ -1,3 +1,7 @@
+# Escrow circuit-breaker availability
+
+Escrow submission is fail closed. If Redis is unavailable or a pause read fails, `isEscrowPaused()` returns `true` so the API cannot submit a transaction while emergency state is unknown. Operators must restore Redis and verify the pause state before resuming escrow.
+
 # Circuit Breaker
 
 ## Overview

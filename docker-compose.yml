@@ -13,8 +13,8 @@ services:
 
   api:
     build:
-      context: ./backend/api
-      target: development
+      context: .
+      dockerfile: Dockerfile.api
     image: ghcr.io/kanishjebamathewm/truxify-api
     container_name: truxify-api
     env_file:
@@ -49,11 +49,13 @@ services:
       SHARD_WEST_DB: truxify_west
       SHARD_WEST_USER: postgres
       SHARD_PASSWORD_WEST: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      # API key auth for backend-to-backend endpoints (n8n workflows)
+      VALID_API_KEYS: ${VALID_API_KEYS}
       # Malware scanning
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
     volumes:
-      - ./backend/api:/app
+      - ./backend:/app/backend
       - /app/node_modules
     depends_on:
       db:
@@ -264,6 +266,7 @@ services:
       - ML_API_KEY=${ML_API_KEY:-local_ml_secret}
       - ML_ENGINE_URL=http://ml-engine:8000
       - BACKEND_API_URL=${BACKEND_API_URL:-http://api:5000}
+      - VALID_API_KEYS=${VALID_API_KEYS}
       - ADMIN_ALERT_EMAIL=${ADMIN_ALERT_EMAIL:-admin@localhost}
     volumes:
       - n8n_data:/home/node/.n8n

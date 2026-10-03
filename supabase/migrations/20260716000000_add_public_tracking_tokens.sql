@@ -61,6 +61,19 @@ create policy "Customers select own tracking tokens"
   to authenticated
   using (created_by = (select id from profiles where firebase_uid = (auth.jwt() ->> 'sub') limit 1));
 
+-- Customers can create their own tokens
+create policy "Customers insert own tracking tokens"
+  on tracking_tokens for insert
+  to authenticated
+  with check (created_by = (select id from profiles where firebase_uid = (auth.jwt() ->> 'sub') limit 1));
+
+-- Customers can update (revoke) their own tokens
+create policy "Customers update own tracking tokens"
+  on tracking_tokens for update
+  to authenticated
+  using (created_by = (select id from profiles where firebase_uid = (auth.jwt() ->> 'sub') limit 1))
+  with check (created_by = (select id from profiles where firebase_uid = (auth.jwt() ->> 'sub') limit 1));
+
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 3. AUTO-EXPIRE TOKENS WHEN ORDER REACHES TERMINAL STATUS

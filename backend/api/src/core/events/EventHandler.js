@@ -32,14 +32,23 @@ export class EventHandler {
     try {
       const runCtx = parentCtx || context.active();
       const result = await context.with(trace.setSpan(runCtx, span), async () => {
-        return await Promise.race([
-          this._handler(event),
-          this._timeout > 0
-            ? new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Handler "${this._name}" timed out after ${this._timeout}ms`)), this._timeout)
-              )
-            : Promise.resolve(),
-        ]);
+        if (this._timeout <= 0) {
+          return await this._handler(event);
+        }
+
+        let timeoutId;
+        try {
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error(`Handler "${this._name}" timed out after ${this._timeout}ms`)),
+              this._timeout,
+            );
+          });
+
+          return await Promise.race([this._handler(event), timeoutPromise]);
+        } finally {
+          clearTimeout(timeoutId);
+        }
       });
 
       span.setStatus({ code: SpanStatusCode.OK });

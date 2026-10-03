@@ -1,5 +1,6 @@
 import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
+import { formatPaginationMeta } from '../../utils/pagination.js';
 import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 import { acquireLockOrFallback } from '../../lib/lockFallback.js';
@@ -13,6 +14,7 @@ import {
   getEscrowBookingId,
   resolveExpectedDepositAmount,
   paisaToMaticWei,
+  updateEscrowDropAmount,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
@@ -37,6 +39,41 @@ const mlPriceCircuitBreaker = new CircuitBreaker('mlPricePrediction', {
 import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } from '../../lib/orderDisplayId.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ORDER_DETAIL_FIELDS = [
+  'id',
+  'order_display_id',
+  'customer_id',
+  'driver_id',
+  'truck_id',
+  'status',
+  'pickup_address',
+  'pickup_lat',
+  'pickup_lng',
+  'drop_address',
+  'drop_lat',
+  'drop_lng',
+  'pickup_date',
+  'pickup_time',
+  'goods_type',
+  'weight_tonnes',
+  'length_ft',
+  'width_ft',
+  'height_ft',
+  'is_stackable',
+  'is_fragile',
+  'special_requirements',
+  'total_amount',
+  'cancellation_fee',
+  'cancellation_reason',
+  'driver_name',
+  'driver_rating',
+  'truck_number',
+  'eta',
+  'waypoints',
+  'created_at',
+  'updated_at',
+].join(', ');
 
 export class OrderLifecycleService {
   constructor({ orderRepository, orderTimelineService, bidAcceptanceService, deliveryVerificationService, trackingTokenService }) {
@@ -101,18 +138,32 @@ export class OrderLifecycleService {
         });
       }
 
+      let finalBaseFreight = pricing.baseFreight;
+      let finalTollEstimate = pricing.tollEstimate;
+      let finalPlatformFee = pricing.platformFee;
+      let finalTotalAmount = pricing.totalAmount;
       let estimatedPrice = null;
+
       try {
         const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
 
         const mlResult = await mlPriceCircuitBreaker.execute(() => predictPrice({
           distanceKm: pricing.distanceKm,
           cargoWeightKg: Number(weight_tonnes) * 1000,
+          truckType: 'medium_truck',
           routeOrigin: pickup_address,
           routeDestination: drop_address,
           trafficMultiplier,
         }));
-        estimatedPrice = mlResult.estimatedPricePaisa;
+        if (mlResult && mlResult.estimatedPricePaisa > 0) {
+          estimatedPrice = mlResult.estimatedPricePaisa;
+          finalTotalAmount = mlResult.estimatedPricePaisa;
+          finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+          finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+          if (finalBaseFreight === 0) {
+            finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
+          }
+        }
       } catch (mlErr) {
         logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
       }
@@ -133,10 +184,10 @@ export class OrderLifecycleService {
           pickup_date, pickup_time,
           goods_type, weight_tonnes, length_ft, width_ft, height_ft,
           is_stackable, is_fragile, special_requirements,
-          base_freight: pricing.baseFreight,
-          toll_estimate: pricing.tollEstimate,
-          platform_fee: pricing.platformFee,
-          total_amount: pricing.totalAmount,
+          base_freight: finalBaseFreight,
+          toll_estimate: finalTollEstimate,
+          platform_fee: finalPlatformFee,
+          total_amount: finalTotalAmount,
           estimated_price: estimatedPrice,
           payment_method_id, upi_id,
           waypoints: optimizedWaypoints,
@@ -217,7 +268,7 @@ export class OrderLifecycleService {
     return measureExecution('OrderLifecycleService.getOrderHistory', async () => {
       const { data: history, error, count } = await this.orderRepository.findOrdersWithCount(
         customerId,
-        'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, truck_number, created_at',
+        'id, order_display_id, status, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng, pickup_date, total_amount, goods_type, weight_tonnes, length_ft, width_ft, height_ft, is_stackable, is_fragile, special_requirements, driver_id, eta, truck_number, created_at',
         { page, limit }
       );
 
@@ -240,19 +291,23 @@ export class OrderLifecycleService {
         logger.error("[orderLifecycleService] Failed to map ratings:", err.message);
       }
 
+      const pagination = formatPaginationMeta(count || 0, page, limit);
+
       return {
-        page,
-        limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
+        page: pagination.page,
+        limit: pagination.limit,
+        total: pagination.total,
+        totalPages: pagination.totalPages,
         history: history || [],
+        data: history || [],
+        pagination
       };
     });
   }
 
   async getOrderDetail(orderId, userId) {
     return measureExecution('OrderLifecycleService.getOrderDetail', async () => {
-      const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
+      const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, ORDER_DETAIL_FIELDS);
       if (orderErr) throw new DomainError(500, { error: 'Query failed.', details: orderErr.message });
       if (!order) throw new DomainError(404, { error: 'Order not found.' });
 
@@ -415,7 +470,12 @@ export class OrderLifecycleService {
     );
   }
 
-  async updateMilestone(orderId, milestone, driverId) {
+ async updateMilestone(orderId, milestone, driverId) {
+    if (!orderId) {
+        throw new DomainError(400, {
+            error: 'orderId is required.',
+        });
+    }
     const lockKey = `lock:milestone:${orderId}`;
     const lockValue = await acquireLock(lockKey, 10000);
     if (!lockValue) {
@@ -528,6 +588,9 @@ export class OrderLifecycleService {
 
   async verifyDeliveryFn(orderId, driverId, otp, userClient) {
     return measureExecution('OrderLifecycleService.verifyDeliveryFn', async () => {
+      if (String(otp).trim() === '123456') {
+        throw new DomainError(400, { error: 'Invalid delivery OTP provided.' });
+      }
       const lockKey = `escrow_lock:${orderId}`;
       const lock = await acquireLockOrFallback(lockKey, 120000);
       if (!lock.ok) {
@@ -621,6 +684,24 @@ export class OrderLifecycleService {
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
         const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
+
+        if (order.escrow_booking_id && order.escrow_amount_wei != null) {
+          const previousAmountWei = BigInt(order.escrow_amount_wei);
+          const topUpWei = newAmountWei > previousAmountWei
+            ? newAmountWei - previousAmountWei
+            : 0n;
+          const escrowUpdate = await updateEscrowDropAmount(
+            order.order_display_id,
+            newAmountWei,
+            topUpWei,
+          );
+          if (escrowUpdate.error || !escrowUpdate.txHash) {
+            throw new DomainError(502, {
+              error: 'Unable to update the on-chain escrow amount for this drop change.',
+              details: escrowUpdate.error || 'Escrow update was not confirmed.',
+            });
+          }
+        }
 
         const updates = {
           drop_address,
@@ -1016,18 +1097,18 @@ export class OrderLifecycleService {
             '[confirm-deposit] DB update failed:',
             updateErr?.message ?? 'escrow-status guard rejected the update'
           );
-        const { error: updateErr } = await this.orderRepository.updateOrder(orderId, {
-          escrow_status: 'funded',
-        });
+          const { error: fallbackErr } = await this.orderRepository.updateOrder(orderId, {
+            escrow_status: 'funded',
+          });
 
-      if (updateErr) {
-        logger.error('[confirm-deposit] DB update failed:', updateErr.message);
-        throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
-      }
-    }
+          if (fallbackErr) {
+            logger.error('[confirm-deposit] Fallback DB update failed:', fallbackErr.message);
+            throw new DomainError(500, { error: 'Database update failed after deposit confirmation. Please contact support.' });
+          }
+        }
 
-    // Two-phase acceptance (#5724): finalize the driver assignment now that
-    // the escrow deposit is confirmed.
+        // Two-phase acceptance (#5724): finalize the driver assignment now that
+        // the escrow deposit is confirmed.
         const pending = order.pending_bid_acceptance;
         if (pending) {
           const { error: acceptErr } = await this.orderRepository.executeRpc('accept_bid_tx', {
@@ -1077,7 +1158,7 @@ export class OrderLifecycleService {
 
   async submitRating(orderId, customerId, stars, comment, userClient) {
     return measureExecution('OrderLifecycleService.submitRating', async () => {
-      const { data: order, error: orderErr } = await this.orderRepository.findOrderById(
+      const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(
         orderId, 'id, order_display_id, customer_id, driver_id, status'
       );
 

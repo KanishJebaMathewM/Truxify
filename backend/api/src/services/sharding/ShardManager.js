@@ -58,7 +58,7 @@ class ShardManager {
     const missingPasswords = [];
 
     // North Zone - Delhi, UP, Punjab, Haryana, Rajasthan
-    const northPassword = process.env.SHARD_PASSWORD_NORTH;
+    const northPassword = process.env.SHARD_PASSWORD_NORTH || process.env.SHARD_PASSWORD;
     if (!northPassword) missingPasswords.push('SHARD_PASSWORD_NORTH');
     this.shards.set('north', {
       name: 'north',
@@ -72,7 +72,7 @@ class ShardManager {
     });
 
     // South Zone - Tamil Nadu, Karnataka, Kerala, AP, Telangana
-    const southPassword = process.env.SHARD_PASSWORD_SOUTH;
+    const southPassword = process.env.SHARD_PASSWORD_SOUTH || process.env.SHARD_PASSWORD;
     if (!southPassword) missingPasswords.push('SHARD_PASSWORD_SOUTH');
     this.shards.set('south', {
       name: 'south',
@@ -86,7 +86,7 @@ class ShardManager {
     });
 
     // East Zone - WB, Bihar, Odisha, Jharkhand, NE States
-    const eastPassword = process.env.SHARD_PASSWORD_EAST;
+    const eastPassword = process.env.SHARD_PASSWORD_EAST || process.env.SHARD_PASSWORD;
     if (!eastPassword) missingPasswords.push('SHARD_PASSWORD_EAST');
     this.shards.set('east', {
       name: 'east',
@@ -100,7 +100,7 @@ class ShardManager {
     });
 
     // West Zone - Maharashtra, Gujarat, MP, Goa
-    const westPassword = process.env.SHARD_PASSWORD_WEST;
+    const westPassword = process.env.SHARD_PASSWORD_WEST || process.env.SHARD_PASSWORD;
     if (!westPassword) missingPasswords.push('SHARD_PASSWORD_WEST');
     this.shards.set('west', {
       name: 'west',
@@ -114,7 +114,13 @@ class ShardManager {
     });
 
     if (missingPasswords.length > 0) {
-      throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      if (process.env.SHARDING_ENABLED === 'true') {
+        throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      }
+      logger.warn(
+        `Sharding not enabled — missing shard password env vars: ${missingPasswords.join(', ')}. ` +
+        'Set SHARDING_ENABLED=true (with the SHARD_PASSWORD_* vars) to require shard credentials.'
+      );
     }
 
     // Initialize connection pools
@@ -268,20 +274,136 @@ class ShardManager {
     }
   }
 
-  async executeCrossShardQuery(queries) {
-    // Execute same query across all shards and combine results
-    const results = [];
-    for (const [name, shard] of this.shards) {
-      if (shard.pool) {
-        try {
-          const result = await shard.pool.query(queries.query, queries.params || []);
-          results.push({ shard: name, data: result.rows });
-        } catch (error) {
-          logger.error(`Error querying shard ${name}:`, error);
+  async executeCrossShardQuery(queries, options = {}) {
+    // Normalize queries argument: support both { query, params } and raw SQL string
+    const queryText = typeof queries === 'string' ? queries : queries?.query;
+    const queryParams = typeof queries === 'string'
+      ? (options.params || [])
+      : (queries?.params || options.params || []);
+
+    if (!queryText || typeof queryText !== 'string') {
+      throw new Error('Query string is required for executeCrossShardQuery');
+    }
+
+    // Execute same query across all shards concurrently via Promise.allSettled
+    const promises = Array.from(this.shards.entries()).map(async ([name, shard]) => {
+      if (!shard.pool) {
+        logger.error(`Shard ${name} is unavailable or uninitialized`);
+        const err = new Error('Shard connection pool uninitialized');
+        err.shard = name;
+        throw err;
+      }
+
+      try {
+        const hasTimeout = Boolean(options.timeoutMs && options.timeoutMs > 0);
+        const queryConfig = hasTimeout
+          ? {
+              text: queryText,
+              values: queryParams,
+              statement_timeout: options.timeoutMs,
+              query_timeout: options.timeoutMs,
+            }
+          : null;
+
+        let queryPromise = queryConfig
+          ? shard.pool.query(queryConfig, queryParams)
+          : shard.pool.query(queryText, queryParams);
+
+        if (hasTimeout) {
+          let timer;
+          const timeoutPromise = new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              const timeoutErr = new Error(`Query timed out on shard ${name}`);
+              timeoutErr.code = 'ETIMEDOUT';
+              timeoutErr.shard = name;
+              reject(timeoutErr);
+            }, options.timeoutMs);
+          });
+          queryPromise = Promise.race([queryPromise, timeoutPromise]).finally(() => {
+            clearTimeout(timer);
+          });
         }
+        const result = await queryPromise;
+        return {
+          shard: name,
+          data: result.rows,
+        };
+      } catch (error) {
+        logger.error(`Error querying shard ${name}:`, error);
+        error.shard = name;
+        throw error;
+      }
+    });
+
+    const settled = await Promise.allSettled(promises);
+
+    const results = [];
+    const failedShards = [];
+    const healthyShards = [];
+    const errors = {};
+
+    for (const item of settled) {
+      if (item.status === 'fulfilled') {
+        results.push({ shard: item.value.shard, data: item.value.data });
+        healthyShards.push(item.value.shard);
+      } else {
+        const shardName = item.reason?.shard || 'unknown';
+        failedShards.push(shardName);
+        errors[shardName] = item.reason?.message || 'Unknown shard error';
       }
     }
-    return results;
+
+    if (options && options.mergeResults) {
+      let merged = results.flatMap((r) => r.data || []);
+      if (options.sortField) {
+        const field = options.sortField;
+        const order = options.sortOrder === 'desc' ? -1 : 1;
+        merged.sort((a, b) => {
+          if (a[field] < b[field]) return -1 * order;
+          if (a[field] > b[field]) return 1 * order;
+          return 0;
+        });
+      }
+      if (options.offset !== undefined || options.limit !== undefined) {
+        const offset = options.offset || 0;
+        const limit = options.limit !== undefined ? offset + options.limit : undefined;
+        merged = merged.slice(offset, limit);
+      }
+
+      // Attach failure boundary metadata as non-enumerable properties so callers
+      // have full visibility without breaking callers expecting an exact Array shape.
+      Object.defineProperties(merged, {
+        results: { value: results, enumerable: false, writable: true, configurable: true },
+        failed: { value: failedShards, enumerable: false, writable: true, configurable: true },
+        healthy: { value: healthyShards, enumerable: false, writable: true, configurable: true },
+        unhealthy: { value: failedShards, enumerable: false, writable: true, configurable: true },
+        partial: { value: failedShards.length > 0, enumerable: false, writable: true, configurable: true },
+        errors: { value: errors, enumerable: false, writable: true, configurable: true },
+      });
+
+      if (options.structured || options.includeMetadata) {
+        return {
+          data: merged,
+          results,
+          failed: failedShards,
+          healthy: healthyShards,
+          unhealthy: failedShards,
+          partial: failedShards.length > 0,
+          errors,
+        };
+      }
+
+      return merged;
+    }
+
+    return {
+      results,
+      failed: failedShards,
+      healthy: healthyShards,
+      unhealthy: failedShards,
+      partial: failedShards.length > 0,
+      errors,
+    };
   }
 
   async healthCheck() {

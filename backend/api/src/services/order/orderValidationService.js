@@ -1,6 +1,5 @@
 import { DomainError } from './domainError.js';
 import { policy } from '../../security/policyEngine.js';
-import { orderRepository } from '../../core/container.js';
 
 export class OrderValidationService {
   constructor({ supabase, orderRepository, logger } = {}) {
@@ -225,23 +224,3 @@ export class OrderValidationService {
     }
   }
 }
-
-let defaultValidationService = null;
-
-function getDefaultValidationService() {
-  if (!defaultValidationService) {
-    defaultValidationService = new OrderValidationService({ orderRepository });
-  }
-  return defaultValidationService;
-}
-
-export default new Proxy({}, {
-  get(_target, prop) {
-    if (prop === 'then') return undefined;
-    return getDefaultValidationService()[prop];
-  },
-  set(_target, prop, value) {
-    getDefaultValidationService()[prop] = value;
-    return true;
-  },
-});

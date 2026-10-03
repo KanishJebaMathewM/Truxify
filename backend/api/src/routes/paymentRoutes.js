@@ -16,6 +16,11 @@ import {
   isEscrowEnabled,
   resolveExpectedDepositAmount,
   submitEscrowRefund,
+  lockPayment,
+  paisaToMaticWei,
+  processMilestoneTransition,
+  executeEscrowTimeoutClawback,
+  ESCROW_MILESTONE_STATES,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
@@ -31,21 +36,23 @@ const PAYMENT_LOCK_TTL_MS = 30_000; // 30 seconds
 // Redis-backed stores so multi-replica deploys share one budget (MemoryStore
 // would allow N× the limit across N API pods).
 
+const lockStore = typeof createStore === 'function' ? createStore('rl:payment-lock:') : null;
 const lockLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
   message: { error: 'Too many payment requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore('rl:payment-lock:'),
+  ...(lockStore ? { store: lockStore } : {}),
 });
 
+const statusStore = typeof createStore === 'function' ? createStore('rl:payment-status:') : null;
 const statusLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  store: createStore('rl:payment-status:'),
+  ...(statusStore ? { store: statusStore } : {}),
 });
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
@@ -58,8 +65,9 @@ const lockPaymentSchema = z.union([
   }),
   z.object({
     bookingId: z.string().min(1),
+    upiReference: z.string().min(1).optional(),
     amount: z.number().positive().optional(),
-    tx_hash: z.string().trim().min(1, 'tx_hash is required'),
+    tx_hash: z.string().trim().min(1).optional(),
     order_id: z.string().optional(),
   }),
 ]);
@@ -140,6 +148,11 @@ router.post(
         `&cu=INR` +
         `&tn=${encodeURIComponent(orderRef)}`;
 
+      logger.info(
+        { event: 'PAYMENT_UPI_INTENT_GENERATED', orderId: order.id, orderRef, amountInr },
+        `[payments] UPI intent generated for order ${orderRef}`
+      );
+
       return res.status(200).json({
         upi_id: platformUpiId,
         amount_inr: amountInr,
@@ -206,11 +219,23 @@ router.post(
       // 1. Fetch order
       let order;
       try {
-        order = await orderValidationService.findOrderByIdOrDisplayId(
-          order_id,
-          'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
-        );
+        if (orderValidationService && typeof orderValidationService.findOrderByIdOrDisplayId === 'function') {
+          order = await orderValidationService.findOrderByIdOrDisplayId(
+            order_id,
+            'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
+          );
+        }
+        if (!order && orderRepository) {
+          if (typeof orderRepository.findOrderByAnyId === 'function') {
+            const { data } = (await orderRepository.findOrderByAnyId(order_id)) || {};
+            order = data || order;
+          } else if (typeof orderRepository.findOrderByIdOrDisplayId === 'function') {
+            const { data } = (await orderRepository.findOrderByIdOrDisplayId(order_id)) || {};
+            order = data || order;
+          }
+        }
       } catch (err) {
+        console.error('FETCH ORDER ERROR:', err);
         return res.status(500).json({ error: 'Failed to fetch order.' });
       }
 
@@ -219,7 +244,7 @@ router.post(
       }
 
       if (order.customer_id !== req.user.id) {
-        return res.status(403).json({ error: 'Access denied.' });
+        return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
       }
 
       // 2. Idempotency — already funded
@@ -245,6 +270,73 @@ router.post(
       if (order.escrow_status !== 'funding') {
         return res.status(409).json({
           error: `Cannot lock payment — escrow must be in 'funding' state, current status: ${order.escrow_status}`,
+        });
+      }
+
+      if (!tx_hash && (req.body.amount || req.body.upiReference)) {
+        const requestedAmountPaisa = Number(req.body.amount);
+        const expectedAmountPaisa = Number(order.total_amount);
+        if (!Number.isSafeInteger(requestedAmountPaisa) || requestedAmountPaisa <= 0 ||
+            !Number.isSafeInteger(expectedAmountPaisa) || requestedAmountPaisa !== expectedAmountPaisa) {
+          return res.status(400).json({
+            error: 'Payment amount must exactly match the order total.',
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+          });
+        }
+
+        const driverId = order.driver_id;
+        if (!driverId) {
+          return res.status(422).json({ error: 'No driver is assigned to this order yet.' });
+        }
+
+        const { data: driverDetails } = await orderRepository.findDriverWallet(driverId);
+        const driverWallet = driverDetails?.polygon_wallet_address ?? null;
+
+        const { data: customerWalletData } = await orderRepository.findCustomerWallet(req.user.id);
+        const customerWallet = customerWalletData?.polygon_wallet_address ?? null;
+
+        const isValidAddress = (addr) => typeof addr === 'string' && /^0x[a-fA-F0-9]{40}$/.test(addr);
+        if (!isValidAddress(driverWallet) || !isValidAddress(customerWallet)) {
+          return res.status(422).json({
+            error: 'A registered Polygon wallet is required for both customer and driver to lock escrow payment.',
+            code: 'WALLET_REQUIRED',
+          });
+        }
+
+        const amountWei = typeof paisaToMaticWei === 'function' ? paisaToMaticWei(req.body.amount || order.total_amount) : String(req.body.amount);
+
+        const result = await lockPayment(
+          order.order_display_id,
+          customerWallet,
+          driverWallet,
+          amountWei
+        );
+
+        if (result && result.error) {
+          logger.error(`[lock-payment] Blockchain lock failed for order ${order.order_display_id}: ${result.error}`);
+          return res.status(502).json({
+            error: 'Failed to lock payment in blockchain escrow.',
+            details: result.error,
+          });
+        }
+
+        const { error: updateErr } = await orderRepository.updateOrder(order.id, {
+          escrow_status: 'funded',
+          deposit_tx_hash: result?.txHash,
+          escrow_deposited_at: new Date().toISOString(),
+          escrow_booking_id: result?.bookingId,
+          upi_reference: req.body.upiReference,
+        });
+
+        if (updateErr) {
+          return res.status(500).json({ error: 'Failed to sync escrow status to database.' });
+        }
+
+        return res.status(200).json({
+          success: true,
+          message: 'Payment successfully locked in blockchain escrow.',
+          txHash: result?.txHash,
+          bookingId: result?.bookingId,
         });
       }
 
@@ -285,7 +377,10 @@ router.post(
       );
 
       if (result.error) {
-        logger.warn(`[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`);
+        logger.warn(
+          { event: 'PAYMENT_RECORD_DEPOSIT_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: result.error, code: result.code },
+          `[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`
+        );
         return res.status(422).json({
           error: `Transaction verification failed: ${result.error}`,
           code: result.code,
@@ -305,7 +400,10 @@ router.post(
       );
 
       if (updateErr) {
-        logger.error('[payments] Failed to update escrow_status:', updateErr.message);
+        logger.error(
+          { event: 'PAYMENT_ESCROW_STATUS_UPDATE_FAILED', orderId: order.id, error: updateErr.message },
+          '[payments] Failed to update escrow_status'
+        );
         return res.status(500).json({
           error: 'Payment verified but database update failed. Please contact support.',
         });
@@ -329,12 +427,12 @@ router.post(
         }, req.token ? createUserClient(req.token) : undefined);
 
         if (acceptErr) {
-          logger.error('[payments] accept_bid_tx failed after lock:', acceptErr.message);
+          logger.error({ event: 'PAYMENT_ACCEPT_BID_FAILED', orderId: order.id, error: acceptErr.message }, '[payments] accept_bid_tx failed after lock');
           let refundResult;
           try {
             refundResult = await submitEscrowRefund(order.order_display_id);
           } catch (refundErr) {
-            logger.error('[payments] Escrow refund also failed:', refundErr.message);
+            logger.error({ event: 'PAYMENT_REFUND_FAILED', orderId: order.id, error: refundErr.message }, '[payments] Escrow refund also failed');
             refundResult = { error: refundErr.message };
           }
           let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
@@ -342,7 +440,7 @@ router.post(
             try {
               await refundResult.waitForConfirmation();
             } catch (confirmErr) {
-              logger.error('[payments] Escrow refund confirmation failed:', confirmErr.message);
+              logger.error({ event: 'PAYMENT_REFUND_CONFIRMATION_FAILED', orderId: order.id, error: confirmErr.message }, '[payments] Escrow refund confirmation failed');
               refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
               refundConfirmed = false;
             }
@@ -360,7 +458,7 @@ router.post(
               escrow_status: 'funding',
               escrow_funding_error: `escrow refund pending: ${refundError}`,
             }).catch((stateErr) => {
-              logger.error('[payments] Failed to mark escrow refund pending:', stateErr.message);
+              logger.error({ event: 'PAYMENT_MARK_REFUND_PENDING_FAILED', orderId: order.id, error: stateErr.message }, '[payments] Failed to mark escrow refund pending');
             });
             return res.status(503).json({
               error: 'Payment locked but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
@@ -369,7 +467,7 @@ router.post(
           }
 
           await orderRepository.revertEscrowStatus(order.id).catch((revertErr) => {
-            logger.error('[payments] Failed to revert escrow status:', revertErr.message);
+            logger.error({ event: 'PAYMENT_REVERT_ESCROW_STATUS_FAILED', orderId: order.id, error: revertErr.message }, '[payments] Failed to revert escrow status');
           });
           return res.status(409).json({
             error: 'Payment locked but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
@@ -383,7 +481,7 @@ router.post(
           `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
           'order_update',
           { orderId: order.id, orderDisplayId: pending.order_display_id }
-        ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
+        ).catch((err) => logger.error({ event: 'PAYMENT_FCM_DRIVER_NOTIFICATION_FAILED', orderId: order.id, driverId: pending.driver_id, error: err.message }, `[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
 
         sendPushNotification(
           pending.driver_id,
@@ -391,7 +489,7 @@ router.post(
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
-        ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
+        ).catch(err => logger.warn({ event: 'PAYMENT_DRIVER_FCM_PUSH_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: err.message }, '[payments] Driver FCM push failed'));
       } else if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
@@ -399,10 +497,10 @@ router.post(
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
           'payment',
           { order_display_id: order.order_display_id, tx_hash }
-        ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
+        ).catch(err => logger.warn({ event: 'PAYMENT_DRIVER_FCM_PUSH_FAILED', orderId: order.id, orderDisplayId: order.order_display_id, error: err.message }, '[payments] Driver FCM push failed'));
       }
 
-      invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache on payment lock'));
+      invalidateBookingCaches().catch(err => logger.error({ event: 'PAYMENT_CACHE_INVALIDATION_FAILED', error: err?.message }, 'Failed to invalidate cache on payment lock'));
 
       return res.status(201).json({
         message: 'Payment successfully locked in escrow. It will be released to the driver upon delivery confirmation.',
@@ -412,9 +510,10 @@ router.post(
         tx_hash,
       });
     } catch (err) {
+      console.error('OUTER PAYMENT LOCK ERROR:', err);
       if (err instanceof LockAcquisitionError) {
         // Redis is down — do NOT proceed with the payment mutation.
-        logger.error('[payments] Redis unavailable — refusing payment lock:', err.message);
+        logger.error({ event: 'PAYMENT_REDIS_UNAVAILABLE', orderId: order_id, error: err.message }, '[payments] Redis unavailable — refusing payment lock');
         return res.status(503).json({
           error: 'Payment service temporarily unavailable. Please retry in a moment.',
         });
@@ -457,7 +556,10 @@ router.get(
       );
 
       if (error) {
-        logger.error({ error }, '[payments] Failed to fetch payment status');
+        logger.error(
+          { event: 'PAYMENT_STATUS_FETCH_ERROR', orderId: req.params.orderId, error: error?.message || error },
+          '[payments] Failed to fetch payment status'
+        );
         return res.status(500).json({ error: 'Failed to fetch payment status.' });
       }
 
@@ -492,6 +594,78 @@ router.get(
         '[payments] status error',
       );
       return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
+
+/**
+ * POST /api/payments/escrow/milestone
+ * Processes partial escrow milestone transitions (ADVANCE_RELEASED, RELEASED).
+ */
+router.post(
+  '/escrow/milestone',
+  authenticate,
+  lockLimiter,
+  async (req, res) => {
+    try {
+      const { order_id, booking_id, target_milestone, pod_hash, ipfs_cid, advance_percentage } = req.body || {};
+
+      if (!order_id || !target_milestone) {
+        return res.status(400).json({ error: 'Missing required fields: order_id and target_milestone' });
+      }
+
+      const result = await processMilestoneTransition({
+        orderId: order_id,
+        bookingId: booking_id,
+        targetMilestone: target_milestone,
+        podHash: pod_hash,
+        ipfsCid: ipfs_cid,
+        advancePercentage: advance_percentage,
+      });
+
+      if (result.error) {
+        const status = result.code === 'POD_VERIFICATION_FAILED' ? 422 : 400;
+        return res.status(status).json({ success: false, error: result.error, code: result.code });
+      }
+
+      return res.status(200).json({ success: true, ...result });
+    } catch (err) {
+      logger.error({ err, requestId: req.requestId }, '[Escrow] Milestone processing failed');
+      return res.status(500).json({ error: 'Internal server error during milestone settlement' });
+    }
+  }
+);
+
+/**
+ * POST /api/payments/escrow/clawback
+ * Checks and triggers timeout clawbacks for abandoned trips.
+ */
+router.post(
+  '/escrow/clawback',
+  authenticate,
+  lockLimiter,
+  async (req, res) => {
+    try {
+      const { order_id, booking_id, max_inactivity_hours } = req.body || {};
+
+      if (!order_id) {
+        return res.status(400).json({ error: 'Missing required field: order_id' });
+      }
+
+      const result = await executeEscrowTimeoutClawback({
+        orderId: order_id,
+        bookingId: booking_id,
+        maxInactivityHours: max_inactivity_hours,
+      });
+
+      if (result.error) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+
+      return res.status(200).json(result);
+    } catch (err) {
+      logger.error({ err, requestId: req.requestId }, '[Escrow] Clawback execution failed');
+      return res.status(500).json({ error: 'Internal server error during escrow clawback' });
     }
   }
 );

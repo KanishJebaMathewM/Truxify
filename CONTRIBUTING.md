@@ -86,6 +86,7 @@ flutter run
 ### 3. Backend API (Node.js & Express)
 
 ```bash
+cd backend/api
 npm install
 npm run lint
 npm test
@@ -106,6 +107,13 @@ pytest
 uvicorn main:app --reload --port 8000
 ```
 
+For contributor linting, also install the development-only tooling:
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check .
+```
+
 ### 5. Smart Contracts (Polygon / Hardhat)
 
 ```bash
@@ -113,6 +121,7 @@ cd blockchain
 npm install
 npx hardhat compile
 npx hardhat test
+npx --yes solhint@6.2.4 'contracts/**/*.sol'
 ```
 
 ### 6. Running via Docker Compose
@@ -132,7 +141,7 @@ Copy `.env.example` at the repository root or in component directories to set yo
 
 | Variable | Description | Default / Example |
 |---|---|---|
-| `PORT` | Node.js Backend API Port | `8080` |
+| `PORT` | Node.js Backend API Port | `5000` |
 | `JWT_SECRET` | Backend JWT signing secret | `truxify-jwt-secret-key` |
 | `POLYGON_RPC_URL` | Polygon JSON-RPC Endpoint | `https://polygon-mumbai.g.alchemy.com/v2/...` |
 | `ESCROW_CONTRACT_ADDRESS` | Deployed TruxifyEscrow contract | `0x1234567890abcdef1234567890abcdef12345678` |
@@ -150,7 +159,7 @@ Always branch off `main` or the active sprint branch using the following naming 
 - **Features**: `feat/<issue-number>-short-description` (e.g. `feat/472-fcm-notifications`)
 - **Bug Fixes**: `fix/<issue-number>-short-description` (e.g. `fix/312-redis-cache-invalidation`)
 - **Documentation**: `docs/<issue-number>-short-description` (e.g. `docs/501-contributing-guide`)
-- **Refactoring**: `refactor/<issue-number>-short-description` (e.g. `refactor/128-order-lifecycle`)
+- **Refactoring**: `refactor/<issue-number>-short-description` (e.g. `refactor/128-order-optimization`)
 
 ---
 
@@ -167,7 +176,7 @@ We follow the **Conventional Commits** specification:
 ### Commit Types
 
 - `feat`: A new feature for the user or API.
-- `fix`: A bug fix.
+- `fix`: A bug fix (non-breaking change fixing a bug).
 - `docs`: Documentation changes only.
 - `test`: Adding or updating unit/integration tests.
 - `refactor`: Code changes that neither fix a bug nor add a feature.
@@ -192,6 +201,19 @@ git commit --no-verify -m "fix(cache): resolve Redis cache-aside TTL expiry on d
 
 ---
 
+### ✅ Before Opening a Pull Request
+
+Before opening your PR, verify:
+
+- [ ] You are working on a dedicated branch and not `main`.
+- [ ] Your changes are limited to the scope of the issue.
+- [ ] Relevant tests have been run and pass successfully.
+- [ ] Code formatting and linting checks have been completed.
+- [ ] No API keys, passwords, tokens, or other secrets are included.
+- [ ] Documentation has been updated if your changes require it.
+- [ ] The related issue is linked in the PR description.
+- [ ] You have reviewed your changes and confirmed the PR is ready for review.
+
 ## 🏷️ Issue Labels Guide
 
 | Label | Description |
@@ -213,8 +235,8 @@ git commit --no-verify -m "fix(cache): resolve Redis cache-aside TTL expiry on d
 |---|---|
 | **Flutter Apps** | `flutter analyze` |
 | **Node.js Backend** | `npm run lint` |
-| **Python ML Service** | `ruff check .` or `flake8` |
-| **Solidity Contracts** | `npx solhint 'contracts/**/*.sol'` |
+| **Python ML Service** | `python -m ruff check .` (install `backend/ml/requirements-dev.txt` first) |
+| **Solidity Contracts** | `npx --yes solhint@6.2.4 'contracts/**/*.sol'` |
 
 **Mac/Linux:**
 ```bash

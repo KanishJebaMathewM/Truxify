@@ -108,8 +108,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get biometricAuthSuccessful => 'பயோமெட்ரிக் அங்கீகாரம் வெற்றிகரமாக முடிந்தது';
 
   @override
-  String get biometricAuthRequiresSession =>
-      'சேமிக்கப்பட்ட அமர்வு எதுவும் கிடைக்கவில்லை. முதலில் உங்கள் தொலைபேசி எண்ணுடன் உள்நுழையவும்.';
+  String get biometricAuthRequiresSession => 'சேமிக்கப்பட்ட அமர்வு எதுவும் கிடைக்கவில்லை. முதலில் உங்கள் தொலைபேசி எண்ணுடன் உள்நுழையவும்.';
 
   @override
   String get pleaseEnterPhone => 'உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்';

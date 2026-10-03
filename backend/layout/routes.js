@@ -86,7 +86,7 @@ const chart2 = new LayoutNode({
 content.addChild(chart1);
 content.addChild(chart2);
 
-// Initial layout
+// Initial layout (Now works because processLayout() is implemented)
 layoutEngine.processLayout();
 
 // ============ Routes ============
@@ -148,7 +148,7 @@ router.post('/layout/node/:nodeId/position', (req, res) => {
     try {
         const { nodeId } = req.params;
         const { x, y } = req.body;
-        
+
         const node = root.findNodeById(nodeId);
         if (!node) {
             return res.status(404).json({
@@ -156,13 +156,13 @@ router.post('/layout/node/:nodeId/position', (req, res) => {
                 error: 'Node not found'
             });
         }
-        
+
         node.position.x = x;
         node.position.y = y;
         node.markDirty({ position: true });
-        
+
         layoutEngine.processLayout();
-        
+
         res.json({
             success: true,
             data: { nodeId, position: node.position },
@@ -179,7 +179,7 @@ router.post('/layout/node/:nodeId/size', (req, res) => {
     try {
         const { nodeId } = req.params;
         const { width, height } = req.body;
-        
+
         const node = root.findNodeById(nodeId);
         if (!node) {
             return res.status(404).json({
@@ -187,13 +187,13 @@ router.post('/layout/node/:nodeId/size', (req, res) => {
                 error: 'Node not found'
             });
         }
-        
+
         node.size.width = width;
         node.size.height = height;
         node.markDirty({ size: true });
-        
+
         layoutEngine.processLayout();
-        
+
         res.json({
             success: true,
             data: { nodeId, size: node.size },
@@ -210,7 +210,7 @@ router.post('/layout/node/:parentId/child', (req, res) => {
     try {
         const { parentId } = req.params;
         const { id, type, width, height, margin } = req.body;
-        
+
         const parent = root.findNodeById(parentId);
         if (!parent) {
             return res.status(404).json({
@@ -218,7 +218,7 @@ router.post('/layout/node/:parentId/child', (req, res) => {
                 error: 'Parent node not found'
             });
         }
-        
+
         const child = new LayoutNode({
             id,
             type,
@@ -226,10 +226,10 @@ router.post('/layout/node/:parentId/child', (req, res) => {
             height: height || 100,
             margin: margin || { top: 0, right: 0, bottom: 0, left: 0 }
         });
-        
+
         parent.addChild(child);
         layoutEngine.processLayout();
-        
+
         res.json({
             success: true,
             data: { parentId, childId: child.id },
@@ -245,7 +245,7 @@ router.post('/layout/node/:parentId/child', (req, res) => {
 router.delete('/layout/node/:parentId/child/:childId', (req, res) => {
     try {
         const { parentId, childId } = req.params;
-        
+
         const parent = root.findNodeById(parentId);
         if (!parent) {
             return res.status(404).json({
@@ -253,10 +253,10 @@ router.delete('/layout/node/:parentId/child/:childId', (req, res) => {
                 error: 'Parent node not found'
             });
         }
-        
+
         parent.removeChild(childId);
         layoutEngine.processLayout();
-        
+
         res.json({
             success: true,
             data: { parentId, childId },
@@ -278,9 +278,9 @@ router.post('/layout/batch-update', (req, res) => {
                 error: 'Updates array required'
             });
         }
-        
+
         const processed = layoutEngine.batchUpdate(updates);
-        
+
         res.json({
             success: true,
             data: {
@@ -300,7 +300,7 @@ router.post('/layout/reflow', (req, res) => {
     try {
         root.invalidateBranch();
         layoutEngine.processLayout();
-        
+
         res.json({
             success: true,
             message: 'Reflow completed',

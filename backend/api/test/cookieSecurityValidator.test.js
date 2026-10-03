@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -50,7 +50,7 @@ describe('cookieSecurityValidator', () => {
 
   it('does not log when all recommended attributes are present', async () => {
     const app = createApp(
-      'session=abc123; HttpOnly; SameSite=Lax; Path=/'
+      'session=abc123; HttpOnly; SameSite=Lax; Path=/; Secure'
     );
 
     await request(app).get('/test');

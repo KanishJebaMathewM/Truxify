@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
 import '../models/app_models.dart';
@@ -46,8 +48,11 @@ class BookingConfirmationScreen extends StatefulWidget {
 
 class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
-  final _paymentRepo = PaymentRepository();
-  final _addressRepo = AddressRepository();
+  late final PaymentRepository _paymentRepo;
+  late final AddressRepository _addressRepo;
+  late final ApiClient _apiClient;
+  bool _isPassengerMode = false;
+  bool _isAwaitingUpi = false;
   bool _showSuccess = false;
   bool _isLoading = true;
   bool _isSubmitting = false;
@@ -57,6 +62,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   String? _amountInr;
   String? _upiIntentError;
   String? _lockError;
+  late final String _orderIdempotencyKey;
 
   late final AnimationController _controller;
   late final OrderService _orderService;
@@ -72,6 +78,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     _paymentRepo = widget.paymentRepository ?? PaymentRepository();
     _addressRepo = widget.addressRepository ?? AddressRepository();
     _apiClient = widget.apiClient ?? ApiClient();
+    _orderIdempotencyKey = const Uuid().v4();
     _controller = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
     _loadCheckoutData();
@@ -121,7 +128,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     }
   }
 
-  Future<void> _pay() async {
+  Future<void> _createOrderAndInitiatePayment() async {
     final finalDropLat = _selectedAddress?.latitude ?? widget.draft.dropLat;
     final finalDropLng = _selectedAddress?.longitude ?? widget.draft.dropLng;
 
@@ -147,27 +154,10 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       return;
     }
 
-    // Parse price to paisa
-    final cleanPriceStr = widget.truck.price.replaceAll('₹', '').replaceAll(',', '').trim();
-    final amountRupees = double.tryParse(cleanPriceStr) ?? 0.0;
-    final amountPaisa = (amountRupees * 100).round();
-
-    // Trigger mock UPI Payment Intent
-    final upiRef = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _UpiPaymentMockDialog(amount: widget.truck.price),
-    );
-
-    if (upiRef == null || upiRef.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Payment cancelled by user')),
-      );
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _upiIntentError = null;
+    });
 
     try {
       final pickupDate = widget.draft.pickupDate;
@@ -176,7 +166,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
               '${pickupDate.minute.toString().padLeft(2, '0')}'
           : widget.draft.dateLabel;
 
-      final orderId = await _orderService.createOrder(
+final orderId = _createdOrderId ?? await _orderService.createOrder(
         pickupAddress: widget.draft.pickup.trim(),
         dropAddress: (_selectedAddress?.fullAddress ?? widget.draft.drop).trim(),
         pickupLat: widget.draft.pickupLat!,
@@ -191,28 +181,13 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         requiresRefrigeration: widget.draft.requiresRefrigeration,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
-        driverId: widget.truck.driverId.trim(),
-        truckId: widget.truck.truckId.trim(),
+        driverId: widget.truck.driverId?.trim() ?? '' ?? '',
+        truckId: widget.truck.truckId?.trim() ?? '',
+        idempotencyKey: _orderIdempotencyKey,
       );
 
-      _createdOrderId = orderId;
-
-      // Call backend POST /api/payments/lock to lock payment on smart contract
-      await _orderService.lockPayment(
-        bookingId: orderId,
-        upiReference: upiRef,
-        amountPaisa: amountPaisa.toDouble(),
-      );
-
-      if (!mounted) return;
-      setState(() => _showSuccess = true);
-      await _controller.forward(from: 0);
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
-
-      if (!mounted) return;
-
-      TruxifyScope.of(context).openOrders(tabIndex: 0);
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      _createdOrderId ??= orderId;
+      await _fetchUpiIntent(_createdOrderId!);
     } catch (e) {
       debugPrint('Failed to complete booking: $e');
 
@@ -581,8 +556,8 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                                           : _createOrderAndInitiatePayment,
                                     ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -652,8 +627,8 @@ class _UpiPaymentSheet extends StatelessWidget {
                                 context))),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1011,9 +986,7 @@ class _VerificationPendingSheet extends StatelessWidget {
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              id: 'btn_check_payment_status',
-              onPressed: isChecking ? null : onCheckAgain,
+            child: ElevatedButton.icon(              onPressed: isChecking ? null : onCheckAgain,
               icon: isChecking
                   ? const SizedBox(
                       width: 16,
@@ -1033,9 +1006,7 @@ class _VerificationPendingSheet extends StatelessWidget {
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
-              id: 'btn_back_to_bookings',
-              onPressed: isChecking ? null : onBackToBookings,
+            child: OutlinedButton.icon(              onPressed: isChecking ? null : onBackToBookings,
               icon: const Icon(Icons.arrow_back_rounded, size: 18),
               label: const Text('Back to bookings'),
               style: OutlinedButton.styleFrom(
@@ -1120,9 +1091,7 @@ class _UpiIntentErrorSheet extends StatelessWidget {
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              id: 'btn_retry_payment',
-              onPressed: isRetrying ? null : onRetry,
+            child: ElevatedButton.icon(              onPressed: isRetrying ? null : onRetry,
               icon: isRetrying
                   ? const SizedBox(
                       width: 16,

@@ -15,6 +15,11 @@ import {
   handleDisputeOpenedEvent,
 } from './eventListener.js';
 
+import { RpcProviderManager, CIRCUIT_STATES, defaultRpcManager } from './rpcProviderManager.js';
+
+const defaultBlockchainMetrics = new BlockchainMetrics();
+const defaultEscalationHandler = new EscalationHandler({});
+
 export {
   Multicall3Service,
   BatchCallBuilder,
@@ -26,6 +31,8 @@ export {
   ESCALATION_LEVELS,
   ESCALATION_THRESHOLDS,
   BlockchainMetrics,
+  defaultBlockchainMetrics,
+  defaultEscalationHandler,
   startEventListener,
   stopEventListener,
   isEventListenerActive,
@@ -34,5 +41,8 @@ export {
   handlePaymentLockedEvent,
   handlePaymentReleasedEvent,
   handleDisputeOpenedEvent,
+  RpcProviderManager,
+  CIRCUIT_STATES,
+  defaultRpcManager,
 };
 

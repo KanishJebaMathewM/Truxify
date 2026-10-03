@@ -53,6 +53,7 @@ contract DIDRegistry is Ownable, Pausable {
     mapping(address => uint256) public issuerNonces;
     mapping(address => string[]) public addressToDIDs;
     mapping(bytes32 => bool) public credentialRevoked;
+    mapping(string => bool) public didInitialized;
 
     // issuer => keccak256(credentialType) => authorized
     mapping(address => mapping(bytes32 => bool)) public issuerAuthorizedForType;
@@ -111,10 +112,55 @@ contract DIDRegistry is Ownable, Pausable {
             isActive: true
         });
 
+        didInitialized[did] = true;
         addressToDIDs[msg.sender].push(did);
         totalDIDs++;
 
         emit DIDCreated(did, msg.sender);
+    }
+
+    function createDIDFor(string memory did, address didOwner) external onlyOwner {
+        require(didOwner != address(0), "Invalid owner");
+        require(bytes(did).length > 0, "DID cannot be empty");
+        require(dids[did].owner == address(0), "DID already exists");
+
+        dids[did] = DIDDocument({
+            owner: didOwner,
+            did: did,
+            serviceEndpoints: new bytes32[](0),
+            verificationMethods: new bytes32[](0),
+            createdAt: block.timestamp,
+            updatedAt: block.timestamp,
+            isActive: true
+        });
+
+        addressToDIDs[didOwner].push(did);
+        totalDIDs++;
+
+        emit DIDCreated(did, didOwner);
+    }
+
+    function configureDIDDuringCreation(
+        string memory did,
+        ServiceEndpoint[] memory endpoints,
+        VerificationMethod[] memory methods
+    ) external onlyOwner {
+        require(bytes(did).length > 0, "DID cannot be empty");
+        require(dids[did].owner != address(0), "DID does not exist");
+        require(dids[did].isActive, "DID is not active");
+        require(!didInitialized[did], "DID already initialized");
+
+        didInitialized[did] = true;
+
+        for (uint256 i = 0; i < endpoints.length; i++) {
+            didServiceEndpoints[did].push(endpoints[i]);
+            emit ServiceEndpointAdded(did, endpoints[i].id);
+        }
+
+        for (uint256 i = 0; i < methods.length; i++) {
+            didVerificationMethods[did].push(methods[i]);
+            emit VerificationMethodAdded(did, methods[i].id);
+        }
     }
 
     function updateDID(string memory did, bytes32[] memory newServiceEndpoints) external {
@@ -122,6 +168,7 @@ contract DIDRegistry is Ownable, Pausable {
         require(dids[did].owner == msg.sender, "Not owner");
         require(dids[did].isActive, "DID is not active");
 
+        didInitialized[did] = true;
         dids[did].serviceEndpoints = newServiceEndpoints;
         dids[did].updatedAt = block.timestamp;
 
@@ -133,6 +180,7 @@ contract DIDRegistry is Ownable, Pausable {
         require(dids[did].owner == msg.sender, "Not owner");
         require(dids[did].isActive, "DID already deactivated");
 
+        didInitialized[did] = true;
         dids[did].isActive = false;
         dids[did].updatedAt = block.timestamp;
 
@@ -149,9 +197,11 @@ contract DIDRegistry is Ownable, Pausable {
         string memory description
     ) external {
         require(bytes(did).length > 0, "DID cannot be empty");
+        require(dids[did].owner != address(0), "DID does not exist");
         require(dids[did].owner == msg.sender, "Not owner");
         require(dids[did].isActive, "DID is not active");
 
+        didInitialized[did] = true;
         didServiceEndpoints[did].push(ServiceEndpoint({
             id: id,
             endpointType: endpointType,
@@ -172,9 +222,11 @@ contract DIDRegistry is Ownable, Pausable {
         string memory publicKeyMultibase
     ) external {
         require(bytes(did).length > 0, "DID cannot be empty");
+        require(dids[did].owner != address(0), "DID does not exist");
         require(dids[did].owner == msg.sender, "Not owner");
         require(dids[did].isActive, "DID is not active");
 
+        didInitialized[did] = true;
         didVerificationMethods[did].push(VerificationMethod({
             id: id,
             keyType: keyType,

@@ -7,6 +7,9 @@ const { supabaseMock, reset } = (() => {
 })();
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabase() { return supabaseMock.supabase; },
   get supabaseAdmin() { return supabaseMock.supabase; },
   createUserClient: () => supabaseMock.supabase,

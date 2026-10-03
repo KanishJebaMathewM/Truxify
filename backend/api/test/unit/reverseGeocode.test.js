@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Unit tests for backend/api/src/lib/reverseGeocode.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -29,11 +29,17 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
-import { reverseGeocode, clampGeohashPrecision } from '../../src/lib/reverseGeocode.js';
+import {
+  reverseGeocode,
+  clampGeohashPrecision,
+  getTimeoutMs,
+  parseRetryAfterMs,
+  getReverseGeocode,
+  fetchAddressFromCoords,
+  reverseGeocodePoint
+} from '../../src/lib/reverseGeocode.js';
 
-// Verified and cleaned up reverseGeocode unit test suite
-
-describe('reverseGeocode', () => {
+describe('reverseGeocode - Comprehensive Edge Cases', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -48,11 +54,21 @@ describe('reverseGeocode', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('returns null for NaN or non-numeric coordinate strings', async () => {
+    it('returns null for NaN or non-numeric coordinate strings and does not query cache', async () => {
       expect(await reverseGeocode(NaN, 72.5)).toBeNull();
       expect(await reverseGeocode(23.0, NaN)).toBeNull();
       expect(await reverseGeocode('invalid', 72.5)).toBeNull();
       expect(await reverseGeocode(23.0, 'not-a-number')).toBeNull();
+      expect(await reverseGeocode('NaN', 'NaN')).toBeNull();
+      expect(mockRedisGet).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('returns null for Infinity or -Infinity lat/lng values', async () => {
+      expect(await reverseGeocode(Infinity, 72.5)).toBeNull();
+      expect(await reverseGeocode(-Infinity, 72.5)).toBeNull();
+      expect(await reverseGeocode(23.0, Infinity)).toBeNull();
+      expect(await reverseGeocode(23.0, -Infinity)).toBeNull();
     });
 
     it('returns null for out-of-range latitude (< -90 or > 90)', async () => {
@@ -226,6 +242,164 @@ describe('reverseGeocode', () => {
       const result = await reverseGeocode(19.0596, 72.8295);
       expect(result).toBe('Bandra West, Mumbai Suburban');
     });
+    it('handles rate-limiting (429) when Retry-After header is missing or non-numeric by defaulting to 60s wait', async () => {
+      vi.useFakeTimers();
+      mockRedisGet.mockResolvedValue(null);
+      mockRedisSet.mockResolvedValue('OK');
+
+      const response429 = {
+        ok: false,
+        status: 429,
+        headers: {
+          get: () => null,
+        },
+      };
+
+      const response200 = {
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => null,
+        },
+        json: () => Promise.resolve({
+          address: {
+            city: 'Delhi',
+          },
+        }),
+      };
+
+      mockFetch.mockResolvedValueOnce(response429).mockResolvedValueOnce(response200);
+
+      const promise = reverseGeocode(28.6139, 77.2090);
+      await vi.advanceTimersByTimeAsync(60000);
+      const result = await promise;
+
+      expect(result).toBe('Delhi');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ waitMs: 60000 }),
+        expect.stringContaining('Rate-limited')
+      );
+      vi.useRealTimers();
+    });
+
+    it('clamps Retry-After wait time to a maximum of 60 seconds when header exceeds 60s', async () => {
+      vi.useFakeTimers();
+      mockRedisGet.mockResolvedValue(null);
+      mockRedisSet.mockResolvedValue('OK');
+
+      const headers = new Map();
+      headers.set('Retry-After', '120'); // 120 seconds
+
+      const response429 = {
+        ok: false,
+        status: 429,
+        headers: {
+          get: (name) => headers.get(name),
+        },
+      };
+
+      const response200 = {
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => null,
+        },
+        json: () => Promise.resolve({
+          address: {
+            city: 'Mumbai',
+          },
+        }),
+      };
+
+      mockFetch.mockResolvedValueOnce(response429).mockResolvedValueOnce(response200);
+
+      const promise = reverseGeocode(19.076, 72.8777);
+      await vi.advanceTimersByTimeAsync(60000);
+      const result = await promise;
+
+      expect(result).toBe('Mumbai');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ waitMs: 60000 }),
+        expect.stringContaining('Rate-limited')
+      );
+      vi.useRealTimers();
+    });
+
+    it('handles numeric string coordinates and rounds to 3 decimal places', async () => {
+      mockRedisGet.mockResolvedValue(null);
+      mockRedisSet.mockResolvedValue('OK');
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          address: {
+            road: 'Ring Road',
+            city: 'Pune',
+          },
+        }),
+      });
+
+      const result = await reverseGeocode('18.520430', '73.856743');
+
+      expect(result).toBe('Ring Road, Pune');
+      expect(mockRedisGet).toHaveBeenCalledWith('geocode:18.520,73.857');
+      expect(mockRedisSet).toHaveBeenCalledWith('geocode:18.520,73.857', 'Ring Road, Pune', 'EX', 604800);
+    });
+  });
+
+  describe('timeout handling and environment configuration', () => {
+    const originalEnv = process.env.NOMINATIM_TIMEOUT_MS;
+
+    beforeEach(() => {
+      process.env.NOMINATIM_TIMEOUT_MS = originalEnv;
+    });
+
+    it('handles timeout error gracefully when fetch aborts or times out', async () => {
+      mockRedisGet.mockResolvedValue(null);
+      const timeoutError = new Error('The operation was aborted due to timeout');
+      timeoutError.name = 'TimeoutError';
+      mockFetch.mockRejectedValue(timeoutError);
+
+      const result = await reverseGeocode(19.076, 72.8777);
+
+      expect(result).toBeNull();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: timeoutError }),
+        '[ReverseGeocode] Error reverse geocoding coordinates'
+      );
+    });
+
+    it('passes AbortSignal to fetch and respects NOMINATIM_TIMEOUT_MS env var', async () => {
+      process.env.NOMINATIM_TIMEOUT_MS = '2500';
+      mockRedisGet.mockResolvedValue(null);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          address: { city: 'Chennai' },
+        }),
+      });
+
+      const result = await reverseGeocode(13.0827, 80.2707);
+
+      expect(result).toBe('Chennai');
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const fetchOptions = mockFetch.mock.calls[0][1];
+      expect(fetchOptions.signal).toBeDefined();
+    });
+
+    it('getTimeoutMs guards against null, undefined, NaN, negative, and non-numeric inputs', () => {
+      expect(getTimeoutMs(null)).toBe(5000);
+      expect(getTimeoutMs(undefined)).toBe(5000);
+      expect(getTimeoutMs(NaN)).toBe(5000);
+      expect(getTimeoutMs('NaN')).toBe(5000);
+      expect(getTimeoutMs('invalid')).toBe(5000);
+      expect(getTimeoutMs(0)).toBe(5000);
+      expect(getTimeoutMs(-500)).toBe(5000);
+      expect(getTimeoutMs(2500)).toBe(2500);
+      expect(getTimeoutMs('2500')).toBe(2500);
+    });
   });
 
   describe('error handling and failure cases', () => {
@@ -279,6 +453,37 @@ describe('reverseGeocode', () => {
   });
 });
 
+describe('parseRetryAfterMs', () => {
+  it('returns default 60000ms when retryAfter is null, undefined, or not a string', () => {
+    expect(parseRetryAfterMs(null)).toBe(60000);
+    expect(parseRetryAfterMs(undefined)).toBe(60000);
+    expect(parseRetryAfterMs(120)).toBe(60000);
+    expect(parseRetryAfterMs({})).toBe(60000);
+    expect(parseRetryAfterMs('')).toBe(60000);
+    expect(parseRetryAfterMs('   ')).toBe(60000);
+  });
+
+  it('parses delay-seconds format accurately into milliseconds', () => {
+    expect(parseRetryAfterMs('30')).toBe(30000);
+    expect(parseRetryAfterMs('  120  ')).toBe(120000);
+    expect(parseRetryAfterMs('0')).toBe(60000);
+  });
+
+  it('parses HTTP-date format accurately relative to now', () => {
+    const now = Date.parse('2026-09-19T12:00:00.000Z');
+    const futureDate = 'Sat, 19 Sep 2026 12:01:00 GMT';
+    expect(parseRetryAfterMs(futureDate, now)).toBe(60000);
+
+    const pastDate = 'Sat, 19 Sep 2026 11:59:00 GMT';
+    expect(parseRetryAfterMs(pastDate, now)).toBe(60000);
+  });
+
+  it('falls back to default 60000ms for invalid date/string formats', () => {
+    expect(parseRetryAfterMs('invalid-date-string')).toBe(60000);
+    expect(parseRetryAfterMs('-50')).toBe(60000);
+  });
+});
+
 describe('clampGeohashPrecision', () => {
   it('returns default (6) for undefined or NaN', () => {
     expect(clampGeohashPrecision(undefined)).toBe(6);
@@ -302,5 +507,14 @@ describe('clampGeohashPrecision', () => {
     expect(clampGeohashPrecision(7)).toBe(7);
     expect(clampGeohashPrecision(8.8)).toBe(8);
     expect(clampGeohashPrecision(12)).toBe(12);
+  });
+});
+
+describe('Enterprise Integration Aliases', () => {
+  it('verifies getReverseGeocode, fetchAddressFromCoords, and reverseGeocodePoint proxy to reverseGeocode', async () => {
+    mockRedisGet.mockResolvedValue('Alias Location');
+    expect(await getReverseGeocode(19.076, 72.878)).toBe('Alias Location');
+    expect(await fetchAddressFromCoords(19.076, 72.878)).toBe('Alias Location');
+    expect(await reverseGeocodePoint(19.076, 72.878)).toBe('Alias Location');
   });
 });

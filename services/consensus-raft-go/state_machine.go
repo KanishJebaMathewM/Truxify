@@ -28,21 +28,27 @@ func canTransition(from, to string) bool {
 	return orderTransitions[from][to]
 }
 
-// orderStatesLocked replays the log up to limit and returns the last recorded
-// command for each order (the per-order state machine).
+// orderStatesLocked replays the compacted snapshot first, then overlays the
+// retained log so lifecycle validation sees the complete current state even
+// after the older log prefix has been discarded.
 func (rn *RaftNode) orderStatesLocked(limit uint64) map[string]string {
 	if limit > uint64(len(rn.Log)) {
 		limit = uint64(len(rn.Log))
 	}
-	states := make(map[string]string)
+	states := make(map[string]string, len(rn.snapshotState))
+	for orderID, command := range rn.snapshotState {
+		states[orderID] = command
+	}
 	for i := 0; i < int(limit); i++ {
 		states[rn.Log[i].OrderID] = rn.Log[i].Command
 	}
 	return states
 }
 
-// findEntryLocked returns the index (1-based) of the first entry in the log up
-// to limit matching the order id and command, or 0 when there is none.
+// findEntryLocked returns the index (1-based) of the first entry in the retained
+// log up to limit matching the order id and command, or 0 when there is none.
+// Compacted entries are handled explicitly by HandleCommitOrder because their
+// original index and timestamp are no longer retained in the log slice.
 func (rn *RaftNode) findEntryLocked(orderID, command string, limit uint64) uint64 {
 	if limit > uint64(len(rn.Log)) {
 		limit = uint64(len(rn.Log))

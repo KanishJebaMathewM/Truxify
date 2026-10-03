@@ -99,6 +99,9 @@ void main() {
       requiresRefrigeration: any(named: 'requiresRefrigeration'),
       targetTemperatureMin: any(named: 'targetTemperatureMin'),
       targetTemperatureMax: any(named: 'targetTemperatureMax'),
+      driverId: any(named: 'driverId'),
+      truckId: any(named: 'truckId'),
+      idempotencyKey: any(named: 'idempotencyKey'),
     )).thenAnswer((_) async => 'order-123');
     when(() => mockApiClient.post(
       any(),

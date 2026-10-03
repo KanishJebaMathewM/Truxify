@@ -39,6 +39,8 @@ Commonly required values for local development:
 - `TRUXIFY_API_BASE_URL`
 - `DRIVER_LOGIN_PHONE`
 - `DRIVER_LOGIN_OTP`
+- `VALID_API_KEYS` (comma-separated internal API keys for the `/api/internal` routes)
+- `ESCROW_OPERATOR_API_KEY` (dedicated operator key; must also be listed in `VALID_API_KEYS` and is additionally required to close the escrow circuit breaker via `POST /api/internal/pause-escrow {"paused": false}` — unpausing fails closed with 403 when it is unset)
 
 Refer to `.env.example` for the full set of available configuration values.
 

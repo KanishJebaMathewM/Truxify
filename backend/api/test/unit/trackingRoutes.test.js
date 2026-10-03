@@ -58,8 +58,11 @@ const buildOrderChain = (data, error) => ({
 
 const buildInsertChain = (data, error) => ({
   insert: vi.fn().mockReturnThis(),
+  update: vi.fn().mockReturnThis(),
+  eq: vi.fn().mockReturnThis(),
   select: vi.fn().mockReturnThis(),
   single: vi.fn(async () => ({ data, error })),
+  then: (resolve) => resolve({ data, error }),
 })
 
 import trackingRoutes from '../../src/routes/trackingRoutes.js'
@@ -71,6 +74,7 @@ app.use('/api/orders', trackingRoutes)
 describe('POST /api/orders/:id/share-tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.PUBLIC_TRACKING_URL = 'https://track.truxify.com'
   })
 
   it('runs the order pre-check and token creation through createUserClient(req.token)', async () => {
@@ -110,6 +114,21 @@ describe('POST /api/orders/:id/share-tracking', () => {
     const res = await request(app).post('/api/orders/ORD-1/share-tracking').send({})
 
     expect(res.status).toBe(404)
+  })
+
+  it('does not build tracking links from the request Host header', async () => {
+    process.env.PUBLIC_TRACKING_URL = ''
+    userClientFrom.mockImplementation((table) => {
+      if (table === 'orders') return buildOrderChain({ order_display_id: 'ORD-1', customer_id: 'customer-1', status: 'in_transit' }, null)
+      if (table === 'tracking_tokens') return buildInsertChain({ id: 'token-1', order_display_id: 'ORD-1', expires_at: '2030-01-01T00:00:00Z' }, null)
+      throw new Error(`unexpected table: ${table}`)
+    })
+    createUserClientMock.mockReturnValue({ from: userClientFrom })
+
+    const res = await request(app).post('/api/orders/ORD-1/share-tracking').set('Host', 'attacker.example')
+
+    expect(res.status).toBe(503)
+    expect(res.body.error).not.toContain('attacker.example')
   })
 })
 

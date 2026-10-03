@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 contract Reputation is Ownable, Pausable {
     mapping(address => bool) public authorizedRelayers;
     mapping(address => uint256) private scores;
+    mapping(bytes32 => bool) public executedAwards;
 
     uint256 public constant MAX_REPUTATION = 10000;
 
@@ -54,6 +55,22 @@ contract Reputation is Ownable, Pausable {
     /// @param driver Address of the driver.
     /// @param points Amount to increase.
     function increaseReputation(address driver, uint256 points) external onlyRelayer whenNotPaused {
+        _increaseReputation(driver, points);
+    }
+
+    /// @notice Increases the reputation of a driver idempotently with an awardId.
+    /// @param driver Address of the driver.
+    /// @param points Amount to increase.
+    /// @param awardId Unique identifier for the award event to prevent double-crediting.
+    function increaseReputationWithIdempotency(address driver, uint256 points, bytes32 awardId) external onlyRelayer whenNotPaused {
+        require(awardId != bytes32(0), "Invalid awardId");
+        require(!executedAwards[awardId], "Award already executed");
+        executedAwards[awardId] = true;
+        _increaseReputation(driver, points);
+    }
+
+    /// @dev Internal helper for reputation score increment.
+    function _increaseReputation(address driver, uint256 points) internal {
         require(points > 0, "Points must be > 0");
         require(driver != address(0), "Invalid driver");
         uint256 current = scores[driver];
@@ -65,6 +82,13 @@ contract Reputation is Ownable, Pausable {
             scores[driver] = newScore;
         }
         emit ReputationIncreased(driver, points, scores[driver]);
+    }
+
+    /// @notice Checks if an awardId has already been executed.
+    /// @param awardId Unique identifier for the award event.
+    /// @return True if already executed, false otherwise.
+    function isAwardExecuted(bytes32 awardId) external view returns (bool) {
+        return executedAwards[awardId];
     }
 
     /// @notice Decreases the reputation of a driver.

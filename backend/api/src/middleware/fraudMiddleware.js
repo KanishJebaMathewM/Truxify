@@ -32,7 +32,10 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
       timestamp: Date.now()
     };
 
-    await fraudDetection.trackBehavior(userId, behaviorData);
+    const trackingResult = await fraudDetection.trackBehavior(userId, behaviorData);
+    if (trackingResult) {
+      req.fraudTracking = trackingResult;
+    }
 
     // Get real-time risk for critical endpoints
     if (isCritical) {

@@ -18,15 +18,23 @@
  * Every endpoint is gated by requireApiKey (x-api-key header against
  * VALID_API_KEYS) at the mount in index.js, so they are only reachable by
  * authenticated B2B callers such as the n8n workflows.
+ *
+ * Closing the circuit is operator-only: POST /pause-escrow {"paused": false}
+ * additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same
+ * x-api-key header (the key must also be listed in VALID_API_KEYS so
+ * requireApiKey authenticates it). Other valid internal keys are answered
+ * 403, and unconfigured ESCROW_OPERATOR_API_KEY fails closed with 403.
  */
 
 import express from 'express';
 import logger from '../middleware/logger.js';
+import { requireEscrowOperatorKey, safeCompare } from '../middleware/apiKey.js';
 import { supabase, supabaseAdmin } from '../config/db.js';
 import {
   setEscrowPaused,
   getPauseState,
 } from '../services/escrowCircuitBreaker.js';
+import { setEscrowContractPaused, pauseEscrowContract } from '../services/escrow.js';
 
 const router = express.Router();
 
@@ -40,6 +48,30 @@ function intFromEnv(raw, fallback) {
 
 function getDbClient() {
   return supabaseAdmin;
+}
+
+/**
+ * Escrow operator authorization.
+ *
+ * POST /api/internal/pause-escrow with {"paused": false} re-enables on-chain
+ * escrow submissions, so it must not be reachable by every key in
+ * VALID_API_KEYS — telemetry pollers and automation callers authenticate
+ * with the same shared internal key. Closing the circuit therefore
+ * additionally requires the dedicated ESCROW_OPERATOR_API_KEY, presented in
+ * the same x-api-key header requireApiKey authenticates (which means the
+ * operator key must also be listed in VALID_API_KEYS).
+ *
+ * Fails closed: when ESCROW_OPERATOR_API_KEY is not configured there is no
+ * operator and every unpause attempt is refused (403). The presented key is
+ * compared with safeCompare and never logged.
+ */
+function isEscrowOperatorRequest(req) {
+  const operatorKey = process.env.ESCROW_OPERATOR_API_KEY;
+  if (!operatorKey) return false;
+
+  const headerName = (process.env.API_KEY_HEADER || 'x-api-key').toLowerCase();
+  const presented = req.headers?.[headerName];
+  return typeof presented === 'string' && safeCompare(presented, operatorKey);
 }
 
 /**
@@ -122,7 +154,7 @@ router.get('/escrow-velocity', async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Open or close the escrow circuit breaker
- *     description: Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit.
+ *     description: 'Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS); any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.'
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -140,19 +172,60 @@ router.get('/escrow-velocity', async (req, res) => {
  *         description: Circuit breaker state updated
  *       401:
  *         description: Missing or invalid API key
+ *       403:
+ *         description: The caller holds a valid internal API key but not the dedicated escrow operator key (also returned when ESCROW_OPERATOR_API_KEY is not configured)
  *       500:
  *         description: Failed to persist pause state
+ *       502:
+ *         description: Failed to confirm on-chain pause
  */
-router.post('/pause-escrow', async (req, res) => {
+router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
   try {
     const raw = req.body?.paused;
     const unpause = raw === false || raw === 'false' || raw === 0 || raw === '0' || raw === null;
+
+    // Closing the circuit is the privileged direction: it re-enables on-chain
+    // escrow submissions, so it must not be reachable by every key in
+    // VALID_API_KEYS — telemetry pollers and the n8n sentinel authenticate
+    // with the same shared internal key. Unpausing therefore additionally
+    // requires the dedicated ESCROW_OPERATOR_API_KEY, and the check fails
+    // closed when that key is not configured. Opening the circuit (the
+    // default) keeps the plain requireApiKey behavior.
+    if (unpause && !isEscrowOperatorRequest(req)) {
+      logger.warn(
+        { event: 'ESCROW_UNPAUSE_FORBIDDEN', path: req.originalUrl },
+        '[internal] Escrow unpause rejected — caller does not hold the escrow operator key.'
+      );
+      return res.status(403).json({
+        error: 'Forbidden: closing the escrow circuit breaker requires the escrow operator key.',
+      });
+    }
+
     const paused = raw === undefined ? true : !unpause;
+
     const result = await setEscrowPaused(paused);
+    const onChainResult = await setEscrowContractPaused(paused);
+
+    if (onChainResult.error) {
+      const redisStatus = result.persisted === false ? 'failed' : 'completed';
+      const action = paused ? 'pause' : 'unpause';
+      return res.status(502).json({
+        error: `Redis ${action} ${redisStatus}, but on-chain ${action} failed.`,
+        onChainError: onChainResult.error,
+        paused: result.paused,
+        persisted: result.persisted !== false,
+      });
+    }
+
     return res.json({
       paused: result.paused,
       updatedAt: result.updatedAt,
       persisted: result.persisted !== false,
+      onChain: {
+        success: true,
+        txHash: onChainResult.txHash,
+        alreadyInState: onChainResult.alreadyInState,
+      }
     });
   } catch (err) {
     logger.error(
@@ -163,13 +236,26 @@ router.post('/pause-escrow', async (req, res) => {
   }
 });
 
+router.post('/pause-escrow-onchain', async (_req, res) => {
+  try {
+    const result = await pauseEscrowContract();
+    return res.json(result);
+  } catch (err) {
+    logger.error(
+      { err: err && err.message, event: 'ESCROW_ONCHAIN_PAUSE_ERROR' },
+      '[internal] Failed to pause escrow contract on-chain.'
+    );
+    return res.status(502).json({ error: 'Failed to pause escrow contract on-chain.' });
+  }
+});
+
 /**
  * @openapi
  * /api/internal/defensive-pause:
  *   post:
  *     tags: [Internal]
  *     summary: Emergency defensive pause (security sentinel)
- *     description: Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.
+ *     description: 'Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.'
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -193,7 +279,9 @@ router.post('/pause-escrow', async (req, res) => {
  *       500:
  *         description: Failed to persist pause state
  *       503:
- *         description: Redis unavailable — the pause did not take effect
+ *         description: Redis unavailable — the on-chain pause succeeded, but off-chain persistence failed.
+ *       502:
+ *         description: Failed to confirm on-chain pause
  */
 router.post('/defensive-pause', async (req, res) => {
   const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 200) : null;
@@ -204,21 +292,32 @@ router.post('/defensive-pause', async (req, res) => {
     // opens the circuit. The sentinel is an automated detector, so giving it a
     // close path would let a single forged call undo an emergency pause.
     const result = await setEscrowPaused(true);
+    const onChainResult = await setEscrowContractPaused(true);
 
-    // setEscrowPaused resolves with persisted:false instead of throwing when
-    // Redis is down, and isEscrowPaused() fails open, so the circuit is not
-    // actually open in that case. Answering 2xx here would tell an unattended
-    // detector its defensive pause succeeded while escrow submissions keep
-    // flowing. Fail loudly so the n8n execution errors and alerts.
+    if (onChainResult.error) {
+      const redisStatus = result.persisted === false ? 'failed off-chain' : 'processed in Redis';
+      return res.status(502).json({
+        error: `Defensive pause ${redisStatus}, but on-chain pause failed.`,
+        onChainError: onChainResult.error,
+        paused: result.paused,
+        persisted: result.persisted !== false,
+      });
+    }
+
+    // Redis was unavailable, so the defensive pause was not persisted. Escrow
+    // submissions are still refused (isEscrowPaused() fails closed while Redis
+    // is unreadable), but the endpoint must still return 503 — answering 2xx
+    // would tell the n8n sentinel the pause succeeded when it did not.
     if (result.persisted === false) {
       logger.error(
         { event: 'DEFENSIVE_PAUSE_NOT_PERSISTED', source: 'security-sentinel', reason, txHash },
-        '[internal] Defensive pause could not be persisted — escrow is NOT paused.'
+        '[internal] Defensive pause failed off-chain. Contract IS paused on-chain, but backend submissions will revert.'
       );
       return res.status(503).json({
-        error: 'Defensive pause was not persisted; escrow is not paused.',
-        paused: false,
+        error: 'Defensive pause succeeded on-chain, but Redis is down. Backend submissions will revert.',
+        paused: true,
         persisted: false,
+        onChain: { success: true, txHash: onChainResult.txHash }
       });
     }
 
@@ -237,6 +336,11 @@ router.post('/defensive-pause', async (req, res) => {
       updatedAt: result.updatedAt,
       persisted: result.persisted !== false,
       source: 'security-sentinel',
+      onChain: {
+        success: true,
+        txHash: onChainResult.txHash,
+        alreadyInState: onChainResult.alreadyInState,
+      }
     });
   } catch (err) {
     logger.error(

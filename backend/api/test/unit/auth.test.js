@@ -14,9 +14,18 @@ describe('authenticate middleware - non bypass flow', () => {
       supabase: null,
     }));
 
+    const mockLoggerWarn = vi.fn();
+    vi.doMock('../../src/middleware/logger.js', () => ({
+      default: {
+        warn: mockLoggerWarn,
+        error: vi.fn(),
+        info: vi.fn(),
+      },
+    }));
+
     const { authenticate } = await import('../../src/middleware/auth.js');
 
-    const req = { headers: {} };
+    const req = { headers: {}, requestId: 'test-req-id' };
     const res = {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
@@ -25,6 +34,13 @@ describe('authenticate middleware - non bypass flow', () => {
     await authenticate(req, res, vi.fn());
 
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      {
+        event: 'AUTH_NO_TOKEN',
+        requestId: 'test-req-id',
+      },
+      'Missing or malformed Bearer Authorization header',
+    );
   });
 
   it('returns 500 when supabase missing for supabase token', async () => {
@@ -609,10 +625,38 @@ describe('requireRole middleware', () => {
       status: vi.fn().mockReturnThis(),
       json: vi.fn(),
     };
+    const next = vi.fn();
 
-    middleware(req, res, vi.fn());
+    middleware(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('safely handles req.user as null or undefined without throwing TypeError', async () => {
+    vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { requireRole } = await import('../../src/middleware/auth.js');
+    const middleware = requireRole(['driver']);
+
+    for (const userVal of [undefined, null]) {
+      const req = { user: userVal };
+      const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      };
+      const next = vi.fn();
+
+      expect(() => middleware(req, res, next)).not.toThrow();
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+      expect(next).not.toHaveBeenCalled();
+    }
   });
 
   it('throws an error on initialization if allowedRoles is missing or empty', async () => {

@@ -5,6 +5,9 @@ const { dbMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() { return dbMock.supabaseAdmin; },
   get supabase() { return null; },
 }));
@@ -71,3 +74,11 @@ describe('escrowWebhookProcessor', () => {
     await expect(processEscrowWebhookEvent('PaymentReleased', { orderId: 'o1' })).rejects.toThrow('Failed to load order');
   });
 });
+
+/**
+ * Unit Tests for escrowWebhookGuards.js
+ * 
+ * Verifies payload validation, order state updates, and idempotency.
+ * Updated to reflect current implementation where payload validation
+ * (orderId check) runs before any legacy simulation branches.
+ */

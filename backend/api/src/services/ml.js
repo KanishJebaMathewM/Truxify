@@ -1,5 +1,5 @@
 import logger from '../middleware/logger.js';
-import { validatePricePrediction, convertToPaisa, RejectionReason } from '../lib/predictionValidator.js';
+import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
 
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
@@ -18,42 +18,50 @@ const DEFAULT_TRUCK_MAX_WIDTH_M = 2.5;
 const DEFAULT_TRUCK_MAX_HEIGHT_M = 4;
 
 // Startup validation
-if (!process.env.ML_API_KEY) {
+const initialApiKey = (process.env.ML_API_KEY || '').trim();
+if (!initialApiKey) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
 }
 
 function guardMlApiKey() {
-  if (!process.env.ML_API_KEY) {
+  const apiKey = (process.env.ML_API_KEY || '').trim();
+  if (!apiKey) {
     throw new Error("[ML] ML_API_KEY is not configured. All ML endpoints will return 503. Set ML_API_KEY to enable ML features.");
   }
 }
 
 /**
  * Parse the free-text `weight` column of load_offers (e.g. '3 tonnes') into
- * kilograms. Returns NaN when the value cannot be interpreted.
+ * kilograms. Returns null when the value cannot be interpreted, consistent
+ * with the rest of the ML service API.
  */
 function parseWeightKg(weight) {
-  if (typeof weight !== 'string') {
-    const num = Number(weight);
-    return Number.isFinite(num) ? num : NaN;
+  if (weight == null || typeof weight === 'boolean' || Array.isArray(weight)) {
+    return null;
   }
-  const match = weight.toLowerCase().match(/([\d.]+)\s*(kg|ton|tonne|t)\b/);
-  if (!match) return NaN;
+  if (typeof weight === 'number') {
+    return Number.isFinite(weight) ? weight : null;
+  }
+  if (typeof weight !== 'string') {
+    return null;
+  }
+  const trimmed = weight.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.toLowerCase().match(/([\d.]+)\s*(kg|tons?|tonnes?|t)\b/);
+  if (!match) {
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
   const value = Number(match[1]);
-  return match[2] === 'kg' ? value : value * 1000;
+  if (!Number.isFinite(value)) return null;
+  return match[2].toLowerCase() === 'kg' ? value : value * 1000;
 }
 
-function parseWeightKgSafe(weight) {
-  if (weight == null || weight === '' || Number.isNaN(Number(weight))) {
-    logger.warn(`[ML] parseWeightKgSafe received invalid weight: ${weight}`);
-    return null;
-  }
-  const result = parseWeightKg(weight);
-  if (Number.isNaN(result)) {
-    logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
-    return null;
-  }
-  return result;
+export function parseWeightKgSafe(weightInput, defaultKg = 1000) {
+  if (weightInput == null) return defaultKg;
+  const parsed = typeof weightInput === 'number' ? weightInput : parseFloat(weightInput);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultKg;
 }
 
 /**
@@ -82,8 +90,9 @@ function getHeaders() {
   const headers = {
     'Content-Type': 'application/json',
   };
-  if (process.env.ML_API_KEY) {
-    headers['X-API-Key'] = process.env.ML_API_KEY;
+  const apiKey = (process.env.ML_API_KEY || '').trim();
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey;
   }
   return headers;
 }
@@ -98,7 +107,7 @@ async function handleResponse(response, url = '', method = 'GET') {
         throw new Error(`[ML] Authentication failed (${response.status}): ${method} ${url} - ${text}`);
     }
     if (!response.ok) {
-        throw new Error(`[ML] Request failed (${response.status}): ${method} ${url} - ${text}`);
+        throw new Error(`[ML] Request failed: ${method} ${url} ${response.status} - ${text}`);
     }
 
     try {
@@ -199,12 +208,12 @@ export async function predictPrice({
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
   // Only forward min_price/max_price keys when the raw response actually
-  // carried them — injecting undefined values trips the response validator.
+  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
-      ...(typeof raw?.min_price === 'number' ? { min_price: raw.min_price * safeMultiplier } : {}),
-      ...(typeof raw?.max_price === 'number' ? { max_price: raw.max_price * safeMultiplier } : {}),
+      ...(Number.isFinite(raw?.min_price) ? { min_price: raw.min_price * safeMultiplier } : {}),
+      ...(Number.isFinite(raw?.max_price) ? { max_price: raw.max_price * safeMultiplier } : {}),
   });
 
   if (!revalidated.ok) {
@@ -284,6 +293,65 @@ export async function predictEta({
 }
 
 /**
+ * Calculates the proportional cancellation penalty for a trip already in
+ * progress. The ML service owns the distance ratio and returns the amount in
+ * the same currency unit supplied by the caller.
+ *
+ * @param {object} params
+ * @param {number} params.distanceCoveredKm - Distance already travelled
+ * @param {number} params.totalDistanceKm - Original route distance
+ * @param {number} params.totalAmount - Original booking amount
+ * @returns {Promise<{penalty_amount: number, covered_ratio: number}>}
+ */
+export async function predictCancellationPenalty({
+  distanceCoveredKm,
+  totalDistanceKm,
+  totalAmount,
+}) {
+  guardMlApiKey();
+
+  if (!Number.isFinite(distanceCoveredKm) || distanceCoveredKm < 0) {
+    throw new Error('[ML] distanceCoveredKm must be a finite non-negative number');
+  }
+  if (!Number.isFinite(totalDistanceKm) || totalDistanceKm <= 0) {
+    throw new Error('[ML] totalDistanceKm must be a finite positive number');
+  }
+  if (!Number.isFinite(totalAmount) || totalAmount < 0) {
+    throw new Error('[ML] totalAmount must be a finite non-negative number');
+  }
+
+  const url = `${getBaseUrl()}/cancellation-penalty`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({
+      distance_covered_km: distanceCoveredKm,
+      total_distance_km: totalDistanceKm,
+      total_amount: totalAmount,
+    }),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+
+  const result = await handleResponse(response, url, 'POST');
+  if (
+    result == null ||
+    !Number.isFinite(result.penalty_amount) ||
+    result.penalty_amount < 0 ||
+    result.penalty_amount > totalAmount ||
+    !Number.isFinite(result.covered_ratio) ||
+    result.covered_ratio < 0 ||
+    result.covered_ratio > 1
+  ) {
+    throw new Error('[ML] Invalid cancellation penalty response');
+  }
+
+  return {
+    penalty_amount: result.penalty_amount,
+    covered_ratio: result.covered_ratio,
+  };
+}
+
+/**
  * Predicts driver profit for a given route using ML model.
  *
  * @param {object} params
@@ -337,12 +405,28 @@ export async function predictDriverProfit({
     throw new Error('[ML] Invalid driver profit prediction: missing confidence_interval');
   }
 
+  const predictedProfit = Math.round(result.predicted_profit * 100) / 100;
+
+  let lowerRaw = result.confidence_interval.lower ?? 0;
+  let upperRaw = result.confidence_interval.upper;
+
+  if (typeof upperRaw !== 'number' || !isFinite(upperRaw)) {
+    // Derive a sane fallback from the prediction magnitude rather than the
+    // undocumented `predicted_profit * 2`, which can go negative for loss
+    // predictions and was not clamped.
+    const margin = Math.abs(result.predicted_profit) * 0.5 || 1;
+    upperRaw = Math.max(result.predicted_profit, 0) + margin;
+  }
+
+  // Round only after enforcing ordering so rounding can never invert the
+  // interval (lower > upper) for tight ranges.
+  let lower = Math.round(Math.max(0, lowerRaw) * 100) / 100;
+  let upper = Math.round(Math.max(upperRaw, lower, predictedProfit) * 100) / 100;
+  lower = Math.min(lower, upper);
+
   return {
-    predicted_profit: Math.round(result.predicted_profit * 100) / 100,
-    confidence_interval: {
-      lower: Math.max(0, Math.round((result.confidence_interval.lower ?? 0) * 100) / 100),
-      upper: Math.round((result.confidence_interval.upper ?? result.predicted_profit * 2) * 100) / 100,
-    },
+    predicted_profit: predictedProfit,
+    confidence_interval: { lower, upper },
     currency: 'INR',
   };
 }
@@ -425,7 +509,12 @@ export async function matchEnRouteLoads({
   // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
   // model consumes.
   const availableLoads = offers
-    .filter(o => o.pickup_lat && o.pickup_lng && o.drop_lat && o.drop_lng)
+    .filter(o =>
+      Number.isFinite(Number(o.pickup_lat)) &&
+      Number.isFinite(Number(o.pickup_lng)) &&
+      Number.isFinite(Number(o.drop_lat)) &&
+      Number.isFinite(Number(o.drop_lng))
+    )
     .map(o => {
       const dims = parseDimensions(o.dimensions);
       return {
@@ -473,7 +562,7 @@ export async function matchEnRouteLoads({
   // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
-      .filter(o => o.pickup_lat && o.pickup_lng)
+      .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
       .map(o => {
         const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
@@ -530,9 +619,64 @@ function _haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Fetches A/B testing status from the ML engine.
+ * @returns {Promise<object>}
+ */
+export async function getAbTestingStatus() {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/ab-testing/status`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+  return handleResponse(response, url, 'GET');
+}
+
+/**
+ * Triggers an A/B test rollback on the ML engine.
+ * @param {string} testId
+ * @returns {Promise<object>}
+ */
+export async function rollbackAbTest(testId) {
+  guardMlApiKey();
+  if (!testId || typeof testId !== 'string') {
+    throw new Error('[ML] Valid testId is required for rollback');
+  }
+  const url = `${getBaseUrl()}/ab-testing/rollback/${encodeURIComponent(testId)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
+  });
+  return handleResponse(response, url, 'POST');
+}
+
 export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
   parseWeightKg,
+  parseWeightKgSafe,
+  parseDimensions,
+  getHeaders,
+  handleResponse,
+  getBaseUrl,
+  guardMlApiKey,
+};
+
+export default {
+  predictDemand,
+  predictPrice,
+  predictEta,
+  predictCancellationPenalty,
+  predictDriverProfit,
+  matchDeadhead,
+  matchEnRouteLoads,
+  getAbTestingStatus,
+  rollbackAbTest,
+  parseWeightKgSafe,
+  handleResponse,
+  __testing,
 };

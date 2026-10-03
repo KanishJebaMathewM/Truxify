@@ -5,14 +5,25 @@ import { createSupabaseMock } from '../../helpers/supabaseMock.js';
 import { OrderRepository } from '../../../src/repositories/orderRepository.js';
 import { BidAcceptanceService, DomainError } from '../../../src/services/order/bidAcceptanceService.js';
 
-vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    escrowDeposit: vi.fn(),
-    submitEscrowRefund: vi.fn(),
-  };
-});
+vi.mock('../../../src/services/escrow.js', () => ({
+  paisaToMaticWei: vi.fn((paisa) => BigInt(Math.round(Number(paisa))) * 4000000000000n),
+  getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),
+  escrowDeposit: vi.fn(),
+  submitEscrowRefund: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/redisLock.js', () => ({
+  acquireLock: vi.fn(),
+  releaseLock: vi.fn(),
+  LockAcquisitionError: class LockAcquisitionError extends Error {
+    constructor(resourceKey, reason) {
+      super(`Failed to acquire lock for "${resourceKey}": ${reason}`);
+      this.name = 'LockAcquisitionError';
+      this.resourceKey = resourceKey;
+      this.reason = reason;
+    }
+  },
+}));
 
 describe('BidAcceptanceService', () => {
   let supabaseMock;
@@ -20,12 +31,22 @@ describe('BidAcceptanceService', () => {
   let service;
   let escrowDeposit;
   let submitEscrowRefund;
+  let acquireLock;
+  let releaseLock;
 
   beforeEach(async () => {
     supabaseMock = createSupabaseMock();
     const { escrowDeposit: escrowDepositFn, submitEscrowRefund: submitEscrowRefundFn } = await import('../../../src/services/escrow.js');
+    const { acquireLock: acquireLockFn, releaseLock: releaseLockFn } = await import('../../../src/lib/redisLock.js');
     escrowDeposit = escrowDepositFn;
     submitEscrowRefund = submitEscrowRefundFn;
+    acquireLock = acquireLockFn;
+    releaseLock = releaseLockFn;
+
+    acquireLock.mockResolvedValue('mock-lock-token');
+    releaseLock.mockResolvedValue(true);
+    acquireLock.mockClear();
+    releaseLock.mockClear();
 
     escrowDeposit.mockResolvedValue({ txData: { to: '0xcontract', data: '0xabcd' }, bookingId: 'escrow:ORDER-001' });
     submitEscrowRefund.mockResolvedValue({ txHash: '0x456' });
@@ -106,9 +127,9 @@ describe('BidAcceptanceService', () => {
     // Verify the correct amountWei was computed using ESCROW_MATIC_PER_PAISA
     // bid_amount = 50000 paisa (₹500) converted via paisaToMaticWei
     const escrowArgs = escrowDeposit.mock.calls[0];
-    const amountWei = escrowArgs[2];
+    const amountWei = escrowArgs[3];
     expect(typeof amountWei).toBe('bigint');
-    expect(amountWei).toBe(ethers.parseEther((50000 * 0.000004).toFixed(18)));
+    expect(amountWei).toBe(ethers.parseEther('0.2'));
     // Two-phase acceptance: the driver must NOT be committed at accept time.
     expect(supabaseMock.calls.some(call => call.rpc === 'accept_bid_tx')).toBe(false);
 
@@ -537,5 +558,14 @@ describe('BidAcceptanceService', () => {
     expect(supabaseMock.store.orders[0].pending_bid_acceptance).toMatchObject({ bid_id: 'bid-0' });
     expect(supabaseMock.store.orders[0].escrow_status).toBe('pending');
     expect(supabaseMock.calls.some(call => call.rpc === 'accept_bid_tx')).toBe(false);
+  });
+
+  it('rejects bid acceptance with 409 when lock is held by another process', async () => {
+    acquireLock.mockResolvedValue(null);
+
+    await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
+      status: 409,
+      payload: { error: 'Another bid acceptance is in progress for this order. Please try again.' },
+    });
   });
 });

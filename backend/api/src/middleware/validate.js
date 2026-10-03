@@ -37,21 +37,37 @@ export function validateBody(schema) {
       });
     }
 
-    const result = schema.safeParse(req.body);
+    try {
+      const result = schema.safeParse(req.body);
 
-    if (!result.success) {
+      if (!result.success) {
+        logger.warn(
+          { event: 'VALIDATION_ERROR', type: 'body', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+          'Body validation failed',
+        );
+        return res.status(400).json({
+          error: "Validation failed",
+          details: formatValidationIssues(result.error),
+        });
+      }
+
+      req.body = result.data;
+      return next();
+    } catch (err) {
       logger.warn(
-        { event: 'VALIDATION_ERROR', type: 'body', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
-        'Body validation failed',
+        {
+          event: 'VALIDATION_ERROR',
+          type: 'body',
+          requestId: req.requestId || req.id,
+          error: err.message,
+        },
+        'Body validation threw',
       );
       return res.status(400).json({
         error: "Validation failed",
-        details: formatValidationIssues(result.error),
+        details: [{ field: "body", message: err.message }],
       });
     }
-
-    req.body = result.data;
-    return next();
   };
 }
 
@@ -64,21 +80,37 @@ export function validateParams(schema) {
       });
     }
 
-    const result = schema.safeParse(req.params);
+    try {
+      const result = schema.safeParse(req.params);
 
-    if (!result.success) {
+      if (!result.success) {
+        logger.warn(
+          { event: 'VALIDATION_ERROR', type: 'params', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+          'Params validation failed',
+        );
+        return res.status(400).json({
+          error: "Validation failed",
+          details: formatValidationIssues(result.error),
+        });
+      }
+
+      req.params = result.data;
+      return next();
+    } catch (err) {
       logger.warn(
-        { event: 'VALIDATION_ERROR', type: 'params', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
-        'Params validation failed',
+        {
+          event: 'VALIDATION_ERROR',
+          type: 'params',
+          requestId: req.requestId || req.id,
+          error: err.message,
+        },
+        'Params validation threw',
       );
       return res.status(400).json({
         error: "Validation failed",
-        details: formatValidationIssues(result.error),
+        details: [{ field: "params", message: err.message }],
       });
     }
-
-    req.params = result.data;
-    return next();
   };
 }
 

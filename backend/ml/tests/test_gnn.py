@@ -50,7 +50,7 @@ class TestRouteOptimizer:
     def test_optimize_route_success(self, sample_network):
         """Verify successful constrained pathfinding returns valid metrics and reached destination."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.optimize_route('A', 'C', graph_data)
 
         assert result is not None
@@ -64,7 +64,7 @@ class TestRouteOptimizer:
     def test_optimize_route_zero_hop(self, sample_network):
         """Verify start == end produces a successful zero-hop route with 1 node visited."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.optimize_route('A', 'A', graph_data)
 
         assert result is not None
@@ -77,21 +77,21 @@ class TestRouteOptimizer:
     def test_optimize_route_disconnected_returns_none(self, sample_network):
         """Verify unreachable / disconnected destination returns None instead of partial route."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.optimize_route('A', 'D_isolated', graph_data)
         assert result is None
 
     def test_optimize_route_missing_node(self, sample_network):
         """Verify non-existent nodes cleanly return None."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.optimize_route('A', 'NON_EXISTENT_NODE', graph_data)
         assert result is None
 
     def test_optimize_route_hazmat_constraint(self, sample_network):
         """Verify hazmat constraint bypasses restricted direct edge and selects compliant path."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.optimize_route('A', 'C', graph_data, constraints={'hazmat': True})
         assert result is not None
@@ -104,7 +104,7 @@ class TestRouteOptimizer:
     def test_optimize_route_weight_constraint(self, sample_network):
         """Verify excessive truck weight exceeding all route limits returns None."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.optimize_route('A', 'C', graph_data, constraints={'truck_weight': 50.0})
         assert result is None
@@ -112,7 +112,7 @@ class TestRouteOptimizer:
     def test_optimize_route_hos_time_constraint(self, sample_network):
         """Verify HOS time limit rejects paths that exceed maximum allowed time."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
 
         result = optimizer.optimize_route('A', 'C', graph_data, constraints={'hos_limit': 10.0})
         assert result is None
@@ -137,7 +137,7 @@ class TestRouteOptimizer:
         builder.build_road_network(nodes, edges)
         graph_data = builder.get_pytorch_data()
 
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.optimize_route('S', 'E', graph_data, objectives=['cost'], constraints={'hos_limit': 50.0})
         assert result is not None
         assert result['success'] is True
@@ -148,10 +148,44 @@ class TestRouteOptimizer:
         assert ('S', 'M2') in hops
         assert ('M2', 'E') in hops
 
+    def test_optimize_route_height_constraint(self):
+        """Verify truck height exceeding low clearance bypasses restricted edge and selects compliant route."""
+        builder = GraphNetworkBuilder()
+        nodes = [
+            {'id': 'S', 'lat': 10.0, 'lng': 20.0, 'traffic': 0, 'road_type': 'highway', 'speed_limit': 80},
+            {'id': 'M', 'lat': 10.1, 'lng': 20.1, 'traffic': 0, 'road_type': 'arterial', 'speed_limit': 60},
+            {'id': 'E', 'lat': 10.2, 'lng': 20.2, 'traffic': 0, 'road_type': 'highway', 'speed_limit': 80}
+        ]
+        edges = [
+            # Direct route S -> E with low clearance underpass (3.5m), faster and cheaper
+            {'source': 'S', 'target': 'E', 'distance': 10.0, 'time': 10.0, 'cost': 50.0, 'fuel': 3.0, 'max_height': 3.5},
+            # Longer alternate route S -> M -> E with standard clearance (4.5m)
+            {'source': 'S', 'target': 'M', 'distance': 15.0, 'time': 15.0, 'cost': 80.0, 'fuel': 5.0, 'max_height': 4.5},
+            {'source': 'M', 'target': 'E', 'distance': 15.0, 'time': 15.0, 'cost': 80.0, 'fuel': 5.0, 'max_height': 4.5},
+        ]
+        builder.build_road_network(nodes, edges)
+        graph_data = builder.get_pytorch_data()
+
+        optimizer = RouteOptimizer(allow_untrained=True)
+
+        # Truck with height 4.0m exceeds direct route clearance (3.5m) and must take alternate S -> M -> E (4.5m)
+        result = optimizer.optimize_route('S', 'E', graph_data, constraints={'truck_height': 4.0})
+        assert result is not None
+        assert result['success'] is True
+        assert result['route'][-1]['to'] == 'E'
+        hops = [(r['from'], r['to']) for r in result['route']]
+        assert ('S', 'M') in hops
+        assert ('M', 'E') in hops
+        assert ('S', 'E') not in hops
+
+        # Oversized truck with height 5.0m exceeds all road clearances (max 4.5m) -> returns None
+        result_oversized = optimizer.optimize_route('S', 'E', graph_data, constraints={'truck_height': 5.0})
+        assert result_oversized is None
+
     def test_multi_objective_optimization(self, sample_network):
         """Verify Pareto multi-objective selection finds optimal balanced route."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.multi_objective_optimization('A', 'C', graph_data)
         assert result is not None
         assert result['success'] is True
@@ -160,7 +194,135 @@ class TestRouteOptimizer:
     def test_multi_objective_optimization_unreachable(self, sample_network):
         """Verify multi-objective optimization returns None for unreachable targets."""
         _, graph_data = sample_network
-        optimizer = RouteOptimizer()
+        optimizer = RouteOptimizer(allow_untrained=True)
         result = optimizer.multi_objective_optimization('A', 'D_isolated', graph_data)
         assert result is None
+
+    def test_untrained_optimizer_raises_runtime_error(self, sample_network):
+        """Verify untrained model without allow_untrained raises RuntimeError (503 condition)."""
+        _, graph_data = sample_network
+        optimizer = RouteOptimizer(allow_untrained=False)
+        assert optimizer.is_trained is False
+        assert optimizer.allow_untrained is False
+
+        with pytest.raises(RuntimeError, match="GNN model is untrained"):
+            optimizer.optimize_route('A', 'C', graph_data)
+
+        with pytest.raises(RuntimeError, match="GNN model is untrained"):
+            optimizer.multi_objective_optimization('A', 'C', graph_data)
+
+    def test_train_empty_dataset_raises_value_error(self):
+        """Verify train() raises ValueError when given an empty dataset rather than dividing by zero."""
+        optimizer = RouteOptimizer(allow_untrained=False)
+        with pytest.raises(ValueError, match="Training dataset cannot be empty"):
+            optimizer.train([])
+
+    def test_train_on_synthetic_nonempty_dataset_and_route_determinism(self, sample_network):
+        """Verify training on non-empty synthetic dataset marks model trained and yields deterministic routes."""
+        builder, graph_data = sample_network
+        optimizer = RouteOptimizer(allow_untrained=False)
+        assert optimizer.is_trained is False
+
+        # Create synthetic training samples from the graph
+        from torch_geometric.data import Data
+        synthetic_samples = []
+        for _ in range(5):
+            d = Data(
+                x=graph_data.x.clone(),
+                edge_index=graph_data.edge_index.clone(),
+                edge_attr=graph_data.edge_attr.clone(),
+                y=torch.tensor([15.0], dtype=torch.float)
+            )
+            synthetic_samples.append(d)
+
+        loss = optimizer.train(synthetic_samples, epochs=3)
+        assert isinstance(loss, float)
+        assert optimizer.is_trained is True
+
+        # Assert deterministic routing after training
+        route1 = optimizer.optimize_route('A', 'C', graph_data)
+        route2 = optimizer.optimize_route('A', 'C', graph_data)
+
+        assert route1 is not None
+        assert route2 is not None
+        assert route1['route'] == route2['route']
+        assert route1['total_distance'] == route2['total_distance']
+        assert route1['total_time'] == route2['total_time']
+
+
+class TestGNNRoutes:
+    """Test suite for FastAPI GNN route endpoints."""
+
+    @pytest.fixture
+    def client(self):
+        """Create FastAPI test client."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from routes.gnn_routes import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app)
+
+    @pytest.fixture
+    def valid_payload(self):
+        """Sample valid request payload."""
+        return {
+            "start_node": "A",
+            "end_node": "C",
+            "nodes": [
+                {"id": "A", "lat": 12.97, "lng": 77.59, "traffic": 20, "road_type": "highway", "speed_limit": 80},
+                {"id": "B", "lat": 12.98, "lng": 77.60, "traffic": 30, "road_type": "arterial", "speed_limit": 60},
+                {"id": "C", "lat": 12.99, "lng": 77.61, "traffic": 10, "road_type": "highway", "speed_limit": 80}
+            ],
+            "edges": [
+                {"source": "A", "target": "B", "distance": 10.0, "time": 15.0, "cost": 100.0, "fuel": 5.0, "congestion": 0.2, "hazmat_allowed": True},
+                {"source": "B", "target": "C", "distance": 15.0, "time": 20.0, "cost": 150.0, "fuel": 7.0, "congestion": 0.1, "hazmat_allowed": True}
+            ],
+            "objectives": ["time", "cost", "fuel"]
+        }
+
+    def test_optimize_route_unknown_nodes_returns_404(self, client, valid_payload):
+        """Verify endpoint returns 404 when start_node or end_node is not in the graph."""
+        payload = dict(valid_payload)
+        payload["start_node"] = "UNKNOWN_START"
+        response = client.post("/gnn/optimize-route", json=payload)
+        assert response.status_code == 404
+        assert "Node(s) not found in graph" in response.json()["detail"]
+        assert "UNKNOWN_START" in response.json()["detail"]
+
+        payload2 = dict(valid_payload)
+        payload2["end_node"] = "UNKNOWN_END"
+        response2 = client.post("/gnn/optimize-route", json=payload2)
+        assert response2.status_code == 404
+        assert "UNKNOWN_END" in response2.json()["detail"]
+
+    def test_multi_objective_unknown_nodes_returns_404(self, client, valid_payload):
+        """Verify multi-objective endpoint returns 404 when start_node or end_node is not in the graph."""
+        payload = dict(valid_payload)
+        payload["start_node"] = "UNKNOWN_START"
+        response = client.post("/gnn/multi-objective", json=payload)
+        assert response.status_code == 404
+        assert "Node(s) not found in graph" in response.json()["detail"]
+
+    def test_train_empty_dataset_returns_422(self, client):
+        """Verify train endpoint returns 422 when training dataset is empty."""
+        response = client.post("/gnn/train", json={"epochs": 10, "learning_rate": 0.001})
+        assert response.status_code == 422
+        assert "Training dataset is empty" in response.json()["detail"]
+
+    def test_untrained_serving_returns_503(self, client, valid_payload, monkeypatch):
+        """Verify endpoint returns 503 when model is untrained and allow_untrained is False."""
+        from routes import gnn_routes
+        monkeypatch.setattr(gnn_routes.optimizer, "is_trained", False)
+        monkeypatch.setattr(gnn_routes.optimizer, "allow_untrained", False)
+
+        response = client.post("/gnn/optimize-route", json=valid_payload)
+        assert response.status_code == 503
+        assert "untrained" in response.json()["detail"].lower()
+
+        response2 = client.post("/gnn/multi-objective", json=valid_payload)
+        assert response2.status_code == 503
+        assert "untrained" in response2.json()["detail"].lower()
+
 

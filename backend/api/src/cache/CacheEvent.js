@@ -132,3 +132,19 @@ export function deserializeCacheEvent(json) {
     return null;
   }
 }
+
+/**
+ * Cache invalidation event definitions.
+ *
+ * Every invalidation that must be propagated across instances is
+ * represented as a CacheEvent. Events are serialized to JSON and
+ * published on the namespace-specific Redis Pub/Sub channel.
+ *
+ * Event types:
+ *   - INVALIDATE_KEY     : delete a single key
+ *   - INVALIDATE_PATTERN : delete all keys matching a glob
+ *   - INVALIDATE_NAMESPACE : delete all keys in a namespace
+ *   - BUMP_VERSION     : increment version counter, invalidating all versioned keys
+ *   - REFRESH          : re-populate a key (informational, triggers a background reload)
+ */
+

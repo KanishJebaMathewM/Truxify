@@ -133,32 +133,52 @@ export class OrderRepository {
       .maybeSingle(), 'findOrderForTimeline');
   } 
 
-  async updateOrder(id, updates, eventType = null) {
-  const result = await this._retryableQuery(() => this.supabase
-    .from('orders')
-    .update(updates)
-    .eq('id', id)
-    .select('*')
-    .single(), 'updateOrder');
+  async updateOrder(id, updates, eventType = null, idempotencyKey = null, client = null) {
+    const supabaseClient = client || this.supabase;
 
-  // Write outbox event after successful mutation — best-effort, never throws.
-  if (!result.error && result.data && eventType) {
-    const { outboxService } = await import('../services/outbox/outboxService.js');
-    await outboxService.writeEvent({
-      aggregateId: result.data.order_display_id || id,
-      aggregateType: 'order',
-      eventType,
-      payload: {
-        orderId: id,
-        orderDisplayId: result.data.order_display_id,
-        status: result.data.status,
-        updates,
-      },
-    });
+    if (eventType) {
+      // Transactional outbox pattern: execute order mutation AND outbox event insertion
+      // atomically inside a single database transaction via PostgreSQL RPC.
+      // This eliminates the dual-write vulnerability where a crash between order UPDATE
+      // and outbox INSERT leaves the order committed while losing the outbox event (#11215).
+      return this._retryableQuery(async () => {
+        const payload = {
+          orderId: id,
+          status: updates?.status,
+          updates,
+        };
+
+        const rpcResult = await supabaseClient.rpc('order_update_with_outbox', {
+          p_order_id: id,
+          p_updates: updates || {},
+          p_event_type: eventType,
+          p_payload: payload,
+          p_idempotency_key: idempotencyKey || null,
+        }).single();
+
+        return rpcResult;
+      }, 'updateOrder:transactional');
+    }
+
+    return this._retryableQuery(() => supabaseClient
+      .from('orders')
+      .update(updates)
+      .eq('id', id)
+      .select('*')
+      .single(), 'updateOrder');
   }
 
-  return result;
-}
+  async updateDeliveryEtaState(id, updates, previousEta, previousState) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .update(updates)
+        .eq('id', id)
+        .eq('delivery_delay_state', previousState);
+      query = previousEta == null ? query.is('eta', null) : query.eq('eta', previousEta);
+      return query.select('id, eta, delivery_delay_state').maybeSingle();
+    }, 'updateDeliveryEtaState');
+  }
 
   async updateOrderWithFilter(id, updates, filters, selectColumns) {
     return this._retryableQuery(() => {
@@ -435,14 +455,6 @@ export class OrderRepository {
       .maybeSingle(), 'findCustomerWallet');
   }
 
-  async findProfileWallet(userId) {
-    return this._retryableQuery(() => this.supabase
-      .from('profiles')
-      .select('polygon_wallet_address')
-      .eq('id', userId)
-      .maybeSingle(), 'findProfileWallet');
-  }
-
   // ===================================================================
   // DRIVER DETAILS (read-only lookups for order context)
   // ===================================================================
@@ -613,16 +625,39 @@ export class OrderRepository {
       }), 'cancelStaleOrder');
   }
 
-  async findStaleFundingOrders(cutoff, { offset = 0, limit = 1000 } = {}) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, status, cancellation_fee, total_amount, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
-      .eq('escrow_status', 'funding')
-      .not('pending_bid_acceptance', 'is', null)
-      .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')
-      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`)
-      .order('updated_at', { ascending: true })
-      .range(offset, offset + Math.max(1, limit) - 1), 'findStaleFundingOrders');
+  async findStaleFundingOrders(cutoff, { after, offset = 0, limit = 1000 } = {}) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, status, cancellation_fee, total_amount, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+        .eq('escrow_status', 'funding')
+        .not('pending_bid_acceptance', 'is', null)
+        .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')
+        .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`)
+        .order('updated_at', { ascending: true })
+        .order('id', { ascending: true });
+
+      if (after) {
+        if (typeof after === 'object' && after.updated_at && after.id) {
+          query = query.or(`updated_at.gt.${after.updated_at},and(updated_at.eq.${after.updated_at},id.gt.${after.id})`);
+        } else if (typeof after === 'string' && after.includes(',')) {
+          const [ts, idVal] = after.split(',');
+          query = query.or(`updated_at.gt.${ts},and(updated_at.eq.${ts},id.gt.${idVal})`);
+        } else if (typeof after === 'string' && after.includes('|')) {
+          const [ts, idVal] = after.split('|');
+          query = query.or(`updated_at.gt.${ts},and(updated_at.eq.${ts},id.gt.${idVal})`);
+        } else {
+          query = query.gt('updated_at', after);
+        }
+      }
+
+      if (typeof limit === 'number') {
+        query = query.limit(limit);
+      } else {
+        query = query.range(offset, offset + Math.max(1, limit) - 1);
+      }
+      return query;
+    }, 'findStaleFundingOrders');
   }
 
   // ===================================================================
@@ -630,9 +665,13 @@ export class OrderRepository {
   // ===================================================================
 
   async insertReputationFailure(data) {
+    const payload = {
+      status: 'pending',
+      ...data,
+    };
     return this._retryableQuery(() => this.supabase
       .from('reputation_failures')
-      .insert(data), 'insertReputationFailure');
+      .insert(payload), 'insertReputationFailure');
   }
 
   // ===================================================================

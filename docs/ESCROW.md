@@ -1,3 +1,9 @@
+# Delivery confirmation OTP invariant
+
+Delivery confirmation must use the six-digit OTP issued for the linked order.
+The API must reject missing order OTPs and must never accept a universal,
+development, or mock fallback such as `123456`, because final-stop confirmation
+can release escrow.
 # Escrow Service
 
 ## Overview
@@ -50,7 +56,7 @@ backend/api/src/services/escrowReleaseReconciliation.js
 
 ## Safety
 
-- **Circuit breaker** — a Redis-backed pause flag (set via the internal n8n endpoint) refuses all on-chain submissions while open; fail-open on Redis outage.
+- **Circuit breaker** — a Redis-backed emergency pause flag (set via the internal n8n endpoint) refuses all on-chain submissions while open. Fail-closed: if Redis cannot be read (unreachable or read error), the pause state counts as active, so submissions are refused until Redis is restored and the pause state is verified.
 - **Reconciliation** — funding, refund, and release sweepers page through stale orders, hold per-order Redis locks, retry with exponential backoff, and escalate after `MAX_RETRIES`.
 - **Amount checks** — deposits are verified against the authoritative expected amount before an order can finalize.
 

@@ -1,7 +1,7 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { AppError } from '../utils/errors.js';
-import { supabase, createUserClient } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 
 /**
  * Resolve the resource for the 'escort:issue-credential' ownership check:

@@ -18,16 +18,27 @@ describe('ML parseWeightKg', () => {
     expect(parseWeightKg('1t')).toBe(1000);
   });
 
-  it('returns NaN for an unparseable value', () => {
-    expect(Number.isNaN(parseWeightKg('heavy'))).toBe(true);
-    expect(Number.isNaN(parseWeightKg('abc123'))).toBe(true);
+  it('returns null for an unparseable value', () => {
+    expect(parseWeightKg('heavy')).toBeNull();
+    expect(parseWeightKg('abc123')).toBeNull();
   });
 });
 
 describe('ML parseWeightKgSafe', () => {
-  it('returns 0 for an unparseable weight', () => {
-    expect(parseWeightKgSafe('not-a-weight')).toBe(0);
-    expect(parseWeightKgSafe(undefined)).toBe(0);
+  it('returns parsed number for valid numeric and string inputs', () => {
+    expect(parseWeightKgSafe(3000)).toBe(3000);
+    expect(parseWeightKgSafe('500 kg')).toBe(500);
+    expect(parseWeightKgSafe('250.5')).toBe(250.5);
+  });
+
+  it('returns defaultKg when input is null, undefined, unparseable, or non-positive', () => {
+    expect(parseWeightKgSafe('not-a-weight')).toBe(1000);
+    expect(parseWeightKgSafe(undefined)).toBe(1000);
+    expect(parseWeightKgSafe(null)).toBe(1000);
+    expect(parseWeightKgSafe(0)).toBe(1000);
+    expect(parseWeightKgSafe(-100)).toBe(1000);
+    expect(parseWeightKgSafe('invalid', 2500)).toBe(2500);
+    expect(parseWeightKgSafe(null, 500)).toBe(500);
   });
 });
 

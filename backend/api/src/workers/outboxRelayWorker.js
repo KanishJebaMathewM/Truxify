@@ -24,6 +24,10 @@ async function relayOnce() {
   if (_running) return;
   _running = true;
 
+  if (!_workerId) {
+    _workerId = getWorkerId();
+  }
+
   try {
     await outboxService.deadLetterExhaustedEvents(MAX_RETRIES);
     await outboxService.requeueFailedEvents(MAX_RETRIES);
@@ -39,6 +43,7 @@ async function relayOnce() {
     });
 
     for (const event of events) {
+      const eventId = event.event_id || event.id;
       try {
         // Publish via eventBus.publishAndReport() with Kafka adapter. Unlike
         // publishAsync(), publishAndReport awaits adapter delivery and reports
@@ -68,39 +73,59 @@ async function relayOnce() {
         });
 
         // Guard explanation:
-        // outcome.published       — EventBus successfully received the event
-        // !outcome.deduplicated   — Event was not a duplicate (avoid re-marking)
-        // outcome.adapterAttempted > 0 — At least one adapter (e.g. Kafka) received the event
+        // outcome.published === true    — EventBus successfully received and published the event
+        // !outcome.deduplicated         — Event was not a duplicate (avoid re-marking)
+        // outcome.adapterAttempted > 0  — At least one adapter (e.g. Kafka) received the event
         // outcome.adapterFailures === 0 — No adapter reported a failure
-        const delivered =
-          outcome.published === true &&
-          !outcome.deduplicated &&
+        // outcome.adapterErrors.length === 0 — No adapter reported error messages
+        const noAdapterFailure =
+          Boolean(outcome) &&
           outcome.adapterAttempted > 0 &&
           outcome.adapterFailures === 0 &&
-          Array.isArray(outcome.adapterErrors) &&
-          outcome.adapterErrors.length === 0;
+          (!outcome.adapterErrors ||
+            (Array.isArray(outcome.adapterErrors) &&
+              outcome.adapterErrors.length === 0));
+
+        const delivered =
+          Boolean(outcome) &&
+          outcome.published === true &&
+          !outcome.deduplicated &&
+          noAdapterFailure;
 
         if (delivered) {
-          await outboxService.markPublished(event.event_id);
+          await outboxService.markPublished(eventId);
           logger.info("[OutboxRelay] Published event:", {
-            eventId: event.event_id,
+            eventId,
             type: event.event_type,
           });
         } else {
-          const reason = outcome.deduplicated
-            ? "Event deduplicated by EventBus"
-            : outcome.adapterAttempted === 0
-              ? 'No event consumer/adapters handled the event'
-              : `Adapter failures: ${outcome.adapterErrors.join('; ')}`;
-          await outboxService.markFailed(event.event_id, _workerId, reason);
-          logger.error('[OutboxRelay] Event not delivered, marked failed:', { eventId: event.event_id, reason });
+          const reason = !outcome
+            ? "No outcome returned from EventBus"
+            : outcome.deduplicated
+              ? "Event deduplicated by EventBus"
+              : outcome.published !== true
+                ? "Publish outcome was unsuccessful"
+                : outcome.adapterAttempted === 0
+                  ? "No event consumer/adapters handled the event"
+                  : `Adapter failures: ${Array.isArray(outcome.adapterErrors) && outcome.adapterErrors.length > 0 ? outcome.adapterErrors.join("; ") : "Adapter reported failure"}`;
+          await outboxService.markFailed(eventId, _workerId, reason);
+          logger.error("[OutboxRelay] Event not delivered, marked failed:", {
+            eventId,
+            reason,
+          });
         }
       } catch (err) {
-        logger.error('[OutboxRelay] Failed to publish event:', { eventId: event.event_id, err: err.message });
+        logger.error("[OutboxRelay] Failed to publish event:", {
+          eventId,
+          err: err.message,
+        });
         try {
-          await outboxService.markFailed(event.event_id, _workerId, err.message);
+          await outboxService.markFailed(eventId, _workerId, err.message);
         } catch (markErr) {
-          logger.error('[OutboxRelay] Failed to mark event failed:', { eventId: event.event_id, err: markErr.message });
+          logger.error("[OutboxRelay] Failed to mark event failed:", {
+            eventId,
+            err: markErr.message,
+          });
         }
       }
     }

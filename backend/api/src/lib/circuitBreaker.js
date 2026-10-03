@@ -22,14 +22,17 @@ export class CircuitBreaker {
     this.nextAttempt = Date.now();
     this._halfOpenTimer = null;
     this._halfOpenProbeInFlight = false;
+    this._generation = 0;
+    this._probeOwner = null;
   }
 
   _scheduleHalfOpen() {
     if (this._halfOpenTimer) {
       clearTimeout(this._halfOpenTimer);
     }
+    const generation = this._generation;
     this._halfOpenTimer = setTimeout(() => {
-      if (this.state === CircuitState.OPEN) {
+      if (generation === this._generation && this.state === CircuitState.OPEN) {
         this.state = CircuitState.HALF_OPEN;
         logger.info(`[CircuitBreaker:${this.name}] Transitioned from OPEN to HALF_OPEN via scheduled timer`);
       }
@@ -51,11 +54,13 @@ export class CircuitBreaker {
       clearTimeout(this._halfOpenTimer);
       this._halfOpenTimer = null;
     }
+    this._generation += 1;
     this.state = CircuitState.CLOSED;
     this.failureCount = 0;
     this.successCount = 0;
     this.timeoutCount = 0;
     this.nextAttempt = Date.now();
+    // Reset is a health override, not proof that a native probe settled.
   }
 
   destroy() {
@@ -77,17 +82,23 @@ export class CircuitBreaker {
       throw new Error(`CircuitBreaker:${this.name} is OPEN`);
     }
 
+    const operation = {
+      generation: this._generation, probe: false,
+      nativeSettled: false, callerSettled: false,
+    };
     if (currentState === CircuitState.HALF_OPEN) {
       // Only a single (or small bounded number of) trial request is admitted
       // during the recovery probe window; the rest are short-circuited like
       // OPEN so we don't hammer the struggling dependency (retry-storm risk).
-      if (this._halfOpenProbeInFlight) {
+      if (this._probeOwner) {
         logger.warn(`[CircuitBreaker:${this.name}] Probe already in flight, rejecting extra HALF_OPEN request`);
         if (typeof this.fallback === 'function') {
           return this.fallback(...args);
         }
         throw new Error(`CircuitBreaker:${this.name} is HALF_OPEN (probe in flight)`);
       }
+      operation.probe = true;
+      this._probeOwner = operation;
       this._halfOpenProbeInFlight = true;
     }
 
@@ -96,6 +107,15 @@ export class CircuitBreaker {
 
     let timer;
     let timedOut = false;
+    const release = () => {
+      // A native success must also finish its health transition before another
+      // HALF_OPEN request can capture ownership in the intervening microtasks.
+      if (operation.nativeSettled && operation.callerSettled
+          && this._probeOwner === operation) {
+        this._probeOwner = null;
+        this._halfOpenProbeInFlight = false;
+      }
+    };
 
     try {
       const timeoutPromise = new Promise((_, reject) => {
@@ -107,45 +127,59 @@ export class CircuitBreaker {
         timer.unref?.();
       });
 
-      const result = await Promise.race([fn(...args, { signal }), timeoutPromise]);
-      this.onSuccess();
+      // Observe the native lifetime separately from the caller's deadline.
+      // The rejection handler also owns late rejections after Promise.race.
+      const native = Promise.resolve().then(() => fn(...args, { signal }));
+      const settled = () => {
+        operation.nativeSettled = true;
+        release();
+      };
+      native.then(settled, settled);
+      const result = await Promise.race([native, timeoutPromise]);
+      this.onSuccess(operation);
       return result;
     } catch (err) {
       if (timedOut) {
-        this.timeoutCount += 1;
+        if (operation.generation === this._generation) this.timeoutCount += 1;
         logger.warn({ timeouts: this.timeoutCount }, `[CircuitBreaker:${this.name}] Request timed out`);
         if (this.countTimeoutAsFailure) {
-          return this.onFailure(err, args);
+          return this.onFailure(err, args, operation);
         }
         throw err;
       }
-      return this.onFailure(err, args);
+      return this.onFailure(err, args, operation);
     } finally {
+      operation.callerSettled = true;
+      release();
       if (timer) {
         clearTimeout(timer);
       }
     }
   }
 
-  onSuccess() {
+  onSuccess(operation = { generation: this._generation, probe: true }) {
+    if (operation.generation !== this._generation) return;
     this.successCount += 1;
-    if (this.state === CircuitState.HALF_OPEN) {
+    if (this.state === CircuitState.HALF_OPEN && operation.probe) {
       this.reset();
-      this._halfOpenProbeInFlight = false;
       logger.info(`[CircuitBreaker:${this.name}] Service recovered. State reset to CLOSED`);
     } else {
       this.failureCount = 0;
     }
   }
 
-  onFailure(err, args) {
+  onFailure(err, args, operation = { generation: this._generation }) {
+    if (operation.generation !== this._generation) {
+      if (typeof this.fallback === 'function') return this.fallback(...args);
+      throw err;
+    }
     this.failureCount += 1;
     const errMessage = err instanceof Error ? err.message : String(err);
     logger.error({ err: errMessage, failures: this.failureCount }, `[CircuitBreaker:${this.name}] Execution failure`);
 
     if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.failureThreshold) {
+      this._generation += 1;
       this.state = CircuitState.OPEN;
-      this._halfOpenProbeInFlight = false;
       this.nextAttempt = Date.now() + this.resetTimeoutMs;
       this._scheduleHalfOpen();
       logger.warn(`[CircuitBreaker:${this.name}] Circuit opened until ${new Date(this.nextAttempt).toISOString()}`);

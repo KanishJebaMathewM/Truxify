@@ -60,6 +60,18 @@ export class DeliveryDelayService {
     );
     if (error || !order || order.driver_id !== driverId || !ACTIVE_STATUSES.has(order.status)) return null;
 
+    // The tracker has two ETA writers. Both must claim the same database fence
+    // before routing; a driver check made before OSRM cannot authorize a late write.
+    let generation;
+    try {
+      const claim = await this.orderRepository.claimEtaGeneration(order.id, driverId, order.status);
+      if (claim?.error || !claim?.data) return null;
+      generation = claim.data;
+    } catch (claimError) {
+      this.logger.warn({ err: claimError, orderId: order.id }, '[DeliveryDelayService] ETA claim failed');
+      return null;
+    }
+
     const estimate = await this.routeEstimate({
       pickupLat: latitude,
       pickupLng: longitude,
@@ -68,7 +80,9 @@ export class DeliveryDelayService {
     });
     if (!estimate || !Number.isFinite(estimate.durationSeconds)) return null;
 
-    const currentEta = new Date(Date.now() + estimate.durationSeconds * 1000).toISOString();
+    const arrivalEpochMs = Date.now() + estimate.durationSeconds * 1000;
+    if (!Number.isFinite(arrivalEpochMs) || arrivalEpochMs < 0 || arrivalEpochMs > 8640000000000000) return null;
+    const currentEta = new Date(arrivalEpochMs).toISOString();
     const evaluation = evaluateDeliveryDelay({
       previousEta: order.previous_eta || order.eta,
       currentEta,
@@ -81,14 +95,25 @@ export class DeliveryDelayService {
 
     const result = await this.orderRepository.updateDeliveryEtaState(order.id, {
       eta: currentEta,
+      eta_arrival_epoch_ms: Math.trunc(arrivalEpochMs),
       previous_eta: nextState === 'delayed'
         ? (order.previous_eta || order.eta || currentEta)
         : currentEta,
       delivery_delay_state: nextState,
-    }, order.eta, priorState);
+    }, order.eta, priorState, { driverId, expectedStatus: order.status, generation });
     if (!result?.data || result.error) return null;
 
     if (shouldNotify) {
+      // Best-effort suppression only: the provider send cannot be transactional
+      // with PostgreSQL, but a known successor must not start an obsolete push.
+      try {
+        const current = await this.orderRepository.findEtaGeneration(order.id);
+        if (current?.error || current?.data?.eta_calculation_generation !== generation ||
+            current.data.driver_id !== driverId || current.data.status !== order.status) return null;
+      } catch (readError) {
+        this.logger.warn({ err: readError, orderId: order.id }, '[DeliveryDelayService] ETA ownership read failed');
+        return null;
+      }
       const notification = buildNotification({
         orderDisplayId: order.order_display_id,
         eta: currentEta,

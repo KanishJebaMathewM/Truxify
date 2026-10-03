@@ -766,13 +766,28 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
+ *
+ * The refund is a single owner-signed `cancelBooking` transaction: the
+ * deployed TruxifyEscrow contract (and therefore ESCROW_ABI) has no
+ * `refundFunds` method. `cancelBooking` already credits the customer's
+ * pending withdrawal and releases the booking slot, so it must be sent
+ * exactly once. The returned `txHash` and `waitForConfirmation()` always
+ * refer to that same transaction, which is what every caller relies on when
+ * it persists `refund_tx_hash` and later waits on / re-confirms it.
+ *
+ * Failures are reported as `{ txHash: null, error }` and never thrown, which
+ * is the contract the order-lifecycle, stale-order worker and the funding /
+ * refund reconcilers all depend on.
+ *
+ * @param {string} orderDisplayId
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string, waitForConfirmation?: () => Promise<object>}>}
  */
 export async function submitEscrowRefund (orderDisplayId) {
   return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping refundFunds.')
+    logger.warn('[escrow] Contract not initialised — skipping cancelBooking refund.')
     return { txHash: null, bookingId }
   }
 
@@ -783,15 +798,13 @@ export async function submitEscrowRefund (orderDisplayId) {
 
   let tx
   try {
-    tx = await escrowContract.cancelBooking(bookingId)
-    logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
+    tx = await withTimeout(escrowContract.cancelBooking(bookingId))
   } catch (err) {
-    logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    logger.error(`[escrow] cancelBooking refund failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
     return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
+  logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
 
-  tx = await withTimeout(escrowContract.refundFunds(bookingId));
-  logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   return {
     txHash: tx.hash,
     bookingId,

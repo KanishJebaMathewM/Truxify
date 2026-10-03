@@ -304,6 +304,9 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
         math.sin(d_lat / 2) ** 2
         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lng / 2) ** 2
     )
+    # Floating-point rounding near antipodes may put a slightly above one.
+    # Callers validate geographic domains before this calculation.
+    a = min(1.0, max(0.0, a))
     return r_earth * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
@@ -315,7 +318,15 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
         drop_lat = float(row.get("drop_lat"))
         drop_lng = float(row.get("drop_lng"))
         weight_kg = float(row.get("weight_tonnes")) * 1000.0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if not all(math.isfinite(value) for value in (
+        pickup_lat, pickup_lng, drop_lat, drop_lng, weight_kg,
+    )):
+        return None
+    if not (-90 <= pickup_lat <= 90 and -90 <= drop_lat <= 90
+            and -180 <= pickup_lng <= 180 and -180 <= drop_lng <= 180):
         return None
 
     distance_km = _haversine_km(pickup_lat, pickup_lng, drop_lat, drop_lng)
@@ -335,9 +346,9 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
         price_paisa = row.get("total_amount")
     try:
         price_paisa = float(price_paisa)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    if price_paisa <= 0:
+    if not math.isfinite(price_paisa) or price_paisa <= 0:
         return None
 
     return {

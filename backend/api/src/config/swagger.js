@@ -33,6 +33,11 @@ const options = {
           scheme: 'bearer',
           bearerFormat: 'JWT',
         },
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
       },
     },
     servers: [

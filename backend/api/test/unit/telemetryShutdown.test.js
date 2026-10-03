@@ -48,7 +48,10 @@ describe('shared telemetry drain and recovery ownership', () => {
     const nativeRoot = path.join(directory, 'native');
     for (const sub of ['sockets', 'middleware', 'config']) fs.mkdirSync(path.join(nativeRoot, 'src', sub), { recursive: true });
     fs.writeFileSync(path.join(nativeRoot, 'package.json'), '{"type":"module"}');
-    fs.copyFileSync(fileURLToPath(new URL('../../src/sockets/telemetryBuffer.js', import.meta.url)), path.join(nativeRoot, 'src/sockets/telemetryBuffer.js'));
+    const sourceDirectory = path.dirname(fileURLToPath(new URL('../../src/sockets/telemetryBuffer.js', import.meta.url)));
+    for (const entry of fs.readdirSync(sourceDirectory, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.js')) fs.copyFileSync(path.join(sourceDirectory, entry.name), path.join(nativeRoot, 'src/sockets', entry.name));
+    }
     fs.writeFileSync(path.join(nativeRoot, 'src/middleware/logger.js'), 'export default {info(){},warn(){},error(){}};');
     fs.writeFileSync(path.join(nativeRoot, 'src/config/db.js'), 'export const mongoDb=null;');
     const sourceUrl = pathToFileURL(path.join(nativeRoot, 'src/sockets/telemetryBuffer.js')).href;

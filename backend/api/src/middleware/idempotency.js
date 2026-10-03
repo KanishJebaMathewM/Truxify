@@ -105,7 +105,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
       }
 
       if (cached) {
-        logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
+        logger.info({ event: 'IDEMPOTENCY_KEY_DETECTED', requestId: req.requestId, idempotencyKey }, 'Cache hit for idempotency key');
         return res.status(cached.statusCode).json(cached.body);
       }
 

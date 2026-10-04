@@ -1,3 +1,7 @@
+import copy
+import functools
+import math
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -239,6 +243,15 @@ class TrafficGraphBuilder:
             return types.index(road_type) / len(types)
         return 0
 
+def _with_gat_state(method):
+    """Serialize native trainer operations; nested training uses an RLock."""
+    @functools.wraps(method)
+    def serialized(self, *args, **kwargs):
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+    return serialized
+
+
 class GATTrainer:
     """Trainer for Graph Attention Network"""
     
@@ -248,13 +261,23 @@ class GATTrainer:
         lr: float = 1e-3,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
-        self.model = model.to(device)
+        self._state_lock = threading.RLock()
         self.device = device
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        model = model.to(device)
+        self._serving_pair = (model, torch.optim.Adam(model.parameters(), lr=lr))
         self.criterion = nn.MSELoss()
         
         logger.info(f"✅ GAT Trainer initialized on {self.device}")
     
+    @property
+    def model(self):
+        return self._serving_pair[0]
+
+    @property
+    def optimizer(self):
+        return self._serving_pair[1]
+
+    @_with_gat_state
     def train_step(self, data: Data, targets: torch.Tensor) -> float:
         """Single training step"""
         self.model.train()
@@ -274,6 +297,7 @@ class GATTrainer:
         
         return loss.item()
     
+    @_with_gat_state
     def train(
         self,
         train_data: Data,
@@ -309,6 +333,7 @@ class GATTrainer:
             'final_val_loss': val_losses[-1] if val_losses else None
         }
     
+    @_with_gat_state
     def validate(self, data: Data, targets: torch.Tensor) -> float:
         """Validate model"""
         self.model.eval()
@@ -318,6 +343,7 @@ class GATTrainer:
             loss = self.criterion(predictions, targets.to(self.device))
         return loss.item()
     
+    @_with_gat_state
     def predict(self, data: Data) -> Dict:
         """Make predictions"""
         self.model.eval()
@@ -331,6 +357,7 @@ class GATTrainer:
                 'std': predictions.std(dim=1).cpu().numpy()
             }
     
+    @_with_gat_state
     def save(self, path: str = "models/gat_traffic.pth"):
         """Save model"""
         torch.save({
@@ -339,9 +366,56 @@ class GATTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @_with_gat_state
     def load(self, path: str = "models/gat_traffic.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # Copy the pair in one deepcopy operation: optimizer parameter keys must
+        # remain bound to the copied model, never the old serving generation.
+        candidate_model, candidate_optimizer = copy.deepcopy(self._serving_pair)
+        candidate_model.load_state_dict(checkpoint['model_state_dict'])
+        candidate_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self._validate_restored_pair(candidate_model, candidate_optimizer)
+        self._serving_pair = (candidate_model, candidate_optimizer)
         logger.info(f"✅ Model loaded from {path}")
+
+    @staticmethod
+    def _validate_restored_pair(model, optimizer):
+        for value in model.state_dict().values():
+            if not torch.isfinite(value).all():
+                raise ValueError("GAT checkpoint model tensors must be finite")
+        parameters = set(model.parameters())
+        bound = {parameter for group in optimizer.param_groups for parameter in group['params']}
+        if bound != parameters:
+            raise ValueError("GAT checkpoint optimizer must own the restored model")
+        for group in optimizer.param_groups:
+            # Adam's loader does not rerun constructor validation.
+            torch.optim.Adam(group['params'], lr=group['lr'], betas=group['betas'],
+                             eps=group['eps'], weight_decay=group['weight_decay'])
+            for key in ('lr', 'eps', 'weight_decay'):
+                if not math.isfinite(float(group[key])):
+                    raise ValueError("GAT checkpoint optimizer settings must be finite")
+        for parameter, state in optimizer.state.items():
+            if parameter not in parameters:
+                raise ValueError("GAT checkpoint optimizer contains foreign state")
+            if not state:
+                continue
+            for key in ('step', 'exp_avg', 'exp_avg_sq'):
+                if key not in state:
+                    raise ValueError("GAT checkpoint Adam state is incomplete")
+            for key, value in state.items():
+                if not isinstance(value, torch.Tensor) or not torch.isfinite(value).all():
+                    raise ValueError("GAT checkpoint Adam tensors must be finite")
+                if key == 'step':
+                    if value.numel() != 1 or value.item() < 0:
+                        raise ValueError("GAT checkpoint Adam step must be a nonnegative scalar")
+                elif key in ('exp_avg', 'exp_avg_sq', 'max_exp_avg_sq'):
+                    if value.shape != parameter.shape:
+                        raise ValueError("GAT checkpoint Adam moment shape mismatch")
+                    if key != 'exp_avg' and (value < 0).any():
+                        raise ValueError("GAT checkpoint Adam squared moments must be nonnegative")
+                else:
+                    raise ValueError("GAT checkpoint contains unknown Adam state")
+            if any(group.get('amsgrad') and parameter in set(group['params'])
+                   for group in optimizer.param_groups) and 'max_exp_avg_sq' not in state:
+                raise ValueError("GAT checkpoint AMSGrad maximum moment is missing")

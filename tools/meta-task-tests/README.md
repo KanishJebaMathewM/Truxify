@@ -23,5 +23,7 @@ exhaustion and local ASGI behavior. Keys, widths and ten query rows are preserve
 Only binary classes are supported by the latent threshold task; unsupported arity
 or nonpositive shot count returns422. Degenerate/nonfinite/unrepresentable tasks
 return503 without partial or mislabeled output. This does not change MAML weights,
-optimizer, provider or model architecture. Actual-source combination with17112
-merges cleanly and passes41 native tests/1stale initialization assertion excluded.
+optimizer, provider or model architecture. Actual-source combination with17112 needs one import-block union retaining
+Query, Annotated and model_validator; model changes merge cleanly. The resolved
+temporary sources pass41 native tests/1stale init assertion excluded. No actual
+branch/upstream merge is performed.

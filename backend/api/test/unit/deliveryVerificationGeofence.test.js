@@ -368,6 +368,56 @@ describe("DeliveryVerificationService.geofenceAutoConfirm radius override", () =
     expect(err).toBeInstanceOf(DomainError);
     expect(err.status).toBe(409);
   });
+
+  it("rejects when claimed coords are at drop-off but server telemetry is far away", async () => {
+    // Driver's actual telemetry position is ~5km away
+    mockTelemetryRecords = [makeTelemetry(28.6139, 77.260)];
+    const { service } = makeService();
+    const err = await captureDomainError(
+      service.geofenceAutoConfirm({
+        orderId: "order-geo-1",
+        driverId: "driver-1",
+        driverLat: DROP_LAT,
+        driverLng: DROP_LNG,
+      }),
+    );
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err.status).toBe(409);
+    expect(err.payload.error).toMatch(/km from the drop-off/i);
+  });
+
+  it("succeeds when server telemetry is at drop-off even without claimed coords", async () => {
+    mockTelemetryRecords = [makeTelemetry(DROP_LAT, DROP_LNG)];
+    const { service, repo } = makeService();
+    const result = await service.geofenceAutoConfirm({
+      orderId: "order-geo-1",
+      driverId: "driver-1",
+    });
+    expect(result.autoConfirmed).toBe(true);
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      "order-geo-1",
+      expect.objectContaining({ updated_at: expect.any(String) }),
+    );
+  });
+
+  it("rejects when telemetry belongs to a different order or driver", async () => {
+    mockTelemetryRecords = [
+      makeTelemetry(DROP_LAT, DROP_LNG, 1000, {
+        driver_id: "other-driver",
+        order_display_id: "ORD-OTHER",
+      }),
+    ];
+    const { service } = makeService();
+    const err = await captureDomainError(
+      service.geofenceAutoConfirm({
+        orderId: "order-geo-1",
+        driverId: "driver-1",
+      }),
+    );
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err.status).toBe(409);
+    expect(err.payload.error).toMatch(/location is not available/i);
+  });
 });
 
 describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {

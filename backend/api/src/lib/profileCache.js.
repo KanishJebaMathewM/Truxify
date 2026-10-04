@@ -1,0 +1,17 @@
+// Before (Problematic Code)
+async function invalidateCachedProfile(userId) {
+  try {
+    await redisClient.del(`profile:${userId}`);
+  } catch (err) {
+    // Silently swallowed error
+  }
+}
+
+// After (Fixed Code)
+async function invalidateCachedProfile(userId) {
+  try {
+    await redisClient.del(`profile:${userId}`);
+  } catch (err) {
+    logCacheError('invalidateCachedProfile', err);
+  }
+}

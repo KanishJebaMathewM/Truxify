@@ -63,7 +63,10 @@ const ESCROW_ABI = [
   'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
+  'function cancelBooking(uint256 bookingId, bytes32 idempotencyKey) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
+  'function cancelWithPenalty(uint256 bookingId, uint256 driverFee, bytes32 idempotencyKey) external',
+  'function processedCancellations(bytes32 cancellationHash) external view returns (bool)',
   'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
   'function markBookingStarted(uint256 bookingId) external',
   'function raiseDispute(uint256 bookingId) external',
@@ -74,6 +77,17 @@ const ESCROW_ABI = [
   'function unpause() external',
   'function paused() external view returns (bool)'
 ]
+
+export function formatIdempotencyKeyBytes32(idempotencyKey) {
+  if (!idempotencyKey) return null;
+  if (typeof idempotencyKey === 'string') {
+    if (idempotencyKey.startsWith('0x') && idempotencyKey.length === 66) {
+      return idempotencyKey;
+    }
+    return ethers.keccak256(ethers.toUtf8Bytes(idempotencyKey));
+  }
+  return null;
+}
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
@@ -767,7 +781,7 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
 /**
  * Submit an escrow refund and return its hash before confirmation.
  */
-export async function submitEscrowRefund (orderDisplayId) {
+export async function submitEscrowRefund (orderDisplayId, idempotencyKey = null) {
   return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -781,17 +795,21 @@ export async function submitEscrowRefund (orderDisplayId) {
     return escrowPausedResult(bookingId)
   }
 
+  const idempBytes32 = formatIdempotencyKeyBytes32(idempotencyKey);
+
   let tx
   try {
-    tx = await escrowContract.cancelBooking(bookingId)
+    if (idempBytes32 && typeof escrowContract['cancelBooking(uint256,bytes32)'] === 'function') {
+      tx = await escrowContract['cancelBooking(uint256,bytes32)'](bookingId, idempBytes32);
+    } else {
+      tx = await escrowContract.cancelBooking(bookingId);
+    }
     logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
   } catch (err) {
     logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
     return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
 
-  tx = await withTimeout(escrowContract.refundFunds(bookingId));
-  logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   return {
     txHash: tx.hash,
     bookingId,
@@ -913,7 +931,7 @@ export async function updateEscrowDropAmount(orderDisplayId, newAmountWei, topUp
  * @param {string|bigint} driverFeeWei
  * @returns {Promise<{txHash: string|null, bookingId: string, error?: string, waitForConfirmation?: Function}>}
  */
-export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWei) {
+export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWei, idempotencyKey = null) {
   return measureExecution('EscrowService.submitEscrowCancelWithPenalty', async () => {
     const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -927,8 +945,15 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
       return escrowPausedResult(bookingId)
     }
 
+    const idempBytes32 = formatIdempotencyKeyBytes32(idempotencyKey);
+
     try {
-      const tx = await escrowContract.cancelWithPenalty(bookingId, driverFeeWei)
+      let tx;
+      if (idempBytes32 && typeof escrowContract['cancelWithPenalty(uint256,uint256,bytes32)'] === 'function') {
+        tx = await escrowContract['cancelWithPenalty(uint256,uint256,bytes32)'](bookingId, driverFeeWei, idempBytes32);
+      } else {
+        tx = await escrowContract.cancelWithPenalty(bookingId, driverFeeWei);
+      }
       logger.info(`[escrow] cancelWithPenalty tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
       return {
         txHash: tx.hash,

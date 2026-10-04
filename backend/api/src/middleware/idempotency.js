@@ -73,7 +73,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
   const ttlMs = safeTtlSeconds * 1000;
 
   return async function idempotencyMiddleware(req, res, next) {
-    const idempotencyKey = req.headers['x-idempotency-key'];
+    const idempotencyKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
 
     // Guard against non-string idempotency key: return 400 if not a string.
     if (typeof idempotencyKey !== 'string' || !idempotencyKey) {

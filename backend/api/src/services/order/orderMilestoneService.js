@@ -18,6 +18,7 @@ import {
   DELIVERY_OTP_READY_STATUSES
 } from './orderNotificationService.js';
 import { escrowRelease, markEscrowBookingStarted, paisaToMaticWei, resolveExpectedDepositAmount } from '../escrow.js';
+import { acquireLockOrFallback } from '../../lib/lockFallback.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { broadcastOrderMilestone } from '../../sockets/tracker.js';
@@ -55,7 +56,33 @@ export class OrderMilestoneService {
           error: 'Access Denied: You are not assigned to this order.'
         });
 
-      const timeline = await this.orderTimelineService.getOrderTimeline(order.order_display_id);
+      const cancelLockKey = `lock:order:cancel:${order.id}`;
+      const cancelLock = await acquireLockOrFallback(cancelLockKey, 30000);
+      if (!cancelLock.ok) {
+        throw new DomainError(409, { error: 'Order is currently being cancelled or modified. Cannot update milestone.' });
+      }
+
+      let currentOrder;
+
+      try {
+        // Re-fetch order status under lock to prevent TOCTOU with concurrent cancellations
+        const { data: freshOrder, error: freshOrderErr } = await this.orderRepository.findOrderById(order.id);
+        if (freshOrderErr || !freshOrder) {
+          throw new DomainError(404, { error: 'Order not found.' });
+        }
+        currentOrder = freshOrder;
+
+        if (currentOrder.driver_id !== driverId) {
+          throw new DomainError(403, {
+            error: 'Access Denied: You are not assigned to this order.'
+          });
+        }
+
+        if (['cancelled', 'cancelling', 'disputed'].includes(currentOrder.status)) {
+          throw new DomainError(409, { error: `Cannot update milestone: order has been ${currentOrder.status}.` });
+        }
+
+        const timeline = await this.orderTimelineService.getOrderTimeline(currentOrder.order_display_id);
 
       const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
       const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
@@ -96,24 +123,25 @@ export class OrderMilestoneService {
         }
       }
 
-      await this.orderTimelineService.completeMilestone(order.order_display_id, milestone);
+      await this.orderTimelineService.completeMilestone(currentOrder.order_display_id, milestone);
 
       const { data: updatedRows, error: updateErr } = await this.orderRepository.executeRpc(
         'update_order_status_tx',
         {
           p_order_id: orderId,
           p_status: status,
+          p_not_statuses: ['cancelled', 'cancelling', 'disputed'],
           p_event_type: 'ORDER_UPDATED',
-          p_payload_extra: { milestone, order_display_id: order.order_display_id },
+          p_payload_extra: { milestone, order_display_id: currentOrder.order_display_id },
         },
         supabaseAdmin
       );
 
       if (updateErr || !updatedRows || updatedRows.length === 0) {
-        await this.orderTimelineService.resetMilestone(order.order_display_id, milestone);
-        throw new DomainError(500, {
+        await this.orderTimelineService.resetMilestone(currentOrder.order_display_id, milestone);
+        throw new DomainError(409, {
           error: 'Failed to update order.',
-          details: updateErr?.message ?? 'Order status guard rejected the milestone update.'
+          details: updateErr?.message ?? 'Order status guard rejected the milestone update (order may be cancelled).'
         });
       }
 
@@ -122,31 +150,31 @@ export class OrderMilestoneService {
       // Once the goods are loaded, the trip has started on-chain. Mark the
       // booking so cancelBooking / cancelWithPenalty revert for a full refund.
       // Best-effort: a chain failure must not block the milestone itself.
-      if (status === 'picked_up' && ['funded', 'release_failed'].includes(order.escrow_status)) {
+      if (status === 'picked_up' && ['funded', 'release_failed'].includes(currentOrder.escrow_status)) {
         try {
-          const started = await markEscrowBookingStarted(order.order_display_id);
+          const started = await markEscrowBookingStarted(currentOrder.order_display_id);
           if (started?.txHash && started.waitForConfirmation) {
             const startedReceipt = await started.waitForConfirmation();
             logger.info(
-              `[escrow] Booking marked started for order ${order.order_display_id} in block ${startedReceipt.blockNumber}`
+              `[escrow] Booking marked started for order ${currentOrder.order_display_id} in block ${startedReceipt.blockNumber}`
             );
           } else if (started?.error) {
             logger.warn(
-              `[escrow] Failed to mark booking started for order ${order.order_display_id}: ${started.error}`
+              `[escrow] Failed to mark booking started for order ${currentOrder.order_display_id}: ${started.error}`
             );
           }
         } catch (startErr) {
           logger.warn(
-            `[escrow] Failed to mark booking started for order ${order.order_display_id}: ${startErr.message}`
+            `[escrow] Failed to mark booking started for order ${currentOrder.order_display_id}: ${startErr.message}`
           );
         }
       }
 
       if (generatedOtp) {
-        const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
+        const notifResult = await sendDeliveryOtpNotification(currentOrder.customer_id, currentOrder.order_display_id, generatedOtp);
         if (!notifResult.success) {
           logger.warn(
-            `[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`
+            `[OrderRoutes] Delivery OTP notification failed for order ${currentOrder.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`
           );
           await this.orderRepository.updateOrder(orderId, {
             updated_at: new Date().toISOString()
@@ -155,10 +183,13 @@ export class OrderMilestoneService {
       }
 
       // Broadcast milestone update to connected WebSocket clients
-      broadcastOrderMilestone(order.order_display_id, milestone, status);
+      broadcastOrderMilestone(currentOrder.order_display_id, milestone, status);
 
       return { order: updatedOrder, milestone, status };
-    });
+    } finally {
+      await cancelLock.release();
+    }
+  });
   }
 
   async verifyDelivery({ orderId, otp, driverId }, userClient) {

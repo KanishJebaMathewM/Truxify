@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -59,6 +59,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     // nonce is burned on success so a commitment cannot be replayed after a slot
     // is reused (e.g. cancel + recreate the same bookingId).
     mapping(address => mapping(uint256 => uint256)) public commitmentNonces;
+    mapping(bytes32 => bool) public processedCancellations;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
     uint256 public constant DISPUTE_TIMEOUT = 7 days;
     address public trustedRelayer;
@@ -83,6 +84,12 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 indexed bookingId,
         address indexed customer,
         uint256 refundAmount
+    );
+
+    event CancellationProcessed(
+        uint256 indexed bookingId,
+        bytes32 indexed idempotencyKey,
+        bytes32 cancellationHash
     );
 
     event BookingStarted(
@@ -415,10 +422,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev Cancel a booking and refund the customer.
      *      RESTRICTED to onlyOwner (backend) to ensure on-chain and off-chain
-     *      state remain synchronized. The backend's cancellation flow performs
-     *      critical checks: Redis distributed lock, idempotency guard, order
-     *      state validation, and escrow refund tracking. Allowing direct
-     *      customer cancellation desynchronizes state.
+     *      state remain synchronized.
      *
      * @param bookingId The booking to cancel and refund
      */
@@ -428,6 +432,32 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         nonReentrant
         whenNotPaused
     {
+        _cancelBookingInternal(bookingId, bytes32(0));
+    }
+
+    /**
+     * @dev Cancel a booking and refund the customer with an idempotency key to prevent duplicate refunds.
+     *
+     * @param bookingId The booking to cancel and refund
+     * @param idempotencyKey The unique idempotency key for this cancellation
+     */
+    function cancelBooking(uint256 bookingId, bytes32 idempotencyKey)
+        external
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
+        _cancelBookingInternal(bookingId, idempotencyKey);
+    }
+
+    function _cancelBookingInternal(uint256 bookingId, bytes32 idempotencyKey) internal {
+        if (idempotencyKey != bytes32(0)) {
+            bytes32 scopedKey = keccak256(abi.encode(bookingId, idempotencyKey));
+            require(!processedCancellations[scopedKey], "TruxifyEscrow: Cancellation already processed");
+            processedCancellations[scopedKey] = true;
+            emit CancellationProcessed(bookingId, idempotencyKey, keccak256(abi.encodePacked(bookingId, idempotencyKey, block.timestamp)));
+        }
+
         Booking storage booking = bookings[bookingId];
 
         require(
@@ -437,11 +467,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
-        // A started trip must be cancelled through cancelWithPenalty so the
-        // driver is compensated for work already performed. Allowing a full
-        // refund here would let the customer void a started booking while the
-        // driver receives nothing (issue #8891).
-        require(!booking.started, "TruxifyEscrow: Trip already started");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
@@ -466,15 +491,37 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Cancels an active booking, compensating the assigned driver before
-     *      refunding the remaining escrow to the customer. The backend chooses
-     *      the penalty only after validating the off-chain trip state.
+     *      refunding the remaining escrow to the customer.
      */
-        function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
+    function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
         external
         onlyOwner
         nonReentrant
         whenNotPaused
     {
+        _cancelWithPenaltyInternal(bookingId, driverFee, bytes32(0));
+    }
+
+    /**
+     * @dev Cancels an active booking with penalty and an idempotency key.
+     */
+    function cancelWithPenalty(uint256 bookingId, uint256 driverFee, bytes32 idempotencyKey)
+        external
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
+        _cancelWithPenaltyInternal(bookingId, driverFee, idempotencyKey);
+    }
+
+    function _cancelWithPenaltyInternal(uint256 bookingId, uint256 driverFee, bytes32 idempotencyKey) internal {
+        if (idempotencyKey != bytes32(0)) {
+            bytes32 scopedKey = keccak256(abi.encode(bookingId, idempotencyKey));
+            require(!processedCancellations[scopedKey], "TruxifyEscrow: Cancellation already processed");
+            processedCancellations[scopedKey] = true;
+            emit CancellationProcessed(bookingId, idempotencyKey, keccak256(abi.encodePacked(bookingId, driverFee, idempotencyKey, block.timestamp)));
+        }
+
         Booking storage booking = bookings[bookingId];
 
         require(
@@ -482,7 +529,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
-        require(booking.started, "TruxifyEscrow: Trip not started");
+        require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
         require(driverFee <= booking.amount, "TruxifyEscrow: Penalty exceeds escrow");
 

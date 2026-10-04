@@ -226,10 +226,6 @@ const milestoneLimiter = rateLimit({
   message: { error: 'Too many milestone updates. Please slow down.' },
 });
 
-
-// 1. CREATE ORDER (CUSTOMER)
-router.post('/', authenticate, userLimiter, requirePolicy('order:create'), validateBody(createOrderSchema), createOrder);
-
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
 
@@ -303,7 +299,7 @@ router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('mileston
  *   get:
  *     tags: [Orders]
  *     summary: List en-route / deadhead load opportunities
- *     description: Returns available load offers ranked for an en-route (deadhead) match using the Deadhead Eliminator ML model, falling back to a haversine-distance ranking when the ML engine is unavailable.
+ *     description: Returns available load offers ranked for an en-route (deadhead) match.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -323,13 +319,6 @@ router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('mileston
  *     responses:
  *       200:
  *         description: En-route load offers
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 loads:
- *                   type: array
  */
 router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateQuery(z.object({
   current_lat: z.coerce.number().optional(),
@@ -381,31 +370,6 @@ router.get('/load-offers/en-route', authenticate, userLimiter, requirePolicy('lo
 // ============================================================================
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-/**
- * @openapi
- * /api/orders/{id}/verify-delivery:
- *   post:
- *     tags: [Orders]
- *     summary: Verify delivery with OTP
- *     description: Verifies delivery completion using OTP. Idempotent for 24 hours. Rate-limited to 20 attempts per 15 minutes.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Delivery verified
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/VerifyDeliveryResponse'
- *       429:
- *         description: Rate limited
- */
 router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
     const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp, req.token ? createUserClient(req.token) : undefined);
@@ -431,46 +395,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
 // ============================================================================
 // 13b. GPS GEOFENCE AUTO-CONFIRM DELIVERY (DRIVER)
 // ============================================================================
-/**
- * @openapi
- * /api/orders/{id}/geofence-confirm:
- *   post:
- *     tags: [Orders]
- *     summary: Auto-confirm delivery via GPS geofence
- *     description: |
- *       If the driver's GPS position is within 500m of the drop location,
- *       automatically confirms delivery and releases escrow payment without
- *       requiring the customer to share an OTP. Falls back gracefully if
- *       the driver is too far away (returns autoConfirmed: false).
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [driver_lat, driver_lng]
- *             properties:
- *               driver_lat:
- *                 type: number
- *               driver_lng:
- *                 type: number
- *               geofence_radius_m:
- *                 type: number
- *                 description: Override default 500m geofence radius
- *     responses:
- *       200:
- *         description: Auto-confirm result (check autoConfirmed field)
- *       409:
- *         description: Order not in arriving status
- */
 router.post(
   '/:id/geofence-confirm',
   authenticate,
@@ -498,10 +422,6 @@ router.post(
           return res.status(400).json({ error: `geofence_radius_m must be between 0 and ${MAX_GEOFENCE_RADIUS_M} meters.` });
         }
         geofenceRadiusM = parsedRadius;
-      }
-
-      if (!req.params.id || !req.params.id.trim()) {
-        return res.status(400).json({ error: 'Invalid order id' });
       }
 
       const order = await orderValidationService.findOrderByIdOrDisplayId(
@@ -536,10 +456,7 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), get
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), getOrderDetails);
 
-// 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
-// Friendly alias of /:id/verify-delivery for the driver app. It accepts the
-// same body { otp } and delegates to the identical pipeline so the driver's
-// Confirm Delivery flow can release the escrow and credit the wallet.
+// 13c. DRIVER OTP CONFIRM ALIAS
 router.post('/:id/confirm-otp', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), verifyDeliveryController);
 
 // 14. RESEND DELIVERY OTP (DRIVER)
@@ -551,6 +468,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), cancelOrder);
 
+// ============================================================================
 // 17. CONFIRM ESCROW DEPOSIT (CUSTOMER)
 // ============================================================================
 /**
@@ -572,6 +490,20 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
  *       200:
  *         description: Deposit confirmed
  */
+router.post(
+  '/:id/confirm-deposit',
+  authenticate,
+  userLimiter,
+  requirePolicy('order:confirm-deposit'),
+  auditLog({ action: 'order:confirm-deposit', resourceType: 'order' }),
+  requireIdempotency(86400),
+  validateParams(paramIdSchema),
+  validateBody(
+    z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') })
+  ),
+  async (req, res, next) => {
+    const orderId = req.params.id;
+    const { txHash } = req.body;
 router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('order:confirm-deposit'), auditLog({ action: 'order:confirm-deposit', resourceType: 'order' }), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(
   z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
 ), async (req, res) => {
@@ -599,78 +531,46 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
     if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
 
-    const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
-    const customerWallet = customerProfile?.polygon_wallet_address ?? null;
-    const bookingId = order.escrow_booking_id || (order.order_display_id ? getEscrowBookingId(order.order_display_id) : orderId);
+    try {
+      const result = await escrowLockManager.withLock(orderId, async (ctx) => {
+        const order = await orderRepository.findOrderById(orderId);
+        const orderData = order?.data || order;
+        if (!orderData) {
+          throw new DomainError(404, { error: 'Order not found' });
+        }
 
-    // Two-phase acceptance (#5724): once the deposit is verified on-chain we
-    // finalize the driver assignment via accept_bid_tx. If that cannot be
-    // completed the deposit is refunded and the order stays pending.
-    const finalizeAcceptance = async () => {
-      const pending = order.pending_bid_acceptance;
-      if (!pending) return;
-      const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
-        p_bid_id: pending.bid_id,
-        p_order_id: orderId,
-        p_load_id: pending.load_id,
-        p_driver_id: pending.driver_id,
-        p_truck_id: pending.truck_id,
-        p_driver_name: pending.driver_name,
-        p_driver_rating: pending.driver_rating,
-        p_truck_number: pending.truck_number,
-        p_bid_amount: pending.bid_amount,
-        p_order_display_id: pending.order_display_id,
-        p_expected_version: pending.version,
-        p_escrow_booking_id: bookingId,
-      }, req.token ? createUserClient(req.token) ?? supabaseAdmin : supabaseAdmin);
-      if (acceptErr) {
-        logger.error('[confirm-deposit] accept_bid_tx failed:', acceptErr.message);
-        // The refund is authoritative: only claim the deposit was refunded once
-        // the on-chain refund was actually submitted. submitEscrowRefund resolves to
-        // { txHash, bookingId, waitForConfirmation } on success or
-        // { txHash: null, bookingId, error } when the submit fails.
-        let refundResult;
+        const expectedAmount = resolveExpectedDepositAmount(orderData);
+        
+        const transitionResult = await ctx.transition('confirming');
+        if (!transitionResult.success) {
+          throw new DomainError(409, { error: 'Invalid state transition for deposit confirmation' });
+        }
+
+        const depositTx = await recordDepositTx(bookingId, txHash, customerWallet, orderData.escrow_driver_wallet ?? null, expectedAmount.expectedAmountWei);
+        if (depositTx.error) {
+          throw new DomainError(422, { error: depositTx.error, code: depositTx.code });
+        }
+
         try {
-          refundResult = await submitEscrowRefund(order.order_display_id);
-        } catch (refundErr) {
-          logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
-          refundResult = { error: refundErr.message };
-        }
-        let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
-        if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
-          try {
-            await refundResult.waitForConfirmation();
-          } catch (confirmErr) {
-            logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
-            refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
-            refundConfirmed = false;
-          }
-        } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
-          refundConfirmed = false;
-          refundResult = {
-            error: refundResult.error || 'escrow refund confirmation is unavailable',
-            txHash: refundResult.txHash,
-          };
-        }
-
-        if (!refundConfirmed) {
-          // The deposit is still locked on-chain. Keep escrow_booking_id and
-          // pending_bid_acceptance intact and return the order to the 'funding'
-          // state so escrowFundingReconciliation reclaims the deposit; report a
-          // retryable error instead of a false "refunded" success.
-          const refundError = refundResult?.error || 'escrow refund was not submitted';
+          await ctx.transition('funded');
           await orderRepository.updateOrder(orderId, {
-            escrow_status: 'funding',
-            escrow_funding_error: `escrow refund pending: ${refundError}`,
-          }).catch((stateErr) => {
-            logger.error('[confirm-deposit] Failed to mark escrow refund pending:', stateErr.message);
+            escrow_status: 'funded',
+            deposit_tx_hash: depositTx.hash || txHash
           });
-          throw new DomainError(503, {
-            error: 'Deposit confirmed but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
-            details: `${acceptErr.message}; escrow refund: ${refundError}`,
-          });
-        }
 
+          invalidateBookingCaches().catch(err => logger.error({ err }, 'Failed to invalidate cache'));
+          return { success: true, txHash: depositTx.hash || txHash };
+        } catch (rpcError) {
+          await ctx.extend();
+          await ctx.transition('refund_pending');
+
+          const refundResult = await submitEscrowRefund(orderId, depositTx);
+          await ctx.transition('refunded');
+
+          await orderRepository.updateOrder(orderId, {
+            escrow_status: 'refunded',
+            refund_tx_hash: refundResult.txHash
+          });
         // Refund confirmed on-chain — safe to release the escrow booking reference.
         // Also clear pending_bid_acceptance so the order can accept a new bid.
         await orderRepository.updateOrder(orderId, {
@@ -1119,119 +1019,29 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUploadLimiter,
 
     let uploadedAny = false;
 
-    if (files.signature && files.signature[0]) {
-      const file = files.signature[0];
-      try {
-        await validateAndScanPodFile(file, 'Signature');
-      } catch (validationErr) {
-        return res.status(validationErr.status || 400).json({ error: `Invalid signature file: ${validationErr.message}` });
+          throw new DomainError(500, {
+            error: 'Acceptance failed, escrow refunded safely',
+            refundTxHash: refundResult.txHash
+          });
+        }
+      }, {
+        expectedState: 'funding',
+        targetState: 'confirming'
+      });
+
+      return res.json(result);
+    } catch (err) {
+      if (err instanceof LockAcquisitionError) {
+        logger.error('[confirm-deposit] Redis unavailable:', err.message);
+        return res.status(503).json({ error: 'Payment service temporarily unavailable. Please retry.' });
       }
-      const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
-      const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
-        .from('driver-documents')
-        .upload(storagePath, file.buffer, { contentType: file.mimetype });
-      if (upErr) {
-        logger.error('Signature upload to storage failed:', upErr.message);
-        return res.status(500).json({ error: 'Failed to upload signature to storage' });
+      if (err instanceof DomainError) {
+        return res.status(err.status).json(err.payload);
       }
-      signatureUrl = storagePath;
-      signatureHash = computeFileHash(file.buffer);
-      uploadedAny = true;
+      logger.error('[confirm-deposit] Exception:', err?.message);
+      return res.status(500).json({ error: 'Internal Server Error' });
     }
-
-    if (files.photo && files.photo[0]) {
-      const file = files.photo[0];
-      try {
-        await validateAndScanPodFile(file, 'Photo');
-      } catch (validationErr) {
-        return res.status(validationErr.status || 400).json({ error: `Invalid photo file: ${validationErr.message}` });
-      }
-      const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
-      const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await createUserClient(req.token).storage
-        .from('driver-documents')
-        .upload(storagePath, file.buffer, { contentType: file.mimetype });
-      if (upErr) {
-        logger.error('Photo upload to storage failed:', upErr.message);
-        return res.status(500).json({ error: 'Failed to upload photo to storage' });
-      }
-      photoUrl = storagePath;
-      photoHash = computeFileHash(file.buffer);
-      uploadedAny = true;
-    }
-
-    if (!uploadedAny) {
-      return res.status(400).json({ error: 'At least one valid proof file (signature or photo) is required' });
-    }
-
-    const updates = {
-      updated_at: new Date().toISOString(),
-    };
-    if (signatureUrl !== order.pod_signature_url) updates.pod_signature_url = signatureUrl;
-    if (photoUrl !== order.pod_photo_url) updates.pod_photo_url = photoUrl;
-    if (signatureHash) updates.pod_signature_hash = signatureHash;
-    if (photoHash) updates.pod_photo_hash = photoHash;
-
-    const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrder(orderId, updates);
-
-    if (updateErr) {
-      logger.error('Failed to update order with PoD:', updateErr.message);
-      return res.status(500).json({ error: 'Failed to update order with PoD data' });
-    }
-
-    return res.json({
-      message: 'Proof of Delivery uploaded successfully',
-      photoUrl: updatedOrder.pod_photo_url,
-      signatureUrl: updatedOrder.pod_signature_url,
-      photoHash: updatedOrder.pod_photo_hash,
-      signatureHash: updatedOrder.pod_signature_hash,
-      uploadTimestamp: updatedOrder.updated_at,
-    });
-  } catch (err) {
-    logger.error('PoD upload error:', err?.message);
-    return res.status(500).json({ error: 'Internal server error' });
   }
-});
-
-// GET /api/orders/:id/timeline
-router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view-timeline', async (req) => {
-  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
-  return { order };
-}), validateParams(paramIdSchema), async (req, res) => {
-  try {
-    const timeline = await orderLifecycleService.getOrderTimeline(req.params.id, req.user.id);
-    return res.json(timeline);
-  } catch (err) {
-    if (err instanceof DomainError) {
-      return res.status(err.status).json(err.payload);
-    }
-    logger.error('Order timeline fetch error:', err);
-    return res.status(500).json({ error: 'Failed to fetch order timeline.' });
-  }
-});
-
-// POST /api/orders/:id/ratings
-router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
-  return { order };
-}), auditLog({ action: 'order:submit-rating', resourceType: 'order_rating' }), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
-  try {
-    const result = await orderLifecycleService.submitRating(
-      req.params.id,
-      req.user.id,
-      req.body.stars,
-      req.body.comment ?? null,
-      req.token ? createUserClient(req.token) : undefined
-    );
-    return res.status(201).json(result);
-  } catch (err) {
-    if (err instanceof DomainError) {
-      return res.status(err.status).json(err.payload);
-    }
-    logger.error('Submit rating exception:', err?.message);
-    return res.status(500).json({ error: 'Internal Server Error.' });
-  }
-});
+);
 
 export default router;

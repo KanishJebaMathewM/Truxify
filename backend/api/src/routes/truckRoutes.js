@@ -81,7 +81,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
-import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -273,7 +273,8 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
   const { name, min_capacity, max_capacity } = req.query;
 
   try {
-    let query = supabase
+    const userClient = createUserClient(req.token);
+    let query = userClient
       .from('trucks')
       .select('id, name, number_plate, max_capacity_tons, created_at')
       .eq('driver_id', req.user.id);
@@ -339,12 +340,13 @@ const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
   Furniture: ['Closed Body', 'Container'],
 });
 
-async function canViewTruckNumber(user, truck) {
+async function canViewTruckNumber(user, truck, client) {
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
   }
 
-  const { data: order, error } = await supabase
+  const db = client || supabase;
+  const { data: order, error } = await db
     .from('orders')
     .select('id')
     .eq('truck_id', truck.id)
@@ -767,7 +769,8 @@ router.get(
  */
 router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
-    const { data: truck, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: truck, error } = await userClient
       .from('trucks')
       .select('id, driver_id, number_plate')
       .eq('id', req.params.id)
@@ -776,7 +779,7 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
     if (error) return res.status(500).json({ error: 'Failed to fetch truck number.', details: error.message });
     if (!truck) return res.status(404).json({ error: 'Truck not found.' });
 
-    const access = await canViewTruckNumber(req.user, truck);
+    const access = await canViewTruckNumber(req.user, truck, userClient);
     if (access.error) {
       return res.status(500).json({ error: 'Failed to verify truck access.', details: access.error.message });
     }

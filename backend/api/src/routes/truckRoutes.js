@@ -81,7 +81,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
-import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -194,11 +194,12 @@ function parseCapacityFilter(value, field) {
  */
 router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
   const { name, truck_type, number_plate, max_capacity_tons } = req.body;
-  const normalizedNumberPlate = sanitizeNumberPlate(number_plate);
+ const normalizedNumberPlate = sanitizeNumberPlate(number_plate);
+const userSupabase = createUserClient(req.token);
 
-  try {
+try {
     // Check for duplicate number plate
-    const { data: existing, error: checkErr } = await supabase
+    const { data: existing, error: checkErr } = await userSupabase
       .from('trucks')
       .select('id')
       .eq('number_plate', normalizedNumberPlate)
@@ -212,7 +213,7 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
       return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
     }
 
-    const { data: truck, error: insertErr } = await supabase
+    const { data: truck, error: insertErr } = await userSupabase
       .from('trucks')
       .insert({ name: sanitizeTruckName(name), truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
       .select('id, name, truck_type, number_plate, max_capacity_tons, created_at')

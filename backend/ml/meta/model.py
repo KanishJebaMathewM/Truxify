@@ -23,17 +23,24 @@ class _AdaptedModel:
     second-order gradients to flow into ``self.model`` during meta-updates.
     """
 
-    def __init__(self, base_model: nn.Module, params: Dict[str, torch.Tensor]):
-        self.base_model = base_model
+    def __init__(self, base_model: nn.Module, params: Dict[str, torch.Tensor], *, copy_model=True):
+        # Functional parameters retain their original autograd links. Module
+        # modes/buffers belong to this task, not to the shared meta model.
+        self.base_model = copy.deepcopy(base_model) if copy_model else base_model
         self.params = params
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         return _functional_call(self.base_model, self.params, (x,))
 
+    @property
+    def training(self):
+        return self.base_model.training
+
     def eval(self) -> "_AdaptedModel":
-        return self
+        return self.train(False)
 
     def train(self, mode: bool = True) -> "_AdaptedModel":
+        self.base_model.train(mode)
         return self
 
 
@@ -110,6 +117,15 @@ class MAML:
         
         logger.info(f"✅ MAML initialized on {self.device}")
     
+    @staticmethod
+    def _paired_targets(predictions, targets):
+        """Scalar labels refer to rows, never a broadcast loss matrix."""
+        if targets.dim() == 1 and predictions.dim() == 2 and predictions.size(1) == 1:
+            targets = targets.unsqueeze(1)
+        if targets.shape != predictions.shape:
+            raise ValueError("Support/query targets must match prediction rows and outputs")
+        return targets
+
     def inner_update(self, model: MAMLModel, support_x: torch.Tensor, support_y: torch.Tensor) -> _AdaptedModel:
         """Perform inner loop update (task-specific adaptation).
 
@@ -120,7 +136,7 @@ class MAML:
         adapted = {name: p.clone() for name, p in model.named_parameters()}
 
         pred = _functional_call(model, adapted, (support_x,))
-        loss = self.criterion(pred, support_y)
+        loss = self.criterion(pred, self._paired_targets(pred, support_y))
 
         grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
 
@@ -152,7 +168,7 @@ class MAML:
 
             # Compute loss on query set (graph flows back into self.model)
             pred = adapted_model(query_x)
-            task_loss = self.criterion(pred, query_y)
+            task_loss = self.criterion(pred, self._paired_targets(pred, query_y))
             meta_loss += task_loss
         
         # Average loss across tasks
@@ -189,13 +205,17 @@ class MAML:
             'final_loss': losses[-1]
         }
     
-    def adapt(self, support_x: torch.Tensor, support_y: torch.Tensor, steps: int = 5) -> _AdaptedModel:
-        """Adapt model to new task using graph-preserving inner updates."""
+    def adapt(self, support_x: torch.Tensor, support_y: torch.Tensor, steps: int = 5,
+              *, training: Optional[bool] = None) -> _AdaptedModel:
+        """Adapt with private module modes and graph-preserving parameters."""
+        working_model = copy.deepcopy(self.model)
+        if training is not None:
+            working_model.train(training)
         adapted = {name: p.clone() for name, p in self.model.named_parameters()}
 
         for _ in range(steps):
-            pred = _functional_call(self.model, adapted, (support_x,))
-            loss = self.criterion(pred, support_y)
+            pred = _functional_call(working_model, adapted, (support_x,))
+            loss = self.criterion(pred, self._paired_targets(pred, support_y))
 
             grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
 
@@ -204,13 +224,17 @@ class MAML:
                 for (name, param), grad in zip(adapted.items(), grads)
             }
 
-        return _AdaptedModel(self.model, adapted)
+        return _AdaptedModel(working_model, adapted, copy_model=False)
     
     def predict(self, model: MAMLModel, x: torch.Tensor) -> torch.Tensor:
         """Make prediction with adapted model"""
+        was_training = model.training
         model.eval()
-        with torch.no_grad():
-            return model(x)
+        try:
+            with torch.no_grad():
+                return model(x)
+        finally:
+            model.train(was_training)
     
     def save(self, path: str = "models/maml_model.pth"):
         """Save model"""
@@ -250,7 +274,7 @@ class FewShotLearner:
         query_x_t = torch.tensor(query_x, dtype=torch.float32)
         
         # Adapt to task
-        adapted_model = self.maml.adapt(support_x_t, support_y_t, steps)
+        adapted_model = self.maml.adapt(support_x_t, support_y_t, steps, training=False)
         
         # Predict
         predictions = self.maml.predict(adapted_model, query_x_t)
@@ -281,7 +305,7 @@ class FewShotLearner:
         query_x_t = torch.tensor(query_x, dtype=torch.float32)
         
         # Adapt
-        adapted_model = self.maml.adapt(support_x_t, support_y_t.float().unsqueeze(1), steps)
+        adapted_model = self.maml.adapt(support_x_t, support_y_t.float().unsqueeze(1), steps, training=False)
         
         # Predict
         predictions = self.maml.predict(adapted_model, query_x_t)

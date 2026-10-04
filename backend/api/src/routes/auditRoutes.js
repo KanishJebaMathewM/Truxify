@@ -263,11 +263,9 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
  * @fileoverview Admin endpoints for querying and exporting audit logs.
  */
 
-import express from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { requireRole } from '../middleware/auth.js';
 import { queryAuditLogs, exportAuditLogsJSON } from '../services/auditService.js';
 import { verifyLogBatch } from '../lib/logSigner.js';
-import logger from '../middleware/logger.js';
 
 const SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET || 'truxify-audit-signing-secret';
 

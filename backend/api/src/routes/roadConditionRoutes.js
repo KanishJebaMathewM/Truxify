@@ -13,6 +13,7 @@ const roadConditionLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:road-conditions:'),
+  validate: { keyGeneratorIpFallback: false },
 });
 
 // POST /api/road-conditions/grip

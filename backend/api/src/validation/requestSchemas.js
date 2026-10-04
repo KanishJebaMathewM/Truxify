@@ -465,3 +465,22 @@ export const nearbyGripQuerySchema = z.object({
  * NOTE: defined once above (truck_id + string axle position); the driver
  * route reads truck_id/axles from req.body, so keep this single export.
  */
+
+/**
+ * Query params for the KEDA namespace-scoped metric routes
+ * (cpu, memory, autoscale, scale recommendation). Both fields are
+ * required because the service calls need explicit targets.
+ */
+export const kedaNamespaceQuerySchema = z.object({
+  namespace: z.string().trim().min(1).max(253),
+  deployment: z.string().trim().min(1).max(253),
+});
+
+/**
+ * Query params for the KEDA Kafka lag route. Both fields are required
+ * because the lag lookup cannot run without a topic and consumer group.
+ */
+export const kedaKafkaLagQuerySchema = z.object({
+  topic: z.string().trim().min(1).max(255),
+  consumerGroup: z.string().trim().min(1).max(255),
+});

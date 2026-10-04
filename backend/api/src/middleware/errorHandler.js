@@ -1,6 +1,8 @@
 import logger from './logger.js';
 import { AppError } from '../utils/errors.js';
 
+export { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
+
 export function errorHandler(err, req, res, next) {
   if (err?.type === 'entity.too.large') {
     logger.warn(

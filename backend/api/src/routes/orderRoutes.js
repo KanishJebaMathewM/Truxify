@@ -224,6 +224,7 @@ const milestoneLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many milestone updates. Please slow down.' },
+  validate: { keyGeneratorIpFallback: false },
 });
 
 

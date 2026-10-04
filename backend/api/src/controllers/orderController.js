@@ -18,7 +18,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   orderRepository,
   buildDepositTxFn: buildDepositTx,
   recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: submitEscrowRefund,
+  escrowRefundFn: escrowRefund,
   logger,
 });
 

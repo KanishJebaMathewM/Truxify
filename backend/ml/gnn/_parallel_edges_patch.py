@@ -41,55 +41,19 @@ class GraphNetworkBuilder(_BaseGraphNetworkBuilder):
 
         return self.graph
 
-    def extract_features(self):
-        import torch
+    def extract_features(self, graph=None):
+        """Export the requested graph in the raw units expected by its scaler.
 
-        node_features = []
-        edge_indices = []
-        edge_features = []
-        node_map = {
-            node: i for i, (node, _) in enumerate(self.graph.nodes(data=True))
-        }
-
-        for _, data in self.graph.nodes(data=True):
-            node_features.append(
-                [
-                    data.get("lat", 0),
-                    data.get("lng", 0),
-                    data.get("traffic", 0) / 100,
-                    *self._road_type_encoding(data.get("road_type", "local")),
-                    data.get("speed_limit", 50) / 100,
-                ]
-            )
-
-        for u, v, _, data in self.graph.edges(data=True, keys=True):
-            edge_indices.append([node_map[u], node_map[v]])
-            edge_features.append(
-                [
-                    data.get("distance", 0) / 100,
-                    data.get("time", 0) / 100,
-                    data.get("cost", 0) / 1000,
-                    data.get("fuel", 0) / 100,
-                    data.get("congestion", 0),
-                ]
-            )
-
-        self.node_map = node_map
-
-        if edge_indices:
-            edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-            edge_attr = torch.tensor(edge_features, dtype=torch.float)
-        else:
-            edge_index = torch.empty((2, 0), dtype=torch.long)
-            edge_attr = torch.empty((0, _models.GNN_EDGE_FEATURE_DIM), dtype=torch.float)
-
-        return {
-            "node_features": torch.tensor(node_features, dtype=torch.float).reshape(
-                -1, _models.GNN_NODE_FEATURE_DIM
-            ),
-            "edge_indices": edge_index,
-            "edge_features": edge_attr,
-        }
+        The base extractor handles MultiDiGraph.edges(data=True), including
+        every parallel segment. Delegating preserves its explicit-graph API,
+        node map and training-derived scaling contract.
+        """
+        features = super().extract_features(graph)
+        # Preserve the two-dimensional node contract for an empty graph too.
+        features["node_features"] = features["node_features"].reshape(
+            -1, _models.GNN_NODE_FEATURE_DIM
+        )
+        return features
 
 
 class RouteOptimizer(_BaseRouteOptimizer):

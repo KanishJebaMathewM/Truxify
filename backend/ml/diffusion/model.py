@@ -9,7 +9,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 class SinusoidalPositionEmbedding(nn.Module):
-    """Sinusoidal position embeddings for diffusion timesteps"""
+    """Sinusoidal position embeddings for diffusion timesteps""" 
     
     def __init__(self, dim: int):
         super().__init__()
@@ -17,9 +17,9 @@ class SinusoidalPositionEmbedding(nn.Module):
     
     def forward(self, timesteps: torch.Tensor) -> torch.Tensor:
         half_dim = self.dim // 2
-        emb = torch.log(torch.tensor(10000.0)) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=timesteps.device) * -emb)
-        emb = timesteps.unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.log(torch.tensor(10000.0, device=timesteps.device)) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=timesteps.device, dtype=torch.float32) * -emb)
+        emb = timesteps.float().unsqueeze(1) * emb.unsqueeze(0)
         return torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
 
 class AttentionBlock(nn.Module):
@@ -68,8 +68,8 @@ class ResBlock(nn.Module):
         x = self.dropout(x)
         
         # Add time embedding
-        time_emb = self.time_mlp(time_emb)
-        x = x + time_emb.unsqueeze(1)
+        t_emb = self.time_mlp(time_emb)
+        x = x + t_emb.unsqueeze(1)
         
         # Second block
         x = self.norm2(x)
@@ -113,9 +113,9 @@ class DiffusionRouteModel(nn.Module):
         self.cond_proj = nn.Linear(cond_dim, hidden_dim) if cond_dim else None
 
         # Noise schedule (linear beta schedule)
-        self.betas = self._get_linear_beta_schedule()
-        self.alphas = 1.0 - self.betas
-        self.alpha_bars = torch.cumprod(self.alphas, dim=0)
+        self.register_buffer('betas', self._get_linear_beta_schedule())
+        self.register_buffer('alphas', 1.0 - self.betas)
+        self.register_buffer('alpha_bars', torch.cumprod(self.alphas, dim=0))
         
         # Diffusion blocks
         self.blocks = nn.ModuleList()
@@ -156,7 +156,7 @@ class DiffusionRouteModel(nn.Module):
             noise = torch.randn_like(x_start)
 
         sqrt_alpha_bar = torch.sqrt(self._extract(self.alpha_bars, t, x_start.shape))
-        sqrt_one_minus_alpha_bar = torch.sqrt(1 - self._extract(self.alpha_bars, t, x_start.shape))
+        sqrt_one_minus_alpha_bar = torch.sqrt(1.0 - self._extract(self.alpha_bars, t, x_start.shape))
 
         return sqrt_alpha_bar * x_start + sqrt_one_minus_alpha_bar * noise
 
@@ -176,7 +176,6 @@ class DiffusionRouteModel(nn.Module):
         condition: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Forward pass through diffusion backbone with condition embedding."""
-        # Backward compatibility: decouple condition if concatenated into input dimension
         if x.shape[-1] > self.input_dim:
             inferred_cond = x[..., self.input_dim:]
             x = x[..., :self.input_dim]
@@ -223,7 +222,7 @@ class DiffusionRouteModel(nn.Module):
         return x
 
 class DiffusionRouteGenerator:
-    """Diffusion model for route generation"""
+    """Diffusion model for route generation wrapper"""
     
     def __init__(
         self,
@@ -234,18 +233,11 @@ class DiffusionRouteGenerator:
         self.device = device
         self.num_timesteps = model.num_timesteps
         
-        # Noise schedule (linear beta schedule)
         self.betas = self.model.betas.to(device)
         self.alphas = self.model.alphas.to(device)
         self.alpha_bars = self.model.alpha_bars.to(device)
         
         logger.info(f"✅ Route generator initialized on {device}")
-    
-    def _get_linear_beta_schedule(self) -> torch.Tensor:
-        """Linear beta schedule from 1e-4 to 2e-2"""
-        start = 1e-4
-        end = 2e-2
-        return torch.linspace(start, end, self.num_timesteps)
     
     def _extract(self, a: torch.Tensor, t: torch.Tensor, x_shape: Tuple) -> torch.Tensor:
         """Extract values from tensor at timesteps"""
@@ -288,14 +280,11 @@ class DiffusionRouteGenerator:
         if num_steps is None:
             num_steps = self.num_timesteps
         
-        # Start from pure noise
         x = torch.randn(shape, device=self.device)
         
-        # Reverse diffusion
         for i in tqdm(range(num_steps - 1, -1, -1), desc="Generating"):
             t = torch.tensor([i] * shape[0], device=self.device)
 
-            # Inpainting boundary condition: pin/diffuse known boundary points
             if start_point is not None and end_point is not None:
                 if i > 0:
                     x[:, 0, :] = self.add_noise(start_point, t)
@@ -304,23 +293,17 @@ class DiffusionRouteGenerator:
                     x[:, 0, :] = start_point
                     x[:, -1, :] = end_point
             
-            # Predict noise
             noise_pred = self.denoise(x, t, condition=condition)
             
-            # Update x
             alpha = self._extract(self.alphas, t, x.shape)
             alpha_bar = self._extract(self.alpha_bars, t, x.shape)
             beta = self._extract(self.betas, t, x.shape)
             
-            if i > 0:
-                z = torch.randn_like(x)
-            else:
-                z = torch.zeros_like(x)
+            z = torch.randn_like(x) if i > 0 else torch.zeros_like(x)
             
-            x = (x - (1 - alpha) / torch.sqrt(1 - alpha_bar) * noise_pred) / torch.sqrt(alpha)
+            x = (x - (1.0 - alpha) / torch.sqrt(1.0 - alpha_bar) * noise_pred) / torch.sqrt(alpha)
             x = x + torch.sqrt(beta) * z
 
-        # Final endpoint enforcement
         if start_point is not None and end_point is not None:
             x[:, 0, :] = start_point
             x[:, -1, :] = end_point
@@ -337,7 +320,6 @@ class DiffusionRouteGenerator:
         num_steps: Optional[int] = None
     ) -> torch.Tensor:
         """Generate optimal route between start and end with boundary conditioning"""
-        # Standardize tensors to device and float32
         if not isinstance(start_point, torch.Tensor):
             start_point = torch.tensor(start_point, dtype=torch.float32, device=self.device)
         else:
@@ -348,7 +330,6 @@ class DiffusionRouteGenerator:
         else:
             end_point = end_point.to(device=self.device, dtype=torch.float32)
 
-        # Ensure 2D (batch_size, feature_dim)
         if start_point.dim() == 1:
             start_point = start_point.unsqueeze(0)
         elif start_point.dim() == 3:
@@ -364,7 +345,6 @@ class DiffusionRouteGenerator:
             end_point = end_point.expand(batch_size, -1)
 
         D = self.model.input_dim
-        # Align feature dimension with model.input_dim
         if start_point.shape[-1] != D:
             sp = torch.zeros(batch_size, D, device=self.device)
             sp[:, :min(start_point.shape[-1], D)] = start_point[:, :min(start_point.shape[-1], D)]
@@ -375,7 +355,6 @@ class DiffusionRouteGenerator:
             ep[:, :min(end_point.shape[-1], D)] = end_point[:, :min(end_point.shape[-1], D)]
             end_point = ep
 
-        # Boundary conditioning: combine start and end representations
         boundary_cond = torch.cat([start_point, end_point], dim=-1)
         if condition is not None:
             if not isinstance(condition, torch.Tensor):

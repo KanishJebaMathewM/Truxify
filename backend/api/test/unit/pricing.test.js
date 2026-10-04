@@ -182,6 +182,50 @@ describe('Pricing Engine (#1513)', () => {
       expect(sanitizePrice(Infinity)).toBe(0);
     });
 
+    it('does not subtract the toll from netProfit (toll is recovered from the customer)', () => {
+      const result = computeOrderPricing(defaultInput, mockRateCard);
+      expect(result.tollEstimate).toBeGreaterThan(0);
+      expect(result.netProfit).toBe(result.baseFreight - result.fuelCost);
+    });
+
+    it('does not return NaN in any field for valid inputs', () => {
+      const result = computeOrderPricing(defaultInput);
+      expect(Number.isFinite(result.baseFreight)).toBe(true);
+      expect(Number.isFinite(result.tollEstimate)).toBe(true);
+      expect(Number.isFinite(result.platformFee)).toBe(true);
+      expect(Number.isFinite(result.totalAmount)).toBe(true);
+      expect(Number.isFinite(result.fuelCost)).toBe(true);
+      expect(Number.isFinite(result.netProfit)).toBe(true);
+    });
+
+    it('guarantees finite results when inputs or rate cards have edge-case values', () => {
+      const edgeCard = {
+        ratePerTonneKm: 50,
+        handlingFee: NaN,
+        tollPerKm: undefined,
+        platformFeePct: null,
+        fuelCostPct: Infinity,
+        fragileMultiplier: NaN,
+        stackableDiscount: -1,
+      };
+
+      const resultZeroDistance = computeOrderPricing({
+        pickupLat: 0,
+        pickupLng: 0,
+        dropLat: 0,
+        dropLng: 0,
+        weightTonnes: 5,
+        roadDistanceKm: 0,
+      }, edgeCard);
+
+      expect(Number.isFinite(resultZeroDistance.distanceKm)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.baseFreight)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.tollEstimate)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.platformFee)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.totalAmount)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.fuelCost)).toBe(true);
+      expect(Number.isFinite(resultZeroDistance.netProfit)).toBe(true);
+      expect(resultZeroDistance.totalAmount).toBeGreaterThanOrEqual(0);
     it('passes through valid values unchanged', () => {
       expect(sanitizePrice(50000)).toBe(50000);
       expect(sanitizePrice(0)).toBe(0);
@@ -256,6 +300,30 @@ describe('Pricing Engine (#1513)', () => {
     });
   });
 
+describe('guardNonNegative', () => {
+  it('passes positive', () => { expect(guardNonNegative(10, 'x')).toBe(10); });
+  it('clamps negative', () => { expect(guardNonNegative(-5, 'x')).toBe(0); });
+  it('rejects NaN', () => { expect(() => guardNonNegative(NaN, 'x')).toThrow(TypeError); });
+});
+
+describe('parsePositiveFloat (from __testing)', () => {
+  const { parsePositiveFloat } = __testing;
+
+  it('returns parsed value for valid positive numbers', () => {
+    expect(parsePositiveFloat(5, 1)).toBe(5);
+    expect(parsePositiveFloat('10.5', 1)).toBe(10.5);
+  });
+
+  it('returns 0 as a valid non-negative value', () => {
+    expect(parsePositiveFloat(0, 1)).toBe(0);
+  });
+
+  it('returns fallback for negative numbers', () => {
+    expect(parsePositiveFloat(-5, 1)).toBe(1);
+  });
+
+  it('returns fallback for NaN', () => {
+    expect(parsePositiveFloat(NaN, 1)).toBe(1);
   // ── computeOrderPricing (CORE FINANCIAL LOGIC) ────────────────────────────
 
   describe('computeOrderPricing (main pricing function)', () => {

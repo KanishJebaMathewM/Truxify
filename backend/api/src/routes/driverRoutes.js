@@ -512,6 +512,7 @@ router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:updat
  */
 router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:view-wallet'), async (req, res) => {
   try {
+    const userClient = createUserClient(req.token);
     const pageParam = req.query.page ?? '1';
     const limitParam = req.query.limit ?? '20';
 
@@ -545,7 +546,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
       data: transactions,
       error,
       count
-    } = await supabase
+    } = await userClient
       .from('wallet_transactions')
       .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id)
@@ -572,7 +573,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
     });
 
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Wallet history fetch error:', err);
+    logger.error({ event: 'DRIVER_WALLET_HISTORY_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Wallet history fetch error');
 
     res.status(500).json({
       error: 'Internal Server Error'

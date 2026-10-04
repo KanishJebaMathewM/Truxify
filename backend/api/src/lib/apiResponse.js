@@ -32,7 +32,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
   const safePage = typeof parsedPage === 'number' && Number.isFinite(parsedPage) ? Math.max(0, parsedPage) : 1;
 
   const parsedLimit = typeof limit === 'number' ? limit : (typeof limit === 'string' && limit.trim() !== '' ? Number(limit) : NaN);
-  const rawLimit = typeof parsedLimit === 'number' && Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
+  const rawLimit = typeof parsedLimit === 'number' && Number.isFinite(parsedLimit) ? Math.max(1, parsedLimit) : 10;
   const safeLimit = Math.min(rawLimit, MAX_PAGE_SIZE);
 
   const parsedTotal = typeof total === 'number' ? total : (typeof total === 'string' && total.trim() !== '' ? Number(total) : NaN);
@@ -50,7 +50,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
       limit: safeLimit,
       total: safeTotal,
       totalPages,
-      hasNextPage: safeTotal > 0 && safePage < totalPages,
+      hasNextPage: safeTotal > 0 && safePage < totalPages && safePage !== totalPages - 1,
       hasPrevPage: safeTotal > 0 && safePage > 1,
       hasPreviousPage: safeTotal > 0 && safePage > 1,
     },

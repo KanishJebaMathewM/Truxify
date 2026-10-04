@@ -188,7 +188,7 @@ describe('OutboxService', () => {
         last_error: 'network timeout',
         attempts: 3,
       });
-      expect(mocks.chain.eq).toHaveBeenCalledWith('id', 'evt-1');
+      expect(mocks.chain.eq).toHaveBeenCalledWith('event_id', 'evt-1');
     });
 
     it('returns false when eventId or workerId is missing', async () => {

@@ -61,7 +61,7 @@ describe("outboxRelayWorker", () => {
   it("publishes claimed events and marks them published", async () => {
     mockOutboxService.claimBatch.mockResolvedValue([
       {
-        id: "evt-1",
+        event_id: "evt-1",
         event_type: "order.created",
         aggregate_id: "order-1",
         aggregate_type: "order",
@@ -88,7 +88,7 @@ describe("outboxRelayWorker", () => {
   it("marks an event failed when publish throws", async () => {
     mockOutboxService.claimBatch.mockResolvedValue([
       {
-        id: "evt-2",
+        event_id: "evt-2",
         event_type: "order.cancelled",
         aggregate_id: "order-2",
         aggregate_type: "order",
@@ -107,6 +107,7 @@ describe("outboxRelayWorker", () => {
 
     expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
       "evt-2",
+      expect.anything(),
       expect.stringContaining("bus down"),
     );
     worker.stopOutboxRelayWorker();
@@ -115,7 +116,7 @@ describe("outboxRelayWorker", () => {
   it("does NOT mark an event published when no adapter handled it (regression #11209)", async () => {
     mockOutboxService.claimBatch.mockResolvedValue([
       {
-        id: "evt-3",
+        event_id: "evt-3",
         event_type: "order.created",
         aggregate_id: "order-3",
         aggregate_type: "order",
@@ -141,6 +142,7 @@ describe("outboxRelayWorker", () => {
 
     expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
       "evt-3",
+      expect.anything(),
       expect.stringContaining("No event consumer"),
     );
     expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-3");
@@ -150,7 +152,7 @@ describe("outboxRelayWorker", () => {
   it("does NOT mark an event published when an adapter fails", async () => {
     mockOutboxService.claimBatch.mockResolvedValue([
       {
-        id: "evt-4",
+        event_id: "evt-4",
         event_type: "order.created",
         aggregate_id: "order-4",
         aggregate_type: "order",
@@ -173,6 +175,7 @@ describe("outboxRelayWorker", () => {
 
     expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
       "evt-4",
+      expect.anything(),
       expect.stringContaining("Adapter failures"),
     );
     expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-4");
@@ -182,7 +185,7 @@ describe("outboxRelayWorker", () => {
   it("requires a boolean published success outcome", async () => {
     mockOutboxService.claimBatch.mockResolvedValue([
       {
-        id: "evt-5",
+        event_id: "evt-5",
         event_type: "order.created",
         aggregate_id: "order-5",
         aggregate_type: "order",

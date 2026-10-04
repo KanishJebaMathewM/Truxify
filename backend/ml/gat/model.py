@@ -178,10 +178,18 @@ class TrafficGraphBuilder:
         logger.info("✅ Traffic Graph Builder initialized")
     
     def build_graph(self, nodes: List[Dict], edges: List[Dict]) -> nx.Graph:
-        """Build traffic graph from nodes and edges"""
+        """Build and publish a fresh graph only after a complete valid build."""
+        node_ids = [node['id'] for node in nodes]
+        if len(set(node_ids)) != len(node_ids):
+            raise ValueError("Traffic graph node IDs must be unique")
+        known = set(node_ids)
+        for edge in edges:
+            if edge['source'] not in known or edge['target'] not in known:
+                raise ValueError("Traffic graph edges must reference declared nodes")
+        graph = nx.Graph()
         # Add nodes with features
         for node in nodes:
-            self.graph.add_node(
+            graph.add_node(
                 node['id'],
                 lat=node['lat'],
                 lng=node['lng'],
@@ -192,7 +200,7 @@ class TrafficGraphBuilder:
         
         # Add edges
         for edge in edges:
-            self.graph.add_edge(
+            graph.add_edge(
                 edge['source'],
                 edge['target'],
                 distance=edge['distance'],
@@ -200,14 +208,17 @@ class TrafficGraphBuilder:
                 congestion=edge.get('congestion', 0)
             )
         
-        return self.graph
+        self.graph = graph
+        return graph
     
-    def get_pytorch_data(self) -> Data:
-        """Convert graph to PyTorch Geometric Data"""
+    def get_pytorch_data(self, graph=None) -> Data:
+        """Export one captured graph, mapping public IDs to local tensor rows."""
+        target_graph = self.graph if graph is None else graph
+        node_map = {node: row for row, node in enumerate(target_graph.nodes)}
         # Node features — must contain exactly NODE_FEATURE_DIM entries so the
         # dimensions stay aligned with the model constructed via in_features.
         node_features = []
-        for node in self.graph.nodes(data=True):
+        for node in target_graph.nodes(data=True):
             features = [
                 node[1].get('traffic', 0) / 100,
                 node[1].get('speed', 50) / 100,
@@ -223,14 +234,17 @@ class TrafficGraphBuilder:
         
         # Edge indices
         edge_indices = []
-        for u, v in self.graph.edges():
-            edge_indices.append([u, v])
-            edge_indices.append([v, u])  # Undirected
+        for u, v in target_graph.edges():
+            edge_indices.append([node_map[u], node_map[v]])
+            edge_indices.append([node_map[v], node_map[u]])  # Undirected
         
-        return Data(
-            x=torch.tensor(node_features, dtype=torch.float),
-            edge_index=torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+        data = Data(
+            x=torch.tensor(node_features, dtype=torch.float).reshape(-1, self.NODE_FEATURE_DIM),
+            edge_index=torch.tensor(edge_indices, dtype=torch.long).reshape(-1, 2).t().contiguous()
         )
+        data.node_map = node_map
+        data.graph = target_graph
+        return data
     
     def _road_type_encoding(self, road_type: str) -> float:
         """Encode road type"""

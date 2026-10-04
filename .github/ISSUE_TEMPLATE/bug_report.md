@@ -1,31 +1,31 @@
----
-name: Bug report
-about: Create a report to help us improve
-title: 'bug: '
-labels: bug
-assignees: ''
----
-
-**Describe the bug**
-A clear and concise description of what the bug is.
-
 **To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+
+1. Open the Battle Mode page.
+2. Start or open a Battle Mode session.
+3. Scroll to the prompt comparison section.
+4. Resize the browser window to a tablet or smaller screen size.
+5. Try navigating through the copy prompt buttons using the keyboard.
+6. Observe the responsive layout and accessibility behavior.
 
 **Expected behavior**
-A clear and concise description of what you expected to happen.
+
+The Battle Mode interface should:
+
+* Display correctly on mobile, tablet, and desktop screen sizes.
+* Arrange cards properly without overflow or broken layouts.
+* Provide clear accessible labels for all interactive copy buttons.
+* Allow keyboard users to navigate and interact with the buttons.
 
 **Screenshots**
-If applicable, add screenshots to help explain your problem.
+
+Add a screenshot showing the layout or accessibility issue if available.
 
 **Environment (please complete the following information):**
- - OS: [e.g. iOS, Android, Windows]
- - App Version [e.g. 1.0.0]
- - Browser [e.g. chrome, safari]
+
+* OS: Windows 11
+* App Version: Latest
+* Browser: Google Chrome
 
 **Additional context**
-Add any other context about the problem here.
+
+Improving the responsive layout and accessibility of the Battle Mode interface would make it easier to use across different screen sizes and for users who rely on keyboard navigation or screen readers.

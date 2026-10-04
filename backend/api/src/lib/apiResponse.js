@@ -38,7 +38,7 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
   const parsedTotal = typeof total === 'number' ? total : (typeof total === 'string' && total.trim() !== '' ? Number(total) : NaN);
   const safeTotal = typeof parsedTotal === 'number' && Number.isFinite(parsedTotal) ? Math.max(0, parsedTotal) : 0;
 
-  const totalPages = Math.ceil(safeTotal / safeLimit) || 0;
+  const totalPages = safeLimit > 0 ? Math.ceil(safeTotal / safeLimit) : 0;
   return {
     success: true,
     statusCode: 200,

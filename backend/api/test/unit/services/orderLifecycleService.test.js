@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OrderLifecycleService } from '../../../src/services/order/orderLifecycleService.js';
 import { DomainError } from '../../../src/services/order/domainError.js';
-import * as redisLock from '../../../src/lib/redisLock.js';
+import * as lockFallback from '../../../src/lib/lockFallback.js';
 
-vi.mock('../../../src/lib/redisLock.js', () => ({
-  acquireLock: vi.fn(),
-  releaseLock: vi.fn()
+vi.mock('../../../src/lib/lockFallback.js', () => ({
+  acquireLockOrFallback: vi.fn()
 }));
 
 describe('OrderLifecycleService - verifyDeliveryFn', () => {
@@ -41,55 +40,54 @@ describe('OrderLifecycleService - verifyDeliveryFn', () => {
   });
 
   it('should acquire escrow lock before verifying delivery', async () => {
-    const lockValue = 'mock-lock-val';
-    vi.mocked(redisLock.acquireLock).mockResolvedValue(lockValue);
+    const release = vi.fn();
+    vi.mocked(lockFallback.acquireLockOrFallback).mockResolvedValue({ ok: true, release });
     mockDeliveryVerification.verifyDelivery.mockResolvedValue({ success: true });
 
     const orderId = 'order-123';
     const driverId = 'driver-456';
-    const otp = '123456';
+    const otp = '654321';
     const mockUserClient = { rpc: vi.fn() };
 
     const result = await service.verifyDeliveryFn(orderId, driverId, otp, mockUserClient);
 
-    expect(redisLock.acquireLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, 120000);
+    expect(lockFallback.acquireLockOrFallback).toHaveBeenCalledWith(`escrow_lock:${orderId}`, 120000);
     expect(mockDeliveryVerification.verifyDelivery).toHaveBeenCalledWith({ orderId, driverId, otp }, mockUserClient);
-    expect(redisLock.releaseLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, lockValue);
+    expect(release).toHaveBeenCalled();
     expect(result).toEqual({ success: true });
   });
 
   it('should throw 409 DomainError if lock cannot be acquired', async () => {
-    vi.mocked(redisLock.acquireLock).mockResolvedValue(null);
+    vi.mocked(lockFallback.acquireLockOrFallback).mockResolvedValue({ ok: false, release: async () => {} });
 
     const orderId = 'order-123';
-    
-    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '123456'))
+
+    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '654321'))
       .rejects
       .toThrow(DomainError);
-      
+
     try {
-      await service.verifyDeliveryFn(orderId, 'driver-456', '123456');
+      await service.verifyDeliveryFn(orderId, 'driver-456', '654321');
     } catch (err) {
       expect(err.status).toBe(409);
       expect(err.payload.error).toMatch(/currently being processed/);
     }
-    
+
     // Verify it did not proceed to verifyDelivery
     expect(mockDeliveryVerification.verifyDelivery).not.toHaveBeenCalled();
-    expect(redisLock.releaseLock).not.toHaveBeenCalled();
   });
 
   it('should release lock even if verifyDelivery throws an error', async () => {
-    const lockValue = 'mock-lock-val';
-    vi.mocked(redisLock.acquireLock).mockResolvedValue(lockValue);
+    const release = vi.fn();
+    vi.mocked(lockFallback.acquireLockOrFallback).mockResolvedValue({ ok: true, release });
     mockDeliveryVerification.verifyDelivery.mockRejectedValue(new Error('Internal verification failed'));
 
     const orderId = 'order-123';
 
-    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '123456'))
+    await expect(service.verifyDeliveryFn(orderId, 'driver-456', '654321'))
       .rejects
       .toThrow('Internal verification failed');
 
-    expect(redisLock.releaseLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, lockValue);
+    expect(release).toHaveBeenCalled();
   });
 });

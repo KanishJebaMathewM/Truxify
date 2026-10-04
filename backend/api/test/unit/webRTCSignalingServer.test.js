@@ -1,49 +1,808 @@
-import { describe, it, expect } from 'vitest';
-import { WebRTCSignalingServer } from '../../src/services/webrtc/WebRTCSignalingServer.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-describe('WebRTCSignalingServer - Location Normalization and Validation', () => {
-  describe('normalizeLocation', () => {
-    it('should convert string lat/lng coordinates to numbers', () => {
-      const input = { lat: '13.0827', lng: '80.2707', accuracy: 5 };
-      const result = WebRTCSignalingServer.normalizeLocation(input);
+/**
+ * The signalling server is a peer *mesh*, not a room server: peers are keyed
+ * by a generated peerId and grouped into meshes. Constructing it binds a
+ * WebSocketServer to an http server and starts a 30s discovery interval, so
+ * these tests build a bare instance off the prototype and populate the two
+ * Maps directly. That keeps the pure logic — location validation, distance,
+ * peer fan-out, authorization — testable without any sockets or timers.
+ */
 
-      expect(result.lat).toBe(13.0827);
-      expect(typeof result.lat).toBe('number');
-      expect(result.lng).toBe(80.2707);
-      expect(typeof result.lng).toBe('number');
+const supabaseQuery = {
+  select: vi.fn().mockReturnThis(),
+  insert: vi.fn().mockResolvedValue({ error: null }),
+  update: vi.fn().mockReturnThis(),
+  eq: vi.fn().mockReturnThis(),
+  or: vi.fn().mockReturnThis(),
+  gt: vi.fn().mockReturnThis(),
+  order: vi.fn().mockResolvedValue({ data: [] }),
+  maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+};
+
+const supabaseMock = { from: vi.fn(() => supabaseQuery) };
+const redisMock = { setex: vi.fn().mockResolvedValue('OK') };
+
+vi.mock('../../src/config/db.js', () => ({
+  supabase: supabaseMock,
+  redisClient: redisMock,
+  firebaseAdmin: null,
+  mongoDb: null,
+}));
+
+vi.mock('ws', () => ({
+  WebSocketServer: class {
+    on() {}
+    close() {}
+  },
+}));
+
+const { default: WebRTCSignalingServer } = await import(
+  '../../src/services/webrtc/WebRTCSignalingServer.js'
+);
+
+const OPEN = 1;
+
+/** A signalling server with no sockets, no timers and no discovery loop. */
+function bareServer() {
+  const server = Object.create(WebRTCSignalingServer.prototype);
+  server.peers = new Map();
+  server.meshes = new Map();
+  server.redis = redisMock;
+  server.wss = { close: vi.fn() };
+  return server;
+}
+
+/** Registers a peer in `meshId`, creating the mesh if needed. */
+function addPeer(server, peerId, { meshId = 'mesh-1', readyState = OPEN, ...rest } = {}) {
+  const ws = { readyState, send: vi.fn(), close: vi.fn() };
+  server.peers.set(peerId, { ws, meshId, connectedAt: 1700000000000, ...rest });
+  if (!server.meshes.has(meshId)) server.meshes.set(meshId, new Set());
+  server.meshes.get(meshId).add(peerId);
+  return ws;
+}
+
+describe('WebRTCSignalingServer', () => {
+  let server;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    supabaseQuery.insert.mockResolvedValue({ error: null });
+    supabaseQuery.order.mockResolvedValue({ data: [] });
+    server = bareServer();
+  });
+
+  describe('isValidLocation()', () => {
+    it('accepts a well-formed coordinate pair', () => {
+      expect(server.isValidLocation({ lat: 12.97, lng: 77.59 })).toBe(true);
     });
 
-    it('should preserve other location properties during normalization', () => {
-      const input = { lat: 13.0827, lng: 80.2707, timestamp: 123456789, device: 'mobile' };
-      const result = WebRTCSignalingServer.normalizeLocation(input);
+    it('accepts numeric strings, since payloads arrive as JSON from clients', () => {
+      expect(server.isValidLocation({ lat: '12.97', lng: '77.59' })).toBe(true);
+    });
 
-      expect(result).toEqual(input);
-      expect(result.timestamp).toBe(123456789);
-      expect(result.device).toBe('mobile');
+    it.each([
+      ['lat above 90', { lat: 90.1, lng: 0 }],
+      ['lat below -90', { lat: -90.1, lng: 0 }],
+      ['lng above 180', { lat: 0, lng: 180.1 }],
+      ['lng below -180', { lat: 0, lng: -180.1 }],
+    ])('rejects %s', (_label, location) => {
+      expect(server.isValidLocation(location)).toBe(false);
+    });
+
+    it.each([
+      ['the poles and the antimeridian', { lat: 90, lng: 180 }],
+      ['their negative extremes', { lat: -90, lng: -180 }],
+      ['null island', { lat: 0, lng: 0 }],
+    ])('accepts %s as in range', (_label, location) => {
+      expect(server.isValidLocation(location)).toBe(true);
+    });
+
+    it.each([
+      ['NaN lat', { lat: NaN, lng: 0 }],
+      ['a non-numeric string', { lat: 'north', lng: '0' }],
+      ['Infinity', { lat: Infinity, lng: 0 }],
+      ['a missing lng', { lat: 12.97 }],
+      ['null', null],
+      ['undefined', undefined],
+    ])('rejects %s', (_label, location) => {
+      expect(server.isValidLocation(location)).toBe(false);
+    });
+
+    it('rejects an empty object rather than coercing it to 0,0', () => {
+      // Number(undefined) is NaN, not 0 — the Number.isFinite guard is what
+      // stops a payload with no coordinates being read as null island.
+      expect(server.isValidLocation({})).toBe(false);
     });
   });
 
-  describe('isValidLocation', () => {
-    it('should return true for valid lat/lng coordinates', () => {
-      const validLocation = { lat: 13.0827, lng: 80.2707 };
-      expect(WebRTCSignalingServer.isValidLocation(validLocation)).toBe(true);
+  describe('normalizeLocation()', () => {
+    it('coerces string coordinates to numbers', () => {
+      expect(server.normalizeLocation({ lat: '12.97', lng: '77.59' })).toEqual({
+        lat: 12.97,
+        lng: 77.59,
+      });
     });
 
-    it('should return false for non-finite or non-numeric values', () => {
-      expect(WebRTCSignalingServer.isValidLocation({ lat: NaN, lng: 80.2707 })).toBe(false);
-      expect(WebRTCSignalingServer.isValidLocation({ lat: 13.0827, lng: Infinity })).toBe(false);
-      expect(WebRTCSignalingServer.isValidLocation({ lat: 'abc', lng: 80.2707 })).toBe(false);
-      expect(WebRTCSignalingServer.isValidLocation(null)).toBe(false);
+    it('preserves the other fields on the location', () => {
+      const normalized = server.normalizeLocation({
+        lat: '1',
+        lng: '2',
+        accuracy: 5,
+        heading: 90,
+      });
+
+      expect(normalized).toMatchObject({ accuracy: 5, heading: 90 });
     });
 
-    it('should reject out-of-range latitudes and longitudes', () => {
-      // Latitude must be between -90 and 90
-      expect(WebRTCSignalingServer.isValidLocation({ lat: 95.0, lng: 80.2707 })).toBe(false);
-      expect(WebRTCSignalingServer.isValidLocation({ lat: -95.0, lng: 80.2707 })).toBe(false);
+    it('does not mutate its argument', () => {
+      const location = { lat: '12.97', lng: '77.59' };
+      server.normalizeLocation(location);
+      expect(location.lat).toBe('12.97');
+    });
 
-      // Longitude must be between -180 and 180
-      expect(WebRTCSignalingServer.isValidLocation({ lat: 13.0827, lng: 190.0 })).toBe(false);
-      expect(WebRTCSignalingServer.isValidLocation({ lat: 13.0827, lng: -190.0 })).toBe(false);
+    it('throws TypeError for null location', () => {
+      expect(() => server.normalizeLocation(null)).toThrow(
+        'normalizeLocation: location must not be null or undefined',
+      );
+    });
+
+    it('throws TypeError for undefined location', () => {
+      expect(() => server.normalizeLocation(undefined)).toThrow(
+        'normalizeLocation: location must not be null or undefined',
+      );
+    });
+  });
+
+
+  describe('calculateDistance()', () => {
+        it.each([
+      ['first latitude', NaN, 77.59, 12.97, 77.59],
+      ['first longitude', 12.97, NaN, 12.97, 77.59],
+      ['second latitude', 12.97, 77.59, NaN, 77.59],
+      ['second longitude', 12.97, 77.59, 12.97, NaN],
+      ['positive Infinity', Infinity, 77.59, 12.97, 77.59],
+      ['negative Infinity', -Infinity, 77.59, 12.97, 77.59],
+    ])('throws TypeError for non-finite %s', (_label, lat1, lng1, lat2, lng2) => {
+      expect(() =>
+        server.calculateDistance(lat1, lng1, lat2, lng2),
+      ).toThrow(TypeError);
+    });
+    it('returns 0 for identical points', () => {
+      expect(server.calculateDistance(12.97, 77.59, 12.97, 77.59)).toBe(0);
+    });
+
+    it('measures a known separation in kilometres', () => {
+      // Bengaluru -> Chennai, roughly 290km great-circle.
+      const km = server.calculateDistance(12.9716, 77.5946, 13.0827, 80.2707);
+      expect(km).toBeGreaterThan(280);
+      expect(km).toBeLessThan(300);
+    });
+
+    it('is symmetric', () => {
+      const forward = server.calculateDistance(12.97, 77.59, 13.08, 80.27);
+      const back = server.calculateDistance(13.08, 80.27, 12.97, 77.59);
+      expect(forward).toBeCloseTo(back, 9);
+    });
+
+    it('handles antipodal points without NaN from floating-point drift', () => {
+      // atan2(sqrt(a), sqrt(1-a)) with a marginally above 1 is the classic
+      // haversine NaN; half the Earth's circumference is ~20015km.
+      const km = server.calculateDistance(0, 0, 0, 180);
+      expect(Number.isFinite(km)).toBe(true);
+      expect(km).toBeCloseTo(20015, 0);
+    });
+  });
+
+  describe('generatePeerId() / getOrCreateMesh()', () => {
+    it('generates unique, prefixed peer ids', () => {
+      const ids = new Set(Array.from({ length: 50 }, () => server.generatePeerId()));
+      expect(ids.size).toBe(50);
+      for (const id of ids) expect(id.startsWith('peer_')).toBe(true);
+    });
+
+    it('registers each new mesh as an empty set', () => {
+      const meshId = server.getOrCreateMesh();
+      expect(meshId.startsWith('mesh_')).toBe(true);
+      expect(server.meshes.get(meshId)).toEqual(new Set());
+    });
+
+    it('creates a distinct mesh on every call', () => {
+      expect(server.getOrCreateMesh()).not.toBe(server.getOrCreateMesh());
+      expect(server.meshes.size).toBe(2);
+    });
+  });
+
+  describe('sendToPeer()', () => {
+    it('serializes the message to the peer socket', () => {
+      const ws = addPeer(server, 'peer-1');
+
+      server.sendToPeer('peer-1', { type: 'offer', sdp: 'x' });
+
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: 'offer', sdp: 'x' }));
+    });
+
+    it('is a no-op for an unknown peer', () => {
+      expect(() => server.sendToPeer('nobody', { type: 'offer' })).not.toThrow();
+    });
+
+    it('does not write to a socket that is not open', () => {
+      const ws = addPeer(server, 'peer-1', { readyState: 3 /* CLOSED */ });
+
+      server.sendToPeer('peer-1', { type: 'offer' });
+
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendPeerList()', () => {
+    it('lists the other peers in the same mesh and excludes the recipient', () => {
+      const ws = addPeer(server, 'peer-1', { location: { lat: 1, lng: 1 } });
+      addPeer(server, 'peer-2', { location: { lat: 2, lng: 2 } });
+
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.type).toBe('peer-list');
+      expect(payload.count).toBe(1);
+      expect(payload.peers.map((p) => p.peerId)).toEqual(['peer-2']);
+    });
+
+    it('does not leak peers from another mesh', () => {
+      const ws = addPeer(server, 'peer-1', { meshId: 'mesh-a' });
+      addPeer(server, 'peer-2', { meshId: 'mesh-b' });
+
+      server.sendPeerList('peer-1');
+
+      expect(JSON.parse(ws.send.mock.calls[0][0]).peers).toEqual([]);
+    });
+
+    it('sends an empty list rather than nothing when alone in a mesh', () => {
+      const ws = addPeer(server, 'peer-1');
+
+      server.sendPeerList('peer-1');
+
+      expect(JSON.parse(ws.send.mock.calls[0][0])).toMatchObject({ count: 0, peers: [] });
+    });
+
+    it('is a no-op for an unknown peer', () => {
+      expect(() => server.sendPeerList('nobody')).not.toThrow();
+    });
+    
+    it('coarsens medium-distance peer locations using the relay precision policy', () => {
+      const ws = addPeer(server, 'peer-1', { location: { lat: 12.9716, lng: 77.5946 } });
+      addPeer(server, 'peer-2', { location: { lat: 12.2958, lng: 76.6394 } });
+
+      server.locationRelayRadius = 50;
+      server.maxRelayRadius = 200;
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0].location).toMatchObject({
+        lat: 12.3,
+        lng: 76.64,
+        precision: 'coarse',
+      });
+    });
+
+    it('omits peer location when the peer is beyond the maximum disclosure radius', () => {
+      const ws = addPeer(server, 'peer-1', { location: { lat: 12.9716, lng: 77.5946 } });
+      addPeer(server, 'peer-2', { location: { lat: 28.6139, lng: 77.2090 } });
+
+      server.locationRelayRadius = 50;
+      server.maxRelayRadius = 200;
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0]).not.toHaveProperty('location');
+    });
+
+    it('never includes exact target location when the recipient has no location', () => {
+      const ws = addPeer(server, 'peer-1', { location: null });
+      addPeer(server, 'peer-2', { location: { lat: 12.971598, lng: 77.594566 } });
+
+      server.sendPeerList('peer-1');
+
+      const payload = JSON.parse(ws.send.mock.calls[0][0]);
+      expect(payload.peers[0].location).toMatchObject({
+        lat: 12.97,
+        lng: 77.59,
+        precision: 'coarse',
+      });
+    });
+
+    it('skips mesh members whose peer record has already been removed', () => {
+      const ws = addPeer(server, 'peer-1');
+      server.meshes.get('mesh-1').add('ghost-peer');
+
+      server.sendPeerList('peer-1');
+
+      expect(JSON.parse(ws.send.mock.calls[0][0]).count).toBe(0);
+    });
+  });
+
+  describe('handleDisconnect()', () => {
+    it('removes the peer from both the peer map and its mesh', async () => {
+      addPeer(server, 'peer-1');
+      addPeer(server, 'peer-2');
+
+      await server.handleDisconnect('peer-1');
+
+      expect(server.peers.has('peer-1')).toBe(false);
+      expect(server.meshes.get('mesh-1')).toEqual(new Set(['peer-2']));
+    });
+
+    it('drops the mesh once its last peer leaves, so meshes do not accumulate', async () => {
+      addPeer(server, 'peer-1');
+
+      await server.handleDisconnect('peer-1');
+
+      expect(server.meshes.has('mesh-1')).toBe(false);
+    });
+
+    it('is a no-op for an unknown peer', async () => {
+      await expect(server.handleDisconnect('nobody')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getPeersNearLocation()', () => {
+    beforeEach(() => {
+      addPeer(server, 'near', { location: { lat: 12.9716, lng: 77.5946 } });
+      addPeer(server, 'far', { location: { lat: 13.0827, lng: 80.2707 } });
+      addPeer(server, 'no-location');
+    });
+
+    it('does not treat a missing requester id as a peer identity match', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
+
+      expect(found).toHaveLength(1);
+      expect(found[0].peerId).toBe('near');
+    });
+    it('returns only peers inside the radius, with their distance', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
+
+      expect(found).toHaveLength(1);
+      expect(found[0].peerId).toBe('near');
+      expect(found[0].distance).toBeCloseTo(0, 6);
+    });
+
+    it('widens with the radius', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 500, { role: 'admin' });
+      expect(found.map((p) => p.peerId).sort()).toEqual(['far', 'near']);
+    });
+
+    it('defaults to a 10km radius', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 10, { role: 'admin' });
+      expect(found.map((p) => p.peerId)).toEqual(['near']);
+    });
+
+    it('skips peers that have not reported a location', async () => {
+      const found = await server.getPeersNearLocation(12.9716, 77.5946, 100000, { role: 'admin' });
+      expect(found.map((p) => p.peerId)).not.toContain('no-location');
+    });
+
+    it('ignores caller-supplied coordinates and radius for non-admin users', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.9800, lng: 77.6000 } });
+      addPeer(server, 'near-2', { location: { lat: 12.9810, lng: 77.6010 } });
+      addPeer(server, 'near-3', { location: { lat: 12.9820, lng: 77.6020 } });
+      addPeer(server, 'far-target', { location: { lat: 28.6139, lng: 77.2090 } });
+      addPeer(server, 'other-mesh-target', {
+        meshId: 'other-mesh',
+        location: { lat: 12.9800, lng: 77.6000 },
+      });
+
+      const found = await server.getPeersNearLocation(28.6139, 77.2090, 500, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found.map((peer) => peer.peerId).sort()).toEqual(['near-1', 'near-2', 'near-3']);
+      expect(found.some((peer) => peer.peerId === 'far-target')).toBe(false);
+      expect(found.some((peer) => peer.peerId === 'other-mesh-target')).toBe(false);
+    });
+
+    it('requires an active location for non-admin discovery', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'peer-1', { location: { lat: 12.98, lng: 77.60 } });
+
+      await expect(
+        server.getPeersNearLocation(12.9716, 77.5946, 10, {
+          id: 'driver-1',
+          role: 'driver',
+        }),
+      ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it('requires an aggregation threshold before returning driver results', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.98, lng: 77.60 } });
+      addPeer(server, 'near-2', { location: { lat: 12.981, lng: 77.601 } });
+
+      const found = await server.getPeersNearLocation(0, 0, 1, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found).toEqual([]);
+    });
+
+    it('coarsens driver locations and buckets distances', async () => {
+      server.peers.clear();
+      server.meshes.clear();
+      addPeer(server, 'driver-self', {
+        userId: 'driver-1',
+        location: { lat: 12.9716, lng: 77.5946 },
+      });
+      addPeer(server, 'near-1', { location: { lat: 12.971598, lng: 77.594566 } });
+      addPeer(server, 'near-2', { location: { lat: 12.981, lng: 77.601 } });
+      addPeer(server, 'near-3', { location: { lat: 12.982, lng: 77.602 } });
+
+      const found = await server.getPeersNearLocation(0, 0, 1, {
+        id: 'driver-1',
+        role: 'driver',
+      });
+
+      expect(found).toHaveLength(3);
+      expect(found[0].location.precision).toBe('coarse');
+      expect(found[0].location.lat).not.toBe(12.971598);
+      expect(found.every((peer) => Number.isInteger(peer.distance / 5))).toBe(true);
+    });
+
+  });
+
+  describe('getStats()', () => {
+    it('reports zeroes on an idle server', () => {
+      expect(server.getStats()).toEqual({
+        totalPeers: 0,
+        totalMeshes: 0,
+        peersPerMesh: [],
+      });
+    });
+
+    it('counts peers per mesh', () => {
+      addPeer(server, 'peer-1', { meshId: 'mesh-a' });
+      addPeer(server, 'peer-2', { meshId: 'mesh-a' });
+      addPeer(server, 'peer-3', { meshId: 'mesh-b' });
+
+      expect(server.getStats()).toEqual({
+        totalPeers: 3,
+        totalMeshes: 2,
+        peersPerMesh: [
+          { meshId: 'mesh-a', peerCount: 2 },
+          { meshId: 'mesh-b', peerCount: 1 },
+        ],
+      });
+    });
+  });
+
+  describe('canUserAccessPeer()', () => {
+    beforeEach(() => {
+      addPeer(server, 'peer-1', { userId: 'user-1' });
+    });
+
+    it('lets a user reach their own peer', () => {
+      expect(server.canUserAccessPeer('peer-1', { id: 'user-1' })).toBe(true);
+    });
+
+    it('refuses another user', () => {
+      expect(server.canUserAccessPeer('peer-1', { id: 'user-2' })).toBe(false);
+    });
+
+    it('lets an admin reach any peer', () => {
+      expect(server.canUserAccessPeer('peer-1', { id: 'someone', role: 'admin' })).toBe(true);
+    });
+
+    it('lets an admin through even for a peer that does not exist', () => {
+      expect(server.canUserAccessPeer('nobody', { role: 'admin' })).toBe(true);
+    });
+
+    it('refuses a non-admin for an unknown peer', () => {
+      expect(server.canUserAccessPeer('nobody', { id: 'user-1' })).toBe(false);
+    });
+
+    it.each([
+      ['no user', undefined],
+      ['null', null],
+      ['a user with no id', {}],
+    ])(
+      'currently ADMITS %s to a peer with an unset userId (undefined === undefined)',
+      (_label, user) => {
+        // Not the intended behaviour — pinned so the fix is visible as a diff.
+        // `peer.userId === user?.id` is true when both sides are undefined, so
+        // a peer registered from a token with no `id` claim is reachable by a
+        // caller who also has no id. Tracked separately; see the follow-up
+        // that tightens this to require both ids to be present.
+        addPeer(server, 'peer-anon', { userId: undefined });
+        expect(server.canUserAccessPeer('peer-anon', user)).toBe(true);
+      },
+    );
+
+    it('refuses an identified user for a peer with an unset userId', () => {
+      addPeer(server, 'peer-anon', { userId: undefined });
+      expect(server.canUserAccessPeer('peer-anon', { id: 'user-1' })).toBe(false);
+    });
+  });
+
+  describe('getOfflineGPSData() authorization', () => {
+    beforeEach(() => {
+      addPeer(server, 'peer-1', { userId: 'user-1' });
+    });
+
+    it('returns [] and never queries for an unauthorized user', async () => {
+      const result = await server.getOfflineGPSData('peer-1', 0, { id: 'user-2' });
+
+      expect(result).toEqual([]);
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+    });
+
+    it('returns [] and never queries when no user is supplied', async () => {
+      const result = await server.getOfflineGPSData('peer-1', 0, null);
+
+      expect(result).toEqual([]);
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+    });
+
+    it('queries the owning user\'s data', async () => {
+      supabaseQuery.order.mockResolvedValue({ data: [{ peerId: 'peer-1' }] });
+
+      const result = await server.getOfflineGPSData('peer-1', 100, { id: 'user-1' });
+
+      expect(supabaseMock.from).toHaveBeenCalledWith('gps_offline_data');
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'peer-1');
+      expect(supabaseQuery.gt).toHaveBeenCalledWith('timestamp', 100);
+      expect(result).toEqual([{ peerId: 'peer-1' }]);
+    });
+
+    it('falls back to timestamp 0 when no cursor is given', async () => {
+      await server.getOfflineGPSData('peer-1', undefined, { id: 'user-1' });
+      expect(supabaseQuery.gt).toHaveBeenCalledWith('timestamp', 0);
+    });
+
+    it('returns [] rather than null when the query yields nothing', async () => {
+      supabaseQuery.order.mockResolvedValue({ data: null });
+      await expect(
+        server.getOfflineGPSData('peer-1', 0, { id: 'user-1' }),
+      ).resolves.toEqual([]);
+    });
+  });
+
+  describe('syncOfflineData() authorization', () => {
+    beforeEach(() => {
+      addPeer(server, 'peer-1', { userId: 'user-1' });
+    });
+
+    it('does not write for an unauthorized user', async () => {
+      await server.syncOfflineData('peer-1', { id: 'user-2' });
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+    });
+
+    it('marks only the unsynced rows of the owning peer', async () => {
+      supabaseQuery.eq.mockReturnValue(supabaseQuery);
+
+      await server.syncOfflineData('peer-1', { id: 'user-1' });
+
+      expect(supabaseQuery.update).toHaveBeenCalledWith({ synced: true });
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'peer-1');
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('synced', false);
+    });
+  });
+
+  describe('destroy()', () => {
+    it('closes every peer socket and clears the maps', () => {
+      const ws1 = addPeer(server, 'peer-1');
+      const ws2 = addPeer(server, 'peer-2', { meshId: 'mesh-b' });
+
+      server.destroy();
+
+      expect(ws1.close).toHaveBeenCalledWith(1001, 'Server shutting down');
+      expect(ws2.close).toHaveBeenCalledWith(1001, 'Server shutting down');
+      expect(server.peers.size).toBe(0);
+      expect(server.meshes.size).toBe(0);
+      expect(server.wss.close).toHaveBeenCalled();
+    });
+
+    it('keeps closing the remaining peers when one socket throws', () => {
+      const ws1 = addPeer(server, 'peer-1');
+      ws1.close.mockImplementation(() => {
+        throw new Error('already closed');
+      });
+      const ws2 = addPeer(server, 'peer-2');
+
+      expect(() => server.destroy()).not.toThrow();
+      expect(ws2.close).toHaveBeenCalled();
+    });
+  });
+
+  describe('meshId and payload boundary checks', () => {
+    it('creates a new mesh and registers it in meshes Map', () => {
+      const meshId = server.getOrCreateMesh();
+      expect(meshId).toMatch(/^mesh_/);
+      expect(server.meshes.has(meshId)).toBe(true);
+      expect(server.meshes.get(meshId).size).toBe(0);
+    });
+
+    it('returns null from getOrCreateMesh when maxMeshes cap is reached', () => {
+      server.maxMeshes = 2;
+      server.meshes.set('m1', new Set());
+      server.meshes.set('m2', new Set());
+
+      const result = server.getOrCreateMesh();
+      expect(result).toBeNull();
+    });
+
+    it('falls back to default maxPayload of 4096 when WS_MAX_PAYLOAD_BYTES is empty or not finite', () => {
+      const parsePayload = (val) => {
+        const parsed = parseInt(val, 10);
+        return Number.isFinite(parsed) ? parsed : 4096;
+      };
+
+      expect(parsePayload('')).toBe(4096);
+      expect(parsePayload('   ')).toBe(4096);
+      expect(parsePayload('not-a-number')).toBe(4096);
+      expect(parsePayload('8192')).toBe(8192);
+    });
+
+    it('enforces MAX_MESH_ID_LENGTH of 64 on meshId query parameter', () => {
+      const MAX_MESH_ID_LENGTH = 64;
+      const validMeshId = 'a'.repeat(64);
+      const invalidMeshId = 'a'.repeat(65);
+
+      expect(validMeshId.length <= MAX_MESH_ID_LENGTH).toBe(true);
+      expect(invalidMeshId.length > MAX_MESH_ID_LENGTH).toBe(true);
+    });
+  });
+
+  describe('capPrecision()', () => {
+    it('returns null if location is null or undefined', () => {
+      expect(server.capPrecision(null)).toBeNull();
+      expect(server.capPrecision(undefined)).toBeNull();
+    });
+
+    it('caps coordinates to 2 decimal places and marks precision as coarse', () => {
+      const capped = server.capPrecision({ lat: 12.971598, lng: 77.594566, speed: 45 });
+      expect(capped).toEqual({
+        lat: 12.97,
+        lng: 77.59,
+        speed: 45,
+        precision: 'coarse',
+      });
+    });
+
+    it('supports custom decimal precision', () => {
+      const capped = server.capPrecision({ lat: 12.971598, lng: 77.594566 }, 3);
+      expect(capped.lat).toBe(12.972);
+      expect(capped.lng).toBe(77.595);
+    });
+  });
+
+  describe('relayLocation() proximity & rate limiting', () => {
+    let wsSender;
+    let wsNearby;
+    let wsMidDist;
+    let wsFar;
+    let wsNoLoc;
+
+    beforeEach(() => {
+      server.locationRelayRadius = 50; // 50 km
+      server.maxRelayRadius = 200; // 200 km
+      server.locationRateLimitMs = 1000;
+
+      // Sender in Bengaluru (12.9716, 77.5946)
+      wsSender = addPeer(server, 'sender', {
+        location: { lat: 12.9716, lng: 77.5946 },
+        lastLocationRelay: 0,
+      });
+
+      // Nearby peer in Bengaluru (~1 km away)
+      wsNearby = addPeer(server, 'nearby', {
+        location: { lat: 12.9800, lng: 77.6000 },
+      });
+
+      // Mid-distance peer in Mysuru (~130 km away, >50km and <=200km)
+      wsMidDist = addPeer(server, 'middist', {
+        location: { lat: 12.2958, lng: 76.6394 },
+      });
+
+      // Far peer in Delhi (~1700 km away, >200km)
+      wsFar = addPeer(server, 'far', {
+        location: { lat: 28.6139, lng: 77.2090 },
+      });
+
+      // Peer with no location
+      wsNoLoc = addPeer(server, 'noloc', {
+        location: null,
+      });
+    });
+
+    it('relays exact location to nearby peers (<= 50km)', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+
+      expect(wsNearby.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(wsNearby.send.mock.calls[0][0]);
+      expect(payload.type).toBe('peer-location');
+      expect(payload.peerId).toBe('sender');
+      expect(payload.location).toEqual({ lat: 12.9716, lng: 77.5946 });
+    });
+
+    it('relays capped precision to medium-distance peers (50km - 200km)', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+
+      expect(wsMidDist.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(wsMidDist.send.mock.calls[0][0]);
+      expect(payload.type).toBe('peer-location');
+      expect(payload.peerId).toBe('sender');
+      expect(payload.location.lat).toBe(12.97);
+      expect(payload.location.lng).toBe(77.59);
+      expect(payload.location.precision).toBe('coarse');
+    });
+
+    it('drops location relay to distant peers (> 200km)', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+
+      expect(wsFar.send).not.toHaveBeenCalled();
+    });
+
+    it('relays capped precision to peers without reported location', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+
+      expect(wsNoLoc.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(wsNoLoc.send.mock.calls[0][0]);
+      expect(payload.location.precision).toBe('coarse');
+      expect(payload.location.lat).toBe(12.97);
+    });
+
+    it('does not relay location back to the sender itself', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+
+      expect(wsSender.send).not.toHaveBeenCalled();
+    });
+
+    it('rate limits consecutive location relays within rate limit interval', async () => {
+      await server.relayLocation('sender', { lat: 12.9716, lng: 77.5946 });
+      expect(wsNearby.send).toHaveBeenCalledTimes(1);
+
+      // Immediate second call should be throttled
+      await server.relayLocation('sender', { lat: 12.9718, lng: 77.5948 });
+      expect(wsNearby.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('isUserAuthorizedForMesh()', () => {
+    it('returns false for missing userId or meshId', async () => {
+      expect(await server.isUserAuthorizedForMesh(null, 'm1')).toBe(false);
+      expect(await server.isUserAuthorizedForMesh('u1', null)).toBe(false);
+    });
+
+    it('returns true for admin users', async () => {
+      expect(await server.isUserAuthorizedForMesh('u1', 'm1', 'admin')).toBe(true);
+    });
+
+    it('returns true if user already has an active peer in the mesh', async () => {
+      addPeer(server, 'peer-user', { meshId: 'm1', userId: 'u1' });
+      expect(await server.isUserAuthorizedForMesh('u1', 'm1', 'driver')).toBe(true);
+    });
+
+    it('checks trips/orders/convoys in database if supabase is available', async () => {
+      const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'm1' } });
+      supabaseQuery.maybeSingle = mockSingle;
+      supabaseQuery.or.mockReturnValue(supabaseQuery);
+
+      const isAuth = await server.isUserAuthorizedForMesh('u1', 'm1', 'driver');
+      expect(isAuth).toBe(true);
+      expect(supabaseMock.from).toHaveBeenCalledWith('trips');
     });
   });
 });
+

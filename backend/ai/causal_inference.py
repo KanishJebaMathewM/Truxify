@@ -117,7 +117,7 @@ class DoCalculus:
 
         return "digraph {\n" + "\n".join(lines) + "\n}"
     
-        def estimate_ate(self, treatment: str, outcome: str) -> Dict:
+    def estimate_ate(self, treatment: str, outcome: str) -> Dict:
         """Estimate the Average Treatment Effect (ATE) using backdoor
         propensity score weighting, based on the graph built in
         set_causal_model."""

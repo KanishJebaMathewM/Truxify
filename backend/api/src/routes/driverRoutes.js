@@ -412,7 +412,8 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   const { is_online } = req.body;
 
   try {
-    const { data: details, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: details, error } = await userClient
       .from('driver_details')
       .update({ is_online, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
@@ -432,7 +433,7 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
     });
 
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver online status update error:', err);
+    logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1345,7 +1346,8 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     }
 
     // 5.1 Fetch driver confirmed balance
-    const { data: details, error: detailsErr } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: details, error: detailsErr } = await userClient
       .from('driver_details')
       .select('wallet_confirmed')
       .eq('user_id', req.user.id)
@@ -1367,7 +1369,6 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     }
 
     // 5.2 Execute atomically via Supabase RPC
-    const userClient = createUserClient(req.token);
     const { error: rpcErr } = await userClient.rpc('withdraw_funds_tx', {
       p_driver_id: req.user.id,
       p_amount:    amount
@@ -1387,7 +1388,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     });
 
   } catch (err) {
-    logger.error('Driver wallet withdrawal error:', err);
+    logger.error({ event: 'DRIVER_WALLET_WITHDRAWAL_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver wallet withdrawal error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1833,7 +1834,8 @@ router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authe
     const { truck_id, axles } = req.body;
 
     // Optional: verify the truck belongs to the driver
-    const { data: truck, error: truckErr } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: truck, error: truckErr } = await userClient
       .from('trucks')
       .select('id')
       .eq('id', truck_id)
@@ -1847,7 +1849,7 @@ router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authe
     const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
     return res.status(200).json(status);
   } catch (err) {
-    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'WEIGH_STATION_SYNC_WEIGHT_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error syncing internal weight');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2011,12 +2013,13 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
 
 router.patch('/availability', authenticate, userLimiter, async (req, res) => {
   try {
+    const userClient = createUserClient(req.token);
     const { available } = req.body;
     if (typeof available !== 'boolean') {
       return res.status(400).json({ error: 'available field must be a boolean.' });
     }
 
-    const { data: details, error } = await supabase
+    const { data: details, error } = await userClient
       .from('driver_details')
       .update({ is_online: available, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
@@ -2032,7 +2035,7 @@ router.patch('/availability', authenticate, userLimiter, async (req, res) => {
       isOnline: details?.is_online || false
     });
   } catch (err) {
-    logger.error('Driver availability update error:', err);
+    logger.error({ event: 'DRIVER_AVAILABILITY_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver availability update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

@@ -61,7 +61,7 @@ const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
   'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
-  'function releasePayment(uint256 bookingId) external',
+  'function releasePayment(uint256 bookingId, bytes32 idempotencyKey) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
   'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
@@ -686,7 +686,7 @@ export async function markEscrowBookingStarted (orderDisplayId) {
  * @param {string|bigint|null} [expectedAmountWei] - authoritative app amount
  * @returns {Promise<{txHash: string|null, bookingId: string, alreadyReleased?: boolean, error?: string, code?: string}>}
  */
-export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
+export async function escrowRelease (orderDisplayId, expectedAmountWei = null, idempotencyKey = null) {
   return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -747,7 +747,8 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   }
 
   try {
-    const tx = await escrowContract.releasePayment(bookingId)
+    const finalIdempotencyKey = idempotencyKey || ethers.utils.hexlify(ethers.utils.randomBytes(32));
+    const tx = await escrowContract.releasePayment(bookingId, finalIdempotencyKey)
     logger.info(`[escrow] releasePayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     const receipt = await tx.wait(1)
     if (!receipt || receipt.status === 0) {

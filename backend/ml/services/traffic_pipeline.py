@@ -23,9 +23,11 @@ except ImportError:
     HAS_TF = False
 import redis
 import os
+import tempfile
 import logging
 from functools import partial
 from collections import deque, OrderedDict
+from app.execution import is_training_cancelled, TrainingCancelled
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -386,7 +388,8 @@ class TrafficPipeline:
     ) -> float:
         """Predict ETA using an order-specific rolling history."""
         try:
-            if self.model is None:
+            model = self.model
+            if model is None:
                 logger.warning("ETA prediction unavailable because TensorFlow model is not loaded")
                 return None
             if route_data.ndim == 1:
@@ -425,7 +428,7 @@ class TrafficPipeline:
                 seq = [seq[0]] * (60 - len(seq)) + seq
 
             model_input = np.array(seq).reshape(1, 60, 5)
-            prediction = self.model.predict(model_input, verbose=0)
+            prediction = model.predict(model_input, verbose=0)
             return float(prediction[0][0])
         except Exception as e:
             logger.error(f"Prediction failed: {e}")
@@ -506,7 +509,11 @@ class TrafficPipeline:
         # Train with an explicit temporal holdout from every eligible route.
         # This avoids Keras selecting the last 20% of the combined route array,
         # which can make validation depend on route ordering rather than time.
-        self.model.fit(
+        # Train a separate instance so live predictions never observe weights
+        # being mutated by fit(). Publish it only after saving succeeds.
+        candidate = self._create_lstm_model()
+        candidate.set_weights(self.model.get_weights())
+        candidate.fit(
             X_train,
             y_train,
             epochs=epochs,
@@ -515,9 +522,26 @@ class TrafficPipeline:
             verbose=1
         )
         
-        # Save model
-        os.makedirs(os.path.dirname('models/eta_lstm.h5'), exist_ok=True)
-        self.model.save('models/eta_lstm.h5')
+        if is_training_cancelled():
+            raise TrainingCancelled()
+
+        model_path = 'models/eta_lstm.h5'
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        fd, temporary_path = tempfile.mkstemp(
+            prefix='.eta-lstm-', suffix='.h5', dir=os.path.dirname(model_path)
+        )
+        os.close(fd)
+        try:
+            candidate.save(temporary_path)
+            if is_training_cancelled():
+                raise TrainingCancelled()
+            # The old artifact stays readable until the complete replacement
+            # exists. In-flight predictions retain their old model reference.
+            os.replace(temporary_path, model_path)
+            self.model = candidate
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
         logger.info("Model trained and saved")
     
     def _create_sequences(self, data: pd.DataFrame, target_col: str, seq_length=60):

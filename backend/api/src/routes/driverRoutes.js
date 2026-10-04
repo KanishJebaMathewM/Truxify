@@ -127,6 +127,7 @@
  */
 
 import express from 'express';
+import { getStatementPayout } from '../services/driver/statementPayout.js';
 import { supabase, getAdminClient, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
@@ -412,7 +413,8 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   const { is_online } = req.body;
 
   try {
-    const { data: details, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: details, error } = await userClient
       .from('driver_details')
       .update({ is_online, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
@@ -432,7 +434,7 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
     });
 
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver online status update error:', err);
+    logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -512,6 +514,7 @@ router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:updat
  */
 router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:view-wallet'), async (req, res) => {
   try {
+    const userClient = createUserClient(req.token);
     const pageParam = req.query.page ?? '1';
     const limitParam = req.query.limit ?? '20';
 
@@ -545,7 +548,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
       data: transactions,
       error,
       count
-    } = await supabase
+    } = await userClient
       .from('wallet_transactions')
       .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id)
@@ -572,7 +575,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
     });
 
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Wallet history fetch error:', err);
+    logger.error({ event: 'DRIVER_WALLET_HISTORY_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Wallet history fetch error');
 
     res.status(500).json({
       error: 'Internal Server Error'
@@ -907,10 +910,11 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
   const limit = Math.min(100, Math.max(1, parsedLimit));
 
   try {
+    const userClient = createUserClient(req.token);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase
+    let query = userClient
       .from('trips')
       .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id);
@@ -933,11 +937,11 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
     let ratingsMap = {};
     if (orderDisplayIds.length > 0) {
       const [ordersRes, ratingsRes] = await Promise.all([
-        supabase
+        userClient
           .from('orders')
           .select('order_display_id, escrow_status')
           .in('order_display_id', orderDisplayIds),
-        supabase
+        userClient
           .from('ratings')
           .select('order_display_id, stars')
           .in('order_display_id', orderDisplayIds)
@@ -972,7 +976,7 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       pagination
     });
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
+    logger.error({ event: 'DRIVER_TRIPS_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver trips fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1006,7 +1010,8 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
   const { tripDisplayId } = req.params;
 
   try {
-    const { data: trip, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: trip, error } = await userClient
       .from('trips')
       .select('*')
       .eq('trip_display_id', tripDisplayId)
@@ -1022,7 +1027,7 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
 
     res.json(trip);
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver single trip fetch error:', err);
+    logger.error({ event: 'DRIVER_TRIP_DETAIL_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver single trip fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1217,7 +1222,7 @@ router.patch(
 
       res.json({ point: updated });
     } catch (err) {
-      logger.error('Driver route point claim error:', err);
+      logger.error({ event: 'DRIVER_ROUTE_POINT_CLAIM_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver route point claim error');
       res.status(500).json({ error: 'Internal Server Error' });
     }
   },
@@ -1301,7 +1306,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
       pagination
     });
   } catch (err) {
-    logger.error('Driver bids fetch error:', err);
+    logger.error({ event: 'DRIVER_BIDS_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver bids fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1345,7 +1350,8 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     }
 
     // 5.1 Fetch driver confirmed balance
-    const { data: details, error: detailsErr } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: details, error: detailsErr } = await userClient
       .from('driver_details')
       .select('wallet_confirmed')
       .eq('user_id', req.user.id)
@@ -1367,7 +1373,6 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     }
 
     // 5.2 Execute atomically via Supabase RPC
-    const userClient = createUserClient(req.token);
     const { error: rpcErr } = await userClient.rpc('withdraw_funds_tx', {
       p_driver_id: req.user.id,
       p_amount:    amount
@@ -1387,7 +1392,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     });
 
   } catch (err) {
-    logger.error('Driver wallet withdrawal error:', err);
+    logger.error({ event: 'DRIVER_WALLET_WITHDRAWAL_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver wallet withdrawal error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1491,7 +1496,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
           return res.status(200).json(JSON.parse(cached));
         }
       } catch (cacheErr) {
-        logger.error(`[reputation] Redis read error for driver ${driverId}: ${cacheErr.message}`);
+        logger.error({ event: 'DRIVER_REPUTATION_REDIS_READ_ERROR', requestId: req.requestId || req.id, driverId, error: cacheErr?.message ?? String(cacheErr) }, 'Reputation redis read error');
       }
     }
 
@@ -1503,7 +1508,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
       .maybeSingle();
 
     if (error) {
-      logger.error(`[reputation] Supabase query error for driver ${driverId}: ${error.message}`);
+      logger.error({ event: 'DRIVER_REPUTATION_QUERY_ERROR', requestId: req.requestId || req.id, driverId, error: error?.message ?? String(error) }, 'Reputation supabase query error');
       return res.status(500).json({ error: 'Failed to fetch driver details.', details: error.message });
     }
 
@@ -1535,14 +1540,14 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
           30
         );
       } catch (cacheErr) {
-        logger.error(`[reputation] Redis write error for driver ${driverId}: ${cacheErr.message}`);
+        logger.error({ event: 'DRIVER_REPUTATION_REDIS_WRITE_ERROR', requestId: req.requestId || req.id, driverId, error: cacheErr?.message ?? String(cacheErr) }, 'Reputation redis write error');
       }
     }
 
     return res.status(200).json(responseData);
 
   } catch (err) {
-    logger.error(`[reputation] Unexpected error retrieving reputation for driver ${driverId}: ${err.message}`);
+    logger.error({ event: 'DRIVER_REPUTATION_UNEXPECTED_ERROR', requestId: req.requestId || req.id, driverId, error: err?.message ?? String(err) }, 'Unexpected reputation error');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1574,7 +1579,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
     while (true) {
       let pageQuery = supabase
         .from('orders')
-        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, bid_amount, total_amount, base_freight, toll_estimate, platform_fee')
         .eq('driver_id', userId)
         .in('status', ['delivered', 'payment_released'])
         .order('pickup_date', { ascending: true })
@@ -1613,7 +1618,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
       const baseFreight = Number(trip.base_freight) || 0;
       const platformFee = Number(trip.platform_fee) || 0;
       const tollEstimate = Number(trip.toll_estimate) || 0;
-      const netEarnings = baseFreight - platformFee;
+      const netEarnings = getStatementPayout(trip);
 
       totalBaseFreight += baseFreight;
       totalPlatformFees += platformFee;
@@ -1785,7 +1790,7 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     }
     return res.status(200).json(status);
   } catch (err) {
-    logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'WEIGH_STATION_BYPASS_STATUS_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error getting bypass status');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1827,13 +1832,14 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
  *       400:
  *         description: Invalid payload
  */
-router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authenticate, requirePolicy('driver:view-stats'), userLimiter, async (req, res) => {
+router.post('/weigh-stations/sync-weight', authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
   try {
     const driverId = req.user.id;
     const { truck_id, axles } = req.body;
 
     // Optional: verify the truck belongs to the driver
-    const { data: truck, error: truckErr } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: truck, error: truckErr } = await userClient
       .from('trucks')
       .select('id')
       .eq('id', truck_id)
@@ -1847,7 +1853,7 @@ router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authe
     const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
     return res.status(200).json(status);
   } catch (err) {
-    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'WEIGH_STATION_SYNC_WEIGHT_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error syncing internal weight');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1928,7 +1934,7 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, 
 
     res.json({ optimized_route: optimizedTasks });
   } catch (err) {
-    logger.error(`[LTL Route] Error optimizing route for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'LTL_ROUTE_OPTIMIZE_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error optimizing route');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2004,19 +2010,20 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
       documents: docMap
     });
   } catch (err) {
-    logger.error('Driver profile fetch error:', err);
+    logger.error({ event: 'DRIVER_PROFILE_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver profile fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 router.patch('/availability', authenticate, userLimiter, async (req, res) => {
   try {
+    const userClient = createUserClient(req.token);
     const { available } = req.body;
     if (typeof available !== 'boolean') {
       return res.status(400).json({ error: 'available field must be a boolean.' });
     }
 
-    const { data: details, error } = await supabase
+    const { data: details, error } = await userClient
       .from('driver_details')
       .update({ is_online: available, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
@@ -2032,7 +2039,7 @@ router.patch('/availability', authenticate, userLimiter, async (req, res) => {
       isOnline: details?.is_online || false
     });
   } catch (err) {
-    logger.error('Driver availability update error:', err);
+    logger.error({ event: 'DRIVER_AVAILABILITY_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver availability update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2111,7 +2118,7 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
       truck: truckData
     });
   } catch (err) {
-    logger.error('Driver truck update error:', err);
+    logger.error({ event: 'DRIVER_TRUCK_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver truck update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

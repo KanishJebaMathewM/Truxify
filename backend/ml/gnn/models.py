@@ -1,4 +1,7 @@
 import heapq
+import copy
+import threading
+from functools import wraps
 from datetime import datetime
 import logging
 import networkx as nx
@@ -399,11 +402,21 @@ class GraphNetworkBuilder:
         data.node_map = features.get('node_map', self.node_map)
         return data
 
+def _serialize_model_mutation(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._mutation_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class RouteOptimizer:
     """GNN-based Route Optimizer"""
     
     def __init__(self, model_path=None, allow_untrained=False):
         """Initialize RouteOptimizer with GNNRouteModel and hardware acceleration device."""
+        self._mutation_lock = threading.RLock()
+        self._generation_lock = threading.Lock()
         self.model = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.is_trained = False
@@ -421,9 +434,19 @@ class RouteOptimizer:
         
         logger.info(f"✅ Route Optimizer initialized on {self.device}")
     
+    def _serving_snapshot(self):
+        with self._generation_lock:
+            return self.model, self.feature_scaler, self.is_trained
+
+    def _publish_model(self, model, scaler):
+        model.eval()
+        with self._generation_lock:
+            self.model, self.feature_scaler, self.is_trained = model, scaler, True
+
     def optimize_route(self, start_node, end_node, graph_data, objectives=['time', 'cost', 'fuel'], constraints=None):
         """Optimize route using GNN and constrained Dijkstra pathfinding."""
-        if not self.is_trained and not self.allow_untrained:
+        model, scaler, is_trained = self._serving_snapshot()
+        if not is_trained and not self.allow_untrained:
             logger.error("Attempted route optimization on untrained model")
             raise RuntimeError("GNN model is untrained. Load a trained checkpoint or enable dev mode.")
 
@@ -438,21 +461,21 @@ class RouteOptimizer:
 
             # Validate the node-feature dimension matches the model before the
             # GCN conv layers run (otherwise Linear raises a cryptic size mismatch).
-            if hasattr(self.model, 'input_dim') and data.x.shape[1] != self.model.input_dim:
+            if hasattr(model, 'input_dim') and data.x.shape[1] != model.input_dim:
                 raise ValueError(
-                    f"Node feature dim mismatch: model expects {self.model.input_dim}, got {data.x.shape[1]}"
+                    f"Node feature dim mismatch: model expects {model.input_dim}, got {data.x.shape[1]}"
                 )
 
             # Apply the same scaler learned during training.
-            self.feature_scaler.transform_graph(data)
+            scaler.transform_graph(data)
 
             # Ensure model is in eval mode so BatchNorm layers do not update running stats during inference
-            if self.model is not None:
-                self.model.eval()
+            if model is not None:
+                model.eval()
 
             # Get node embeddings
             with torch.no_grad():
-                embeddings = self.model(data.x, data.edge_index, data.edge_attr)
+                embeddings = model(data.x, data.edge_index, data.edge_attr)
             
             # Find optimal route using embeddings and constraints
             route = self._find_optimal_route(
@@ -623,6 +646,7 @@ class RouteOptimizer:
         # Non-negative weight guard for Dijkstra
         return max(score, 1e-6)
     
+    @_serialize_model_mutation
     def train(self, train_data, val_data=None, epochs=100):
         """Train GNN model with training-derived feature scaling."""
         if not train_data:
@@ -630,24 +654,26 @@ class RouteOptimizer:
 
         # Fit once on the complete training set so training and inference
         # use identical feature statistics.
-        self.feature_scaler.fit(train_data)
+        serving_model, _, _ = self._serving_snapshot()
+        model = copy.deepcopy(serving_model)
+        scaler = GNNFeatureScaler.default().fit(train_data)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         criterion = nn.MSELoss()
 
         avg_loss = 0.0
         for epoch in range(epochs):
-            self.model.train()
+            model.train()
             total_loss = 0.0
 
             for data in train_data:
                 data = data.to(self.device).clone()
-                self.feature_scaler.transform_graph(data)
+                scaler.transform_graph(data)
                 optimizer.zero_grad()
 
                 batch = getattr(data, 'batch', None)
                 edge_attr = getattr(data, 'edge_attr', None)
-                out = self.model(data.x, data.edge_index, edge_attr, batch)
+                out = model(data.x, data.edge_index, edge_attr, batch)
                 target = getattr(data, 'y', None)
                 if target is None:
                     target = torch.zeros_like(out)
@@ -663,24 +689,25 @@ class RouteOptimizer:
             if epoch % 10 == 0:
                 logger.info(f"Epoch {epoch}: Loss = {avg_loss:.4f}")
 
-        self.is_trained = True
-        self.model.eval()
+        self._publish_model(model, scaler)
         return avg_loss
 
     def save_model(self, path='models/gnn_route.pth'):
         """Save GNN weights together with the exact feature scaling parameters."""
-        if not self.feature_scaler.fitted:
+        model, scaler, _ = self._serving_snapshot()
+        if not scaler.fitted:
             raise ValueError(
                 "Cannot save a GNN model before fitting feature scaler during training"
             )
 
         checkpoint = {
-            "state_dict": self.model.state_dict(),
-            "feature_scaler": self.feature_scaler.state_dict(),
+            "state_dict": model.state_dict(),
+            "feature_scaler": scaler.state_dict(),
         }
         torch.save(checkpoint, path)
         logger.info(f"✅ Model and feature scaler saved to {path}")
 
+    @_serialize_model_mutation
     def load_model(self, path='models/gnn_route.pth'):
         """Load GNN weights and the exact persisted feature scaling parameters."""
         checkpoint = torch.load(path, map_location=self.device)
@@ -698,13 +725,19 @@ class RouteOptimizer:
                 "retrain and save the model before loading it"
             )
 
-        self.model = GNNRouteModel().to(self.device)
-        self.model.load_state_dict(checkpoint["state_dict"])
-        self.feature_scaler = GNNFeatureScaler.from_state_dict(scaler_state)
-        if not self.feature_scaler.fitted:
+        scaler = GNNFeatureScaler.from_state_dict(scaler_state)
+        if scaler_state['fitted'] is not True:
             raise ValueError("Saved GNN feature scaler was not fitted on training data")
-        self.model.eval()
-        self.is_trained = True
+        for name, width in [('node_mean', 4), ('node_scale', 4),
+                            ('edge_mean', 5), ('edge_scale', 5)]:
+            values = getattr(scaler, name)
+            if values.shape != (width,) or not torch.isfinite(values).all():
+                raise ValueError(f"Saved GNN feature scaler has invalid {name}")
+            if name.endswith('scale') and not (values > 0).all():
+                raise ValueError(f"Saved GNN feature scaler has nonpositive {name}")
+        model = GNNRouteModel().to(self.device)
+        model.load_state_dict(checkpoint["state_dict"])
+        self._publish_model(model, scaler)
         logger.info(f"✅ Model and feature scaler loaded from {path}")
 
     def _edge_is_feasible(self, edge_data, constraints):

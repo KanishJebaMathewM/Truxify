@@ -999,5 +999,42 @@ describe('WorkZoneService Unit Tests', () => {
 
       expect(results.length).toBeGreaterThan(0);
     });
+
+    it('accepts 0 lat/lng as valid coordinates', () => {
+      const result = generateBypassWaypoint({ lat: 0, lng: 0 });
+      expect(result).not.toBeNull();
+      expect(result.lat).toBeCloseTo(7 / 111, 5);
+      expect(result.lng).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('accepts a zero latitude with a non-zero longitude', () => {
+      const result = generateBypassWaypoint({ lat: 0, lng: -77.22 });
+      expect(result).not.toBeNull();
+      expect(result.lat).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('accepts a zero longitude with a non-zero latitude', () => {
+      const result = generateBypassWaypoint({ lat: 12.97, lng: 0 });
+      expect(result).not.toBeNull();
+      expect(result.lng).toBeCloseTo(7 / 111, 5);
+    });
+
+    it('returns null for a non-finite latitude', () => {
+      expect(generateBypassWaypoint({ lat: 'abc', lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: NaN, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: Infinity, lng: 77.22 })).toBeNull();
+    });
+
+    it('returns null for out-of-range coordinates', () => {
+      expect(generateBypassWaypoint({ lat: 91, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: -91, lng: 77.22 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: 12.97, lng: 181 })).toBeNull();
+      expect(generateBypassWaypoint({ lat: 12.97, lng: -181 })).toBeNull();
+    });
+
+    it('never emits a NaN bypass coordinate', () => {
+      const result = generateBypassWaypoint({ lat: 'abc', lng: 'def' });
+      expect(result).toBeNull();
+    });
   });
 });

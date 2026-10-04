@@ -9,6 +9,7 @@ import {
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
   verifyDeliveryOtpHash,
+  expireDeliveryOtps,
   sendPushNotification,
 } from "../notificationService.js";
 import {
@@ -64,6 +65,7 @@ export class DeliveryVerificationService {
       getActiveDeliveryOtp,
       verifyDeliveryOtp,
       verifyDeliveryOtpHash,
+      expireDeliveryOtps,
     };
     this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
     this.trackingTokenService = deps.trackingTokenService || null;
@@ -229,6 +231,11 @@ export class DeliveryVerificationService {
 
         const activeOtp =
           await this.notificationService.getActiveDeliveryOtp(orderId);
+        // A resend must not issue another usable code if invalidating the
+        // previous one failed. Keep the existing failure budget on resends.
+        if (!(await this.notificationService.expireDeliveryOtps(orderId))) {
+          throw new Error("Failed to invalidate previous delivery OTPs.");
+        }
         const otp = crypto.randomInt(100000, 1000000).toString();
         const stored = await this.notificationService.storeDeliveryOtp(
           orderId,
@@ -555,9 +562,12 @@ export class DeliveryVerificationService {
           }
 
           try {
+            const idempotencyKeyStr = crypto.createHash('sha256').update(`${orderId}-${otp}`).digest('hex');
+            const idempotencyKeyBytes32 = '0x' + idempotencyKeyStr;
             const releaseResult = await this.escrowReleaseFn(
               order.order_display_id,
               expectedAmountWei,
+              idempotencyKeyBytes32
             );
             if (releaseResult.txHash) {
               releaseTxHash = releaseResult.txHash;

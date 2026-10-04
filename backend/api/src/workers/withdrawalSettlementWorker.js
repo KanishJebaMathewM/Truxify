@@ -45,16 +45,43 @@ export function calculateBackoffDelaySeconds(retryCount) {
  * have been committed at the gateway before the request timed out/errored, so
  * it is unsafe to assume nothing left the platform. These errors must NOT lead
  * to restoring reserved funds (which would double-pay the driver).
+ *
+ * The default is deliberately AMBIGUOUS. Restoring funds on an unproven failure
+ * permanently double-credits the driver, whereas treating an unproven outcome as
+ * ambiguous only delays the payout (backoff retry, then DLQ, then manual
+ * reconciliation). Both directions are handled by the same worker, but they are
+ * not symmetric in cost, so we fail toward the recoverable one.
+ *
+ * Consequently this is an allowlist of the only failures we can PROVE never
+ * reached the provider - the argument validations that run before dispatchPayout
+ * calls fetch(). Everything else is treated as ambiguous.
+ *
+ * The previous implementation inverted this and matched on error substrings, which
+ * misclassified three real cases as "safe to refund":
+ *
+ *   1. "Payout webhook did not respond within 10000ms." - the AbortSignal
+ *      timeout. Its message contains none of the ambiguity substrings
+ *      (no "timeout", no "network", no 5xx), so an indeterminate payout was
+ *      refunded, defeating the intent stated at the throw site itself.
+ *   2. "Payout webhook returned HTTP 200 but body contains no settlement_ref" -
+ *      a 2xx is positive evidence the payout was accepted. Failing to read the
+ *      reference out of the body is not evidence the payout failed.
+ *   3. HTTP 408/425/429 and any unrecognised transport/parse error.
  */
 export function isAmbiguousDispatchError(err) {
   const msg = String((err && err.message) || "").toLowerCase();
-  return (
-    /timeout|timed out|etimedout|econnreset|econnrefused|enotfound|network|socket|eai_again/.test(
-      msg,
-    ) ||
-    /[^0-9]5\d\d\b/.test(msg) ||
-    /unknown error/.test(msg)
-  );
+
+  // Raised before any request leaves the process, so no money can have moved.
+  const PROVED_NOT_DISPATCHED = [
+    /invalid withdrawal amount/,
+    /no withdrawal payout provider configured/,
+    /not supported yet/,
+  ];
+  if (PROVED_NOT_DISPATCHED.some((pattern) => pattern.test(msg))) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -64,10 +91,29 @@ export function isAmbiguousDispatchError(err) {
  * Returns true only when this caller reserved the row.
  */
 async function claimWithdrawal(withdrawalId) {
+  // This claim is the linearization point before an irreversible payout, so it
+  // must re-assert EVERY precondition that makes a payout correct, not just
+  // that the claim token is free.
+  //
+  // payout_attempted_at alone is insufficient because it is a reusable token:
+  // schedule_withdrawal_retry and admin_resolve_dlq_withdrawal's requeue path
+  // both deliberately reset it to NULL so the next sweep can re-claim. A row can
+  // therefore legitimately be pending-and-unclaimed again while a worker still
+  // holds a stale candidate snapshot, and it can leave 'pending' entirely
+  // between the candidate SELECT and this UPDATE (fail_withdrawal_tx refunds the
+  // wallet and marks the row failed without touching payout_attempted_at).
+  //
+  // Claiming such a row dispatches a real payout that settle_withdrawal_tx then
+  // rejects (it only matches rows still in 'pending'), leaving money paid out on
+  // an already-refunded withdrawal. Re-asserting status/settled_at/txn_type here
+  // makes the claim match exactly the set the candidate SELECT chose from.
   const { data, error } = await supabaseAdmin
     .from("wallet_transactions")
     .update({ payout_attempted_at: new Date().toISOString() })
     .eq("id", withdrawalId)
+    .eq("txn_type", "withdrawal")
+    .eq("status", "pending")
+    .is("settled_at", null)
     .is("payout_attempted_at", null)
     .select("id");
 

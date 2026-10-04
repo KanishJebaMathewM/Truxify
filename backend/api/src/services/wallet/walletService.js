@@ -9,7 +9,7 @@ import logger from '../../middleware/logger.js';
 export async function validateWalletAddress(walletAddress) {
     if (!walletAddress || typeof walletAddress !== 'string') {
         // eslint-disable-next-line preserve-caught-error
-        throw new (400, { error: 'Wallet address is required and must be a valid string.' });
+        throw new DomainError(400, { error: 'Wallet address is required and must be a valid string.' });
     }
     if (!ethers.isAddress(walletAddress)) {
         throw new DomainError(400, { error: `Invalid Ethereum/Polygon wallet address format: "${walletAddress}".` });

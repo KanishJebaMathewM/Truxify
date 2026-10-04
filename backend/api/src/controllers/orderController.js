@@ -18,7 +18,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   orderRepository,
   buildDepositTxFn: buildDepositTx,
   recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: submitEscrowRefund,
+  escrowRefundFn: escrowRefund,
   logger,
 });
 
@@ -66,7 +66,11 @@ async function fetchLoadOffers(req, res, next, { isEnRoute, label }) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (error) return next(new AppError(`Failed to fetch ${label}.`, 500, "INTERNAL_ERROR", { details: error.message }));
+    if (error) {
+      logger.error(`[orderController] Failed to fetch ${label}:`, error.message);
+      return next(new AppError(`Failed to fetch ${label}.`, 500, "INTERNAL_ERROR"));
+    }
+
     res.json(offers);
   } catch (err) {
     logger.error(`[orderController] Failed to fetch ${label}:`, err.message);
@@ -314,6 +318,11 @@ export const getLiveRouteGeometry = async (req, res, next) => {
     }
 
     if (!order.driver_id) {
+      // Number(null) is zero; reject absent pickup values before conversion
+      // while preserving real zero coordinates at the equator/prime meridian.
+      if (order.pickup_lat == null || order.pickup_lng == null) {
+        return next(new AppError('Order is missing pickup coordinates.', 500, "INTERNAL_ERROR"));
+      }
       const originLat = Number(order.pickup_lat);
       const originLng = Number(order.pickup_lng);
       const destLat = Number(order.drop_lat);

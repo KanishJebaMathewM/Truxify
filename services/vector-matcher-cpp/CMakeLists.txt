@@ -27,3 +27,7 @@ target_link_libraries(test_matcher PRIVATE vector_matcher)
 enable_testing()
 add_test(NAME content_length COMMAND test_content_length)
 add_test(NAME vector_matcher_packing COMMAND test_matcher)
+
+add_executable(test_search_numeric tests/test_search_numeric.cpp)
+target_link_libraries(test_search_numeric PRIVATE Threads::Threads)
+add_test(NAME vector_matcher_numeric COMMAND test_search_numeric)

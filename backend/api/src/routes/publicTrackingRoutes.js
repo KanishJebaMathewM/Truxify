@@ -4,7 +4,6 @@ import rateLimit from 'express-rate-limit';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import GpsLog from '../models/GpsLog.js';
 import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 import GpsLog from '../models/GpsLog.js';

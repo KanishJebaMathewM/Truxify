@@ -1,9 +1,46 @@
 /**
- * Returns an error message if the lat/lng pair is out of bounds, or null when valid.
+ * Validates a single coordinate component (latitude or longitude) against geographic bounds.
+ *
+ * @param {any} value - The coordinate value to validate
+ * @param {'lat'|'latitude'|'lng'|'lon'|'longitude'} [type='lat'] - Coordinate axis
+ * @param {string} [fieldName] - Field name to use in error messages
+ * @returns {{ valid: boolean, value?: number, error?: string }}
  */
-export function validateCoordinateRange(lat, lng) {
-  if (lat < -90 || lat > 90) return 'lat must be between -90 and 90';
-  if (lng < -180 || lng > 180) return 'lng must be between -180 and 180';
+export function validateCoordinate(value, type = 'lat', fieldName = type) {
+  if (value === null || value === undefined) {
+    return { valid: false, error: `${fieldName} is required` };
+  }
+  if (typeof value === 'boolean' || Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return { valid: false, error: `${fieldName} must be a valid number` };
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return { valid: false, error: `${fieldName} cannot be empty` };
+  }
+
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return { valid: false, error: `${fieldName} must be a finite number` };
+  }
+
+  const isLat = type === 'lat' || type === 'latitude';
+  const min = isLat ? -90 : -180;
+  const max = isLat ? 90 : 180;
+
+  if (num < min || num > max) {
+    return { valid: false, error: `${fieldName} must be between ${min} and ${max}` };
+  }
+
+  return { valid: true, value: num };
+}
+
+/**
+ * Returns an error message if the lat/lng pair is out of bounds or invalid, or null when valid.
+ */
+export function validateCoordinateRange(lat, lng, latName = 'lat', lngName = 'lng') {
+  const latRes = validateCoordinate(lat, 'lat', latName);
+  if (!latRes.valid) return latRes.error;
+  const lngRes = validateCoordinate(lng, 'lng', lngName);
+  if (!lngRes.valid) return lngRes.error;
   return null;
 }
 
@@ -144,6 +181,7 @@ export function filterCoordinatesByRadius(candidates, center, radiusKm, opts = {
 }
 
 export default {
+  validateCoordinate,
   validateCoordinateRange,
   haversineDistance,
   getBoundingBox,

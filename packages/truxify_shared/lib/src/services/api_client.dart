@@ -111,12 +111,23 @@ class ApiClient {
 
   static String _getBaseUrl(String? overrideUrl) {
     final url = overrideUrl ?? defaultBaseUrl;
-    if (!url.startsWith('https://')) {
+
+    if (kReleaseMode && !url.startsWith('https://')) {
       throw StateError(
-        'TRUXIFY_API_BASE_URL must use the https:// scheme; '
-        'cleartext http:// is not allowed and would expose bearer tokens: $url',
+        'TRUXIFY_API_BASE_URL must use the https:// scheme in release mode: $url',
       );
     }
+
+    if (!kReleaseMode &&
+        !url.startsWith('https://') &&
+        !url.startsWith('http://localhost:') &&
+        !url.startsWith('http://10.0.2.2:')) {
+      throw StateError(
+        'Development API URL must use https://, '
+        'http://localhost:<port>, or http://10.0.2.2:<port>: $url',
+      );
+    }
+
     return url;
   }
 

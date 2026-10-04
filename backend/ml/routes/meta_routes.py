@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
@@ -31,6 +31,12 @@ class FewShotRequest(BaseModel):
     support_y: List[float]
     query_x: List[List[float]]
     steps: int = 5
+
+    @model_validator(mode="after")
+    def validate_support_rows(self):
+        if len(self.support_x) != len(self.support_y):
+            raise ValueError("Support labels must match support input rows")
+        return self
 
 class FewShotClassifyRequest(BaseModel):
     support_set: Dict[str, List[List[float]]]

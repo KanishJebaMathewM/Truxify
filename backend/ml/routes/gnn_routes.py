@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import logging
 
+from app.execution import run_inference
 from gnn.models import GraphNetworkBuilder, RouteOptimizer
 import os
 
@@ -172,20 +173,28 @@ async def build_graph(
 
     try:
         active_builder = _resolve_builder(graph_builder)
-        graph = active_builder.build_road_network(
-            [node.dict() for node in nodes],
-            [edge.dict() for edge in edges]
-        )
+
+        def native_operation():
+            graph = active_builder.build_road_network(
+                [node.dict() for node in nodes],
+                [edge.dict() for edge in edges]
+            )
+
+            return {
+                "nodes": len(graph.nodes),
+                "edges": len(graph.edges),
+                "is_connected": nx.is_weakly_connected(graph),
+            }
+
+        summary = await run_inference(native_operation)
 
         return {
             'success': True,
-            'data': {
-                'nodes': len(graph.nodes),
-                'edges': len(graph.edges),
-                'is_connected': nx.is_weakly_connected(graph)
-            },
+            'data': summary,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Graph building failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -204,23 +213,28 @@ async def optimize_route(
         active_builder = _resolve_builder(graph_builder)
         active_optimizer = _resolve_optimizer(route_optimizer)
 
-        graph = active_builder.build_road_network(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
+        def native_operation():
+            graph = active_builder.build_road_network(
+                [node.dict() for node in request.nodes],
+                [edge.dict() for edge in request.edges]
+            )
 
-        try:
-            graph_data = active_builder.get_pytorch_data(graph)
-        except TypeError:
-            graph_data = active_builder.get_pytorch_data()
+            try:
+                graph_data = active_builder.get_pytorch_data(graph)
+            except TypeError:
+                graph_data = active_builder.get_pytorch_data()
 
-        result = active_optimizer.optimize_route(
-            request.start_node,
-            request.end_node,
-            graph_data,
-            request.objectives,
-            request.constraints
-        )
+            result = active_optimizer.optimize_route(
+                request.start_node,
+                request.end_node,
+                graph_data,
+                request.objectives,
+                request.constraints
+            )
+
+            return result
+
+        result = await run_inference(native_operation)
 
         if result:
             return {
@@ -234,6 +248,8 @@ async def optimize_route(
                 'error': 'Route optimization failed',
                 'timestamp': datetime.now().isoformat()
             }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Route optimization failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -252,33 +268,38 @@ async def multi_objective_optimize(
         active_builder = _resolve_builder(graph_builder)
         active_optimizer = _resolve_optimizer(route_optimizer)
 
-        graph = active_builder.build_road_network(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
-
-        try:
-            graph_data = active_builder.get_pytorch_data(graph)
-        except TypeError:
-            graph_data = active_builder.get_pytorch_data()
-
-        try:
-            result = _multi_objective_optimization(
-                request.start_node,
-                request.end_node,
-                graph_data,
-                objectives=request.objectives,
-                constraints=request.constraints,
-                route_optimizer=active_optimizer,
+        def native_operation():
+            graph = active_builder.build_road_network(
+                [node.dict() for node in request.nodes],
+                [edge.dict() for edge in request.edges]
             )
-        except TypeError:
-            result = _multi_objective_optimization(
-                request.start_node,
-                request.end_node,
-                graph_data,
-                objectives=request.objectives,
-                constraints=request.constraints,
-            )
+
+            try:
+                graph_data = active_builder.get_pytorch_data(graph)
+            except TypeError:
+                graph_data = active_builder.get_pytorch_data()
+
+            try:
+                result = _multi_objective_optimization(
+                    request.start_node,
+                    request.end_node,
+                    graph_data,
+                    objectives=request.objectives,
+                    constraints=request.constraints,
+                    route_optimizer=active_optimizer,
+                )
+            except TypeError:
+                result = _multi_objective_optimization(
+                    request.start_node,
+                    request.end_node,
+                    graph_data,
+                    objectives=request.objectives,
+                    constraints=request.constraints,
+                )
+
+            return result
+
+        result = await run_inference(native_operation)
 
         if result:
             return {
@@ -292,6 +313,8 @@ async def multi_objective_optimize(
                 'error': 'Multi-objective route optimization failed',
                 'timestamp': datetime.now().isoformat()
             }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Multi-objective optimization failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -337,34 +360,40 @@ async def update_route(
     route_optimizer: RouteOptimizer = Depends(get_route_optimizer),
 ):
     """Update route with real-time traffic and reroute over the updated network."""
+    validate_route_objectives(request.objectives)
+    start = request.route[0].get('from') if request.route else None
+    end = request.route[-1].get('to') if request.route else None
+    if start is None or end is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Route must contain at least one edge with 'from' and 'to' fields"
+        )
+
     try:
         active_builder = _resolve_builder(graph_builder)
         active_optimizer = _resolve_optimizer(route_optimizer)
 
-        graph = active_builder.build_road_network(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
-        try:
-            graph_data = active_builder.get_pytorch_data(graph)
-        except TypeError:
-            graph_data = active_builder.get_pytorch_data()
+        def native_operation():
+            graph = active_builder.build_road_network(
+                [node.dict() for node in request.nodes],
+                [edge.dict() for edge in request.edges]
+            )
+            try:
+                graph_data = active_builder.get_pytorch_data(graph)
+            except TypeError:
+                graph_data = active_builder.get_pytorch_data()
 
-        start = request.route[0].get('from') if request.route else None
-        end = request.route[-1].get('to') if request.route else None
-        if start is None or end is None:
-            raise HTTPException(
-                status_code=422,
-                detail="Route must contain at least one edge with 'from' and 'to' fields"
+            updated_route = active_optimizer.real_time_update(
+                request.route,
+                request.traffic_data,
+                graph_data=graph_data,
+                objectives=request.objectives,
+                constraints=request.constraints
             )
 
-        updated_route = active_optimizer.real_time_update(
-            request.route,
-            request.traffic_data,
-            graph_data=graph_data,
-            objectives=request.objectives,
-            constraints=request.constraints
-        )
+            return updated_route
+
+        updated_route = await run_inference(native_operation)
 
         return {
             'success': True,

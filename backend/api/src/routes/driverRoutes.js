@@ -1217,7 +1217,7 @@ router.patch(
 
       res.json({ point: updated });
     } catch (err) {
-      logger.error('Driver route point claim error:', err);
+      logger.error({ event: 'DRIVER_ROUTE_POINT_CLAIM_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver route point claim error');
       res.status(500).json({ error: 'Internal Server Error' });
     }
   },
@@ -1301,7 +1301,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
       pagination
     });
   } catch (err) {
-    logger.error('Driver bids fetch error:', err);
+    logger.error({ event: 'DRIVER_BIDS_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver bids fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1387,7 +1387,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver
     });
 
   } catch (err) {
-    logger.error('Driver wallet withdrawal error:', err);
+    logger.error({ event: 'DRIVER_WALLET_WITHDRAWAL_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver wallet withdrawal error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1491,7 +1491,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
           return res.status(200).json(JSON.parse(cached));
         }
       } catch (cacheErr) {
-        logger.error(`[reputation] Redis read error for driver ${driverId}: ${cacheErr.message}`);
+        logger.error({ event: 'DRIVER_REPUTATION_REDIS_READ_ERROR', requestId: req.requestId || req.id, driverId, error: cacheErr?.message ?? String(cacheErr) }, 'Reputation redis read error');
       }
     }
 
@@ -1503,7 +1503,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
       .maybeSingle();
 
     if (error) {
-      logger.error(`[reputation] Supabase query error for driver ${driverId}: ${error.message}`);
+      logger.error({ event: 'DRIVER_REPUTATION_QUERY_ERROR', requestId: req.requestId || req.id, driverId, error: error?.message ?? String(error) }, 'Reputation supabase query error');
       return res.status(500).json({ error: 'Failed to fetch driver details.', details: error.message });
     }
 
@@ -1535,14 +1535,14 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
           30
         );
       } catch (cacheErr) {
-        logger.error(`[reputation] Redis write error for driver ${driverId}: ${cacheErr.message}`);
+        logger.error({ event: 'DRIVER_REPUTATION_REDIS_WRITE_ERROR', requestId: req.requestId || req.id, driverId, error: cacheErr?.message ?? String(cacheErr) }, 'Reputation redis write error');
       }
     }
 
     return res.status(200).json(responseData);
 
   } catch (err) {
-    logger.error(`[reputation] Unexpected error retrieving reputation for driver ${driverId}: ${err.message}`);
+    logger.error({ event: 'DRIVER_REPUTATION_UNEXPECTED_ERROR', requestId: req.requestId || req.id, driverId, error: err?.message ?? String(err) }, 'Unexpected reputation error');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1785,7 +1785,7 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     }
     return res.status(200).json(status);
   } catch (err) {
-    logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'WEIGH_STATION_BYPASS_STATUS_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error getting bypass status');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1847,7 +1847,7 @@ router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authe
     const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
     return res.status(200).json(status);
   } catch (err) {
-    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'WEIGH_STATION_SYNC_WEIGHT_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error syncing internal weight');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1928,7 +1928,7 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, 
 
     res.json({ optimized_route: optimizedTasks });
   } catch (err) {
-    logger.error(`[LTL Route] Error optimizing route for driver ${req.user.id}: ${err.message}`);
+    logger.error({ event: 'LTL_ROUTE_OPTIMIZE_ERROR', requestId: req.requestId || req.id, driverId: req.user.id, error: err?.message ?? String(err) }, 'Error optimizing route');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2004,7 +2004,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
       documents: docMap
     });
   } catch (err) {
-    logger.error('Driver profile fetch error:', err);
+    logger.error({ event: 'DRIVER_PROFILE_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver profile fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2032,7 +2032,7 @@ router.patch('/availability', authenticate, userLimiter, async (req, res) => {
       isOnline: details?.is_online || false
     });
   } catch (err) {
-    logger.error('Driver availability update error:', err);
+    logger.error({ event: 'DRIVER_AVAILABILITY_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver availability update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2111,7 +2111,7 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
       truck: truckData
     });
   } catch (err) {
-    logger.error('Driver truck update error:', err);
+    logger.error({ event: 'DRIVER_TRUCK_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver truck update error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

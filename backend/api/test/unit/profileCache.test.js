@@ -44,6 +44,11 @@ describe('profileCache - Validation & Null Guards', () => {
       expect(isValidCachedProfile(12345, validActiveProfile)).toBe(false);
     });
 
+// === Spec 8 test ===
+describe('isValidProfile', () => {
+  it('accepts valid profile with required fields', () => {
+    expect(isValidProfile({ id: 'a', createdAt: '2026-01-01T00:00:00Z' })).toBe(true);
+  });
     it('returns true for valid active profile with matching UID', () => {
       expect(isValidCachedProfile(validUid, validActiveProfile)).toBe(true);
     });
@@ -102,6 +107,13 @@ describe('profileCache - Validation & Null Guards', () => {
       expect(isValidCachedSupabaseProfile(validUserId, [])).toBe(false);
     });
 
+  it('rejects when createdAt is not a valid ISO date string', () => {
+    expect(isValidProfile({ id: 'user-123', createdAt: 'bad' })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: '' })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: '2026-13-01T00:00:00Z' })).toBe(false); // invalid month
+    expect(isValidProfile({ id: 'user-123', createdAt: null })).toBe(false);
+    expect(isValidProfile({ id: 'user-123', createdAt: undefined })).toBe(false);
+  });
     it('returns true for valid active Supabase profile with matching ID', () => {
       expect(isValidCachedSupabaseProfile(validUserId, validSbProfile)).toBe(true);
     });

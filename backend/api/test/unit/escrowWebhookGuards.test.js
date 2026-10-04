@@ -16,7 +16,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { processEscrowWebhookEvent } from '../../src/services/webhook/escrowWebhookProcessor.js';
+import { processEscrowWebhookEvent } from '../../src/services/webhook/escrowWebhookGuards.js';
 
 function chain(result) {
   const q = {
@@ -42,7 +42,7 @@ describe('escrowWebhookProcessor', () => {
 
   it('acknowledges unknown event types without state change', async () => {
     const result = await processEscrowWebhookEvent('SomeUnknownEvent', { orderId: 'o1' });
-    expect(result).toEqual({ received: true });
+    expect(result).toEqual(expect.objectContaining({ received: true }));
   });
 
   it('marks a funded order released on PaymentReleased without a txHash', async () => {

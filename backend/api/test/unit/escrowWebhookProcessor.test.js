@@ -90,11 +90,16 @@ class MockQuery {
   update(payload) {
     this.hasUpdated = true;
     dbState.updates.push({ table: this.table, payload });
+    mockQuery.update(payload);
     return this;
   }
 
   maybeSingle() {
-    if (this.selectCols.includes('escrow_amount_wei')) return Promise.resolve(dbState.orderResult);
+    if (this.selectCols.includes('escrow_amount_wei')) {
+      const custom = mockQuery.maybeSingle();
+      if (custom !== undefined) return custom;
+      return Promise.resolve(dbState.orderResult);
+    }
     if (this.selectCols.includes('polygon_wallet_address')) return Promise.resolve(dbState.walletResult);
     return Promise.resolve(dbState.replayResult);
   }
@@ -119,6 +124,7 @@ const mockQuery = {
 
 const mockSupabaseAdmin = {
   from: vi.fn((table) => new MockQuery(table)),
+  rpc: vi.fn(async () => ({ error: null })),
 };
 
 vi.mock('../../src/config/db.js', () => ({
@@ -162,9 +168,13 @@ function updatePayloads() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockQuery.maybeSingle.mockReset();
   resetDbState();
   verifierMock.verifyEscrow.mockResolvedValue({ ok: true, txHash: TX, blockNumber: 195, confirmations: 6 });
   verifierMock.verifyWithdrawal.mockResolvedValue({ ok: true, txHash: TX, blockNumber: 195, confirmations: 6 });
+  process.env.POLYGON_RPC_URL = 'https://polygon-rpc.example';
+  process.env.ESCROW_CONTRACT_ADDRESS = '0xEscrowContract000000000000000000000001';
+  mockGetTransactionReceipt.mockResolvedValue({ status: 1, to: '0xEscrowContract000000000000000000000001', logs: [] });
 });
 
 describe('processEscrowWebhookEvent', () => {
@@ -453,6 +463,11 @@ describe('processEscrowWebhookEvent — WithdrawalReady / Withdrawn', () => {
 
   it('rejects a withdrawal webhook without a well-formed transaction hash (permanent)', async () => {
     dbState.orderResult = { data: makeOrder({ order_display_id: '#OD6' }), error: null };
+    await expect(
+      processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD6' })
+    ).rejects.toMatchObject({ code: 'INVALID_TX_HASH', retryable: false });
+    expect(verifierMock.verifyWithdrawal).not.toHaveBeenCalled();
+    expect(dbState.updates).toHaveLength(0);
   });
   it('reconciles the wallet ledger exactly once for a duplicate release (no infinite DLQ re-entry, #12154)', async () => {
     // Released-before-reconcile ordering: a release Webhook re-delivered after
@@ -491,8 +506,8 @@ describe('processEscrowWebhookEvent — WithdrawalReady / Withdrawn', () => {
     mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
 
     await expect(
-      processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD6' })
-    ).rejects.toMatchObject({ code: 'INVALID_TX_HASH', retryable: false });
+      processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD7' })
+    ).resolves.toEqual({ received: true });
 
     expect(verifierMock.verifyWithdrawal).not.toHaveBeenCalled();
     expect(dbState.updates).toHaveLength(0);
@@ -531,17 +546,19 @@ describe('regression: wallet ledger must not multiply the net credit across driv
     mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
 
     await expect(
-      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: '0xabc' })
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: TX })
     ).resolves.toEqual({ received: true });
 
     // The on-chain release transfers a single net amount. The wallet ledger must
     // be reconciled exactly once for the order's driver — never once per grouped
     // driver, which would over-credit by (n-1) × net_amount.
-    const walletUpdateIndexes = mockSupabaseAdmin.from.mock.calls
-      .map(([table], i) => (table === 'wallet_transactions' ? i : -1))
-      .filter((i) => i !== -1);
-    expect(walletUpdateIndexes).toHaveLength(1);
-    expect(mockQuery.update.mock.calls[walletUpdateIndexes[0]][0]).toEqual(
+    const walletCalls = mockSupabaseAdmin.from.mock.calls.filter(
+      ([table]) => table === 'wallet_transactions'
+    );
+    expect(walletCalls).toHaveLength(1);
+    const walletTxUpdate = dbState.updates.find((u) => u.table === 'wallet_transactions');
+    expect(walletTxUpdate).toBeDefined();
+    expect(walletTxUpdate.payload).toEqual(
       expect.objectContaining({ status: 'confirmed' })
     );
   });

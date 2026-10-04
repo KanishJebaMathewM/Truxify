@@ -907,10 +907,11 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
   const limit = Math.min(100, Math.max(1, parsedLimit));
 
   try {
+    const userClient = createUserClient(req.token);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = supabase
+    let query = userClient
       .from('trips')
       .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id);
@@ -933,11 +934,11 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
     let ratingsMap = {};
     if (orderDisplayIds.length > 0) {
       const [ordersRes, ratingsRes] = await Promise.all([
-        supabase
+        userClient
           .from('orders')
           .select('order_display_id, escrow_status')
           .in('order_display_id', orderDisplayIds),
-        supabase
+        userClient
           .from('ratings')
           .select('order_display_id, stars')
           .in('order_display_id', orderDisplayIds)
@@ -972,7 +973,7 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       pagination
     });
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
+    logger.error({ event: 'DRIVER_TRIPS_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver trips fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1006,7 +1007,8 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
   const { tripDisplayId } = req.params;
 
   try {
-    const { data: trip, error } = await supabase
+    const userClient = createUserClient(req.token);
+    const { data: trip, error } = await userClient
       .from('trips')
       .select('*')
       .eq('trip_display_id', tripDisplayId)
@@ -1022,7 +1024,7 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
 
     res.json(trip);
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Driver single trip fetch error:', err);
+    logger.error({ event: 'DRIVER_TRIP_DETAIL_FETCH_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver single trip fetch error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

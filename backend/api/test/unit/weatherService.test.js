@@ -1,4 +1,3 @@
-```javascript
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WeatherService } from '../../src/services/weatherService.js';
 
@@ -387,4 +386,3 @@ describe('WeatherService', () => {
     });
   });
 });
-```

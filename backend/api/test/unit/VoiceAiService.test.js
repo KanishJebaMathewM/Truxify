@@ -1,39 +1,78 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../../src/config/db.js', () => ({
-  redisClient: global.mockRedis,
-  upstashRedisClient: global.mockRedis,
-  }));
+vi.mock('openai', () => ({
+  OpenAI: vi.fn(),
+}));
 
 describe('VoiceAiService', () => {
-  let VoiceAiService;
+  const OLD_KEY = process.env.OPENAI_API_KEY;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    VoiceAiService = (await import('../../src/services/voice/VoiceAiService.js')).default;
+    delete process.env.OPENAI_API_KEY;
   });
 
-  describe('processVoiceCommand', () => {
-    it('parses accept command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('accept the bid');
-      expect(result).toHaveProperty('intent');
-      expect(result).toHaveProperty('entities');
-    });
+  afterEach(() => {
+    if (OLD_KEY === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = OLD_KEY;
+    }
+  });
 
-    it('parses reject command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('reject the order');
-      expect(result.intent).toMatch(/reject|cancel/);
-    });
+  it('constructs without credentials and leaves the client unset', async () => {
+    const { VoiceAiService } = await import(
+      '../../src/services/voice/VoiceAiService.js'
+    );
 
-    it('parses navigate command correctly', async () => {
-      const result = await VoiceAiService.processVoiceCommand('navigate to the pickup');
-      expect(result.intent).toMatch(/navigate|location/);
-    });
+    const service = new VoiceAiService();
 
-    it('returns null intent for unrecognized command', async () => {
-      const result = await VoiceAiService.processVoiceCommand('asdfghjkl random text');
-      expect(result.intent).toBeNull();
-    });
+    expect(service.openai).toBeNull();
+  });
+
+  it('builds the client when a key is configured', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    const { OpenAI } = await import('openai');
+    const { VoiceAiService } = await import(
+      '../../src/services/voice/VoiceAiService.js'
+    );
+
+    const service = new VoiceAiService();
+
+    expect(OpenAI).toHaveBeenCalledWith({ apiKey: 'test-key' });
+    expect(service.openai).toBeDefined();
+  });
+
+  it('rejects voice queries without credentials with a clear error', async () => {
+    const path = await import('node:path');
+    const { VoiceAiService } = await import(
+      '../../src/services/voice/VoiceAiService.js'
+    );
+
+    const service = new VoiceAiService();
+    const insideUploads = path.resolve(
+      process.cwd(),
+      'uploads',
+      'voice',
+      'note.wav'
+    );
+
+    await expect(service.processVoiceQuery(insideUploads, 'en')).rejects.toThrow(
+      'Voice AI is not configured'
+    );
+  });
+
+  it('rejects paths escaping the uploads directory', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    const { VoiceAiService } = await import(
+      '../../src/services/voice/VoiceAiService.js'
+    );
+
+    const service = new VoiceAiService();
+
+    await expect(
+      service.processVoiceQuery('/etc/passwd', 'en')
+    ).rejects.toThrow('Invalid file path');
   });
 });

@@ -30,9 +30,14 @@ const TTS_MAX_RESPONSE_CHARS = loadPositiveIntegerEnv(
 
 class VoiceAiService {
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    // Defer client creation until credentials exist: constructing the
+    // service must never throw, so module load and routes work in
+    // environments without a key and calls fail with a clear error.
+    this.openai = process.env.OPENAI_API_KEY
+      ? new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+        })
+      : null;
     this.elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
     
     // Voice IDs for different languages
@@ -68,6 +73,10 @@ class VoiceAiService {
     }
 
     try {
+      if (!this.openai) {
+        throw new Error('Voice AI is not configured: OPENAI_API_KEY is missing.');
+      }
+
       // 1. Transcribe Audio using Whisper
       logger.info(`Starting transcription for language: ${languageName} (${language})`);
       const transcription = await this.openai.audio.transcriptions.create({
@@ -143,4 +152,5 @@ class VoiceAiService {
   }
 }
 
+export { VoiceAiService };
 export default new VoiceAiService();

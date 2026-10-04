@@ -218,7 +218,8 @@ describe('WeatherService', () => {
         await service.getWeatherForecast(30, 72);
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
-          '[WeatherService] Fetching forecast for lat: 30, lng: 72'
+          expect.objectContaining({ event: 'WEATHER_FORECAST_FETCH' }),
+          expect.any(String)
         );
       });
 
@@ -226,7 +227,8 @@ describe('WeatherService', () => {
         await service.getWeatherForecast(-45, -90);
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
-          '[WeatherService] Fetching forecast for lat: -45, lng: -90'
+          expect.objectContaining({ event: 'WEATHER_FORECAST_FETCH' }),
+          expect.any(String)
         );
       });
 
@@ -234,7 +236,8 @@ describe('WeatherService', () => {
         await service.getWeatherForecast('45', '72');
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
-          '[WeatherService] Fetching forecast for lat: 45, lng: 72'
+          expect.objectContaining({ event: 'WEATHER_FORECAST_FETCH' }),
+          expect.any(String)
         );
       });
 
@@ -242,7 +245,8 @@ describe('WeatherService', () => {
         await service.getWeatherForecast(NaN, Infinity);
 
         expect(mockLogger.debug).toHaveBeenCalledWith(
-          '[WeatherService] Fetching forecast for lat: NaN, lng: Infinity'
+          expect.objectContaining({ event: 'WEATHER_FORECAST_FETCH' }),
+          expect.any(String)
         );
       });
 

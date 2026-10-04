@@ -104,12 +104,12 @@ async function loadActiveDevices(userId) {
       .eq('user_id', userId)
       .eq('is_active', true);
     if (error) {
-      logger.error(`[FCM] Failed to load active devices for user ${userId}: ${error.message}`);
+      logger.error({ event: 'FCM_DEVICES_LOAD_ERROR', userId, error: error?.message ?? String(error) }, 'Failed to load active devices');
       return [];
     }
     return Array.isArray(data) ? data : [];
   } catch (err) {
-    logger.error(`[FCM] Failed to load active devices for user ${userId}: ${err.message}`);
+    logger.error({ event: 'FCM_DEVICES_LOAD_ERROR', userId, error: err?.message ?? String(err) }, 'Failed to load active devices');
     return [];
   }
 }
@@ -195,13 +195,13 @@ async function deactivateInvalidDevices(deviceIds, userId, invalidatedTokens) {
         })
         .in('id', deviceIds);
       if (error) {
-        logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${error.message}`);
+        logger.error({ event: 'FCM_DEVICES_DEACTIVATE_ERROR', userId, error: error?.message ?? String(error) }, 'Failed to deactivate invalid devices');
       } else {
         deactivated = deviceIds.length;
-        logger.info(`[FCM] Deactivated ${deactivated} invalid device(s) for user ${userId}.`);
+        logger.info({ event: 'FCM_DEVICES_DEACTIVATED', userId, deactivated }, 'Deactivated invalid devices');
       }
     } catch (dbErr) {
-      logger.error(`[FCM] Failed to deactivate invalid devices for user ${userId}: ${dbErr.message}`);
+      logger.error({ event: 'FCM_DEVICES_DEACTIVATE_ERROR', userId, error: dbErr?.message ?? String(dbErr) }, 'Failed to deactivate invalid devices');
     }
   }
 
@@ -216,7 +216,7 @@ async function deactivateInvalidDevices(deviceIds, userId, invalidatedTokens) {
         .eq('id', userId)
         .in('fcm_token', invalidatedTokens);
     } catch (dbErr) {
-      logger.error(`[FCM] Failed to clear invalid profile FCM token for user ${userId}: ${dbErr.message}`);
+      logger.error({ event: 'FCM_PROFILE_TOKEN_CLEAR_ERROR', userId, error: dbErr?.message ?? String(dbErr) }, 'Failed to clear invalid profile FCM token');
     }
   }
 
@@ -235,7 +235,7 @@ async function touchDevicesLastSeen(deviceIds) {
       .update({ last_seen: new Date().toISOString() })
       .in('id', deviceIds);
   } catch (dbErr) {
-    logger.warn(`[FCM] Failed to update device last_seen: ${dbErr.message}`);
+    logger.warn({ event: 'FCM_DEVICES_LAST_SEEN_ERROR', error: dbErr?.message ?? String(dbErr) }, 'Failed to update device last seen');
   }
 }
 

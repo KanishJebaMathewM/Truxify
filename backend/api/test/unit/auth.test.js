@@ -7,6 +7,10 @@ describe('authenticate middleware - non bypass flow', () => {
     vi.resetModules();
   });
 
+  afterEach(() => {
+    delete process.env.BYPASS_AUTH;
+  });
+
   it('returns 401 when authorization header missing', async () => {
     vi.doMock('../../src/config/db.js', () => ({
       createUserClient: () => null,
@@ -20,6 +24,14 @@ describe('authenticate middleware - non bypass flow', () => {
         warn: mockLoggerWarn,
         error: vi.fn(),
         info: vi.fn(),
+        debug: vi.fn(),
+        trace: vi.fn(),
+        child: vi.fn(() => ({
+          warn: vi.fn(),
+          error: vi.fn(),
+          info: vi.fn(),
+          debug: vi.fn(),
+        })),
       },
     }));
 
@@ -118,19 +130,18 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'user-1',
-                    firebase_uid: 'firebase-user-id',
-                    role: 'driver',
-                    full_name: 'John Supa',
-                    phone: '9999999999',
-                  },
-                  error: null,
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: {
+                  id: 'user-1',
+                  firebase_uid: 'firebase-user-id',
+                  role: 'driver',
+                  full_name: 'John Supa',
+                  phone: '9999999999',
+                  is_active: true,
+                },
+                error: null,
+              }),
           }),
         }),
       }),
@@ -235,13 +246,11 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: null,
-                  error: null,
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: null,
+                error: null,
+              }),
           }),
         }),
       }),
@@ -284,15 +293,13 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: null,
-                  error: {
-                    message: 'db failure',
-                  },
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: null,
+                error: {
+                  message: 'db failure',
+                },
+              }),
           }),
         }),
       }),
@@ -335,19 +342,18 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'user-1',
-                    firebase_uid: 'firebase-user',
-                    role: 'driver',
-                    full_name: 'John',
-                    phone: '9999999999',
-                  },
-                  error: null,
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: {
+                  id: 'user-1',
+                  firebase_uid: 'firebase-user',
+                  role: 'driver',
+                  full_name: 'John',
+                  phone: '9999999999',
+                  is_active: true,
+                },
+                error: null,
+              }),
           }),
         }),
       }),
@@ -630,7 +636,10 @@ describe('requireRole middleware', () => {
     middleware(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Unauthorized: Authentication required.',
+      hint: 'Please provide a valid authentication token to access this resource.',
+    });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -654,7 +663,10 @@ describe('requireRole middleware', () => {
 
       expect(() => middleware(req, res, next)).not.toThrow();
       expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+      expect(res.json).toHaveBeenCalledWith({
+      error: 'Unauthorized: Authentication required.',
+      hint: 'Please provide a valid authentication token to access this resource.',
+    });
       expect(next).not.toHaveBeenCalled();
     }
   });
@@ -771,10 +783,16 @@ describe('authenticate middleware - Redis caching', () => {
       isActive: true
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(JSON.stringify(cachedUser)),
-      set: vi.fn(),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedProfile: vi.fn().mockResolvedValue(cachedUser),
+        setCachedProfile: vi.fn(),
+        invalidateCachedProfile: vi.fn(),
+        isValidCachedProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const firebaseAdminMock = {
       auth: () => ({
@@ -792,8 +810,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { authenticate } = await import('../../src/middleware/auth.js');
 
@@ -812,7 +830,7 @@ describe('authenticate middleware - Redis caching', () => {
 
     await authenticate(req, res, next);
 
-    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:cached-firebase-uid');
+    expect(profileCacheMock.getCachedProfile).toHaveBeenCalledWith('cached-firebase-uid');
     expect(supabaseMock.from).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual(cachedUser);
@@ -823,11 +841,16 @@ describe('authenticate middleware - Redis caching', () => {
       fullName: 'Corrupted User',
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(JSON.stringify(invalidCachedUser)),
-      set: vi.fn(),
-      del: vi.fn().mockResolvedValue(1),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedProfile: vi.fn().mockResolvedValue(invalidCachedUser),
+        setCachedProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedProfile: vi.fn().mockResolvedValue(),
+        isValidCachedProfile: vi.fn().mockReturnValue(false),
+      };
+    })();
 
     const firebaseAdminMock = {
       auth: () => ({
@@ -842,16 +865,15 @@ describe('authenticate middleware - Redis caching', () => {
       firebase_uid: 'corrupted-firebase-uid',
       role: 'customer',
       full_name: 'Database User',
-      phone: '+9876543210'
+      phone: '+9876543210',
+      is_active: true
     };
 
     const supabaseMock = {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
           }),
         }),
       }),
@@ -861,8 +883,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { authenticate } = await import('../../src/middleware/auth.js');
 
@@ -881,16 +903,22 @@ describe('authenticate middleware - Redis caching', () => {
 
     await authenticate(req, res, next);
 
-    expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:corrupted-firebase-uid');
+    expect(profileCacheMock.invalidateCachedProfile).toHaveBeenCalledWith('corrupted-firebase-uid');
     expect(next).toHaveBeenCalled();
     expect(req.user.id).toBe('db-user-999');
   });
 
   it('caches tombstone with TOMBSTONE_TTL_SECONDS when profile query returns no results', async () => {
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(null),
-      set: vi.fn().mockResolvedValue('OK'),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedProfile: vi.fn().mockResolvedValue(null),
+        setCachedProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedProfile: vi.fn().mockResolvedValue(),
+        isValidCachedProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const firebaseAdminMock = {
       auth: () => ({
@@ -904,9 +932,7 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: null, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: null, error: null }),
           }),
         }),
       }),
@@ -916,8 +942,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { TOMBSTONE_TTL_SECONDS } = await import('../../src/lib/profileCache.js');
     const { authenticate } = await import('../../src/middleware/auth.js');
@@ -938,10 +964,9 @@ describe('authenticate middleware - Redis caching', () => {
     await authenticate(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(403);
-    expect(redisClientMock.set).toHaveBeenCalledWith(
-      'user:profile:nonexistent-firebase-uid',
-      JSON.stringify({ isActive: false }),
-      'EX',
+    expect(profileCacheMock.setCachedProfile).toHaveBeenCalledWith(
+      'nonexistent-firebase-uid',
+      { isActive: false },
       TOMBSTONE_TTL_SECONDS
     );
   });
@@ -952,13 +977,20 @@ describe('authenticate middleware - Redis caching', () => {
       firebase_uid: 'miss-firebase-uid',
       role: 'driver',
       full_name: 'Database User',
-      phone: '+9876543210'
+      phone: '+9876543210',
+      is_active: true
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(null),
-      set: vi.fn().mockResolvedValue('OK'),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedProfile: vi.fn().mockResolvedValue(null),
+        setCachedProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedProfile: vi.fn().mockResolvedValue(),
+        isValidCachedProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const firebaseAdminMock = {
       auth: () => ({
@@ -972,13 +1004,11 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: dbProfile,
-                  error: null,
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: dbProfile,
+                error: null,
+              }),
           }),
         }),
       }),
@@ -988,10 +1018,9 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
-    const { TTL_SECONDS } = await import('../../src/lib/profileCache.js');
     const { authenticate } = await import('../../src/middleware/auth.js');
 
     const req = {
@@ -1009,20 +1038,15 @@ describe('authenticate middleware - Redis caching', () => {
 
     await authenticate(req, res, next);
 
-    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:miss-firebase-uid');
-    expect(redisClientMock.set).toHaveBeenCalledWith(
-      'user:profile:miss-firebase-uid',
-      JSON.stringify({
-        id: dbProfile.id,
-        uid: dbProfile.firebase_uid,
-        role: dbProfile.role,
-        fullName: dbProfile.full_name,
-        phone: dbProfile.phone,
-        isActive: true
-      }),
-      'EX',
-      TTL_SECONDS
-    );
+    expect(profileCacheMock.getCachedProfile).toHaveBeenCalledWith('miss-firebase-uid');
+    expect(profileCacheMock.setCachedProfile).toHaveBeenCalledWith('miss-firebase-uid', {
+      id: dbProfile.id,
+      uid: dbProfile.firebase_uid,
+      role: dbProfile.role,
+      fullName: dbProfile.full_name,
+      phone: dbProfile.phone,
+      isActive: true
+    });
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual({
       id: dbProfile.id,
@@ -1040,13 +1064,20 @@ describe('authenticate middleware - Redis caching', () => {
       firebase_uid: 'error-firebase-uid',
       role: 'customer',
       full_name: 'Resilient User',
-      phone: '+1111111111'
+      phone: '+1111111111',
+      is_active: true
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockRejectedValue(new Error('Redis connection lost')),
-      set: vi.fn(),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedProfile: vi.fn().mockRejectedValue(new Error('Redis connection lost')),
+        setCachedProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedProfile: vi.fn().mockResolvedValue(),
+        isValidCachedProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const firebaseAdminMock = {
       auth: () => ({
@@ -1060,13 +1091,11 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: dbProfile,
-                  error: null,
-                }),
-            }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: dbProfile,
+                error: null,
+              }),
           }),
         }),
       }),
@@ -1076,8 +1105,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { authenticate } = await import('../../src/middleware/auth.js');
 
@@ -1094,16 +1123,9 @@ describe('authenticate middleware - Redis caching', () => {
 
     const next = vi.fn();
 
-    // Temporarily capture and ignore console.error to avoid test noise
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await authenticate(req, res, next);
 
-    try {
-      await authenticate(req, res, next);
-    } finally {
-      consoleSpy.mockRestore();
-    }
-
-    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:error-firebase-uid');
+    expect(profileCacheMock.getCachedProfile).toHaveBeenCalledWith('error-firebase-uid');
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual({
       id: dbProfile.id,
@@ -1126,10 +1148,16 @@ describe('authenticate middleware - Redis caching', () => {
       isActive: true,
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(JSON.stringify(cached)),
-      set: vi.fn().mockResolvedValue('OK'),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedSupabaseProfile: vi.fn().mockResolvedValue(cached),
+        setCachedSupabaseProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedSupabaseProfile: vi.fn().mockResolvedValue(),
+        isValidCachedSupabaseProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const fromSpy = vi.fn();
     const supabaseMock = {
@@ -1146,8 +1174,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: {},
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { authenticate } = await import('../../src/middleware/auth.js');
 
@@ -1157,7 +1185,7 @@ describe('authenticate middleware - Redis caching', () => {
 
     await authenticate(req, res, next);
 
-    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:sb:supabase-user-uuid');
+    expect(profileCacheMock.getCachedSupabaseProfile).toHaveBeenCalledWith('supabase-user-uuid');
     expect(fromSpy).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual(cached);
@@ -1177,12 +1205,19 @@ describe('authenticate middleware - Redis caching', () => {
       role: 'customer',
       full_name: 'Fresh Supa',
       phone: '+912222222222',
+      is_active: true,
     };
 
-    const redisClientMock = {
-      get: vi.fn().mockResolvedValue(null),
-      set: vi.fn().mockResolvedValue('OK'),
-    };
+    const profileCacheMock = await (async () => {
+      const actual = await vi.importActual('../../src/lib/profileCache.js');
+      return {
+        ...actual,
+        getCachedSupabaseProfile: vi.fn().mockResolvedValue(null),
+        setCachedSupabaseProfile: vi.fn().mockResolvedValue(),
+        invalidateCachedSupabaseProfile: vi.fn().mockResolvedValue(),
+        isValidCachedSupabaseProfile: vi.fn().mockReturnValue(true),
+      };
+    })();
 
     const supabaseMock = {
       auth: {
@@ -1194,9 +1229,7 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
           }),
         }),
       }),
@@ -1206,8 +1239,8 @@ describe('authenticate middleware - Redis caching', () => {
       createUserClient: () => null,
       firebaseAdmin: {},
       supabase: supabaseMock,
-      redisClient: redisClientMock,
     }));
+    vi.doMock('../../src/lib/profileCache.js', () => profileCacheMock);
 
     const { authenticate } = await import('../../src/middleware/auth.js');
 
@@ -1218,11 +1251,10 @@ describe('authenticate middleware - Redis caching', () => {
     await authenticate(req, res, next);
 
     expect(next).toHaveBeenCalled();
-    const setCall = redisClientMock.set.mock.calls.find(
-      ([key]) => key === 'user:profile:sb:supabase-user-uuid'
-    );
-    expect(setCall).toBeDefined();
-    const ttl = setCall[3];
+    expect(profileCacheMock.setCachedSupabaseProfile).toHaveBeenCalled();
+    const setCall = profileCacheMock.setCachedSupabaseProfile.mock.calls[0];
+    expect(setCall[0]).toBe('supabase-user-uuid');
+    const ttl = setCall[2];
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(120);
   });

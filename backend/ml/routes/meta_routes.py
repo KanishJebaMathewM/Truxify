@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Annotated
 import torch
 import numpy as np
 from datetime import datetime
 import logging
-from meta.model import MAML, MAMLModel, FewShotLearner, TaskGenerator
+from meta.model import MAML, MAMLModel, FewShotLearner, TaskGenerator, TaskGenerationUnavailable
 import os
 
 logger = logging.getLogger(__name__)
@@ -136,7 +136,10 @@ async def sample_task(k_shot: int = 5):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/few-shot")
-async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
+async def sample_few_shot_task(
+    k_shot: Annotated[int, Query(ge=1)] = 5,
+    num_classes: Annotated[int, Query(ge=2, le=2)] = 2,
+):
     """Sample a few-shot classification task"""
     try:
         task = task_generator.generate_few_shot_task(k_shot, num_classes)
@@ -155,6 +158,8 @@ async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
             },
             'timestamp': datetime.now().isoformat()
         }
+    except TaskGenerationUnavailable:
+        raise HTTPException(status_code=503, detail="Binary task generation unavailable")
     except Exception as e:
         logger.error(f"Few-shot task sampling failed: {e}")
         logger.error(f"Internal error: {e}")

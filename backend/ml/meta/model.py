@@ -289,6 +289,10 @@ class FewShotLearner:
         
         return classes.cpu().numpy()
 
+class TaskGenerationUnavailable(ValueError):
+    """The selected task cannot yield finite truth-aligned binary samples."""
+
+
 class TaskGenerator:
     """Task generator for meta-learning"""
     
@@ -342,23 +346,69 @@ class TaskGenerator:
             tasks.append(self.sample_task(k_shot))
         return tasks
     
+    @staticmethod
+    def _normal_above(lower, count):
+        """Draw a conditional standard normal with one finite proposal batch.
+
+        Positive tails use an exponential envelope; negative thresholds accept
+        more than half of standard-normal proposals. No rare-class retry loop.
+        """
+        budget = 4 * count + 64
+        if lower >= 0:
+            rate = lower / 2 + np.hypot(lower / 2, 1.0)
+            values = lower + np.random.exponential(1 / rate, budget)
+            acceptance = np.exp(-0.5 * (values - rate) ** 2)
+            accepted = values[(values > lower) & (np.random.random(budget) < acceptance)]
+        else:
+            values = np.random.randn(budget)
+            accepted = values[values > lower]
+        if len(accepted) < count or not np.isfinite(accepted[:count]).all():
+            raise TaskGenerationUnavailable("Binary support sampling budget exhausted")
+        return accepted[:count]
+
     def generate_few_shot_task(self, k_shot: int = 5, num_classes: int = 2) -> Dict:
-        """Generate few-shot classification task"""
+        """Generate support and query labels from the same binary linear task."""
+        if isinstance(k_shot, bool) or not isinstance(k_shot, (int, np.integer)) or k_shot <= 0:
+            raise ValueError("k_shot must be a positive integer")
+        if num_classes != 2:
+            raise ValueError("Linear threshold tasks support exactly two classes")
+        if not self.tasks:
+            raise TaskGenerationUnavailable("No binary tasks available")
         task = np.random.choice(self.tasks)
-        w = task['weights']
-        b = task['bias']
-        
-        # Generate support set for each class
+        weights = np.asarray(task['weights'], dtype=float).reshape(-1).copy()
+        bias = np.asarray(task['bias'], dtype=float).reshape(-1)
+        if weights.shape != (self.input_dim,) or not weights.size or bias.size != 1:
+            raise TaskGenerationUnavailable("Invalid binary task feature dimensions")
+        if not np.isfinite(weights).all() or not np.isfinite(bias).all():
+            raise TaskGenerationUnavailable("Binary task coefficients must be finite")
+        scale = float(np.abs(weights).max())
+        if not scale:
+            raise TaskGenerationUnavailable("Constant tasks cannot supply both binary classes")
+        scaled = weights / scale
+        norm = np.linalg.norm(scaled)
+        direction = scaled / norm
+        threshold = -(float(bias[0]) / scale) / norm
+        if not np.isfinite(threshold):
+            raise TaskGenerationUnavailable("Binary boundary cannot be represented")
+
         support_set = {}
-        for cls in range(num_classes):
-            x = np.random.randn(k_shot, self.input_dim)
-            y = (x @ w + b > 0).astype(int)
-            support_set[str(cls)] = x
-        
-        # Generate query set
+        for cls in (0, 1):
+            # The normal component is conditional; its independent orthogonal
+            # Gaussian component is unchanged. This preserves the correct
+            # Gaussian distribution within each task halfspace.
+            values = self._normal_above(threshold if cls else -threshold, k_shot)
+            if not cls:
+                values = -values
+            rows = np.random.randn(k_shot, self.input_dim)
+            rows -= np.outer(rows @ direction, direction)
+            rows += np.outer(values, direction)
+            actual = (rows @ direction > threshold).astype(int)
+            if not np.isfinite(rows).all() or not (actual == cls).all():
+                raise TaskGenerationUnavailable("Binary boundary is numerically unresolved")
+            support_set[str(cls)] = rows
+
         query_x = np.random.randn(10, self.input_dim)
-        query_y = (query_x @ w + b > 0).astype(int)
-        
+        query_y = (query_x @ direction > threshold).astype(int).reshape(-1, 1)
         return {
             'support_set': support_set,
             'query_x': query_x,

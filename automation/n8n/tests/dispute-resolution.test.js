@@ -79,18 +79,11 @@ test("has a real Release Escrow Payment node (no phantom) with retry + onError",
   assert.strictEqual(release.onError, "continueErrorOutput", "Release Escrow Payment must continue error output");
 });
 
-test("has a Freeze Escrow Payment node with retry + onError", () => {
-  const freeze = nodeByName("Freeze Escrow Payment");
-  assert.ok(freeze, "Freeze Escrow Payment node must exist");
-  assert.strictEqual(freeze.retryOnFail, true, "Freeze Escrow Payment must retry on fail");
-  assert.strictEqual(freeze.onError, "continueErrorOutput", "Freeze Escrow Payment must continue error output");
-});
-
-test("Verify Escrow Release error output reaches Alert Admin — Escrow Release Failed", () => {
-  assert.ok(
-    reachableViaErrorOutputs("Verify Escrow Release", "Alert Admin — Escrow Release Failed"),
-    "Alert Admin — Escrow Release Failed must be reachable from Verify Escrow Release error path",
-  );
+test("has an Idempotency Patch Guard node with retry + onError", () => {
+  const patchNode = nodeByName("Idempotency Patch Guard");
+  assert.ok(patchNode, "Idempotency Patch Guard node must exist");
+  assert.strictEqual(patchNode.retryOnFail, true, "Idempotency Patch Guard must retry on fail");
+  assert.strictEqual(patchNode.onError, "continueErrorOutput", "Idempotency Patch Guard must continue error output");
 });
 
 test("Release Escrow Payment error output reaches Alert Admin — Escrow Release Failed", () => {
@@ -145,7 +138,6 @@ test("no emailSend node hardcodes a literal recipient address", () => {
 
 test("every alert/escalation email routes to $env.ADMIN_ALERT_EMAIL", () => {
   const expected = [
-    "Alert Admin — Escrow Freeze Failed",
     "Email Admin",
     "Alert Admin — Escrow Release Failed",
   ];

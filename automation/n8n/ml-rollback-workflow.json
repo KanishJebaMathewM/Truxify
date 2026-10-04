@@ -60,7 +60,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const data = $input.item.json;\nreturn {\n  model: data.model,\n  active_version: data.active_version,\n  previous_version: data.previous_version,\n  should_rollback: Boolean(data.should_rollback),\n  action: data.should_rollback ? 'rollback' : 'keep_active',\n  evaluated_at: new Date().toISOString()\n};"
+        "jsCode": "const data = $input.item.json;\nconst activeVer = data.active_version || data.test_id || 'demand-v1';\nconst shouldRollback = Boolean(data.should_rollback || (data.metrics && data.metrics.degradation > 0.15));\nreturn {\n  model: data.model || 'demand_forecast',\n  active_version: activeVer,\n  test_id: activeVer,\n  previous_version: data.previous_version,\n  should_rollback: shouldRollback,\n  action: shouldRollback ? 'rollback' : 'keep_active',\n  evaluated_at: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -108,7 +108,24 @@
     },
     {
       "parameters": {
-        "toEmail": "ml-alerts@truxify.org",
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.rolled_back || ($node[\"Restore Previous Demand Model\"].json && $node[\"Restore Previous Demand Model\"].json.status === \"success\")}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1200, -100],
+      "id": "rollback-http-ok",
+      "name": "Check Rollback HTTP Status"
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ML_ALERT_EMAIL || 'ml-alerts@truxify.org'}}",
         "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.active_version}}",
         "htmlFormat": true,
         "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
@@ -116,9 +133,23 @@
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
-      "position": [1200, -100],
+      "position": [1400, -200],
       "id": "send-alert",
       "name": "Send Demand Rollback Alert"
+    },
+    {
+      "parameters": {
+        "toEmail": "={{$env.ML_ALERT_EMAIL || 'ml-alerts@truxify.org'}}",
+        "subject": "CRITICAL: Demand Forecast Rollback Failed: {{$node[\"Demand Rollback Decision\"].json.active_version}}",
+        "htmlFormat": true,
+        "message": "<h3>Demand Forecast Rollback FAILED</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>, but the rollback HTTP request failed.</p><p>Immediate manual intervention required.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [1400, 0],
+      "id": "send-failure-alert",
+      "name": "Send Demand Rollback Failure Alert"
     }
   ],
   "connections": {
@@ -181,7 +212,25 @@
       "main": [
         [
           {
+            "node": "rollback-http-ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rollback-http-ok": {
+      "main": [
+        [
+          {
             "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-failure-alert",
             "type": "main",
             "index": 0
           }

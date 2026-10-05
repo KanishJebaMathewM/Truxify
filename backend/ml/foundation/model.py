@@ -343,6 +343,6 @@ class FoundationModelTrainer:
     
     def load(self, path: str = "models/foundation_model.pth"):
         """Load model"""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"✅ Model loaded from {path}")

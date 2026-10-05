@@ -73,7 +73,7 @@
 
 import express from 'express';
 import { z } from 'zod';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
@@ -360,45 +360,39 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // caller owns or is assigned to. Never trust a client-supplied trip_id.
     // This runs BEFORE the idempotency short-circuit below, otherwise a
     // replayed batch would return 202 and skip authorization entirely.
-    if (req.user.role !== 'admin') {
-      const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
-
-      if (tripIds.length > 0) {
-        // Trip ids sent by the app are trip display ids ('TX-' + order display id),
-        // not the orders.id uuid. Map them back to the bare order display id before
-        // looking up the owning order, otherwise every batch is rejected with 403.
-        const orderDisplayIds = tripIds.map(tripId =>
-          typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
-        );
-
-        const { data: ownedOrders, error: ownershipError } = await supabase
-          .from('orders')
-          .select('order_display_id, driver_id, customer_id')
-          .in('order_display_id', orderDisplayIds);
-
-        if (ownershipError) {
-          logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
-          return res.status(500).json({ error: 'Internal Server Error' });
+    const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
+    const orderIdByTripId = new Map();
+    if (tripIds.length > 0) {
+      // App trip IDs are 'TX-' + order_display_id. Persist the resolved order
+      // UUID, matching trip_events.trip_id and the GET /:id/events reader.
+      const orderDisplayIds = tripIds.map(tripId =>
+        typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
+      );
+      const { data: ownedOrders, error: ownershipError } = await supabaseAdmin
+        .from('orders')
+        .select('id, order_display_id, driver_id, customer_id')
+        .in('order_display_id', orderDisplayIds);
+      if (ownershipError) {
+        logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
+      }
+      const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
+      for (const tripId of tripIds) {
+        const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
+        const order = orderByDisplayId.get(orderDisplayId);
+        const isDriver = order?.driver_id === userId;
+        const isCustomer = order?.customer_id === userId;
+        if (!order || (req.user.role !== 'admin' && !isDriver && !isCustomer)) {
+          logger.warn('[SyncEngine] Rejected batch: user', userId, 'not authorised for trip', tripId);
+          return res.status(403).json({ error: 'Access Denied: You are not authorised to add events to this trip.' });
         }
-
-        const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
-
-        for (const tripId of tripIds) {
-          const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
-          const order = orderByDisplayId.get(orderDisplayId);
-          const isDriver = order?.driver_id === userId;
-          const isCustomer = order?.customer_id === userId;
-          if (!order || (!isDriver && !isCustomer)) {
-            logger.warn('[SyncEngine] Rejected batch: user', userId, 'not authorised for trip', tripId);
-            return res.status(403).json({ error: 'Access Denied: You are not authorised to add events to this trip.' });
-          }
-        }
+        orderIdByTripId.set(tripId, order.id);
       }
     }
 
     // 3. Check Idempotency (Prevent double processing)
     // We check if this exact batch has already been processed recently.
-    const { data: existingBatch } = await supabase
+    const { data: existingBatch } = await supabaseAdmin
       .from('processed_batches')
       .select('id')
       .eq('idempotency_key', idempotencyKey)
@@ -417,9 +411,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       return {
         event_id: event.id,
         user_id: userId,
-        trip_id: (typeof event.trip_id === 'string' && event.trip_id.startsWith('TX-'))
-          ? event.trip_id.slice(3)
-          : (event.trip_id || null),
+        trip_id: event.trip_id ? orderIdByTripId.get(event.trip_id) : null,
         event_type: event.type,
         event_timestamp: event.occurred_at,
         latitude: event.payload?.lat !== undefined ? Number(event.payload.lat) : null,
@@ -429,12 +421,12 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       };
     });
 
-    // 3. Bulk Insert / Upsert into the trip_events table
-    // Upsert ensures that if a specific event ID already exists, it just updates it
-    // rather than failing the whole batch.
-    const { error: insertError } = await supabase
+    // 3. Insert immutable events using the server client after ownership checks.
+    // A retry or globally colliding event ID must never rewrite an existing
+    // event, including one uploaded by another user.
+    const { error: insertError } = await supabaseAdmin
       .from('trip_events')
-      .upsert(recordsToInsert, { onConflict: 'event_id' });
+      .upsert(recordsToInsert, { onConflict: 'event_id', ignoreDuplicates: true });
 
     if (insertError) {
       logger.error('[SyncEngine] Bulk Insert Failed:', insertError.message);
@@ -453,7 +445,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // 4. Log the successful batch using the idempotency key
     // This prevents the same batch from being uploaded again if the client crashes
     // before it can mark them as synced in its local SQLite db.
-    const { error: idempotencyError } = await supabase
+    const { error: idempotencyError } = await supabaseAdmin
       .from('processed_batches')
       .insert({
         idempotency_key: idempotencyKey,
@@ -598,11 +590,10 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       }
     }
 
-    const tripDisplayId = order.order_display_id;
-    let eventsQuery = supabase
+    let eventsQuery = supabaseAdmin
       .from('trip_events')
       .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at', { count: 'exact' })
-      .eq('trip_id', tripDisplayId);
+      .eq('trip_id', order.id);
 
     if (type && typeof type === 'string') {
       eventsQuery = eventsQuery.eq('event_type', type);
@@ -898,6 +889,11 @@ router.put('/:id/start', authenticate, userLimiter, async (req, res) => {
     if (ctx.trip) {
       if (!canAccessTrip(req.user, ctx.trip)) {
         return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+      }
+      // Only an active trip is an idempotent successful start. Never report
+      // completed/cancelled (or unknown-state) trips as newly running.
+      if (ctx.trip.status !== 'active') {
+        return res.status(409).json({ error: `Trip cannot be started: status is ${ctx.trip.status}.` });
       }
       return res.json(ctx.trip);
     }

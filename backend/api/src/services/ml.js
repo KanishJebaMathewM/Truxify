@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
 
@@ -9,7 +10,6 @@ const priceCache = new LRUCache(100, 15 * 60 * 1000);
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
 const ML_HTTP_TIMEOUT_MS = 5000;
-const ML_HTTP_TIMEOUT_MS_HEAVY = 10000;
 const ML_HTTP_TIMEOUT_MS_LONG = 300000;
 const ML_DEFAULT_PICKUP_LEAD_MS = 8 * 60 * 60 * 1000;
 const DEFAULT_TRUCK_MAX_WEIGHT_KG = 25000;
@@ -165,6 +165,7 @@ export async function predictPrice({
     routeOrigin = '',
     routeDestination = '',
     trafficMultiplier = 1.0,
+    signal,
 } = {}) {
   guardMlApiKey();
 
@@ -187,12 +188,28 @@ export async function predictPrice({
       traffic_multiplier: safeMultiplier,
   };
 
-  const response = await fetch(url, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ML_HTTP_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  }
 
   const raw = await handleResponse(response, url, 'POST');
 
@@ -466,19 +483,25 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
   guardMlApiKey();
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/match/deadhead`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({
-      driver_destination: driverDestination,
-      truck_specs: truckSpecs,
-      arrival_time: arrivalTime,
-      available_loads: availableLoads,
-    }),
-    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
+  return mlMatchingGateway.execute(async (signal) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        driver_destination: driverDestination,
+        truck_specs: truckSpecs,
+        arrival_time: arrivalTime,
+        available_loads: availableLoads,
+      }),
+      signal,
+    });
+    // Body consumption and response validation share the admission deadline.
+    const result = await handleResponse(response, url, 'POST');
+    if (!result || !Array.isArray(result.recommendations)) {
+      throw new Error('[ML] Invalid matching recommendation response');
+    }
+    return result;
   });
-
-  return handleResponse(response);
 }
 
 /**
@@ -504,17 +527,19 @@ export async function matchEnRouteLoads({
 }) {
   if (!offers || offers.length === 0) return [];
 
+  // Normalize the detour budget: a non-finite or non-positive value makes
+  // `detour_km <= maxDetourKm` false for every row, which silently empties the
+  // response instead of surfacing the bad input.
+  const detourBudgetKm = Number(maxDetourKm);
+  const effectiveMaxDetourKm =
+    Number.isFinite(detourBudgetKm) && detourBudgetKm > 0 ? detourBudgetKm : 50;
+
   // Build the available_loads list the ML model expects. load_offers stores
   // coordinates as pickup_*/drop_*, weight as text ('3 tonnes') and dimensions
   // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
   // model consumes.
   const availableLoads = offers
-    .filter(o =>
-      Number.isFinite(Number(o.pickup_lat)) &&
-      Number.isFinite(Number(o.pickup_lng)) &&
-      Number.isFinite(Number(o.drop_lat)) &&
-      Number.isFinite(Number(o.drop_lng))
-    )
+    .filter(o => _hasValidCoordinates(o))
     .map(o => {
       const dims = parseDimensions(o.dimensions);
       return {
@@ -561,20 +586,21 @@ export async function matchEnRouteLoads({
 
   // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
+    mlUsed = false;
     recommendations = offers
-      .filter(o => Number.isFinite(Number(o.pickup_lat)) && Number.isFinite(Number(o.pickup_lng)))
+      .filter(o => _hasValidCoordinates(o))
       .map(o => {
         const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
           load_id: o.id,
           detour_km: dtKm,
           distance_to_pickup_km: dtKm,
-          match_score: Math.max(0, 1 - dtKm / maxDetourKm),
+          match_score: Math.max(0, 1 - dtKm / effectiveMaxDetourKm),
           estimated_earnings: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
           _fallback: true,
         };
       })
-      .filter(r => r.detour_km <= maxDetourKm)
+      .filter(r => r.detour_km !== null && r.detour_km <= effectiveMaxDetourKm)
       .sort((a, b) => b.match_score - a.match_score);
   }
 
@@ -603,20 +629,58 @@ export async function matchEnRouteLoads({
   return enriched;
 }
 
+const MIN_LATITUDE = -90;
+const MAX_LATITUDE = 90;
+const MIN_LONGITUDE = -180;
+const MAX_LONGITUDE = 180;
+
+/**
+ * Coerces a stored coordinate to a finite number inside the WGS84 range.
+ * `0` is a legitimate coordinate (Null Island / the prime meridian), so this
+ * must not be implemented as a truthiness check.
+ * @private
+ */
+function _validCoord(value, min, max) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
+
 /**
  * Haversine great-circle distance in km between two lat/lng points.
+ * Returns `null` for non-finite input so callers can drop the row instead of
+ * ranking it on a NaN distance.
  * @private
  */
 function _haversineKm(lat1, lng1, lat2, lng2) {
+  const coords = [lat1, lng1, lat2, lng2].map(Number);
+  if (!coords.every(Number.isFinite)) return null;
+
+  const [a1, o1, a2, o2] = coords;
   const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
+  const dLat = ((a2 - a1) * Math.PI) / 180;
+  const dLng = ((o2 - o1) * Math.PI) / 180;
+  const h =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
+    Math.cos((a1 * Math.PI) / 180) *
+      Math.cos((a2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/**
+ * True when a load_offer row carries a usable, in-range pickup and drop pair.
+ * @private
+ */
+function _hasValidCoordinates(offer) {
+  if (!offer) return false;
+  return (
+    _validCoord(offer.pickup_lat, MIN_LATITUDE, MAX_LATITUDE) !== null &&
+    _validCoord(offer.pickup_lng, MIN_LONGITUDE, MAX_LONGITUDE) !== null &&
+    _validCoord(offer.drop_lat, MIN_LATITUDE, MAX_LATITUDE) !== null &&
+    _validCoord(offer.drop_lng, MIN_LONGITUDE, MAX_LONGITUDE) !== null
+  );
 }
 
 /**
@@ -657,6 +721,8 @@ export const __testing = {
   demandCache,
   priceCache,
   _haversineKm,
+  _validCoord,
+  _hasValidCoordinates,
   parseWeightKg,
   parseWeightKgSafe,
   parseDimensions,

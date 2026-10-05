@@ -9,7 +9,7 @@
  *      the ID from the transaction's own emitted event, which is race-free.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ethers } from 'ethers';
 
 // The service constructs an ethers JsonRpcProvider / Wallet / Contract at import
@@ -129,5 +129,95 @@ describe('extractEventArg — race-free ID from emitted event (no TOCTOU)', () =
     };
     const id = extractEventArg({ logs: [foreign] }, contract, 'AssetCreated', 0);
     expect(id).toBeNull();
+  });
+});
+
+describe('TokenizationService environment configuration (#16496)', () => {
+  const ENV_VARS = ['POLYGON_RPC_URL', 'PRIVATE_KEY', 'ASSET_TOKEN_ADDRESS'] as const;
+  const originalEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of ENV_VARS) {
+      originalEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    for (const key of ENV_VARS) {
+      if (originalEnv[key] !== undefined) {
+        process.env[key] = originalEnv[key];
+      } else {
+        delete process.env[key];
+      }
+    }
+    vi.resetModules();
+  });
+
+  it('imports successfully without throwing when all blockchain env vars are missing', async () => {
+    for (const key of ENV_VARS) {
+      delete process.env[key];
+    }
+
+    let tokenServiceModule: any;
+    await expect(
+      (async () => {
+        tokenServiceModule = await import('../../../tokenization/token.service.js');
+        return tokenServiceModule;
+      })()
+    ).resolves.toBeDefined();
+
+    const service = tokenServiceModule.default;
+    expect(service).toBeDefined();
+    expect(service.provider).toBeNull();
+    expect(service.wallet).toBeNull();
+    expect(service.tokenAddress).toBeNull();
+    expect(service.token).toBeNull();
+  });
+
+  it('imports successfully when only PRIVATE_KEY or ASSET_TOKEN_ADDRESS is missing', async () => {
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
+    delete process.env.PRIVATE_KEY;
+    delete process.env.ASSET_TOKEN_ADDRESS;
+
+    const { default: service } = await import('../../../tokenization/token.service.js');
+    expect(service).toBeDefined();
+    expect(service.provider).toBeNull();
+    expect(service.wallet).toBeNull();
+    expect(service.token).toBeNull();
+  });
+
+  it('fails with a clear configuration error when blockchain methods are called on disabled service', async () => {
+    for (const key of ENV_VARS) {
+      delete process.env[key];
+    }
+
+    const { default: service } = await import('../../../tokenization/token.service.js');
+    const expectedError = /TokenizationService is disabled: missing required environment variables/;
+
+    expect(() => service.getRelayerSigner('0x0000000000000000000000000000000000000001')).toThrow(expectedError);
+    await expect(service.createAsset({ name: 'Test' })).rejects.toThrow(expectedError);
+    await expect(service.purchaseFraction(1, 10, '0x0000000000000000000000000000000000000001', {} as any)).rejects.toThrow(expectedError);
+    await expect(service.sellFraction(1, 10, '0x0000000000000000000000000000000000000001', {} as any)).rejects.toThrow(expectedError);
+    await expect(service.createTradeOrder(1, 10, 1, 'sell', '0x0000000000000000000000000000000000000001')).rejects.toThrow(expectedError);
+    await expect(service.getTradeOrder(1, 0)).rejects.toThrow(expectedError);
+    await expect(service.executeTradeOrder(1, 0, '0x0000000000000000000000000000000000000001', {} as any)).rejects.toThrow(expectedError);
+    await expect(service.getAsset(1)).rejects.toThrow(expectedError);
+    await expect(service.getFractionalOwnership(1, '0x0000000000000000000000000000000000000001')).rejects.toThrow(expectedError);
+    await expect(service.getStats()).rejects.toThrow(expectedError);
+    expect(() => service._extractIdFromLogs({ logs: [] }, 'AssetCreated', 'assetId')).toThrow(expectedError);
+  });
+
+  it('initializes provider, wallet, and contract when all required env vars are present', async () => {
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
+    process.env.PRIVATE_KEY = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    process.env.ASSET_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000001';
+
+    const { default: service } = await import('../../../tokenization/token.service.js');
+    expect(service.provider).not.toBeNull();
+    expect(service.wallet).not.toBeNull();
+    expect(service.tokenAddress).toBe('0x0000000000000000000000000000000000000001');
+    expect(service.token).not.toBeNull();
   });
 });

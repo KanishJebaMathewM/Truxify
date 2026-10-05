@@ -182,36 +182,45 @@ class PolicyGradient:
             
             return action
     
-    def train_step(
-        self,
-        states: np.ndarray,
-        actions: np.ndarray,
-        rewards: np.ndarray
-    ) -> float:
-        """Single training step with REINFORCE"""
+    def _paired_batch(self, states, actions, rewards):
+        states_t = torch.as_tensor(states, dtype=torch.float32)
+        action_values = torch.as_tensor(actions, dtype=torch.float64)
+        rewards_t = torch.as_tensor(rewards, dtype=torch.float32)
+        if states_t.ndim != 2 or states_t.shape[1] != self.state_dim or not len(states_t):
+            raise ValueError("states must be nonempty rows with state_dim features")
+        count = len(states_t)
+        if rewards_t.shape == (count, 1):
+            rewards_t = rewards_t[:, 0]
+        if action_values.shape != (count,) or rewards_t.shape != (count,):
+            raise ValueError("actions and rewards must have one value per state row")
+        if not all(torch.isfinite(value).all() for value in (states_t, action_values, rewards_t)):
+            raise ValueError("policy batch values must be finite")
+        if not torch.equal(action_values, action_values.round()):
+            raise ValueError("actions must be integer indices")
+        if ((action_values < 0) | (action_values >= self.action_dim)).any():
+            raise ValueError("action index outside categorical policy")
+        return states_t, action_values.long(), rewards_t
+
+    def train_step(self, states: np.ndarray, actions: np.ndarray,
+                   rewards: np.ndarray) -> float:
+        """Stable row-paired REINFORCE without log(underflowed probabilities)."""
+        states_t, actions_t, rewards_t = self._paired_batch(states, actions, rewards)
         self.policy.train()
-        
-        states_t = torch.tensor(states, dtype=torch.float32)
-        actions_t = torch.tensor(actions, dtype=torch.long)
-        rewards_t = torch.tensor(rewards, dtype=torch.float32)
-        
-        # Forward pass
-        action_probs = self.policy(states_t)
-        
-        # Compute log probabilities
-        log_probs = torch.log(action_probs.gather(1, actions_t.unsqueeze(1)).squeeze())
-        
-        # Compute loss
-        loss = -torch.mean(log_probs * rewards_t)
-        
-        # Backward pass
+        # Preserve the registered policy (including its public Softmax) and all
+        # checkpoint/optimizer keys; reuse its existing modules for logits.
+        logits = self.policy[:-1](states_t)
+        if not torch.isfinite(logits).all():
+            raise ValueError("policy logits must be finite")
+        log_probs = F.log_softmax(logits, dim=-1).gather(1, actions_t[:, None])[:, 0]
+        loss = -(log_probs * rewards_t).mean()
+        if not torch.isfinite(loss):
+            raise ValueError("policy objective cannot be represented finitely")
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0, error_if_nonfinite=True)
         self.optimizer.step()
-        
         return loss.item()
-    
+
     def train(
         self,
         trajectories: List[Dict],
@@ -221,20 +230,16 @@ class PolicyGradient:
         """Train policy using REINFORCE"""
         losses = []
         
-        # Prepare data
-        all_states = []
-        all_actions = []
-        all_rewards = []
-        
-        for traj in trajectories:
-            all_states.extend(traj['states'])
-            all_actions.extend(traj['actions'])
-            all_rewards.extend(traj['rewards'])
-        
-        states = np.array(all_states)
-        actions = np.array(all_actions)
-        rewards = np.array(all_rewards)
-        
+        if epochs < 1 or batch_size < 1 or not trajectories:
+            raise ValueError("epochs, batch_size and trajectories must be nonempty/positive")
+        # Validate every trajectory before flattening can conceal shifted rows
+        # and before the first optimizer update.
+        batches = [self._paired_batch(traj['states'], traj['actions'], traj['rewards'])
+                   for traj in trajectories]
+        states = torch.cat([batch[0] for batch in batches]).numpy()
+        actions = torch.cat([batch[1] for batch in batches]).numpy()
+        rewards = torch.cat([batch[2] for batch in batches]).numpy().astype(np.float64)
+
         # Normalize rewards
         rewards = (rewards - np.mean(rewards)) / (np.std(rewards) + 1e-8)
         

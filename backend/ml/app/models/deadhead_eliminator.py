@@ -1,6 +1,8 @@
 import logging
 import math
 import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
@@ -10,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
 _OSRM_TIMEOUT_SECONDS = 1.5
+_OSRM_TABLE_MAX_COORDINATES = 100
+_OSRM_MAX_BATCH_REQUESTS = 4
+_OSRM_DISPATCH_BUDGET_SECONDS = 3.0
+_OSRM_NATIVE_ADMISSION = threading.BoundedSemaphore(4)
+_route_now = time.monotonic
+_ROUTE_UNAVAILABLE = object()
 _FALLBACK_AVG_SPEED_KMH = 40.0
 _EARTH_RADIUS_KM = 6371.0
 
@@ -67,41 +75,69 @@ def _fetch_pickup_route_durations(
     if not _osrm_enabled() or not available_loads:
         return None
 
-    coordinates = [
-        f"\${driver_destination['lng']},\${driver_destination['lat']}"
-    ] + [
-        f"\${load['origin_lng']},\${load['origin_lat']}"
-        for load in available_loads
-    ]
-    base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
-    url = f"\${base_url}/table/v1/driving/{';'.join(coordinates)}"
-    destination_indexes = ";".join(str(index) for index in range(1, len(coordinates)))
-
-    try:
-        response = requests.get(
-            url,
-            params={
-                "sources": "0",
-                "destinations": destination_indexes,
-                "annotations": "duration",
-            },
-            timeout=_OSRM_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        durations = payload.get("durations") if isinstance(payload, dict) else None
-        if (
-            not isinstance(durations, list)
-            or len(durations) != 1
-            or not isinstance(durations[0], list)
-            or len(durations[0]) != len(available_loads)
-        ):
-            logger.warning("OSRM returned an invalid deadhead duration matrix")
-            return None
-        return durations[0]
-    except (requests.RequestException, ValueError, TypeError) as exc:
-        logger.warning("OSRM deadhead duration lookup failed: %s", exc)
+    if not _OSRM_NATIVE_ADMISSION.acquire(blocking=False):
         return None
+    try:
+        deadline = _route_now() + _OSRM_DISPATCH_BUDGET_SECONDS
+        durations = [_ROUTE_UNAVAILABLE] * len(available_loads)
+        received_batch = False
+        base_url = os.getenv("OSRM_BASE_URL", _DEFAULT_OSRM_BASE_URL).rstrip("/")
+        batch_size = _OSRM_TABLE_MAX_COORDINATES - 1
+        for request_index, offset in enumerate(range(0, len(available_loads), batch_size)):
+            remaining = deadline - _route_now()
+            if request_index >= _OSRM_MAX_BATCH_REQUESTS or remaining <= 0:
+                break
+            batch = available_loads[offset:offset + batch_size]
+            coordinates = [f"{driver_destination['lng']},{driver_destination['lat']}"] + [
+                f"{load['origin_lng']},{load['origin_lat']}" for load in batch
+            ]
+            url = f"{base_url}/table/v1/driving/{';'.join(coordinates)}"
+            response = None
+            try:
+                response = requests.get(
+                    url,
+                    params={
+                        "sources": "0",
+                        "destinations": ";".join(str(index) for index in range(1, len(coordinates))),
+                        "annotations": "duration",
+                    },
+                    timeout=min(_OSRM_TIMEOUT_SECONDS, remaining),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                rows = payload.get("durations") if isinstance(payload, dict) else None
+                if (
+                    not isinstance(rows, list)
+                    or len(rows) != 1
+                    or not isinstance(rows[0], list)
+                    or len(rows[0]) != len(batch)
+                    or payload.get("code", "Ok") != "Ok"
+                ):
+                    logger.warning("OSRM returned an invalid deadhead duration batch")
+                    continue
+                durations[offset:offset + len(batch)] = rows[0]
+                received_batch = True
+            except (requests.RequestException, ValueError, TypeError) as exc:
+                logger.warning("OSRM deadhead duration batch failed: %s", exc)
+            finally:
+                if response is not None:
+                    response.close()
+        if not received_batch:
+            return None
+        # Only unavailable batches use the old straight-line approximation.
+        # A successful provider's None means unreachable, never approximate.
+        for index, duration in enumerate(durations):
+            if duration is _ROUTE_UNAVAILABLE:
+                load = available_loads[index]
+                durations[index] = _haversine(
+                    driver_destination["lat"], driver_destination["lng"],
+                    load["origin_lat"], load["origin_lng"],
+                ) / _FALLBACK_AVG_SPEED_KMH * 3600.0
+        return durations
+    finally:
+        # A socket timeout is not native cancellation. Keep the
+        # permit through response parsing, fallback assembly and cleanup.
+        _OSRM_NATIVE_ADMISSION.release()
 
 
 MAX_DETOUR_FRACTION = 0.5

@@ -119,6 +119,15 @@ describe('driverController', () => {
         total: 25,
         totalPages: 3,
         trips: mockTrips,
+        data: mockTrips,
+        pagination: {
+          page: 2,
+          limit: 10,
+          total: 25,
+          totalPages: 3,
+          hasNextPage: true,
+          hasPreviousPage: true,
+        },
       });
     });
 

@@ -6,17 +6,11 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  sendPushNotification,
-  sendNotification,
-  insertNotification,
-} from '../../src/services/notificationService.js';
-import {
   validateNotifType,
   ALLOWED_NOTIF_TYPES,
   FCM_ENABLED_TYPES,
   HIGH_PRIORITY_TYPES,
 } from '../../src/lib/notifTypeAllowlist.js';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import crypto from 'crypto';
 import { createSupabaseMock } from '../helpers/supabaseMock.js';
 import { DomainError } from '../../src/services/order/domainError.js';
@@ -823,16 +817,6 @@ describe('notificationService', () => {
   });
 });
 
-// Mock the database client
-vi.mock('../../src/config/db.js', () => ({
-  supabaseAdmin: {
-    from: vi.fn(() => ({
-      insert: vi.fn().mockResolvedValue({ data: [{ id: 'notif-123' }], error: null }),
-      select: vi.fn().mockResolvedValue({ data: [], error: null }),
-    })),
-  },
-}));
-
 // Mock FCM admin
 vi.mock('firebase-admin', () => ({
   default: {
@@ -865,7 +849,7 @@ describe('Notification Service (#8494)', () => {
   describe('sendPushNotification', () => {
     it('accepts valid arguments without throwing', async () => {
       await expect(
-        sendPushNotification('user-123', 'Test Title', 'Test Body', { notif_type: 'order_update' })
+        sendPushNotification('user-123', 'Test Title', 'Test Body', 'order_update')
       ).resolves.not.toThrow();
     });
 

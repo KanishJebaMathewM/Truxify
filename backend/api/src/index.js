@@ -26,6 +26,7 @@ import iotRoutes from './routes/iotRoutes.js'
 import demandRoutes from './routes/demandRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
+import { validateWimConfig } from './config/wim.js'
 import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
@@ -268,6 +269,20 @@ if (!process.env.WEBHOOK_SECRET) {
 }
 
 // ============================================================================
+// 🆕 WIM BYPASS VALIDATION
+// ============================================================================
+// WIM bypass credentials are HMAC-signed with a server secret. Without a
+// properly configured secret the process must fail fast rather than ever
+// issue an unsigned or weakly-signed bypass credential.
+try {
+  validateWimConfig();
+  logger.info('✅ WIM bypass signing configuration is valid.')
+} catch (err) {
+  logger.fatal(err.message)
+  process.exit(1)
+}
+
+// ============================================================================
 // 🆕 OTEL VALIDATION
 // ============================================================================
 if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
@@ -355,6 +370,8 @@ validateEscrowSetup().then((valid) => {
 
 const app = express()
 const server = http.createServer(app)
+// Wrap JSON responses before any middleware or route can send them.
+app.use(responseSanitizer)
 app.use(sentryRequestHandler());
 app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
@@ -754,7 +771,6 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
-app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
 app.use(notFound)

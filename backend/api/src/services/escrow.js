@@ -1,4 +1,3 @@
-
 class EscrowAmountMismatchError extends Error {
   constructor(expectedWei, actualWei) {
     super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);
@@ -34,9 +33,9 @@ class EscrowAmountMismatchError extends Error {
  *   2. bookings(0) eth_call — verifies the contract responds with the expected ABI
  *
  * Required env vars (see .env.example):
- *   POLYGON_RPC_URL              — JSON-RPC endpoint
- *   ESCROW_CONTRACT_ADDRESS      — Deployed TruxifyEscrow.sol address
- *   RELAYER_WALLET_PRIVATE_KEY   — Private key of the authorised relayer
+ *   POLYGON_RPC_URL             — JSON-RPC endpoint
+ *   ESCROW_CONTRACT_ADDRESS     — Deployed TruxifyEscrow.sol address
+ *   RELAYER_WALLET_PRIVATE_KEY  — Private key of the authorised relayer
  */
 
 import { ethers } from 'ethers'
@@ -61,7 +60,7 @@ const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
   'function commitmentNonces(address customer, uint256 bookingId) external view returns (uint256)',
-  'function releasePayment(uint256 bookingId) external',
+  'function releasePayment(uint256 bookingId, bytes32 idempotencyKey) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
   'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
@@ -75,7 +74,7 @@ const ESCROW_ABI = [
   'function paused() external view returns (bool)'
 ]
 
-const rpcUrl            = process.env.POLYGON_RPC_URL;
+const rpcUrl              = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
 function parseEnvFloat(raw, defaultVal, name) {
@@ -348,10 +347,13 @@ export function getEscrowBookingId(orderDisplayId) {
  * @throws {Error} If database query fails
  */
 export async function getEscrowBooking(escrowBookingId) {
-  if (!escrowBookingId || typeof escrowBookingId !== 'string' || !escrowBookingId.trim()) {
+  if (!escrowContract) {
+    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
     return null;
   }
 
+  if (!ethers.isHexString(escrowBookingId, 32)) {
+    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
   const trimmedId = escrowBookingId.trim();
 
   // On-chain lookup when given a bytes32 hex string
@@ -375,6 +377,18 @@ export async function getEscrowBooking(escrowBookingId) {
   }
 
   try {
+    const booking = await escrowContract.bookings(escrowBookingId);
+    return booking;
+  } catch (err) {
+    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
+    return null;
+  }
+}
+
+/**
+ * Verifies that the on-chain escrow balance strictly matches the expected deposit amount in wei.
+ * Updated to use exact-equality semantics (`===`) per Issue #11217 to align with `recordDepositTx`
+ * and prevent over-deposit or under-deposit anomalies from bypassing validation.
     const { data, error } = await supabaseAdmin
       .from('escrow_bookings')
       .select('*')
@@ -394,28 +408,59 @@ export async function getEscrowBooking(escrowBookingId) {
 }
 
 /**
+ * Computes the bytes32 hash ID used for the escrow contract based on the display ID.
+ * Matches keccak256(abi.encodePacked("escrow:" + displayId))
+ *
+ * @param {string} displayId - The public order display ID
+ * @returns {string} The computed booking ID (bytes32 hex string)
+ */
+export function getEscrowBookingId(displayId) {
+  if (!displayId) throw new Error('Missing displayId');
+  return ethers.solidityPackedKeccak256(['string', 'string'], ['escrow:', String(displayId)]);
+}
+
+/**
  * Query the on-chain escrow smart contract mapping.
  * Used by escrowFundingReconciliation and the release reconciler to check
  * the authoritative on-chain booking state.
  *
- * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
- * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
+ * @param {string|number|BigInt} onChainAmount - Actual balance found on-chain
+ * @param {string|number|BigInt} expectedAmount - Expected booking amount in wei
+ * @returns {object} Verification result object
  */
+export async function verifyOnChainEscrowBalance(onChainAmount, expectedAmount) {
+  try {
+    const onChainAmountBN = BigInt(onChainAmount || 0);
+    const expectedWeiBN = BigInt(expectedAmount || 0);
 export async function getOnChainEscrowBooking(escrowBookingId) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — cannot query bookings.');
     return null;
   }
 
-  if (!ethers.isHexString(escrowBookingId, 32)) {
-    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
-    return null;
-  }
+    const isValid = onChainAmountBN === expectedWeiBN;
 
-  try {
-    const booking = await escrowContract.bookings(escrowBookingId);
-    return booking;
+    if (!isValid) {
+      logger.warn({
+        on_chain_wei: onChainAmountBN.toString(),
+        expected_wei: expectedWeiBN.toString(),
+        difference: (onChainAmountBN - expectedWeiBN).toString(),
+      }, '[Escrow] On-chain escrow balance mismatch detected (exact match required)');
+    }
+
+    return {
+      valid: isValid,
+      onChainBalanceWei: onChainAmountBN.toString(),
+      expectedWei: expectedWeiBN.toString(),
+      code: isValid ? 'SUCCESS' : 'ESCROW_AMOUNT_MISMATCH',
+    };
   } catch (err) {
+    logger.error({ error: err?.message }, '[Escrow] Failed to verify on-chain escrow balance');
+    return {
+      valid: false,
+      error: err?.message || 'Balance verification failed',
+      code: 'VERIFICATION_ERROR',
+    };
     logger.error(`[escrow] getOnChainEscrowBooking failed: ${err?.message ?? String(err)}`);
     return null;
   }
@@ -458,10 +503,6 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
 
   let txData
   try {
-    // Owner-signed EIP-191 commitment binding chain, contract, customer,
-    // bookingId and the customer's next nonce. Without it the contract
-    // rejects createBooking, so a third party cannot front-run the slot
-    // (issue #7734).
     const network = await escrowContract.runner.provider.getNetwork()
     const nonce = await escrowContract.commitmentNonces(customerWalletAddress, bookingId)
     const commitment = ethers.solidityPackedKeccak256(
@@ -506,12 +547,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Invalid transaction hash' }
   }
 
-  // Idempotency: check if this booking already has a funded escrow on-chain.
-  // createBooking now requires an owner-signed commitment (issue #7734), but an
-  // already-existing booking is still verified to have been created by the
-  // registered customer — and, when the expected values are persisted on the
-  // order, for the assigned driver and for at least the expected escrow amount
-  // — before it is accepted as funded.
   try {
     const booking = await escrowContract.bookings(bookingId)
     if (booking && booking.amount > 0n) {
@@ -524,10 +559,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       if (expectedDriverAddress && booking.driver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
         return { error: 'Existing booking was created for a different driver than the one assigned to this order' }
       }
-      // Always verify the on-chain booking amount against the authoritative
-      // server figure. When the caller does not supply expectedAmountWei,
-      // resolve it server-side from the order's escrow_amount_wei so a funded
-      // booking is never accepted with zero amount validation.
       let authoritativeAmountWei = expectedAmountWei
       if (authoritativeAmountWei === null && supabaseAdmin) {
         try {
@@ -571,11 +602,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction destination is not the Escrow contract' }
   }
 
-  // Critical Security Check: Verify tx.value (deposit amount). The exact
-  // equality check below (expectedAmountWei !== null) is the authoritative
-  // gate — a redundant less-than guard here would shadow the booking-id,
-  // sender, and driver checks for under-funded deposits.
-
   let decoded
   try {
     decoded = escrowContract.interface.parseTransaction({ data: tx.data, value: tx.value })
@@ -598,8 +624,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction booking ID does not match' }
   }
 
-  // Verify the on-chain sender (tx.from) is the registered customer wallet.
-  // Reject if no wallet is on file rather than silently skipping sender verification (fail closed).
   if (!expectedSenderAddress) {
     return { error: 'No registered customer wallet on file to verify transaction sender against' }
   }
@@ -607,11 +631,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction sender does not match the registered customer wallet for this order' }
   }
 
-  // Verify the booking was created for the assigned driver and funded with
-  // EXACTLY the expected escrow amount when those are persisted for the
-  // order. Exact equality (not >=) rejects both under- and over-payments:
-  // a client that deposits Y ≠ X against an accepted bid of X must not be
-  // allowed to re-anchor the payout amount.
   if (expectedDriverAddress && txDriver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
     return { error: 'Transaction driver address does not match the assigned driver for this order' }
   }
@@ -630,7 +649,8 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 
 /**
  * Mark an escrow booking as started on-chain once the trip has begun, so
- * cancelBooking / cancelWithPenalty revert and a full refund is blocked
+ * cancelBooking reverts and a full refund is blocked; the owner can still
+ * use cancelWithPenalty to compensate the driver when policy permits.
  * (issue #5768).
  *
  * @param {string} orderDisplayId
@@ -676,17 +696,11 @@ export async function markEscrowBookingStarted (orderDisplayId) {
  * Release escrowed funds to the driver after successful delivery verification.
  * Must be called by an authorised relayer.
  *
- * Payout defense-in-depth: when `expectedAmountWei` is provided, the on-chain
- * booking amount is verified against it BEFORE the release transaction is
- * submitted. A booking funded with an amount that does not match the app's
- * authoritative amount is never released — the funds stay locked so the
- * anomaly can be resolved instead of paying the driver a wrong amount.
- *
  * @param {string} orderDisplayId
  * @param {string|bigint|null} [expectedAmountWei] - authoritative app amount
  * @returns {Promise<{txHash: string|null, bookingId: string, alreadyReleased?: boolean, error?: string, code?: string}>}
  */
-export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
+export async function escrowRelease (orderDisplayId, expectedAmountWei = null, idempotencyKey = null) {
   return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -706,10 +720,6 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`)
       return { txHash: null, bookingId, alreadyReleased: true }
     }
-    // Always verify the on-chain booking amount against the authoritative
-    // server figure (the order's escrow_amount_wei). When the caller does not
-    // supply expectedAmountWei, resolve it server-side from the order so the
-    // amount guard can never be skipped.
     let authoritativeAmountWei = expectedAmountWei
     if (authoritativeAmountWei === null && supabaseAdmin) {
       try {
@@ -747,7 +757,8 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   }
 
   try {
-    const tx = await escrowContract.releasePayment(bookingId)
+    const finalIdempotencyKey = idempotencyKey || ethers.utils.hexlify(ethers.utils.randomBytes(32));
+    const tx = await escrowContract.releasePayment(bookingId, finalIdempotencyKey)
     logger.info(`[escrow] releasePayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
     const receipt = await tx.wait(1)
     if (!receipt || receipt.status === 0) {
@@ -766,13 +777,28 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
+ *
+ * The refund is a single owner-signed `cancelBooking` transaction: the
+ * deployed TruxifyEscrow contract (and therefore ESCROW_ABI) has no
+ * `refundFunds` method. `cancelBooking` already credits the customer's
+ * pending withdrawal and releases the booking slot, so it must be sent
+ * exactly once. The returned `txHash` and `waitForConfirmation()` always
+ * refer to that same transaction, which is what every caller relies on when
+ * it persists `refund_tx_hash` and later waits on / re-confirms it.
+ *
+ * Failures are reported as `{ txHash: null, error }` and never thrown, which
+ * is the contract the order-lifecycle, stale-order worker and the funding /
+ * refund reconcilers all depend on.
+ *
+ * @param {string} orderDisplayId
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string, waitForConfirmation?: () => Promise<object>}>}
  */
 export async function submitEscrowRefund (orderDisplayId) {
   return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping refundFunds.')
+    logger.warn('[escrow] Contract not initialised — skipping cancelBooking refund.')
     return { txHash: null, bookingId }
   }
 
@@ -783,15 +809,13 @@ export async function submitEscrowRefund (orderDisplayId) {
 
   let tx
   try {
-    tx = await escrowContract.cancelBooking(bookingId)
-    logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
+    tx = await withTimeout(escrowContract.cancelBooking(bookingId))
   } catch (err) {
-    logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
+    logger.error(`[escrow] cancelBooking refund failed for booking ${orderDisplayId}: ${err?.message ?? String(err)}`)
     return { txHash: null, bookingId, error: err?.message ?? String(err) }
   }
+  logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
 
-  tx = await withTimeout(escrowContract.refundFunds(bookingId));
-  logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   return {
     txHash: tx.hash,
     bookingId,

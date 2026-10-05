@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 process.env.NODE_ENV = 'test';
-process.env.WIM_SIGNING_SECRET = 'wim-bypass-test-secret';
+process.env.WIM_SIGNING_SECRET = 'wim-bypass-test-secret-at-least-32-characters';
 
 import {
     calculateBridgeFormulaMaxWeight,
@@ -12,7 +12,7 @@ import {
 import {
     evaluateBypassEligibility,
     createSignedWimPacket,
-    verifySignedWimPacket
+    verifyWimPacket
 } from '../../src/services/wimBypass.js';
 
 async function test(name, fn) {
@@ -168,43 +168,58 @@ await test('wimBypass.evaluateBypassEligibility respects bridge formula axle loa
 });
 
 await test('creates and cryptographically verifies signed WIM packets', () => {
-    const payload = {
+    const issuedAt = Date.now();
+    const credential = {
+        credentialId: 'CRED-999',
+        measurementId: 'MEAS-999',
         truckId: 'TRUCK-999',
+        orderDisplayId: 'BOL-777-XYZ',
         safetyScore: 95,
-        bolId: 'BOL-777-XYZ',
-        axleWeight: 78000
+        axleWeightLbs: 78000,
+        capacityLbs: 80000,
+        eligible: true,
+        issuedAt,
+        expiresAt: issuedAt + 300000,
     };
 
-    const signedPacket = createSignedWimPacket(payload);
+    const signedPacket = createSignedWimPacket(credential);
     assert.ok(signedPacket.packet.timestamp > 0);
     assert.strictEqual(signedPacket.signature.length, 64);
 
-    const verification = verifySignedWimPacket(signedPacket);
+    const verification = verifyWimPacket(signedPacket);
     assert.strictEqual(verification.valid, true);
-    assert.strictEqual(verification.packet.truckId, 'TRUCK-999');
+    assert.strictEqual(verification.packetData.truckId, 'TRUCK-999');
 });
 
 await test('rejects tampered or expired WIM packet', () => {
-    const payload = { truckId: 'TRUCK-444', safetyScore: 90, bolId: 'BOL-1', axleWeight: 50000 };
-    const signedPacket = createSignedWimPacket(payload);
+    const issuedAt = Date.now();
+    const credential = {
+        credentialId: 'CRED-444',
+        measurementId: 'MEAS-444',
+        truckId: 'TRUCK-444',
+        orderDisplayId: 'BOL-1',
+        safetyScore: 90,
+        axleWeightLbs: 50000,
+        capacityLbs: 80000,
+        eligible: true,
+        issuedAt,
+        expiresAt: issuedAt + 300000,
+    };
+    const signedPacket = createSignedWimPacket(credential);
 
     // Tamper with payload
     const tampered = {
         packet: { ...signedPacket.packet, safetyScore: 100 },
         signature: signedPacket.signature
     };
-    const tamperedVerif = verifySignedWimPacket(tampered);
+    const tamperedVerif = verifyWimPacket(tampered);
     assert.strictEqual(tamperedVerif.valid, false);
-    assert.strictEqual(tamperedVerif.reason, 'Cryptographic signature mismatch');
+    assert.strictEqual(tamperedVerif.reason, 'invalid-signature');
 
-    // Expired packet (older than 5 minutes)
-    const expired = {
-        packet: { ...signedPacket.packet, timestamp: Date.now() - 400000 },
-        signature: signedPacket.signature
-    };
-    const expiredVerif = verifySignedWimPacket(expired);
+    // Expiry is checked after signature verification.
+    const expiredVerif = verifyWimPacket(signedPacket, { now: credential.expiresAt + 1 });
     assert.strictEqual(expiredVerif.valid, false);
-    assert.strictEqual(expiredVerif.reason, 'Packet expired (replay attack defense)');
+    assert.strictEqual(expiredVerif.reason, 'expired-credential');
 });
 
 console.log('\n🎉 All Federal Bridge Formula & Weigh Station Compliance tests passed successfully!\n');

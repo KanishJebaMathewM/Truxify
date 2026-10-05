@@ -11,6 +11,8 @@ import logging
 import math
 from typing import List, Dict, Any
 
+from ._shelf_fit_index import ShelfFitIndex
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -153,6 +155,14 @@ def _pack_packages(
     indexed = [(i, p) for i, p in enumerate(packages)]
     indexed.sort(key=lambda t: t[1]["length"] * t[1]["width"] * t[1]["height"], reverse=True)
 
+    # Avoid index overhead for small inputs and retain legacy numeric behavior.
+    numeric_values = [truck_l, truck_w, truck_h, max_weight]
+    numeric_values.extend(p[key] for p in packages for key in ("length", "width", "height", "weight"))
+    use_index = len(packages) >= 128 and all(
+        isinstance(value, (int, float)) and 0 < value <= 2 ** 53 and math.isfinite(value)
+        for value in numeric_values
+    )
+    shelf_index = ShelfFitIndex(len(packages), truck_l) if use_index else None
     shelves: List[_Shelf] = []
     arrangements = [None] * len(packages)
     unpacked: List[int] = []
@@ -175,7 +185,21 @@ def _pack_packages(
             continue
 
         placed = False
-        for i, shelf in enumerate(shelves):
+        if shelf_index is None:
+            candidate_indices = range(len(shelves))
+        else:
+            def candidates(dimensions=(pkg_length, pkg_width, pkg_height)):
+                """Yield ordered conservative candidates; exact placement may reject."""
+                start = 0
+                while True:
+                    candidate = shelf_index.find_first(dimensions, start)
+                    if candidate is None:
+                        return
+                    yield candidate
+                    start = candidate + 1
+            candidate_indices = candidates()
+        for i in candidate_indices:
+            shelf = shelves[i]
             if i + 1 < len(shelves):
                 clearance = shelves[i + 1].z_bottom - shelf.z_bottom
             else:
@@ -183,6 +207,8 @@ def _pack_packages(
 
             pos = shelf.try_place(pkg_length, pkg_width, pkg_height, max_height_limit=clearance)
             if pos is not None:
+                if shelf_index is not None:
+                    shelf_index.update(i, shelf, clearance)
                 arrangements[idx] = {
                     "package_index": idx,
                     "position": {"x": round(pos["x"], 4), "y": round(pos["y"], 4), "z": round(pos["z"], 4)},
@@ -196,6 +222,7 @@ def _pack_packages(
                 break
 
         if not placed:
+            # Keep Python's compensated float summation and boundary decisions.
             z_offset = sum(s.shelf_height for s in shelves)
             if z_offset >= truck_h:
                 arrangements[idx] = {
@@ -220,6 +247,10 @@ def _pack_packages(
                 }
                 packed_weight += pkg_weight
                 packed_volume += pkg_length * pkg_width * pkg_height
+                if shelf_index is not None:
+                    if shelves:
+                        shelf_index.update(len(shelves) - 1, shelves[-1], z_offset - shelves[-1].z_bottom)
+                    shelf_index.update(len(shelves), new_shelf, truck_h - z_offset)
                 shelves.append(new_shelf)
             else:
                 arrangements[idx] = {
@@ -272,7 +303,7 @@ def _validate_delivery_addresses(
 # ---------------------------------------------------------------------------
 
 
-def _sequence_stops(
+def _greedy_sequence_stops(
     delivery_addresses: List[Dict[str, float]],
     packed_indices: List[int],
     route_start: Dict[str, float],
@@ -308,6 +339,96 @@ def _sequence_stops(
         current_lat = delivery_addresses[nearest]["lat"]
         current_lng = delivery_addresses[nearest]["lng"]
 
+    return sequence
+
+
+# Avoid scientific import/query overhead on the common small-route path.
+_SPATIAL_INDEX_MIN_STOPS = 512
+_SPATIAL_INDEX_TAIL_STOPS = 32
+# Unit-sphere chord distance: include near ties beyond double-precision noise,
+# then rank with the existing scalar Haversine/index rule.
+_CHORD_TIE_MARGIN = 2e-12
+
+
+def _get_kdtree():
+    try:
+        from scipy.spatial import KDTree
+    except ImportError:
+        return None
+    return KDTree
+
+
+def _unit_sphere_point(address):
+    lat = math.radians(address["lat"])
+    lng = math.radians(address["lng"])
+    cos_lat = math.cos(lat)
+    return (cos_lat * math.cos(lng), cos_lat * math.sin(lng), math.sin(lat))
+
+
+def _sequence_stops(delivery_addresses, packed_indices, route_start):
+    """Retain greedy ordering, shortlisting large routes with a spherical index."""
+    remaining = set(packed_indices)
+    if len(remaining) < _SPATIAL_INDEX_MIN_STOPS:
+        return _greedy_sequence_stops(delivery_addresses, packed_indices, route_start)
+    _validate_route_start(route_start)
+    if any(index < 0 or index >= len(delivery_addresses) for index in remaining):
+        raise ValueError("packed_indices contains an address index outside delivery_addresses")
+    tree_type = _get_kdtree()
+    if tree_type is None:
+        return _greedy_sequence_stops(delivery_addresses, packed_indices, route_start)
+
+    points = {index: _unit_sphere_point(delivery_addresses[index]) for index in remaining}
+    current_point = _unit_sphere_point(route_start)
+    current_lat, current_lng = route_start["lat"], route_start["lng"]
+    sequence = []
+    tree = None
+    indexed_indices = []
+
+    while remaining:
+        if len(remaining) <= _SPATIAL_INDEX_TAIL_STOPS:
+            sequence.extend(_greedy_sequence_stops(
+                delivery_addresses, sorted(remaining), {"lat": current_lat, "lng": current_lng}
+            ))
+            break
+        if tree is None or len(remaining) * 2 <= len(indexed_indices):
+            # Reclaim visited points at geometric size thresholds. Keep only
+            # linear storage, never an all-pairs distance matrix.
+            indexed_indices = sorted(remaining)
+            tree = tree_type([points[index] for index in indexed_indices])
+
+        neighbors = min(8, len(indexed_indices))
+        while True:
+            distances, positions = tree.query(
+                current_point, k=list(range(1, neighbors + 1)), eps=0, p=2, workers=1
+            )
+            nearest_distance = next((
+                float(distance) for distance, position in zip(distances, positions)
+                if indexed_indices[int(position)] in remaining
+            ), None)
+            if nearest_distance is not None:
+                break
+            neighbors = min(len(indexed_indices), neighbors * 2)
+
+        if nearest_distance >= 1.9999:
+            # Near antipodes, angular distance is numerically sensitive.
+            # Retain the original complete scalar comparison in this case.
+            candidates = remaining
+        else:
+            positions = tree.query_ball_point(
+                current_point, nearest_distance + _CHORD_TIE_MARGIN, eps=0, p=2, workers=1
+            )
+            candidates = [indexed_indices[int(position)] for position in positions
+                          if indexed_indices[int(position)] in remaining]
+        nearest = min(candidates, key=lambda index: (
+            _haversine(current_lat, current_lng,
+                       delivery_addresses[index]["lat"], delivery_addresses[index]["lng"]),
+            index,
+        ))
+        sequence.append(nearest)
+        remaining.remove(nearest)
+        current_point = points[nearest]
+        current_lat = delivery_addresses[nearest]["lat"]
+        current_lng = delivery_addresses[nearest]["lng"]
     return sequence
 
 

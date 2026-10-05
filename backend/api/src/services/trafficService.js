@@ -22,7 +22,12 @@ const CACHE_TTL = 300; // 5 minutes caching for live traffic
  */
 export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
   try {
-    if (pickupLat == null || pickupLng == null || !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+    if (
+      pickupLat == null || pickupLng == null ||
+      !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
+      pickupLat < -90 || pickupLat > 90 ||
+      pickupLng < -180 || pickupLng > 180
+    ) {
       return 1.0;
     }
 
@@ -111,12 +116,25 @@ export function getRushHourMultiplier(date) {
  * @returns {Promise<number>} - Multiplier between 1.0 and 2.5
  */
 export async function getLiveTrafficMultiplierEnterprise(lat, lng) {
+  if (
+    lat == null || lng == null ||
+    typeof lat === 'boolean' || typeof lng === 'boolean' ||
+    Array.isArray(lat) || Array.isArray(lng) ||
+    (typeof lat === 'object' && lat !== null) || (typeof lng === 'object' && lng !== null) ||
+    (typeof lat === 'string' && lat.trim() === '') || (typeof lng === 'string' && lng.trim() === '')
+  ) {
+    logger.warn('[TrafficService] Invalid coordinates provided, returning default multiplier (1.0).');
+    return 1.0;
+  }
+
   const nLat = Number(lat);
   const nLng = Number(lng);
 
-  // Issue #13581: reject non-finite coordinates (NaN, ±Infinity) before any
-  // distance/duration calculation so invalid results never reach responses.
-  if (lat == null || lng == null || !Number.isFinite(nLat) || !Number.isFinite(nLng)) {
+  if (
+    !Number.isFinite(nLat) || !Number.isFinite(nLng) ||
+    nLat < -90 || nLat > 90 ||
+    nLng < -180 || nLng > 180
+  ) {
     logger.warn('[TrafficService] Invalid coordinates provided, returning default multiplier (1.0).');
     return 1.0;
   }
@@ -198,6 +216,28 @@ export async function getTrafficForRoute(route, options = {}) {
       destLng = route.drop_lng ?? route.dropLng ?? route.endLng ?? route.end_lng;
     }
 
+    const isInvalidCoord = (val) =>
+      val === undefined ||
+      val === null ||
+      typeof val === 'boolean' ||
+      Array.isArray(val) ||
+      (typeof val === 'object' && val !== null) ||
+      (typeof val === 'string' && val.trim() === '');
+
+    if (
+      isInvalidCoord(originLat) || isInvalidCoord(originLng) ||
+      isInvalidCoord(destLat) || isInvalidCoord(destLng)
+    ) {
+      logger.warn('[TrafficService] Invalid or missing route coordinates');
+      return {
+        success: false,
+        multiplier: 1.0,
+        congestionLevel: 'unknown',
+        delayMinutes: 0,
+        error: 'Invalid route coordinates',
+      };
+    }
+
     const nOriginLat = Number(originLat);
     const nOriginLng = Number(originLng);
     const nDestLat = Number(destLat);
@@ -207,7 +247,11 @@ export async function getTrafficForRoute(route, options = {}) {
       !Number.isFinite(nOriginLat) ||
       !Number.isFinite(nOriginLng) ||
       !Number.isFinite(nDestLat) ||
-      !Number.isFinite(nDestLng)
+      !Number.isFinite(nDestLng) ||
+      nOriginLat < -90 || nOriginLat > 90 ||
+      nDestLat < -90 || nDestLat > 90 ||
+      nOriginLng < -180 || nOriginLng > 180 ||
+      nDestLng < -180 || nDestLng > 180
     ) {
       logger.warn('[TrafficService] Invalid or missing route coordinates');
       return {

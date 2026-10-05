@@ -1,4 +1,5 @@
 import rateLimit, { MemoryStore } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
 import crypto from "crypto";

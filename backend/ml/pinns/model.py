@@ -82,57 +82,58 @@ class PhysicsLoss:
         
         logger.info(f"✅ Physics loss initialized with {physics_type}")
     
+    @staticmethod
+    def _gradient(u: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Scalar rowwise field derivatives, including disconnected constants."""
+        if x.ndim != 2 or not len(x) or u.shape != (len(x), 1):
+            raise ValueError("physics requires nonempty coordinates and one scalar field per row")
+        if not x.requires_grad:
+            raise ValueError("physics coordinates must require gradients")
+        if not u.requires_grad:
+            return x * 0
+        derivative = grad(u, x, grad_outputs=torch.ones_like(u),
+                          create_graph=True, allow_unused=True)[0]
+        # Keep a zero-valued graph to permit higher derivatives and parameter
+        # backpropagation for constant or affine fields.
+        zero = x * 0 + u * 0
+        return zero if derivative is None else derivative + zero
+
+    def _space_time(self, u: torch.Tensor, x: torch.Tensor):
+        if x.ndim != 2 or x.shape[1] != 2:
+            raise ValueError("evolution equations require [space, time] coordinates")
+        first = self._gradient(u, x)
+        return first[:, 0:1], first[:, 1:2]
+
     def diffusion_loss(self, u: torch.Tensor, x: torch.Tensor, D: float = 1.0) -> torch.Tensor:
-        """Diffusion equation: ∂u/∂t = D * ∂²u/∂x²"""
-        # First derivative with respect to x
-        u_x = grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-        
-        # Second derivative with respect to x
-        u_xx = grad(u_x, x, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
-        
-        # Physics residual
-        residual = u - D * u_xx
-        loss = torch.mean(residual ** 2)
-        
-        return loss
-    
+        """u_t - D*u_xx for coordinates [space, time]."""
+        u_x, u_t = self._space_time(u, x)
+        u_xx = self._gradient(u_x, x)[:, 0:1]
+        return (u_t - D * u_xx).square().mean()
+
     def advection_loss(self, u: torch.Tensor, x: torch.Tensor, v: float = 1.0) -> torch.Tensor:
-        """Advection equation: ∂u/∂t + v * ∂u/∂x = 0"""
-        # First derivative with respect to x
-        u_x = grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-        
-        # Physics residual
-        residual = u + v * u_x
-        loss = torch.mean(residual ** 2)
-        
-        return loss
-    
+        """u_t + v*u_x for coordinates [space, time]."""
+        u_x, u_t = self._space_time(u, x)
+        return (u_t + v * u_x).square().mean()
+
     def burger_loss(self, u: torch.Tensor, x: torch.Tensor, nu: float = 0.01) -> torch.Tensor:
-        """Burgers equation: ∂u/∂t + u * ∂u/∂x = nu * ∂²u/∂x²"""
-        # First derivative with respect to x
-        u_x = grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-        
-        # Second derivative with respect to x
-        u_xx = grad(u_x, x, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
-        
-        # Physics residual
-        residual = u + u * u_x - nu * u_xx
-        loss = torch.mean(residual ** 2)
-        
-        return loss
-    
+        """u_t + u*u_x - nu*u_xx for coordinates [space, time]."""
+        u_x, u_t = self._space_time(u, x)
+        u_xx = self._gradient(u_x, x)[:, 0:1]
+        return (u_t + u * u_x - nu * u_xx).square().mean()
+
     def poisson_loss(self, u: torch.Tensor, x: torch.Tensor, f: torch.Tensor) -> torch.Tensor:
-        """Poisson equation: -∇²u = f"""
-        # Second derivative with respect to x
-        u_x = grad(u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-        u_xx = grad(u_x, x, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
-        
-        # Physics residual
-        residual = -u_xx - f
-        loss = torch.mean(residual ** 2)
-        
-        return loss
-    
+        """-sum_i u_xixi - f; every coordinate is spatial for Poisson."""
+        first = self._gradient(u, x)
+        if x.shape[1] == 0:
+            raise ValueError("Poisson requires at least one spatial coordinate")
+        laplacian = u * 0
+        for axis in range(x.shape[1]):
+            laplacian = laplacian + self._gradient(first[:, axis:axis+1], x)[:, axis:axis+1]
+        forcing = torch.as_tensor(f, dtype=u.dtype, device=u.device)
+        if forcing.ndim != 0 and forcing.shape != u.shape:
+            raise ValueError("Poisson forcing must be scalar or one scalar per row")
+        return (-laplacian - forcing).square().mean()
+
     def compute_loss(self, u: torch.Tensor, x: torch.Tensor, **kwargs) -> torch.Tensor:
         """Compute physics loss based on type"""
         if self.physics_type == 'diffusion':
@@ -145,7 +146,7 @@ class PhysicsLoss:
             nu = kwargs.get('nu', 0.01)
             return self.burger_loss(u, x, nu)
         elif self.physics_type == 'poisson':
-            f = kwargs.get('f', torch.zeros_like(x))
+            f = kwargs.get('f', torch.zeros_like(u))
             return self.poisson_loss(u, x, f)
         else:
             raise ValueError(f"Unknown physics type: {self.physics_type}")
@@ -189,7 +190,7 @@ class PINNTrainer:
         # Move to device
         x_data = x_data.to(self.device)
         y_data = y_data.to(self.device)
-        x_phys = x_phys.to(self.device)
+        x_phys = x_phys.to(self.device).detach().clone().requires_grad_(True)
         
         # Data loss
         y_pred = self.model(x_data)

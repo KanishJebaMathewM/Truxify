@@ -10,6 +10,7 @@ to make predictions meaningful.
 """
 
 import logging
+import threading
 from typing import Dict, List, Optional, Any
 
 import numpy as np
@@ -42,7 +43,8 @@ def _generate_synthetic_data() -> dict:
         ``load_ids``          – list of synthetic load-id strings
         ``truck_ids``         – list of synthetic truck-id strings
     """
-    np.random.seed(42)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
 
     user_ids = [f"user_{i:03d}" for i in range(N_USERS)]
     load_ids = [f"load_{i:03d}" for i in range(N_LOADS)]
@@ -51,15 +53,15 @@ def _generate_synthetic_data() -> dict:
     # ~20% density – most cells are 0 (no interaction)
     ul = np.zeros((N_USERS, N_LOADS), dtype=np.float64)
     for i in range(N_USERS):
-        n_interactions = np.random.randint(1, max(2, int(N_LOADS * 0.3)))
-        cols = np.random.choice(N_LOADS, size=n_interactions, replace=False)
-        ul[i, cols] = np.random.randint(1, 6, size=n_interactions).astype(np.float64)
+        n_interactions = rng.randint(1, max(2, int(N_LOADS * 0.3)))
+        cols = rng.choice(N_LOADS, size=n_interactions, replace=False)
+        ul[i, cols] = rng.randint(1, 6, size=n_interactions).astype(np.float64)
 
     ut = np.zeros((N_USERS, N_TRUCKS), dtype=np.float64)
     for i in range(N_USERS):
-        n_interactions = np.random.randint(1, max(2, int(N_TRUCKS * 0.3)))
-        cols = np.random.choice(N_TRUCKS, size=n_interactions, replace=False)
-        ut[i, cols] = np.random.randint(1, 6, size=n_interactions).astype(np.float64)
+        n_interactions = rng.randint(1, max(2, int(N_TRUCKS * 0.3)))
+        cols = rng.choice(N_TRUCKS, size=n_interactions, replace=False)
+        ut[i, cols] = rng.randint(1, 6, size=n_interactions).astype(np.float64)
 
     return {
         "user_load_matrix": ul,
@@ -146,6 +148,8 @@ class CollaborativeFilter:
     """SVD-based collaborative filtering recommender."""
 
     def __init__(self) -> None:
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
         self.user_load_approx: Optional[np.ndarray] = None
         self.user_truck_approx: Optional[np.ndarray] = None
         self.user_ids: List[str] = []
@@ -159,74 +163,67 @@ class CollaborativeFilter:
     # -- persistence --------------------------------------------------------
 
     def train(self) -> dict:
-        """Generate synthetic data, compute SVD approximations, persist."""
-        data = _generate_synthetic_data()
+        """Prepare and persist a complete model before changing serving state."""
+        with self._lifecycle_lock:
+            data = _generate_synthetic_data()
+            payload = {
+                "user_load_approx": _svd_reconstruct(data["user_load_matrix"], LATENT_K),
+                "user_truck_approx": _svd_reconstruct(data["user_truck_matrix"], LATENT_K),
+                "user_load_matrix": data["user_load_matrix"],
+                "user_truck_matrix": data["user_truck_matrix"],
+                "user_ids": data["user_ids"],
+                "load_ids": data["load_ids"],
+                "truck_ids": data["truck_ids"],
+                "popular_loads": _popularity_ranking(data["user_load_matrix"]),
+                "popular_trucks": _popularity_ranking(data["user_truck_matrix"]),
+            }
+            metrics = {
+                "n_users": len(payload["user_ids"]),
+                "n_loads": len(payload["load_ids"]),
+                "n_trucks": len(payload["truck_ids"]),
+                "latent_k": LATENT_K,
+            }
+            save_model(payload, MODEL_NAME, metrics)
+            self._publish_payload(payload)
+            logger.info(
+                "Collaborative filter trained: %d users, %d loads, %d trucks",
+                metrics["n_users"], metrics["n_loads"], metrics["n_trucks"],
+            )
+            return metrics
 
-        self.user_ids = data["user_ids"]
-        self.load_ids = data["load_ids"]
-        self.truck_ids = data["truck_ids"]
-        self.user_load_matrix = data["user_load_matrix"]
-        self.user_truck_matrix = data["user_truck_matrix"]
-
-        self.user_load_approx = _svd_reconstruct(self.user_load_matrix, LATENT_K)
-        self.user_truck_approx = _svd_reconstruct(self.user_truck_matrix, LATENT_K)
-
-        self._popular_loads = _popularity_ranking(self.user_load_matrix)
-        self._popular_trucks = _popularity_ranking(self.user_truck_matrix)
-
-        payload = {
-            "user_load_approx": self.user_load_approx,
-            "user_truck_approx": self.user_truck_approx,
-            "user_load_matrix": self.user_load_matrix,
-            "user_truck_matrix": self.user_truck_matrix,
-            "user_ids": self.user_ids,
-            "load_ids": self.load_ids,
-            "truck_ids": self.truck_ids,
-            "popular_loads": self._popular_loads,
-            "popular_trucks": self._popular_trucks,
-        }
-
-        metrics = {
-            "n_users": len(self.user_ids),
-            "n_loads": len(self.load_ids),
-            "n_trucks": len(self.truck_ids),
-            "latent_k": LATENT_K,
-        }
-
-        save_model(payload, MODEL_NAME, metrics)
-        logger.info(
-            "Collaborative filter trained: %d users, %d loads, %d trucks",
-            len(self.user_ids),
-            len(self.load_ids),
-            len(self.truck_ids),
-        )
-        return metrics
+    def _publish_payload(self, payload) -> None:
+        # Resolve every required field before changing any serving attribute.
+        keys = ("user_load_approx", "user_truck_approx", "user_load_matrix",
+                "user_truck_matrix", "user_ids", "load_ids", "truck_ids",
+                "popular_loads", "popular_trucks")
+        values = tuple(payload[key] for key in keys)
+        with self._state_lock:
+            (self.user_load_approx, self.user_truck_approx, self.user_load_matrix,
+             self.user_truck_matrix, self.user_ids, self.load_ids, self.truck_ids,
+             self._popular_loads, self._popular_trucks) = values
 
     def load(self) -> None:
-        """Load persisted model; auto-train if none exists."""
-        if not model_exists(MODEL_NAME):
-            self.train()
-            return
-
-        payload = load_model(MODEL_NAME)
-        if payload is None:
-            self.train()
-            return
-
-        self.user_load_approx = payload["user_load_approx"]
-        self.user_truck_approx = payload["user_truck_approx"]
-        self.user_load_matrix = payload["user_load_matrix"]
-        self.user_truck_matrix = payload["user_truck_matrix"]
-        self.user_ids = payload["user_ids"]
-        self.load_ids = payload["load_ids"]
-        self.truck_ids = payload["truck_ids"]
-        self._popular_loads = payload["popular_loads"]
-        self._popular_trucks = payload["popular_trucks"]
+        """Load complete persisted state; retain the existing auto-train fallback."""
+        with self._lifecycle_lock:
+            if not model_exists(MODEL_NAME):
+                self.train()
+                return
+            payload = load_model(MODEL_NAME)
+            if payload is None:
+                self.train()
+                return
+            self._publish_payload(payload)
 
     # -- helpers ------------------------------------------------------------
 
     def _ensure_loaded(self) -> None:
-        if self.user_load_approx is None:
+        with self._state_lock:
+            if self.user_load_approx is not None:
+                return
+        with self._lifecycle_lock:
+            with self._state_lock:
+                if self.user_load_approx is not None:
+                    return
             self.load()
 
     def _user_index(self, user_id: str) -> Optional[int]:
@@ -234,6 +231,16 @@ class CollaborativeFilter:
             return self.user_ids.index(user_id)
         except ValueError:
             return None
+
+    def _capture_recommendation_state(self, user_id, entity_type):
+        self._ensure_loaded()
+        # Capture the row lookup together with its aligned IDs and scores.
+        # Scoring uses these references outside both locks, even during training.
+        with self._state_lock:
+            index = self._user_index(user_id)
+            if entity_type == "load":
+                return index, self.load_ids, self._popular_loads, self.user_load_approx
+            return index, self.truck_ids, self._popular_trucks, self.user_truck_approx
 
     # -- private recommendation pipeline ------------------------------------
 
@@ -247,6 +254,7 @@ class CollaborativeFilter:
         booking_history: List[Dict[str, Any]],
         booking_key: str,
         top_n: int,
+        idx: int | None,
     ) -> Dict[str, Any]:
         """Shared recommendation pipeline for any entity type.
 
@@ -269,6 +277,8 @@ class CollaborativeFilter:
             (``"load_id"`` or ``"truck_id"``).
         top_n : int
             Number of recommendations to return.
+        idx : int or None
+            User row captured with the aligned model fields; None means cold start.
 
         Returns
         -------
@@ -276,7 +286,6 @@ class CollaborativeFilter:
             ``{"recommendations": [{entity_type + "_id": ..., "relevance_score": ...}, ...]}``
         """
         _validate_top_n(top_n)
-        idx = self._user_index(user_id)
 
         # The exclusion set must be built before the cold-start branch so
         # popularity fallback never recommends an entity already booked.
@@ -346,10 +355,9 @@ class CollaborativeFilter:
             ``recommendations`` – list of ``{load_id, relevance_score}``.
         """
         _validate_top_n(top_n)
-        self._ensure_loaded()
+        idx, ids, popular, approx = self._capture_recommendation_state(user_id, "load")
         return self._recommend(
-            user_id, "load", self.load_ids, self._popular_loads,
-            self.user_load_approx, booking_history, "load_id", top_n,
+            user_id, "load", ids, popular, approx, booking_history, "load_id", top_n, idx,
         )
 
     def recommend_trucks(
@@ -375,10 +383,9 @@ class CollaborativeFilter:
             ``recommendations`` – list of ``{truck_id, relevance_score}``.
         """
         _validate_top_n(top_n)
-        self._ensure_loaded()
+        idx, ids, popular, approx = self._capture_recommendation_state(user_id, "truck")
         return self._recommend(
-            user_id, "truck", self.truck_ids, self._popular_trucks,
-            self.user_truck_approx, booking_history, "truck_id", top_n,
+            user_id, "truck", ids, popular, approx, booking_history, "truck_id", top_n, idx,
         )
 
 

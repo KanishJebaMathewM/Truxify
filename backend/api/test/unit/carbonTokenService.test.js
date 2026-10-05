@@ -37,7 +37,8 @@ describe('carbonTokenService.calculateAndMintCarbonCredits', () => {
     expect(token.co2SavedKg).toBe(32.16);
     expect(token.co2SavedMetricTons).toBe(0.0322);
     expect(token.tokenAmount).toBe(0.0322);
-    expect(token.status).toBe('MINTED');
+    // No fabricated chain proofs: the record waits for a real anchor.
+    expect(token.status).toBe('PENDING_CHAIN_ANCHOR');
     expect(token.distanceKm).toBe(450);
     expect(token.loadWeightKg).toBe(9000);
   });
@@ -138,7 +139,8 @@ describe('carbonTokenService.purchaseCarbonCredits', () => {
     expect(retired.status).toBe('RETIRED_FOR_OFFSET');
     expect(retired.buyerAddress).toBe('0xBuyer');
     expect(retired.shipperId).toBe('SH-1');
-    expect(retired.transferTxHash).toMatch(/^0x[0-9a-f]{64}$/);
+    // Retirement records no fabricated transfer hash.
+    expect(retired.transferTxHash).toBeNull();
   });
 
   it('refuses to retire the same credit twice', async () => {

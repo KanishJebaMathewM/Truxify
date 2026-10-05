@@ -20,6 +20,7 @@ const publicTrackingLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:public-tracking:'),
+  validate: { keyGeneratorIpFallback: false },
 });
 
 const shareTrackingLimiter = rateLimit({
@@ -29,6 +30,7 @@ const shareTrackingLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || 'unknown',
   store: createStore('rl:share-tracking:'),
+  validate: { keyGeneratorIpFallback: false },
 });
 
 // ──────────────────────────────────────────────────────────────────────────

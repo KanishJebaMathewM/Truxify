@@ -6,7 +6,6 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
-import GpsLog from '../models/GpsLog.js';
 import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 import { trackingTokenInvalidResponse } from '../utils/trackingTokenStatus.js';
 
@@ -59,6 +58,7 @@ const publicLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:public-track:'),
+  validate: { keyGeneratorIpFallback: false },
 });
 
 // ──────────────────────────────────────────────────────────────────────────

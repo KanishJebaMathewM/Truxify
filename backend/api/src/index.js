@@ -184,8 +184,6 @@ import {
 } from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
 
-// --- AUDIT LOGGING IMPORTS ---
-import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
 
 
 // Configuration load from root folder is handled in db.js

@@ -4,8 +4,10 @@
  */
 
 import crypto from 'crypto';
+import { EVENT_SEVERITY } from './auditEventTypes.js';
 
 const HMAC_ALGORITHM = 'sha256';
+const DEFAULT_EVENT_SEVERITY = 'info';
 
 /**
  * Signs a batch of log entries using a rotating HMAC key.
@@ -59,6 +61,19 @@ export function generateLogId() {
     const timestamp = Date.now().toString(36);
     const randomPart = crypto.randomBytes(6).toString('hex');
     return `log_${timestamp}_${randomPart}`;
+}
+
+/**
+ * Resolves the SIEM severity for an audit event type.
+ * Unknown or missing types fall back to info so queueing never fails.
+ * @param {string} eventType
+ * @returns {string}
+ */
+export function getEventSeverity(eventType) {
+    if (typeof eventType !== 'string' || eventType.length === 0) {
+        return DEFAULT_EVENT_SEVERITY;
+    }
+    return EVENT_SEVERITY[eventType] ?? DEFAULT_EVENT_SEVERITY;
 }
 
 /**

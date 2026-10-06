@@ -251,7 +251,18 @@ async def get_traffic(route_id: str, _auth=Depends(verify_api_key)):
         raise HTTPException(status_code=404, detail="Route not found")
 
     try:
-        traffic = await traffic_pipeline.get_real_time_traffic(route_id)
+        order_route = _get_order_route(route_id)
+        route_signature = (
+            TrafficPipeline.build_route_signature(
+                {"lat": order_route["dest_lat"], "lng": order_route["dest_lng"]}
+            )
+            if order_route
+            else None
+        )
+        if route_signature is not None:
+            traffic = await traffic_pipeline.get_real_time_traffic(route_id, route_signature)
+        else:
+            traffic = await traffic_pipeline.get_real_time_traffic(route_id)
         utc_now = datetime.now(timezone.utc)
         if traffic:
             return {

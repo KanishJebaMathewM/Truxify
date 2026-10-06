@@ -36,6 +36,8 @@ async def _ingest_traffic_data_without_synthetic_training_rows(self, route_id, s
             hour=timestamp.hour,
         )
 
+        traffic_entry.degraded = not (gmaps_is_live and osrm_is_live)
+
         if gmaps_is_live and osrm_is_live:
             await asyncio.to_thread(self._persist_traffic_entry, traffic_entry)
         else:
@@ -52,6 +54,7 @@ async def _ingest_traffic_data_without_synthetic_training_rows(self, route_id, s
                         "speed": traffic_entry.traffic_speed,
                         "congestion": traffic_entry.congestion_level,
                         "timestamp": traffic_entry.timestamp.isoformat(),
+                        "degraded": not (gmaps_is_live and osrm_is_live),
                     }
                 ),
             ),

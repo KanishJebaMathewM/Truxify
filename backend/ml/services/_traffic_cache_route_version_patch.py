@@ -7,6 +7,11 @@ from . import traffic_pipeline as _traffic_pipeline
 
 _BaseTrafficPipeline = _traffic_pipeline.TrafficPipeline
 
+# Capture the pre-patch implementation BEFORE assigning ours below —
+# _BaseTrafficPipeline is the class object itself, so delegating to
+# _BaseTrafficPipeline.ingest_traffic_data after the assignment recurses.
+_pre_patch_ingest_traffic_data = _BaseTrafficPipeline.ingest_traffic_data
+
 
 async def ingest_traffic_data(
     self,
@@ -16,7 +21,7 @@ async def ingest_traffic_data(
     cache_route_signature: Optional[str] = None,
 ):
     """Write real-time traffic under a destination-versioned cache key."""
-    traffic_entry = await _BaseTrafficPipeline.ingest_traffic_data(
+    traffic_entry = await _pre_patch_ingest_traffic_data(
         self,
         route_id,
         source,
@@ -32,6 +37,7 @@ async def ingest_traffic_data(
         "congestion": traffic_entry.congestion_level,
         "timestamp": traffic_entry.timestamp.isoformat(),
         "route_signature": route_signature,
+        "degraded": getattr(traffic_entry, "degraded", False),
     })
     await asyncio.get_running_loop().run_in_executor(
         None,

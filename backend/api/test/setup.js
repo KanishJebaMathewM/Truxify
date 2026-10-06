@@ -24,6 +24,14 @@ process.env.MAX_ESCROW_MATIC = '10000';
 // in application code — it only exists here so tests can exercise signing.
 process.env.WIM_SIGNING_SECRET = 'test-wim-signing-secret-0123456789abcdef-0123456789abcdef';
 process.env.DRIVER_LOGIN_OTP = '1234';
+// Escrow webhook signature verification fails closed at boot without it.
+process.env.WEBHOOK_SECRET ??= 'test-webhook-secret-for-harness-only';
+
+// Dummy Supabase config so validateConfig() passes in the harness — tests mock
+// the clients, so these never reach a real server. ??= keeps real env intact.
+process.env.SUPABASE_URL ??= 'https://test.supabase.co';
+process.env.SUPABASE_ANON_KEY ??= 'test-anon-key-for-harness';
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-service-role-key-for-harness';
 
 // Suppress noisy console.error output from the routes — they log
 // pricing errors and DB failures to stderr when tests trigger them.

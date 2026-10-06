@@ -4,7 +4,7 @@ import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabaseAdmin, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
-import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { createStore, safeIpKeyGenerator, publicTrackingLimiter } from '../middleware/rateLimiter.js';
 import GpsLog from '../models/GpsLog.js';
 import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 import { trackingTokenInvalidResponse } from '../utils/trackingTokenStatus.js';
@@ -26,7 +26,7 @@ const trackingTokenService = new TrackingTokenService({
 // ──────────────────────────────────────────────────────────────────────────
 router.get(
   '/tracking/:token/route',
-  publicLimiter,
+  publicTrackingLimiter,
   validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {

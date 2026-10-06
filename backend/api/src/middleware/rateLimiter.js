@@ -473,6 +473,34 @@ export const healthLimiter = rateLimit({
   },
 });
 
+export const publicTrackingLimiter = rateLimit({
+  windowMs: AUTH_WINDOW_MS,
+  max: AUTH_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:public-tracking:"),
+
+  handler: (req, res) => {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: safeIpKeyGenerator(req),
+        path: req.originalUrl,
+        method: req.method,
+        userAgent: req.get("user-agent"),
+      },
+      "Public tracking rate limit exceeded",
+    );
+
+    res.status(429).json({
+      error: "Rate limit exceeded",
+      retryAfter: Math.ceil(AUTH_WINDOW_MS / 1000),
+    });
+  },
+});
+
 export const authLimiter = rateLimit({
   windowMs: AUTH_WINDOW_MS,
   max: AUTH_MAX_REQUESTS,

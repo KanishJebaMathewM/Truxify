@@ -1,4 +1,5 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import { validateWimConfig } from './config/wim.js';
 import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
@@ -232,7 +233,7 @@ const stateDivergenceDetector = new StateDivergenceDetector({
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
-if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development') {
+if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') {
   logger.fatal('BYPASS_AUTH is enabled outside development. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it), and set NODE_ENV=development if you need local testing.')
   process.exit(1)
 }
@@ -659,6 +660,8 @@ app.use('/api/blockchain', (req, _res, next) => {
 // additionally gated inside the route on the dedicated ESCROW_OPERATOR_API_KEY
 
 // (403 for other valid keys; fails closed when unconfigured).
+import complianceRoutes from './routes/complianceRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 

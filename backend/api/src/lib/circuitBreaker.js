@@ -162,6 +162,7 @@ export class CircuitBreaker {
     this.successCount += 1;
     if (this.state === CircuitState.HALF_OPEN && operation.probe) {
       this.reset();
+      this.successCount = 1;
       logger.info(`[CircuitBreaker:${this.name}] Service recovered. State reset to CLOSED`);
     } else {
       this.failureCount = 0;

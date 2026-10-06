@@ -1,6 +1,6 @@
 import logging
 import os
-from math import atan2, cos, radians, sin, sqrt
+from math import atan2, cos, isfinite, radians, sin, sqrt
 from typing import List, Tuple
 
 import requests
@@ -112,6 +112,27 @@ def get_route_matrix(
     return distance_matrix
 
 
+def _convert_table_matrix(matrix, size: int, divisor: float) -> List[List[float]]:
+    """Validate an all-to-all table, retaining null cells as unreachable."""
+    if not isinstance(matrix, list) or len(matrix) != size:
+        raise ValueError("OSRM table has an unexpected number of rows")
+    converted = []
+    for row in matrix:
+        if not isinstance(row, list) or len(row) != size:
+            raise ValueError("OSRM table has an unexpected number of columns")
+        values = []
+        for value in row:
+            if value is None:
+                values.append(float("inf"))
+                continue
+            parsed = float(value)
+            if isinstance(value, bool) or not isfinite(parsed) or parsed < 0:
+                raise ValueError("OSRM table contains an invalid distance or duration")
+            values.append(parsed / divisor)
+        converted.append(values)
+    return converted
+
+
 def get_route_matrix_with_duration(
     locations: List[Tuple[float, float]],
 ) -> Tuple[List[List[float]], List[List[float]]]:
@@ -148,29 +169,14 @@ def get_route_matrix_with_duration(
 
         data = response.json()
 
+        if not isinstance(data, dict):
+            raise ValueError("OSRM table response must be an object")
         distances = data.get("distances")
         durations = data.get("durations")
 
         if distances is not None and durations is not None:
-            distance_matrix = [
-                [
-                    float(distance) / 1000.0
-                    if distance is not None
-                    else float("inf")
-                    for distance in row
-                ]
-                for row in distances
-            ]
-
-            duration_matrix = [
-                [
-                    float(duration) / 60.0
-                    if duration is not None
-                    else float("inf")
-                    for duration in row
-                ]
-                for row in durations
-            ]
+            distance_matrix = _convert_table_matrix(distances, len(locations), 1000.0)
+            duration_matrix = _convert_table_matrix(durations, len(locations), 60.0)
 
             return distance_matrix, duration_matrix
 

@@ -26,6 +26,9 @@ process.env.WIM_SIGNING_SECRET = 'test-wim-signing-secret-0123456789abcdef-01234
 process.env.DRIVER_LOGIN_OTP = '1234';
 // Escrow webhook signature verification fails closed at boot without it.
 process.env.WEBHOOK_SECRET ??= 'test-webhook-secret-for-harness-only';
+// Pin a harness JWT secret (>=32 chars, the jwtSecret.js floor) so
+// generateTestToken and getJwtSecret agree.
+process.env.JWT_SECRET ??= 'test-jwt-secret-for-harness-0123456789abcdef';
 
 // Dummy Supabase config so validateConfig() passes in the harness — tests mock
 // the clients, so these never reach a real server. ??= keeps real env intact.

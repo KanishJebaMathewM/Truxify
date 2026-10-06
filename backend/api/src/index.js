@@ -15,6 +15,8 @@ import BlockchainMonitor from './services/blockchain/blockchainMonitor.js'
 import StateDivergenceDetector from './services/blockchain/stateDivergenceDetector.js'
 import app from './app.js'
 
+export default app
+
 const server = http.createServer(app)
 
 

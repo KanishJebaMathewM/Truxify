@@ -7,7 +7,7 @@ import responseSanitizer from '../../src/middleware/responseSanitizer.js';
 // Replay the relevant real bootstrap registrations, without starting the API's
 // database connections, background workers or listener. Fixtures stand in for
 // response producers; sanitization itself runs through real Express res.json.
-const source = readFileSync(new URL('../../src/index.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../../src/app.js', import.meta.url), 'utf8');
 const registration = text => {
   const offset = source.indexOf(text);
   if (offset < 0) throw new Error(`Missing bootstrap registration: ${text}`);

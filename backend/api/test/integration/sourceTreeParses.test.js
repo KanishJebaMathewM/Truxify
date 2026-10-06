@@ -10,10 +10,9 @@ const ROOT_DIR = path.resolve(BACKEND_API_DIR, '..');
 // Files whose parse errors are fixed in separate, already-open PRs. Remove an
 // entry from this list as soon as its fix PR merges so the whole tree is
 // covered again.
-const EXEMPT_PARSE_FILES = new Set([
-  'src/lib/profileCache.js',
-  'src/services/webrtc/WebRTCSignalingServer.js',
-]);
+// profileCache.js and WebRTCSignalingServer.js parse again — the exemption
+// list is empty; the test keeps the mechanism for future temporary cases.
+const EXEMPT_PARSE_FILES = new Set([]);
 
 const EXCLUDED_DIRS = new Set(['node_modules', 'dist', 'coverage', '.git', 'build', '.next']);
 const JS_EXT = '.js';

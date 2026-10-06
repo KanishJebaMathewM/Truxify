@@ -11,6 +11,31 @@ import { trackingTokenInvalidResponse } from '../utils/trackingTokenStatus.js';
 
 const router = express.Router();
 
+// ──────────────────────────────────────────────────────────────────────────
+// GET /api/public/tracking/:token
+// Public — no authentication required. Returns the safe order subset.
+// ──────────────────────────────────────────────────────────────────────────
+router.get(
+  '/tracking/:token',
+  publicTrackingLimiter,
+  validateParams(publicTrackingTokenSchema),
+  async (req, res) => {
+    try {
+      const { token } = req.params;
+      const result = await trackingTokenService.validateAndGetPublicTrackingData(token);
+
+      if (!result.valid) {
+        return res.status(404).json({ error: 'Tracking link not found or invalid', reason: result.reason });
+      }
+
+      return res.json(result.data);
+    } catch (error) {
+      logger.error({ err: error }, 'Error processing public tracking request');
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
 // 🔒 CRITICAL FIX (#10131 / #8954): Public tracking share-links are unauthenticated.
 // Passing supabaseAdmin ensures RLS-protected tables (tracking_tokens, orders, order_timeline)
 // can be queried successfully without returning 0 rows (404).

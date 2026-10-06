@@ -1,8 +1,16 @@
+import crypto from 'crypto';
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import crypto from 'crypto';
 
 const localQueues = new Map();
+
+function normalizeTtl(ttlMs, fallbackMs) {
+  const value = Number(ttlMs);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallbackMs;
+  }
+  return value;
+}
 
 function acquireLocalLock(key, ttlSeconds) {
   const tail = localQueues.get(key) ?? Promise.resolve();
@@ -44,16 +52,16 @@ function acquireLocalLock(key, ttlSeconds) {
  * @returns {Promise<{acquired: boolean, release: Function}>}
  */
 export async function acquireDistributedLock(key, ttlSeconds = 5) {
+  const safeTtlSeconds = normalizeTtl(ttlSeconds, 5);
   const isRedisReady = redisClient &&
     (redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function'));
 
   if (!isRedisReady) {
-    // Degraded / fallback mode: maintain in-process mutual exclusion per key
-    return acquireLocalLock(key, ttlSeconds);
+    return { acquired: false, release: async () => {} };
   }
 
   try {
-    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
+    const lock = await redisClient.set(key, '1', 'NX', 'EX', safeTtlSeconds);
     if (lock === 'OK') {
       return {
         acquired: true,
@@ -68,7 +76,7 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
     }
   } catch (err) {
     logger.error({ err, key }, 'Redis lock acquisition error; using local mutex fallback');
-    return acquireLocalLock(key, ttlSeconds);
+    return acquireLocalLock(key, safeTtlSeconds);
   }
 
   return { acquired: false, release: async () => {} };
@@ -103,14 +111,9 @@ export async function withLock(key, fn, options = {}) {
   throw new Error(`Failed to acquire lock for ${key} after ${maxRetries} retries`);
 }
 
-
 /**
  * Thrown when a distributed lock cannot be acquired because Redis is
  * unavailable or an unexpected error occurred during SET NX.
- *
- * Callers MUST catch this and abort the protected operation — typically
- * by returning HTTP 503 Service Unavailable.  This is a hard failure,
- * not a "lock is already held" signal.
  */
 export class LockAcquisitionError extends Error {
   constructor(resourceKey, reason) {
@@ -120,23 +123,16 @@ export class LockAcquisitionError extends Error {
     this.reason = reason;
   }
 }
-
 /**
  * Acquires a distributed Redis lock using SET … NX PX with a random owner
  * token (UUID) so that only the holder can release it.
  *
- * Failure semantics — **fail closed**:
- *   - Returns `null`               → lock is held by another process; caller should back off.
- *   - Throws `LockAcquisitionError` → Redis is unavailable or errored; caller MUST abort
- *                                     the critical section and return 503.
- *
- * @param {string} resourceKey  Unique key for the guarded resource, e.g. `payment_lock:order_123`
- * @param {number} ttlMs        Lock TTL in **milliseconds** (default 30 000 = 30 s)
+ * @param {string} resourceKey  Unique key for the guarded resource
+ * @param {number} ttlMs        Lock TTL in milliseconds (default 30 000 ms)
  * @returns {Promise<string|null>} The owner token (UUID) on success, null if already locked.
  * @throws {LockAcquisitionError}  When Redis is down or SET NX throws.
  */
 export async function acquireLock(resourceKey, ttlMs = 30_000) {
-  // Redis client not initialised — hard failure, not a silent skip.
   if (!redisClient) {
     throw new LockAcquisitionError(
       resourceKey,
@@ -151,22 +147,19 @@ export async function acquireLock(resourceKey, ttlMs = 30_000) {
     );
   }
 
+  const safeTtlMs = normalizeTtl(ttlMs, 30_000);
   const lockValue = crypto.randomUUID();
 
   try {
-    const result = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
+    const result = await redisClient.set(resourceKey, lockValue, 'PX', safeTtlMs, 'NX');
 
-    // 'OK' (ioredis string) or 1 (raw RESP integer) means we acquired the lock.
     if (result === 'OK' || result === 1 || result === true) {
       return lockValue;
     }
 
-    // null / 0 / false means the key already exists — another process holds the lock.
     return null;
   } catch (err) {
     logger.error({ err }, '[RedisLock] Error acquiring lock for key', resourceKey);
-    // Re-throw as a typed error so callers can distinguish Redis failures
-    // from "lock is held" (null return).
     throw new LockAcquisitionError(resourceKey, err.message);
   }
 }
@@ -181,8 +174,9 @@ export async function acquireLock(resourceKey, ttlMs = 30_000) {
  * @returns {Promise<boolean>} true if renewed, false if the lock is no longer ours
  */
 export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
-  if (!redisClient || !lockValue) return false;
+  if (!redisClient || !lockValue || typeof resourceKey !== 'string' || !resourceKey.trim()) return false;
 
+  const safeTtlMs = normalizeTtl(ttlMs, 30_000);
   const luaScript = `
     if redis.call('GET', KEYS[1]) == ARGV[1] then
       redis.call('PEXPIRE', KEYS[1], ARGV[2])
@@ -193,7 +187,7 @@ export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
 
   try {
     const result = await redisClient.eval(
-      luaScript, 1, resourceKey, lockValue, ttlMs.toString()
+      luaScript, 1, resourceKey, lockValue, safeTtlMs.toString()
     );
     return result === 1;
   } catch (err) {
@@ -202,46 +196,23 @@ export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
   }
 }
 
-/**
- * Renews the lock on a fixed interval while a long-running async task holds
- * the critical section, so the lock cannot silently lapse mid-operation (e.g.
- * while awaiting a slow on-chain `waitForConfirmation()`).
- *
- * This is the fix for concurrency issue #14681: per-order escrow locks were
- * acquired with a fixed TTL but never renewed, so a blockchain confirmation
- * that outlived the TTL let a second sweep re-lock and double-submit a payout.
- *
- * The renewal runs on `intervalMs` (default 10 s, always clamped to be shorter
- * than `ttlMs`). Each renewal only succeeds if we still own the lock; if the
- * lock is lost the timer keeps firing harmlessly (renewLock returns false) and
- * the task itself must detect the lost lock. The timer is always cleared in a
- * `finally` so it never outlives the task.
- *
- * @param {string}      resourceKey
- * @param {string|null} lockValue   The UUID returned by acquireLock; if falsy, no renewal (pass-through)
- * @param {number}      ttlMs       TTL to extend to on each renewal
- * @param {() => Promise<T>} asyncFn  The critical-section task
- * @param {number}      [intervalMs] Renewal cadence (default 10 000 ms)
- * @returns {Promise<T>} the task's result
- * @template T
- */
 export const DEFAULT_LOCK_RENEWAL_INTERVAL_MS = 10_000;
 
 export async function withLockRenewal(resourceKey, lockValue, ttlMs, asyncFn, intervalMs = DEFAULT_LOCK_RENEWAL_INTERVAL_MS) {
   if (!resourceKey || !lockValue || typeof asyncFn !== 'function') {
-    return asyncFn();
+    if (typeof asyncFn === 'function') {
+      return asyncFn();
+    }
+    return undefined;
   }
 
-  // Never renew less often than half the TTL, so at least one renewal lands
-  // before the lock could expire even if a tick is delayed.
-  const renewalIntervalMs = Math.max(Math.min(intervalMs, Math.floor(ttlMs / 2)), 1_000);
+  const safeTtlMs = normalizeTtl(ttlMs, DEFAULT_LOCK_RENEWAL_INTERVAL_MS * 2);
+  const safeIntervalMs = normalizeTtl(intervalMs, DEFAULT_LOCK_RENEWAL_INTERVAL_MS);
+  const renewalIntervalMs = Math.max(Math.min(safeIntervalMs, Math.floor(safeTtlMs / 2)), 1_000);
 
   const timer = setInterval(() => {
-    // Fire-and-forget: renewLock logs and returns false on failure; a missed
-    // tick does not abort the task, it only risks the lock lapsing.
-    void renewLock(resourceKey, lockValue, ttlMs);
+    void renewLock(resourceKey, lockValue, safeTtlMs);
   }, renewalIntervalMs);
-  // Don't keep the event loop alive solely for lock renewal.
   timer.unref?.();
 
   try {
@@ -252,20 +223,14 @@ export async function withLockRenewal(resourceKey, lockValue, ttlMs, asyncFn, in
 }
 
 /**
- * Releases a distributed lock **only if** we still own it.
- *
- * Uses an atomic Lua script (GET + DEL) so a slow holder cannot accidentally
- * delete a newer holder's lock after its own TTL has expired.
- *
- * Safe to call in a `finally` block — never throws; returns false on failure
- * so the caller can log a warning if needed.
+ * Releases a distributed lock only if we still own it.
  *
  * @param {string}      resourceKey  The same key passed to acquireLock
- * @param {string|null} lockValue    The UUID returned by acquireLock; if null/undefined, no-op
+ * @param {string|null} lockValue    The UUID returned by acquireLock
  * @returns {Promise<boolean>} true if we held and deleted the lock, false otherwise
  */
 export async function releaseLock(resourceKey, lockValue) {
-  if (!redisClient || !lockValue) return false;
+  if (!redisClient || !lockValue || typeof resourceKey !== 'string' || !resourceKey.trim()) return false;
 
   const luaScript = `
     if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -284,8 +249,6 @@ export async function releaseLock(resourceKey, lockValue) {
   }
 }
 
-// === Spec 15: ===
-// === Spec 15: fix double-release in Redis distributed lock ===
 export class LockState {
   constructor() { this.released = false; this.held = false; }
   acquire() { if (this.held) return false; this.held = true; return true; }
@@ -315,7 +278,7 @@ class RedisLock {
   constructor(options = {}) {
     this.redisUrl = options.redisUrl || process.env.REDIS_URL || 'redis://localhost:6379';
     this.client = createClient({ url: this.redisUrl });
-    this.defaultTtl = options.defaultTtl || 30000; 
+    this.defaultTtl = options.defaultTtl || 30000;
     this.retryDelay = options.retryDelay || 100;
     this.maxRetries = options.maxRetries || 50;
 
@@ -367,7 +330,7 @@ class RedisLock {
       };
     }
     await this.connect();
-    
+
     const lockKey = `lock:${lockName}`;
     let attempts = 0;
 
@@ -407,9 +370,8 @@ class RedisLock {
       };
     }
     await this.connect();
-    
+
     const lockKey = `lock:${lockName}`;
-    
     const result = await this.client.eval(this.releaseScript, {
       keys: [lockKey],
       arguments: [owner],
@@ -427,7 +389,7 @@ class RedisLock {
       return { success: false, message: 'Redis client not initialized' };
     }
     await this.connect();
-    
+
     const lockKey = `lock:${lockName}`;
     const currentOwner = await this.client.get(lockKey);
 
@@ -445,5 +407,3 @@ class RedisLock {
 }
 
 export default RedisLock;
-
-import crypto from 'crypto';

@@ -67,12 +67,18 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
     }
 
+    if (!isValidIdentifier(truck_id) || !isValidIdentifier(trip_id)) {
+      return res.status(400).json({ error: 'truck_id and trip_id must be valid alphanumeric identifiers (1-64 chars)' });
+    }
+
     // Pass the raw values through: the service owns the numeric contract, so
     // 'abc' and -100 are rejected there instead of being coerced to NaN and
-    // persisted as a minted credit.
+    // persisted as a minted credit. The minted credit stays bound to the
+    // authenticated carrier (906ebbe97) so retirement can be authorized.
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
-      truckId: truck_id,
-      tripId: trip_id,
+      ownerId: req.user.id,
+      truckId: truck_id.trim(),
+      tripId: trip_id.trim(),
       distanceKm: distance_km,
       fuelSavedLiters: fuel_saved_liters,
       loadWeightKg: load_weight_kg

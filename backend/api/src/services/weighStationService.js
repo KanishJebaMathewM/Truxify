@@ -193,16 +193,6 @@ export const checkBypassEligibility = async (driverId, lat, lng) => {
  * Syncs highly accurate internal air suspension weights with DOT enforcement software.
  * Returns an UNSUPPORTED response until a real WIM provider (Drivewyze/PrePass) API is integrated.
  */
-const syncAndTransmitInternalWeights = async (driverId, truckId, axles) => {
-  logger.warn('[WeighStation] syncAndTransmitInternalWeights called but no WIM provider is configured -- returning unsupported');
-  return {
-    action: 'UNSUPPORTED',
-    supported: false,
-    simulated: true,
-    stationId: null,
-    reason: 'Weigh-in-motion sync is not available: no WIM provider (Drivewyze/PrePass) is configured. Configure WIM_PROVIDER_API_KEY to enable. This is not a regulatory verdict.',
-    timestamp: new Date().toISOString(),
-  };
 export const syncAndTransmitInternalWeights = async (driverId, truckId, axles) => {
     logger.warn('[WeighStation] syncAndTransmitInternalWeights called but no WIM provider is configured -- returning unsupported');
     return {

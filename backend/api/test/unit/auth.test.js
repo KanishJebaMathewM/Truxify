@@ -4,7 +4,12 @@ import jwt from 'jsonwebtoken';
 describe('authenticate middleware - non bypass flow', () => {
   beforeEach(() => {
     process.env.BYPASS_AUTH = 'false';
+    process.env.JWT_SECRET = 'secret'; // middleware fails closed without it (93de585a7)
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    delete process.env.JWT_SECRET;
   });
 
   it('returns 401 when authorization header missing', async () => {
@@ -118,18 +123,17 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'user-1',
-                    firebase_uid: 'firebase-user-id',
-                    role: 'driver',
-                    full_name: 'John Supa',
-                    phone: '9999999999',
-                  },
-                  error: null,
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: {
+                  id: 'user-1',
+                  firebase_uid: 'firebase-user-id',
+                  role: 'driver',
+                  full_name: 'John Supa',
+                  is_active: true,
+                  phone: '9999999999',
+                },
+                error: null,
             }),
           }),
         }),
@@ -235,12 +239,10 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: null,
-                  error: null,
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: null,
+                error: null,
             }),
           }),
         }),
@@ -284,14 +286,12 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: null,
-                  error: {
-                    message: 'db failure',
-                  },
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: null,
+                error: {
+                  message: 'db failure',
+                },
             }),
           }),
         }),
@@ -335,18 +335,17 @@ describe('authenticate middleware - non bypass flow', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'user-1',
-                    firebase_uid: 'firebase-user',
-                    role: 'driver',
-                    full_name: 'John',
-                    phone: '9999999999',
-                  },
-                  error: null,
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: {
+                  id: 'user-1',
+                  firebase_uid: 'firebase-user',
+                  role: 'driver',
+                  full_name: 'John',
+                  is_active: true,
+                  phone: '9999999999',
+                },
+                error: null,
             }),
           }),
         }),
@@ -481,8 +480,9 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     // Headers should have been deleted before any logic ran
     expect(req.headers['x-user-id']).toBeUndefined();
     expect(req.headers['x-user-role']).toBeUndefined();
-    // Falls through to token flow → 500 because supabase is null
-    expect(res.status).toHaveBeenCalledWith(500);
+    // JWT_SECRET is unset in production, so the middleware fails closed with
+    // 503 before any token-flow branch (93de585a7).
+    expect(res.status).toHaveBeenCalledWith(503);
   });
 
   it('returns 401 when BYPASS_AUTH is enabled but x-user-id header is missing', async () => {
@@ -630,7 +630,10 @@ describe('requireRole middleware', () => {
     middleware(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+    expect(res.json).toHaveBeenCalledWith({
+        error: 'Unauthorized: Authentication required.',
+        hint: 'Please provide a valid authentication token to access this resource.',
+      });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -654,7 +657,10 @@ describe('requireRole middleware', () => {
 
       expect(() => middleware(req, res, next)).not.toThrow();
       expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'Unauthorized: Authentication required.',
+        hint: 'Please provide a valid authentication token to access this resource.',
+      });
       expect(next).not.toHaveBeenCalled();
     }
   });
@@ -746,10 +752,13 @@ describe('requireRole middleware', () => {
 
 describe('authenticate middleware - Redis caching', () => {
   let originalBypassAuth;
+  let originalJwtSecret;
 
   beforeEach(() => {
     originalBypassAuth = process.env.BYPASS_AUTH;
+    originalJwtSecret = process.env.JWT_SECRET;
     process.env.BYPASS_AUTH = 'false';
+    process.env.JWT_SECRET = 'secret'; // middleware fails closed without it (93de585a7)
     vi.resetModules();
   });
 
@@ -758,6 +767,11 @@ describe('authenticate middleware - Redis caching', () => {
       delete process.env.BYPASS_AUTH;
     } else {
       process.env.BYPASS_AUTH = originalBypassAuth;
+    }
+    if (originalJwtSecret === undefined) {
+      delete process.env.JWT_SECRET;
+    } else {
+      process.env.JWT_SECRET = originalJwtSecret;
     }
   });
 
@@ -839,6 +853,7 @@ describe('authenticate middleware - Redis caching', () => {
 
     const dbProfile = {
       id: 'db-user-999',
+      is_active: true,
       firebase_uid: 'corrupted-firebase-uid',
       role: 'customer',
       full_name: 'Database User',
@@ -849,9 +864,7 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
           }),
         }),
       }),
@@ -904,9 +917,7 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: null, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: null, error: null }),
           }),
         }),
       }),
@@ -949,6 +960,7 @@ describe('authenticate middleware - Redis caching', () => {
   it('queries database and populates Redis on cache miss', async () => {
     const dbProfile = {
       id: 'db-user-123',
+      is_active: true,
       firebase_uid: 'miss-firebase-uid',
       role: 'driver',
       full_name: 'Database User',
@@ -972,12 +984,10 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: dbProfile,
-                  error: null,
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: dbProfile,
+                error: null,
             }),
           }),
         }),
@@ -1040,7 +1050,8 @@ describe('authenticate middleware - Redis caching', () => {
       firebase_uid: 'error-firebase-uid',
       role: 'customer',
       full_name: 'Resilient User',
-      phone: '+1111111111'
+      phone: '+1111111111',
+      is_active: true
     };
 
     const redisClientMock = {
@@ -1060,12 +1071,10 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: dbProfile,
-                  error: null,
-                }),
+            maybeSingle: () =>
+              Promise.resolve({
+                data: dbProfile,
+                error: null,
             }),
           }),
         }),
@@ -1177,6 +1186,7 @@ describe('authenticate middleware - Redis caching', () => {
       role: 'customer',
       full_name: 'Fresh Supa',
       phone: '+912222222222',
+      is_active: true,
     };
 
     const redisClientMock = {
@@ -1194,9 +1204,7 @@ describe('authenticate middleware - Redis caching', () => {
       from: () => ({
         select: () => ({
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
-            }),
+            maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
           }),
         }),
       }),

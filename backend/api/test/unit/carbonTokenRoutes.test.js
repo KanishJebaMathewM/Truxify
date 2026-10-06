@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ValidationError } from '../../src/utils/errors.js';
 import request from 'supertest';
 import express from 'express';
 
@@ -162,6 +163,13 @@ describe('carbonTokenRoutes', () => {
     });
 
     it('rejects zero or negative fuel_saved_liters with 400', async () => {
+      // Numeric validation lives in the service (e3a8d9289), so the mock
+      // must reject the way the real service does to exercise the route's
+      // error mapping.
+      carbonTokenServiceMock.calculateAndMintCarbonCredits.mockRejectedValueOnce(
+        new ValidationError('fuelSavedLiters must be greater than 0 to mint carbon credits')
+      );
+
       const res = await request(makeApp())
         .post('/api/carbon-credits/mint')
         .send({
@@ -170,10 +178,14 @@ describe('carbonTokenRoutes', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/greater than zero/i);
+      expect(res.body.error).toMatch(/greater than 0/i);
     });
 
     it('rejects excessive distance_km above limit with 400', async () => {
+      carbonTokenServiceMock.calculateAndMintCarbonCredits.mockRejectedValueOnce(
+        new ValidationError('distance_km exceeds maximum threshold of 50000 km')
+      );
+
       const res = await request(makeApp())
         .post('/api/carbon-credits/mint')
         .send({
@@ -186,6 +198,10 @@ describe('carbonTokenRoutes', () => {
     });
 
     it('rejects excessive fuel_saved_liters above limit with 400', async () => {
+      carbonTokenServiceMock.calculateAndMintCarbonCredits.mockRejectedValueOnce(
+        new ValidationError('fuel_saved_liters exceeds maximum single-trip threshold of 10000 L')
+      );
+
       const res = await request(makeApp())
         .post('/api/carbon-credits/mint')
         .send({
@@ -207,7 +223,8 @@ describe('carbonTokenRoutes', () => {
         .send(validMintPayload);
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Chain RPC failure');
+      // Non-validation failures are masked with the route fallback message.
+      expect(res.body.error).toBe('Failed to mint carbon credit tokens');
     });
   });
 
@@ -276,16 +293,18 @@ describe('carbonTokenRoutes', () => {
       expect(res.body.error).toMatch(/valid 40-character hex EVM wallet/i);
     });
 
-    it('returns 404 when token is not found during purchase', async () => {
+    it('returns 400 when token is not found during purchase', async () => {
+      // The service rejects unknown tokens with a ValidationError, which the
+      // route surfaces as a 400 client error.
       carbonTokenServiceMock.purchaseCarbonCredits.mockRejectedValue(
-        new Error('Token not found: CCT-NONEXISTENT')
+        new ValidationError('Carbon credit token not found')
       );
 
       const res = await request(makeApp())
         .post('/api/carbon-credits/purchase')
         .send(validPurchasePayload);
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/not found/i);
     });
   });

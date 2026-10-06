@@ -21,6 +21,11 @@ function assertNonNegativeNumber(value, field) {
   return n;
 }
 
+// Single-trip plausibility thresholds for minted telematics credits.
+export const MAX_DISTANCE_KM = 50000;
+export const MAX_FUEL_SAVED_LITERS = 10000;
+export const MAX_LOAD_WEIGHT_KG = 100000;
+
 /**
  * Service for calculating freight telematics carbon savings and minting cross-chain credit tokens.
  */
@@ -50,6 +55,19 @@ class CarbonTokenService {
 
     if (safeFuelSavedLiters === 0) {
       throw new ValidationError('fuelSavedLiters must be greater than 0 to mint carbon credits');
+    }
+
+    // Single-trip sanity thresholds: a single freight trip cannot plausibly
+    // exceed these, and minting beyond them would create sellable Scope 3
+    // offsets from telemetry spikes or unit mistakes.
+    if (safeDistanceKm > MAX_DISTANCE_KM) {
+      throw new ValidationError(`distance_km exceeds maximum threshold of ${MAX_DISTANCE_KM} km`);
+    }
+    if (safeFuelSavedLiters > MAX_FUEL_SAVED_LITERS) {
+      throw new ValidationError(`fuel_saved_liters exceeds maximum single-trip threshold of ${MAX_FUEL_SAVED_LITERS} L`);
+    }
+    if (safeLoadWeightKg > MAX_LOAD_WEIGHT_KG) {
+      throw new ValidationError(`load_weight_kg exceeds maximum limit of ${MAX_LOAD_WEIGHT_KG} kg`);
     }
 
     // Standard diesel emission factor: ~2.68 kg CO2 saved per liter of fuel saved

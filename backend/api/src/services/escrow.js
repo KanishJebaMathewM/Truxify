@@ -341,19 +341,15 @@ export function getEscrowBookingId(orderDisplayId) {
  * Retrieves a full escrow booking record by its ID.
  * Used by the funding reconciliation sweeper to verify on-chain deposits.
  * Resolves Issue #7340.
- * 
+ *
  * @param {string} escrowBookingId - The UUID of the escrow booking
  * @returns {Promise<object|null>} The booking record or null if not found
  * @throws {Error} If database query fails
  */
 export async function getEscrowBooking(escrowBookingId) {
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
+  if (!escrowBookingId || typeof escrowBookingId !== 'string' || !escrowBookingId.trim()) {
     return null;
   }
-
-  if (!ethers.isHexString(escrowBookingId, 32)) {
-    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
   const trimmedId = escrowBookingId.trim();
 
   // On-chain lookup when given a bytes32 hex string
@@ -377,18 +373,6 @@ export async function getEscrowBooking(escrowBookingId) {
   }
 
   try {
-    const booking = await escrowContract.bookings(escrowBookingId);
-    return booking;
-  } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err?.message ?? String(err)}`);
-    return null;
-  }
-}
-
-/**
- * Verifies that the on-chain escrow balance strictly matches the expected deposit amount in wei.
- * Updated to use exact-equality semantics (`===`) per Issue #11217 to align with `recordDepositTx`
- * and prevent over-deposit or under-deposit anomalies from bypassing validation.
     const { data, error } = await supabaseAdmin
       .from('escrow_bookings')
       .select('*')
@@ -408,21 +392,9 @@ export async function getEscrowBooking(escrowBookingId) {
 }
 
 /**
- * Computes the bytes32 hash ID used for the escrow contract based on the display ID.
- * Matches keccak256(abi.encodePacked("escrow:" + displayId))
- *
- * @param {string} displayId - The public order display ID
- * @returns {string} The computed booking ID (bytes32 hex string)
- */
-export function getEscrowBookingId(displayId) {
-  if (!displayId) throw new Error('Missing displayId');
-  return ethers.solidityPackedKeccak256(['string', 'string'], ['escrow:', String(displayId)]);
-}
-
-/**
- * Query the on-chain escrow smart contract mapping.
- * Used by escrowFundingReconciliation and the release reconciler to check
- * the authoritative on-chain booking state.
+ * Verifies that the on-chain escrow balance strictly matches the expected deposit amount in wei.
+ * Updated to use exact-equality semantics (`===`) per Issue #11217 to align with `recordDepositTx`
+ * and prevent over-deposit or under-deposit anomalies from bypassing validation.
  *
  * @param {string|number|BigInt} onChainAmount - Actual balance found on-chain
  * @param {string|number|BigInt} expectedAmount - Expected booking amount in wei
@@ -432,11 +404,6 @@ export async function verifyOnChainEscrowBalance(onChainAmount, expectedAmount) 
   try {
     const onChainAmountBN = BigInt(onChainAmount || 0);
     const expectedWeiBN = BigInt(expectedAmount || 0);
-export async function getOnChainEscrowBooking(escrowBookingId) {
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
-    return null;
-  }
 
     const isValid = onChainAmountBN === expectedWeiBN;
 
@@ -461,10 +428,37 @@ export async function getOnChainEscrowBooking(escrowBookingId) {
       error: err?.message || 'Balance verification failed',
       code: 'VERIFICATION_ERROR',
     };
+  }
+}
+
+/**
+ * Query the on-chain escrow smart contract mapping.
+ * Used by escrowFundingReconciliation and the release reconciler to check
+ * the authoritative on-chain booking state.
+ *
+ * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
+ * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
+ */
+export async function getOnChainEscrowBooking(escrowBookingId) {
+  if (!escrowContract) {
+    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
+    return null;
+  }
+
+  if (!ethers.isHexString(escrowBookingId, 32)) {
+    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
+    return null;
+  }
+
+  try {
+    const booking = await escrowContract.bookings(escrowBookingId);
+    return booking;
+  } catch (err) {
     logger.error(`[escrow] getOnChainEscrowBooking failed: ${err?.message ?? String(err)}`);
     return null;
   }
 }
+
 
 /**
  * Build an unsigned deposit transaction for the customer's wallet to sign.

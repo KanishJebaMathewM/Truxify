@@ -31,7 +31,6 @@ export function paginated(data = [], page = 1, limit = 10, total = 0, message = 
   // Parse and normalize page: clamp negative/zero values to 1 and ensure integer format
   const parsedPage = typeof page === 'number' ? page : (typeof page === 'string' && page.trim() !== '' ? Number(page) : NaN);
   const safePage = typeof parsedPage === 'number' && Number.isFinite(parsedPage) ? Math.max(1, Math.floor(parsedPage)) : 1;
-  const safePage = typeof parsedPage === 'number' && Number.isFinite(parsedPage) ? Math.max(0, parsedPage) : 1;
 
   // Parse and normalize limit: ensure positive integer, capped at MAX_PAGE_SIZE
   const parsedLimit = typeof limit === 'number' ? limit : (typeof limit === 'string' && limit.trim() !== '' ? Number(limit) : NaN);

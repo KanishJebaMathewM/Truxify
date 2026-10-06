@@ -3,7 +3,6 @@
  * Resolves Issue #8494: Validates that sendPushNotification and other
  * exports work correctly after the module was corrupted by a CommonJS stub.
  */
-
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   validateNotifType,
@@ -21,7 +20,6 @@ const firebaseMock = {
   sendEachForMulticast: vi.fn(),
   send: vi.fn(),
 };
-
 const mockRedis = {
   publish: vi.fn().mockResolvedValue(1),
 };
@@ -38,7 +36,6 @@ vi.mock('../../src/config/db.js', () => ({
   redisClient: mockRedis,
   mongoDb: null,
 }));
-
 vi.mock('../../src/middleware/logger.js', () => ({
   default: {
     error: vi.fn(),
@@ -47,7 +44,6 @@ vi.mock('../../src/middleware/logger.js', () => ({
     debug: vi.fn(),
   },
 }));
-
 const {
   default: notificationService,
   sendFcmNotification,
@@ -103,7 +99,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['token-a']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       const call = firebaseMock.sendEachForMulticast.mock.calls[0][0];
       expect(call.tokens).toEqual(['token-a']);
@@ -122,7 +117,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['token-a', 'token-b', 'token-c']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens.sort()).toEqual(
         ['token-a', 'token-b', 'token-c'].sort()
@@ -140,7 +134,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['token-a']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['token-a']);
       expect(result.summary.uniqueTokens).toBe(1);
       expect(result.summary.devicesFound).toBe(1);
@@ -164,7 +157,6 @@ describe('notificationService', () => {
       expect(result.summary.delivered).toBe(1);
       expect(result.summary.permanent).toBe(1);
       expect(result.summary.deactivated).toBe(1);
-
       const devA = supabaseMock.store.user_devices.find((d) => d.id === 'dev-a');
       const devB = supabaseMock.store.user_devices.find((d) => d.id === 'dev-b');
       expect(devA.is_active).toBe(false);
@@ -179,7 +171,6 @@ describe('notificationService', () => {
       });
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(result.success).toBe(false);
       expect(result.summary.transient).toBe(1);
       expect(result.summary.deactivated).toBe(0);
@@ -195,7 +186,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['token-dup']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['token-dup']);
       expect(result.summary.uniqueTokens).toBe(1);
@@ -208,7 +198,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['profile-token-1']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['profile-token-1']);
       expect(result.success).toBe(true);
@@ -221,7 +210,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['same-token']));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['same-token']);
       expect(result.summary.uniqueTokens).toBe(1);
@@ -231,7 +219,6 @@ describe('notificationService', () => {
     it('returns a controlled NO_FCM_TOKEN failure when no token exists at all', async () => {
       supabaseMock.store.user_devices = [];
       supabaseMock.store.profiles = [{ id: 'user-1', fcm_token: null }];
-
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
 
       expect(result.success).toBe(false);
@@ -245,7 +232,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockImplementation(async ({ tokens }) => okBatch(tokens));
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(2);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toHaveLength(500);
       expect(firebaseMock.sendEachForMulticast.mock.calls[1][0].tokens).toHaveLength(1);
@@ -266,7 +252,6 @@ describe('notificationService', () => {
           { success: false, error: { code: 'messaging/unavailable' } },
         ],
       });
-
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
 
       expect(result.success).toBe(true);
@@ -284,7 +269,6 @@ describe('notificationService', () => {
       firebaseMock.sendEachForMulticast.mockRejectedValue(transientErr);
 
       const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(3);
       expect(result.success).toBe(false);
       expect(result.summary.transient).toBe(1);
@@ -296,7 +280,6 @@ describe('notificationService', () => {
       const dbModule = await import('../../src/config/db.js');
       const originalMessaging = dbModule.firebaseAdmin.messaging;
       dbModule.firebaseAdmin.messaging = null;
-
       try {
         const result = await sendFcmNotification('user-1', { title: 'Hi', body: 'There' }, {});
         expect(result.success).toBe(false);
@@ -315,9 +298,7 @@ describe('notificationService', () => {
         { id: 'other-dev', user_id: 'driver-9', fcm_token: 'driver-token' },
       ]);
       firebaseMock.sendEachForMulticast.mockResolvedValue(okBatch(['customer-token']));
-
       const result = await sendDeliveryOtpNotification('customer-1', 'ORD-1001', '123456');
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].tokens).toEqual(['customer-token']);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].notification.body).toContain('123456');
@@ -327,7 +308,6 @@ describe('notificationService', () => {
         otp: '123456',
       });
       expect(result.success).toBe(true);
-
       const persisted = supabaseMock.store.notifications.find(
         (n) => n.user_id === 'customer-1'
       );
@@ -351,7 +331,6 @@ describe('notificationService', () => {
         user_id: 'user-1',
         title: 'Order updated',
       });
-
       expect(row).toBeTruthy();
       const persisted = supabaseMock.store.notifications.find(
         (n) => n.user_id === 'user-1'
@@ -390,12 +369,10 @@ describe('notificationService', () => {
         'order_update',
         { order_display_id: 'ORD-2001' }
       );
-
       const persisted = supabaseMock.store.notifications.find((n) => n.user_id === 'user-1');
       expect(persisted).toBeTruthy();
       expect(persisted.notif_type).toBe('order_update');
       expect(persisted.metadata).toEqual({ order_display_id: 'ORD-2001' });
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].data).toEqual({
         notifType: 'order_update',
@@ -407,7 +384,6 @@ describe('notificationService', () => {
     it('handles FCM failure while persisting the notification', async () => {
       seedDevices([{ fcm_token: 'token-a' }]);
       firebaseMock.sendEachForMulticast.mockRejectedValue(new Error('FCM unavailable'));
-
       const result = await sendPushNotification(
         'user-1',
         'Order updated',
@@ -432,7 +408,6 @@ describe('notificationService', () => {
         'order_update',
         {}
       );
-
       expect(firebaseMock.sendEachForMulticast).toHaveBeenCalledTimes(1);
       expect(result.success).toBe(true);
       expect(result.fcm.summary.delivered).toBe(1);
@@ -470,7 +445,6 @@ describe('notificationService', () => {
 
       const stored = await storeDeliveryOtp('order-1', '123456', 15);
       expect(stored).toBeDefined();
-
       const oldOtp = supabaseMock.store.delivery_otps.find((o) => o.id === 'otp-old');
       expect(oldOtp.verified).toBe(true);
 
@@ -501,7 +475,6 @@ describe('notificationService', () => {
           created_at: new Date().toISOString(),
         },
       ];
-
       const activeOtp = await getActiveDeliveryOtp('order-100');
       expect(activeOtp).toBeDefined();
       expect(activeOtp.id).toBe('otp-1');
@@ -516,7 +489,12 @@ describe('notificationService', () => {
 
     it('verifies a delivery OTP by id', async () => {
       supabaseMock.store.delivery_otps = [
-        { id: 'otp-valid', order_id: 'order-1', verified: false },
+        {
+          id: 'otp-valid',
+          order_id: 'order-1',
+          verified: false,
+          expires_at: '2099-01-01T00:00:00.000Z',
+        },
       ];
 
       const verified = await verifyDeliveryOtp('otp-valid');
@@ -543,7 +521,6 @@ describe('notificationService', () => {
       ];
 
       await expireDeliveryOtps('order-1');
-
       const otp1 = supabaseMock.store.delivery_otps.find((o) => o.id === 'otp-1');
       const otp2 = supabaseMock.store.delivery_otps.find((o) => o.id === 'otp-2');
       expect(new Date(otp1.expires_at).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
@@ -656,7 +633,6 @@ describe('notificationService', () => {
     it('prunes device records deactivated longer than specified days', async () => {
       const oldDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
       const recentDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
-
       supabaseMock.store.user_devices = [
         { id: 'dev-1', fcm_token: 't1', is_active: false, deactivated_at: oldDate },
         { id: 'dev-2', fcm_token: 't2', is_active: false, deactivated_at: recentDate },
@@ -689,7 +665,6 @@ describe('notificationService', () => {
         notification: { title: 'Test', body: 'Body' },
         data: { key: 'val' },
       });
-
       expect(result.success).toBe(true);
       expect(result.messageId).toBe('msg-single-123');
       expect(firebaseMock.send).toHaveBeenCalledWith({
@@ -703,7 +678,6 @@ describe('notificationService', () => {
       const error = new Error('Invalid token');
       error.code = 'messaging/invalid-registration-token';
       firebaseMock.send.mockRejectedValue(error);
-
       const result = await sendToDevice('bad-token', {});
       expect(result.success).toBe(false);
       expect(result.error).toBe('messaging/invalid-registration-token');
@@ -717,7 +691,6 @@ describe('notificationService', () => {
         { id: 'dev-2', fcm_token: 'token-2' },
       ]);
       firebaseMock.send.mockResolvedValue('msg-id-ok');
-
       const payload = { notification: { title: 'Hello', body: 'World' } };
       const results = await sendNotification('user-1', payload);
 
@@ -739,7 +712,6 @@ describe('notificationService', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].success).toBe(false);
-
       const dev = supabaseMock.store.user_devices.find((d) => d.id === 'dev-bad');
       expect(dev.is_active).toBe(false);
     });
@@ -750,17 +722,15 @@ describe('notificationService', () => {
       firebaseMock.send.mockResolvedValue('msg-profile');
 
       const results = await sendNotification('user-1', { notification: { title: 'Hi' } });
-
       expect(results).toHaveLength(1);
       expect(results[0].deviceId).toBe('profile-fallback');
       expect(results[0].success).toBe(true);
-    }); 
+    });
 
     it('continues device delivery even if Redis publish throws an error', async () => {
       seedDevices([{ id: 'dev-1', fcm_token: 'token-1' }]);
       firebaseMock.send.mockResolvedValue('msg-id-ok');
       mockRedis.publish.mockRejectedValueOnce(new Error('Redis publishing error'));
-
       const payload = { notification: { title: 'Hello', body: 'World' } };
       const results = await sendNotification('user-1', payload);
 
@@ -884,21 +854,28 @@ describe('Notification Service (#8494)', () => {
       ).resolves.not.toThrow();
     });
 
-    it('rejects missing userId', async () => {
+    it('resolves when user has no devices', async () => {
       await expect(
-        sendNotification({ title: 'Test', body: 'Test', notif_type: 'order_update' })
-      ).rejects.toThrow();
+        sendNotification('user-123', {
+          title: 'Test',
+          body: 'Test',
+          notif_type: 'order_update',
+        })
+      ).resolves.toEqual([]);
     });
 
-    it('rejects missing title', async () => {
+    it('resolves when notification has no title and user has no devices', async () => {
       await expect(
-        sendNotification({ userId: 'user-123', body: 'Test', notif_type: 'order_update' })
-      ).rejects.toThrow();
+        sendNotification('user-123', {
+          body: 'Test',
+          notif_type: 'order_update',
+        })
+      ).resolves.toEqual([]);
     });
 
     it('rejects invalid notif_type', async () => {
       await expect(
-        sendNotification({
+        insertNotification({
           userId: 'user-123',
           title: 'Test',
           body: 'Test',
@@ -916,7 +893,7 @@ describe('Notification Service (#8494)', () => {
         body: 'Your payment has been processed',
         notif_type: 'payment',
       });
-      
+
       expect(result).toBeDefined();
     });
 

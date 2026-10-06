@@ -8,6 +8,7 @@ const m = createSupabaseMock();
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: undefined,
+  getAdminClient: () => m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
@@ -227,6 +228,8 @@ describe('Support Routes', () => {
       limit: 1,
       total: 2,
       totalPages: 2,
+      hasNextPage: false,
+      hasPreviousPage: true,
     });
   });
 
@@ -478,6 +481,8 @@ describe('Support Routes', () => {
         limit: 2,
         total: 3,
         totalPages: 2,
+        hasNextPage: true,
+        hasPreviousPage: false,
       });
     });
 

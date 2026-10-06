@@ -265,7 +265,12 @@ class MultiTaskTrainer:
                 self.model.zero_grad()
                 losses[t].backward(retain_graph=True)
                 task_vecs.append(
-                    torch.cat([p.grad.detach().flatten() for p in grad_params if p.grad is not None])
+                    torch.cat([
+                        p.grad.detach().flatten()
+                        if p.grad is not None
+                        else torch.zeros_like(p).flatten()
+                        for p in grad_params
+                    ])
                 )
             processed = self.gradient_surgery.pcgrad(task_vecs)
             # Sum the resolved per-task gradients back into the parameters.

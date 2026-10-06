@@ -8,6 +8,7 @@ mkdir -p "$PREDICTION_HARNESS/backend/api/src/services" "$PREDICTION_HARNESS/bac
  "$PREDICTION_HARNESS/backend/api/test/unit"
 cp "${PREDICTION_SERVICE_SOURCE:-$REPO_ROOT/backend/api/src/services/ml.js}" "$PREDICTION_HARNESS/backend/api/src/services/ml.js"
 cp "$REPO_ROOT/backend/api/src/lib/ownedPredictionFlights.js" "$REPO_ROOT/backend/api/src/lib/predictionValidator.js" "$PREDICTION_HARNESS/backend/api/src/lib/"
+cp "$REPO_ROOT/backend/api/src/services/mlMatchingGateway.js" "$PREDICTION_HARNESS/backend/api/src/services/"
 cp "$REPO_ROOT/backend/api/src/utils/cache.js" "$PREDICTION_HARNESS/backend/api/src/utils/"
 cp "$REPO_ROOT/backend/api/src/middleware/logger.js" "$PREDICTION_HARNESS/backend/api/src/middleware/"
 cp "$REPO_ROOT/backend/api/test/unit/cachedPredictionOwnership.test.js" "$REPO_ROOT/backend/api/test/unit/mlService.test.js" "$PREDICTION_HARNESS/backend/api/test/unit/"

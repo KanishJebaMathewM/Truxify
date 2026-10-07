@@ -89,23 +89,23 @@ class _MockHttpClientRequest extends Fake implements HttpClientRequest {
   final Uri url;
   final _TripsApiState apiState;
 
-  // google_fonts' font fetch sets followRedirects on the request — the fake
-  // needs a writable field or it throws UnimplementedError mid-render.
+  // package:http's IOClient drives these on the request — absorb them rather
+  // than throw UnimplementedError (which silently failed the fetches).
   @override
   bool followRedirects = true;
-
+  @override
+  int maxRedirects = 5;
   @override
   int contentLength = -1;
-
-  // The upload path uses addStream/flush/done; font fetchers set
-  // followRedirects/maxRedirects — the fake needs the IO members as real
-  // futures and absorbs unknown setters.
   @override
-  Future<void> addStream(Stream<List<int>> stream) async {}
+  bool persistentConnection = true;
+  @override
+  Future<void> addStream(Stream<List<int>> stream) => stream.drain();
   @override
   Future<void> flush() async {}
   @override
-  Future<HttpClientResponse> get done => Future.value(_MockHttpClientResponse(url, apiState));
+  Future<HttpClientResponse> get done =>
+      Future.value(_MockHttpClientResponse(url, apiState));
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -129,7 +129,10 @@ class _MockHttpHeaders extends Fake implements HttpHeaders {
   @override
   void set(String name, Object value, {bool preserveHeaderCase = false}) {}
   @override
-  void forEach(void Function(String name, List<String> values) action) {}
+  void forEach(void Function(String name, List<String> values) action) {
+    // UTF-8 charset so package:http doesn't latin-1-decode the '→' in routes.
+    action('content-type', ['application/json; charset=utf-8']);
+  }
 }
 
 class _MockHttpClientResponse extends Fake implements HttpClientResponse {
@@ -142,18 +145,14 @@ class _MockHttpClientResponse extends Fake implements HttpClientResponse {
 
   @override
   int get contentLength => -1;
-
   @override
   bool get isRedirect => false;
-
+  @override
+  bool get persistentConnection => false;
   @override
   String get reasonPhrase => 'OK';
-
   @override
   List<RedirectInfo> get redirects => const [];
-
-  @override
-  bool get persistentConnection => true;
 
   @override
   HttpHeaders get headers => _MockHttpHeaders();
@@ -245,12 +244,30 @@ Widget _buildTestApp() {
   );
 }
 
+
+/// pumpAndSettle can hang on this screen (indeterminate load-more shimmer);
+/// bounded pumps flush the fake API + transitions deterministically.
+Future<void> _boundedSettle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pump();
+}
+
+/// Scroll deterministically to the bottom so the -200px load-more threshold
+/// fires (a fling can land short — flaky).
+void _jumpToBottom(WidgetTester tester) {
+  final scrollable =
+      tester.widget<CustomScrollView>(find.byType(CustomScrollView));
+  scrollable.controller!.jumpTo(
+    scrollable.controller!.position.maxScrollExtent,
+  );
+}
+
 void main() {
   late _TripsApiState apiState;
 
   setUpAll(() async {
-    GoogleFonts.config.allowRuntimeFetching = false;
-  HttpOverrides.global = MockHttpOverrides(apiState = _TripsApiState());
+    HttpOverrides.global = MockHttpOverrides(apiState = _TripsApiState());
     await setupTestEnvironment();
   });
 
@@ -266,26 +283,36 @@ void main() {
     'refresh concurrent with in-flight load-more produces no duplicate or stale pages',
     (WidgetTester tester) async {
       apiState.delayLoadMore = true;
-      // Use a short viewport so the list is scrollable and load-more can fire.
-      tester.binding.window.physicalSizeTestValue = const Size(400, 500);
-      tester.binding.window.devicePixelRatioTestValue = 1.0;
 
       await tester.pumpWidget(_buildTestApp());
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
-      // Page 1 is loaded (5 trips).
+      // Page 1 is loaded (5 trips) — the lazy list only builds on-screen
+      // cards, so enlarge the viewport (at DPR 1.0 → 3000 logical px) to
+      // build all of page 1 first.
+      tester.binding.window.devicePixelRatioTestValue = 1.0;
+      tester.binding.window.physicalSizeTestValue = const Size(400, 3000);
+      await tester.pump();
       expect(find.text('#TX-2026-001'), findsOneWidget);
       expect(find.text('#TX-2026-005'), findsOneWidget);
 
-      // Scroll to the bottom to trigger an in-flight load-more (page 2, delayed).
-      await tester.fling(
-        find.byType(CustomScrollView),
-        const Offset(0, -400),
-        1000,
-      );
+      // Use a short viewport so the list is scrollable and load-more can fire.
+      tester.binding.window.physicalSizeTestValue = const Size(400, 500);
+      tester.binding.window.devicePixelRatioTestValue = 1.0;
+      await tester.pump();
+
+      // Jump to the bottom to trigger an in-flight load-more (page 2,
+      // delayed). A fling can land short of the -200px threshold (flaky).
+      _jumpToBottom(tester);
       await tester.pump();
 
       // While the load-more is still in-flight, trigger a pull-to-refresh.
+      // RefreshIndicator only engages at the scroll TOP — jump there first
+      // (a downward fling mid-list just scrolls up; the refresh never fires).
+      final scrollable =
+          tester.widget<CustomScrollView>(find.byType(CustomScrollView));
+      scrollable.controller!.jumpTo(0);
+      await tester.pump();
       await tester.fling(
         find.byType(CustomScrollView),
         const Offset(0, 300),
@@ -294,14 +321,22 @@ void main() {
       await tester.pump();
 
       // Let the delayed load-more complete after the refresh has applied.
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
+      // The RefreshIndicator dismissal animation runs a few more frames.
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+
+      // Enlarge the viewport so every card in the list is built (the lazy
+      // list otherwise omits off-screen entries) — then count directly.
+      tester.binding.window.devicePixelRatioTestValue = 1.0;
+      tester.binding.window.physicalSizeTestValue = const Size(400, 3000);
+      await tester.pump();
 
       // The refreshed page 1 is intact...
       expect(find.text('#TX-2026-001'), findsOneWidget);
       expect(find.text('#TX-2026-005'), findsOneWidget);
 
       // ...and the stale/duplicate page-2 entries were never appended.
-      expect(find.text('#TX-2026-001'), findsOneWidget);
       expect(find.text('#TX-2026-006'), findsNothing);
 
       tester.binding.window.clearPhysicalSizeTestValue();
@@ -319,14 +354,16 @@ void main() {
       tester.binding.window.devicePixelRatioTestValue = 1.0;
 
       await tester.pumpWidget(_buildTestApp());
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
-      await tester.fling(
-        find.byType(CustomScrollView),
-        const Offset(0, -400),
-        1000,
-      );
-      await tester.pumpAndSettle();
+      _jumpToBottom(tester);
+      await _boundedSettle(tester);
+
+      // The lazy list only builds on-screen cards — enlarge the viewport so
+      // every card is built, then count instances directly.
+      tester.binding.window.devicePixelRatioTestValue = 1.0;
+      tester.binding.window.physicalSizeTestValue = const Size(400, 3000);
+      await tester.pump();
 
       // trip-1 was on page 1 and re-appears on page 2 — it must not be doubled.
       expect(find.text('#TX-2026-001'), findsOneWidget);

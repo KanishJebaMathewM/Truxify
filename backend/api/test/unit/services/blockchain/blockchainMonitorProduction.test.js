@@ -530,8 +530,9 @@ describe('Blockchain Monitor Production Suite — Copilot Review Fixes (Issue #1
         blockNumber: 50,
       };
 
-      // processLog catches the handler error internally.
-      await monitor.processLog(log);
+      // A handling/persistence failure must propagate so scanBlockRange() rejects and the
+      // caller does NOT advance the checkpoint (otherwise the event is lost for good).
+      await expect(monitor.processLog(log)).rejects.toThrow('DB write failed');
 
       // Event must NOT be in the in-memory set (storeEvent failed before adding it).
       const eventKey = '0xFailTxHash:1';

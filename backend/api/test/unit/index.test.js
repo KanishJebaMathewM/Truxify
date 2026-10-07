@@ -4,6 +4,8 @@ import * as path from 'path';
 
 describe('index.js structure', () => {
   const indexPath = path.resolve(process.cwd(), 'src/index.js');
+  // The express assembly lives in src/app.js; index.js is startup-only.
+  const appPath = path.resolve(process.cwd(), 'src/app.js');
 
   it('is a JavaScript module with imports and exports', () => {
     const content = fs.readFileSync(indexPath, 'utf-8');
@@ -12,18 +14,18 @@ describe('index.js structure', () => {
   });
 
   it('imports Express', () => {
-    const content = fs.readFileSync(indexPath, 'utf-8');
+    const content = fs.readFileSync(appPath, 'utf-8');
     expect(content).toContain("import express from 'express'");
   });
 
   it('imports key middleware', () => {
-    const content = fs.readFileSync(indexPath, 'utf-8');
+    const content = fs.readFileSync(appPath, 'utf-8');
     expect(content).toContain('helmet');
     expect(content).toContain('cors');
   });
 
   it('imports route modules', () => {
-    const content = fs.readFileSync(indexPath, 'utf-8');
+    const content = fs.readFileSync(appPath, 'utf-8');
     expect(content).toContain('orderRoutes');
     expect(content).toContain('driverRoutes');
     expect(content).toContain('healthRoutes');
@@ -35,7 +37,7 @@ describe('index.js structure', () => {
   });
 
   it('loads dotenv configuration', () => {
-    const content = fs.readFileSync(indexPath, 'utf-8');
+    const content = fs.readFileSync(appPath, 'utf-8');
     expect(content).toContain('dotenv.config');
   });
 
@@ -56,7 +58,7 @@ describe('index.js structure', () => {
     const initWebSocketServerMatches = content.match(/initWebSocketServer\(/g) || [];
 
     expect(waitForMongoDbMatches.length).toBe(1);
-    // 1 import statement + 1 function call = 2 occurrences
-    expect(initWebSocketServerMatches.length).toBe(2);
+    // The import carries no '(' — exactly one call site.
+    expect(initWebSocketServerMatches.length).toBe(1);
   });
 });

@@ -117,8 +117,8 @@ describe('Driver Profile & Availability Endpoints', () => {
   beforeEach(() => {
     app = buildApp();
     // The hardened authenticate middleware fails closed without JWT_SECRET
-    // (93de585a7); this suite signs its tokens with 'secret'.
-    process.env.JWT_SECRET = 'secret';
+    // (93de585a7); this suite signs its tokens with 'test-jwt-secret-for-harness-0123456789abcdef'.
+    process.env.JWT_SECRET = 'test-jwt-secret-for-harness-0123456789abcdef';
     vi.clearAllMocks();
     mockUpdateDetails.mockReset();
     mockUpdateTruck.mockReset();
@@ -130,7 +130,7 @@ describe('Driver Profile & Availability Endpoints', () => {
   afterEach(() => {
     delete process.env.JWT_SECRET;
   });
-    token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'secret');
+    token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'test-jwt-secret-for-harness-0123456789abcdef');
 
     // Default test data
     mockProfile = {

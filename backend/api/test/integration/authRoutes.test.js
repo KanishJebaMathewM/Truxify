@@ -187,7 +187,7 @@ describe('POST /api/auth/logout', () => {
 describe('POST /api/auth/refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.JWT_SECRET = 'test-refresh-secret';
+    process.env.JWT_SECRET = 'test-refresh-secret-key-0123456789abcdef';
     rotateRefreshTokenMock.mockResolvedValue({
       user_id: 'user-1',
       token: 'rotated-refresh-token',
@@ -205,7 +205,7 @@ describe('POST /api/auth/refresh', () => {
     expect(res.body.accessToken).not.toContain('placeholder');
     expect(res.body.accessToken.split('.')).toHaveLength(3);
 
-    const decoded = jwt.verify(res.body.accessToken, 'test-refresh-secret');
+    const decoded = jwt.verify(res.body.accessToken, 'test-refresh-secret-key-0123456789abcdef');
     expect(decoded.id).toBe('user-1');
     expect(decoded.uid).toBe('user-1');
     expect(decoded.iss).toBe('truxify-backend-api');

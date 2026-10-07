@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const indexSource = fs.readFileSync(path.resolve(__dirname, '../../src/index.js'), 'utf8');
+const indexSource = fs.readFileSync(path.resolve(__dirname, '../../src/app.js'), 'utf8');
 
 describe('voice assistant route mount', () => {
   it('mounts the driver voice assistant endpoint at the documented API v1 path', () => {

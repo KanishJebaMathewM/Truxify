@@ -95,6 +95,7 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   createStore: () => undefined,
   safeIpKeyGenerator: () => 'test-ip',
+  publicTrackingLimiter: (req, res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

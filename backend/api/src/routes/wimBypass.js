@@ -114,11 +114,6 @@ router.post(
 
         const maxWeightLimit = Number(rawTruckCapacity) * LBS_PER_TONNE;
         const axleWeight = Number(rawLoadWeight) * LBS_PER_TONNE;
-        // There is no safety-score column in the schema; derive the safety
-        // signal from the driver's verified registration (fail closed to 0).
-        const safetyScore = isVerified ? 100 : 0;
-
-
         // Number(null) and Number('') are both 0, so a load with no registered
         // weight used to coerce to the lightest possible axle weight and be
         // granted a bypass. The service's own typeof check cannot catch this
@@ -139,12 +134,6 @@ router.post(
             });
         }
 
-        const isEligible = evaluateBypassEligibility({
-            safetyScore,
-            axleWeight,
-            maxWeightLimit,
-        });
-      }
 
       // Server-side freshness + vehicle/load correlation of the trusted measurement.
       const measurementCheck = validateTrustedMeasurement(measurement, {

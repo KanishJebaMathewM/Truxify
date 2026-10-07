@@ -57,10 +57,17 @@ async function verifySupabaseJwt(req, res, next) {
 export function requireDaoAuth(actionType = 'vote') {
   return async (req, res, next) => {
     // Step 1: Verify JWT
+    // verifySupabaseJwt answers failures directly on res without invoking
+    // the callback, so stop waiting once the response is already sent instead
+    // of hanging on a callback that never comes.
+    let settled = false;
     await new Promise((resolve) => {
-      verifySupabaseJwt(req, res, (err) => {
-        if (err || res.headersSent) return resolve(true);
+      verifySupabaseJwt(req, res, () => {
+        settled = true;
         resolve(false);
+      });
+      queueMicrotask(() => {
+        if (!settled && res.headersSent) resolve(true);
       });
     });
 

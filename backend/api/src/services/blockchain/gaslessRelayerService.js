@@ -2,6 +2,15 @@ import { ethers } from 'ethers';
 import logger from '../../middleware/logger.js';
 import { acquireDistributedLock } from '../../lib/redisLock.js';
 
+// The nonce lock serialises "read pending nonce -> broadcast -> (speed-up)".
+// That section is NOT bounded by the 15s lease: _waitForTransactionOrSpeedUp()
+// alone waits up to 30s for the first confirmation and then waits again for the
+// replacement transaction. The lease is therefore renewed in the background
+// (only while we still own it) up to this hard cap, so a stalled RPC cannot pin
+// the lock forever, but a healthy slow confirmation can never lose it mid-flight.
+const RELAYER_NONCE_LOCK_TTL_SECONDS = 15;
+const RELAYER_NONCE_LOCK_MAX_HOLD_MS = 3 * 60 * 1000;
+
 export class GaslessRelayerService {
   /**
    * @param {object} [options={}]
@@ -63,7 +72,10 @@ export class GaslessRelayerService {
     } = params;
 
     const lockKey = 'lock:relayer:nonce';
-    const lock = await acquireDistributedLock(lockKey, 15);
+    const lock = await acquireDistributedLock(lockKey, RELAYER_NONCE_LOCK_TTL_SECONDS, {
+      keepAlive: true,
+      maxHoldMs: RELAYER_NONCE_LOCK_MAX_HOLD_MS,
+    });
 
     if (!lock.acquired) {
       throw new Error('Relayer nonce lock is busy, please retry in a moment');

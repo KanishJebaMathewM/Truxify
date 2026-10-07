@@ -18,6 +18,8 @@ const isPayoutProviderConfiguredMock = vi.fn();
 vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
   dispatchPayout: dispatchPayoutMock,
   isPayoutProviderConfigured: isPayoutProviderConfiguredMock,
+  recoverSettlementRef: vi.fn().mockResolvedValue(null),
+  lookupPayoutStatus: vi.fn().mockResolvedValue({ state: 'unsupported' }),
 }));
 
 vi.mock('../../src/core/telemetry/WorkerTracer.js', () => ({

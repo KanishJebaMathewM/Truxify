@@ -3,6 +3,7 @@ import logger from "../middleware/logger.js";
 import {
   dispatchPayout,
   isPayoutProviderConfigured,
+  lookupPayoutStatus,
   recoverSettlementRef,
 } from "../services/wallet/payoutProvider.js";
 import { sendPushNotification } from "../services/notificationService.js";
@@ -149,7 +150,7 @@ async function recordDispatchOutcome(withdrawalId, settlementRef) {
     }
   }
   throw new Error(
-    `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId} after ${SETTLE_RETRY_ATTEMPTS} attempts: ${lastError?.message}`,
+    `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId} after ${RECORD_PERSIST_ATTEMPTS} attempts: ${lastError?.message}`,
   );
 }
 
@@ -194,6 +195,51 @@ async function flagForReconciliation(withdrawalId) {
 }
 
 /**
+ * Asks the provider whether a payout for this withdrawal already exists BEFORE
+ * the worker is allowed to dispatch one.
+ *
+ * An unclaimed row (payout_attempted_at IS NULL) is not proof that no payout was
+ * sent. schedule_withdrawal_retry resets the claim after an AMBIGUOUS failure
+ * (timeout, 5xx, a 2xx with an unreadable body) - exactly the cases where the
+ * provider may already have paid - and admin_resolve_dlq_withdrawal('retry')
+ * wipes retry_count / settlement_error / payout_attempted_at as well. Without
+ * this check every such retry dispatched a second payout for the same
+ * withdrawal and double-paid the driver.
+ *
+ * Returns the lookup result, or null when the row must be skipped this cycle
+ * because the provider could not confirm either way (fail closed: a delayed
+ * payout is recoverable, a duplicate one is not).
+ */
+async function verifyNoPriorPayout(withdrawal) {
+  let status;
+  try {
+    status = await lookupPayoutStatus({ withdrawalId: withdrawal.id });
+  } catch (err) {
+    status = { state: "unknown", error: err?.message };
+  }
+
+  if (!status || status.state === "unknown") {
+    logger.error(
+      `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} skipped: could not confirm with the provider whether a payout already exists (${status?.error || "no status returned"}). ` +
+        `Not dispatching to avoid a duplicate payout; will re-check next sweep.`,
+    );
+    return null;
+  }
+
+  if (
+    status.state === "unsupported" &&
+    ((withdrawal.retry_count || 0) > 0 || withdrawal.settlement_error)
+  ) {
+    logger.warn(
+      `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} is being re-dispatched after a previous attempt but WITHDRAWAL_PAYOUT_STATUS_URL is not configured; ` +
+        `duplicate-payout protection relies solely on the provider honouring the idempotency key.`,
+    );
+  }
+
+  return status;
+}
+
+/**
  * Settles 'pending' withdrawal wallet_transactions:
  *   1. loads pending withdrawals whose next_retry_at <= now();
  *   2. atomically claims each unclaimed row (payout_attempted_at IS NULL);
@@ -221,7 +267,7 @@ export async function settlePendingWithdrawals() {
   let query = supabaseAdmin
     .from("wallet_transactions")
     .select(
-      "id, driver_id, amount, payout_attempted_at, settlement_ref, settle_attempts, retry_count, max_retries, next_retry_at",
+      "id, driver_id, amount, payout_attempted_at, settlement_ref, settle_attempts, retry_count, max_retries, next_retry_at, settlement_error",
     )
     .eq("txn_type", "withdrawal")
     .eq("status", "pending")
@@ -251,6 +297,15 @@ export async function settlePendingWithdrawals() {
     let settlementRef = withdrawal.settlement_ref;
 
     if (!withdrawal.payout_attempted_at) {
+      // 0. NEVER re-send blindly: confirm with the provider that an earlier
+      // (ambiguous) attempt did not already pay this withdrawal out. This is a
+      // read-only check, so it runs before the claim and a skipped row is left
+      // untouched for the next sweep.
+      const priorPayout = await verifyNoPriorPayout(withdrawal);
+      if (!priorPayout) {
+        continue;
+      }
+
       // 1. ATOMIC CLAIM
       const claimed = await claimWithdrawal(withdrawal.id);
       if (!claimed) {
@@ -261,10 +316,21 @@ export async function settlePendingWithdrawals() {
       }
 
       try {
-        const result = await dispatchPayout({
-          driverId: withdrawal.driver_id,
-          withdrawal,
-        });
+        let result;
+        if (priorPayout.state === "found") {
+          // The provider already paid this withdrawal in an earlier attempt.
+          // Adopt its reference and go straight to settlement - dispatching
+          // again would pay the driver twice.
+          logger.warn(
+            `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} was already paid out by the provider (ref: ${priorPayout.settlementRef}) - adopting it instead of re-dispatching.`,
+          );
+          result = { settlementRef: priorPayout.settlementRef };
+        } else {
+          result = await dispatchPayout({
+            driverId: withdrawal.driver_id,
+            withdrawal,
+          });
+        }
         settlementRef = result.settlementRef;
 
         try {

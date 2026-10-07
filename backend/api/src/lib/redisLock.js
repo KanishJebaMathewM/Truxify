@@ -1,77 +1,167 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
+import { acquireLocalMutex } from './localMutex.js';
 
-const localQueues = new Map();
+/** Upper bound for lease auto-renewal so a hung holder can never pin a lock forever. */
+export const DEFAULT_KEEPALIVE_MAX_HOLD_MS = 5 * 60 * 1000;
 
-function acquireLocalLock(key, ttlSeconds) {
-  const tail = localQueues.get(key) ?? Promise.resolve();
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const chain = tail.then(() => gate);
-  localQueues.set(key, chain);
+/**
+ * Wraps the in-process fallback mutex in the `{ acquired, release, isLost }`
+ * shape returned by `acquireDistributedLock`.
+ */
+async function acquireLocalLock(key, ttlMs, keepAliveOptions) {
+  const lease = await acquireLocalMutex(key, ttlMs);
+  let releasedByCaller = false;
 
-  let released = false;
-  const doRelease = () => {
-    if (released) return;
-    released = true;
-    release();
-    chain.then(() => {
-      if (localQueues.get(key) === chain) {
-        localQueues.delete(key);
-      }
-    });
-  };
+  const keepAlive = startKeepAlive({
+    key,
+    ttlMs,
+    options: keepAliveOptions,
+    renew: async () => (lease.extend(ttlMs) ? 'renewed' : 'lost'),
+  });
 
-  const timer = setTimeout(doRelease, ttlSeconds * 1000);
-  timer.unref?.();
-
-  return tail.then(() => ({
+  return {
     acquired: true,
     release: async () => {
-      clearTimeout(timer);
-      doRelease();
+      if (releasedByCaller) return false;
+      releasedByCaller = true;
+      keepAlive.stop();
+      return lease.release();
     },
-  }));
+    isLost: () => !releasedByCaller && !lease.isHeld(),
+  };
 }
 
 /**
- * Acquires a distributed lock using Redis SET NX EX.
+ * Starts the optional lease auto-renewal ("keep-alive") loop for a held lock.
+ *
+ * `renew` must resolve to 'renewed' | 'lost' | 'error':
+ *   - 'renewed' → lease extended, keep going
+ *   - 'lost'    → we no longer own the lock; stop renewing and report it
+ *   - 'error'   → transient failure (e.g. Redis blip); try again next tick
+ *
+ * Renewal stops at `maxHoldMs` so a hung holder cannot keep a lock alive
+ * forever; after that the lease is allowed to lapse naturally.
+ */
+function startKeepAlive({ key, ttlMs, options, renew }) {
+  const state = { lost: false, timer: null };
+  const stop = () => {
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+  };
+
+  if (!options?.keepAlive) {
+    return { stop, isLost: () => state.lost };
+  }
+
+  const maxHoldMs = options.maxHoldMs ?? DEFAULT_KEEPALIVE_MAX_HOLD_MS;
+  const intervalMs = options.renewIntervalMs ?? Math.max(Math.floor(ttlMs / 3), 250);
+  const deadline = Date.now() + maxHoldMs;
+  let renewing = false;
+
+  state.timer = setInterval(async () => {
+    if (renewing) return;
+    if (Date.now() >= deadline) {
+      stop();
+      logger.warn({ key, maxHoldMs }, '[RedisLock] Lock keep-alive reached maxHoldMs; letting the lease lapse');
+      return;
+    }
+    renewing = true;
+    try {
+      const outcome = await renew();
+      // release()/maxHoldMs stopped the loop while this renewal was in flight:
+      // a 'lost' result then just means we released the key ourselves.
+      if (state.timer === null) return;
+      if (outcome === 'lost') {
+        state.lost = true;
+        stop();
+        logger.error({ key }, '[RedisLock] Lock lease was lost while the critical section was still running');
+      } else if (outcome === 'error') {
+        logger.warn({ key }, '[RedisLock] Lock lease renewal failed; will retry');
+      }
+    } finally {
+      renewing = false;
+    }
+  }, intervalMs);
+  state.timer.unref?.();
+
+  return { stop, isLost: () => state.lost };
+}
+
+/**
+ * Acquires a distributed lock using Redis `SET key <owner-token> NX EX ttl`.
  * Falls back to an in-process per-key mutex when Redis is unavailable.
  * 
+ * Ownership safety: the stored value is a random per-acquisition token and
+ * `release()` is an atomic compare-and-delete (Lua), so a holder whose lease
+ * already expired can never delete the lock that now belongs to someone else.
+ * (Previously every holder stored the constant '1' and released with a bare
+ * `DEL`, so a slow holder's late release freed a *successor's* lock and let a
+ * third caller into the critical section.)
+ *
+ * For critical sections that may legitimately outlive `ttlSeconds` (e.g. waiting
+ * for an on-chain confirmation) pass `{ keepAlive: true }`: the lease is then
+ * renewed in the background — only while we still own it — until `release()`
+ * or `maxHoldMs` is reached.
+ *
  * @param {string} key - The unique lock identifier (e.g., lock:profile:uid).
- * @param {number} ttlSeconds - Time-to-live to prevent deadlocks if the process crashes.
- * @returns {Promise<{acquired: boolean, release: Function}>}
+ * @param {number} ttlSeconds - Lease length; prevents deadlocks if the process crashes.
+ * @param {object}  [options]
+ * @param {boolean} [options.keepAlive=false]  Auto-renew the lease while held.
+ * @param {number}  [options.maxHoldMs]        Cap on total auto-renewal time (default 5 min).
+ * @param {number}  [options.renewIntervalMs]  Renewal cadence (default ttl/3, min 250 ms).
+ * `isLost()` reports whether the lease is known to have been lost before
+ * `release()`. For Redis locks it is only meaningful with `keepAlive: true`
+ * (renewals are what detect the loss); for the in-process fallback it is exact.
+ *
+ * @returns {Promise<{acquired: boolean, release: () => Promise<boolean>, isLost: () => boolean}>}
  */
-export async function acquireDistributedLock(key, ttlSeconds = 5) {
+export async function acquireDistributedLock(key, ttlSeconds = 5, options = {}) {
+  const ttlMs = Math.round(ttlSeconds * 1000);
   const isRedisReady = redisClient &&
     (redisClient.status === 'ready' || (!redisClient.status && typeof redisClient.set === 'function'));
 
   if (!isRedisReady) {
     // Degraded / fallback mode: maintain in-process mutual exclusion per key
-    return acquireLocalLock(key, ttlSeconds);
+    return acquireLocalLock(key, ttlMs, options);
   }
 
+  const token = crypto.randomUUID();
+
+  let result;
   try {
-    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
-    if (lock === 'OK') {
-      return {
-        acquired: true,
-        release: async () => {
-          try {
-            await redisClient.del(key);
-          } catch (err) {
-            logger.error({ err, key }, 'Failed to release distributed lock');
-          }
-        }
-      };
-    }
+    result = await redisClient.set(key, token, 'NX', 'EX', ttlSeconds);
   } catch (err) {
     logger.error({ err, key }, 'Redis lock acquisition error; using local mutex fallback');
-    return acquireLocalLock(key, ttlSeconds);
+    return acquireLocalLock(key, ttlMs, options);
   }
 
-  return { acquired: false, release: async () => {} };
+  if (result !== 'OK') {
+    return { acquired: false, release: async () => false, isLost: () => false };
+  }
+
+  let released = false;
+  const keepAlive = startKeepAlive({
+    key,
+    ttlMs,
+    options,
+    renew: () => renewOwned(key, token, ttlMs),
+  });
+
+  return {
+    acquired: true,
+    release: async () => {
+      if (released) return false; // idempotent: never issue a second release
+      released = true;
+      keepAlive.stop();
+      // Atomic compare-and-delete: only removes the key if it still holds OUR token.
+      return releaseLock(key, token);
+    },
+    isLost: () => keepAlive.isLost(),
+  };
 }
 
 /**
@@ -79,13 +169,22 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
  * 
  * @param {string} key - Lock key
  * @param {Function} fn - Async function to execute
- * @param {object} options - Retry configuration
+ * @param {object} options - Retry configuration (`ttlSeconds`, `retryDelayMs`,
+ *   `maxRetries`) plus the optional `keepAlive` / `maxHoldMs` /
+ *   `renewIntervalMs` lease auto-renewal settings of `acquireDistributedLock`.
  */
 export async function withLock(key, fn, options = {}) {
-  const { ttlSeconds = 5, retryDelayMs = 100, maxRetries = 3 } = options;
+  const {
+    ttlSeconds = 5,
+    retryDelayMs = 100,
+    maxRetries = 3,
+    keepAlive,
+    maxHoldMs,
+    renewIntervalMs,
+  } = options;
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const lock = await acquireDistributedLock(key, ttlSeconds);
+    const lock = await acquireDistributedLock(key, ttlSeconds, { keepAlive, maxHoldMs, renewIntervalMs });
     
     if (lock.acquired) {
       try {
@@ -181,7 +280,20 @@ export async function acquireLock(resourceKey, ttlMs = 30_000) {
  * @returns {Promise<boolean>} true if renewed, false if the lock is no longer ours
  */
 export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
-  if (!redisClient || !lockValue) return false;
+  return (await renewOwned(resourceKey, lockValue, ttlMs)) === 'renewed';
+}
+
+/**
+ * Tri-state variant of `renewLock` used by the keep-alive loop so it can tell a
+ * confirmed ownership loss apart from a transient Redis error:
+ *   'renewed' → TTL extended
+ *   'lost'    → the key is gone / now holds someone else's token
+ *   'error'   → Redis unavailable or the script failed (ownership unknown)
+ *
+ * @returns {Promise<'renewed'|'lost'|'error'>}
+ */
+async function renewOwned(resourceKey, lockValue, ttlMs = 30_000) {
+  if (!redisClient || !lockValue) return 'error';
 
   const luaScript = `
     if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -195,10 +307,10 @@ export async function renewLock(resourceKey, lockValue, ttlMs = 30_000) {
     const result = await redisClient.eval(
       luaScript, 1, resourceKey, lockValue, ttlMs.toString()
     );
-    return result === 1;
+    return result === 1 ? 'renewed' : 'lost';
   } catch (err) {
     logger.error({ err }, '[RedisLock] Error renewing lock for key', resourceKey);
-    return false;
+    return 'error';
   }
 }
 

@@ -7,6 +7,7 @@ vi.mock('../../../src/config/db.js', () => ({
     status: 'ready',
     set: vi.fn(),
     del: vi.fn(),
+    eval: vi.fn(),
   }
 }));
 
@@ -24,7 +25,21 @@ describe('Distributed Redis Locking (#6726)', () => {
       const result = await acquireDistributedLock('lock:test:123', 5);
       
       expect(result.acquired).toBe(true);
-      expect(redisClient.set).toHaveBeenCalledWith('lock:test:123', '1', 'NX', 'EX', 5);
+      // The stored value is a unique owner token (never the shared constant '1'),
+      // otherwise one holder could release another holder's lock.
+      expect(redisClient.set).toHaveBeenCalledWith('lock:test:123', expect.any(String), 'NX', 'EX', 5);
+      const token = redisClient.set.mock.calls[0][1];
+      expect(token).not.toBe('1');
+      expect(token.length).toBeGreaterThan(8);
+    });
+
+    it('should use a distinct owner token for every acquisition', async () => {
+      redisClient.set.mockResolvedValue('OK');
+      await acquireDistributedLock('lock:test:123', 5);
+      await acquireDistributedLock('lock:test:123', 5);
+
+      const [first, second] = redisClient.set.mock.calls.map((call) => call[1]);
+      expect(first).not.toBe(second);
     });
 
     it('should return acquired=false when lock is already held', async () => {
@@ -43,14 +58,38 @@ describe('Distributed Redis Locking (#6726)', () => {
       await result.release();
     });
 
-    it('should release the lock by deleting the key', async () => {
+    it('should release with an atomic owner-checked delete (never a bare DEL)', async () => {
       redisClient.set.mockResolvedValue('OK');
-      redisClient.del.mockResolvedValue(1);
-      
+      redisClient.eval.mockResolvedValue(1);
+
+      const result = await acquireDistributedLock('lock:test:123', 5);
+      const token = redisClient.set.mock.calls[0][1];
+      await expect(result.release()).resolves.toBe(true);
+
+      expect(redisClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('DEL'), 1, 'lock:test:123', token
+      );
+      expect(redisClient.del).not.toHaveBeenCalled();
+    });
+
+    it('should not free a lock that now belongs to someone else', async () => {
+      redisClient.set.mockResolvedValue('OK');
+      redisClient.eval.mockResolvedValue(0); // key expired and was re-acquired by another holder
+
+      const result = await acquireDistributedLock('lock:test:123', 5);
+      await expect(result.release()).resolves.toBe(false);
+      expect(redisClient.del).not.toHaveBeenCalled();
+    });
+
+    it('should only issue the release once even if release() is called twice', async () => {
+      redisClient.set.mockResolvedValue('OK');
+      redisClient.eval.mockResolvedValue(1);
+
       const result = await acquireDistributedLock('lock:test:123', 5);
       await result.release();
-      
-      expect(redisClient.del).toHaveBeenCalledWith('lock:test:123');
+      await expect(result.release()).resolves.toBe(false);
+
+      expect(redisClient.eval).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -63,7 +102,7 @@ describe('Distributed Redis Locking (#6726)', () => {
       
       expect(result).toBe('success');
       expect(mockFn).toHaveBeenCalledTimes(1);
-      expect(redisClient.del).toHaveBeenCalled(); // Released
+      expect(redisClient.eval).toHaveBeenCalled(); // Released (owner-checked)
     });
 
     it('should retry if lock is initially held', async () => {
@@ -94,7 +133,9 @@ describe('Distributed Redis Locking (#6726)', () => {
       const mockFn = vi.fn().mockRejectedValue(new Error('Business logic failure'));
       
       await expect(withLock('lock:test', mockFn)).rejects.toThrow('Business logic failure');
-      expect(redisClient.del).toHaveBeenCalledWith('lock:test');
+      expect(redisClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('DEL'), 1, 'lock:test', expect.any(String)
+      );
     });
   });
 });

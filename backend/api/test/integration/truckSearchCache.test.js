@@ -16,6 +16,7 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient,
+  upstashRedisClient: redisClient,
   mongoDb: {
     collection: () => ({
       find: () => ({

@@ -407,5 +407,5 @@ function parseWasiJsonOutput(stdout) {
 // const result = JSON.parse(stdout);
 //
 // With:
-const result = parseWasiJsonOutput(stdout);
+// const result = parseWasiJsonOutput(stdout);
 export default new WASIRuntime();

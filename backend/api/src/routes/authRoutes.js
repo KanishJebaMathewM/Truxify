@@ -52,6 +52,7 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
+import { refreshToken } from "../controllers/authController.js";
 import { firebaseAdmin, supabase, redisClient } from "../config/db.js";
 import {
   OTP_MAX_FAILED_ATTEMPTS,

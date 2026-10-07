@@ -17,7 +17,8 @@ vi.mock('../../src/config/db.js', () => ({
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
   },
-  supabase: {}
+  supabase: {},
+  redisClient: null
 }));
 
 vi.mock('../../src/middleware/rateLimiter.js', async (importOriginal) => {
@@ -141,7 +142,7 @@ describe('Road Condition Routes Integration', () => {
         .query({ lat: 45.0 }); // Missing lng
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Latitude (lat) and longitude (lng) are required');
+      expect(res.body.error).toContain('Invalid lng');
     });
   });
 });

@@ -352,7 +352,6 @@ beforeEach(() => {
     );
     worker.stopOutboxRelayWorker();
   });
-});
 
 
 describe("outbox relay polling generations", () => {

@@ -4,7 +4,7 @@ import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabaseAdmin, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
-import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { createStore, safeIpKeyGenerator, publicTrackingLimiter } from '../middleware/rateLimiter.js';
 import GpsLog from '../models/GpsLog.js';
 import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 import { trackingTokenInvalidResponse } from '../utils/trackingTokenStatus.js';
@@ -20,96 +20,13 @@ const trackingTokenService = new TrackingTokenService({
   logger,
 });
 
-router.get('/tracking/:token', async (req, res) => {
-  try {
-    const { token } = req.params;
-    const result = await trackingTokenService.validateAndGetPublicTrackingData(token);
-// ──────────────────────────────────────────────────────────────────────────
-// GET /api/public/tracking/:token
-// Public — no authentication required. Returns safe order subset.
-// ──────────────────────────────────────────────────────────────────────────
-router.get(
-  '/tracking/:token',
-  publicLimiter,
-  validateParams(publicTrackingTokenSchema),
-  async (req, res) => {
-    try {
-      const { token } = req.params;
-
-      const validation = await trackingTokenService.validateToken(token);
-
-      if (validation.reason === 'validation_error') {
-        return res.status(400).json({ error: 'Invalid tracking token' });
-      }
-
-      if (!validation.valid) {
-        const { status, message } = trackingTokenInvalidResponse(validation);
-        return res.status(status).json({ error: message });
-      }
-
-      const { orderDisplayId } = validation;
-
-      // Fetch order, timeline, and driver location in parallel
-      const [order, timeline, driverLocation] = await Promise.all([
-        trackingTokenService.getOrderForPublicTracking(orderDisplayId),
-        trackingTokenService.getOrderTimeline(orderDisplayId),
-        trackingTokenService.getDriverLocation(orderDisplayId),
-      ]);
-
-      if (!order) {
-        return res.status(404).json({ error: 'Order not found' });
-      }
-
-      // Expose ONLY safe public fields — sensitive data is never included
-      // All string fields are HTML-encoded to prevent XSS (issue #14364)
-      const publicOrder = {
-        order_display_id: encodeHtml(order.order_display_id),
-        status: encodeHtml(order.status),
-        pickup_address: encodeHtml(order.pickup_address),
-        pickup_lat: order.pickup_lat,
-        pickup_lng: order.pickup_lng,
-        drop_address: encodeHtml(order.drop_address),
-        drop_lat: order.drop_lat,
-        drop_lng: order.drop_lng,
-        pickup_date: encodeHtml(order.pickup_date),
-        pickup_time: encodeHtml(order.pickup_time),
-        goods_type: encodeHtml(order.goods_type),
-        weight_tonnes: order.weight_tonnes,
-        driver_name: encodeHtml(order.driver_name),
-        driver_rating: order.driver_rating,
-        truck_number: encodeHtml(order.truck_number),
-        eta: encodeHtml(order.eta),
-        created_at: order.created_at,
-      };
-
-      const publicTimeline = timeline.map((t) => ({
-        milestone: encodeHtml(t.milestone),
-        milestone_time: t.milestone_time,
-        completed: t.completed,
-        sort_order: t.sort_order,
-      }));
-
-      const publicDriverLocation = driverLocation
-        ? {
-            latitude: driverLocation.latitude,
-            longitude: driverLocation.longitude,
-            last_updated_at: driverLocation.last_updated_at,
-          }
-        : null;
-
-    if (!result.valid) {
-      return res.status(404).json({ error: 'Tracking link not found or invalid', reason: result.reason });
-    }
-  }
-);
-
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/public/tracking/:token/route
 // Public — returns route geometry for the tracked order.
 // ──────────────────────────────────────────────────────────────────────────
 router.get(
   '/tracking/:token/route',
-  publicLimiter,
+  publicTrackingLimiter,
   validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {

@@ -64,16 +64,20 @@ export class FlashbotsRelayerService {
   }
 }
 
+let _mevRelayer = null;
+
 export function getMevRelayer() {
-  return mevRelayer;
+  // Lazy: importing this module must not throw when the relayer is not
+  // configured (test harnesses, health checks). Construct on first use.
+  if (_mevRelayer === null) {
+    const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
+    if (!relayerPrivateKey) {
+      throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required');
+    }
+    _mevRelayer = new FlashbotsRelayerService(
+      process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
+      relayerPrivateKey
+    );
+  }
+  return _mevRelayer;
 }
-
-const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-if (!relayerPrivateKey) {
-  throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required');
-}
-
-export const mevRelayer = new FlashbotsRelayerService(
-  process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
-  relayerPrivateKey
-);

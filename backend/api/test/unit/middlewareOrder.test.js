@@ -7,7 +7,7 @@
  * content-type enforcement, fraud detection and the rate limiter, which meant
  * every request to it bypassed all of them.
  *
- * These assertions read src/index.js as text rather than booting the app,
+ * These assertions read src/app.js as text rather than booting the app,
  * because importing it starts servers, workers and reconciliation cron jobs.
  */
 import { describe, expect, it, beforeAll } from 'vitest';
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const INDEX = path.resolve(__dirname, '../../src/index.js');
+const INDEX = path.resolve(__dirname, '../../src/app.js');
 
 /** Middleware every /api route must sit behind, with the marker that registers it. */
 const REQUIRED_BEFORE_ROUTES = [

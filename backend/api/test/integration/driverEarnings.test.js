@@ -42,8 +42,7 @@ const mockTrips = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const client = {
       from: (table) => {
         if (table === 'trips') {
           return {
@@ -62,7 +61,12 @@ vi.mock('../../src/config/db.js', () => {
           }),
         };
       },
-    },
+  };
+
+  return {
+    supabase: client,
+    supabaseAdmin: client,
+    createUserClient: () => client,
     mongoDb: null,
     redisClient: {
       get: () => Promise.resolve(null),

@@ -95,6 +95,9 @@ vi.mock('@sentry/node', () => ({
 }));
 
 vi.mock('../../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: mockSupabase,
 }));
 
@@ -102,7 +105,7 @@ vi.mock('../../../../src/core/performanceMetrics.js', () => ({
   measureExecution: (name, fn) => fn(),
 }));
 
-import KeyRotationService from '../../../../src/services/security/keyRotationService.js';
+const { default: KeyRotationService } = await import('../../../../src/services/security/keyRotationService.js');
 
 describe('KeyRotationService', () => {
   let service;

@@ -30,9 +30,10 @@ const TTS_MAX_RESPONSE_CHARS = loadPositiveIntegerEnv(
 
 class VoiceAiService {
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    // The OpenAI SDK throws when no API key is configured, so the client is
+    // created on first use. Constructing it here made importing this module
+    // (and therefore booting the API) fail whenever OPENAI_API_KEY was unset.
+    this._openai = null;
     this.elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
     
     // Voice IDs for different languages
@@ -41,6 +42,22 @@ class VoiceAiService {
       hi: 'pNInz6obpgDQGcFmaJgB', // Example Voice ID (Adam is multilingual)
       ta: 'pNInz6obpgDQGcFmaJgB'  // Example Voice ID
     };
+  }
+
+  /**
+   * Lazily created OpenAI client.
+   * @returns {OpenAI}
+   * @throws {Error} If OPENAI_API_KEY is not configured
+   */
+  get openai() {
+    if (!this._openai) {
+      const apiKey = (process.env.OPENAI_API_KEY || '').trim();
+      if (!apiKey) {
+        throw new Error('VoiceAiService: OPENAI_API_KEY is not configured');
+      }
+      this._openai = new OpenAI({ apiKey });
+    }
+    return this._openai;
   }
 
   /**
@@ -77,7 +94,10 @@ class VoiceAiService {
       });
       
       const userText = transcription.text;
-      logger.info(`Transcription result: ${userText}`);
+      logger.info(
+        { language, transcriptLength: typeof userText === 'string' ? userText.length : 0 },
+        'Voice transcription completed',
+      );
 
       // 2. Generate LLM Response
       const completion = await this.openai.chat.completions.create({
@@ -102,7 +122,10 @@ class VoiceAiService {
         throw new Error('LLM response exceeds the voice response limit');
       }
 
-      logger.info(`LLM Response: ${responseText}`);
+      logger.info(
+        { language, responseLength: typeof responseText === 'string' ? responseText.length : 0 },
+        'LLM response generated',
+      );
 
       // 3. Convert Text to Speech using ElevenLabs
       const voiceId = this.voiceIds[language] || this.voiceIds['en'];

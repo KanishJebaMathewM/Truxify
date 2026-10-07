@@ -1,4 +1,5 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
 import { compressionMiddleware } from './config/compression.js'
@@ -25,6 +26,7 @@ import iotRoutes from './routes/iotRoutes.js'
 import demandRoutes from './routes/demandRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
+import { getJwtSecret } from './config/jwtSecret.js'
 import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
@@ -62,6 +64,7 @@ import webhookRoutes from './routes/webhookRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
 import droneRoutes from './routes/droneRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
+import lumperEscrowRoutes from './routes/lumperEscrowRoutes.js'
 import tollOptimizationRouter from './routes/tollOptimization.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
@@ -73,6 +76,7 @@ import carbonTokenRoutes from './routes/carbonTokenRoutes.js'
 import mlRoutes from './routes/mlRoutes.js'
 import tireAnalyticsRoutes from './routes/tireAnalyticsRoutes.js'
 import arLoadingRoutes from './routes/arLoadingRoutes.js'
+import relayRoutes from './routes/relayRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -180,6 +184,10 @@ import {
 } from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
 
+// --- AUDIT LOGGING IMPORTS ---
+import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
+
+
 // Configuration load from root folder is handled in db.js
 
 // ============================================================================
@@ -249,6 +257,16 @@ if (!process.env.WEBHOOK_SECRET) {
   logger.fatal('WEBHOOK_SECRET is not set. Escrow webhook signature verification cannot run and webhook requests will be rejected. Set WEBHOOK_SECRET and restart.')
   process.exit(1)
 }
+if (process.env.NODE_ENV === 'production') {
+  // The backend JWT signing key had a hardcoded public fallback, so a missing
+  // JWT_SECRET silently produced tokens anyone could forge. It is now required.
+  try {
+    getJwtSecret()
+  } catch (err) {
+    logger.fatal(`${err.message} Generate one with \`openssl rand -hex 48\` and restart.`)
+    process.exit(1)
+  }
+}
 
 // ============================================================================
 // 🆕 WEBHOOK VALIDATION
@@ -260,6 +278,20 @@ if (!process.env.WEBHOOK_SECRET) {
   } else {
     logger.warn('WARNING: WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
+}
+
+// ============================================================================
+// 🆕 WIM BYPASS VALIDATION
+// ============================================================================
+// WIM bypass credentials are HMAC-signed with a server secret. Without a
+// properly configured secret the process must fail fast rather than ever
+// issue an unsigned or weakly-signed bypass credential.
+try {
+  validateWimConfig();
+  logger.info('✅ WIM bypass signing configuration is valid.')
+} catch (err) {
+  logger.fatal(err.message)
+  process.exit(1)
 }
 
 // ============================================================================
@@ -287,8 +319,8 @@ if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
   logger.warn('WARNING: Shard hosts not fully configured. Using localhost defaults.')
 }
 
-if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
-  !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
+if (!process.env.SHARD_PASSWORD && (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
+  !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST)) {
   logger.warn('WARNING: Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
@@ -350,6 +382,8 @@ validateEscrowSetup().then((valid) => {
 
 const app = express()
 const server = http.createServer(app)
+// Wrap JSON responses before any middleware or route can send them.
+app.use(responseSanitizer)
 app.use(sentryRequestHandler());
 app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
@@ -503,13 +537,14 @@ app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)
 app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
-app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
-app.use('/api/trips', tripRoutes)
 // ============================================================================
 // REQUEST-SCOPED CACHE — created per-request, destroyed after response.
 // Registers before all routes so every request handler benefits.
 // ============================================================================
 app.use('/api', requestCacheMiddleware)
+
+app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
+app.use('/api/trips', tripRoutes)
 
 // ============================================================================
 // REST API ROUTING
@@ -519,6 +554,10 @@ app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMi
 // long-haul loads. Sits behind authenticate + per-route policy checks.
 app.use('/api/cross-dock', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, crossDockRoutes)
 app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
+// Lumper fee escrow (broker deposit / driver receipt release). The router
+// already applies `authenticate` + `userLimiter` on each of its own routes,
+// so no additional middleware is layered on here.
+app.use('/api/lumper-escrow', lumperEscrowRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
@@ -538,7 +577,6 @@ app.use('/api/users', userRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
 app.use('/api/maintenance', maintenancePhotoRoutes)
-app.use('/api/webhooks', webhookRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
@@ -551,6 +589,7 @@ app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
+app.use('/api/tolls', tollOptimizationRouter)
 
 // ============================================================================
 // 🆕 WEB3 SUBSYSTEM ROUTES
@@ -578,6 +617,7 @@ app.use('/api/carbon-credits', carbonTokenRoutes)
 app.use('/api/ml', mlRoutes)
 app.use('/api/tire-analytics', tireAnalyticsRoutes)
 app.use('/api/ar-loading', arLoadingRoutes)
+app.use('/api/relay', relayRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES
@@ -621,21 +661,56 @@ app.use('/api/blockchain', (req, _res, next) => {
 // ============================================================================
 app.use('/api/internal', requireApiKey, internalRoutes)
 
-// 🆕 Oracle Health Check Endpoint
-app.get('/api/oracle/health', (req, res) => {
+// ============================================================================
+// 🆕 OPENTELEMETRY HEALTH CHECK
+// ============================================================================
+app.get('/api/tracing/health', (req, res) => {
   res.json({
     status: 'healthy',
+    service: 'opentelemetry',
     version: '1.0.0',
-    oracleEnabled: true,
-    consensusThreshold: process.env.ORACLE_CONSENSUS_THRESHOLD || 2,
-    providers: {
-      chainlink: process.env.CHAINLINK_ENABLED === 'true',
-      customVerifier: true,
-      backupOracle: process.env.BACKUP_ORACLE_ENABLED === 'true'
-    },
+    isEnabled: tracing.isInitialized,
     timestamp: new Date().toISOString()
   })
 })
+
+// Root & 404 Controllers
+app.get('/', getRoot)
+app.use(notFound)
+
+// Sentry Error Handler
+app.use(sentryErrorHandler)
+
+// Global Error Handler
+app.use(errorHandler)
+
+const PORT = process.env.PORT || 4000
+
+server.listen(PORT, async () => {
+  logger.info(`Server running on port ${PORT}`)
+  
+  // Start background workers
+  startOutboxRelayWorker()
+  startEscrowReleaseReconciliation()
+  startEscrowRefundReconciliation()
+  startEscrowFundingReconciliation()
+  startReputationReconciliation()
+  startDocumentExpiryWorker()
+  startDlqWorker()
+  startStaleOrderWorker()
+  startDevicePruningWorker()
+  startWithdrawalSettlementWorker()
+
+  // Initialize WebSockets and servers
+  initWebSocketServer(server)
+  initLocationServer(server)
+  initWebRTCSignaling(server)
+
+  // Start blockchain monitoring divergence detector explicitly
+  stateDivergenceDetector.start?.()
+})
+
+export default app
 
 // ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
@@ -674,6 +749,7 @@ app.use('/api', wasmRoutes)
 app.use('/api', snykRoutes)
 app.use('/api', liquibaseRoutes)
 app.use('/api/wim', wimBypassRouter)
+app.use('/api/ifta-tax', iftaTaxRouter)
 
 // 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
@@ -742,7 +818,6 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
-app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
 app.use(notFound)
@@ -922,7 +997,13 @@ async function shutdown(signal) {
     clearTimeout(forceExit)
     process.exit(exitCode)
   }
-}
+} 
+
+// --- COMPLIANCE IMPORTS ---
+import complianceRoutes from './routes/complianceRoutes.js';
+
+// Mount compliance routes
+app.use('/api/compliance', complianceRoutes);
 
 // Handle uncaught exceptions and unhandled rejections.
 // Both handlers route through shutdown() so that connections are drained
@@ -940,7 +1021,51 @@ process.on('unhandledRejection', async (reason) => {
   await shutdown('unhandledRejection')
 })
 
-process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
+// --- FLEET ANALYTICS IMPORTS ---
+import analyticsRoutes from './routes/analyticsRoutes.js';
+
+// Mount analytics routes
+app.use('/api/analytics', analyticsRoutes);
+
+process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop 
 process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
 
-app.use('/api/tolls', tollOptimizationRouter);
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Request payload exceeded configured limit'
+    );
+
+    return res.status(413).json({
+      error: 'Payload too large',
+    });
+  }
+
+  if (
+    err instanceof SyntaxError &&
+    err.status === 400 &&
+    'body' in err
+  ) {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Malformed JSON payload received'
+    );
+
+    return res.status(400).json({
+      error: 'Malformed JSON payload',
+    });
+  }
+
+  next(err);
+});

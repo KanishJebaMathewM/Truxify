@@ -94,6 +94,30 @@ int main() {
         check(originCount == 4, "2x2 matrix emits 4 cells");
     }
 
+    // Invalid coordinates must be rejected before streamed distance output.
+    for (const std::string& fields : {
+        "\"lng\":0", "\"lat\":0", "\"lat\":null,\"lng\":0",
+        "\"lat\":\"19\",\"lng\":0", "\"lat\":1e309,\"lng\":0",
+        "\"lat\":91,\"lng\":0", "\"lat\":-91,\"lng\":0",
+        "\"lat\":0,\"lng\":181", "\"lat\":0,\"lng\":-181",
+        "\"lat\":12oops,\"lng\":0"
+    }) {
+        auto parsed = parse_locations("{\"locations\":[{\"id\":\"A\"," + fields + "}]}");
+        auto decision = decide_matrix_request(parsed);
+        check(!decision.ok && decision.status_line == "400 Bad Request", "invalid coordinates rejected");
+    }
+    for (const std::string& fields : {"\"lat\":0,\"lng\":0", "\"lat\":90,\"lng\":180", "\"lat\":-90,\"lng\":-180", "\"lat\":-1.5e1,\"lng\":1.25e2"}) {
+        auto parsed = parse_locations("{\"locations\":[{\"id\":\"A\"," + fields + "}]}");
+        check(decide_matrix_request(parsed).ok, "valid zeros, boundaries and signed scientific notation accepted");
+    }
+
+    {
+        auto missing = parse_locations("{\"locations\":[{\"id\":\"lat\",\"lng\":0}]}");
+        check(!decide_matrix_request(missing).ok, "coordinate-like id cannot impersonate missing latitude");
+        auto valid = parse_locations("{\"locations\":[{\"id\":\"lat\",\"lat\":0,\"lng\":0}]}");
+        check(decide_matrix_request(valid).ok, "coordinate-like id with real coordinates accepted");
+    }
+
     if (failures == 0) {
         std::printf("ALL TESTS PASSED\n");
         return 0;

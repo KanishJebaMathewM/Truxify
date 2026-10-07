@@ -1,5 +1,4 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
@@ -9,10 +8,13 @@ class AtomicSwapService {
     constructor() {
         const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
         this.provider = new ethers.JsonRpcProvider(rpcUrl);
+
         const privateKey = process.env.PRIVATE_KEY && /^0x?[0-9a-fA-F]{64}$/.test(process.env.PRIVATE_KEY)
             ? process.env.PRIVATE_KEY
             : ethers.Wallet.createRandom().privateKey;
+
         this.wallet = new ethers.Wallet(privateKey, this.provider);
+
         this.swapAddress = (process.env.ATOMIC_SWAP_ADDRESS && ethers.isAddress(process.env.ATOMIC_SWAP_ADDRESS))
             ? process.env.ATOMIC_SWAP_ADDRESS
             : ethers.ZeroAddress;
@@ -54,34 +56,52 @@ class AtomicSwapService {
 
     async createSwap(counterparty, tokenAddress, amount, secret, initiator) {
         try {
-        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
-        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+            const validInitiator = atomicSwapRelayer.validateParticipantAddress(
+                initiator,
+                'Initiator'
+            );
 
-        // `initiator` is the server-verified signer (the funding wallet owner),
-        // never the server wallet. Reject attempts to fund from the server
-        // wallet, which would let a caller drain server funds.
-        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
-            throw new Error('Invalid initiator: funding wallet must be user-owned');
-        }
-
-        const amountValidation = atomicSwapRelayer.validateAmount(amount);
-        if (!amountValidation.valid) {
-            throw new Error(amountValidation.error);
-        }
-
-        const hashLock = this.generateHashLock(secret);
-        if (await this.swap.usedHashLocks(hashLock)) {
-            throw new Error('Hash lock already used');
-        }
-        const parsedAmount = ethers.parseEther(amount.toString());
-        const swapId = this.generateSwapId();
-
-        const token = tokenAddress || ethers.ZeroAddress;
-        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
-
-        const tx = await this.swap.openSwap(
-                swapId,
+            const validCounterparty = atomicSwapRelayer.validateParticipantAddress(
                 counterparty,
+                'Counterparty'
+            );
+
+            // The initiator is the server-verified signer and must never
+            // be the server wallet.
+            if (
+                this.wallet &&
+                validInitiator.toLowerCase() === this.wallet.address.toLowerCase()
+            ) {
+                throw new Error(
+                    'Invalid initiator: funding wallet must be user-owned'
+                );
+            }
+
+            const amountValidation = atomicSwapRelayer.validateAmount(amount);
+
+            if (!amountValidation.valid) {
+                throw new Error(amountValidation.error);
+            }
+
+            // IMPORTANT:
+            // Only the hash lock is persisted.
+            // The plaintext secret must NOT be stored in the database
+            // or returned from this service.
+            const hashLock = this.generateHashLock(secret);
+
+            if (await this.swap.usedHashLocks(hashLock)) {
+                throw new Error('Hash lock already used');
+            }
+
+            const parsedAmount = ethers.parseEther(amount.toString());
+            const swapId = this.generateSwapId();
+
+            const token = tokenAddress || ethers.ZeroAddress;
+            const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+
+            const tx = await this.swap.openSwap(
+                swapId,
+                validCounterparty,
                 hashLock,
                 this.lockDuration,
                 {
@@ -89,12 +109,13 @@ class AtomicSwapService {
                     gasLimit: 300000
                 }
             );
+
             const receipt = await tx.wait();
 
             await this.storeSwap({
                 swapId,
-                initiator,
-                counterparty,
+                initiator: validInitiator,
+                counterparty: validCounterparty,
                 tokenAddress,
                 amount,
                 hashLock,
@@ -102,6 +123,7 @@ class AtomicSwapService {
             });
 
             logger.info(`✅ Swap created: ${swapId}`);
+
             return {
                 success: true,
                 swapId: swapId.toString(),
@@ -115,15 +137,25 @@ class AtomicSwapService {
     }
 
     async executeSwap(swapId, secret) {
-    try {
-        const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
-            gasLimit: 150000
-        });
+        try {
+            const tx = await this.swap.claimSwap(
+                swapId,
+                ethers.toUtf8Bytes(secret),
+                {
+                    gasLimit: 150000
+                }
+            );
+
             const receipt = await tx.wait();
 
-            await this.updateSwapStatus(swapId, 'executed', receipt.hash);
+            await this.updateSwapStatus(
+                swapId,
+                'executed',
+                receipt.hash
+            );
 
             logger.info(`✅ Swap executed: ${swapId}`);
+
             return {
                 success: true,
                 swapId,
@@ -140,11 +172,17 @@ class AtomicSwapService {
             const tx = await this.swap.refundSwap(swapId, {
                 gasLimit: 150000
             });
+
             const receipt = await tx.wait();
 
-            await this.updateSwapStatus(swapId, 'refunded', receipt.hash);
+            await this.updateSwapStatus(
+                swapId,
+                'refunded',
+                receipt.hash
+            );
 
             logger.info(`✅ Swap refunded: ${swapId}`);
+
             return {
                 success: true,
                 swapId,
@@ -158,49 +196,81 @@ class AtomicSwapService {
 
     // ============ Cross-Chain Swap Operations ============
 
-    async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret, initiator) {
+    async createCrossChainSwap(
+        destChainId,
+        counterparty,
+        tokenAddress,
+        amount,
+        secret,
+        initiator
+    ) {
         try {
-        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
-        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+            const validInitiator = atomicSwapRelayer.validateParticipantAddress(
+                initiator,
+                'Initiator'
+            );
 
-        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
-            throw new Error('Invalid initiator: funding wallet must be user-owned');
-        }
+            const validCounterparty = atomicSwapRelayer.validateParticipantAddress(
+                counterparty,
+                'Counterparty'
+            );
 
-        const amountValidation = atomicSwapRelayer.validateAmount(amount);
-        if (!amountValidation.valid) {
-            throw new Error(amountValidation.error);
-        }
-
-        const hashLock = this.generateHashLock(secret);
-        if (await this.swap.usedHashLocks(hashLock)) {
-            throw new Error('Hash lock already used');
-        }
-        const parsedAmount = ethers.parseEther(amount.toString());
-        const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${counterparty}:${tokenAddress}:${amount}`));
-        const swapId = this.generateSwapId();
-
-        const token = tokenAddress || ethers.ZeroAddress;
-        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
-
-        const tx = await this.swap.openSwap(
-            swapId,
-            counterparty,
-            hashLock,
-            this.lockDuration,
-            {
-                value,
-                gasLimit: 350000
+            if (
+                this.wallet &&
+                validInitiator.toLowerCase() === this.wallet.address.toLowerCase()
+            ) {
+                throw new Error(
+                    'Invalid initiator: funding wallet must be user-owned'
+                );
             }
-        );
-        const receipt = await tx.wait();
+
+            const amountValidation = atomicSwapRelayer.validateAmount(amount);
+
+            if (!amountValidation.valid) {
+                throw new Error(amountValidation.error);
+            }
+
+            // IMPORTANT:
+            // Only the hash lock is persisted.
+            // The plaintext secret must never be stored or returned.
+            const hashLock = this.generateHashLock(secret);
+
+            if (await this.swap.usedHashLocks(hashLock)) {
+                throw new Error('Hash lock already used');
+            }
+
+            const parsedAmount = ethers.parseEther(amount.toString());
+
+            const proof = ethers.keccak256(
+                ethers.toUtf8Bytes(
+                    `${destChainId}:${validCounterparty}:${tokenAddress}:${amount}`
+                )
+            );
+
+            const swapId = this.generateSwapId();
+
+            const token = tokenAddress || ethers.ZeroAddress;
+            const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+
+            const tx = await this.swap.openSwap(
+                swapId,
+                validCounterparty,
+                hashLock,
+                this.lockDuration,
+                {
+                    value,
+                    gasLimit: 350000
+                }
+            );
+
+            const receipt = await tx.wait();
 
             await this.storeCrossChainSwap({
                 swapId,
-                sourceChainId: 137, // Polygon
+                sourceChainId: 137,
                 destChainId,
-                initiator,
-                counterparty,
+                initiator: validInitiator,
+                counterparty: validCounterparty,
                 tokenAddress,
                 amount,
                 hashLock,
@@ -209,6 +279,7 @@ class AtomicSwapService {
             });
 
             logger.info(`✅ Cross-chain swap created: ${swapId}`);
+
             return {
                 success: true,
                 swapId: swapId.toString(),
@@ -217,28 +288,44 @@ class AtomicSwapService {
                 txHash: receipt.hash
             };
         } catch (error) {
-            logger.error('Cross-chain swap creation failed:', error);
+            logger.error(
+                'Cross-chain swap creation failed:',
+                error
+            );
             throw error;
         }
     }
 
     async executeCrossChainSwap(swapId, secret, proof) {
-    try {
-        const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
-            gasLimit: 200000
-        });
+        try {
+            const tx = await this.swap.claimSwap(
+                swapId,
+                ethers.toUtf8Bytes(secret),
+                {
+                    gasLimit: 200000
+                }
+            );
+
             const receipt = await tx.wait();
 
-            await this.updateCrossChainSwapStatus(swapId, 'executed', receipt.hash);
+            await this.updateCrossChainSwapStatus(
+                swapId,
+                'executed',
+                receipt.hash
+            );
 
             logger.info(`✅ Cross-chain swap executed: ${swapId}`);
+
             return {
                 success: true,
                 swapId,
                 txHash: receipt.hash
             };
         } catch (error) {
-            logger.error('Cross-chain swap execution failed:', error);
+            logger.error(
+                'Cross-chain swap execution failed:',
+                error
+            );
             throw error;
         }
     }
@@ -248,18 +335,27 @@ class AtomicSwapService {
             const tx = await this.swap.refundSwap(swapId, {
                 gasLimit: 150000
             });
+
             const receipt = await tx.wait();
 
-            await this.updateCrossChainSwapStatus(swapId, 'refunded', receipt.hash);
+            await this.updateCrossChainSwapStatus(
+                swapId,
+                'refunded',
+                receipt.hash
+            );
 
             logger.info(`✅ Cross-chain swap refunded: ${swapId}`);
+
             return {
                 success: true,
                 swapId,
                 txHash: receipt.hash
             };
         } catch (error) {
-            logger.error('Cross-chain swap refund failed:', error);
+            logger.error(
+                'Cross-chain swap refund failed:',
+                error
+            );
             throw error;
         }
     }
@@ -269,6 +365,7 @@ class AtomicSwapService {
     async getSwap(swapId) {
         try {
             const swap = await this.swap.swaps(swapId);
+
             return {
                 id: swapId,
                 sender: swap[0],
@@ -289,6 +386,7 @@ class AtomicSwapService {
     async getCrossChainSwap(swapId) {
         try {
             const swap = await this.swap.swaps(swapId);
+
             return {
                 id: swapId,
                 sender: swap[0],
@@ -301,7 +399,10 @@ class AtomicSwapService {
                 isCrossChain: swap[7]
             };
         } catch (error) {
-            logger.error('Cross-chain swap fetch failed:', error);
+            logger.error(
+                'Cross-chain swap fetch failed:',
+                error
+            );
             return null;
         }
     }
@@ -322,6 +423,7 @@ class AtomicSwapService {
                 status: 'pending',
                 created_at: new Date().toISOString()
             }]);
+
         if (error) throw error;
     }
 
@@ -342,6 +444,7 @@ class AtomicSwapService {
                 status: 'pending',
                 created_at: new Date().toISOString()
             }]);
+
         if (error) throw error;
     }
 
@@ -354,10 +457,15 @@ class AtomicSwapService {
                 executed_at: new Date().toISOString()
             })
             .eq('swap_id', swapId);
+
         if (error) throw error;
     }
 
-    async updateCrossChainSwapStatus(swapId, status, txHash) {
+    async updateCrossChainSwapStatus(
+        swapId,
+        status,
+        txHash
+    ) {
         const { error } = await supabase
             .from('cross_chain_swaps')
             .update({
@@ -366,6 +474,7 @@ class AtomicSwapService {
                 executed_at: new Date().toISOString()
             })
             .eq('swap_id', swapId);
+
         if (error) throw error;
     }
 
@@ -383,11 +492,26 @@ class AtomicSwapService {
 
             return {
                 totalSwaps: swaps?.length || 0,
-                executedSwaps: swaps?.filter(s => s.status === 'executed').length || 0,
-                pendingSwaps: swaps?.filter(s => s.status === 'pending').length || 0,
-                refundedSwaps: swaps?.filter(s => s.status === 'refunded').length || 0,
-                totalCrossChainSwaps: crossSwaps?.length || 0,
-                totalVolume: swaps?.reduce((sum, s) => sum + parseFloat(s.amount || 0), 0) || 0,
+                executedSwaps:
+                    swaps?.filter(
+                        s => s.status === 'executed'
+                    ).length || 0,
+                pendingSwaps:
+                    swaps?.filter(
+                        s => s.status === 'pending'
+                    ).length || 0,
+                refundedSwaps:
+                    swaps?.filter(
+                        s => s.status === 'refunded'
+                    ).length || 0,
+                totalCrossChainSwaps:
+                    crossSwaps?.length || 0,
+                totalVolume:
+                    swaps?.reduce(
+                        (sum, s) =>
+                            sum + parseFloat(s.amount || 0),
+                        0
+                    ) || 0,
                 timestamp: new Date().toISOString()
             };
         } catch (error) {

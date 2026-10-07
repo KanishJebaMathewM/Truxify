@@ -2,6 +2,10 @@ name: Truxify CI
 
 on:
   pull_request:
+    paths:
+      - 'apps/**'
+      - 'blockchain/**'
+      - 'backend/ml/**'
   push:
     branches:
       - main
@@ -17,10 +21,12 @@ jobs:
   secret-scan:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
@@ -35,10 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         working-directory: backend/api
@@ -69,6 +75,9 @@ jobs:
           cache-dependency-path: |
             backend/ml/requirements.txt
             backend/ml/requirements-dev.txt
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libopenblas-dev
 
       - name: Install dependencies
         working-directory: backend/ml

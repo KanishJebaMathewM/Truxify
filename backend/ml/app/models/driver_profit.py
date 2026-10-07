@@ -10,14 +10,14 @@ predictions meaningful.
 """
 
 import logging
-from typing import Optional
+import threading
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
-from .base import save_model, load_model, model_exists, get_model_meta
+from .base import load_model_snapshot, model_exists, save_model
 
 logger = logging.getLogger(__name__)
 
@@ -40,28 +40,29 @@ def _generate_synthetic_data(n_samples: int = 2000) -> tuple:
     y : ndarray of shape (n_samples,)
         Target: net profit (₹).
     """
-    np.random.seed(42)
+    # Own the stream per invocation while preserving legacy seed42 draws.
+    rng = np.random.RandomState(42)
 
-    route_distance = np.random.uniform(50, 2000, n_samples)                 # km
-    fuel_price = np.random.uniform(95, 115, n_samples)                      # ₹/L
-    toll_estimate = route_distance * np.random.uniform(1.5, 4.0, n_samples) # ₹
-    truck_mileage = np.random.uniform(3, 8, n_samples)                      # km/L
-    cargo_weight = np.random.uniform(500, 25_000, n_samples)                # kg
-    avg_speed = np.random.uniform(40, 60, n_samples)                        # km/h
+    route_distance = rng.uniform(50, 2000, n_samples)                 # km
+    fuel_price = rng.uniform(95, 115, n_samples)                      # ₹/L
+    toll_estimate = route_distance * rng.uniform(1.5, 4.0, n_samples) # ₹
+    truck_mileage = rng.uniform(3, 8, n_samples)                      # km/L
+    cargo_weight = rng.uniform(500, 25_000, n_samples)                # kg
+    avg_speed = rng.uniform(40, 60, n_samples)                        # km/h
     trip_duration = route_distance / avg_speed                               # hours
 
     # Revenue model
-    base_rate = np.random.uniform(1.8, 3.5, n_samples)                     # ₹/km base
+    base_rate = rng.uniform(1.8, 3.5, n_samples)                     # ₹/km base
     weight_factor = 1 + (cargo_weight / 25_000) * 0.5                       # heavier → more ₹
     revenue = base_rate * route_distance * weight_factor
 
     # Costs
     fuel_cost = (route_distance / truck_mileage) * fuel_price
-    maintenance = route_distance * np.random.uniform(0.8, 2.0, n_samples)  # ₹/km
+    maintenance = route_distance * rng.uniform(0.8, 2.0, n_samples)  # ₹/km
 
     net_profit = revenue - fuel_cost - toll_estimate - maintenance
     # Add noise
-    net_profit += np.random.normal(0, 500, n_samples)
+    net_profit += rng.normal(0, 500, n_samples)
 
     X = np.column_stack([
         route_distance,
@@ -117,32 +118,41 @@ class DriverProfitPredictor:
     """Gradient-boosting model that predicts net driver profit for a trip."""
 
     def __init__(self) -> None:
-        self.model: Optional[GradientBoostingRegressor] = None
-        self.feature_ranges = dict(TRAINING_FEATURE_RANGES)
+        self.model: GradientBoostingRegressor | None = None
+        self.feature_ranges = {
+            feature: dict(bounds) for feature, bounds in TRAINING_FEATURE_RANGES.items()
+        }
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
 
     # -- persistence --------------------------------------------------------
 
     def train(self) -> dict:
         """Train on synthetic data and persist via ``base.save_model``."""
+        with self._lifecycle_lock:
+            return self._train_candidate()
+
+    def _train_candidate(self) -> dict:
+        """Prepare/persist privately; failures leave the published state intact."""
         X, y = _generate_synthetic_data()
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42,
         )
 
-        self.model = GradientBoostingRegressor(
+        candidate = GradientBoostingRegressor(
             n_estimators=200,
             max_depth=5,
             learning_rate=0.1,
             random_state=42,
         )
-        self.model.fit(X_train, y_train)
+        candidate.fit(X_train, y_train)
 
-        y_pred = self.model.predict(X_test)
+        y_pred = candidate.predict(X_test)
         mae = mean_absolute_error(y_test, y_pred)
         rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
         r2 = r2_score(y_test, y_pred)
 
-        self.feature_ranges = {
+        feature_ranges = {
             feature: dict(bounds)
             for feature, bounds in TRAINING_FEATURE_RANGES.items()
         }
@@ -155,26 +165,33 @@ class DriverProfitPredictor:
             "feature_names": FEATURE_NAMES,
         }
         training_meta = {
-            "feature_ranges": self.feature_ranges,
+            "feature_ranges": feature_ranges,
             "feature_statistics": _feature_statistics(X),
         }
 
-        save_model(self.model, MODEL_NAME, metrics, training_meta=training_meta)
+        save_model(candidate, MODEL_NAME, metrics, training_meta=training_meta)
+        self._publish(candidate, feature_ranges)
         logger.info("Driver-profit model trained. R2: %.3f, MAE: %.1f", r2, mae)
         return metrics
 
     def load(self) -> None:
         """Load a persisted model, auto-training if none exists or metadata is incomplete."""
+        with self._lifecycle_lock:
+            self._load_candidate()
+
+    def _load_candidate(self) -> None:
+        """Prepare all domain metadata before making the loaded model visible."""
         if not model_exists(MODEL_NAME):
             self.train()
             return
 
-        loaded = load_model(MODEL_NAME)
-        if loaded is None:
+        snapshot = load_model_snapshot(MODEL_NAME)
+        if snapshot is None or snapshot.model is None:
             self.train()
             return
 
-        meta = get_model_meta(MODEL_NAME) or {}
+        loaded = snapshot.model
+        meta = snapshot.metadata or {}
         training_meta = meta.get("training_meta") or {}
         feature_ranges = training_meta.get("feature_ranges")
         if not isinstance(feature_ranges, dict) or set(feature_ranges) != set(FEATURE_NAMES):
@@ -182,24 +199,52 @@ class DriverProfitPredictor:
             self.train()
             return
 
-        self.model = loaded
-        self.feature_ranges = {
+        prepared_ranges = {
             feature: {
                 "min": float(feature_ranges[feature]["min"]),
                 "max": float(feature_ranges[feature]["max"]),
             }
             for feature in FEATURE_NAMES
         }
+        for feature, bounds in prepared_ranges.items():
+            if not (np.isfinite(bounds["min"]) and np.isfinite(bounds["max"])):
+                raise ValueError(f"Training range for {feature} must be finite")
+            if bounds["min"] > bounds["max"]:
+                raise ValueError(f"Training range for {feature} is inverted")
+        self._publish(loaded, prepared_ranges)
+
+    def _publish(self, model, feature_ranges: dict) -> None:
+        """Replace a complete serving pair under the short state lock."""
+        with self._state_lock:
+            self.model = model
+            self.feature_ranges = feature_ranges
+
+    def _capture_state(self) -> tuple:
+        """Capture warm state promptly; serialize and recheck cold initialization."""
+        with self._state_lock:
+            if self.model is not None:
+                return self.model, self.feature_ranges
+        # Lock order is lifecycle -> state. Never wait on lifecycle while
+        # holding state; warm requests do not join a candidate's expensive work.
+        with self._lifecycle_lock:
+            with self._state_lock:
+                needs_load = self.model is None
+            if needs_load:
+                self._load_candidate()
+            with self._state_lock:
+                if self.model is None:
+                    raise RuntimeError("Driver-profit initialization produced no model")
+                return self.model, self.feature_ranges
 
     # -- inference ----------------------------------------------------------
 
-    def _validate_feature_domain(self, values: dict[str, float]) -> None:
+    def _validate_feature_domain(self, values: dict[str, float], feature_ranges: dict) -> None:
         """Reject requests containing features outside the training domain."""
         for feature, value in values.items():
             if not np.isfinite(value):
                 raise ValueError(f"{feature} must be a finite number")
 
-            bounds = self.feature_ranges.get(feature)
+            bounds = feature_ranges.get(feature)
             if not bounds:
                 raise ValueError(f"No training range is available for {feature}")
 
@@ -238,8 +283,7 @@ class DriverProfitPredictor:
             ``confidence_interval`` – ``{lower, upper}`` derived from
             ensemble staged-prediction spread.
         """
-        if self.model is None:
-            self.load()
+        model, feature_ranges = self._capture_state()
 
         values = {
             "route_distance": route_distance,
@@ -249,7 +293,7 @@ class DriverProfitPredictor:
             "cargo_weight": cargo_weight,
             "trip_duration": trip_duration,
         }
-        self._validate_feature_domain(values)
+        self._validate_feature_domain(values, feature_ranges)
 
         features = np.array([[
             route_distance,
@@ -260,7 +304,7 @@ class DriverProfitPredictor:
             trip_duration,
         ]])
 
-        prediction = float(self.model.predict(features)[0])
+        prediction = float(model.predict(features)[0])
 
         # Confidence interval.
         # `staged_predict` yields the CUMULATIVE prediction after each boosting
@@ -271,7 +315,7 @@ class DriverProfitPredictor:
         # meaningful proxy for model disagreement/uncertainty, and we clamp the
         # lower bound to be non-negative.
         staged_preds = np.array(
-            [pred for pred in self.model.staged_predict(features)]
+            [pred for pred in model.staged_predict(features)]
         ).flatten()
         if len(staged_preds) > 1:
             increments = np.diff(staged_preds)

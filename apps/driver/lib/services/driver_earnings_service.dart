@@ -107,6 +107,11 @@ class DriverEarningsService {
       if (e is StateError) {
         throw Exception(e.message);
       }
+      if (e is ApiAuthException) {
+        // Auth failures must not masquerade as generic network errors —
+        // ApiAuthException is not an ApiException subtype.
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load wallet history.');
       }
@@ -155,6 +160,11 @@ class DriverEarningsService {
           })
           .toList();
     } catch (e) {
+      if (e is ApiAuthException) {
+        // Auth failures must not masquerade as generic network errors —
+        // ApiAuthException is not an ApiException subtype.
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load earnings summary.');
       }
@@ -215,6 +225,11 @@ class DriverEarningsService {
       if (e is StateError) {
         throw Exception(e.message);
       }
+      if (e is ApiAuthException) {
+        // Auth failures must not masquerade as generic network errors —
+        // ApiAuthException is not an ApiException subtype.
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load today\'s earnings.');
       }
@@ -242,6 +257,11 @@ class DriverEarningsService {
       throw StateError('Unexpected driver stats payload type');
     } catch (e) {
       if (e is StateError) {
+        throw Exception(e.message);
+      }
+      if (e is ApiAuthException) {
+        // Auth failures must not masquerade as generic network errors —
+        // ApiAuthException is not an ApiException subtype.
         throw Exception(e.message);
       }
       if (e is ApiException) {
@@ -302,7 +322,7 @@ class DriverEarningsService {
     } on ApiException {
       rethrow;
     } catch (e) {
-      throw Exception('Network error: Failed to withdraw funds.');
+      throw Exception('Network error: $e');
     }
   }
 
@@ -358,6 +378,11 @@ class DriverEarningsService {
       }
       return Map<String, dynamic>.from(decoded);
     } catch (e) {
+      if (e is ApiAuthException) {
+        // Auth failures must not masquerade as generic network errors —
+        // ApiAuthException is not an ApiException subtype.
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load earnings analytics.');
       }

@@ -29,6 +29,15 @@ export const isValidReceiptUrl = (url) => {
 };
 
 /**
+ * Validation failures are client errors (400), not server faults (500).
+ * Without this, a malformed amount was reported as "Failed to deposit lumper
+ * fee into escrow" and monitoring could not distinguish the two.
+ */
+function statusForError(err) {
+  return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+}
+
+/**
  * POST /api/lumper-escrow/deposit
  * Broker pre-deposits estimated lumper fee into smart contract escrow
  */
@@ -41,7 +50,7 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
 
     const { booking_id, broker_address, estimated_fee } = req.body;
 
-    if (!booking_id || !broker_address || estimated_fee === undefined) {
+    if (!booking_id || !broker_address || estimated_fee === undefined || estimated_fee === null) {
       return res.status(400).json({ error: 'Missing required parameters: booking_id, broker_address, estimated_fee' });
     }
 
@@ -69,7 +78,9 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
       escrow
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to deposit lumper fee into escrow' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to deposit lumper fee into escrow'
+    });
   }
 });
 
@@ -110,7 +121,7 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       escrowId: escrow_id,
       driverWallet: driver_wallet,
       receiptImageUrl: receipt_url,
-      claimedAmount: parsedClaimed
+      claimedAmount: claimed_amount
     });
 
     return res.json({
@@ -118,8 +129,9 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       escrow: releasedEscrow
     });
   } catch (err) {
-    const status = err.message?.includes('not found') ? 404 : 500;
-    return res.status(status).json({ error: err.message || 'Failed to process lumper receipt release' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to process lumper receipt release'
+    });
   }
 });
 

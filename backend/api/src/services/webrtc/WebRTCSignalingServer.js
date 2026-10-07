@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient, createUserClient } from '../../config/db.js';
+import { createSocketRateLimiter } from '../../lib/socketRateLimiter.js';
 
 const OFFLINE_GPS_PAGE_SIZE = 1000;
 
@@ -115,21 +116,8 @@ class WebRTCSignalingServer {
       }
 
       const peerId = this.generatePeerId();
-
-      // Security: Validate caller authorization for requested mesh instead of trusting client
-      const requestedMeshId = url.searchParams.get('meshId') || req.headers['x-mesh-id'];
+      // Select a mesh from authenticated server state, never the URL query.
       let meshId = null;
-
-      if (requestedMeshId) {
-        const isAuthorized = await this.isUserAuthorizedForMesh(decoded.id, requestedMeshId, decoded.role);
-        if (isAuthorized) {
-          meshId = requestedMeshId;
-        } else {
-          logger.warn(`WebRTC connection rejected: user ${decoded.id} unauthorized for requested mesh ${requestedMeshId}`);
-          ws.close(4003, 'Unauthorized for requested mesh');
-          return;
-        }
-      }
 
       if (!meshId) {
         for (const [existingPeerId, peer] of this.peers.entries()) {
@@ -184,7 +172,26 @@ class WebRTCSignalingServer {
       });
 
       // Handle messages
+      // WebSocket frames bypass the Express middleware chain, so the HTTP rate
+      // limiters never see them. Signaling messages are cheap individually but
+      // unbounded in aggregate, so each peer gets its own budget here.
+      const messageLimiter = createSocketRateLimiter({
+        refillPerSecond: Number(process.env.WS_WEBRTC_MSG_RATE_PER_SEC) || undefined,
+        capacity: Number(process.env.WS_WEBRTC_MSG_BURST) || undefined,
+      });
+
       ws.on('message', async (data) => {
+        if (!messageLimiter.tryConsume()) {
+          if (messageLimiter.isAbusive()) {
+            logger.error(
+              `[WebRTC] Closing peer ${peerId} for flooding signaling messages ` +
+                `(${messageLimiter.getOverRateCount()} over-rate messages)`,
+            );
+            ws.close(4008, 'Too many signaling messages');
+          }
+          return;
+        }
+
         try {
           const message = JSON.parse(data);
           await this.handleMessage(peerId, message);

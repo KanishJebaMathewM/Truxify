@@ -8,6 +8,12 @@ const DEFAULT_MAX_DETOUR_KM = 45;
 const DEFAULT_MAX_DETOUR_MINUTES = 60;
 const ESTIMATED_FUEL_COST_PER_KM_INR = 14.5; // Average Indian logistics commercial diesel rate per km
 
+function routeDurationMinutes(route, distanceKm) {
+  return Number.isFinite(route?.durationSeconds) && route.durationSeconds >= 0
+    ? route.durationSeconds / 60
+    : distanceKm * 1.5;
+}
+
 /**
  * Deadhead & Mid-Trip Route Optimization Service
  * Identifies compatible cargo pickups along active route buffers and manages
@@ -68,7 +74,7 @@ class DeadheadMatchingService {
       });
 
       const baselineDistanceKm = directRoute?.distanceKm ?? (getHaversineDistance(currentLat, currentLng, destLat, destLng) / 1000);
-      const baselineDurationMins = directRoute?.durationMinutes ?? (baselineDistanceKm * 1.5);
+      const baselineDurationMins = routeDurationMinutes(directRoute, baselineDistanceKm);
 
       // 3. Fetch candidate active load offers
       const { data: availableOffers, error: offersError } = await client
@@ -109,9 +115,9 @@ class DeadheadMatchingService {
         const dist2 = leg2?.distanceKm ?? (getHaversineDistance(pLat, pLng, dLat, dLng) / 1000);
         const dist3 = leg3?.distanceKm ?? (getHaversineDistance(dLat, dLng, destLat, destLng) / 1000);
 
-        const dur1 = leg1?.durationMinutes ?? (dist1 * 1.5);
-        const dur2 = leg2?.durationMinutes ?? (dist2 * 1.5);
-        const dur3 = leg3?.durationMinutes ?? (dist3 * 1.5);
+        const dur1 = routeDurationMinutes(leg1, dist1);
+        const dur2 = routeDurationMinutes(leg2, dist2);
+        const dur3 = routeDurationMinutes(leg3, dist3);
 
         const totalInsertedDistanceKm = dist1 + dist2 + dist3;
         const totalInsertedDurationMins = dur1 + dur2 + dur3;

@@ -25,6 +25,10 @@ vi.mock('../../src/lib/redisLock.js', () => {
       await mocks.redisDel(resourceKey);
       return true;
     },
+    // Added with the per-order renewal in #14681: no-op doubles so the
+    // sweep exercises its full path without extra redis calls.
+    renewLock: async () => true,
+    withLockRenewal: async (_resourceKey, _lockValue, _ttlMs, fn) => fn(),
   };
 });
 
@@ -328,6 +332,14 @@ describe('reconciliationRunning Recovery Behavior', () => {
 
     // Start first invocation (will pause inside findPendingEscrowRefunds)
     const firstRunPromise = reconcilePendingEscrowRefunds(mockDelayedRepo);
+
+    // Wait until the first sweep has actually entered the repository call:
+    // without this the assertion below can run before the first invocation
+    // gets past its lock acquisition, and a premature failure would skip
+    // resolvePending and wedge the in-memory guard for every later test.
+    await vi.waitFor(() => {
+      expect(mockDelayedRepo.findPendingEscrowRefunds).toHaveBeenCalledTimes(1);
+    });
 
     // Second concurrent invocation should exit immediately due to in-memory guard
     await reconcilePendingEscrowRefunds(orderRepository);

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -116,6 +116,9 @@ describe('Driver Profile & Availability Endpoints', () => {
 
   beforeEach(() => {
     app = buildApp();
+    // The hardened authenticate middleware fails closed without JWT_SECRET
+    // (93de585a7); this suite signs its tokens with 'secret'.
+    process.env.JWT_SECRET = 'secret';
     vi.clearAllMocks();
     mockUpdateDetails.mockReset();
     mockUpdateTruck.mockReset();
@@ -123,6 +126,10 @@ describe('Driver Profile & Availability Endpoints', () => {
 
     process.env.BYPASS_AUTH = 'false';
     mockGetUser.mockResolvedValue({ data: { user: { id: 'driver-123' } }, error: null });
+
+  afterEach(() => {
+    delete process.env.JWT_SECRET;
+  });
     token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'secret');
 
     // Default test data

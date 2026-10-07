@@ -1,7 +1,7 @@
 /**
  * Unit Tests for auth.js middleware (authenticate function)
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { authenticate } from '../../../src/middleware/auth.js';
 import { createMockRequest, createMockResponse, createMockNext, createMockUser } from '../../fixtures/authFixtures.js';
 
@@ -17,6 +17,15 @@ describe('authenticate middleware', () => {
         res = createMockResponse();
         next = createMockNext();
         vi.clearAllMocks();
+        // These tests exercise the no-token 401 path; isolate from the
+        // ENABLE_TEST_AUTH bypass that test/unit/auth.test.js sets in the
+        // same worker process.
+        vi.stubEnv('ENABLE_TEST_AUTH', '');
+        vi.stubEnv('BYPASS_AUTH', '');
+    });
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
     });
 
     it('should call next() if req.user is already set', async () => {

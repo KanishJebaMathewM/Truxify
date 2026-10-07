@@ -11,16 +11,18 @@ import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } from '../../lib/
 
 // Targeting knobs for the new-trip driver broadcast. Env-configurable so a
 // burst of order creations can never trigger an unbounded notification fan-out.
-const NEW_TRIP_NOTIFY_RADIUS_KM = Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM)
+const configuredRadiusKm = Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM);
+const NEW_TRIP_NOTIFY_RADIUS_KM = Number.isFinite(configuredRadiusKm * 1000) && configuredRadiusKm > 0
+  ? configuredRadiusKm
   : 50;
-const NEW_TRIP_NOTIFY_MAX_DRIVERS = Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS)
-  : 50;
-const NEW_TRIP_NOTIFY_BATCH_SIZE = Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE) > 0
-  ? Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE)
-  : 25;
+const NEW_TRIP_NOTIFY_MAX_DRIVERS = positiveCount(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS, 50);
+const NEW_TRIP_NOTIFY_BATCH_SIZE = positiveCount(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE, 25);
 const DRIVER_LOCATION_FRESHNESS_MS = 15 * 60 * 1000;
+
+function positiveCount(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 /**
  * Find drivers that should be notified about a new trip: those online and

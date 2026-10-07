@@ -106,8 +106,8 @@ describe('getLiveTrafficMultiplier', () => {
         ok: true,
         json: async () => ({
           flowSegmentData: {
-            speedDiffPercent: -50,
-            currentDelaySec: 900,
+            currentTravelTime: 2700,
+            freeFlowTravelTime: 1800,
           },
         }),
       });

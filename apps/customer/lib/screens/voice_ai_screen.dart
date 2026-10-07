@@ -9,7 +9,164 @@ import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/api_client.dart';
 import '../theme/app_theme.dart';
+import 'package:flutter/material.dart';
+import '../services/voice_recording_service.dart';
 
+class VoiceAiScreen extends StatefulWidget {
+  const VoiceAiScreen({Key? key}) : super(key: key);
+
+  @override
+  State<VoiceAiScreen> createState() => _VoiceAiScreenState();
+}
+
+class _VoiceAiScreenState extends State<VoiceAiScreen> {
+  bool _isListening = false;
+  String _transcript = 'Tap the microphone to speak with Truxify Voice AI...';
+  String _aiResponse = '';
+
+  void _toggleListening() async {
+    if (!_isListening) {
+      // 1. Request microphone permission
+      final hasPermission = await VoiceRecordingService.requestPermission();
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission is required for Voice AI.')),
+        );
+        return;
+      }
+
+      setState(() {
+        _isListening = true;
+        _transcript = 'Listening for freight booking or order inquiry...';
+        _aiResponse = '';
+      });
+
+      // 2. Start streaming audio recording chunks
+      await VoiceRecordingService.startRecording(
+        onDataChunk: (chunk) {
+          // Stream binary audio chunk to backend WebSocket / Voice AI service
+        },
+      );
+    } else {
+      // 3. Stop recording and process request
+      await VoiceRecordingService.stopRecording();
+      setState(() {
+        _isListening = false;
+        _transcript = '"Book a 10-ton heavy truck from Chennai to Bangalore."';
+        _aiResponse = 'Processing voice query... Synthesizing via ElevenLabs.';
+      });
+
+      // Simulate backend AI response
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            _aiResponse = 'Confirmed! Heavy Truck booked. Estimated fare: ₹14,500. Waybill dispatched to your account.';
+          });
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Truxify Voice AI Assistant'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Voice AI Pulse Visualizer Orb
+            Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: _isListening
+                      ? [Colors.red.shade400, Colors.orange.shade400]
+                      : [Colors.blue.shade600, Colors.indigo.shade800],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (_isListening ? Colors.red : Colors.blue).withOpacity(0.4),
+                    blurRadius: 25,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: Icon(
+                _isListening ? Icons.mic : Icons.mic_none,
+                size: 64,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 40),
+
+            // Transcript & AI Response Card
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: theme.dividerColor.withOpacity(0.1)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'USER QUERY TRANSCRIPT',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_transcript, style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic)),
+                  if (_aiResponse.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'AI ASSISTANT (ELEVENLABS)',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_aiResponse, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 40),
+
+            // Action Button
+            ElevatedButton.icon(
+              onPressed: _toggleListening,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                backgroundColor: _isListening ? Colors.red.shade600 : theme.primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              ),
+              icon: Icon(_isListening ? Icons.stop : Icons.mic),
+              label: Text(_isListening ? 'Stop Recording & Submit' : 'Tap to Speak'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 class VoiceAiScreen extends StatefulWidget {
   const VoiceAiScreen({super.key, required this.orderId});
 

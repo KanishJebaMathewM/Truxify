@@ -3,7 +3,17 @@ import { context, trace } from '@opentelemetry/api';
 import spanFactory from './telemetry/SpanFactory.js';
 import { ContextPropagator } from './telemetry/ContextPropagator.js';
 
-const DEFAULT_MAX_RETRIES = parseInt(process.env.SUPABASE_RETRY_MAX_RETRIES || '3', 10);
+function retryCountOrDefault(value, fallback) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
+// Invalid configuration must not skip the initial database operation or
+// create an unbounded retry loop. Zero explicitly disables retries.
+const configuredMaxRetries = process.env.SUPABASE_RETRY_MAX_RETRIES?.trim();
+const DEFAULT_MAX_RETRIES = retryCountOrDefault(
+  configuredMaxRetries ? Number(configuredMaxRetries) : undefined,
+  3,
+);
 const DEFAULT_BASE_DELAY_MS = parseInt(process.env.SUPABASE_RETRY_BASE_DELAY_MS || '100', 10);
 const DEFAULT_MAX_DELAY_MS = parseInt(process.env.SUPABASE_RETRY_MAX_DELAY_MS || '2000', 10);
 
@@ -67,7 +77,7 @@ export function isRetryable(error) {
 }
 
 export async function executeWithRetry(asyncFn, options = {}) {
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxRetries = retryCountOrDefault(options.maxRetries, DEFAULT_MAX_RETRIES);
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const operation = options.operation || 'supabase_query';

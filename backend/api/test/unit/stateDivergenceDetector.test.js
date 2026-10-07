@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import StateDivergenceDetector from '../../src/services/blockchain/stateDivergenceDetector.js';
 
 vi.mock('../../src/middleware/logger.js', () => ({

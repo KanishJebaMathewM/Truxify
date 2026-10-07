@@ -91,6 +91,24 @@ describe('documentValidation', () => {
       expect(validateDocumentBuffer(PNG, 'image/png')).toBe('image/png');
       expect(validateDocumentBuffer(PDF, 'application/pdf')).toBe('application/pdf');
     });
+    
+    it('matches declared MIME type case-insensitively', () => {
+      expect(validateDocumentBuffer(JPEG, 'IMAGE/JPEG')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(JPEG, 'Image/Jpeg')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, 'IMAGE/PNG')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, 'APPLICATION/PDF')).toBe('application/pdf');
+    });
+
+    it('matches declared MIME type with surrounding whitespace', () => {
+      expect(validateDocumentBuffer(JPEG, '  image/jpeg  ')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, '\timage/png\n')).toBe('image/png');
+    });
+
+    it('ignores a blank or whitespace-only declared MIME type', () => {
+      expect(validateDocumentBuffer(JPEG, '')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, '   ')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, undefined)).toBe('application/pdf');
+    });
 
     it('throws DocumentValidationError when buffer is null or undefined', () => {
       expect(() => validateDocumentBuffer(null)).toThrow(DocumentValidationError);

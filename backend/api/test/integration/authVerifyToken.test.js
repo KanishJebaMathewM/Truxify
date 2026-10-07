@@ -3,14 +3,7 @@ import request from 'supertest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
-
-// verifyIdToken is mocked so each test controls exactly which token the route
-// accepts. mockResolvedValueOnce / mockRejectedValueOnce drive the fail-closed
-// and fail-open assertions below.
-const verifyIdTokenMock = vi.fn();
-
-// Mock DB module. firebaseAdmin is present so the route reaches verification.
+// Mock DB module
 vi.mock('../../src/config/db.js', () => {
   return {
     supabase: null,
@@ -39,6 +32,13 @@ vi.mock('../../src/lib/profileCache.js', () => ({
 }));
 
 import authRoutes from '../../src/routes/authRoutes.js';
+import { authenticate } from '../../src/middleware/auth.js';
+import { getJwtSecret } from '../../src/config/jwtSecret.js';
+
+// Must resolve through the same shared resolver as the route, otherwise the
+// key used to decode below would not match the key the route actually signs
+// with.
+const JWT_SECRET = getJwtSecret();
 
 const app = express();
 app.use(express.json());

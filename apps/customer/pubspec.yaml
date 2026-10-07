@@ -8,7 +8,7 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
-  record: ^5.0.5
+  record: ^7.1.1
   pointycastle: ^3.7.3
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4

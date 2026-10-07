@@ -41,12 +41,8 @@ describe('ProfileModel', () => {
       expect(ProfileModel.fromProfile(null)).toBeNull();
     });
 
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromProfile(undefined);
-
-      expect(result).not.toBeNull();
-      expect(result.role).toBe('user');
-      expect(result.fullName).toBe('');
+    it('returns null when input is omitted', () => {
+      expect(ProfileModel.fromProfile(undefined)).toBeNull();
     });
 
     it('applies defaults for missing fields', () => {
@@ -86,10 +82,8 @@ describe('ProfileModel', () => {
       expect(ProfileModel.fromCustomerStats(null)).toBeNull();
     });
 
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromCustomerStats(undefined);
-      expect(result).not.toBeNull();
-      expect(result.totalOrders).toBe(0);
+    it('returns null when input is omitted', () => {
+      expect(ProfileModel.fromCustomerStats(undefined)).toBeNull();
     });
 
     it('applies defaults for missing fields', () => {
@@ -133,11 +127,8 @@ describe('ProfileModel', () => {
       expect(ProfileModel.fromDriverDetails(null)).toBeNull();
     });
 
-    it('applies defaults when input is omitted', () => {
-      const result = ProfileModel.fromDriverDetails(undefined);
-      expect(result).not.toBeNull();
-      expect(result.totalTrips).toBe(0);
-      expect(result.badges).toEqual([]);
+    it('returns null when input is omitted', () => {
+      expect(ProfileModel.fromDriverDetails(undefined)).toBeNull();
     });
 
     it('awards badges based on achievements', () => {

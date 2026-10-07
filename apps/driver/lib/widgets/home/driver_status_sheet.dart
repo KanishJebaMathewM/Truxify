@@ -4,6 +4,7 @@ import '../../models/earnings_daily_model.dart';
 import '../../theme/app_theme.dart';
 import '../earnings_shimmer.dart';
 import 'metrics_error_card.dart';
+import 'shift_metrics_row.dart';
 
 /// Bottom sheet shown on the Home screen when no active trip is selected.
 /// Displays the driver online/offline toggle and today's earnings summary
@@ -49,11 +50,14 @@ class DriverStatusSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final gross = todayEarnings != null
+    final payValue = todayEarnings != null
         ? '₹${todayEarnings!.amount.toStringAsFixed(0)}'
         : '—';
-    final net = todayEarnings != null
-        ? '₹${todayEarnings!.netAmount.toStringAsFixed(0)}'
+    final hoursValue = todayEarnings != null
+        ? '${todayEarnings!.hoursDriven.toStringAsFixed(1)} hrs'
+        : '—';
+    final ratingValue = driverRating != null
+        ? driverRating!.toStringAsFixed(2)
         : '—';
     final tripCountValue = todayEarnings != null
         ? '${todayEarnings!.tripCount}'

@@ -465,3 +465,22 @@ export const nearbyGripQuerySchema = z.object({
  * NOTE: defined once above (truck_id + string axle position); the driver
  * route reads truck_id/axles from req.body, so keep this single export.
  */
+
+/**
+ * Query schemas for the KEDA autoscaling metric routes. kedaRoutes.js
+ * imported these before they existed, which made validateQuery reject
+ * every request to the cpu/memory/autoscale/recommend/kafka-lag routes.
+ */
+export const kedaNamespaceQuerySchema = z.object({
+  namespace: z.string({ required_error: 'namespace is required' })
+    .min(1, 'namespace is required'),
+  deployment: z.string({ required_error: 'deployment is required' })
+    .min(1, 'deployment is required'),
+}).strict();
+
+export const kedaKafkaLagQuerySchema = z.object({
+  topic: z.string({ required_error: 'topic is required' })
+    .min(1, 'topic is required'),
+  consumerGroup: z.string({ required_error: 'consumerGroup is required' })
+    .min(1, 'consumerGroup is required'),
+}).strict();

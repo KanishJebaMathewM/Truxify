@@ -58,7 +58,7 @@ import {
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
-import { refreshToken } from "../controllers/authController.js";
+import { getJwtSecret } from "../config/jwtSecret.js";
 
 const router = express.Router();
 
@@ -182,7 +182,6 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
 import crypto from "crypto";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
-
 
 const AUTH_OTP_IN_MEMORY_MAX = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || "10000", 10);
 const authOtpFailedAttempts = new Map();
@@ -457,15 +456,10 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
   }
 });
 
-// Development-only fallback: this literal is public, so it must never protect
-// a production deployment. validateConfig() refuses to boot production without
-// JWT_SECRET (see config/db.js); this warning covers non-production runtimes.
-const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
-if (!process.env.JWT_SECRET) {
-  logger.warn(
-    '[auth/verify] JWT_SECRET is not set. Falling back to the built-in development secret — never use this in production.',
-  );
-}
+// Signing and verification share one resolver so they can never drift apart.
+// In production this throws when JWT_SECRET is missing or too short instead of
+// silently falling back to a publicly known key.
+const JWT_SECRET = getJwtSecret();
 
 /**
  * @openapi

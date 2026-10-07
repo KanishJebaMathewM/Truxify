@@ -104,6 +104,10 @@ export function validatePricePrediction(raw) {
     if (typeof raw.min_price !== 'number' || !Number.isFinite(raw.min_price)) {
       return reject(RejectionReason.INVALID_MIN_PRICE, `min_price is not a finite number: ${raw.min_price}`);
     }
+    // Reject before rounding: small negatives must not become a valid zero band.
+    if (raw.min_price < 0) {
+      return reject(RejectionReason.INVALID_MIN_PRICE, `min_price must be nonnegative, got ${raw.min_price}`);
+    }
     if (raw.min_price > price) {
       return reject(RejectionReason.INVALID_MIN_PRICE, `min_price ${raw.min_price} exceeds estimated_price ${price}`);
     }

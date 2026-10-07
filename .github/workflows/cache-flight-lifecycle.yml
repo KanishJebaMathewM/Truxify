@@ -1,0 +1,26 @@
+name: Predictive cache flight lifecycle
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/lib/cache/**'
+      - 'backend/api/src/lib/lruCache.js'
+      - 'backend/api/test/unit/cache/cacheFlightLifecycle.test.js'
+      - 'tools/cache-flight-tests/**'
+      - '.github/workflows/cache-flight-lifecycle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cache-flight-lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Install locked test dependencies
+        run: npm ci --prefix tools/cache-flight-tests --ignore-scripts --no-audit --no-fund
+      - name: Test actual cache modules with controlled persistence boundaries
+        run: tools/cache-flight-tests/run.sh

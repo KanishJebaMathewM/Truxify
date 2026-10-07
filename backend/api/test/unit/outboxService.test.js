@@ -46,6 +46,10 @@ function buildSupabaseMock() {
       this.lastGte = [col, val];
       return this;
     }),
+    lte: vi.fn(function (col, val) {
+      this.lastLte = [col, val];
+      return this;
+    }),
     lt: vi.fn(function (col, val) {
       this.lastLt = [col, val];
       return this;
@@ -69,6 +73,7 @@ function buildSupabaseMock() {
   };
 
   const supabase = {
+    rpc: vi.fn(() => Promise.resolve({ data: chain.data, error: chain.error })),
     from: vi.fn((table) => {
       chain.lastTable = table;
       return chain;
@@ -159,43 +164,31 @@ describe('OutboxService', () => {
   });
 
   describe('markPublished', () => {
-    it('updates status to published and returns true when data returned', async () => {
-      mocks.chain.data = [{ event_id: 'evt-1' }];
-      const result = await outboxService.markPublished('evt-1');
-
-      expect(result).toBe(true);
-      expect(mocks.chain.lastTable).toBe('event_outbox');
-      expect(mocks.chain.lastUpdate).toMatchObject({ status: 'published' });
-      expect(mocks.chain.eq).toHaveBeenCalledWith('event_id', 'evt-1');
+    it('settles the exact claim generation and reports accepted success', async () => {
+      mocks.chain.data = true;
+      expect(await outboxService.markPublished('evt-1', 2)).toBe(true);
+      expect(mocks.supabase.rpc).toHaveBeenCalledWith('settle_leased_outbox_event', expect.objectContaining({
+        p_event_id: 'evt-1', p_claim_attempt: 2, p_published: true,
+      }));
     });
-
-    it('returns false when no data matched', async () => {
-      mocks.chain.data = [];
-      const result = await outboxService.markPublished('evt-nonexistent');
-      expect(result).toBe(false);
+    it('returns false when no claim matched', async () => {
+      mocks.chain.data = false;
+      expect(await outboxService.markPublished('evt-nonexistent', 2)).toBe(false);
     });
   });
 
   describe('markFailed', () => {
-    it('increments attempts and updates last_error', async () => {
-      mocks.chain.data = { attempts: 2 };
-      const success = await outboxService.markFailed('evt-1', 'worker-1', 'network timeout');
-
-      expect(success).toBe(true);
-      expect(mocks.chain.lastTable).toBe('event_outbox');
-      expect(mocks.chain.lastUpdate).toMatchObject({
-        status: 'pending',
-        last_error: 'network timeout',
-        attempts: 3,
-      });
-      expect(mocks.chain.eq).toHaveBeenCalledWith('id', 'evt-1');
+    it('schedules a fenced retry without incrementing the claim count twice', async () => {
+      mocks.chain.data = true;
+      expect(await outboxService.markFailed('evt-1', 'worker-1', 'network timeout', 2)).toBe(true);
+      expect(mocks.supabase.rpc).toHaveBeenCalledWith('settle_leased_outbox_event', expect.objectContaining({
+        p_event_id: 'evt-1', p_claim_attempt: 2, p_published: false,
+        p_error: 'network timeout', p_retry_ms: 2000,
+      }));
     });
-
     it('returns false when eventId or workerId is missing', async () => {
-      const res1 = await outboxService.markFailed(null, 'worker-1', 'err');
-      const res2 = await outboxService.markFailed('evt-1', null, 'err');
-      expect(res1).toBe(false);
-      expect(res2).toBe(false);
+      expect(await outboxService.markFailed(null, 'worker-1', 'err', 2)).toBe(false);
+      expect(await outboxService.markFailed('evt-1', null, 'err', 2)).toBe(false);
     });
   });
 
@@ -225,12 +218,13 @@ describe('OutboxService', () => {
   });
 
   describe('requeueFailedEvents', () => {
-    it('resets publishing events back to pending', async () => {
+    it('resets only expired publishing events back to pending', async () => {
       await outboxService.requeueFailedEvents(5);
       expect(mocks.chain.lastTable).toBe('event_outbox');
       expect(mocks.chain.lastUpdate).toEqual({ status: 'pending' });
       expect(mocks.chain.eq).toHaveBeenCalledWith('status', 'publishing');
       expect(mocks.chain.lt).toHaveBeenCalledWith('attempts', 5);
+      expect(mocks.chain.lte).toHaveBeenCalledWith('next_attempt_at', expect.any(String));
     });
   });
 

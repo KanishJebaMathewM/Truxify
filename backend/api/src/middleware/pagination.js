@@ -37,11 +37,10 @@ if (req.query.offset) {
 
   const parsed = Number.parseInt(rawOffset, 10);
 
-  if (Number.isFinite(parsed)) {
-    offset = Math.max(0, Math.min(parsed, maxOffset));
-  } else {
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return res.status(400).json({ error: 'Invalid offset parameter' });
   }
+  offset = Math.min(parsed, maxOffset);
 } else if (req.query.page) {
       const parsedPage = parseInteger(req.query.page);
       if (parsedPage !== null && parsedPage < 1) {

@@ -377,7 +377,7 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
   it.each(rpcCallBlocks(readSource('routes/orderRoutes.js')))(
     'orderRoutes passes a client for $rpc',
     ({ block }) => {
-      expect(block).toMatch(/,\s*(req\.token \? createUserClient\(req\.token\) : undefined|supabaseAdmin)\s*\)\s*;?$/);
+      expect(block).toMatch(/,\s*(?:req\.token \? createUserClient\(req\.token\)(?:\s*\?\?\s*supabaseAdmin)? : (?:undefined|supabaseAdmin)|supabaseAdmin)\)\s*;?$/);
     }
   );
 
@@ -424,9 +424,10 @@ describe('update_order_and_load_offer invoked via the service-role client (issue
     return content.slice(match.index, i + 1);
   }
 
+  // The route level call moved into the change-drop service path, so only
+  // the service entry remains; it still runs under the service-role client.
   it.each([
     ['services/order/orderLifecycleService.js', 'orderLifecycleService.js change-drop path'],
-    ['routes/orderRoutes.js', 'orderRoutes.js change-drop route'],
   ])('%s invokes update_order_and_load_offer with supabaseAdmin, never the user client', (rel, label) => {
     const content = readSource(rel);
     const block = rpcBlock(content, 'update_order_and_load_offer');

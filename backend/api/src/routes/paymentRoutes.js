@@ -222,7 +222,7 @@ router.post(
         if (orderValidationService && typeof orderValidationService.findOrderByIdOrDisplayId === 'function') {
           order = await orderValidationService.findOrderByIdOrDisplayId(
             order_id,
-            'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
+            'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
           );
         }
         if (!order && orderRepository) {

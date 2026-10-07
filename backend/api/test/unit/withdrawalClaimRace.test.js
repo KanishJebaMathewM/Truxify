@@ -46,6 +46,7 @@ vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
   dispatchPayout: (...a) => mockDispatchPayout(...a),
   isPayoutProviderConfigured: () => true,
   recoverSettlementRef: vi.fn().mockResolvedValue(null),
+  lookupPayoutStatus: vi.fn().mockResolvedValue({ state: 'unsupported' }),
 }));
 vi.mock('../../src/services/notificationService.js', () => ({ sendPushNotification: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../src/middleware/logger.js', () => ({ default: { info() {}, warn() {}, error() {}, debug() {} } }));

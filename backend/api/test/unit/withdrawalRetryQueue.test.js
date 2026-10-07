@@ -19,6 +19,7 @@ vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
   dispatchPayout: dispatchPayoutMock,
   isPayoutProviderConfigured: isPayoutProviderConfiguredMock,
   recoverSettlementRef: vi.fn(),
+  lookupPayoutStatus: vi.fn().mockResolvedValue({ state: 'unsupported' }),
 }));
 
 const sendPushNotificationMock = vi.fn().mockResolvedValue({ success: true });

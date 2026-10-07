@@ -18,6 +18,11 @@ import { supabaseAdmin, supabase } from '../../config/db.js';
 
 const DEFAULT_PAYOUT_TIMEOUT_MS = 15000;
 
+/** Stable provider-side reference / idempotency key for a withdrawal. */
+export function payoutReference(withdrawalId) {
+  return `w${withdrawalId}`;
+}
+
 function payoutTimeoutMs() {
   const configured = Number(process.env.WITHDRAWAL_PAYOUT_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0
@@ -71,13 +76,20 @@ export async function dispatchPayout({ driverId, withdrawal }) {
     try {
       response = await fetch(webhookUrl, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // Deterministic per withdrawal (never per attempt). A retry after an
+          // ambiguous failure (timeout, 5xx, 2xx without a body) re-sends the
+          // SAME key, so a provider that honours idempotency returns the
+          // original payout instead of creating a second one.
+          'idempotency-key': payoutReference(withdrawal.id),
+        },
         body: JSON.stringify({
           provider,
           driver_id: driverId,
           withdrawal_id: withdrawal.id,
           amount: withdrawal.amount,
-          reference: `w${withdrawal.id}`,
+          reference: payoutReference(withdrawal.id),
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -124,28 +136,33 @@ export async function dispatchPayout({ driverId, withdrawal }) {
 }
 
 /**
- * Best-effort recovery of a payout's settlement reference from the provider.
+ * Asks the provider whether a payout for this withdrawal already exists.
  *
- * A withdraw can be left with `payout_attempted_at` set but `settlement_ref`
- * NULL in the database when the persist between dispatch and completion fails
- * (Issue #14686). As long as the payout actually left the platform we must be
- * able to re-derive the reference rather than orphaning the driver's funds.
+ * Returns a tri-state result so callers can tell "the provider says nothing was
+ * sent" apart from "we could not find out" - conflating the two is what let a
+ * retry re-dispatch a payout that had already been paid:
  *
- * Providers that support status lookup opt in via WITHDRAWAL_PAYOUT_STATUS_URL;
- * the platform previously sent `reference: "w<withdrawalId>"` to the dispatch
- * webhook, which the status endpoint can resolve back to a settlement_ref.
- * When no status endpoint is configured (or the lookup fails) we return null so
- * the caller can flag the row for manual reconciliation instead of guessing.
+ *   { state: 'found', settlementRef }  - a payout exists; never dispatch again.
+ *   { state: 'not_found' }             - provider affirmatively reports none
+ *                                        (HTTP 404, or `found: false` /
+ *                                        `status: "not_found"` in the body).
+ *   { state: 'unsupported' }           - WITHDRAWAL_PAYOUT_STATUS_URL is not
+ *                                        configured; no verification possible.
+ *   { state: 'unknown', error }        - lookup failed or was inconclusive;
+ *                                        callers must NOT dispatch on this.
+ *
+ * The status endpoint resolves the `reference` ("w<withdrawalId>") that
+ * dispatchPayout sends with every payout.
  */
-export async function recoverSettlementRef({ withdrawalId }) {
+export async function lookupPayoutStatus({ withdrawalId }) {
   const statusUrl = process.env.WITHDRAWAL_PAYOUT_STATUS_URL;
   if (!statusUrl) {
-    return null;
+    return { state: 'unsupported' };
   }
 
   try {
     const response = await fetch(
-      `${statusUrl}${statusUrl.includes('?') ? '&' : '?'}reference=w${withdrawalId}`,
+      `${statusUrl}${statusUrl.includes('?') ? '&' : '?'}reference=${encodeURIComponent(payoutReference(withdrawalId))}`,
       {
         method: 'GET',
         headers: { 'content-type': 'application/json' },
@@ -153,33 +170,58 @@ export async function recoverSettlementRef({ withdrawalId }) {
       },
     );
 
+    if (response.status === 404) {
+      return { state: 'not_found' };
+    }
     if (!response.ok) {
-      return null;
+      return { state: 'unknown', error: `Payout status lookup returned HTTP ${response.status}.` };
     }
 
     const body = await response.json().catch(() => null);
     if (!body || typeof body !== 'object') {
-      return null;
+      return { state: 'unknown', error: 'Payout status lookup returned an unreadable body.' };
     }
 
     const rawRef = body.settlement_ref || body.reference || null;
-    if (!rawRef || !isValidSettlementRef(rawRef)) {
-      if (rawRef) {
+    if (rawRef) {
+      if (!isValidSettlementRef(rawRef)) {
         logger.warn(
           { rawRef, withdrawalId },
           `[PayoutProvider] Recovered settlement_ref does not match valid pattern: "${rawRef}"`
         );
+        return { state: 'unknown', error: 'Payout status lookup returned an invalid settlement_ref.' };
       }
-      return null;
+      return { state: 'found', settlementRef: rawRef.trim() };
     }
 
-    return rawRef.trim();
+    if (body.found === false || body.status === 'not_found') {
+      return { state: 'not_found' };
+    }
+    return { state: 'unknown', error: 'Payout status lookup was inconclusive (no settlement_ref).' };
   } catch (err) {
     logger.error(
-      `[PayoutProvider] Failed to recover settlement ref for withdrawal ${withdrawalId}: ${err.message}`,
+      `[PayoutProvider] Failed to look up payout status for withdrawal ${withdrawalId}: ${err.message}`,
     );
-    return null;
+    return { state: 'unknown', error: err.message };
   }
+}
+
+/**
+ * Best-effort recovery of a payout's settlement reference from the provider.
+ *
+ * A withdraw can be left with `payout_attempted_at` set but `settlement_ref`
+ * NULL in the database when the persist between dispatch and completion fails
+ * (Issue #14686). As long as the payout actually left the platform we must be
+ * able to re-derive the reference rather than orphaning the driver's funds.
+ *
+ * Thin wrapper over lookupPayoutStatus kept for backward compatibility: it
+ * returns the reference when found and null in every other case. Callers that
+ * must distinguish "not found" from "lookup failed" should use
+ * lookupPayoutStatus directly.
+ */
+export async function recoverSettlementRef({ withdrawalId }) {
+  const result = await lookupPayoutStatus({ withdrawalId });
+  return result.state === 'found' ? result.settlementRef : null;
 }
 
 /**

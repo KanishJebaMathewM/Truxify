@@ -40,6 +40,7 @@ const queryChain = {
 };
 vi.mock('../../api/src/config/db.js', () => ({
   supabase: { from: () => queryChain },
+  supabaseAdmin: { from: () => queryChain },
 }));
 vi.mock('../../api/src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

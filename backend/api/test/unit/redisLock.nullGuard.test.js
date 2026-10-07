@@ -27,25 +27,34 @@ describe('RedisLock Null Safety (#9427)', () => {
             expect(typeof acquireDistributedLock).toBe('function');
         });
 
-        it('should return a promise', () => {
+        // NOTE: every test below releases the lock it acquires. The in-process
+        // fallback grants each holder a full lease from the moment it is granted, so
+        // a leaked lock would (correctly) block the next acquirer of the same key
+        // until the lease expires.
+        it('should return a promise', async () => {
             const result = acquireDistributedLock('test-key', 5);
             expect(result).toBeInstanceOf(Promise);
+            await (await result).release();
         });
 
         it('should not throw when called with valid arguments', async () => {
-            await expect(acquireDistributedLock('test-key', 5)).resolves.toBeDefined();
+            const lock = await acquireDistributedLock('test-key', 5);
+            expect(lock).toBeDefined();
+            await lock.release();
         });
 
         it('should return object with acquired boolean', async () => {
             const result = await acquireDistributedLock('test-key', 5);
             expect(result).toHaveProperty('acquired');
             expect(typeof result.acquired).toBe('boolean');
+            await result.release();
         });
 
         it('should return object with release function', async () => {
             const result = await acquireDistributedLock('test-key', 5);
             expect(result).toHaveProperty('release');
             expect(typeof result.release).toBe('function');
+            await result.release();
         });
 
         it('release function should be callable without error', async () => {

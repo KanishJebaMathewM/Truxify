@@ -1,40 +1,24 @@
 import { acquireLock, releaseLock, LockAcquisitionError } from './redisLock.js';
 import logger from '../middleware/logger.js';
+import { acquireLocalMutex } from './localMutex.js';
 
 // In-process mutex fallback used when Redis is unavailable. The distributed
 // Redis lock fails closed (LockAcquisitionError) by design (see redisLock.js),
 // but not every critical section needs cross-instance exclusion. This helper
 // lets order/escrow-flavoured flows degrade to a single-process mutex so the
 // API stays available during a Redis outage instead of 500ing every request.
-const localQueues = new Map();
-
-function acquireLocal(resourceKey, ttlMs) {
-  const tail = localQueues.get(resourceKey) ?? Promise.resolve();
-  let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const chain = tail.then(() => gate);
-  localQueues.set(resourceKey, chain);
-
-  let released = false;
-  const doRelease = () => {
-    if (released) return;
-    released = true;
-    release();
-    chain.then(() => {
-      if (localQueues.get(resourceKey) === chain) {
-        localQueues.delete(resourceKey);
-      }
-    });
-  };
-
-  const timer = setTimeout(doRelease, ttlMs);
-  return tail.then(() => ({
+//
+// The mutex is the shared lease-based implementation in localMutex.js: each
+// holder's TTL starts when the lock is GRANTED (not when the caller queued),
+// and a stale release() can never free a lease that now belongs to someone else.
+async function acquireLocal(resourceKey, ttlMs) {
+  const lease = await acquireLocalMutex(resourceKey, ttlMs);
+  return {
     ok: true,
     release: async () => {
-      clearTimeout(timer);
-      doRelease();
+      lease.release();
     },
-  }));
+  };
 }
 
 /**

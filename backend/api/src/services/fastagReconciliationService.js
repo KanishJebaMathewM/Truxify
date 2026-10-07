@@ -19,6 +19,52 @@ const FASTAG_WEBHOOK_SECRET = process.env.FASTAG_WEBHOOK_SECRET || 'truxify-fast
 const processedTransactions = new Map();
 const orderTollLedgers = new Map();
 
+// Tolerance used when checking that a rupee amount carries at most 2 decimal
+// places (paisa). Absorbs the IEEE-754 representation error of `amount * 100`.
+const PAISA_EPSILON = 1e-6;
+
+/**
+ * Rounds a monetary value to 2 decimal places (paisa precision).
+ *
+ * @param {number} value
+ * @returns {number}
+ */
+function roundInr(value) {
+  return Number(value.toFixed(2));
+}
+
+/**
+ * Strictly parses and validates a rupee amount.
+ *
+ * Accepts only finite, strictly positive numbers (or their numeric string
+ * equivalents) that do not exceed 2 decimal places. `NaN`, `Infinity`,
+ * `'abc'`, `0`, negatives and non-numeric types are all rejected, which keeps
+ * them out of the ledger where they would poison running totals.
+ *
+ * @param {unknown} value
+ * @returns {{ok: true, amount: number} | {ok: false}}
+ */
+function parseAmountInr(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return { ok: false };
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return { ok: false };
+  }
+
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false };
+  }
+
+  const paisa = amount * 100;
+  if (Math.abs(paisa - Math.round(paisa)) > PAISA_EPSILON) {
+    return { ok: false };
+  }
+
+  return { ok: true, amount: roundInr(amount) };
+}
+
 /**
  * Calculates Great-Circle distance in meters.
  */
@@ -38,19 +84,35 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
 
 /**
  * Verifies HMAC signature for incoming NETC FASTag webhooks.
+ *
+ * `crypto.timingSafeEqual` throws an unhandled `RangeError` when the two
+ * buffers differ in length, so a malformed/truncated signature header used to
+ * crash the request with a 500. Header presence, type and byte length are all
+ * validated up front and any mismatch simply returns `false`, letting the
+ * caller answer 401 instead of DoS-ing the endpoint.
+ *
+ * @param {string|Object} payloadRaw
+ * @param {unknown} signatureHeader
+ * @returns {boolean}
  */
 export function verifyFastagWebhookSignature(payloadRaw, signatureHeader) {
-  if (!signatureHeader) return false;
+  if (typeof signatureHeader !== 'string' || signatureHeader.length === 0) {
+    return false;
+  }
 
   const expectedSignature = crypto
     .createHmac('sha256', FASTAG_WEBHOOK_SECRET)
     .update(typeof payloadRaw === 'string' ? payloadRaw : JSON.stringify(payloadRaw))
     .digest('hex');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signatureHeader, 'utf8'),
-    Buffer.from(expectedSignature, 'utf8')
-  );
+  const provided = Buffer.from(signatureHeader, 'utf8');
+  const expected = Buffer.from(expectedSignature, 'utf8');
+
+  if (provided.length !== expected.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(provided, expected);
 }
 
 /**
@@ -63,7 +125,8 @@ export function verifyFastagWebhookSignature(payloadRaw, signatureHeader) {
 export async function processFastagTransaction(txData, gpsContext = null) {
   const { transactionId, tagId, vrn, tollPlazaId, amountInr, readerTimestamp, laneId } = txData;
 
-  if (!transactionId || !amountInr || amountInr <= 0) {
+  const parsedAmount = parseAmountInr(amountInr);
+  if (!transactionId || !parsedAmount.ok) {
     throw new DomainError(400, { error: 'Invalid FASTag transaction payload' });
   }
 
@@ -111,7 +174,7 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     vrn,
     tollPlazaId: plaza.id,
     plazaName: plaza.name,
-    amountInr: Number(amountInr),
+    amountInr: parsedAmount.amount,
     readerTimestamp: readerTimestamp || new Date().toISOString(),
     laneId: laneId || 'LANE_01',
     isGpsVerified,
@@ -133,7 +196,7 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     }
 
     const ledger = orderTollLedgers.get(matchedOrderId);
-    ledger.totalTollsPaidInr += reconciliationRecord.amountInr;
+    ledger.totalTollsPaidInr = roundInr(ledger.totalTollsPaidInr + reconciliationRecord.amountInr);
     ledger.transactions.push(reconciliationRecord);
     orderTollLedgers.set(matchedOrderId, ledger);
   }
@@ -141,13 +204,19 @@ export async function processFastagTransaction(txData, gpsContext = null) {
   processedTransactions.set(transactionId, reconciliationRecord);
 
   logger.info(
-    { transactionId, plazaName: plaza.name, amountInr, orderId: matchedOrderId, isGpsVerified },
+    {
+      transactionId,
+      plazaName: plaza.name,
+      amountInr: parsedAmount.amount,
+      orderId: matchedOrderId,
+      isGpsVerified,
+    },
     '[fastagReconciliationService] FASTag transaction settled successfully'
   );
 
   return {
     status: 'SETTLED',
-    message: `FASTag toll of ₹${amountInr} at ${plaza.name} reconciled and settled`,
+    message: `FASTag toll of ₹${parsedAmount.amount} at ${plaza.name} reconciled and settled`,
     reconciliation: reconciliationRecord,
   };
 }
@@ -166,15 +235,16 @@ export async function reconcileOrderTolls(orderId, estimatedTollInr = 0) {
     transactions: [],
   };
 
-  const actualTollsInr = ledger.totalTollsPaidInr;
-  const varianceInr = Number((actualTollsInr - estimatedTollInr).toFixed(2));
-  const isWithinBudget = actualTollsInr <= estimatedTollInr;
+  const estimatedInr = roundInr(Number.isFinite(Number(estimatedTollInr)) ? Number(estimatedTollInr) : 0);
+  const actualTollsInr = roundInr(ledger.totalTollsPaidInr);
+  const varianceInr = roundInr(actualTollsInr - estimatedInr);
+  const isWithinBudget = actualTollsInr <= estimatedInr;
 
   return {
     success: true,
     orderId,
-    estimatedTollInr: Number(estimatedTollInr),
-    actualTollsInr: Number(actualTollsInr),
+    estimatedTollInr: estimatedInr,
+    actualTollsInr,
     varianceInr,
     isWithinBudget,
     totalTransactions: ledger.transactions.length,

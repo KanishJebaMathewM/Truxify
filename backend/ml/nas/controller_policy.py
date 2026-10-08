@@ -3,6 +3,7 @@ import math
 from copy import deepcopy
 from numbers import Integral, Real
 from threading import RLock
+from uuid import uuid4
 
 import torch
 from torch import nn
@@ -84,6 +85,8 @@ class RLNASController:
         self.best_accuracy = -math.inf
         self.baseline = 0.0
         self.updates = 0
+        self._instance_id = uuid4().hex
+        self._sample_serial = 0
         self._pending = None
 
     def _admit_policy(self):
@@ -147,6 +150,11 @@ class RLNASController:
             if not bool(torch.isfinite(log_probability)):
                 raise RuntimeError("native trajectory probability must be finite")
             architecture = self._architecture(actions)
+            self._sample_serial += 1
+            # Identical genotypes can arise under distinct on-policy samples.
+            # Keep an explicit ticket so an older returned dictionary cannot
+            # receive the newer sample's reward merely because its fields match.
+            architecture['controller_sample_id'] = f"{self._instance_id}:{self._sample_serial}"
             self._pending = (deepcopy(architecture), tuple(actions),
                              [p.detach().clone() for p in self.controller.parameters()])
             return deepcopy(architecture)

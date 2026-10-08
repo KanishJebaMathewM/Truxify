@@ -242,3 +242,22 @@ def test_precision_change_invalidates_outstanding_policy_generation():
     m.controller.double()
     with pytest.raises(ValueError, match='changed policy'): m.update_controller(a, 1.)
     assert m.updates == 0 and not m.optimizer.state
+
+
+def test_repeated_identical_genotype_has_distinct_sample_identity():
+    s = space()
+    s.operations = ['identity']
+    m = RLNASController(s)
+    first = m.sample_architecture()
+    m.discard_sample()
+    second = m.sample_architecture()
+    assert {k: v for k, v in first.items() if k != 'controller_sample_id'} == {
+        k: v for k, v in second.items() if k != 'controller_sample_id'}
+    assert first['controller_sample_id'] != second['controller_sample_id']
+    with pytest.raises(ValueError, match='differs'): m.update_controller(first, 1.)
+    assert m.updates == 0 and m._pending is not None
+    m.update_controller(second, 1.)
+    other = RLNASController(s)
+    another = other.sample_architecture()
+    assert another['controller_sample_id'] != second['controller_sample_id']
+    with pytest.raises(ValueError, match='differs'): other.update_controller(second, 1.)

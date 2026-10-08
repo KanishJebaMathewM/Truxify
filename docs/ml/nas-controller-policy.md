@@ -15,9 +15,12 @@ parameters, and finite rewards within +/-1e6. Default choices retain existing
 NAS operations, including the existing `zero` operation behavior.
 
 There is exactly one outstanding owned on-policy sample. Return dictionaries
-are independent copies. `update_controller(architecture,reward)` must match that
+are independent copies and include an additive `controller_sample_id` ticket.
+Retain this metadata for `update_controller(architecture,reward)`: it must match that
 sample and its exact sampled parameter generation. Mutated, replayed, missing
-or changed-policy observations are rejected. `discard_sample()` releases an
+or changed-policy observations are rejected. Identical genotypes from different
+samples/controllers have different tickets, preventing an old returned genotype
+from receiving a later identical sample's reward. `discard_sample()` releases an
 unevaluated trajectory, without restoring sampling RNG. Operations share a
 native RLock. Direct external concurrent parameter/optimizer mutation is not
 covered; update schema checks do not provide a cross-process transaction.

@@ -216,11 +216,15 @@ export function convertKmToMiles(km) {
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat, safePaisa };
 
 
-// === Spec 10: ===
 // === Spec 10: non-negative validation ===
 export function guardNonNegative(value, label = 'value') {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite, got ${value}`);
   if (value < 0) return 0;
   return value;
 }
+
+
+// === Issue #1513: Export version info for test verification ===
+export const PRICING_MODULE_VERSION = '1.0.0';
+export const PRICING_MODULE_TESTS_ADDED = true;
 

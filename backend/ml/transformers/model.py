@@ -5,6 +5,10 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 import math
 import logging
+import copy
+import threading
+from dataclasses import dataclass
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +219,9 @@ class TrafficForecastTransformer(nn.Module):
         
         logger.info(f"✅ Traffic Forecast Transformer initialized")
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.transformer(x)
+
 class PriceForecastTransformer(nn.Module):
     """Transformer for price forecasting"""
     
@@ -242,6 +249,24 @@ class PriceForecastTransformer(nn.Module):
         
         logger.info(f"✅ Price Forecast Transformer initialized")
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.transformer(x)
+
+@dataclass(frozen=True)
+class _TrainerGeneration:
+    model: nn.Module
+    optimizer: torch.optim.Optimizer
+
+
+def _serialize_mutation(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        # Ownership follows native work, even after an async caller disconnects.
+        with self._mutation_lock:
+            return method(self, *args, **kwargs)
+    return wrapped
+
+
 class TransformerTrainer:
     """Trainer for time series transformers"""
     
@@ -251,34 +276,39 @@ class TransformerTrainer:
         lr: float = 1e-4,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
-        self.model = model.to(device)
         self.device = device
-        self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+        self._mutation_lock = threading.RLock()
+        serving_model = model.to(device).eval()
+        self._generation = _TrainerGeneration(
+            serving_model, torch.optim.AdamW(serving_model.parameters(), lr=lr)
+        )
         self.criterion = nn.MSELoss()
         
         logger.info(f"✅ Transformer Trainer initialized on {self.device}")
     
+    @property
+    def model(self):
+        return self._generation.model
+
+    @property
+    def optimizer(self):
+        return self._generation.optimizer
+
+    def _working_generation(self):
+        generation = self._generation
+        model = copy.deepcopy(generation.model)
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=generation.optimizer.param_groups[0]['lr']
+        )
+        optimizer.load_state_dict(copy.deepcopy(generation.optimizer.state_dict()))
+        return _TrainerGeneration(model, optimizer)
+
+    @_serialize_mutation
     def train_step(self, x: torch.Tensor, y: torch.Tensor) -> float:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        x = x.to(self.device)
-        y = y.to(self.device)
-        
-        # Forward pass
-        predictions = self.model(x)
-        
-        # Loss
-        loss = self.criterion(predictions, y)
-        
-        # Backward pass
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
-        
-        return loss.item()
-    
+        """Train one complete batch and publish one complete generation."""
+        return self.train(x, y, epochs=1, batch_size=x.size(0))['final_loss']
+
+    @_serialize_mutation
     def train(
         self,
         train_data: torch.Tensor,
@@ -289,11 +319,27 @@ class TransformerTrainer:
         val_labels: Optional[torch.Tensor] = None
     ) -> Dict:
         """Full training loop"""
+        if epochs < 1:
+            raise ValueError("epochs must be >= 1")
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        if train_data.size(0) == 0:
+            raise ValueError("Training data cannot be empty")
+        if train_data.size(0) != train_labels.size(0):
+            raise ValueError("Training data and labels must have equal sample counts")
+        if val_data is not None and val_labels is not None:
+            if val_data.size(0) != val_labels.size(0):
+                raise ValueError("Validation data and labels must have equal sample counts")
+            
         losses = []
         val_losses = []
         
         num_batches = (train_data.size(0) + batch_size - 1) // batch_size
         
+        # Isolate training by copying the model
+        working = self._working_generation()
+        working_model, working_optimizer = working.model, working.optimizer
+
         for epoch in range(epochs):
             epoch_loss = 0
             
@@ -306,19 +352,45 @@ class TransformerTrainer:
                 batch_x = train_data_shuffled[i:i+batch_size]
                 batch_y = train_labels_shuffled[i:i+batch_size]
                 
-                loss = self.train_step(batch_x, batch_y)
-                epoch_loss += loss
+                # Single training step
+                working_model.train()
+                working_optimizer.zero_grad()
+                
+                batch_x = batch_x.to(self.device)
+                batch_y = batch_y.to(self.device)
+                
+                predictions = working_model(batch_x)
+                loss = self.criterion(predictions, batch_y)
+                
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(working_model.parameters(), 1.0)
+                working_optimizer.step()
+                
+                epoch_loss += loss.item()
             
             avg_loss = epoch_loss / num_batches
             losses.append(avg_loss)
             
             # Validation
             if val_data is not None and val_labels is not None:
-                val_loss = self.validate(val_data, val_labels)
+                working_model.eval()
+                with torch.no_grad():
+                    val_x = val_data.to(self.device)
+                    val_y = val_labels.to(self.device)
+                    val_preds = working_model(val_x)
+                    val_loss = self.criterion(val_preds, val_y).item()
                 val_losses.append(val_loss)
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Val Loss={val_loss:.4f}")
             else:
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
+                
+        # Never copy weights into a model still owned by native inference.
+        from app.execution import is_training_cancelled, TrainingCancelled
+        if is_training_cancelled():
+            raise TrainingCancelled("Training timed out, aborting swap")
+            
+        working_model.eval()
+        self._generation = working
         
         return {
             'train_losses': losses,
@@ -329,33 +401,38 @@ class TransformerTrainer:
     
     def validate(self, x: torch.Tensor, y: torch.Tensor) -> float:
         """Validate model"""
-        self.model.eval()
+        model = self._generation.model
         with torch.no_grad():
             x = x.to(self.device)
             y = y.to(self.device)
-            predictions = self.model(x)
+            predictions = model(x)
             loss = self.criterion(predictions, y)
         return loss.item()
     
     def predict(self, x: torch.Tensor) -> np.ndarray:
         """Make predictions"""
-        self.model.eval()
+        model = self._generation.model
         with torch.no_grad():
             x = x.to(self.device)
-            predictions = self.model(x)
+            predictions = model(x)
         return predictions.cpu().numpy()
     
     def save(self, path: str = "models/transformer_ts.pth"):
         """Save model"""
+        generation = self._generation
         torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
+            'model_state_dict': generation.model.state_dict(),
+            'optimizer_state_dict': generation.optimizer.state_dict()
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @_serialize_mutation
     def load(self, path: str = "models/transformer_ts.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        working = self._working_generation()
+        working.model.load_state_dict(checkpoint['model_state_dict'])
+        working.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        working.model.eval()
+        self._generation = working
         logger.info(f"✅ Model loaded from {path}")

@@ -1,0 +1,39 @@
+name: ML demand cache lifecycle
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/demand_forecast.py'
+      - 'backend/ml/app/models/base.py'
+      - 'backend/ml/tests/test_demand_cache_lifecycle.py'
+      - 'backend/ml/tests/test_demand_forecast.py'
+      - '.github/workflows/ml-demand-cache-lifecycle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  demand-cache-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused model dependencies
+        run: >-
+          python -m pip install pytest==9.1.1 numpy==2.5.3 scipy==1.17.1
+          scikit-learn==1.9.0 fastapi==0.142.2 requests==2.34.2 ruff==0.16.9
+      - name: Test cache ownership and existing demand model
+        env:
+          MODEL_ARTIFACT_SIGNATURE_DIR: ${{ runner.temp }}/demand-model-signatures
+        run: >-
+          python -m pytest backend/ml/tests/test_demand_cache_lifecycle.py
+          backend/ml/tests/test_demand_forecast.py -q
+      - name: Analyze new tests and compile production model
+        run: |
+          ruff check backend/ml/tests/test_demand_cache_lifecycle.py
+          python -m py_compile backend/ml/app/models/demand_forecast.py

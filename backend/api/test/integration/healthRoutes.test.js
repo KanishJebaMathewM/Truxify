@@ -94,7 +94,7 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.supabase).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
+      { event: 'HEALTH_SUPABASE_ERROR', error: 'Supabase network error' },
       '[health] Supabase check failed'
     );
   });
@@ -130,7 +130,7 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('degraded');
     expect(res.body.services.mongodb).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
+      { event: 'HEALTH_MONGO_ERROR', error: 'MongoDB timeout' },
       '[health] MongoDB check failed'
     );
   });
@@ -144,7 +144,7 @@ describe('GET /api/health', () => {
     expect(res.body.status).toBe('ok');
     expect(res.body.services.redis).toBe('failed');
     expect(loggerErrorSpy).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
+      { event: 'HEALTH_REDIS_ERROR', error: 'Redis connection refused' },
       '[health] Redis check failed'
     );
   });

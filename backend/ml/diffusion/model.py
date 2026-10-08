@@ -110,7 +110,13 @@ class DiffusionRouteModel(nn.Module):
         self.input_proj = nn.Linear(input_dim, hidden_dim)
 
         # Condition projection layer
-        self.cond_proj = nn.Linear(cond_dim, hidden_dim) if cond_dim else None
+        if cond_dim is not None and (isinstance(cond_dim, bool)
+                or not isinstance(cond_dim, int) or cond_dim < 1):
+            raise ValueError("cond_dim must be a positive integer or None")
+        # Lazy parameters are registered now, so optimizers own them before the
+        # first conditional batch and materialization preserves their identity.
+        self.cond_proj = (nn.Linear(cond_dim, hidden_dim) if cond_dim is not None
+                          else nn.LazyLinear(hidden_dim))
 
         # Noise schedule (linear beta schedule)
         self.register_buffer('betas', self._get_linear_beta_schedule())
@@ -176,40 +182,43 @@ class DiffusionRouteModel(nn.Module):
         condition: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Forward pass through diffusion backbone with condition embedding."""
+        # Admit all context before a lazy projection initializes or dropout
+        # consumes RNG. A materialized condition schema never changes silently.
+        if x.ndim != 3 or not x.shape[0] or not x.shape[1] or x.shape[-1] < self.input_dim:
+            raise ValueError("x must contain nonempty batch/sequence input rows")
         if x.shape[-1] > self.input_dim:
-            inferred_cond = x[..., self.input_dim:]
+            if condition is not None:
+                raise ValueError("conditions cannot be supplied twice")
+            condition = x[..., self.input_dim:]
             x = x[..., :self.input_dim]
-            if condition is None:
-                condition = inferred_cond
-
-        # Time embedding
-        t_emb = self.time_embed(timesteps)
-        t_emb = self.time_mlp(t_emb)
-        
-        # Input projection
-        x = self.input_proj(x)
-
-        # Condition projection
         if condition is not None:
-            if not isinstance(condition, torch.Tensor):
-                condition = torch.tensor(condition, dtype=torch.float32, device=x.device)
-            elif condition.device != x.device:
-                condition = condition.to(x.device)
-            if condition.dtype not in (torch.float32, torch.float64):
-                condition = condition.float()
-
-            if condition.dim() == 1:
+            condition = torch.as_tensor(condition, device=x.device)
+            if condition.is_complex() or condition.dtype == torch.bool:
+                raise ValueError("condition must contain finite real numeric values")
+            if condition.ndim == 1:
                 condition = condition.unsqueeze(0)
+            if (condition.ndim not in (2, 3) or condition.shape[-1] < 1
+                    or condition.shape[0] not in (1, x.shape[0])
+                    or (condition.ndim == 3 and condition.shape[1] not in (1, x.shape[1]))
+                    or not torch.isfinite(condition).all()):
+                raise ValueError("condition batch/sequence schema must match input")
+            width = self.cond_proj.weight.shape[1] if not isinstance(
+                self.cond_proj.weight, nn.parameter.UninitializedParameter) else None
+            if width is not None and condition.shape[-1] != width:
+                raise ValueError("condition width differs from the registered projection")
+            condition = condition.to(dtype=self.input_proj.weight.dtype)
+            if not torch.isfinite(condition).all():
+                raise ValueError("condition cannot be represented in model dtype")
 
-            cond_in = condition.shape[-1]
-            if self.cond_proj is None or self.cond_proj.in_features != cond_in:
-                self.cond_proj = nn.Linear(cond_in, self.hidden_dim).to(x.device)
-
+        t_emb = self.time_embed(timesteps).to(dtype=self.time_mlp[0].weight.dtype)
+        t_emb = self.time_mlp(t_emb)
+        x = self.input_proj(x)
+        if condition is not None:
             c = self.cond_proj(condition)
-            if c.dim() == 2:
+            if c.ndim == 2:
                 c = c.unsqueeze(1)
             x = x + c
-        
+
         # Diffusion blocks
         for block in self.blocks:
             if isinstance(block, ResBlock):
@@ -279,37 +288,70 @@ class DiffusionRouteGenerator:
         """Generate route using reverse diffusion with optional endpoint boundary constraints"""
         if num_steps is None:
             num_steps = self.num_timesteps
-        
-        x = torch.randn(shape, device=self.device)
-        
-        for i in tqdm(range(num_steps - 1, -1, -1), desc="Generating"):
-            t = torch.tensor([i] * shape[0], device=self.device)
-
-            if start_point is not None and end_point is not None:
-                if i > 0:
-                    x[:, 0, :] = self.add_noise(start_point, t)
-                    x[:, -1, :] = self.add_noise(end_point, t)
+        if (isinstance(num_steps, bool) or not isinstance(num_steps, (int, np.integer))
+                or not 1 <= num_steps <= self.num_timesteps):
+            raise ValueError("num_steps must be a positive integer within the training schedule")
+        if (not isinstance(shape, (tuple, list)) or len(shape) != 3
+                or any(isinstance(size, bool) or not isinstance(size, (int, np.integer)) or size < 1
+                       for size in shape) or shape[2] != self.model.input_dim):
+            raise ValueError("shape must be positive batch/sequence/input_dim dimensions")
+        if (start_point is None) != (end_point is None):
+            raise ValueError("start and end points must be supplied together")
+        dtype = next(self.model.parameters()).dtype
+        if start_point is not None:
+            start_point = torch.as_tensor(start_point, device=self.device, dtype=dtype)
+            end_point = torch.as_tensor(end_point, device=self.device, dtype=dtype)
+            if (start_point.shape != (shape[0], shape[2]) or end_point.shape != start_point.shape
+                    or not torch.isfinite(start_point).all() or not torch.isfinite(end_point).all()):
+                raise ValueError("endpoints must be finite batch/input_dim rows")
+        if (self.alpha_bars.shape != (self.num_timesteps,)
+                or not torch.isfinite(self.alpha_bars).all()
+                or not ((self.alpha_bars > 0) & (self.alpha_bars < 1)).all()):
+            raise ValueError("cumulative noise schedule must be finite and strictly between zero and one")
+        full_schedule = num_steps == self.num_timesteps
+        timesteps = (list(range(self.num_timesteps - 1, -1, -1)) if full_schedule
+                     else torch.linspace(self.num_timesteps - 1, 0, num_steps).round().long().tolist())
+        modes = [(module, module.training) for module in self.model.modules()]
+        try:
+            self.model.eval()
+            x = torch.randn(shape, device=self.device, dtype=dtype)
+            for index, current in enumerate(tqdm(timesteps, desc="Generating")):
+                t = torch.full((shape[0],), current, device=self.device, dtype=torch.long)
+                if start_point is not None:
+                    if current > 0:
+                        x[:, 0, :] = self.add_noise(start_point, t)
+                        x[:, -1, :] = self.add_noise(end_point, t)
+                    else:
+                        x[:, 0, :], x[:, -1, :] = start_point, end_point
+                noise_pred = self.denoise(x, t, condition=condition)
+                if noise_pred.shape != x.shape or not torch.isfinite(noise_pred).all():
+                    raise RuntimeError("denoiser must return finite shape-matched noise")
+                if full_schedule:
+                    # Preserve the existing adjacent stochastic DDPM update.
+                    alpha = self._extract(self.alphas, t, x.shape)
+                    alpha_bar = self._extract(self.alpha_bars, t, x.shape)
+                    beta = self._extract(self.betas, t, x.shape)
+                    z = torch.randn_like(x) if current > 0 else torch.zeros_like(x)
+                    x = (x - (1.0 - alpha) / torch.sqrt(1.0 - alpha_bar) * noise_pred) / torch.sqrt(alpha)
+                    x = x + torch.sqrt(beta) * z
                 else:
-                    x[:, 0, :] = start_point
-                    x[:, -1, :] = end_point
-            
-            noise_pred = self.denoise(x, t, condition=condition)
-            
-            alpha = self._extract(self.alphas, t, x.shape)
-            alpha_bar = self._extract(self.alpha_bars, t, x.shape)
-            beta = self._extract(self.betas, t, x.shape)
-            
-            z = torch.randn_like(x) if i > 0 else torch.zeros_like(x)
-            
-            x = (x - (1.0 - alpha) / torch.sqrt(1.0 - alpha_bar) * noise_pred) / torch.sqrt(alpha)
-            x = x + torch.sqrt(beta) * z
+                    # DDIM eta=0 traverses selected *trained* noise levels.
+                    # The virtual next index -1 is the clean alpha_bar=1 endpoint.
+                    next_index = timesteps[index + 1] if index + 1 < len(timesteps) else -1
+                    a_current = self.alpha_bars[current].to(dtype=x.dtype)
+                    a_next = self.alpha_bars[next_index].to(dtype=x.dtype) if next_index >= 0 else x.new_tensor(1.0)
+                    clean = (x - torch.sqrt(1 - a_current) * noise_pred) / torch.sqrt(a_current)
+                    x = torch.sqrt(a_next) * clean + torch.sqrt(1 - a_next) * noise_pred
+                if not torch.isfinite(x).all():
+                    raise RuntimeError("reverse diffusion produced nonfinite coordinates")
+            if start_point is not None:
+                x[:, 0, :], x[:, -1, :] = start_point, end_point
+            return x.detach()
+        finally:
+            # Restore heterogeneous child modes, not only the parent flag.
+            for module, training in modes:
+                module.training = training
 
-        if start_point is not None and end_point is not None:
-            x[:, 0, :] = start_point
-            x[:, -1, :] = end_point
-        
-        return x.detach()
-    
     @torch.no_grad()
     def generate_route(
         self,

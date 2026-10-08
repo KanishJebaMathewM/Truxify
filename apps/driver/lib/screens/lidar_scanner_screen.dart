@@ -129,7 +129,7 @@ class _LidarScannerScreenState extends State<LidarScannerScreen> {
           if (isDiscrepancy)
             Container(
               padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.bottom(16),
+              margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(color: Colors.red[50], border: Border.all(color: Colors.red[300]!), borderRadius: BorderRadius.circular(12)),
               child: Row(
                 children: [

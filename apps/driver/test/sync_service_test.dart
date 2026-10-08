@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -152,6 +154,15 @@ void main() {
 
     setUpAll(() async {
       TestWidgetsFlutterBinding.ensureInitialized();
+      // sqflite ffi for LocalDbService + connectivity default 'none' (the
+      // offline path); the nested upload group overrides with 'wifi'.
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/connectivity'),
+        (call) async => call.method == 'check' ? <String>['none'] : null,
+      );
       await setupTests();
       tempDir = await Directory.systemTemp.createTemp('pod_test_');
     });

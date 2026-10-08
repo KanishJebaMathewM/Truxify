@@ -89,6 +89,30 @@ class _MockHttpClientRequest extends Fake implements HttpClientRequest {
   final Uri url;
   final _TripsApiState apiState;
 
+  // google_fonts' font fetch sets followRedirects on the request — the fake
+  // needs a writable field or it throws UnimplementedError mid-render.
+  @override
+  bool followRedirects = true;
+
+  @override
+  int contentLength = -1;
+
+  // The upload path uses addStream/flush/done; font fetchers set
+  // followRedirects/maxRedirects — the fake needs the IO members as real
+  // futures and absorbs unknown setters.
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {}
+  @override
+  Future<void> flush() async {}
+  @override
+  Future<HttpClientResponse> get done => Future.value(_MockHttpClientResponse(url, apiState));
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    if (invocation.isSetter) return null;
+    return super.noSuchMethod(invocation);
+  }
+
   @override
   final HttpHeaders headers = _MockHttpHeaders();
 
@@ -104,6 +128,8 @@ class _MockHttpHeaders extends Fake implements HttpHeaders {
       {bool preserveHeaderCase = false}) {}
   @override
   void set(String name, Object value, {bool preserveHeaderCase = false}) {}
+  @override
+  void forEach(void Function(String name, List<String> values) action) {}
 }
 
 class _MockHttpClientResponse extends Fake implements HttpClientResponse {
@@ -113,6 +139,21 @@ class _MockHttpClientResponse extends Fake implements HttpClientResponse {
 
   @override
   int get statusCode => 200;
+
+  @override
+  int get contentLength => -1;
+
+  @override
+  bool get isRedirect => false;
+
+  @override
+  String get reasonPhrase => 'OK';
+
+  @override
+  List<RedirectInfo> get redirects => const [];
+
+  @override
+  bool get persistentConnection => true;
 
   @override
   HttpHeaders get headers => _MockHttpHeaders();
@@ -208,7 +249,8 @@ void main() {
   late _TripsApiState apiState;
 
   setUpAll(() async {
-    HttpOverrides.global = MockHttpOverrides(apiState = _TripsApiState());
+    GoogleFonts.config.allowRuntimeFetching = false;
+  HttpOverrides.global = MockHttpOverrides(apiState = _TripsApiState());
     await setupTestEnvironment();
   });
 

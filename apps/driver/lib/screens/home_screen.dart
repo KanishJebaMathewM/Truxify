@@ -13,6 +13,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
@@ -49,6 +50,9 @@ import '../widgets/home/search_destination_card.dart';
 import '../widgets/home/new_load_notification_banner.dart';
 import '../widgets/home/driver_status_sheet.dart';
 import '../widgets/home/active_trip_sheet.dart';
+import '../widgets/earnings_shimmer.dart';
+import '../widgets/pulsing_location_dot.dart';
+import 'demand_heatmap_screen.dart';
 import 'destination_picker_screen.dart';
 import 'pod_capture_screen.dart';
 
@@ -566,8 +570,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       return await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
     } catch (e, stackTrace) {
       debugPrint('LOCATION ERROR: $e\n$stackTrace');
@@ -792,6 +795,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       .onError((_, __) => routePoints);
             });
           }
+      }
       } else {
         await Future.wait([
           SecureStorage.delete('cached_trip_id'),
@@ -1171,7 +1175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ? ActiveTripSheet(
                             isTripStarted: _isTripStarted,
                             truckLabel: _activeTruckLabel,
-                            currentLocationLabel: _currentLocationLabel,
+                            currentLocationLabel: _currentLocationLabel(context),
                             destinationAddress:
                                 _destination?.address ?? 'Destination',
                             distance: _activeTripDistance,
@@ -1183,6 +1187,44 @@ class _HomeScreenState extends State<HomeScreen> {
                             currentMilestone: _activeTripMilestone.isNotEmpty
                                 ? _activeTripMilestone
                                 : null,
+                            onStartTrip: () async {
+                              if (_activeTripId == null) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                              try {
+                                await _tripService.startTrip(_activeTripId!);
+                                if (mounted) {
+                                  setState(() {
+                                    _isTripStarted = true;
+                                    _activeTripStatus = 'EN-ROUTE';
+                                  });
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            onCompleteTrip: _completeRide,
+                            onCancel: _clearDestination,
+                            onOpenMaps: _openGoogleMapsRoute,
                           )
                         : SearchDestinationCard(
                             currentLocationText: _currentLocationText,
@@ -1196,6 +1238,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+            ),
             ),
 
             // ── HoS over-limit warning ────────────────────────────────
@@ -1421,7 +1464,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

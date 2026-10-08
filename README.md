@@ -7,7 +7,7 @@
 **Directly connecting manufacturers and truck drivers — eliminating the middleman, maximising earnings, and bringing transparency to India's ₹14 lakh crore freight industry.**
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter)](https://flutter.dev)
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=flat-square&logo=nodedotjs)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?style=flat-square&logo=nodedotjs)](https://nodejs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Polygon](https://img.shields.io/badge/Polygon-Blockchain-8247E5?style=flat-square&logo=polygon)](https://polygon.technology)
 [![License](https://img.shields.io/badge/License-MIT-00897B?style=flat-square)](LICENSE)
@@ -248,7 +248,7 @@ Note: Truxify is in active development (Phase 2). The core platform features are
 
 ### Prerequisites
 - Flutter SDK `>= 3.19.0`
-- Node.js `>= 20.x` (LTS)
+- Node.js `>= 22.x` (LTS)
 - Python `>= 3.11.x`
 - Docker Engine and Docker Compose
 - Git
@@ -292,6 +292,49 @@ npm run dev
 - `npm start` starts the production server.
 - `npm test` runs the backend test suite.
 
+## 🧪 Testing
+
+Run the test suite for the component you changed before opening a pull request. From the repository root:
+
+### Backend API
+```bash
+cd backend/api
+npm test
+```
+
+### Customer Flutter app
+```bash
+cd apps/customer
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### Driver Flutter app
+```bash
+cd apps/driver
+flutter pub get
+flutter analyze
+flutter test
+```
+
+### ML service
+```bash
+cd backend/ml
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+### Smart contracts
+```bash
+cd blockchain
+npm ci
+npx hardhat compile
+npx hardhat test
+```
+
+For CI-reproducible lint checks, see the linting commands in `CONTRIBUTING.md`.
+
 ## 🔧 Environment Configuration
 The backend uses `backend/api/.env.example` as the template for local configuration. Copy it to `.env` before running the service and fill in the required values for your environment.
 
@@ -326,7 +369,7 @@ Once the stack is running, you can reach the local services here:
 
 ## 🤝 Contributor Notes
 - Verify that `backend/api/.env` exists before starting the backend or Docker Compose services.
-- Run the relevant test commands before opening a pull request; see the repository testing guide in `CONTRIBUTING.md`.
+- Run the component-specific tests documented above before opening a pull request.
 - Prefer Docker Compose when you want the full local development environment with API, PostgreSQL/PostGIS, MongoDB, and Redis together.
 
 ## 📊 Impact Metrics (Projected)
@@ -405,3 +448,6 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
+
+## Development
+Run the project's existing test suite before submitting changes.

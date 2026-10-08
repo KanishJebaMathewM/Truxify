@@ -1,13 +1,15 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
-import '../services/fcm_service.dart';
+import '../services/fcm_service.dart' hide FcmService;
+import '../services/weigh_station_service.dart';
 import 'home_screen.dart';
 import 'documents_screen.dart';
 import 'destination_picker_screen.dart';

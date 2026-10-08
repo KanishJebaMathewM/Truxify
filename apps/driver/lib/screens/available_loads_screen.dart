@@ -15,10 +15,14 @@ class AvailableLoadsScreen extends StatefulWidget {
   State<AvailableLoadsScreen> createState() => _AvailableLoadsScreenState();
 }
 
+/// Which quick filter chip is active on the available loads list.
+enum _LoadFilter { nearMe, highPaying, matchesRoute }
+
 class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
   late final MarketplaceRepository _repository =
       widget._repository ?? MarketplaceRepository();
   late Future<List<LoadOffer>> _loadsFuture;
+  _LoadFilter _selectedFilter = _LoadFilter.nearMe;
 
   @override
   void initState() {
@@ -40,17 +44,29 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
     });
   }
 
-  @override
-  State<AvailableLoadsScreen> createState() => _AvailableLoadsScreenState();
-}
+  void _selectFilter(_LoadFilter filter) {
+    setState(() => _selectedFilter = filter);
+  }
 
-class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
-  _LoadFilter _selectedFilter = _LoadFilter.nearMe;
+  /// Filter/sort the loaded offers for the active chip. nearMe sorts by
+  /// distance, highPaying by net profit, matchesRoute surfaces the badge
+  /// flagged bestProfit first.
+  List<LoadOffer> _applyFilter(List<LoadOffer> loads) {
+    final sorted = [...loads];
+    switch (_selectedFilter) {
+      case _LoadFilter.nearMe:
+        sorted.sort((a, b) =>
+            a.distanceFromDriver.compareTo(b.distanceFromDriver));
+      case _LoadFilter.highPaying:
+        sorted.sort((a, b) => b.netProfit.compareTo(a.netProfit));
+      case _LoadFilter.matchesRoute:
+        sorted.sort((a, b) => (b.bestProfit ? 1 : 0) - (a.bestProfit ? 1 : 0));
+    }
+    return sorted;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final indexes = List<int>.generate(10, (index) => index).where(_matchesFilter).toList();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Available Loads'),
@@ -103,12 +119,14 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
                   );
                 }
 
-                final loads = snapshot.data ?? const <LoadOffer>[];
+                final loads =
+                    _applyFilter(snapshot.data ?? const <LoadOffer>[]);
                 if (loads.isEmpty) {
                   return _MessageState(
                     icon: Icons.inventory_2_outlined,
                     title: 'No loads available',
-                    message: 'New load offers will appear here as they become available.',
+                    message:
+                        'New load offers will appear here as they become available.',
                     actionLabel: 'Refresh',
                     onAction: _refreshLoads,
                   );
@@ -178,26 +196,8 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
                 _buildStatColumn(context, Icons.route, load.routeDistance),
                 _buildStatColumn(context, Icons.scale, load.weight),
                 _buildStatColumn(
-                  context,
-                  Icons.account_balance_wallet,
-                  load.estimatedProfit,
-                  isHighlight: true,
-                ),
+                    context, Icons.payments_outlined, load.estimatedProfit),
               ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text('View Details'),
-              ),
             ),
           ],
         ),
@@ -205,23 +205,16 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
     );
   }
 
-  Widget _buildStatColumn(
-    BuildContext context,
-    IconData icon,
-    String value, {
-    bool isHighlight = false,
-  }) {
+  Widget _buildStatColumn(BuildContext context, IconData icon, String value) {
     return Column(
       children: [
-        Icon(icon, size: 20, color: isHighlight ? Colors.green : Colors.grey[600]),
+        Icon(icon, size: 18, color: Colors.grey),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: isHighlight ? FontWeight.bold : FontWeight.normal,
-                color: isHighlight ? Colors.green[700] : null,
-              ),
-        ),
+        Text(value,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
       ],
     );
   }
@@ -246,28 +239,21 @@ class _MessageState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(32.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: Colors.grey[600]),
+            Icon(icon, size: 48, color: Colors.grey),
             const SizedBox(height: 12),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
+            Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: onAction,
-              child: Text(actionLabel),
-            ),
+            TextButton(onPressed: onAction, child: Text(actionLabel)),
           ],
         ),
       ),

@@ -68,7 +68,33 @@ export class DeliveryVerificationService {
     this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
     this.trackingTokenService = deps.trackingTokenService || null;
   }
+  // ... inside verifyDelivery / release handling ...
 
+    // 1. Resolve expected deposit amount (defense-in-depth)
+    let expectedAmountWei = null;
+    try {
+      const resolvedAmount = resolveExpectedDepositAmount(order);
+      if (resolvedAmount) {
+        expectedAmountWei = resolvedAmount;
+      }
+    } catch (err) {
+      logger.warn({ orderId: order.order_display_id, err: err.message }, 'Failed to resolve expected deposit amount');
+    }
+
+    // ... later in the release flow, the correct release call is executed:
+    const releaseResult = await this.escrowReleaseFn(order.order_display_id, expectedAmountWei);
+
+    // ... and for updating order status upon successful release:
+    if (releaseTxHash || escrowAlreadyReleased) {
+      const { error: persistReleaseErr } = await this._writeRepository.updateOrder(orderId, {
+        escrow_status: 'released',
+        updated_at: new Date().toISOString()
+      });
+
+      if (persistReleaseErr) {
+        logger.error({ orderId, err: persistReleaseErr.message }, 'Failed to persist escrow release state');
+      }
+    }
   /**
    * Repository used for release-path DB writes (escrow status, release hash,
    * guard updates, wallet description). Falls back to the read repository when

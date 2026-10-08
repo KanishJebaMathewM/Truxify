@@ -6,6 +6,28 @@ import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCac
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
+import logger from './logger.js'; // Ensure logger is imported
+
+export const authenticate = async (req, res, next) => {
+  const requestId = req.headers['x-request-id'] || req.id || 'unknown';
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    logger.warn({
+      event: 'AUTH_NO_TOKEN',
+      requestId,
+      path: req.originalUrl,
+      method: req.method,
+      ip: req.ip || req.connection.remoteAddress,
+    }, 'Authentication failed: Missing or malformed Authorization header');
+
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  // ... existing token verification logic ...
+};
 export async function authenticate(req, res, next) {
   if (req.user) {
     return next();

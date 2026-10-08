@@ -1,0 +1,28 @@
+name: Outbox protocol tests
+on:
+  pull_request:
+    paths:
+      - 'supabase/tests/**'
+      - 'supabase/migrations/*outbox*.sql'
+      - 'backend/api/src/services/outbox/**'
+      - 'backend/api/src/workers/outboxRelayWorker.js'
+      - '.github/workflows/outbox-protocol.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/tests/**'
+      - 'supabase/migrations/*outbox*.sql'
+      - '.github/workflows/outbox-protocol.yml'
+permissions:
+  contents: read
+jobs:
+  postgres-protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 20
+      - run: npm ci --prefix supabase/tests --ignore-scripts
+      - run: npm test --prefix supabase/tests

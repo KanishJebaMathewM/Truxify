@@ -80,7 +80,8 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
+import crypto from 'crypto';
+import { supabase, supabaseAdmin, createUserClient, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -96,6 +97,7 @@ import { getTruckSearchVersion } from '../utils/cacheInvalidation.js';
 import logger from '../middleware/logger.js';
 import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
+import { validateCoordinate } from '../utils/coordinates.js';
 
 const weatherService = new WeatherService({ logger });
 const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
@@ -196,8 +198,9 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
   const normalizedNumberPlate = sanitizeNumberPlate(number_plate);
 
   try {
+    const userDb = createUserClient(req.token);
     // Check for duplicate number plate
-    const { data: existing, error: checkErr } = await supabase
+    const { data: existing, error: checkErr } = await userDb
       .from('trucks')
       .select('id')
       .eq('number_plate', normalizedNumberPlate)
@@ -211,7 +214,7 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
       return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
     }
 
-    const { data: truck, error: insertErr } = await supabase
+    const { data: truck, error: insertErr } = await userDb
       .from('trucks')
       .insert({ name: sanitizeTruckName(name), truck_type, number_plate: normalizedNumberPlate, max_capacity_tons, driver_id: req.user.id })
       .select('id, name, truck_type, number_plate, max_capacity_tons, created_at')
@@ -272,7 +275,8 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
   const { name, min_capacity, max_capacity } = req.query;
 
   try {
-    let query = supabase
+    const userClient = createUserClient(req.token);
+    let query = userClient
       .from('trucks')
       .select('id, name, number_plate, max_capacity_tons, created_at')
       .eq('driver_id', req.user.id);
@@ -338,12 +342,13 @@ const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
   Furniture: ['Closed Body', 'Container'],
 });
 
-async function canViewTruckNumber(user, truck) {
+async function canViewTruckNumber(user, truck, client) {
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
   }
 
-  const { data: order, error } = await supabase
+  const db = client || supabaseAdmin;
+  const { data: order, error } = await db
     .from('orders')
     .select('id')
     .eq('truck_id', truck.id)
@@ -425,7 +430,8 @@ router.get(
       return acc;
     }, {});
     const hash = crypto.createHash('md5').update(JSON.stringify(sorted)).digest('hex');
-    return `v${version}:${hash}`;
+    // Search results may include a number plate after a per-user access check.
+    return `v${version}:${req.user.id}:${hash}`;
   }),
   async (req, res) => {
   const {
@@ -512,7 +518,9 @@ router.get(
     return res.status(400).json({ error: 'min_capacity must be less than or equal to max_capacity' });
   }
 
+  const userClient = createUserClient(req.token);
   const searchCacheFilters = {
+    userId: req.user.id,
     pickupLat: numPickupLat,
     pickupLng: numPickupLng,
     dropLat: numDropLat,
@@ -596,8 +604,7 @@ router.get(
         const maxDistanceMeters = 50000; // 50km radius
         const nearbyTelemetry = await mongoDb.collection('telemetry').find({
           location: {
-            $near: {
-              $geometry: {
+            $near: {$geometry: {
                 type: "Point",
                 coordinates: [numPickupLng, numPickupLat]
               },
@@ -616,9 +623,6 @@ router.get(
       return res.json([]);
     }
 
-    // driver_details / trucks / profiles are RLS-protected with all anon
-    // privileges revoked, so the marketplace search must use the service-role
-    // client (scope is enforced by the search criteria, never the raw anon key).
     const { data: drivers, error: driversErr } = await supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
@@ -665,7 +669,7 @@ router.get(
       const truck = truckMap[d.truck_id] || {};
       let truckNumber = '';
       if (truck.id) {
-        const access = await canViewTruckNumber(req.user, truck);
+        const access = await canViewTruckNumber(req.user, truck, userClient);
         truckNumber = access.allowed ? (truck.number_plate || '') : '';
       }
       return {
@@ -766,7 +770,10 @@ router.get(
  */
 router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
-    const { data: truck, error } = await supabase
+    const userClient = createUserClient(req.token);
+    // Authorized customers may view a truck assigned to their order, even
+    // though the truck owner RLS policy cannot expose it through their token.
+    const { data: truck, error } = await supabaseAdmin
       .from('trucks')
       .select('id, driver_id, number_plate')
       .eq('id', req.params.id)
@@ -775,7 +782,7 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
     if (error) return res.status(500).json({ error: 'Failed to fetch truck number.', details: error.message });
     if (!truck) return res.status(404).json({ error: 'Truck not found.' });
 
-    const access = await canViewTruckNumber(req.user, truck);
+    const access = await canViewTruckNumber(req.user, truck, userClient);
     if (access.error) {
       return res.status(500).json({ error: 'Failed to verify truck access.', details: access.error.message });
     }
@@ -788,8 +795,6 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-
-// export default moved to end
 
 // ============================================================================
 // INTELLIGENT FUEL ADVISOR
@@ -831,12 +836,14 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
  */
 router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const truckId = req.params.id;
-  const destinationLat = Number(req.query.destination_lat);
-  const destinationLng = Number(req.query.destination_lng);
+  const latitude = validateCoordinate(req.query.destination_lat, 'lat');
+  const longitude = validateCoordinate(req.query.destination_lng, 'lng');
 
-  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) {
+  if (!latitude.valid || !longitude.valid) {
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
+  const destinationLat = latitude.value;
+  const destinationLng = longitude.value;
 
   if (req.user.role !== 'driver' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden: fuel advice is restricted to assigned drivers and admins' });
@@ -844,7 +851,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
 
   // Ensure truck belongs to the caller (if driver) or caller is admin
   if (req.user.role === 'driver') {
-    const { data: truck, error: truckErr } = await supabase
+    const { data: truck, error: truckErr } = await createUserClient(req.token)
       .from('trucks')
       .select('id')
       .eq('id', truckId)
@@ -865,9 +872,7 @@ router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidPa
   }
 });
 
-// Resolves #2053: Prevent race conditions in truck allocation
-
 // ============================================================================
-// EXPORT ROUTER (MOVED TO END TO ENSURE ALL ENDPOINTS ARE REACHABLE - #14304)
+// EXPORT ROUTER (MOVED TO END TO ENSURE ALL ENDPOINTS ARE REACHABLE - #14303)
 // ============================================================================
 export default router;

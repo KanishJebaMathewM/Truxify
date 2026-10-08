@@ -6,6 +6,61 @@ import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCac
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
+/**
+ * Authentication Middleware
+ * 
+ * Verifies JWT Bearer tokens on incoming requests and attaches user context.
+ * Implements structured warning logging for unauthenticated or missing token attempts.
+ */
+
+import jwt from 'jsonwebtoken';
+import logger from './logger.js';
+
+export const authenticate = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const clientIp = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress;
+    logger.warn(
+      {
+        event: 'AUTH_NO_TOKEN',
+        requestId: req.requestId || req.id,
+        clientIp,
+        path: req.originalUrl || req.url,
+        method: req.method,
+      },
+      'Missing or invalid authorization token format'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Access denied. No token provided.',
+    });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const secret = process.env.JWT_SECRET || 'default_secret';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    logger.warn(
+      {
+        event: 'AUTH_INVALID_TOKEN',
+        requestId: req.requestId || req.id,
+        error: err?.message,
+      },
+      'Invalid or expired token provided'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid or expired token.',
+    });
+  }
+};
+
+export default authenticate;
 export async function authenticate(req, res, next) {
   if (req.user) {
     return next();

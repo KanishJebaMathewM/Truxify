@@ -203,6 +203,43 @@ export const ProfileService = {
   deleteProfile,
   sanitizeProfilePii,
 };
+router.get('/', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    // Create per-request authenticated client carrying the user's JWT
+    const userClient = createUserClient(req.token);
+
+    // Pass the authenticated client to service methods
+    const profile = await getProfile(userId, userClient);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    let extra = null;
+
+    if (role === 'customer') {
+      const stats = await getCustomerStats(userId, userClient);
+      extra = ProfileModel.fromCustomerStats(stats);
+    }
+
+    if (role === 'driver') {
+      const details = await getDriverDetails(userId, userClient);
+      extra = ProfileModel.fromDriverDetails(details);
+    }
+
+    return res.json({
+      profile: ProfileModel.fromProfile(profile),
+      extra
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch profile',
+      details: err.message
+    });
+  }
+});
 
 export default ProfileService;
 

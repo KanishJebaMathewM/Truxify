@@ -4,7 +4,16 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// Before
+console.error('Error inserting notification:', error);
 
+// After
+logger.error({
+  event: 'NOTIFICATION_INSERT_ERROR',
+  error: error.message,
+  stack: error.stack,
+  requestId: req?.id || requestId,
+}, 'Failed to insert notification into database');
 /**
  * Notification Service
  * Handles FCM push notification fan-outs, device token deduplication,

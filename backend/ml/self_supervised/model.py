@@ -1,10 +1,17 @@
+import logging
+import math
+from threading import RLock
+from typing import Dict, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-import math
-import logging
+from self_supervised.training_transition import (
+    check_adam,
+    finite_registered_state,
+    own_dataset,
+    recover_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,149 +301,70 @@ class SSLPreTrainer:
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+        self._training_lock = RLock()
         
         logger.info(f"✅ SSL Pre-Trainer initialized on {self.device}")
     
     def pretrain_simclr(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
-        """Pre-train using SimCLR"""
-        losses = []
-        
-        for epoch in range(epochs):
-            epoch_loss = 0
-            num_batches = 0
-            
-            # Create two augmented views
-            indices = torch.randperm(data.size(0))
-            data_shuffled = data[indices]
-            
-            for i in range(0, data.size(0), batch_size):
-                batch = data_shuffled[i:i+batch_size]
-                
-                # Two augmented views (simplified: add noise)
-                view1 = batch + torch.randn_like(batch) * 0.01
-                view2 = batch + torch.randn_like(batch) * 0.01
-                
-                # Forward pass
-                _, z1 = self.model(view1)
-                _, z2 = self.model(view2)
-                
-                # Loss
-                loss = self.model.contrastive_loss(z1, z2)
-                
-                # Backward pass
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
-                
-                epoch_loss += loss.item()
-                num_batches += 1
-            
-            avg_loss = epoch_loss / num_batches
-            losses.append(avg_loss)
-            
-            if (epoch + 1) % 10 == 0:
-                logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1] if losses else None,
-            'method': 'simclr'
-        }
-    
+        return self._pretrain(data, epochs, batch_size, 'simclr')
+
     def pretrain_moco(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
-        """Pre-train using MoCo"""
-        losses = []
-        
-        for epoch in range(epochs):
-            epoch_loss = 0
-            num_batches = 0
-            
-            indices = torch.randperm(data.size(0))
-            data_shuffled = data[indices]
-            
-            for i in range(0, data.size(0), batch_size):
-                batch = data_shuffled[i:i+batch_size]
-                
-                # Query and key views
-                view_q = batch + torch.randn_like(batch) * 0.01
-                view_k = batch + torch.randn_like(batch) * 0.01
-                
-                # Forward pass
-                loss = self.model(view_q, view_k)
-                
-                # Backward pass
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
-                
-                epoch_loss += loss.item()
-                num_batches += 1
-            
-            avg_loss = epoch_loss / num_batches
-            losses.append(avg_loss)
-            
-            if (epoch + 1) % 10 == 0:
-                logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1] if losses else None,
-            'method': 'moco'
-        }
-    
+        return self._pretrain(data, epochs, batch_size, 'moco')
+
     def pretrain_mae(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
-        """Pre-train using Masked Autoencoder"""
-        for name, value in (('epochs', epochs), ('batch_size', batch_size)):
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        data = data.to(self.device)
-        self.model._validate_input(data)
-        losses = []
-        observed_batches = 0
-        skipped_batches = 0
+        return self._pretrain(data, epochs, batch_size, 'mae')
 
-        for epoch in range(epochs):
-            epoch_loss = 0
-            num_batches = 0
-            
-            indices = torch.randperm(data.size(0))
-            data_shuffled = data[indices]
-            
-            for i in range(0, data.size(0), batch_size):
-                batch = data_shuffled[i:i+batch_size]
-                
-                # Forward pass
-                _, loss, mask = self.model(batch)
-                
-                # Backward pass
-                self.optimizer.zero_grad()
-                if mask.any():
-                    observed_batches += 1
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
-                    self.optimizer.step()
-                else:
-                    skipped_batches += 1
+    def _pretrain(self, data, epochs, batch_size, method):
+        with self._training_lock:
+            expected = {'simclr': SimCLR, 'moco': MoCo, 'mae': MaskedAutoencoder}[method]
+            if not isinstance(self.model, expected):
+                raise ValueError('selected pretraining method must match the registered model')
+            data = own_dataset(data, self.model, method, epochs, batch_size)
+            finite_registered_state(self.model)
+            check_adam(self.model, self.optimizer)
+            losses, observed_batches, skipped_batches = [], 0, 0
+            for _ in range(epochs):
+                shuffled = data[torch.randperm(len(data), device=data.device)]
+                total = 0.0
+                for start in range(0, len(data), batch_size):
+                    batch = shuffled[start:start + batch_size]
+                    with recover_batch(self.model, self.optimizer) as receipt:
+                        self.model.train()
+                        if method == 'mae':
+                            _, loss, mask = self.model(batch)
+                            observed = bool(mask.any())
+                        else:
+                            view1 = batch + torch.randn_like(batch) * .01
+                            view2 = batch + torch.randn_like(batch) * .01
+                            if method == 'simclr':
+                                _, z1 = self.model(view1)
+                                _, z2 = self.model(view2)
+                                loss = self.model.contrastive_loss(z1, z2)
+                            else:
+                                loss = self.model(view1, view2)
+                            observed = True
+                        if loss.numel() != 1 or not torch.isfinite(loss):
+                            raise ValueError('SSL native objective must be finite and scalar')
+                        if observed:
+                            self.optimizer.zero_grad()
+                            loss.backward()
+                            if any(p.grad is not None and not torch.isfinite(p.grad).all()
+                                   for p in self.model.parameters()):
+                                raise ValueError('SSL native derivatives must be finite')
+                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
+                            self.optimizer.step()
+                            receipt['accepted'] = True
+                        total += loss.item() * len(batch)
+                    if observed:
+                        observed_batches += 1
+                    else:
+                        skipped_batches += 1
+                losses.append(total / len(data))
+            result = {'losses': losses, 'final_loss': losses[-1], 'method': method}
+            if method == 'mae':
+                result.update(observed_batches=observed_batches, skipped_batches=skipped_batches)
+            return result
 
-                epoch_loss += loss.item()
-                num_batches += 1
-            
-            avg_loss = epoch_loss / num_batches
-            losses.append(avg_loss)
-            
-            if (epoch + 1) % 10 == 0:
-                logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1] if losses else None,
-            'method': 'mae',
-            'observed_batches': observed_batches,
-            'skipped_batches': skipped_batches
-        }
-    
     def save(self, path: str = "models/ssl_model.pth"):
         """Save model"""
         torch.save({

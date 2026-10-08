@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 import torch
 import torch.nn as nn
 from nas.construction_plan import NASPlanError, plan_construction
+from nas.controller_policy import RLNASController
 
 logger = logging.getLogger(__name__)
 
@@ -220,42 +221,6 @@ class NASModel(nn.Module):
     def get_params(self) -> int:
         return sum(parameter.numel() for parameter in self.parameters())
 
-class RLNASController:
-    """Reinforcement Learning based NAS Controller"""
-    
-    def __init__(self, search_space: NASSearchSpace):
-        self.search_space = search_space
-        self.controller = self._build_controller()
-        self.optimizer = torch.optim.Adam(self.controller.parameters(), lr=0.001)
-        self.best_architecture = None
-        self.best_accuracy = 0.0
-        
-        logger.info("✅ RL NAS Controller initialized")
-    
-    def _build_controller(self) -> nn.Module:
-        """Build controller network"""
-        class Controller(nn.Module):
-            def __init__(self, output_size: int = 10):
-                super().__init__()
-                self.lstm = nn.LSTM(64, 128, num_layers=2, batch_first=True)
-                self.fc = nn.Linear(128, output_size)
-            
-            def forward(self, x):
-                lstm_out, _ = self.lstm(x)
-                return self.fc(lstm_out)
-        
-        return Controller()
-    
-    def sample_architecture(self) -> Dict:
-        """Sample architecture using controller"""
-        # Simplified: use random for now
-        return self.search_space.sample_random_architecture()
-    
-    def update_controller(self, architecture: Dict, reward: float):
-        """Update controller based on reward"""
-        # In production: use REINFORCE algorithm
-        pass
-
 class NASSearcher:
     """Main NAS search engine"""
     
@@ -278,6 +243,29 @@ class NASSearcher:
             'history': deepcopy(history),
             'method': method,
         }
+
+    def reinforcement_search(self, num_trials=20, evaluator=None):
+        """Learn from explicit evaluated scores; no synthetic RL accuracy claims."""
+        num_trials = _positive_budget(num_trials, 'num_trials')
+        if num_trials > 128 or not callable(evaluator):
+            raise ValueError("reinforcement search requires an evaluator and at most128 trials")
+        controller = RLNASController(self.search_space)
+        history, best_arch, best_score = [], None, -float('inf')
+        for trial in range(num_trials):
+            architecture = controller.sample_architecture()
+            try:
+                score = self._evaluate_architecture(deepcopy(architecture), evaluator)
+                update = controller.update_controller(architecture, score)
+            except Exception:
+                controller.discard_sample()
+                raise
+            history.append({'trial': trial, 'architecture': deepcopy(architecture),
+                            'score': score, 'policy_update': update})
+            if score > best_score:
+                best_arch, best_score = deepcopy(architecture), score
+        result = self._publish(best_arch, best_score, history, 'reinforcement')
+        result['score_source'] = 'provided_evaluator'
+        return result
 
     def random_search(self, num_trials: int = 100, evaluator=None) -> Dict:
         """Evaluate independent candidates and publish exact score provenance."""

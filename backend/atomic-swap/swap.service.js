@@ -3,7 +3,163 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+/**
+ * Atomic Swap Service
+ * 
+ * Interacts with the deployed AtomicSwap.sol smart contract on the Polygon / EVM network.
+ * Aligns ethers.js contract calls and ABI definitions with the actual contract specification.
+ */
 
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+
+// Correct ABI matching blockchain/contracts/AtomicSwap.sol
+const ATOMIC_SWAP_ABI = [
+  "function openSwap(bytes32 swapId, address payable recipient, bytes32 hashLock, uint256 lockDuration) external payable returns (bytes32)",
+  "function claimSwap(bytes32 swapId, bytes calldata preimage) external",
+  "function refundSwap(bytes32 swapId) external",
+  "function getUserSwaps(address user) external view returns (bytes32[] memory)",
+  "function swaps(bytes32) external view returns (bytes32 id, address payable initiator, address payable recipient, uint256 amount, bytes32 hashLock, uint256 lockDuration, uint256 expiresAt, bool withdrawn, bool refunded)",
+  "function usedHashLocks(bytes32) external view returns (bool)",
+  "event SwapOpened(bytes32 indexed swapId, address indexed initiator, address indexed recipient, uint256 amount, bytes32 hashLock, uint256 expiresAt)",
+  "event SwapClaimed(bytes32 indexed swapId, bytes preimage)",
+  "event SwapRefunded(bytes32 indexed swapId)"
+];
+
+export class SwapService {
+  constructor(providerOrSigner, contractAddress) {
+    if (!contractAddress) {
+      throw new Error('AtomicSwap contract address is required.');
+    }
+    this.contractAddress = contractAddress;
+    this.providerOrSigner = providerOrSigner;
+    this.contract = new ethers.Contract(contractAddress, ATOMIC_SWAP_ABI, providerOrSigner);
+  }
+
+  /**
+   * Opens a new hash time-locked swap (HTLC).
+   * @param {string} swapId - Unique bytes32 identifier for the swap
+   * @param {string} recipient - Recipient Ethereum address
+   * @param {string} hashLock - SHA-256 / Keccak-256 hash lock (bytes32)
+   * @param {number} lockDuration - Duration in seconds until expiration
+   * @param {string|BigInt} amount - Amount of native token to lock (in wei)
+   */
+  async createSwap(swapId, recipient, hashLock, lockDuration, amount) {
+    try {
+      logger.info({ event: 'ATOMIC_SWAP_OPEN_INIT', swapId, recipient, amount }, 'Opening atomic swap on-chain');
+      
+      const tx = await this.contract.openSwap(
+        swapId,
+        recipient,
+        hashLock,
+        lockDuration,
+        { value: amount }
+      );
+
+      const receipt = await tx.wait();
+      logger.info({ event: 'ATOMIC_SWAP_OPEN_SUCCESS', swapId, txHash: receipt.transactionHash }, 'Atomic swap opened successfully');
+      return { success: true, transactionHash: receipt.transactionHash, swapId };
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_OPEN_ERROR', swapId, error: err?.message }, 'Failed to open atomic swap');
+      throw new Error(`Failed to create swap: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Claims funds from an existing swap by revealing the preimage.
+   * @param {string} swapId - Unique bytes32 identifier for the swap
+   * @param {string|Uint8Array} preimage - Secret preimage matching the hashLock
+   */
+  async executeSwap(swapId, preimage) {
+    try {
+      logger.info({ event: 'ATOMIC_SWAP_CLAIM_INIT', swapId }, 'Claiming atomic swap on-chain');
+
+      const tx = await this.contract.claimSwap(swapId, preimage);
+      const receipt = await tx.wait();
+
+      logger.info({ event: 'ATOMIC_SWAP_CLAIM_SUCCESS', swapId, txHash: receipt.transactionHash }, 'Atomic swap claimed successfully');
+      return { success: true, transactionHash: receipt.transactionHash, swapId };
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_CLAIM_ERROR', swapId, error: err?.message }, 'Failed to claim atomic swap');
+      throw new Error(`Failed to execute swap claim: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Refunds a timed-out swap back to the initiator.
+   * @param {string} swapId - Unique bytes32 identifier for the swap
+   */
+  async refundSwap(swapId) {
+    try {
+      logger.info({ event: 'ATOMIC_SWAP_REFUND_INIT', swapId }, 'Refunding atomic swap on-chain');
+
+      const tx = await this.contract.refundSwap(swapId);
+      const receipt = await tx.wait();
+
+      logger.info({ event: 'ATOMIC_SWAP_REFUND_SUCCESS', swapId, txHash: receipt.transactionHash }, 'Atomic swap refunded successfully');
+      return { success: true, transactionHash: receipt.transactionHash, swapId };
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_REFUND_ERROR', swapId, error: err?.message }, 'Failed to refund atomic swap');
+      throw new Error(`Failed to refund swap: ${err?.message}`);
+    }
+  }
+
+  /**
+   * Retrieves swap details from the smart contract mapping.
+   * @param {string} swapId - Unique bytes32 identifier for the swap
+   */
+  async getSwap(swapId) {
+    try {
+      const swap = await this.contract.swaps(swapId);
+      if (!swap || swap.id === ethers.ZeroHash) {
+        return null;
+      }
+
+      return {
+        id: swap.id,
+        initiator: swap.initiator,
+        recipient: swap.recipient,
+        amount: swap.amount.toString(),
+        hashLock: swap.hashLock,
+        lockDuration: Number(swap.lockDuration),
+        expiresAt: Number(swap.expiresAt),
+        withdrawn: swap.withdrawn,
+        refunded: swap.refunded,
+      };
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_GET_ERROR', swapId, error: err?.message }, 'Failed to retrieve swap details');
+      return null;
+    }
+  }
+
+  /**
+   * Retrieves all swap IDs associated with a specific user address.
+   * @param {string} userAddress - Ethereum address
+   */
+  async getUserSwaps(userAddress) {
+    try {
+      return await this.contract.getUserSwaps(userAddress);
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_USER_SWAPS_ERROR', userAddress, error: err?.message }, 'Failed to fetch user swaps');
+      return [];
+    }
+  }
+
+  /**
+   * Checks if a hash lock has already been used.
+   * @param {string} hashLock - bytes32 hash lock
+   */
+  async isHashLockUsed(hashLock) {
+    try {
+      return await this.contract.usedHashLocks(hashLock);
+    } catch (err) {
+      logger.error({ event: 'ATOMIC_SWAP_HASHLOCK_CHECK_ERROR', hashLock, error: err?.message }, 'Failed to check hash lock status');
+      return false;
+    }
+  }
+}
+
+export default SwapService;
 class AtomicSwapService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);

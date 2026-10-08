@@ -5,6 +5,86 @@ import '../repositories/payment_repository.dart';
 import '../services/supabase_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'package:flutter/material.dart';
+import '../services/biometric_auth_service.dart';
+
+class PaymentMethodsScreen extends StatefulWidget {
+  const PaymentMethodsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<PaymentMethodsScreen> createState() => _PaymentMethodsScreenState();
+}
+
+class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
+  final List<Map<String, dynamic>> _paymentMethods = [
+    {'type': 'Escrow Wallet', 'details': 'Balance: ₹1,45,000 (Active)', 'isDefault': true},
+    {'type': 'Corporate Credit Card', 'details': 'HDFC Bank ending in •••• 4092', 'isDefault': false},
+  ];
+
+  void _handleSensitiveTransaction(String actionName) async {
+    // Invoke biometric auth with fallback
+    final bool authorized = await BiometricAuthService.authenticateUser(
+      context,
+      reason: 'Authorize $actionName from Truxify Escrow Account',
+    );
+
+    if (authorized) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Successfully authorized: $actionName!')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Authentication cancelled or failed.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Payments, Escrow & Wallet'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Payment Methods & Escrow Wallets',
+              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text('Manage corporate wallets, credit lines, and secure payouts.'),
+            const SizedBox(height: 24),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _paymentMethods.length,
+                itemBuilder: (context, index) {
+                  final pm = _paymentMethods[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      leading: const Icon(Icons.account_balance_wallet, size: 32),
+                      title: Text(pm['type'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(pm['details']),
+                      trailing: ElevatedButton(
+                        onPressed: () => _handleSensitiveTransaction(pm['type']),
+                        child: const Text('Withdraw / Payout'),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class PaymentMethodsScreen extends StatefulWidget {
   const PaymentMethodsScreen({super.key});

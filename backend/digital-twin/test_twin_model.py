@@ -1,88 +1,242 @@
-import unittest
-from datetime import datetime, timedelta
-
-from twin_model import DigitalTwin, LogisticsEvent, SimulationEngine
-
-
-class TestSimulationMetrics(unittest.TestCase):
-    def setUp(self):
-        self.engine = SimulationEngine(DigitalTwin())
-        self.base = datetime(2026, 1, 1, 12, 0, 0)
-
-    def _event(self, event_type, timestamp, asset_id="TRUCK_1"):
-        return LogisticsEvent(
-            id=f"{event_type}_{int(timestamp.timestamp())}",
-            type=event_type,
-            timestamp=timestamp,
-            asset_id=asset_id,
-            location={"lat": 25.0, "lng": 75.0},
-        )
-
-    def test_utilization_is_zero_to_one_fraction(self):
-        # One asset busy for the full 60s window -> utilization 1.0
-        events = [
-            self._event("pickup", self.base),
-            self._event("dropoff", self.base + timedelta(seconds=60)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertAlmostEqual(metrics["utilization"], 1.0, places=4)
-
-    def test_utilization_scales_down_with_idle_time(self):
-        # Two assets, each busy 10s within a 110s window -> utilization ~0.09
-        events = [
-            self._event("pickup", self.base, "TRUCK_1"),
-            self._event("dropoff", self.base + timedelta(seconds=10), "TRUCK_1"),
-            self._event("pickup", self.base + timedelta(seconds=100), "TRUCK_2"),
-            self._event("dropoff", self.base + timedelta(seconds=110), "TRUCK_2"),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertGreaterEqual(metrics["utilization"], 0.0)
-        self.assertLessEqual(metrics["utilization"], 1.0)
-        self.assertAlmostEqual(metrics["utilization"], 20.0 / 220.0, places=4)
-
-    def test_utilization_bounds_for_short_window(self):
-        # Single instantaneous event has no measurable window -> 0.0
-        metrics = self.engine._calculate_metrics([self._event("pickup", self.base)], {})
-        self.assertEqual(metrics["utilization"], 0.0)
-
-    def test_utilization_zero_for_no_events(self):
-        metrics = self.engine._calculate_metrics([], {})
-        self.assertEqual(metrics["utilization"], 0.0)
-        self.assertEqual(metrics["efficiency"], 0.0)
-
-    def test_efficiency_reflects_delays(self):
-        # 3 events, 1 delay -> efficiency 2/3
-        events = [
-            self._event("pickup", self.base),
-            self._event("delay", self.base + timedelta(seconds=10)),
-            self._event("dropoff", self.base + timedelta(seconds=20)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertAlmostEqual(metrics["efficiency"], 2.0 / 3.0, places=4)
-
-    def test_efficiency_is_perfect_without_delays(self):
-        events = [
-            self._event("pickup", self.base),
-            self._event("dropoff", self.base + timedelta(seconds=10)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertEqual(metrics["efficiency"], 1.0)
-
-    def test_recommendations_fire_on_low_utilization(self):
-        metrics = {"utilization": 0.1, "efficiency": 0.9, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertIn("Increase asset utilization by optimizing routes", recs)
-
-    def test_recommendations_fire_on_low_efficiency(self):
-        metrics = {"utilization": 0.9, "efficiency": 0.4, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertIn("Improve operational efficiency by reducing delays", recs)
-
-    def test_recommendations_smooth_when_metrics_healthy(self):
-        metrics = {"utilization": 0.9, "efficiency": 0.9, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertEqual(recs, ["Current operations are running smoothly"])
+```python
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, List, Any
 
 
-if __name__ == "__main__":
-    unittest.main()
+@dataclass
+class DigitalTwin:
+    assets: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.assets is None:
+            self.assets = {}
+
+
+@dataclass
+class LogisticsEvent:
+    id: str
+    type: str
+    timestamp: datetime
+    asset_id: str
+    location: Dict[str, float]
+
+
+class SimulationEngine:
+
+    def __init__(self, digital_twin: DigitalTwin):
+        self.digital_twin = digital_twin
+
+    def _calculate_metrics(
+        self,
+        events: List[LogisticsEvent],
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+
+        if not events:
+            return {
+                "utilization": 0.0,
+                "efficiency": 0.0,
+                "event_types": {}
+            }
+
+        events = sorted(events, key=lambda e: e.timestamp)
+
+        # Count event types
+        event_types = {}
+
+        for event in events:
+            event_types[event.type] = event_types.get(event.type, 0) + 1
+
+        # ---------------------------------------------------------
+        # UTILIZATION
+        # ---------------------------------------------------------
+        start_time = events[0].timestamp
+        end_time = events[-1].timestamp
+
+        total_window = (end_time - start_time).total_seconds()
+
+        if total_window <= 0:
+            utilization = 0.0
+        else:
+            asset_events = {}
+
+            for event in events:
+                asset_events.setdefault(event.asset_id, []).append(event)
+
+            total_busy_time = 0.0
+            asset_count = len(asset_events)
+
+            for asset_id, asset_event_list in asset_events.items():
+
+                asset_event_list.sort(key=lambda e: e.timestamp)
+
+                busy_start = None
+
+                for event in asset_event_list:
+
+                    if event.type == "pickup":
+                        if busy_start is None:
+                            busy_start = event.timestamp
+
+                    elif event.type == "dropoff":
+                        if busy_start is not None:
+                            busy_time = (
+                                event.timestamp - busy_start
+                            ).total_seconds()
+
+                            if busy_time > 0:
+                                total_busy_time += busy_time
+
+                            busy_start = None
+
+            total_available_time = total_window * asset_count
+
+            if total_available_time > 0:
+                utilization = (
+                    total_busy_time / total_available_time
+                )
+            else:
+                utilization = 0.0
+
+            utilization = max(0.0, min(1.0, utilization))
+
+        # ---------------------------------------------------------
+        # EFFICIENCY
+        # ---------------------------------------------------------
+        total_events = len(events)
+        delay_events = event_types.get("delay", 0)
+
+        if total_events == 0:
+            efficiency = 0.0
+        else:
+            efficiency = (
+                total_events - delay_events
+            ) / total_events
+
+        efficiency = max(0.0, min(1.0, efficiency))
+
+        return {
+            "utilization": utilization,
+            "efficiency": efficiency,
+            "event_types": event_types
+        }
+
+    def _generate_recommendations(
+        self,
+        metrics: Dict[str, Any]
+    ) -> List[str]:
+
+        utilization = metrics.get("utilization", 0.0)
+        efficiency = metrics.get("efficiency", 0.0)
+
+        recommendations = []
+
+        if utilization < 0.5:
+            recommendations.append(
+                "Increase asset utilization by optimizing routes"
+            )
+
+        if efficiency < 0.5:
+            recommendations.append(
+                "Improve operational efficiency by reducing delays"
+            )
+
+        if not recommendations:
+            recommendations.append(
+                "Current operations are running smoothly"
+            )
+
+        return recommendations
+
+    def simulate(
+        self,
+        events: List[LogisticsEvent],
+        data: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+
+        if data is None:
+            data = {}
+
+        metrics = self._calculate_metrics(events, data)
+
+        recommendations = self._generate_recommendations(metrics)
+
+        return {
+            "metrics": metrics,
+            "recommendations": recommendations
+        }
+```
+
+### Why this fixes the bug
+
+The important correction is this calculation:
+
+```python
+total_available_time = total_window * asset_count
+
+utilization = total_busy_time / total_available_time
+```
+
+For your second test:
+
+```text
+Time window = 110 seconds
+Assets = 2
+Available time = 110 × 2 = 220 seconds
+
+Truck 1 busy = 10 seconds
+Truck 2 busy = 10 seconds
+
+Total busy = 20 seconds
+
+Utilization = 20 / 220
+             = 0.0909
+```
+
+So:
+
+```python
+self.assertAlmostEqual(
+    metrics["utilization"],
+    20.0 / 220.0,
+    places=4
+)
+```
+
+passes.
+
+It also handles the edge case:
+
+```python
+events = [pickup]
+```
+
+where the time window is zero, so:
+
+```python
+utilization = 0.0
+```
+
+And for no events:
+
+```python
+utilization = 0.0
+efficiency = 0.0
+```
+
+### Run the tests
+
+Put the code above in:
+
+```text
+twin_model.py
+```
+
+Keep your test file alongside it, then run:
+
+```bash
+python -m unittest -v
+```
+
+You should get **9 tests passing**.

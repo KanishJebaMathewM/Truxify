@@ -97,7 +97,8 @@ export async function recordOtpFailure(orderId) {
     }
   }
 
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
+  // Updating an existing attempt counter does not require another map slot.
+  if (!inMemoryOtpFailedAttempts.has(orderId) && inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
     const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
     inMemoryOtpFailedAttempts.delete(oldestKey);
   }

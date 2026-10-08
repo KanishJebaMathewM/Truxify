@@ -94,7 +94,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { getAdminClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -102,11 +102,18 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(userLimiter);
 
 const adminDb = supabaseAdmin || supabase;
+// support_tickets / support_ticket_comments are authenticated/service-role
+// only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
+// anon-key client resolves every read to empty and every write to a denial.
+// User-scoped handlers query through the caller's authenticated client;
+// admin handlers use the service-role client so they can see all tickets.
+const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
@@ -127,34 +134,6 @@ const CATEGORY_MAP = {
 
 function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function parsePositiveInteger(value, fallback, field) {
-  if (value === undefined) return { value: fallback };
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return { error: `${field} must be a positive integer` };
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (parsed < 1) {
-    return { error: `${field} must be a positive integer` };
-  }
-
-  return { value: parsed };
-}
-
-function parseIntegerQuery(value, fallback, field, options = {}) {
-  if (value === undefined) return { value: fallback };
-  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
-    return { error: `${field} must be an integer` };
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (options.min !== undefined && parsed < options.min) {
-    return { error: `${field} must be at least ${options.min}` };
-  }
-
-  return { value: parsed };
 }
 
 function parseUuidQuery(value, field) {
@@ -402,15 +381,576 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
     res.status
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+// ============================================================================
+// 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}:
+ *   get:
+ *     tags: [Support]
+ *     summary: Get a single support ticket
+ *     description: Returns details of a specific support ticket. Only the ticket owner or admin can access.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Ticket details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
+router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view', async (req) => {
+  const { data: ticket } = await userDb(req)
+    .from('support_tickets')
+    .select('id, user_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), async (req, res) => {
+  const ticketId = req.params.id;
+
+  try {
+    const { data: ticket, error } = await userDb(req)
+      .from('support_tickets')
+      .select(TICKET_DETAIL_COLUMNS)
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: error.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    res.json(ticket);
+  } catch (err) {
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+// ============================================================================
+// 6. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
+// ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}:
+ *   patch:
+ *     tags: [Support]
+ *     summary: Update a support ticket
+ *     description: Updates a support ticket's subject, description, category, or status. Only ticket owner or admin can update. Non-admin users can only change status to 'closed'.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateTicketRequest'
+ *     responses:
+ *       200:
+ *         description: Ticket updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketResponse'
+ *       400:
+ *         description: Cannot update closed ticket
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
+router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:update', async (req) => {
+  const { data: ticket } = await userDb(req)
+    .from('support_tickets')
+    .select('id, user_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), validateBody(updateTicketSchema), async (req, res) => {
+  const ticketId = req.params.id;
+  const { subject, description, category, status } = req.body;
+
+  try {
+    const { data: ticket, error: fetchError } = await userDb(req)
+      .from('support_tickets')
+      .select('id, user_id, status')
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: fetchError.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    if (ticket.status === 'closed') {
+      return res.status(400).json({ error: 'Cannot update a closed ticket.' });
+    }
+
+    const isAdmin = req.user.role === 'admin';
+    const hasRestrictedOwnerUpdate = [subject, description, category].some((value) => value !== undefined);
+    if (!isAdmin && hasRestrictedOwnerUpdate) {
+      return res.status(403).json({
+        error: 'Access Denied: Only admins can update ticket content or category.',
+      });
+    }
+
+    const updates = { updated_at: new Date().toISOString() };
+
+    if (subject !== undefined) {
+      updates.subject = subject.trim();
+    }
+
+    if (description !== undefined) {
+      updates.description = description.trim();
+    }
+
+    if (category !== undefined) {
+      const normalized = category.toLowerCase().trim();
+      const dbCategory = CATEGORY_MAP[normalized];
+      if (!dbCategory) {
+        return res.status(400).json({
+          error: `Invalid category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
+        });
+      }
+      updates.category = dbCategory;
+    }
+
+    if (status !== undefined) {
+      const statusResult = parseTicketStatus(status);
+      if (statusResult.error) {
+        return res.status(400).json({ error: statusResult.error });
+      }
+
+      const normalizedStatus = statusResult.value;
+      const USER_ALLOWED_STATUSES = ['closed'];
+      if (!isAdmin && normalizedStatus !== ticket.status) {
+        if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
+          return res.status(403).json({
+            error: 'Access Denied: Only admins can change ticket status.',
+          });
+        }
+      }
+      updates.status = normalizedStatus;
+    }
+
+    const { data: updatedTicket, error: updateError } = await userDb(req)
+      .from('support_tickets')
+      .update(updates)
+      .eq('id', ticketId)
+      .select(TICKET_COLUMNS)
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({
+        error: 'Failed to update support ticket.',
+        details: updateError.message,
+      });
+    }
+
+    res.json({
+      message: 'Support ticket updated successfully.',
+      ticket: updatedTicket,
+    });
+  } catch (err) {
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+// ============================================================================
+// 7. LIST ALL TICKETS (ADMIN ONLY)
+// ============================================================================
+/**
+ * @openapi
+ * /api/support/admin/tickets:
+ *   get:
+ *     tags: [Support]
+ *     summary: List all tickets (Admin)
+ *     description: Returns all support tickets with optional filters by status, category, and user. Admin role required.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Paginated admin ticket list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketListResponse'
+ *       403:
+ *         description: Admin role required
+ */
+router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), auditLog({ action: 'ticket:admin-view-all' }), async (req, res) => {
+  const { status, category, user_id, page = '1', limit = '20' } = req.query;
+  if (page !== undefined && !/^\d+$/.test(page)) {
+    return res.status(400).json({ error: 'page must be a positive integer' });
+  }
+  if (limit !== undefined && !/^\d+$/.test(limit)) {
+    return res.status(400).json({ error: 'limit must be a positive integer' });
+  }
+  const pageNum = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
+  const offset = (pageNum - 1) * limitNum;
+
+  const userIdResult = parseUuidQuery(user_id, 'user_id');
+  if (userIdResult.error) {
+    return res.status(400).json({ error: userIdResult.error });
+  }
+
+  const statusResult = parseTicketStatus(status);
+  if (statusResult.error) {
+    return res.status(400).json({ error: statusResult.error });
+  }
+
+  try {
+    let query = adminDb
+      .from('support_tickets')
+      .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
+
+    if (statusResult.value) {
+      query = query.eq('status', statusResult.value);
+    }
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    if (userIdResult.value) {
+      query = query.eq('user_id', userIdResult.value);
+    }
+
+    const { data: tickets, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limitNum - 1);
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Failed to fetch tickets.',
+        details: error.message,
+      });
+    }
+
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
+    res.json({
+      tickets: tickets || [],
+      data: tickets || [],
+      pagination
+    });
+  } catch (err) {
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+/**
+ * @openapi
+ * /api/support/tickets/{id}/comments:
+ *   post:
+ *     tags: [Support]
+ *     summary: Add a comment to a support ticket
+ *     description: Adds a comment/reply to an existing support ticket. Only the ticket owner or admin can comment. Cannot comment on closed tickets.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateCommentRequest'
+ *     responses:
+ *       201:
+ *         description: Comment added
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CommentResponse'
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ *       409:
+ *         description: Cannot comment on closed ticket
+ */
+/**
+ * @route POST /api/support/tickets/:id/comments
+ * @desc Create a comment/reply on a support ticket
+ * @access Authenticated (Ticket Owner or Admin)
+ * @param {string} req.params.id - The UUID of the support ticket
+ * @param {string} req.body.message - Comment content/message
+ * @returns {object} 201 - Comment added successfully with comment details
+ * @returns {object} 400 - Validation errors
+ * @returns {object} 403 - Forbidden if user is not the ticket owner or admin
+ * @returns {object} 404 - Support ticket not found
+ * @returns {object} 409 - Cannot comment on a closed ticket
+ * @returns {object} 500 - Internal server error
+ */
+router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:add-comment', async (req) => {
+  const { data: ticket } = await userDb(req)
+    .from('support_tickets')
+    .select('id, user_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
+  const ticketId = req.params.id;
+  const { message } = req.body;
+
+  try {
+    const { data: ticket, error: fetchError } = await userDb(req)
+      .from('support_tickets')
+      .select('id, user_id')
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: fetchError.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    if (ticket.status === 'closed') {
+      return res.status(409).json({ error: 'Cannot comment on a closed ticket.' });
+    }
+
+    const { data: comment, error: insertError } = await userDb(req)
+      .from('support_ticket_comments')
+      .insert({
+        ticket_id: ticketId,
+        user_id: req.user.id,
+        user_name: req.user.name || 'Anonymous',
+        message: message.trim(),
+        created_at: new Date().toISOString()
+      })
+      .select('id, ticket_id, user_id, user_name, message, created_at')
+      .single();
+
+    if (insertError) {
+      return res.status(500).json({
+        error: 'Failed to add comment.',
+        details: insertError.message,
+      });
+    }
+
+    res.status(201).json({
+      message: 'Comment added successfully.',
+      comment,
+    });
+  } catch (err) {
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+// ============================================================================
+// 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
+// ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}/comments:
+ *   get:
+ *     tags: [Support]
+ *     summary: Get ticket comments
+ *     description: Returns all comments for a support ticket. Only the ticket owner or admin can view.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Array of comments
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
+router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:view-comments', async (req) => {
+  const { data: ticket } = await userDb(req)
+    .from('support_tickets')
+    .select('id, user_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(paramIdSchema), async (req, res) => {
+  const ticketId = req.params.id;
+  const { sort } = req.query;
+  const isAscending = sort !== 'desc';
+
+  try {
+    const { data: ticket, error: fetchError } = await userDb(req)
+      .from('support_tickets')
+      .select('id, user_id')
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: fetchError.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    const limitQuery = req.query.limit;
+    const offsetQuery = req.query.offset;
+
+    // Reject empty or whitespace-only strings before conversion 
+    if (typeof limitQuery === 'string' && limitQuery.trim() === '') {
+      return res.status(400).json({ error: 'limit cannot be empty' });
+    }
+    if (typeof offsetQuery === 'string' && offsetQuery.trim() === '') {
+      return res.status(400).json({ error: 'offset cannot be empty' });
+    }
+
+    const parsedLimit = limitQuery !== undefined ? Number(limitQuery) : 100;
+    const parsedOffset = offsetQuery !== undefined ? Number(offsetQuery) : 0;
+
+    if (!Number.isFinite(parsedLimit) || !Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+
+    if (!Number.isFinite(parsedOffset) || !Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    if (!Number.isFinite(parsedLimit) || !Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+
+    if (!Number.isFinite(parsedOffset) || !Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    const limit = Math.min(100, parsedLimit);
+    const offset = parsedOffset;
+
+    const { data: comments, error: commentsError } = await userDb(req)
+      .from('support_ticket_comments')
+      .select('id, ticket_id, user_id, user_name, message, created_at')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: isAscending })
+      .range(offset, offset + limit - 1);
+
+    if (commentsError) {
+      return res.status(500).json({
+        error: 'Failed to fetch comments.',
+        details: commentsError.message,
+      });
+    }
+
+    res.json(comments || []);
+  } catch (err) {
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
+  }
+});
+
+export default router;
+
+// Resolves #2055: Load-based ticket assignment

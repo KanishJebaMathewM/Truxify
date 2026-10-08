@@ -2095,7 +2095,21 @@ CREATE TRIGGER trigger_sync_wallet_tx_hash
 AFTER UPDATE OF release_tx_hash ON orders
 FOR EACH ROW
 EXECUTE FUNCTION sync_wallet_tx_hash();
-
+create table if not exists driver_details (
+  id                      uuid primary key default gen_random_uuid(),
+  user_id                 uuid not null,                            -- profiles.id (no FK)
+  truck_id                uuid,                                     -- trucks.id  (no FK)
+  rating                  numeric(3,2) not null default 0.00,       -- e.g. 4.80
+  total_trips             int not null default 0,
+  completion_rate         numeric(5,2) not null default 100.00,     -- percentage
+  is_online               boolean not null default false,
+  wallet_confirmed        int not null default 0 check (wallet_confirmed >= 0),   -- paisa
+  wallet_pending          int not null default 0 check (wallet_pending >= 0),
+  wallet_total            int not null default 0,
+  polygon_wallet_address  text,                                     -- Added to align with seed INSERT and migration schema
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now()
+);
 
 -- ============================================================================
 -- ✅ SETUP COMPLETE

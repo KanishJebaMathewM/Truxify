@@ -1,0 +1,28 @@
+name: Path Portability Guard
+
+# Linux CI cannot see paths that collide on Windows/macOS (trailing dots, case-only
+# duplicates). A stray `escrowFundingReconciliation.js.` once overwrote the real
+# module on Windows checkouts and stopped the API from booting. No paths filter on
+# purpose: any added or renamed file anywhere in the tree can introduce the problem.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  path-portability:
+    name: Reject paths that collide on Windows/macOS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tracked paths
+        run: node .github/scripts/check-path-portability.cjs
+
+      - name: Run guard unit tests
+        run: node --test .github/scripts/check-path-portability.test.cjs

@@ -7,7 +7,25 @@ import { createSocketRateLimiter } from '../../lib/socketRateLimiter.js';
 
 const OFFLINE_GPS_PAGE_SIZE = 1000;
 
-class WebRTCSignalingServer {
+export class WebRTCSignalingServer {
+  /** True when location has finite numeric lat/lng within valid ranges. */
+  static isValidLocation(location) {
+    if (!location) return false;
+    const lat = Number(location.lat);
+    const lng = Number(location.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  }
+
+  /** Coerce string lat/lng to numbers; every other property is preserved. */
+  static normalizeLocation(location) {
+    return {
+      ...location,
+      lat: Number(location.lat),
+      lng: Number(location.lng),
+    };
+  }
+
   constructor(server) {
     const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10);
     this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: Number.isFinite(MAX_WS_PAYLOAD_BYTES) ? MAX_WS_PAYLOAD_BYTES : 4096 });
@@ -221,12 +239,12 @@ class WebRTCSignalingServer {
 
     switch (message.type) {
       case 'location-update':
-        if (!this.isValidLocation(message.location)) {
+        if (!WebRTCSignalingServer.isValidLocation(message.location)) {
           logger.warn(`Invalid WebRTC location update dropped for peer ${peerId}`);
           return;
         }
 
-        peer.location = this.normalizeLocation(message.location);
+        peer.location = WebRTCSignalingServer.normalizeLocation(message.location);
         if (this.redis) {
           await this.redis.setex(
             `peer:${peerId}:location`,
@@ -281,7 +299,7 @@ class WebRTCSignalingServer {
     const relayRadius = this.locationRelayRadius || 50;
     const maxRadius = this.maxRelayRadius || 200;
 
-    const sourceLoc = peer.location || (this.isValidLocation(location) ? this.normalizeLocation(location) : null);
+    const sourceLoc = peer.location || (WebRTCSignalingServer.isValidLocation(location) ? WebRTCSignalingServer.normalizeLocation(location) : null);
 
     for (const targetPeerId of peersInMesh) {
       if (targetPeerId === peerId) continue;
@@ -331,7 +349,7 @@ class WebRTCSignalingServer {
   getDisclosedLocation(sourceLocation, recipientLocation, relayRadius, maxRadius) {
     if (!sourceLocation) return null;
 
-    if (recipientLocation && this.isValidLocation(recipientLocation) && this.isValidLocation(sourceLocation)) {
+    if (recipientLocation && WebRTCSignalingServer.isValidLocation(recipientLocation) && WebRTCSignalingServer.isValidLocation(sourceLocation)) {
       const distance = this.calculateDistance(
         sourceLocation.lat,
         sourceLocation.lng,
@@ -370,7 +388,7 @@ class WebRTCSignalingServer {
   }
 
   async handleGPSData(peerId, data) {
-    if (!data || typeof data !== 'object' || !this.isValidLocation(data.location)) {
+    if (!data || typeof data !== 'object' || !WebRTCSignalingServer.isValidLocation(data.location)) {
       logger.warn(`Invalid WebRTC GPS payload dropped for peer ${peerId}`);
       return;
     }
@@ -387,7 +405,7 @@ class WebRTCSignalingServer {
 
     const normalizedData = {
       ...data,
-      location: this.normalizeLocation(data.location)
+      location: WebRTCSignalingServer.normalizeLocation(data.location)
     };
 
     // Store GPS data in MongoDB with offline sync flag
@@ -548,7 +566,7 @@ class WebRTCSignalingServer {
           peer.userId === requestingUser.id &&
           peer.meshId &&
           peer.location &&
-          this.isValidLocation(peer.location),
+          WebRTCSignalingServer.isValidLocation(peer.location),
       );
 
       if (requestingPeers.length === 0) {

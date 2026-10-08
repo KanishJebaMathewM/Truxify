@@ -28,12 +28,12 @@ unsupported; ownership begins with the completed private snapshot.
 
 ## Supported contract and limits
 
-- A list/tuple of at most64 compatible strided tensors, with identical shape,
+- A list/tuple of at most 64 compatible strided tensors, with identical shape,
   device and dtype; empty collections and empty/scalar tensors are supported.
-- Real float16, bfloat16, float32 and float64 on CPU/CUDA. CPU Torch2.8.0 is
+- Real float16, bfloat16, float32 and float64 on CPU/CUDA. CPU Torch 2.8.0 is
   natively verified; CUDA is admitted but not exercised by this CPU workflow.
   MPS/meta/sparse/complex/integer and mixed layouts/types are rejected.
-- At most8million total input coordinates and128million ordered pair-coordinate
+- At most 8 million total input coordinates and 128 million ordered pair-coordinate
   operations. These are library work policies, not measured latency guarantees.
 - Ordinary binary floating rounding remains. Near-cancelling dots and coordinates
   beyond float64's relative dynamic range can lose information; this is not exact
@@ -46,7 +46,7 @@ unsupported; ownership begins with the completed private snapshot.
 
 ## Native verification
 
-`test_pcgrad_dynamic_range.py` compares220 seeded pairs across11 dtype/scale
+`test_pcgrad_dynamic_range.py` compares 220 seeded pairs across 11 dtype/scale
 combinations with exact binary Fraction projections, normalized at output to
 prevent tiny-value absolute tolerance from hiding a wrong result. Independent
 analytic/three-task controls, noncontiguous singleton ownership, work/type/finite

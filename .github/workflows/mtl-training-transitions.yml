@@ -28,8 +28,8 @@ jobs:
         env:
           PYTHONPATH: backend/ml
           OMP_NUM_THREADS: '1'
-        run: python -m pytest -q backend/ml/tests/test_mtl_training_transition.py backend/ml/tests/test_mtl_checkpoint_generation.py backend/ml/tests/test_mtl_classification_logits.py backend/ml/tests/test_mtl_target_pipeline.py backend/ml/tests/test_mtl.py -k 'not test_mtl_init'
+        run: python -m pytest -q backend/ml/tests/test_mtl_training_transition.py backend/ml/tests/test_pcgrad_parameter_layout.py backend/ml/tests/test_mtl_checkpoint_generation.py backend/ml/tests/test_mtl_classification_logits.py backend/ml/tests/test_mtl_target_pipeline.py backend/ml/tests/test_mtl.py -k 'not test_mtl_init'
       - name: Source analysis
         run: |
           python -m ruff check backend/ml/mtl/training_transition.py backend/ml/tests/test_mtl_training_transition.py
-          python -m ruff check backend/ml/mtl/model.py backend/ml/routes/mtl_routes.py --select E9,F63,F7,F82,I,F401
+          python -m ruff check backend/ml/mtl/model.py backend/ml/routes/mtl_routes.py backend/ml/tests/test_pcgrad_parameter_layout.py --select E9,F63,F7,F82,I,F401

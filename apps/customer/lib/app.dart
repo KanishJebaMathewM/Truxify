@@ -1,13 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:truxify/l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
 import 'l10n/app_localizations.dart' as app_loc;
 import 'providers/language_provider.dart';
 import 'screens/public_tracking_screen.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
+import 'package:flutter/material.dart';
+import 'config/routes.dart';
 
+class TruxifyCustomerApp extends StatelessWidget {
+  const TruxifyCustomerApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: 'Truxify Customer Logistics',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      routerConfig: AppRouter.router,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
 class TruxifyApp extends StatefulWidget {
   const TruxifyApp({super.key, this.languageProvider});
   final LanguageProvider? languageProvider;
@@ -87,6 +105,8 @@ class _TruxifyAppState extends State<TruxifyApp> {
                 Locale('en'),
                 Locale('hi'),
                 Locale('ta'),
+                Locale('kn'),
+                Locale('mr'),
               ],
               home: const SplashScreen(),
             );

@@ -3,6 +3,9 @@ import express from 'express';
 import request from 'supertest';
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   createUserClient: vi.fn(() => ({
     from: vi.fn(() => ({
       select: vi.fn(() => ({

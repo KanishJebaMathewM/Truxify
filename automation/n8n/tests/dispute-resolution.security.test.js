@@ -50,131 +50,125 @@ function nodeSource(node) {
   return JSON.stringify(node);
 }
 
-let failures = 0;
-function test(title, fn) {
-  try {
-    fn();
-    console.log(`PASS: ${title}`);
-  } catch (err) {
-    failures++;
-    console.error(`FAILED: ${title}\n  ${err.message}`);
-  }
-}
+describe("Dispute Resolution Workflow — Security Audit (#13111)", () => {
+  // ─── 1. Webhooks reject unauthenticated POSTs ───────────────────────────────
 
-// ─── 1. Webhooks reject unauthenticated POSTs ────────────────────────────────
+  test("workflow still exposes the two dispute webhooks", () => {
+    const webhooks = nodesOfType(WEBHOOK_TYPE);
+    const paths = webhooks.map((n) => n.parameters.path).sort();
+    assert.deepStrictEqual(
+      paths,
+      ["admin-resolution", "dispute-trigger"],
+      "expected exactly the dispute-trigger and admin-resolution webhooks"
+    );
+  });
 
-test("workflow still exposes the two dispute webhooks", () => {
-  const webhooks = nodesOfType(WEBHOOK_TYPE);
-  const paths = webhooks.map((n) => n.parameters.path).sort();
-  assert.deepStrictEqual(
-    paths,
-    ["admin-resolution", "dispute-trigger"],
-    "expected exactly the dispute-trigger and admin-resolution webhooks",
-  );
-});
+  test("every webhook declares an authentication method (no anonymous POSTs)", () => {
+    for (const node of nodesOfType(WEBHOOK_TYPE)) {
+      const auth = node.parameters.authentication;
+      assert.ok(
+        auth && auth !== "none",
+        `webhook '${node.name}' (path '${node.parameters.path}') has no authentication — ` +
+          `anyone who can reach the n8n URL can trigger it`
+      );
+    }
+  });
 
-test("every webhook declares an authentication method (no anonymous POSTs)", () => {
-  for (const node of nodesOfType(WEBHOOK_TYPE)) {
-    const auth = node.parameters.authentication;
+  test("every webhook binds a credential for the auth method it declares", () => {
+    const credentialForAuth = {
+      headerAuth: "httpHeaderAuth",
+      basicAuth: "httpBasicAuth",
+      jwtAuth: "jwtAuth",
+    };
+    for (const node of nodesOfType(WEBHOOK_TYPE)) {
+      const auth = node.parameters.authentication;
+      const expected = credentialForAuth[auth];
+      assert.ok(expected, `webhook '${node.name}' uses unknown auth method '${auth}'`);
+      assert.ok(
+        node.credentials && node.credentials[expected],
+        `webhook '${node.name}' declares '${auth}' but binds no '${expected}' credential — ` +
+          `n8n would fail open at import time`
+      );
+    }
+  });
+
+  // ─── 2. The escrow payee is never caller-supplied ───────────────────────────
+
+  test("Release Escrow Payment does not forward a caller-supplied recipient", () => {
+    const release = nodeByName("Release Escrow Payment");
+    assert.ok(release, "Release Escrow Payment node must exist");
+
+    const names = bodyParameters(release).map((p) => p.name);
     assert.ok(
-      auth && auth !== "none",
-      `webhook '${node.name}' (path '${node.parameters.path}') has no authentication — ` +
-        `anyone who can reach the n8n URL can trigger it`,
+      !names.includes("recipient"),
+      `Release Escrow Payment sends a 'recipient' body parameter (${names.join(", ")}). ` +
+        `releasePayment(bookingId) pays booking.driver, bound at deposit time — ` +
+        `a request-supplied recipient can only redirect funds`
     );
-  }
-});
-
-test("every webhook binds a credential for the auth method it declares", () => {
-  const credentialForAuth = {
-    headerAuth: "httpHeaderAuth",
-    basicAuth: "httpBasicAuth",
-    jwtAuth: "jwtAuth",
-  };
-  for (const node of nodesOfType(WEBHOOK_TYPE)) {
-    const auth = node.parameters.authentication;
-    const expected = credentialForAuth[auth];
-    assert.ok(expected, `webhook '${node.name}' uses unknown auth method '${auth}'`);
-    assert.ok(
-      node.credentials && node.credentials[expected],
-      `webhook '${node.name}' declares '${auth}' but binds no '${expected}' credential — ` +
-        `n8n would fail open at import time`,
+    assert.deepStrictEqual(
+      names,
+      ["bookingId"],
+      "escrow release must be identified by bookingId alone"
     );
-  }
-});
+  });
 
-// ─── 2. The escrow payee is never caller-supplied ────────────────────────────
+  test("no node anywhere derives a payout address from the request body", () => {
+    const forbidden =
+      /\$json\.body\.(recipient|payee|destination|to(?:Address)?|wallet(?:Address)?)\b/;
+    for (const node of workflow.nodes) {
+      const match = nodeSource(node).match(forbidden);
+      assert.ok(
+        !match,
+        `node '${node.name}' reads a payout address from the request body (${
+          match && match[0]
+        }) — ` +
+          `escrow destinations must come from the on-chain booking, not the caller`
+      );
+    }
+  });
 
-test("Release Escrow Payment does not forward a caller-supplied recipient", () => {
-  const release = nodeByName("Release Escrow Payment");
-  assert.ok(release, "Release Escrow Payment node must exist");
+  // ─── 3. Fund-moving calls authenticate to the backend ──────────────────────
 
-  const names = bodyParameters(release).map((p) => p.name);
-  assert.ok(
-    !names.includes("recipient"),
-    `Release Escrow Payment sends a 'recipient' body parameter (${names.join(", ")}). ` +
-      `releasePayment(bookingId) pays booking.driver, bound at deposit time — ` +
-      `a request-supplied recipient can only redirect funds`,
-  );
-  assert.deepStrictEqual(
-    names,
-    ["bookingId"],
-    "escrow release must be identified by bookingId alone",
-  );
-});
+  test("every fund-moving HTTP node authenticates to the backend", () => {
+    const moving = nodesOfType(HTTP_TYPE).filter(movesFunds);
+    assert.ok(moving.length > 0, "expected at least one fund-moving HTTP node");
 
-test("no node anywhere derives a payout address from the request body", () => {
-  const forbidden = /\$json\.body\.(recipient|payee|destination|to(?:Address)?|wallet(?:Address)?)\b/;
-  for (const node of workflow.nodes) {
-    const match = nodeSource(node).match(forbidden);
-    assert.ok(
-      !match,
-      `node '${node.name}' reads a payout address from the request body (${match && match[0]}) — ` +
-        `escrow destinations must come from the on-chain booking, not the caller`,
-    );
-  }
-});
+    for (const node of moving) {
+      assert.strictEqual(
+        node.parameters.authentication,
+        "genericCredentialType",
+        `'${node.name}' calls ${node.parameters.url} without authentication — ` +
+          `the backend cannot re-authorize an anonymous caller`
+      );
+      assert.strictEqual(
+        node.parameters.genericAuthType,
+        "httpHeaderAuth",
+        `'${node.name}' must authenticate with the x-api-key header credential (requireApiKey)`
+      );
+      assert.ok(
+        node.credentials && node.credentials.httpHeaderAuth,
+        `'${node.name}' declares header auth but binds no httpHeaderAuth credential`
+      );
+    }
+  });
 
-// ─── 3. Fund-moving calls authenticate to the backend ────────────────────────
+  // ─── 4. Graph integrity ─────────────────────────────────────────────────────
 
-test("every fund-moving HTTP node authenticates to the backend", () => {
-  const moving = nodesOfType(HTTP_TYPE).filter(movesFunds);
-  assert.ok(moving.length > 0, "expected at least one fund-moving HTTP node");
-
-  for (const node of moving) {
-    assert.strictEqual(
-      node.parameters.authentication,
-      "genericCredentialType",
-      `'${node.name}' calls ${node.parameters.url} without authentication — ` +
-        `the backend cannot re-authorize an anonymous caller`,
-    );
-    assert.strictEqual(
-      node.parameters.genericAuthType,
-      "httpHeaderAuth",
-      `'${node.name}' must authenticate with the x-api-key header credential (requireApiKey)`,
-    );
-    assert.ok(
-      node.credentials && node.credentials.httpHeaderAuth,
-      `'${node.name}' declares header auth but binds no httpHeaderAuth credential`,
-    );
-  }
-});
-
-// ─── 4. Graph integrity ──────────────────────────────────────────────────────
-
-test("every connection source and target references an existing node", () => {
-  const nodeNames = new Set(workflow.nodes.map((n) => n.name));
-  for (const [source, outputs] of Object.entries(workflow.connections)) {
-    assert.ok(nodeNames.has(source), `connection source '${source}' must be a real node`);
-    for (const branch of outputs.main || []) {
-      for (const edge of branch) {
-        assert.ok(nodeNames.has(edge.node), `connection target '${edge.node}' must be a real node`);
+  test("every connection source and target references an existing node", () => {
+    const nodeNames = new Set(workflow.nodes.map((n) => n.name));
+    for (const [source, outputs] of Object.entries(workflow.connections)) {
+      assert.ok(
+        nodeNames.has(source),
+        `connection source '${source}' must be a real node`
+      );
+      for (const branch of outputs.main || []) {
+        for (const edge of branch) {
+          assert.ok(
+            nodeNames.has(edge.node),
+            `connection target '${edge.node}' must be a real node`
+          );
+        }
       }
     }
-  }
+  });
 });
-
-if (failures > 0) {
-  console.error(`\n${failures} security check(s) failed`);
-  process.exit(1);
-}
-console.log("\nAll security checks passed");

@@ -18,17 +18,18 @@ class ETAPredictor:
         self.model = None
 
     def generate_synthetic_data(self, n=1000):
-        np.random.seed(42)
+        # Own the stream per invocation while preserving legacy seed42 draws.
+        rng = np.random.RandomState(42)
 
-        distance = np.random.uniform(5, 1200, n)
-        time_of_day = np.random.randint(0, 24, n)
-        day_of_week = np.random.randint(0, 7, n)
-        route_type = np.random.choice([0, 1], n)
+        distance = rng.uniform(5, 1200, n)
+        time_of_day = rng.randint(0, 24, n)
+        day_of_week = rng.randint(0, 7, n)
+        route_type = rng.choice([0, 1], n)
 
         historical_speed = np.where(
             route_type == 1,
-            np.random.uniform(55, 85, n),
-            np.random.uniform(20, 45, n),
+            rng.uniform(55, 85, n),
+            rng.uniform(20, 45, n),
         )
 
         traffic_factor = np.where(
@@ -41,7 +42,7 @@ class ETAPredictor:
         weekend_factor = np.where(day_of_week >= 5, 1.1, 1.0)
 
         eta = (distance / historical_speed) * 60 * traffic_factor * weekend_factor
-        eta += np.random.normal(0, 10, n)
+        eta += rng.normal(0, 10, n)
 
         X = np.column_stack([
             distance,

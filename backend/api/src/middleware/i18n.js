@@ -19,6 +19,15 @@ const translationCache = {};
 function loadLocaleDictionary(locale) {
   if (translationCache[locale]) {
     return translationCache[locale];
+const enDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
+  } catch (err) {
+    logger.warn(
+      { event: 'I18N_LOCALE_LOAD_ERROR', locale: 'en', error: err && err.message },
+      '[i18n] Failed to load en.json locale, falling back to empty object'
+    );
+    return {};
   }
 
   try {
@@ -92,8 +101,37 @@ export function i18n(defaultLang = DEFAULT_LOCALE) {
       req.locale = DEFAULT_LOCALE;
       req.t = (key) => key;
       next();
+    logger.warn(
+      { event: 'I18N_LOCALE_LOAD_ERROR', locale: 'es', error: err && err.message },
+      '[i18n] Failed to load es.json locale, falling back to empty object'
+    );
+    return {};
+  }
+})();
+
+i18next
+  .use(middleware.LanguageDetector)
+  .init({
+    preload: ['en', 'es'],
+    fallbackLng: 'en',
+    resources: {
+      en: { translation: enDict },
+      es: { translation: esDict }
+    }
+  });
+
+export const errorTranslationInterceptor = (req, res, next) => {
+  const originalJson = res.json;
+  res.json = function(body) {
+    if (body !== null && body && typeof body === 'object' && typeof body.error === 'string') {
+      const translated = req.t(body.error, { defaultValue: body.error });
+      body.error = translated;
     }
   };
 }
 
 export default i18n;
+  next();
+};
+
+export default errorTranslationInterceptor;

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +12,9 @@ import 'battery_service.dart';
 import 'location_replay_service.dart';
 import 'offline_location_queue.dart';
 import 'secure_storage.dart';
+
+/// WebSocket connection lifecycle for the driver location channel.
+enum WsConnectionStatus { connecting, connected, disconnected }
 
 /// Outcome of a location ping attempt.
 ///
@@ -193,6 +198,23 @@ class LocationService {
         return false;
       }
     };
+    _replayService.sendSyncLocations = 
+        ({required locations, required token}) async {
+      try {
+        final url = Uri.parse('$defaultApiBaseUrl/api/devices/locations/sync');
+        final response = await http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({'locations': locations}),
+        );
+        return response.statusCode >= 200 && response.statusCode < 300;
+      } catch (_) {
+        return false;
+      }
+    };
     _replayService.tokenProvider =
         () => Supabase.instance.client.auth.currentSession?.accessToken;
     _replayService.driverIdProvider =
@@ -247,6 +269,25 @@ class LocationService {
     });
   }
 
+  /// Fallback heartbeat: re-send the last known position when nothing went
+  /// out within [_maxInterval]. Serialized with position-stream sends and
+  /// re-checks the throttle so it never duplicates a recent ping (#13955).
+  Future<void> _sendFallbackPing() async {
+    await _serializeSend(() async {
+      if (!_isTracking) return;
+      final last = _lastSentPosition;
+      if (last == null) return;
+      final lastTime = _lastSentTime;
+      if (lastTime != null && DateTime.now().difference(lastTime) < _maxInterval) return;
+      final result = await _sendLocationPing(last);
+      if (result == LocationDelivery.delivered ||
+          result == LocationDelivery.queued) {
+        _lastSentTime = DateTime.now();
+      }
+    });
+  }
+
+
   Future<void> _handleLocationUpdate(Position position) async {
     // Drop stale/cached fixes: Geolocator routinely re-emits the last-known
     // position with an old `timestamp` (after startup, GPS loss, or waking from
@@ -263,18 +304,6 @@ class LocationService {
       return;
     }
 
-    // Implement displacement-based throttling
-    if (_lastSentPosition == null) {
-      // First position, always send
-      final result = await _sendLocationPing(position);
-      if (result == LocationDelivery.delivered ||
-          result == LocationDelivery.queued) {
-        _lastSentTime = DateTime.now();
-      }
-    });
-  }
-
-  Future<void> _handleLocationUpdate(Position position) async {
     // Serialize the throttle decision + send + state update so two concurrent
     // updates (or the fallback timer) cannot both read the same stale throttle
     // state and both pass the check (issue #13955).
@@ -620,7 +649,7 @@ class LocationService {
         _wsAuthenticated = false;
         final token = await _resolveAuthToken();
         if (token != null && token.isNotEmpty) {
-          ws.send({'event': 'auth', 'data': {'token': token}});
+          _resilientWs?.send({'event': 'auth', 'data': {'token': token}});
         }
       },
       urlFactory: () => _buildWsUri().toString(),
@@ -690,8 +719,4 @@ class LocationService {
     _resilientWs = null;
   }
 
-  void stopTracking() {
-    _timer?.cancel();
-    _socket?.disconnect();
-  }
 }

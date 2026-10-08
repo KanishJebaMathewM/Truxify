@@ -1,29 +1,250 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify/widgets/order_card.dart';
-import 'package:truxify_shared/truxify_shared.dart';
 
-import '../constants/supabase_config.dart';
-import '../l10n/app_localizations.dart';
-import '../services/order_service.dart';
-import '../services/supabase_service.dart';
-import '../controllers/app_controller.dart';
-import '../core/offline/cache/cache_manager.dart';
+import '../../models/app_models.dart';
 import '../models/app_models.dart';
-import '../theme/app_theme.dart';
-import '../widgets/app_page_route.dart';
-import '../widgets/order_search_bar.dart';
+import '../services/order_service.dart';
+import '../utils/driver_utils.dart';
+import '../widgets/order_card.dart';
 import 'live_tracking_screen.dart';
 import 'order_detail_screen.dart';
-import 'package:flutter/foundation.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
-import '../utils/driver_utils.dart';
 
+class DesktopOrdersTable extends StatefulWidget {
+  const DesktopOrdersTable({
+    super.key,
+    required this.orders,
+    required this.onOrderTap,
+  });
+
+  final List<HistoryOrderData> orders;
+  final ValueChanged<HistoryOrderData> onOrderTap;
+
+  @override
+  State<DesktopOrdersTable> createState() => _DesktopOrdersTableState();
+}
+
+class _DesktopOrdersTableState extends State<DesktopOrdersTable> {
+  int? _sortColumnIndex;
+  bool _sortAscending = true;
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'active':
+        return Colors.blue;
+      case 'pending':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _statusBadge(String status) {
+    final color = _getStatusColor(status);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        status,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  void _sortByOrderId(int columnIndex, bool ascending) {
+    setState(() {
+      _sortColumnIndex = columnIndex;
+      _sortAscending = ascending;
+
+      widget.orders.sort((a, b) {
+        final result = a.orderId.compareTo(b.orderId);
+        return ascending ? result : -result;
+      });
+    });
+  }
+
+  void _sortByRoute(int columnIndex, bool ascending) {
+    setState(() {
+      _sortColumnIndex = columnIndex;
+      _sortAscending = ascending;
+
+      widget.orders.sort((a, b) {
+        final result = a.route.compareTo(b.route);
+        return ascending ? result : -result;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.orders.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(40),
+          child: Text(
+            'No orders found',
+            style: TextStyle(fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            sortColumnIndex: _sortColumnIndex,
+            sortAscending: _sortAscending,
+            showCheckboxColumn: false,
+
+            columns: [
+              DataColumn(
+                label: const Text(
+                  'Order ID',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                onSort: _sortByOrderId,
+              ),
+              DataColumn(
+                label: const Text(
+                  'Route',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                onSort: _sortByRoute,
+              ),
+              const DataColumn(
+                label: Text(
+                  'Vehicle',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const DataColumn(
+                label: Text(
+                  'Cargo',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const DataColumn(
+                label: Text(
+                  'Status',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const DataColumn(
+                label: Text(
+                  'Amount',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const DataColumn(
+                label: Text(
+                  'Actions',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+
+            rows: widget.orders.map((order) {
+              return DataRow(
+                onSelectChanged: (_) {
+                  widget.onOrderTap(order);
+                },
+                cells: [
+                  DataCell(
+                    Text(
+                      order.orderId,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+
+                  DataCell(
+                    SizedBox(
+                      width: 250,
+                      child: Text(
+                        order.route,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+
+                  DataCell(
+                    Text(order.truckNumber),
+                  ),
+
+                  DataCell(
+                    Text(
+                      order.goodsType ?? '—',
+                    ),
+                  ),
+
+                  DataCell(
+                    _statusBadge(order.status),
+                  ),
+
+                  DataCell(
+                    Text(order.amount),
+                  ),
+
+                  DataCell(
+                    IconButton(
+                      tooltip: 'View order',
+                      icon: const Icon(
+                        Icons.visibility_outlined,
+                      ),
+                      onPressed: () {
+                        widget.onOrderTap(order);
+                      },
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mobile orders screen: Active and History tabs backed by OrderService.
 class OrdersScreen extends StatefulWidget {
-  final OrderService? orderService;
   const OrdersScreen({super.key, this.orderService});
+
+  /// Injectable for tests; defaults to a real OrderService.
+  final OrderService? orderService;
 
   @override
   State<OrdersScreen> createState() => _OrdersScreenState();
@@ -33,626 +254,139 @@ class _OrdersScreenState extends State<OrdersScreen>
     with SingleTickerProviderStateMixin {
   late final OrderService _orderService;
   late final TabController _tabController;
-  TruxifyController? _controller;
-  final TextEditingController _searchController = TextEditingController();
-  bool _isSearching = false;
-  String _searchQuery = '';
-  final CacheManager _cacheManager = CacheManager();
-  bool _isOffline = false;
-  String? _lastUpdatedLabel;
-  List<ActiveOrderData> _activeOrders = [];
-  List<HistoryOrderData> _historyOrders = [];
-  bool _isLoading = true;
-
-  // Advanced filter & sort state
-  String _selectedStatusFilter = 'All Trips';
-  final List<String> _statusFilterOptions = [
-    'All Trips',
-    'Pending',
-    'Accepted',
-    'In Transit',
-    'Delivered',
-    'Cancelled',
-  ];
-
-  DateTime? _startDate;
-  DateTime? _endDate;
-  String _selectedSort = 'Newest';
-  final List<String> _sortOptions = ['Newest', 'Oldest'];
-
-  void _resetFilters() {
-    setState(() {
-      _selectedStatusFilter = 'All Trips';
-      _startDate = null;
-      _endDate = null;
-      _selectedSort = 'Newest';
-      _searchQuery = '';
-      _searchController.clear();
-    });
-  }
-
-  String _formatStatus(String status) {
-    switch (status) {
-      case 'driver_assigned':
-      case 'accepted':
-        return 'Accepted';
-      case 'in_transit':
-        return 'In Transit';
-      case 'payment_released':
-      case 'completed':
-      case 'delivered':
-        return 'Delivered';
-      case 'cancelled':
-        return 'Cancelled';
-      case 'pending':
-        return 'Pending';
-      default:
-        return status
-            .split('_')
-            .map((word) => word.isEmpty
-                ? word
-                : '${word[0].toUpperCase()}${word.substring(1)}')
-            .join(' ');
-    }
-  }
+  late final Future<List<Map<String, dynamic>>> _activeFuture;
+  late final Future<List<Map<String, dynamic>>> _historyFuture;
 
   @override
   void initState() {
     super.initState();
-
     _orderService = widget.orderService ?? OrderService();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(_onTabChanged);
-    _loadOrders();
-    _subscribeToOrdersListUpdates();
-  }
-
-  String _formatLastUpdated(String? updatedAt) {
-    final lastUpdated = updatedAt != null ? DateTime.tryParse(updatedAt) : null;
-    return DateFormatter.formatRelativeTime(lastUpdated);
-  }
-
-  String _resolveDriverName(Map<String, dynamic> order) {
-    return DriverUtils.resolveDriverName(order);
-  }
-
-  Future<void> _loadOrders() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity.isNotEmpty &&
-        !connectivity.contains(ConnectivityResult.none);
-
-    if (!kIsWeb) {
-      await _cacheManager.open();
-    }
-
-    try {
-      if (hasNetwork) {
-        final activeOrders = await _orderService.fetchActiveOrders();
-        final historyOrders = await _orderService.fetchHistoryOrders();
-
-        String? updatedAt;
-
-        if (!kIsWeb) {
-          await _cacheManager.cacheOrders([
-            ...activeOrders,
-            ...historyOrders,
-          ]);
-
-          updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
-        }
-
-        if (!mounted) return;
-
-        setState(() {
-          _isOffline = false;
-          _isLoading = false;
-          _lastUpdatedLabel = updatedAt;
-
-          _activeOrders = activeOrders.map((order) {
-            return ActiveOrderData(
-              orderId: order['order_display_id']?.toString() ?? '',
-              route:
-                  '${order['pickup_address']} → ${order['drop_address']}',
-              driver: _resolveDriverName(order),
-              milestone:
-                  _formatStatus(order['status']?.toString() ?? 'pending'),
-              eta: order['eta']?.toString() ?? '',
-              status:
-                  _formatStatus(order['status']?.toString() ?? 'pending'),
-            );
-          }).toList();
-
-          _historyOrders = historyOrders.map((order) {
-            final rawAmount = order['total_amount'] ?? 0;
-            final amountInRupees = (rawAmount is num)
-                ? (rawAmount / 100).toStringAsFixed(2)
-                : rawAmount.toString();
-            return HistoryOrderData(
-              orderId: order['order_display_id']?.toString() ?? '',
-              route:
-                  '${order['pickup_address']} → ${order['drop_address']}',
-              date: order['pickup_date']?.toString() ?? '',
-              amount: '₹$amountInRupees',
-              status: _formatStatus(
-                  order['status']?.toString() ?? 'completed'),
-              driver: _resolveDriverName(order),
-              truckNumber: order['truck_number']?.toString().trim().isNotEmpty == true
-                  ? order['truck_number'].toString().trim()
-                  : '—',
-              timeline: const [],
-              goodsType: order['goods_type']?.toString(),
-              weightTonnes: order['weight_tonnes']?.toString(),
-              dimensions: (order['length_ft'] != null && order['width_ft'] != null && order['height_ft'] != null)
-                  ? '${order['length_ft']} × ${order['width_ft']} × ${order['height_ft']}'
-                  : null,
-              isStackable: order['is_stackable'] as bool?,
-              isFragile: order['is_fragile'] as bool?,
-              specialRequirements: order['special_requirements']?.toString(),
-              pickupLat: (order['pickup_lat'] as num?)?.toDouble(),
-              pickupLng: (order['pickup_lng'] as num?)?.toDouble(),
-              dropLat: (order['drop_lat'] as num?)?.toDouble(),
-              dropLng: (order['drop_lng'] as num?)?.toDouble(),
-            );
-          }).toList();
-        });
-      } else {
-        if (!kIsWeb) {
-          final cachedOrders = await _cacheManager.getOrders(limit: 50);
-          final updatedAt =
-              await _cacheManager.getLastUpdatedLabel('orders');
-
-          if (!mounted) return;
-
-          const activeStatuses = {
-            'pending',
-            'active',
-            'driver_assigned',
-            'truck_assigned',
-            'en_route_pickup',
-            'arrived_pickup',
-            'picked_up',
-            'in_transit',
-            'arriving',
-          };
-
-          final activeRaw = cachedOrders
-              .where((o) => activeStatuses.contains(o['status']?.toString()))
-              .toList();
-          final historyRaw = cachedOrders
-              .where((o) => !activeStatuses.contains(o['status']?.toString()))
-              .toList();
-
-          setState(() {
-            _isOffline = true;
-            _isLoading = false;
-            _lastUpdatedLabel = updatedAt;
-
-            _activeOrders = activeRaw.map((order) {
-              return ActiveOrderData(
-                orderId: order['order_display_id']?.toString() ?? '',
-                route:
-                    '${order['pickup_address']} → ${order['drop_address']}',
-                driver: _resolveDriverName(order),
-                milestone:
-                    _formatStatus(order['status']?.toString() ?? 'pending'),
-                eta: order['eta']?.toString() ?? '',
-                status:
-                    _formatStatus(order['status']?.toString() ?? 'pending'),
-              );
-            }).toList();
-
-            _historyOrders = historyRaw.map((order) {
-              final rawAmount = order['total_amount'] ?? 0;
-              final amountInRupees = (rawAmount is num)
-                  ? (rawAmount / 100).toStringAsFixed(2)
-                  : rawAmount.toString();
-              return HistoryOrderData(
-                orderId: order['order_display_id']?.toString() ?? '',
-                route:
-                    '${order['pickup_address']} → ${order['drop_address']}',
-                date: order['pickup_date']?.toString() ?? '',
-                amount: '₹$amountInRupees',
-                status: _formatStatus(
-                    order['status']?.toString() ?? 'completed'),
-                driver: _resolveDriverName(order),
-                truckNumber: order['truck_number']?.toString().trim().isNotEmpty == true
-                    ? order['truck_number'].toString().trim()
-                    : '—',
-                timeline: const [],
-                goodsType: order['goods_type']?.toString(),
-                weightTonnes: order['weight_tonnes']?.toString(),
-                dimensions: (order['length_ft'] != null && order['width_ft'] != null && order['height_ft'] != null)
-                    ? '${order['length_ft']} × ${order['width_ft']} × ${order['height_ft']}'
-                    : null,
-                isStackable: order['is_stackable'] as bool?,
-                isFragile: order['is_fragile'] as bool?,
-                specialRequirements: order['special_requirements']?.toString(),
-              );
-            }).toList();
-          });
-        } else {
-          if (!mounted) return;
-
-          setState(() {
-            _isOffline = true;
-            _isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Failed to load orders: $e');
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final controller = TruxifyScope.of(context);
-    _controller = controller;
-
-    if (controller.currentTab != 2) {
-      if (_selectedStatusFilter != 'All Trips') {
-        _selectedStatusFilter = 'All Trips';
-      }
-    }
-
-    if (_tabController.index != controller.ordersTabIndex &&
-        !_tabController.indexIsChanging) {
-      _tabController.animateTo(controller.ordersTabIndex);
-    }
-  }
-
-  RealtimeChannel? _ordersChannel;
-
-  void _subscribeToOrdersListUpdates() {
-    if (!SupabaseConfig.isConfigured) return;
-    
-    final userId = SupabaseService.currentUserId;
-    if (userId == null) return;
-
-    _ordersChannel = Supabase.instance.client
-        .channel('customer_orders_list_$userId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'orders',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'customer_id',
-            value: userId,
-          ),
-          callback: (payload) {
-            debugPrint('Realtime customer orders list update: ${payload.newRecord}');
-            if (!mounted) return;
-            _loadOrders();
-          },
-        )
-        .subscribe();
-  }
-
-  void _onTabChanged() {
-    if (!_tabController.indexIsChanging) {
-      _controller?.setOrdersTab(_tabController.index);
-    }
+    _activeFuture = _orderService.fetchActiveOrders();
+    _historyFuture = _orderService.fetchHistoryOrders();
   }
 
   @override
   void dispose() {
-    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
-    _searchController.dispose();
-    if (SupabaseConfig.isConfigured && _ordersChannel != null) {
-      Supabase.instance.client.removeChannel(_ordersChannel!);
-    }
     super.dispose();
   }
 
-  void _toggleSearch() {
-    setState(() {
-      _isSearching = !_isSearching;
-      if (!_isSearching) {
-        _searchQuery = '';
-        _searchController.clear();
-      }
-    });
+  ActiveOrderData _toActiveOrder(Map<String, dynamic> order) {
+    final status = order['status']?.toString() ?? '';
+    return ActiveOrderData(
+      orderId:
+          order['order_display_id']?.toString() ?? order['id']?.toString() ?? '',
+      route:
+          '${order['pickup_address'] ?? ''} → ${order['drop_address'] ?? ''}',
+      driver: DriverUtils.resolveDriverName(order),
+      milestone: status,
+      eta: order['eta']?.toString() ?? '',
+      status: status,
+    );
   }
 
-  void _onSearchChanged(String value) {
-    setState(() {
-      _searchQuery = value;
-    });
-  }
-
-  List<ActiveOrderData> get _filteredActiveOrders {
-    final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return _activeOrders;
-    }
-    return _activeOrders.where((order) {
-      return _orderMatches(query, [
-        order.orderId,
-        order.route,
-        order.driver,
-        order.milestone,
-        order.status,
-        order.eta,
-      ]);
-    }).toList();
-  }
-
-  List<HistoryOrderData> get _filteredHistoryOrders {
-    final query = _searchQuery.trim().toLowerCase();
-    var filtered = List<HistoryOrderData>.from(_historyOrders);
-
-    // Apply status filter
-    if (_selectedStatusFilter != 'All Trips') {
-      filtered = filtered
-          .where((order) => order.status == _selectedStatusFilter)
-          .toList();
-    }
-
-    // Apply pickup / destination or general search query filter
-    if (query.isNotEmpty) {
-      filtered = filtered
-          .where((order) => _orderMatches(query, [
-                order.orderId,
-                order.route,
-                order.driver,
-                order.date,
-                order.amount,
-                order.status,
-                order.truckNumber,
-                if (order.goodsType != null) order.goodsType!,
-              ]))
-          .toList();
-    }
-
-    // Apply date range filter (based on date string parsing)
-    if (_startDate != null || _endDate != null) {
-      filtered = filtered.where((order) {
-        final parsedDate = DateTime.tryParse(order.date);
-        if (parsedDate == null) return true;
-        if (_startDate != null && parsedDate.isBefore(DateTime(_startDate!.year, _startDate!.month, _startDate!.day))) {
-          return false;
-        }
-        if (_endDate != null && parsedDate.isAfter(DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59))) {
-          return false;
-        }
-        return true;
-      }).toList();
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) {
-      final dateA = DateTime.tryParse(a.date) ?? DateTime(1970);
-      final dateB = DateTime.tryParse(b.date) ?? DateTime(1970);
-      if (_selectedSort == 'Oldest') {
-        return dateA.compareTo(dateB);
-      }
-      // Default 'Newest'
-      return dateB.compareTo(dateA);
-    });
-
-    return filtered;
-  }
-
-  bool _orderMatches(String query, List<String> fields) {
-    return fields.any((value) => value.toLowerCase().contains(query));
+  HistoryOrderData _toHistoryOrder(Map<String, dynamic> order) {
+    final rawAmount = (order['total_amount'] as num?) ?? 0;
+    return HistoryOrderData(
+      orderId:
+          order['order_display_id']?.toString() ?? order['id']?.toString() ?? '',
+      route:
+          '${order['pickup_address'] ?? ''} → ${order['drop_address'] ?? ''}',
+      date: order['pickup_date']?.toString() ?? '',
+      amount: '₹${(rawAmount / 100).toStringAsFixed(0)}',
+      status: order['status']?.toString() ?? '',
+      driver: DriverUtils.resolveDriverName(order),
+      truckNumber: order['truck_number']?.toString() ?? '',
+      timeline: const [],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
+    return Column(
         children: [
-          OrderSearchBar(
-            title: AppLocalizations.of(context)!.orders,
-            isSearching: _isSearching,
-            onToggle: _toggleSearch,
-            controller: _searchController,
-            onChanged: _onSearchChanged,
-            searchQuery: _searchQuery,
-            hintText: AppLocalizations.of(context)!.searchOrdersHint,
+          TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'Active'),
+              Tab(text: 'History'),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-            child: TabBar(
-              controller: _tabController,
-              tabs: [Tab(text: AppLocalizations.of(context)!.activeTab), Tab(text: AppLocalizations.of(context)!.historyTab)],
-            ),
-          ),
-          if (_isOffline)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-              child: Text(
-                '${AppLocalizations.of(context)!.offlineMode} \u2022 ${AppLocalizations.of(context)!.lastUpdated(_formatLastUpdated(_lastUpdatedLabel))}',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: TruxifyColors.accentDark),
-              ),
-            ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                RefreshIndicator(
-                  onRefresh: _loadOrders,
-                  child: _isLoading
-                      ? ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                          itemCount: 3,
-                          separatorBuilder: (_, __) => const SizedBox(height: 14),
-                          itemBuilder: (context, index) => const ShimmerOrderCard(),
-                        )
-                      : _filteredActiveOrders.isEmpty
-                          ? Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Lottie.asset('packages/truxify_shared/assets/lottie/no_trips.json', width: 200, height: 200),
-                                    Text(AppLocalizations.of(context)!.noActiveOrders, style: const TextStyle(color: Colors.grey, fontSize: 16)),
-                                  ],
-                                ),
-                              )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                              itemCount: _filteredActiveOrders.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 14),
-                              itemBuilder: (context, index) {
-                                final order = _filteredActiveOrders[index];
-                                return ActiveOrderCard(
-                                  order: order,
-                                  onTap: () => Navigator.of(context).push(
-                                    AppPageRoute(
-                                      builder: (_) =>
-                                          LiveTrackingScreen(orderId: order.orderId),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                ),
-                RefreshIndicator(
-                  onRefresh: _loadOrders,
-                  child: _isLoading
-                      ? ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                          itemCount: 3,
-                          separatorBuilder: (_, __) => const SizedBox(height: 14),
-                          itemBuilder: (context, index) => const ShimmerOrderCard(),
-                        )
-                      : Column(
-                          children: [
-                            // Status filter dropdown
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    'Status',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                          color: TruxifyColors
-                                              .adaptiveSecondaryText(context),
-                                        ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12),
-                                      decoration: BoxDecoration(
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Theme.of(context)
-                                              .dividerColor,
-                                        ),
-                                      ),
-                                      child: DropdownButtonHideUnderline(
-                                        child: DropdownButton<String>(
-                                          value: _selectedStatusFilter,
-                                          isExpanded: true,
-                                          isDense: true,
-                                          items: _statusFilterOptions
-                                              .map(
-                                                (option) =>
-                                                    DropdownMenuItem(
-                                                  value: option,
-                                                  child: Text(
-                                                    option,
-                                                    style: const TextStyle(
-                                                        fontSize: 14),
-                                                  ),
-                                                ),
-                                              )
-                                              .toList(),
-                                          onChanged: (value) {
-                                            if (value != null) {
-                                              setState(() {
-                                                _selectedStatusFilter =
-                                                    value;
-                                              });
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                _OrdersTab(
+                  future: _activeFuture,
+                  builder: (orders) => ListView.builder(
+                    itemCount: orders.length,
+                    itemBuilder: (context, index) {
+                      final raw = orders[index];
+                      final active = _toActiveOrder(raw);
+                      return ActiveOrderCard(
+                        order: active,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LiveTrackingScreen(
+                                orderId: raw['id']?.toString() ?? '',
+                                orderService: _orderService,
                               ),
                             ),
-                            // Orders list
-                            Expanded(
-                              child: _filteredHistoryOrders.isEmpty
-                                  ? Center(
-                                      child: Padding(
-                                        padding:
-                                            const EdgeInsets.symmetric(
-                                                horizontal: 24),
-                                        child: Text(
-                                          _historyOrders.isEmpty
-                                              ? AppLocalizations.of(
-                                                      context)!
-                                                  .noHistoryOrders
-                                              : 'No matching trips',
-                                          textAlign: TextAlign.center,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(
-                                                color: TruxifyColors
-                                                    .adaptiveSecondaryText(
-                                                        context),
-                                              ),
-                                        ),
-                                      ),
-                                    )
-                                  : ListView.separated(
-                                      padding: const EdgeInsets.fromLTRB(
-                                          20, 12, 20, 24),
-                                      itemCount:
-                                          _filteredHistoryOrders.length,
-                                      separatorBuilder: (_, __) =>
-                                          const SizedBox(height: 14),
-                                      itemBuilder: (context, index) {
-                                        final order =
-                                            _filteredHistoryOrders[index];
-                                        return HistoryOrderCard(
-                                          order: order,
-                                          onTap: () =>
-                                              Navigator.of(context).push(
-                                            AppPageRoute(
-                                              builder: (_) =>
-                                                  OrderDetailScreen(
-                                                      order: order),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                _OrdersTab(
+                  future: _historyFuture,
+                  builder: (orders) => ListView.builder(
+                    itemCount: orders.length,
+                    itemBuilder: (context, index) {
+                      final history = _toHistoryOrder(orders[index]);
+                      return HistoryOrderCard(
+                        order: history,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => OrderDetailScreen(order: history),
                             ),
-                          ],
-                        ),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
           ),
         ],
-      ),
+    );
+  }
+}
+
+class _OrdersTab extends StatelessWidget {
+  const _OrdersTab({required this.future, required this.builder});
+
+  final Future<List<Map<String, dynamic>>> future;
+  final Widget Function(List<Map<String, dynamic>> orders) builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final orders = snapshot.data ?? const [];
+        if (orders.isEmpty) {
+          return const Center(child: Text('No orders yet'));
+        }
+        return builder(orders);
+      },
     );
   }
 }

@@ -54,17 +54,43 @@ class MultiHeadAttention(nn.Module):
         # Attention scores
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         
+        empty_rows = None
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
-        
+            if mask.device != scores.device:
+                raise ValueError("attention mask must be on the input device")
+            if not torch.all((mask == 0) | (mask == 1)):
+                raise ValueError("attention mask must contain binary keep values")
+            if mask.ndim == 2:
+                if mask.shape != (batch_size, k.size(-2)):
+                    raise ValueError("token mask must have shape [batch, keys]")
+                mask = mask[:, None, None, :]
+            elif mask.ndim == 3:
+                if mask.shape != (batch_size, q.size(-2), k.size(-2)):
+                    raise ValueError("pairwise mask must have shape [batch, queries, keys]")
+                mask = mask[:, None, :, :]
+            elif mask.ndim != 4:
+                raise ValueError("attention mask must have rank 2, 3 or 4")
+            try:
+                keep = torch.broadcast_to(mask.bool(), scores.shape)
+            except RuntimeError as exc:
+                raise ValueError("attention mask cannot broadcast to [batch, heads, queries, keys]") from exc
+            empty_rows = ~keep.any(dim=-1, keepdim=True)
+            scores = scores.masked_fill(~keep, float('-inf'))
+            # Avoid undefined softmax and its backward derivative for empty rows.
+            scores = scores.masked_fill(empty_rows, 0)
+
         attn = F.softmax(scores, dim=-1)
+        if empty_rows is not None:
+            attn = attn.masked_fill(empty_rows, 0)
         attn = self.dropout(attn)
         
         # Apply attention
         out = torch.matmul(attn, v)
         out = out.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
         out = self.w_o(out)
-        
+        if empty_rows is not None:
+            out = out.masked_fill(empty_rows.all(dim=1), 0)
+
         return out
 
 class TransformerBlock(nn.Module):
@@ -135,17 +161,42 @@ class LogisticsFoundationModel(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         task: str = 'classification'
     ) -> Dict[str, torch.Tensor]:
+        if attention_mask is not None:
+            if attention_mask.shape != input_ids.shape or attention_mask.ndim != 2:
+                raise ValueError("foundation token mask must match [batch, sequence] input IDs")
+            if attention_mask.device != input_ids.device:
+                raise ValueError("foundation token mask must be on the input device")
+            if not torch.all((attention_mask == 0) | (attention_mask == 1)):
+                raise ValueError("foundation token mask must contain binary keep values")
+            if not attention_mask.bool().any(dim=1).all():
+                raise ValueError("foundation token mask requires a non-padding token in every sample")
+
         # Embeddings
         x = self.token_embedding(input_ids) * math.sqrt(self.d_model)
         x = self.position_encoding(x)
         x = self.dropout(x)
         
+        # MLM admits a token mask and broadcasts internally, keeping the public
+        # token-mask contract compatible with the separate attention fix.
+        layer_mask = attention_mask
+        if task == 'mlm' and attention_mask is not None:
+            if attention_mask.shape != input_ids.shape or attention_mask.ndim != 2:
+                raise ValueError("MLM token mask must match input IDs")
+            if attention_mask.device != input_ids.device or not torch.all(
+                (attention_mask == 0) | (attention_mask == 1)
+            ) or not attention_mask.bool().any(dim=1).all():
+                raise ValueError("MLM token mask must be binary, on-device and nonempty per row")
+            layer_mask = attention_mask[:, None, None, :]
+
         # Transformer layers
         for layer in self.layers:
-            x = layer(x, attention_mask)
+            x = layer(x, layer_mask)
         
         x = self.ln_final(x)
         
+        if task == 'mlm':
+            return {'output': self.generation_head(x), 'hidden': x}
+
         # Pooling (mean pooling over sequence)
         if attention_mask is not None:
             x = (x * attention_mask.unsqueeze(-1)).sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)
@@ -343,6 +394,6 @@ class FoundationModelTrainer:
     
     def load(self, path: str = "models/foundation_model.pth"):
         """Load model"""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"✅ Model loaded from {path}")

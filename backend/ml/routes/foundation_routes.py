@@ -3,7 +3,6 @@ from foundation.prediction_contract import PredictionAdmissionError, predict_tex
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
-import torch
 from datetime import datetime
 import logging
 

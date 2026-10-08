@@ -15,7 +15,92 @@ export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
 
   const numDistance = Number(distance);
   const numFuel = Number(fuelAmount);
+  const { supabaseAdmin } = require('../config/db');
 
+class FuelAdvisorService {
+  /**
+   * Retrieves fuel recommendation and computes average engine load from trip events telemetry.
+   * @param {string} truckId 
+   * @returns {Object} Fuel recommendation and average engine load percentage
+   */
+  async getFuelRecommendation(truckId) {
+    try {
+      const avgEngineLoad = await this._getAverageEngineLoad(truckId);
+      
+      // Calculate fuel optimization recommendation based on real engine load telemetry
+      let recommendation = 'Optimal fuel efficiency maintained.';
+      if (avgEngineLoad > 75) {
+        recommendation = 'High engine load detected. Consider reducing acceleration and checking tire pressure.';
+      } else if (avgEngineLoad < 30) {
+        recommendation = 'Low engine load efficiency profile. Monitor idling times.';
+      }
+
+      return {
+        success: true,
+        truck_id: truckId,
+        average_engine_load_percent: avgEngineLoad,
+        recommendation,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error(`Error in FuelAdvisorService for truck ${truckId}:`, error.message);
+      // Fallback response with default load on critical failure
+      return {
+        success: false,
+        truck_id: truckId,
+        average_engine_load_percent: 50,
+        recommendation: 'Unable to compute telemetry at this time. Using default baseline.',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Internal helper to query trip_events and compute average engine load.
+   * Fixed #9914: queries 'metadata' and orders by 'event_timestamp'.
+   */
+  async _getAverageEngineLoad(truckId) {
+    try {
+      // Fetch recent trip events for the truck
+      const { data: events, error: eventsErr } = await supabaseAdmin
+        .from('trip_events')
+        .select('metadata, event_timestamp')
+        .eq('truck_id', truckId)
+        .eq('event_type', 'gpsUpdate')
+        .order('event_timestamp', { ascending: false })
+        .limit(50);
+
+      if (eventsErr || !events || events.length === 0) {
+        return 50; // Default baseline load if no telemetry exists
+      }
+
+      let totalLoad = 0;
+      let validCount = 0;
+
+      for (const event of events) {
+        // Read engine load safely from jsonb metadata column
+        const metadata = event.metadata || {};
+        const engineLoad = metadata.engineLoad ?? metadata.engine_load;
+
+        if (typeof engineLoad === 'number' && !isNaN(engineLoad)) {
+          totalLoad += engineLoad;
+          validCount++;
+        }
+      }
+
+      if (validCount === 0) {
+        return 50; // Default baseline load if telemetry lacks engine load metrics
+      }
+
+      return Math.round((totalLoad / validCount) * 100) / 100;
+    } catch (err) {
+      console.error('Failed to calculate average engine load from trip_events:', err);
+      return 50; // Fallback default load
+    }
+  }
+}
+
+module.exports = new FuelAdvisorService();
   if (
     distance == null ||
     fuelAmount == null ||
@@ -178,13 +263,13 @@ export class FuelAdvisorService {
    * @returns {Promise<Object>} Recommendation payload
    */
   async getFuelRecommendation(truckId, destinationLat, destinationLng) {
-    this.logger?.info(`[FuelAdvisorService] Computing recommendation for truck ${truckId} heading to ${destinationLat},${destinationLng}`);
+    this.logger?.info({ event: 'FUEL_RECOMMENDATION_COMPUTE', truckId, destinationLat, destinationLng }, 'Computing fuel recommendation');
 
     // 1. Get average engine load from recent telemetry
     const avgEngineLoad = await this._getAverageEngineLoad(truckId);
 
     // 2. Get weather forecast for destination
-    const weather = await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    const weather = await this._getWeatherSafely(destinationLat, destinationLng);
     if (!weather || !Number.isFinite(weather.temperature_c)) {
       this.logger?.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data — using safe default B20.');
       return {
@@ -226,6 +311,20 @@ export class FuelAdvisorService {
         average_engine_load_percent: Math.round(avgEngineLoad)
       }
     };
+  }
+
+  /**
+   * Fetches a weather forecast without letting provider failures crash the
+   * recommendation, which deliberately degrades to a safe default. A throwing
+   * external API must not take down the whole fueling-advisor endpoint.
+   */
+  async _getWeatherSafely(destinationLat, destinationLng) {
+    try {
+      return await this.weatherService.getWeatherForecast(destinationLat, destinationLng);
+    } catch (err) {
+      this.logger?.warn(`[FuelAdvisorService] Weather service failed: ${err?.message ?? String(err)}`);
+      return null;
+    }
   }
 
   /**
@@ -283,7 +382,7 @@ export class FuelAdvisorService {
 
       for (const event of events) {
         const load = event.metadata?.engineLoad;
-        if (load !== undefined && load !== null && typeof load === 'number') {
+        if (Number.isFinite(load) && load >= 0 && load <= 100) {
           totalLoad += load;
           count++;
         }
@@ -291,7 +390,7 @@ export class FuelAdvisorService {
 
       return count > 0 ? totalLoad / count : 50;
     } catch (err) {
-      this.logger?.error(`[FuelAdvisorService] Error computing engine load: ${err?.message ?? String(err)}`);
+      this.logger?.error({ event: 'FUEL_ENGINE_LOAD_ERROR', error: err?.message ?? String(err) }, 'Error computing engine load');
       return 50; // Fallback
     }
   }

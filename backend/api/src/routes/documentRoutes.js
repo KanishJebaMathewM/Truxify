@@ -72,7 +72,30 @@ const upload = multer({
  *         description: File size exceeds limit
  */
 // POST /api/driver/documents
-router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), upload.single('document'), uploadDriverDocument);
+// Multer errors fire before the controller runs, so handle them here with a
+// structured log; success passes through to the controller unchanged.
+function handleDocumentUpload(req, res, next) {
+  upload.single('document')(req, res, (err) => {
+    if (err) {
+      logger.error(
+        {
+          event: 'DOCUMENT_UPLOAD_ERROR',
+          requestId: req.requestId || req.id,
+          userId: req.user && req.user.id,
+          code: err.code,
+          error: err.message,
+        },
+        'Document upload failed',
+      );
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'File size exceeds limit' });
+      }
+      return res.status(400).json({ error: err.message || 'Document upload failed' });
+    }
+    return uploadDriverDocument(req, res, next);
+  });
+}
+router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), handleDocumentUpload);
 
 // POST /api/documents/verify-digilocker
 router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) => {

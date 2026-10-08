@@ -1,14 +1,52 @@
+import logging
+import math
+import random
+from copy import deepcopy
+from numbers import Integral
+from typing import Dict, List, Tuple
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-import random
-import logging
-from collections import OrderedDict
-import itertools
+from nas.construction_plan import NASPlanError, plan_construction
 
 logger = logging.getLogger(__name__)
+
+def _snapshot_architecture(architecture, space=None):
+    """Own aligned genotype data before it crosses a search/model boundary."""
+    if not isinstance(architecture, dict):
+        raise ValueError("architecture must be a dictionary")
+    result = deepcopy(architecture)
+    fields = ('layers', 'filters', 'activations')
+    if any(not isinstance(result.get(key), (list, tuple)) for key in fields):
+        raise ValueError("architecture requires aligned layer/filter/activation lists")
+    for key in fields:
+        result[key] = list(result[key])
+    size = len(result['layers'])
+    if not size or any(len(result[key]) != size for key in fields):
+        raise ValueError("architecture fields must have equal nonzero lengths")
+    operations = space.operations if space else NASSearchSpace().operations
+    activations = space.activation_functions if space else NASSearchSpace().activation_functions
+    if any(op not in operations for op in result['layers']):
+        raise ValueError("unknown architecture operation")
+    if any(act not in activations for act in result['activations']):
+        raise ValueError("unknown architecture activation")
+    if any(isinstance(value, bool) or not isinstance(value, Integral) or value <= 0
+           for value in result['filters']):
+        raise ValueError("filters must be positive integers")
+    if space:
+        if not space.num_layers_range[0] <= size <= space.num_layers_range[1]:
+            raise ValueError("architecture exceeds configured layer range")
+        if any(not space.num_filters_range[0] <= value <= space.num_filters_range[1]
+               or value % 8 for value in result['filters']):
+            raise ValueError("filters must be in the configured range and divisible by eight")
+    return result
+
+
+def _positive_budget(value, name):
+    if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
 
 class NASSearchSpace:
     """Search space for Neural Architecture Search"""
@@ -53,11 +91,12 @@ class NASSearchSpace:
     
     def generate_neighbor_architectures(self, architecture: Dict) -> List[Dict]:
         """Generate neighbor architectures by mutating"""
+        architecture = _snapshot_architecture(architecture, self)
         neighbors = []
         
         for i in range(len(architecture['layers'])):
             # Mutate operation
-            new_arch = architecture.copy()
+            new_arch = deepcopy(architecture)
             current_op = new_arch['layers'][i]
             available_ops = [op for op in self.operations if op != current_op]
             if available_ops:
@@ -65,7 +104,7 @@ class NASSearchSpace:
                 neighbors.append(new_arch)
             
             # Mutate filters
-            new_arch = architecture.copy()
+            new_arch = deepcopy(architecture)
             current_filters = new_arch['filters'][i]
             delta = random.choice([-8, 8, 16])
             new_filters = current_filters + delta
@@ -75,7 +114,7 @@ class NASSearchSpace:
                 neighbors.append(new_arch)
             
             # Mutate activation
-            new_arch = architecture.copy()
+            new_arch = deepcopy(architecture)
             current_act = new_arch['activations'][i]
             available_acts = [act for act in self.activation_functions if act != current_act]
             if available_acts:
@@ -107,87 +146,79 @@ class NASSearchSpace:
         return architecture
 
 class NASModel(nn.Module):
-    """Dynamic model based on architecture"""
-    
-    def __init__(self, architecture: Dict, input_shape: Tuple[int, ...] = (1, 28, 28)):
+    """Native NAS execution with a complete owned geometry/resource plan."""
+
+    def __init__(self, architecture: Dict, input_shape: Tuple[int, ...] = (1, 28, 28),
+                 *, max_parameters=50000000, max_flops=100000000000,
+                 max_activation_values=16000000, max_batch_size=1024):
         super().__init__()
-        self.architecture = architecture
-        self.input_shape = input_shape
-        
-        self.layers = nn.ModuleList()
+        snapshot = _snapshot_architecture(architecture)
+        self._plan = plan_construction(snapshot, input_shape, max_parameters=max_parameters,
+            max_flops=max_flops, max_activation_values=max_activation_values,
+            max_batch_size=max_batch_size)
+        self._architecture = snapshot
         self.build_model()
-        
-        logger.info(f"✅ NAS Model built with {len(architecture['layers'])} layers")
-    
+
+    @property
+    def architecture(self):
+        return deepcopy(self._architecture)
+
+    @property
+    def input_shape(self):
+        return self._plan.shape
+
     def build_model(self):
-        """Build model from architecture"""
-        in_channels = self.input_shape[0]
-        current_size = self.input_shape[1]
-        
-        for i, (op, filters, activation) in enumerate(zip(
-            self.architecture['layers'],
-            self.architecture['filters'],
-            self.architecture['activations']
-        )):
-            if op == 'conv3x3':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=3, padding=1)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'conv5x5':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=5, padding=2)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'conv7x7':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=7, padding=3)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'maxpool3x3':
-                layer = nn.MaxPool2d(3, stride=1, padding=1)
-                self.layers.append(layer)
-            elif op == 'avgpool3x3':
-                layer = nn.AvgPool2d(3, stride=1, padding=1)
-                self.layers.append(layer)
-            elif op == 'identity':
-                layer = nn.Identity()
-                self.layers.append(layer)
-            elif op == 'zero':
-                layer = nn.ZeroPad2d(0)
-                self.layers.append(layer)
-            
-            # Add activation
-            if op not in ['maxpool3x3', 'avgpool3x3', 'zero']:
-                if activation == 'relu':
-                    self.layers.append(nn.ReLU())
-                elif activation == 'tanh':
-                    self.layers.append(nn.Tanh())
-                elif activation == 'sigmoid':
-                    self.layers.append(nn.Sigmoid())
-                elif activation == 'swish':
-                    self.layers.append(nn.SiLU())
-        
-        # Adaptive pooling and classifier
-        self.layers.append(nn.AdaptiveAvgPool2d((1, 1)))
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(in_channels, 10))
-    
+        """Allocate privately, then replace one coherent registered module list."""
+        layers = nn.ModuleList()
+        channels = self.input_shape[0]
+        for operation, filters, activation in self._plan.stages:
+            if operation in ('conv3x3', 'conv5x5', 'conv7x7'):
+                kernel = {'conv3x3':3, 'conv5x5':5, 'conv7x7':7}[operation]
+                layers.append(nn.Conv2d(channels, filters, kernel_size=kernel, padding=kernel // 2))
+                channels = filters
+            elif operation == 'maxpool3x3':
+                layers.append(nn.MaxPool2d(3, stride=1, padding=1))
+            elif operation == 'avgpool3x3':
+                layers.append(nn.AvgPool2d(3, stride=1, padding=1))
+            elif operation == 'identity':
+                layers.append(nn.Identity())
+            elif operation == 'zero':
+                layers.append(nn.ZeroPad2d(0))
+            if operation not in ('maxpool3x3', 'avgpool3x3', 'zero'):
+                layers.append({'relu':nn.ReLU, 'tanh':nn.Tanh,
+                               'sigmoid':nn.Sigmoid, 'swish':nn.SiLU}[activation]())
+        layers.append(nn.AdaptiveAvgPool2d((1, 1)))
+        layers.append(nn.Flatten())
+        layers.append(nn.Linear(channels, 10))
+        self.layers = layers
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.layers:
+        if (not isinstance(x, torch.Tensor) or x.layout != torch.strided
+                or not x.is_floating_point() or x.ndim != 4
+                or tuple(x.shape[1:]) != self.input_shape):
+            raise NASPlanError("input must be dense floating NCHW with the declared geometry")
+        batch = x.shape[0]
+        if (not 1 <= batch <= self._plan.max_batch_size
+                or batch * self._plan.flops > self._plan.max_flops
+                or batch * self._plan.activation_values > self._plan.max_activation_values):
+            raise NASPlanError("complete NAS batch exceeds execution work/activation budget")
+        reference = next(self.parameters())
+        if x.dtype != reference.dtype or x.device != reference.device or not torch.isfinite(x).all():
+            raise NASPlanError("input must match model dtype/device and contain finite values")
+        # Keep one admitted module generation for the whole forward.
+        layers = self.layers
+        for layer in layers:
             x = layer(x)
+        if not torch.isfinite(x).all():
+            raise NASPlanError("native NAS result cannot be represented finitely")
         return x
-    
+
     def get_flops(self) -> int:
-        """Calculate FLOPs (simplified)"""
-        total = 0
-        for layer in self.layers:
-            if isinstance(layer, nn.Conv2d):
-                total += layer.weight.numel() * 2
-            elif isinstance(layer, nn.Linear):
-                total += layer.weight.numel() * 2
-        return total
-    
+        """Per-sample convolution/dense multiply-add estimate (two FLOPs per MAC)."""
+        return self._plan.flops
+
     def get_params(self) -> int:
-        """Get number of parameters"""
-        return sum(p.numel() for p in self.parameters())
+        return sum(parameter.numel() for parameter in self.parameters())
 
 class RLNASController:
     """Reinforcement Learning based NAS Controller"""
@@ -236,95 +267,64 @@ class NASSearcher:
         
         logger.info("✅ NAS Searcher initialized")
     
-    def random_search(self, num_trials: int = 100, evaluator = None) -> Dict:
-        """Random search for architectures"""
-        best_arch = None
-        best_score = -float('inf')
-        
-        for trial in range(num_trials):
-            arch = self.search_space.sample_random_architecture()
-            score = self._evaluate_architecture(arch, evaluator) if evaluator else random.uniform(0, 1)
-            
-            self.search_history.append({
-                'trial': trial,
-                'architecture': arch,
-                'score': score
-            })
-            
-            if score > best_score:
-                best_score = score
-                best_arch = arch
-            
-            if (trial + 1) % 10 == 0:
-                logger.info(f"Random search: Trial {trial+1}/{num_trials}, Best score: {best_score:.4f}")
-        
-        self.best_architecture = best_arch
+    def _publish(self, best_arch, best_score, history, method):
+        # Publish only a completed run; every outward view has separate ownership.
+        self.best_architecture = deepcopy(best_arch)
         self.best_performance = best_score
-        
+        self.search_history = deepcopy(history)
         return {
-            'best_architecture': best_arch,
+            'best_architecture': deepcopy(best_arch),
             'best_score': best_score,
-            'history': self.search_history,
-            'method': 'random'
+            'history': deepcopy(history),
+            'method': method,
         }
-    
-    def evolutionary_search(self, population_size: int = 20, generations: int = 10, evaluator = None) -> Dict:
-        """Evolutionary search for architectures"""
-        # Initialize population
-        population = [self.search_space.sample_random_architecture() for _ in range(population_size)]
-        
-        best_arch = None
-        best_score = -float('inf')
-        
+
+    def random_search(self, num_trials: int = 100, evaluator=None) -> Dict:
+        """Evaluate independent candidates and publish exact score provenance."""
+        num_trials = _positive_budget(num_trials, 'num_trials')
+        history, best_arch, best_score = [], None, -float('inf')
+        for trial in range(num_trials):
+            arch = _snapshot_architecture(self.search_space.sample_random_architecture(), self.search_space)
+            score = self._evaluate_architecture(arch, evaluator)
+            history.append({'trial': trial, 'architecture': deepcopy(arch), 'score': score})
+            if score > best_score:
+                best_arch, best_score = deepcopy(arch), score
+        return self._publish(best_arch, best_score, history, 'random')
+
+    def evolutionary_search(self, population_size: int = 20, generations: int = 10, evaluator=None) -> Dict:
+        """Select scored genotypes without aliasing parents, evaluators or winners."""
+        population_size = _positive_budget(population_size, 'population_size')
+        generations = _positive_budget(generations, 'generations')
+        population = [_snapshot_architecture(self.search_space.sample_random_architecture(), self.search_space)
+                      for _ in range(population_size)]
+        history, best_arch, best_score = [], None, -float('inf')
         for generation in range(generations):
-            # Evaluate population
             scores = []
-            for arch in population:
-                score = self._evaluate_architecture(arch, evaluator) if evaluator else random.uniform(0, 1)
+            for candidate, arch in enumerate(population):
+                score = self._evaluate_architecture(arch, evaluator)
                 scores.append(score)
-                
+                history.append({'trial': len(history), 'generation': generation,
+                                'candidate': candidate, 'architecture': deepcopy(arch), 'score': score})
                 if score > best_score:
-                    best_score = score
-                    best_arch = arch
-            
-            # Select top performers
-            sorted_indices = np.argsort(scores)[::-1]
-            top_indices = sorted_indices[:population_size // 2]
-            top_population = [population[i] for i in top_indices]
-            
-            # Generate next generation
-            next_population = top_population.copy()
-            
+                    best_arch, best_score = deepcopy(arch), score
+            if generation + 1 == generations:
+                break  # Do not generate an unevaluated final population.
+            indices = sorted(range(population_size), key=lambda index: scores[index], reverse=True)
+            elite_count = max(1, population_size // 2)
+            elites = [deepcopy(population[index]) for index in indices[:elite_count]]
+            next_population = deepcopy(elites)
             while len(next_population) < population_size:
-                # Select two parents
-                parent1 = random.choice(top_population)
-                parent2 = random.choice(top_population)
-                
-                # Crossover
-                child = self._crossover(parent1, parent2)
-                
-                # Mutation
+                child = self._crossover(random.choice(elites), random.choice(elites))
                 if random.random() < 0.3:
                     child = self._mutate(child)
-                
                 next_population.append(child)
-            
             population = next_population
-            
-            logger.info(f"Evolutionary search: Generation {generation+1}/{generations}, Best score: {best_score:.4f}")
-        
-        self.best_architecture = best_arch
-        self.best_performance = best_score
-        
-        return {
-            'best_architecture': best_arch,
-            'best_score': best_score,
-            'history': self.search_history,
-            'method': 'evolutionary'
-        }
-    
+        return self._publish(best_arch, best_score, history, 'evolutionary')
+
     def _crossover(self, parent1: Dict, parent2: Dict) -> Dict:
         """Crossover two architectures"""
+        parent1 = _snapshot_architecture(parent1, self.search_space)
+        parent2 = _snapshot_architecture(parent2, self.search_space)
         child = {
             'layers': [],
             'filters': [],
@@ -346,7 +346,13 @@ class NASSearcher:
     
     def _mutate(self, architecture: Dict) -> Dict:
         """Mutate architecture"""
-        mutation_type = random.choice(['operation', 'filters', 'activation', 'add_layer', 'remove_layer'])
+        architecture = _snapshot_architecture(architecture, self.search_space)
+        choices = ['operation', 'filters', 'activation']
+        if len(architecture['layers']) < self.search_space.num_layers_range[1]:
+            choices.append('add_layer')
+        if len(architecture['layers']) > self.search_space.num_layers_range[0]:
+            choices.append('remove_layer')
+        mutation_type = random.choice(choices)
         
         mutated = {
             'layers': architecture['layers'].copy(),
@@ -389,7 +395,7 @@ class NASSearcher:
             mutated['activations'].insert(idx, new_activation)
         
         elif mutation_type == 'remove_layer':
-            if len(mutated['layers']) > 3:
+            if len(mutated['layers']) > self.search_space.num_layers_range[0]:
                 idx = random.randint(0, len(mutated['layers']) - 1)
                 del mutated['layers'][idx]
                 del mutated['filters'][idx]
@@ -397,10 +403,15 @@ class NASSearcher:
         
         return mutated
     
-    def _evaluate_architecture(self, architecture: Dict, evaluator = None) -> float:
-        """Evaluate architecture performance"""
-        if evaluator:
-            return evaluator(architecture)
-        else:
-            # Simulate evaluation
-            return random.uniform(0, 1)
+    def _evaluate_architecture(self, architecture: Dict, evaluator=None) -> float:
+        candidate = _snapshot_architecture(architecture, self.search_space)
+        value = evaluator(candidate) if evaluator is not None else random.uniform(0, 1)
+        if isinstance(value, bool):
+            raise ValueError("evaluator score must be a finite number")
+        try:
+            score = float(value)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("evaluator score must be a finite number") from error
+        if not math.isfinite(score):
+            raise ValueError("evaluator score must be a finite number")
+        return score

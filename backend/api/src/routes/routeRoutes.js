@@ -49,6 +49,16 @@ router.post('/plan', authenticate, requirePolicy('route:write'), async (req, res
         success: false,
         error: 'Both origin and destination are required for route planning.',
       });
+    const isBlank = (str) =>
+      str === undefined ||
+      str === null ||
+      typeof str === 'boolean' ||
+      Array.isArray(str) ||
+      (typeof str === 'object' && str !== null) ||
+      String(str).trim() === '';
+
+    if (routeId !== undefined && (typeof routeId !== 'string' || routeId.trim() === '')) {
+      return res.status(400).json({ error: 'Invalid routeId provided.' });
     }
 
     let originCoords, destCoords;

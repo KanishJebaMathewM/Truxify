@@ -91,6 +91,24 @@ describe('documentValidation', () => {
       expect(validateDocumentBuffer(PNG, 'image/png')).toBe('image/png');
       expect(validateDocumentBuffer(PDF, 'application/pdf')).toBe('application/pdf');
     });
+    
+    it('matches declared MIME type case-insensitively', () => {
+      expect(validateDocumentBuffer(JPEG, 'IMAGE/JPEG')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(JPEG, 'Image/Jpeg')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, 'IMAGE/PNG')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, 'APPLICATION/PDF')).toBe('application/pdf');
+    });
+
+    it('matches declared MIME type with surrounding whitespace', () => {
+      expect(validateDocumentBuffer(JPEG, '  image/jpeg  ')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, '\timage/png\n')).toBe('image/png');
+    });
+
+    it('ignores a blank or whitespace-only declared MIME type', () => {
+      expect(validateDocumentBuffer(JPEG, '')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, '   ')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, undefined)).toBe('application/pdf');
+    });
 
     it('throws DocumentValidationError when buffer is null or undefined', () => {
       expect(() => validateDocumentBuffer(null)).toThrow(DocumentValidationError);
@@ -141,6 +159,21 @@ describe('documentValidation', () => {
         const detected = validateDocumentBuffer(buffer);
         expect(ALLOWED_DOCUMENT_MIME_TYPES).toContain(detected);
       }
+    });
+
+    it('treats an empty or whitespace-only declared type as absent (#11030)', () => {
+      expect(validateDocumentBuffer(PDF, '')).toBe('application/pdf');
+      expect(validateDocumentBuffer(PDF, '   ')).toBe('application/pdf');
+    });
+
+    it('compares the declared type case-insensitively (#11030)', () => {
+      expect(validateDocumentBuffer(JPEG, 'IMAGE/JPEG')).toBe('image/jpeg');
+      expect(validateDocumentBuffer(PNG, 'Image/PNG')).toBe('image/png');
+      expect(validateDocumentBuffer(PDF, ' application/pdf ')).toBe('application/pdf');
+    });
+
+    it('still rejects a declared type that does not match the content', () => {
+      expect(() => validateDocumentBuffer(PDF, 'IMAGE/JPEG')).toThrow(DocumentValidationError);
     });
   });
 

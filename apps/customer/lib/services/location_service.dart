@@ -2,7 +2,92 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
+// Conditional import for web geolocation support
+import 'location_service_stub.dart'
+    if (dart.library.html) 'location_service_web.dart';
+
+class GeoService {
+  Timer? _debounceTimer;
+
+  /// Retrieves current user coordinates (Latitude, Longitude)
+  /// Uses browser Geolocation API on web, and native/mock fallback on mobile.
+  Future<Map<String, double>> getCurrentPosition() async {
+    if (kIsWeb) {
+      return await getBrowserGeolocation();
+    } else {
+      // Mobile native / fallback coordinates (e.g. Chennai hub center)
+      return {'latitude': 13.0827, 'longitude': 80.2707};
+    }
+  }
+
+  /// Reverse geocodes latitude & longitude to a human-readable street address using Nominatim REST API
+  Future<String> reverseGeocode(double latitude, double longitude) async {
+    try {
+      final url = Uri.parse(
+          'https://nominatim.openstreetmap.org/reverse?format=json&lat=$latitude&lon=$longitude&zoom=18&addressdetails=1');
+      
+      final response = await http.get(
+        url,
+        headers: {'User-Agent': 'TruxifyCustomerApp/1.0 (support@truxify.app)'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data != null && data['display_name'] != null) {
+          return data['display_name'];
+        }
+      }
+    } catch (e) {
+      debugPrint('Reverse geocoding error: $e');
+    }
+    return 'Lat: ${latitude.toStringAsFixed(4)}, Lon: ${longitude.toStringAsFixed(4)}';
+  }
+
+  /// Address search autocomplete with 300ms client-side debounce
+  void searchAddressAutocomplete(
+    String query,
+    ValueSetter<List<Map<String, dynamic>>> onResults,
+  ) {
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      if (query.trim().isEmpty) {
+        onResults([]);
+        return;
+      }
+
+      try {
+        final url = Uri.parse(
+            'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeComponent(query)}&limit=5&addressdetails=1');
+
+        final response = await http.get(
+          url,
+          headers: {'User-Agent': 'TruxifyCustomerApp/1.0 (support@truxify.app)'},
+        );
+
+        if (response.statusCode == 200) {
+          final List<dynamic> data = json.decode(response.body);
+          final results = data.map((item) => {
+                'displayName': item['display_name'] as String,
+                'lat': double.parse(item['lat'].toString()),
+                'lon': double.parse(item['lon'].toString()),
+              }).toList();
+          onResults(results);
+        } else {
+          onResults([]);
+        }
+      } catch (e) {
+        debugPrint('Autocomplete search error: $e');
+        onResults([]);
+      }
+    });
+  }
+}
 class LocationSuggestion {
   const LocationSuggestion({required this.address, required this.point});
 

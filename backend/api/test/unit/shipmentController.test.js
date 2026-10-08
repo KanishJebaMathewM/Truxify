@@ -5,12 +5,23 @@ const { supabaseMock, reset } = (() => {
   const mock = createSupabaseMock();
   return { supabaseMock: mock, reset: mock.reset.bind(mock) };
 })();
+// In test/unit/shipmentController.test.js
 
 vi.mock('../../src/config/db.js', () => ({
+  get supabase() { 
+    return dbMock.supabase; 
+  },
+  get createUserClient() {
+    return dbMock.createUserClient || vi.fn(() => dbMock.supabase);
+  },
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabase() { return supabaseMock.supabase; },
   get supabaseAdmin() { return supabaseMock.supabase; },
   createUserClient: () => supabaseMock.supabase,
 }));
+
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },

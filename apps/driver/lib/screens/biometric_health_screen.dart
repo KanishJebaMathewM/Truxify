@@ -161,7 +161,10 @@ class _BiometricHealthScreenState extends State<BiometricHealthScreen> {
               children: [
                 Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 32, color: isAlarm ? Colors.red[900] : Colors.black87)),
                 const SizedBox(width: 4),
-                Text(unit, style: TextStyle(color: isAlarm ? Colors.red : Colors.grey, padding: const EdgeInsets.only(bottom: 6))),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(unit, style: TextStyle(color: isAlarm ? Colors.red : Colors.grey)),
+                ),
               ],
             ),
           ],

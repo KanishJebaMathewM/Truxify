@@ -1,5 +1,5 @@
 import logging
-import random
+import math
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,21 @@ class PredictiveMaintenanceModel:
         Simulate prediction of vehicle component failures based on OBD-II telemetry.
         In a real scenario, this would load a trained ML model (e.g., Random Forest/XGBoost).
         """
+        # NaN comparisons are false and would otherwise report healthy telemetry.
+        for field, value in {
+            "engine_temperature": engine_temperature,
+            "tire_pressure": tire_pressure,
+            "oil_level": oil_level,
+            "coolant_level": coolant_level,
+            "mileage": mileage,
+        }.items():
+            try:
+                finite = math.isfinite(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(f"{field} must be a finite number") from exc
+            if not finite:
+                raise ValueError(f"{field} must be a finite number")
+
         try:
             # Simple threshold-based anomaly detection mock for simulation
             anomalies = []

@@ -22,6 +22,7 @@ vi.mock('../../src/services/notificationService.js', () => ({
   getActiveDeliveryOtp: vi.fn(),
   verifyDeliveryOtp: vi.fn(),
   verifyDeliveryOtpHash: vi.fn(),
+  expireDeliveryOtps: vi.fn(),
   sendPushNotification: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -88,6 +89,7 @@ function makeService({ repo = makeOrderRepository(), notificationOverrides = {} 
     verifyDeliveryOtpHash: () => true,
     verifyDeliveryOtp: () => Promise.resolve(true),
     storeDeliveryOtp: () => Promise.resolve(true),
+    expireDeliveryOtps: () => Promise.resolve(true),
     sendDeliveryOtpNotification: () => Promise.resolve({ success: true }),
     ...notificationOverrides,
   };
@@ -101,6 +103,42 @@ function makeService({ repo = makeOrderRepository(), notificationOverrides = {} 
 }
 
 describe('deliveryVerificationService', () => {
+  describe('resendDeliveryOtp', () => {
+    const request = {
+      orderId: 'order-1',
+      customerId: 'customer-1',
+      orderDisplayId: 'OD-1',
+      orderStatus: 'arriving',
+    };
+
+    it('expires prior codes before storing and notifying the replacement', async () => {
+      const calls = [];
+      const svc = makeService({ notificationOverrides: {
+        expireDeliveryOtps: vi.fn(async () => { calls.push('expire'); return true; }),
+        storeDeliveryOtp: vi.fn(async () => { calls.push('store'); return { id: 'new-otp' }; }),
+        sendDeliveryOtpNotification: vi.fn(async () => { calls.push('notify'); return { success: true }; }),
+      } });
+
+      await expect(svc.resendDeliveryOtp(request)).resolves.toHaveProperty('expiresInMinutes');
+      expect(calls).toEqual(['expire', 'store', 'notify']);
+      expect(svc.notificationService.expireDeliveryOtps).toHaveBeenCalledWith('order-1');
+    });
+
+    it('does not store or notify a replacement when expiration fails', async () => {
+      const storeDeliveryOtp = vi.fn();
+      const sendDeliveryOtpNotification = vi.fn();
+      const svc = makeService({ notificationOverrides: {
+        expireDeliveryOtps: vi.fn().mockResolvedValue(false),
+        storeDeliveryOtp,
+        sendDeliveryOtpNotification,
+      } });
+
+      await expect(svc.resendDeliveryOtp(request)).rejects.toThrow('invalidate previous delivery OTPs');
+      expect(storeDeliveryOtp).not.toHaveBeenCalled();
+      expect(sendDeliveryOtpNotification).not.toHaveBeenCalled();
+    });
+  });
+
   describe('verifyDelivery', () => {
     it('verifies delivery when order is arriving and OTP matches', async () => {
       const repo = makeOrderRepository();

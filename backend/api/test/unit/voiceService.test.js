@@ -34,6 +34,9 @@ vi.mock('axios');
 const mockSupabaseFrom = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: {
     from: mockSupabaseFrom,
   },
@@ -129,8 +132,11 @@ describe('voiceService', () => {
 
       expect(result).toBeNull();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Orders table check failed in voiceService:',
-        'Table not found'
+        expect.objectContaining({
+          event: 'VOICE_ORDER_LOOKUP_ERROR',
+          error: expect.any(String),
+        }),
+        expect.any(String)
       );
     });
 
@@ -236,7 +242,7 @@ describe('voiceService', () => {
       const result = await processVoiceQuery('user-1', 'booking-1', Buffer.from('audio'), 'audio.wav');
 
       expect(result.transcript).toBeTruthy();
-      expect(result.response_text).toContain('in transit');
+      expect(result.response_text).toContain('in_transit');
     });
 
     it('returns mock when only OPENAI_API_KEY is set', async () => {

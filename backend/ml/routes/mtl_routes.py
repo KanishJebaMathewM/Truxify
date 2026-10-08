@@ -1,12 +1,12 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from mtl.model import MultiTaskModel, MTLLoss, MultiTaskTrainer
 import os
+from datetime import datetime
+from typing import List
+
+import torch
+from fastapi import APIRouter, HTTPException
+from mtl.model import MTLLoss, MultiTaskModel, MultiTaskTrainer
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mtl", tags=["Multi-Task Learning"])
@@ -109,7 +109,7 @@ async def predict_single_task(data: List[List[float]], task_name: str):
     """Make prediction for single task"""
     try:
         X = torch.tensor(data, dtype=torch.float32)
-        prediction = trainer.model.forward_single_task(X, task_name)
+        prediction = trainer.predict(X, task_name=task_name)
         
         return {
             'success': True,

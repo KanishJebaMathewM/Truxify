@@ -19,13 +19,13 @@ int main() {
     }
 
     // A well-formed request with a small body parses normally.
-    std::string normal = "POST /search HTTP/1.1\r\nContent-Length: 12\r\n\r\n{\"query\":[0]}";
+    std::string normal = "POST /search HTTP/1.1\r\nContent-Length: 13\r\n\r\n{\"query\":[0]}";
     {
         size_t cl = 0, start = 0, len = 0;
         bool ok = compute_body_range(normal, cl, start, len);
         assert(ok);
-        assert(cl == 12);
-        assert(len == 12);
+        assert(cl == 13);
+        assert(len == 13);
         std::string method, path, body;
         parse_request(normal, method, path, body);
         assert(body == "{\"query\":[0]}");

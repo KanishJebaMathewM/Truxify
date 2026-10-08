@@ -70,6 +70,25 @@
           "id": ""
         }
       }
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/pause-escrow-onchain",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "options": {}
+      },
+      "name": "Pause Escrow Contract On-Chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [1050, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Truxify Internal API Key",
+          "id": ""
+        }
+      }
     }
   ],
   "connections": {
@@ -100,6 +119,17 @@
         [
           {
             "node": "Execute Emergency Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Emergency Pause": {
+      "main": [
+        [
+          {
+            "node": "Pause Escrow Contract On-Chain",
             "type": "main",
             "index": 0
           }

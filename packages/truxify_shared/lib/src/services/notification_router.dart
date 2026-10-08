@@ -122,22 +122,29 @@ class NotificationRouter {
   ) {
     switch (payload.type) {
       case 'order_update':
+      case 'delivery_otp':
         if (payload.orderId != null) {
           return NavigateToOrderDetail(payload.orderId!);
         }
         return const NavigateToNotificationsList();
 
       case 'order_delivered':
+      case 'trip_update':
+      case 'trip_completed':
         if (payload.orderId != null) {
           return NavigateToLiveTracking(payload.orderId!);
         }
         return const NavigateToNotificationsList();
 
       case 'bid_received':
+      case 'load_offer':
         if (payload.bidId != null) {
           return NavigateToLoadDetail(payload.bidId!);
         }
         return const NavigateToNotificationsList();
+
+      case 'payment':
+        return const NavigateToEarnings();
 
       case 'payment_released':
         return appType == NotificationAppType.customer
@@ -150,6 +157,9 @@ class NotificationRouter {
         }
         return const NavigateToNotificationsList();
 
+      case 'system':
+      case 'document':
+      case 'document_expiry':
       case 'general_notification':
       default:
         return const NavigateToNotificationsList();

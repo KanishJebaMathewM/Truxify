@@ -2,6 +2,7 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+import { validateCoordinate } from '../utils/coordinates.js';
 
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
@@ -20,18 +21,27 @@ const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 10_000; // upper bound on a single backoff sleep
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
 export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
-  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
-      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
-    return 'Invalid coordinates provided.';
+  const pLat = validateCoordinate(pickupLat, 'lat', 'pickup_lat');
+  if (!pLat.valid) {
+    return pLat.error.includes('between') ? 'pickup_lat must be between -90 and 90.' : 'Invalid coordinates provided.';
   }
-  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
-  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
-  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
-  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  const pLng = validateCoordinate(pickupLng, 'lng', 'pickup_lng');
+  if (!pLng.valid) {
+    return pLng.error.includes('between') ? 'pickup_lng must be between -180 and 180.' : 'Invalid coordinates provided.';
+  }
+  const dLat = validateCoordinate(dropLat, 'lat', 'drop_lat');
+  if (!dLat.valid) {
+    return dLat.error.includes('between') ? 'drop_lat must be between -90 and 90.' : 'Invalid coordinates provided.';
+  }
+  const dLng = validateCoordinate(dropLng, 'lng', 'drop_lng');
+  if (!dLng.valid) {
+    return dLng.error.includes('between') ? 'drop_lng must be between -180 and 180.' : 'Invalid coordinates provided.';
+  }
   
   return null;
 };
@@ -39,6 +49,15 @@ export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Exponential backoff delay for a retry attempt, clamped to MAX_RETRY_DELAY_MS
+ * so a misconfigured (very large) retry count or base delay cannot produce a
+ * multi-minute sleep in the request path.
+ */
+function retryDelayMs(baseDelayMs, attempt) {
+  return Math.min(baseDelayMs * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
 }
 
 function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
@@ -52,17 +71,20 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
+  // Fixed from 8 decimals to 6 decimals to match contract & client expectations
   const r = (n) => Number(n.toFixed(6));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
 export async function getRouteEstimate(input = {}) {
   if (!input) return null;
-  const { pickupLat, pickupLng, dropLat, dropLng } = input;
+  const { pickupLat, pickupLng, dropLat, dropLng, signal } = input;
   return measureExecution('OSRMService.getRouteEstimate', async () => {
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
-    !Number.isFinite(dropLat) || !Number.isFinite(dropLng)
+    !Number.isFinite(dropLat) || !Number.isFinite(dropLng) ||
+    pickupLat < -90 || pickupLat > 90 || dropLat < -90 || dropLat > 90 ||
+    pickupLng < -180 || pickupLng > 180 || dropLng < -180 || dropLng > 180
   ) {
     return null;
   }
@@ -89,8 +111,15 @@ export async function getRouteEstimate(input = {}) {
   const baseDelayMs = parsePositiveNumber(process.env.OSRM_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS);
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (signal?.aborted) {
+      return null;
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = () => controller.abort();
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     try {
       const routeUrl = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng });
@@ -103,7 +132,7 @@ export async function getRouteEstimate(input = {}) {
         const errBody = await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries, url: routeUrl.toString(), errorBody: errBody }, 'Server error. Retrying...');
-          await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
+          await new Promise(r => setTimeout(r, retryDelayMs(baseDelayMs, attempt)));
           continue;
         }
         logger.warn({ status: response.status, statusText: response.statusText, url: routeUrl.toString(), errorBody: errBody }, '[OSRM] HTTP request failed with non-2xx status');
@@ -131,13 +160,19 @@ export async function getRouteEstimate(input = {}) {
       }
 
       clearTimeout(timeout);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       return result;
 
     } catch (err) {
       clearTimeout(timeout);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
       const routeUrlStr = buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }).toString();
       if (attempt < maxRetries - 1) {
-        const delayMs = baseDelayMs * Math.pow(2, attempt);
+        const delayMs = retryDelayMs(baseDelayMs, attempt);
         if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
           logger.warn({ url: routeUrlStr, errMessage: err.message }, '[OSRM] Circuit is open. Falling back instantly.');
           return null; // Return null so caller knows to use straight-line fallback
@@ -167,6 +202,7 @@ function buildGeometryUrl({ originLat, originLng, destLat, destLng }) {
 }
 
 function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
+  // Fixed from 8 decimals to 6 decimals to match contract & client expectations
   const r = (n) => Number(n.toFixed(6));
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
@@ -175,7 +211,9 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
+    !Number.isFinite(destLat) || !Number.isFinite(destLng) ||
+    originLat < -90 || originLat > 90 || destLat < -90 || destLat > 90 ||
+    originLng < -180 || originLng > 180 || destLng < -180 || destLng > 180
   ) {
     return null;
   }
@@ -258,7 +296,9 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
 export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-    !Number.isFinite(destLat) || !Number.isFinite(destLng)
+    !Number.isFinite(destLat) || !Number.isFinite(destLng) ||
+    originLat < -90 || originLat > 90 || destLat < -90 || destLat > 90 ||
+    originLng < -180 || originLng > 180 || destLng < -180 || destLng > 180
   ) {
     return null;
   }
@@ -281,12 +321,12 @@ export const __testing = {
   buildCacheKey,
   buildGeometryUrl,
   buildGeometryCacheKey,
+  retryDelayMs,
+  MAX_RETRY_DELAY_MS,
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };
 
-
-// === Spec 22: ===
 // === Spec 22: OSRM failover ===
 function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const nLat1 = Number(lat1);
@@ -308,15 +348,22 @@ function haversineFallbackKm(lat1, lon1, lat2, lon2) {
   const a = Math.sin(dLat/2)**2 + Math.cos(t(nLat1))*Math.cos(t(nLat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
+
 export async function routeWithFailover(primary, _fb, coords) {
-  try { return await primary(coords); }
-  catch (err) {
-    logger.warn({ errMessage: err?.message }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+  try {
+    return await primary(coords);
+  } catch (err) {
+    // 🛠️ FIX FOR ISSUE #10653: Properly log error details from catch block
+    logger.warn({ errMessage: err?.message, stack: err?.stack }, '[osrm] routeWithFailover: primary call failed, falling back to haversine');
+
     if (!coords || !coords[0] || !coords[0][0] || !coords[0][1]) {
       return { distance: 0, source: 'haversine-fallback', error: 'No valid coordinates for haversine fallback' };
     }
     const [a, b] = coords[0];
-    return { distance: haversineFallbackKm(a[1], a[0], b[1], b[0]), source: 'haversine-fallback' };
+    return {
+      distance: haversineFallbackKm(a[1], a[0], b[1], b[0]),
+      source: 'haversine-fallback',
+      error: err?.message
+    };
   }
 }
-

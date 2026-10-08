@@ -16,7 +16,7 @@ const mockRedisRef = vi.hoisted(() => {
         // First lock acquisition succeeds; later ones fail (NX semantics).
         if (!lockAcquired) {
           lockAcquired = true;
-          store.set(key, '1');
+          store.set(key, value);
           return Promise.resolve('OK');
         }
         return Promise.resolve(null);

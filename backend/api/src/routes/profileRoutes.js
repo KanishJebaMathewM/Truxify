@@ -115,7 +115,87 @@ function sanitizeNumberPlate(plate) {
   if (!plate || typeof plate !== 'string') return '';
   return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
+/**
+ * GET /driver/statement
+ * Fetches the driver's delivered orders and calculates statement earnings.
+ * Uses offset-based pagination to retrieve all records beyond the PostgREST 1000-row limit.
+ */
+router.get('/driver/statement', authenticate, requirePolicy('driver:read'), async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { start_date, end_date } = req.query;
 
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID not found in token.' });
+    }
+
+    const pageSize = 1000;
+    const trips = [];
+
+    // Loop through paginated results to bypass PostgREST's 1000-row limit
+    while (true) {
+      let pageQuery = supabase
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) pageQuery = pageQuery.gte('pickup_date', start_date);
+      if (end_date) pageQuery = pageQuery.lte('pickup_date', end_date);
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        logger.error(
+          { requestId: req.requestId, event: 'DRIVER_STATEMENT_FETCH_ERROR', error: error.message },
+          'Failed to fetch driver statement records'
+        );
+        return res.status(500).json({ success: false, error: 'Failed to fetch statement records.' });
+      }
+
+      trips.push(...(pageRows || []));
+
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
+    }
+
+    // Restore descending order (newest first)
+    trips.reverse();
+
+    // Calculate aggregated totals across the full trip history
+    const totals = trips.reduce(
+      (acc, trip) => {
+        acc.total_amount += Number(trip.total_amount) || 0;
+        acc.total_base_freight += Number(trip.base_freight) || 0;
+        acc.total_toll_estimate += Number(trip.toll_estimate) || 0;
+        acc.total_platform_fee += Number(trip.platform_fee) || 0;
+        return acc;
+      },
+      { total_amount: 0, total_base_freight: 0, total_toll_estimate: 0, total_platform_fee: 0 }
+    );
+
+    logger.info(
+      { requestId: req.requestId, event: 'DRIVER_STATEMENT_FETCH_SUCCESS', tripCount: trips.length },
+      'Driver statement generated successfully.'
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: trips.length,
+      totals,
+      trips,
+    });
+  } catch (err) {
+    logger.error(
+      { requestId: req.requestId, event: 'DRIVER_STATEMENT_EXCEPTION', error: err?.message || err },
+      'Unhandled exception in driver statement endpoint'
+    );
+    return res.status(500).json({ success: false, error: 'Internal server error while generating statement.' });
+  }
+});
 
 /**
  * @openapi

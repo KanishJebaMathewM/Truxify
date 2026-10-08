@@ -211,8 +211,6 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
-  // Only forward min_price/max_price keys when the raw response actually
-  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
@@ -263,7 +261,7 @@ export async function predictEta({
   historicalSpeed,
 }) {
   guardMlApiKey();
-  const url = `${getBaseUrl()}/predict/eta`;
+  const url = `${getBaseUrl()}/eta/predict`;
 
   const payload = {
     route_distance: routeDistance,
@@ -420,28 +418,6 @@ export async function predictDriverProfit({
 }
 
 /**
- * Recommends available loads for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedDrivers]   - Previously rated drivers
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
- * Recommends suitable trucks for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedLoads]     - Previously rated loads
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
  * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
  * @param {object} params
  * @param {object} params.driverDestination - { lat, lng }
@@ -476,10 +452,10 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
  * the endpoint never returns an empty list when offers exist in the DB.
  *
  * @param {object} params
- * @param {number}   params.currentLat       - Driver's current latitude
- * @param {number}   params.currentLng       - Driver's current longitude
- * @param {Array}    params.offers           - Raw load_offer rows from DB
- * @param {object}   [params.truckSpecs]     - Truck capacity; defaults to generous values
+ * @param {number}   params.currentLat        - Driver's current latitude
+ * @param {number}   params.currentLng        - Driver's current longitude
+ * @param {Array}    params.offers            - Raw load_offer rows from DB
+ * @param {object}   [params.truckSpecs]      - Truck capacity; defaults to generous values
  * @param {number}   [params.maxDetourKm=50] - Max acceptable detour in km
  * @returns {Promise<Array>} - offers enriched with detour_km, extra_earnings, match_score
  */
@@ -492,10 +468,6 @@ export async function matchEnRouteLoads({
 }) {
   if (!offers || offers.length === 0) return [];
 
-  // Build the available_loads list the ML model expects. load_offers stores
-  // coordinates as pickup_*/drop_*, weight as text ('3 tonnes') and dimensions
-  // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
-  // model consumes.
   const availableLoads = offers
     .filter(o => o.pickup_lat && o.pickup_lng && o.drop_lat && o.drop_lng)
     .map(o => {
@@ -526,7 +498,6 @@ export async function matchEnRouteLoads({
   let recommendations = [];
   let mlUsed = false;
 
-  // Try the FastAPI ML engine first
   if (availableLoads.length > 0) {
     try {
       const result = await matchDeadhead({
@@ -542,7 +513,6 @@ export async function matchEnRouteLoads({
     }
   }
 
-  // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
       .filter(o => o.pickup_lat && o.pickup_lng)
@@ -561,19 +531,17 @@ export async function matchEnRouteLoads({
       .sort((a, b) => b.match_score - a.match_score);
   }
 
-  // Build a lookup map of ML results keyed by load_id
   const recMap = new Map(recommendations.map(r => [r.load_id, r]));
 
-  // Merge ML/haversine annotations back onto the original offer rows
   const enriched = offers
     .map(o => {
       const rec = recMap.get(o.id);
-      if (!rec) return null; // not recommended by ML — exclude
+      if (!rec) return null;
       return {
         ...o,
         detour_km: rec.detour_km ?? rec.distance_to_pickup_km ?? 0,
         extra_earnings: rec.estimated_earnings
-          ? Math.round(rec.estimated_earnings * 100) // convert to paisa for consistency
+          ? Math.round(rec.estimated_earnings * 100)
           : (o.freight_value || 0),
         match_score: rec.match_score ?? 0,
         extra_distance_km: rec.detour_km ?? 0,

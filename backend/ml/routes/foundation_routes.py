@@ -1,3 +1,8 @@
+import asyncio
+from functools import wraps
+from threading import RLock
+from foundation.checkpoint_generation import save_bundle, load_bundle
+
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
@@ -8,6 +13,17 @@ import logging
 from foundation.model import LogisticsFoundationModel, FoundationModelConfig, FoundationModelTrainer
 from foundation.data import LogisticsDataProcessor, LogisticsDatasetGenerator
 from routes.foundation_validation import UploadTooLarge, read_training_json, safe_model_path
+
+_foundation_state_lock = RLock()
+
+
+def _with_foundation_state(function):
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with _foundation_state_lock:
+            return function(*args, **kwargs)
+    return locked
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/foundation", tags=["Foundation Model"])
@@ -51,7 +67,8 @@ def _validated_model_path(path: str) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("/data/generate")
-async def generate_data(request: GenerateDataRequest):
+@_with_foundation_state
+def generate_data(request: GenerateDataRequest):
     """Generate synthetic logistics data"""
     try:
         samples = LogisticsDatasetGenerator.generate_samples(request.num_samples)
@@ -70,10 +87,8 @@ async def generate_data(request: GenerateDataRequest):
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/data/prepare")
-async def prepare_data(file: UploadFile = File(...)):
-    """Prepare data for training"""
-    data = await _read_training_data(file)
+@_with_foundation_state
+def _native_prepare_data(data):
     try:
         
         # Prepare pretraining data
@@ -98,10 +113,15 @@ async def prepare_data(file: UploadFile = File(...)):
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/pretrain")
-async def pretrain_model(file: Optional[UploadFile] = None):
-    """Pre-train foundation model"""
-    data = await _read_training_data(file) if file else LogisticsDatasetGenerator.generate_samples(10000)
+
+@router.post("/data/prepare")
+async def prepare_data(file: UploadFile = File(...)):
+    """Prepare data for training"""
+    data = await _read_training_data(file)
+    return await asyncio.to_thread(_native_prepare_data, data)
+
+@_with_foundation_state
+def _native_pretrain_model(data):
     try:
         # Prepare data
         train_data = processor.create_pretraining_data(data[:8000])
@@ -127,14 +147,15 @@ async def pretrain_model(file: Optional[UploadFile] = None):
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/finetune")
-async def finetune_model(
-    task: Literal['classification', 'regression'] = 'classification',
-    epochs: int = Query(5, ge=1, le=100),
-    file: Optional[UploadFile] = None
-):
-    """Fine-tune foundation model for specific task"""
-    data = await _read_training_data(file) if file else LogisticsDatasetGenerator.generate_samples(1000)
+
+@router.post("/pretrain")
+async def pretrain_model(file: Optional[UploadFile] = None):
+    """Pre-train foundation model"""
+    data = await _read_training_data(file) if file else LogisticsDatasetGenerator.generate_samples(10000)
+    return await asyncio.to_thread(_native_pretrain_model, data)
+
+@_with_foundation_state
+def _native_finetune_model(data, task, epochs):
     try:
         # Prepare data
         train_data = processor.create_finetuning_data(data[:800], task)
@@ -161,8 +182,20 @@ async def finetune_model(
 
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+@router.post("/finetune")
+async def finetune_model(
+    task: Literal['classification', 'regression'] = 'classification',
+    epochs: int = Query(5, ge=1, le=100),
+    file: Optional[UploadFile] = None
+):
+    """Fine-tune foundation model for specific task"""
+    data = await _read_training_data(file) if file else LogisticsDatasetGenerator.generate_samples(1000)
+    return await asyncio.to_thread(_native_finetune_model, data, task, epochs)
+
 @router.post("/predict")
-async def predict(
+@_with_foundation_state
+def predict(
     text: str = Query(..., min_length=1, max_length=10000),
     task: Literal['classification', 'regression'] = 'classification',
 ):
@@ -210,7 +243,8 @@ async def predict(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
-async def get_model_info():
+@_with_foundation_state
+def get_model_info():
     """Get model information"""
     try:
         return {
@@ -222,8 +256,8 @@ async def get_model_info():
                 'num_layers': config.num_layers,
                 'd_ff': config.d_ff,
                 'max_len': config.max_len,
-                'parameters': sum(p.numel() for p in model.parameters()),
-                'trainable': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                'parameters': sum(p.numel() for p in trainer.model.parameters()),
+                'trainable': sum(p.numel() for p in trainer.model.parameters() if p.requires_grad),
                 'device': str(trainer.device)
             },
             'timestamp': datetime.now().isoformat()
@@ -234,15 +268,16 @@ async def get_model_info():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
-async def save_model(path: str = "models/foundation_model.pth"):
+@_with_foundation_state
+def save_model(path: str = "models/foundation_model.pth"):
     """Save foundation model"""
     path = _validated_model_path(path)
     try:
-        trainer.save(path)
-        processor.save_vocab()
+        artifact = save_bundle(trainer, processor, path)
         return {
             'success': True,
             'message': f'Model saved to {path}',
+            'artifact': artifact,
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
@@ -251,15 +286,19 @@ async def save_model(path: str = "models/foundation_model.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
-async def load_model(path: str = "models/foundation_model.pth"):
+@_with_foundation_state
+def load_model(path: str = "models/foundation_model.pth"):
     """Load foundation model"""
+    global trainer, processor, model, config
     path = _validated_model_path(path)
     try:
-        trainer.load(path)
-        processor.load_vocab()
+        candidate_trainer, candidate_processor, artifact = load_bundle(trainer, processor, path)
+        trainer, processor = candidate_trainer, candidate_processor
+        model, config = trainer.model, trainer.config
         return {
             'success': True,
             'message': f'Model loaded from {path}',
+            'artifact': artifact,
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:

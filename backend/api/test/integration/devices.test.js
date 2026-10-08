@@ -151,7 +151,9 @@ describe('Device Routes Integration Tests', () => {
         .send({ fcmToken: 'token_err_database' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to register device');
+      expect(res.body.error.message).toBe('Failed to register device');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
+      expect(res.body.error.details).toEqual({});
     });
 
     it('returns 500 when the transactional device registration fails', async () => {
@@ -163,7 +165,9 @@ describe('Device Routes Integration Tests', () => {
         .send({ fcmToken: 'token_profile_sync_fail', platform: 'android' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to register device');
+      expect(res.body.error.message).toBe('Failed to register device');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
+      expect(res.body.error.details).toEqual({});
       // The whole registration (device row + profile sync) is one transaction,
       // so a failure must not leave a partially-inserted device row behind.
       expect(m.store.user_devices.find(d => d.fcm_token === 'token_profile_sync_fail')).toBeUndefined();
@@ -377,7 +381,9 @@ describe('Device Routes Integration Tests', () => {
         .send({ fcmToken: 'token_err_database' });
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to unregister device');
+      expect(res.body.error.message).toBe('Failed to unregister device');
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
+      expect(res.body.error.details).toEqual({});
     });
   });
 

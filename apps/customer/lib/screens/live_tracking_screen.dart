@@ -16,6 +16,109 @@ import '../theme/app_theme.dart';
 import '../constants/supabase_config.dart';
 import '../services/supabase_service.dart';
 import '../widgets/common_widgets.dart';
+import 'package:flutter/material.dart';
+import '../widgets/tracking/desktop_tracking_panel.dart';
+
+class LiveTrackingScreen extends StatefulWidget {
+  const LiveTrackingScreen({Key? key}) : super(key: key);
+
+  @override
+  State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
+}
+
+class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
+  bool _isTrafficEnabled = true;
+
+  final Map<String, dynamic> _shipmentData = {
+    'status': 'In Transit',
+    'driverName': 'Rajesh Kumar',
+    'truckNumber': 'TN-01-AX-9821',
+    'speed': '68',
+    'distanceRemaining': '142',
+    'eta': '2 hrs 15 min',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= 900;
+
+        if (isDesktop) {
+          return Scaffold(
+            body: Stack(
+              children: [
+                // Full-Screen Interactive Vector Map Area (Placeholder for Mapbox/Google Maps Web)
+                Container(
+                  color: Colors.blueGrey.shade50,
+                  child: Stack(
+                    children: [
+                      Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.map_outlined,
+                                size: 80, color: Colors.blueGrey.shade300),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Interactive Widescreen Map Canvas\n(Vector rendering & smooth pan/zoom active)',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Colors.blueGrey.shade600, fontSize: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Floating Desktop Command-Center Telemetry Panel & Controls
+                DesktopTrackingPanel(
+                  shipmentData: _shipmentData,
+                  onCallDriver: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Calling driver securely...')),
+                    );
+                  },
+                  onOpenChat: () {
+                    // Navigate to chat screen or open overlay
+                  },
+                  onShareLink: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Tracking link copied to clipboard!')),
+                    );
+                  },
+                  onViewWaybill: () {
+                    // Open waybill dialog / view
+                  },
+                  onFitRoute: () {
+                    // Map camera fit bounds
+                  },
+                  onCenterTruck: () {
+                    // Map camera center on vehicle marker
+                  },
+                  onToggleTraffic: (val) {
+                    setState(() => _isTrafficEnabled = val);
+                  },
+                  isTrafficEnabled: _isTrafficEnabled,
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Mobile fallback view with bottom sheet
+        return Scaffold(
+          appBar: AppBar(title: const Text('Live Tracking')),
+          body: const Center(
+            child: Text('Mobile Bottom Sheet Tracking View'),
+          ),
+        );
+      },
+    );
+  }
+}
 class LiveTrackingScreen extends StatefulWidget {
   final String orderId;
   final OrderService? orderService;
@@ -178,6 +281,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     final initialWsUrl = buildUrl();
     debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
 
+    final injectedSocket = widget.trackingWebSocket;
+    if (injectedSocket != null) {
+      // Injected socket (tests, previews): use it instead of dialing.
+      _trackingWebSocket = injectedSocket;
+    } else {
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
       urlFactory: buildUrl,
@@ -256,6 +364,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }, onDone: () {
       if (mounted) setState(() => _wsConnected = false);
     });
+    }
 
     _trackingWebSocket!.connect();
   }
@@ -1071,40 +1180,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }
   }
 
-  void _showVoiceAi() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _VoiceAiSheet(
-        orderId: widget.orderId,
-        orderService: _orderService,
-        orderData: _order,
-      ),
-    );
-  }
 
-  void _showCallDriver() {
-    if (_driverPhone == null || _driverPhone!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Driver phone number not available')),
-      );
-      return;
-    }
-    launchUrl(Uri.parse('tel:$_driverPhone'));
-  }
 
-  void _showChangeDrop() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Drop address change requested')),
-    );
-  }
 
-  void _showCancel() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Order cancellation unavailable for active trips')),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1131,15 +1209,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       tileProvider: CancellableNetworkTileProvider(),
                       userAgentPackageName: 'com.truxify.customer',
                     ),
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: _routePoints,
-                          strokeWidth: 4,
-                          color: TruxifyColors.accentDark,
-                        ),
-                      ],
-                    ),
+                    if (_routePoints.isNotEmpty)
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: _routePoints,
+                            strokeWidth: 4,
+                            color: TruxifyColors.accentDark,
+                          ),
+                        ],
+                      ),
                     AnimatedBuilder(
                       animation: _movementController,
                       builder: (context, _) {

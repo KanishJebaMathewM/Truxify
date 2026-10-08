@@ -37,7 +37,7 @@ class FakeGoTrueClient implements GoTrueClient {
   User? get currentUser => _user;
 
   @override
-  Session? get currentSession => _user == null ? null : Session(null);
+  Session? get currentSession => _user == null ? null : Session(accessToken: 'fake_token', tokenType: 'bearer', user: _user!);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -114,13 +114,13 @@ void main() {
 
 class _FakeSignOutGoTrueClient implements GoTrueClient {
   _FakeSignOutGoTrueClient(this._onSignOut);
-  final VoidCallback _onSignOut;
+  final void Function() _onSignOut;
 
   @override
   User? get currentUser => null;
 
   @override
-  Future<void> signOut() async {
+  Future<void> signOut({SignOutScope scope = SignOutScope.local}) async {
     _onSignOut();
   }
 

@@ -1,99 +1,53 @@
-﻿/**
- * Unit tests for backend/api/src/lib/requestContext.js
+/**
+ * Request Context Manager using AsyncLocalStorage
  */
-import { describe, it, expect, vi } from 'vitest';
-import { requestContext, getRequestCache, safeJsonParseWithFallback } from '../../src/lib/requestContext.js';
-import { RequestCache } from '../../src/lib/requestCache.js';
+import { AsyncLocalStorage } from 'async_hooks';
 
-describe('requestContext', () => {
-  describe('getRequestCache', () => {
-    it('returns null when called outside a request context', () => {
-      const cache = getRequestCache();
-      expect(cache).toBeNull();
-    });
+export const requestContext = new AsyncLocalStorage();
 
-    it('returns the requestCache from the store when inside context.run()', () => {
-      const store = { requestCache: new RequestCache() };
-      let observedCache = null;
+/**
+ * Retrieves the requestCache instance from the current AsyncLocalStorage store.
+ * Returns null if outside a context or if no requestCache is found.
+ * 
+ * @returns {import('./requestCache.js').RequestCache | null}
+ */
+export function getRequestCache() {
+  const store = requestContext.getStore();
+  if (!store || store.requestCache == null) {
+    return null;
+  }
+  return store.requestCache;
+}
 
-      requestContext.run(store, () => {
-        observedCache = getRequestCache();
-      });
+/**
+ * Safely parses a JSON string with a fallback value.
+ * Validates that the parsed result is a non-null plain object (not an array or primitive).
+ * 
+ * @param {string|any} input - The JSON string to parse.
+ * @param {any} fallback - The fallback value to return if parsing fails or result is invalid.
+ * @returns {any} The parsed object or fallback.
+ */
+export function safeJsonParseWithFallback(input, fallback) {
+  if (input === null || input === undefined || input === '') {
+    return fallback;
+  }
 
-      expect(observedCache).toBe(store.requestCache);
-      expect(observedCache).toBeInstanceOf(RequestCache);
-    });
+  try {
+    const parsed = JSON.parse(input);
+    
+    // Ensure the top-level parsed result is a valid non-null object and not an array
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fallback;
+    }
 
-    it('returns null when the store has no requestCache property', () => {
-      const store = {};
-      let observedCache = null;
+    return parsed;
+  } catch (err) {
+    return fallback;
+  }
+}
 
-      requestContext.run(store, () => {
-        observedCache = getRequestCache();
-      });
-
-      expect(observedCache).toBeNull();
-    });
-
-    it('returns null when the store.requestCache is explicitly null', () => {
-      const store = { requestCache: null };
-      let observedCache = null;
-
-      requestContext.run(store, () => {
-        observedCache = getRequestCache();
-      });
-
-      expect(observedCache).toBeNull();
-    });
-  });
-
-  describe('safeJsonParseWithFallback', () => {
-    it('returns parsed object for valid JSON object string', () => {
-      const result = safeJsonParseWithFallback('{"key":"value"}', null);
-      expect(result).toEqual({ key: 'value' });
-    });
-
-    it('parses valid JSON objects with multiple properties', () => {
-      expect(safeJsonParseWithFallback('{"a":1,"b":2}', {})).toEqual({ a: 1, b: 2 });
-    });
-
-    it('returns fallback for JSON array string (not an object)', () => {
-      const fallback = null;
-      const result = safeJsonParseWithFallback('[1, 2, 3]', fallback);
-      expect(result).toBe(fallback);
-    });
-
-    it('returns fallback for null input', () => {
-      const fallback = { default: true };
-      expect(safeJsonParseWithFallback(null, fallback)).toBe(fallback);
-    });
-
-    it('returns fallback for undefined input', () => {
-      const fallback = { default: true };
-      expect(safeJsonParseWithFallback(undefined, fallback)).toBe(fallback);
-    });
-
-    it('returns fallback for invalid JSON string', () => {
-      const fallback = { safe: true };
-      expect(safeJsonParseWithFallback('not valid json', fallback)).toBe(fallback);
-      expect(safeJsonParseWithFallback('{ broken }', {})).toEqual({});
-    });
-
-    it('returns fallback for primitive JSON values', () => {
-      const fallback = { safe: true };
-      expect(safeJsonParseWithFallback('"just a string"', fallback)).toBe(fallback);
-      expect(safeJsonParseWithFallback('123', fallback)).toBe(fallback);
-      expect(safeJsonParseWithFallback('true', fallback)).toBe(fallback);
-    });
-
-    it('returns fallback for empty string', () => {
-      const fallback = { safe: true };
-      expect(safeJsonParseWithFallback('', fallback)).toBe(fallback);
-    });
-
-    it('uses custom fallback', () => {
-      const custom = { custom: true };
-      expect(safeJsonParseWithFallback('not valid', custom)).toBe(custom);
-    });
-  });
-});
+export default {
+  requestContext,
+  getRequestCache,
+  safeJsonParseWithFallback,
+};

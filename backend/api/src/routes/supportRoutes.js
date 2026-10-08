@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -94,7 +94,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { getAdminClient, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -102,6 +102,7 @@ import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
 router.use(userLimiter);
@@ -111,7 +112,7 @@ router.use(userLimiter);
 // anon-key client resolves every read to empty and every write to a denial.
 // User-scoped handlers query through the caller's authenticated client;
 // admin handlers use the service-role client so they can see all tickets.
-const adminDb = supabaseAdmin || supabase;
+const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
 
 
@@ -135,34 +136,6 @@ const CATEGORY_MAP = {
 
 function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function parsePositiveInteger(value, fallback, field) {
-  if (value === undefined) return { value: fallback };
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return { error: `${field} must be a positive integer` };
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (parsed < 1) {
-    return { error: `${field} must be a positive integer` };
-  }
-
-  return { value: parsed };
-}
-
-function parseIntegerQuery(value, fallback, field, options = {}) {
-  if (value === undefined) return { value: fallback };
-  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
-    return { error: `${field} must be an integer` };
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (options.min !== undefined && parsed < options.min) {
-    return { error: `${field} must be at least ${options.min}` };
-  }
-
-  return { value: parsed };
 }
 
 function parseUuidQuery(value, field) {
@@ -451,14 +424,12 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
@@ -771,14 +742,12 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
       });
     }
 
+    const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
+
     res.json({
       tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
+      data: tickets || [],
+      pagination
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
@@ -970,23 +939,44 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ti
       return res.status(404).json({ error: 'Support ticket not found.' });
     }
 
-    const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');
-    if (parsedLimit.error) {
-      return res.status(400).json({ error: parsedLimit.error });
+    const limitQuery = req.query.limit;
+    const offsetQuery = req.query.offset;
+
+    // Reject empty or whitespace-only strings before conversion 
+    if (typeof limitQuery === 'string' && limitQuery.trim() === '') {
+      return res.status(400).json({ error: 'limit cannot be empty' });
+    }
+    if (typeof offsetQuery === 'string' && offsetQuery.trim() === '') {
+      return res.status(400).json({ error: 'offset cannot be empty' });
     }
 
-    const limit = Math.min(100, parsedLimit.value);
-    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
-    if (parsedOffset.error) {
-      return res.status(400).json({ error: parsedOffset.error });
+    const parsedLimit = limitQuery !== undefined ? Number(limitQuery) : 100;
+    const parsedOffset = offsetQuery !== undefined ? Number(offsetQuery) : 0;
+
+    if (!Number.isFinite(parsedLimit) || !Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
     }
-    const offset = parsedOffset.value;
+
+    if (!Number.isFinite(parsedOffset) || !Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    if (!Number.isFinite(parsedLimit) || !Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+
+    if (!Number.isFinite(parsedOffset) || !Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be a non-negative integer' });
+    }
+
+    const limit = Math.min(100, parsedLimit);
+    const offset = parsedOffset;
 
     const { data: comments, error: commentsError } = await userDb(req)
       .from('support_ticket_comments')
       .select('id, ticket_id, user_id, user_name, message, created_at')
       .eq('ticket_id', ticketId)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: isAscending })
       .range(offset, offset + limit - 1);
 
     if (commentsError) {

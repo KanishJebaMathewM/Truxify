@@ -23,6 +23,9 @@ const mockOrderRepository = {
 
 const mockOrderLifecycleService = {
   verifyDeliveryFn: vi.fn(),
+  deliveryVerification: {
+    geofenceAutoConfirm: vi.fn(),
+  },
 };
 
 const mockLockPayment = vi.fn();
@@ -30,7 +33,11 @@ const mockStoreDeliveryOtp = vi.fn();
 const mockSendFcmNotification = vi.fn();
 
 // Register mocks BEFORE importing routes
-vi.mock('../../src/middleware/rateLimiter.js', () => ({
+// Only the limiter is stubbed; importOriginal keeps createStore real, which
+// paymentRoutes.js needs. Without it this module fails to import and the whole
+// suite collects zero tests.
+vi.mock('../../src/middleware/rateLimiter.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   userLimiter: (req, res, next) => next(),
   createStore: () => undefined,
 }));
@@ -63,6 +70,10 @@ vi.mock('../../src/core/container.js', () => ({
   },
   orderLifecycleService: {
     verifyDeliveryFn: (...args) => mockOrderLifecycleService.verifyDeliveryFn(...args),
+    deliveryVerification: {
+      geofenceAutoConfirm: (...args) =>
+        mockOrderLifecycleService.deliveryVerification.geofenceAutoConfirm(...args),
+    },
   },
   logger: {
     info: vi.fn(),
@@ -184,8 +195,11 @@ describe('Payment & Escrow Endpoints', () => {
       }));
     });
 
-    it('auto-confirms delivery via GPS geofence fallback (within 500m)', async () => {
-      // Lat/Lng is very close to Bangalore drop location (12.9716, 77.5946)
+    it('does NOT auto-confirm via self-reported GPS inside the 500m geofence', async () => {
+      // Coordinates match the drop location (12.9716, 77.5946). This used to
+      // auto-confirm delivery: the route stored a constant 'GEOF' string as a
+      // valid OTP and released escrow, letting the assigned driver release
+      // payment by echoing the order's own drop coordinates back.
       const res = await request(app)
         .post('/api/deliveries/order-123/confirm-otp')
         .set('user-id', 'driver-user-id')
@@ -194,17 +208,13 @@ describe('Payment & Escrow Endpoints', () => {
           longitude: 77.5948,
         });
 
-      expect(res.status).toBe(200);
-      expect(res.body.isGeofenced).toBe(true);
-      expect(mockStoreDeliveryOtp).toHaveBeenCalledWith('order-123', 'GEOF', 5);
-      expect(mockOrderLifecycleService.verifyDeliveryFn).toHaveBeenCalledWith(
-        'order-123',
-        'driver-user-id',
-        'GEOF'
-      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('OTP is required');
+      expect(mockStoreDeliveryOtp).not.toHaveBeenCalled();
+      expect(mockOrderLifecycleService.verifyDeliveryFn).not.toHaveBeenCalled();
     });
 
-    it('rejects with 400 if outside geofence and no OTP is provided', async () => {
+    it('ignores coordinates and still requires the OTP when outside the geofence', async () => {
       // Coordinates are far away (e.g. Mumbai)
       const res = await request(app)
         .post('/api/deliveries/order-123/confirm-otp')
@@ -216,6 +226,18 @@ describe('Payment & Escrow Endpoints', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('OTP is required');
+      expect(mockOrderLifecycleService.verifyDeliveryFn).not.toHaveBeenCalled();
+    });
+
+    it('does not accept the GEOF bypass value as a delivery OTP', async () => {
+      const res = await request(app)
+        .post('/api/deliveries/order-123/confirm-otp')
+        .set('user-id', 'driver-user-id')
+        .send({ otp: 'GEOF' });
+
+      // Rejected by validation (must be 4 digits) before any service call.
+      expect(res.status).toBe(400);
+      expect(mockOrderLifecycleService.verifyDeliveryFn).not.toHaveBeenCalled();
     });
   });
 });

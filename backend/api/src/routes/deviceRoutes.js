@@ -39,7 +39,8 @@ import {
   registerDeviceToken, 
   unregisterDeviceToken, 
   getDevicePlatforms,
-  pruneDevices 
+  pruneDevices,
+  syncLocations
 } from '../controllers/deviceController.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
@@ -115,6 +116,9 @@ router.post('/unregister', authenticate, deviceLimiter, validateBody(unregisterD
 
 // GET /api/devices/platforms
 router.get('/platforms', authenticate, getDevicePlatforms);
+
+// POST /api/devices/locations/sync
+router.post('/locations/sync', authenticate, syncLocations);
 
 /**
  * @openapi

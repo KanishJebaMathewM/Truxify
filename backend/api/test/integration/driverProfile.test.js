@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -116,6 +116,9 @@ describe('Driver Profile & Availability Endpoints', () => {
 
   beforeEach(() => {
     app = buildApp();
+    // The hardened authenticate middleware fails closed without JWT_SECRET
+    // (93de585a7); this suite signs its tokens with 'secret'.
+    process.env.JWT_SECRET = 'secret';
     vi.clearAllMocks();
     mockUpdateDetails.mockReset();
     mockUpdateTruck.mockReset();
@@ -123,6 +126,10 @@ describe('Driver Profile & Availability Endpoints', () => {
 
     process.env.BYPASS_AUTH = 'false';
     mockGetUser.mockResolvedValue({ data: { user: { id: 'driver-123' } }, error: null });
+
+  afterEach(() => {
+    delete process.env.JWT_SECRET;
+  });
     token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'secret');
 
     // Default test data
@@ -131,7 +138,8 @@ describe('Driver Profile & Availability Endpoints', () => {
       full_name: 'John Driver',
       phone: '+919999999999',
       email: 'john.driver@truxify.com',
-      role: 'driver'
+      role: 'driver',
+      is_active: true
     };
     mockDriverDetails = {
       rating: 4.7,
@@ -219,17 +227,18 @@ describe('Driver Profile & Availability Endpoints', () => {
         .put('/api/driver/truck')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          type: 'Heavy Duty Truck',
+          type: 'Container',
           capacityWeight: 16.0,
           capacityVolume: 50.0,
           registrationNumber: 'MH12AB9999'
         });
 
+      console.log('PUT truck STATUS:', res.status, 'BODY:', res.body);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.truck.truck_type).toBe('Heavy Duty Truck');
-      expect(res.body.truck.capacity_weight_tonnes).toBe(16.0);
-      expect(res.body.truck.registration_number).toBe('MH12AB9999');
+      expect(res.body.truck.truck_type).toBe('Container');
+      expect(res.body.truck.max_capacity_tons).toBe(16.0);
+      expect(res.body.truck.number_plate).toBe('MH12AB9999');
       expect(mockUpdateTruck).toHaveBeenCalled();
     });
 
@@ -239,7 +248,7 @@ describe('Driver Profile & Availability Endpoints', () => {
         .put('/api/driver/truck')
         .set('Authorization', `Bearer ${token}`)
         .send({
-          type: 'Heavy Duty Truck',
+          type: 'Container',
           capacityWeight: 16.0,
           capacityVolume: 50.0,
           registrationNumber: 'MH12AB9999'

@@ -5,22 +5,72 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
+const EVM_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
+const MAX_LUMPER_FEE_USD = 10000;
+
+/**
+ * Validates EVM wallet address format.
+ */
+export const isValidEvmAddress = (address) => {
+  return typeof address === 'string' && EVM_ADDRESS_REGEX.test(address);
+};
+
+/**
+ * Validates secure web URL.
+ */
+export const isValidReceiptUrl = (url) => {
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Validation failures are client errors (400), not server faults (500).
+ * Without this, a malformed amount was reported as "Failed to deposit lumper
+ * fee into escrow" and monitoring could not distinguish the two.
+ */
+function statusForError(err) {
+  return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+}
+
 /**
  * POST /api/lumper-escrow/deposit
  * Broker pre-deposits estimated lumper fee into smart contract escrow
  */
 router.post('/deposit', authenticate, userLimiter, async (req, res) => {
   try {
+    // Role check: Only authorized brokers or admins may deposit into escrow
+    if (req.user && req.user.role !== 'broker' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access Denied: Only brokers or admins can deposit lumper escrow funds' });
+    }
+
     const { booking_id, broker_address, estimated_fee } = req.body;
 
-    if (!booking_id || !broker_address || !estimated_fee) {
+    if (!booking_id || !broker_address || estimated_fee === undefined || estimated_fee === null) {
       return res.status(400).json({ error: 'Missing required parameters: booking_id, broker_address, estimated_fee' });
+    }
+
+    if (!isValidEvmAddress(broker_address)) {
+      return res.status(400).json({ error: 'Invalid broker_address: Must be a valid 40-character hex EVM address' });
+    }
+
+    const feeAmount = Number(estimated_fee);
+    if (!Number.isFinite(feeAmount) || feeAmount <= 0) {
+      return res.status(400).json({ error: 'estimated_fee must be a positive finite number' });
+    }
+
+    if (feeAmount > MAX_LUMPER_FEE_USD) {
+      return res.status(400).json({ error: `estimated_fee exceeds maximum permissible limit of $${MAX_LUMPER_FEE_USD}` });
     }
 
     const escrow = await lumperEscrowService.depositLumperFee({
       bookingId: booking_id,
       brokerAddress: broker_address,
-      estimatedFeeAmount: Number(estimated_fee)
+      estimatedFeeAmount: feeAmount
     });
 
     return res.status(201).json({
@@ -28,7 +78,9 @@ router.post('/deposit', authenticate, userLimiter, async (req, res) => {
       escrow
     });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to deposit lumper fee into escrow' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to deposit lumper fee into escrow'
+    });
   }
 });
 
@@ -44,11 +96,32 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters: escrow_id, driver_wallet, receipt_url' });
     }
 
+    // Role check: Only drivers or admins can claim lumper fee releases
+    if (req.user && req.user.role !== 'driver' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access Denied: Only assigned drivers or admins can release lumper fee' });
+    }
+
+    if (!isValidEvmAddress(driver_wallet)) {
+      return res.status(400).json({ error: 'Invalid driver_wallet: Must be a valid 40-character hex EVM address' });
+    }
+
+    if (!isValidReceiptUrl(receipt_url)) {
+      return res.status(400).json({ error: 'Invalid receipt_url: Must be a valid HTTP/HTTPS URL' });
+    }
+
+    let parsedClaimed = undefined;
+    if (claimed_amount !== undefined && claimed_amount !== null) {
+      parsedClaimed = Number(claimed_amount);
+      if (!Number.isFinite(parsedClaimed) || parsedClaimed <= 0) {
+        return res.status(400).json({ error: 'claimed_amount must be a positive finite number' });
+      }
+    }
+
     const releasedEscrow = await lumperEscrowService.processReceiptAndRelease({
       escrowId: escrow_id,
       driverWallet: driver_wallet,
       receiptImageUrl: receipt_url,
-      claimedAmount: claimed_amount ? Number(claimed_amount) : undefined
+      claimedAmount: claimed_amount
     });
 
     return res.json({
@@ -56,7 +129,9 @@ router.post('/release', authenticate, userLimiter, async (req, res) => {
       escrow: releasedEscrow
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to process lumper receipt release' });
+    return res.status(statusForError(err)).json({
+      error: err.statusCode === 400 ? err.message : 'Failed to process lumper receipt release'
+    });
   }
 });
 

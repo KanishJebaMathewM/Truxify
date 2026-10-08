@@ -8,8 +8,12 @@ const adminDbMock = {
 };
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: adminDbMock,
   supabase: adminDbMock,
+  getAdminClient: () => adminDbMock,
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({
@@ -94,6 +98,27 @@ describe('Admin Stuck Withdrawals & DLQ Endpoints', () => {
         p_notes: 'Manual operator retry',
       });
       expect(res.body.success).toBe(true);
+    });
+
+    it('returns conflict when payout dispatch makes retry unsafe', async () => {
+      const rejectedRetry = {
+        success: false,
+        error: 'Cannot retry a withdrawal after payout dispatch was attempted',
+      };
+      adminDbMock.rpc.mockResolvedValue({ data: rejectedRetry, error: null });
+
+      const res = await request(app)
+        .post('/api/v1/admin/withdrawals/w-dispatched/retry');
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(rejectedRetry);
+      expect(adminDbMock.rpc).toHaveBeenCalledWith(
+        'admin_resolve_dlq_withdrawal',
+        expect.objectContaining({
+          p_withdrawal_id: 'w-dispatched',
+          p_action: 'retry',
+        }),
+      );
     });
   });
 

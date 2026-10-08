@@ -21,7 +21,10 @@ vi.mock('ethers', () => ({
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({ default: loggerMock }));
-vi.mock('../../src/config/db.js', () => ({ supabase: { from } }));
+vi.mock('../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: { from } }));
 
 const { TraceabilityService } = await import('../../../traceability/trace.service.js');
 

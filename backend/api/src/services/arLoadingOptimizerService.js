@@ -1,4 +1,5 @@
 import logger from '../middleware/logger.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Service for AR-guided container loading optimization and axle weight balancing.
@@ -102,7 +103,7 @@ class ARLoadingOptimizerService {
     const frontAxleLoadKg = Math.round(totalWeightKg * 0.42);
     const rearAxleLoadKg = Math.round(totalWeightKg * 0.58);
 
-    const planId = `AR-PLAN-${Date.now()}`;
+    const planId = `PLAN-${randomUUID()}`;
     const plan = {
       planId,
       ownerId,

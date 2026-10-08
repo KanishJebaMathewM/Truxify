@@ -52,31 +52,24 @@ class SnykService {
     // the last JSON document found within it, and otherwise return null so the
     // caller can report a structured failure with the raw output logged.
     _parseJsonOutput(stdout) {
+        if (!stdout || typeof stdout !== 'string') return null;
         try {
             return JSON.parse(stdout);
         } catch {
-            // fall through to scan-for-JSON below
-        }
-        for (const pair of [['{', '}'], ['[', ']']]) {
-            const [open, close] = pair;
-            const start = stdout.indexOf(open);
-            if (start === -1) continue;
-            let end = -1;
-            for (let i = stdout.length - 1; i >= start; i--) {
-                if (stdout[i] === close) {
-                    end = i;
-                    break;
+            for (const [open, close] of [['{', '}'], ['[', ']']]) {
+                const first = stdout.indexOf(open);
+                const last = stdout.lastIndexOf(close);
+                if (first !== -1 && last !== -1 && last > first) {
+                    try {
+                        return JSON.parse(stdout.slice(first, last + 1));
+                    } catch (err) {
+                        logger.error({ err, stdout }, '[SnykService] Failed extracting embedded JSON');
+                    }
                 }
             }
-            if (end === -1) continue;
-            try {
-                return JSON.parse(stdout.slice(start, end + 1));
-            } catch {
-                // keep scanning
-            }
+            logger.error({ stdout }, '[SnykService] Produced non-JSON output');
+            return null;
         }
-        logger.error('Snyk produced non-JSON output:', stdout);
-        return null;
     }
 
     async scanDependencies(projectPath = '.') {

@@ -134,4 +134,64 @@ const releaseEscrowFunds = async (userId, bookingId, requestId = null) => {
         }
 
         if (booking.escrow_status !== 'deposited') {
-            throw new
+            throw new Error('No escrow deposit found for this booking');
+        }
+
+        const bookingIdBytes32 = ethers.id(validBookingId);
+
+        let receipt;
+        if (process.env.NODE_ENV === 'test') {
+            const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
+            const contract = getEscrowContract(provider);
+            const tx = await contract.releaseEscrow(bookingIdBytes32);
+            receipt = await tx.wait();
+        } else {
+            const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
+            receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
+                const contract = getEscrowContract(provider);
+                const tx = await contract.releaseEscrow(bookingIdBytes32);
+                return await tx.wait();
+            });
+        }
+
+        const { error: updateError } = await supabase
+            .from('bookings')
+            .update({
+                escrow_status: 'released',
+                escrow_released_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', validBookingId);
+
+        if (updateError) {
+            logger.error('Failed to update booking escrow status', {
+                event: 'ESCROW_ERROR',
+                requestId,
+                bookingId: validBookingId,
+                userId,
+                error: updateError.message,
+            });
+        }
+
+        return {
+            success: true,
+            transactionHash: receipt.hash,
+            bookingId: validBookingId,
+        };
+    } catch (error) {
+        logger.error('Escrow release service error', {
+            event: 'ESCROW_ERROR',
+            requestId,
+            bookingId,
+            userId,
+            error: error.message,
+            stack: error.stack,
+        });
+        throw error;
+    }
+};
+
+module.exports = {
+    initiateEscrowDeposit,
+    releaseEscrowFunds,
+};

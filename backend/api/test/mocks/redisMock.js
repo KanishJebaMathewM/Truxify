@@ -50,6 +50,20 @@ class RedisMock {
             return result === 'OK' ? 1 : 0;
         }
 
+        // Sequence gate (locationServer.applySequenceGate): ioredis-style
+        // eval(script, numKeys, key, ...args) — accept when the incoming epoch
+        // is newer than the stored one, then persist it.
+        if (luaScript.includes("local incoming = tonumber(ARGV[1])")) {
+            const seqKey = Array.isArray(keys) ? keys[0] : args;
+            const incomingEpoch = Array.isArray(keys) ? args[0] : arguments[3];
+            const current = await this.get(seqKey);
+            if (current != null && Number(incomingEpoch) <= Number(current)) {
+                return 0;
+            }
+            await this.set(seqKey, String(incomingEpoch));
+            return 1;
+        }
+
         return 0;
     }
 

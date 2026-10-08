@@ -39,6 +39,7 @@ class NeRFNetwork(nn.Module):
         
         self.num_frequencies = num_frequencies
         self.num_dir_frequencies = num_dir_frequencies
+        self.skip_layer = skip_layer
         
         # Position encoding
         self.pos_encoder = PositionalEncoding(num_frequencies)
@@ -90,14 +91,11 @@ class NeRFNetwork(nn.Module):
         # Density computation
         x = encoded_pos
         for i, layer in enumerate(self.density_layers):
-            if i == 0:
-                x = layer(x)
-            elif i == 4:  # Skip connection
+            # Sequential interleaves Linear/ReLU; configuration counts Linears.
+            if isinstance(layer, nn.Linear) and i // 2 == self.skip_layer and i != 0:
                 x = torch.cat([x, encoded_pos], dim=-1)
-                x = layer(x)
-            else:
-                x = layer(x)
-        
+            x = layer(x)
+
         density = self.density_head(x)
         
         # Color computation
@@ -117,6 +115,10 @@ class NeRFRenderer:
         num_samples: int = 64,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        if not math.isfinite(near) or not math.isfinite(far) or near < 0 or far <= near:
+            raise ValueError("ray interval requires finite 0 <= near < far")
+        if isinstance(num_samples, bool) or not isinstance(num_samples, int) or num_samples <= 0:
+            raise ValueError("num_samples must be a positive integer")
         self.model = model.to(device)
         self.near = near
         self.far = far
@@ -135,8 +137,24 @@ class NeRFRenderer:
         if num_samples is None:
             num_samples = self.num_samples
         
-        # Sample points along rays
-        t_values = torch.linspace(self.near, self.far, num_samples, device=self.device)
+        if isinstance(num_samples, bool) or not isinstance(num_samples, int) or num_samples <= 0:
+            raise ValueError("num_samples must be a positive integer")
+        if (ray_origins.ndim != 3 or ray_origins.shape != ray_directions.shape
+                or ray_origins.shape[-1] != 3 or not ray_origins.shape[0] or not ray_origins.shape[1]):
+            raise ValueError("rays require matching nonempty [batch, rays, 3] tensors")
+        parameter = next(self.model.parameters())
+        if (ray_origins.dtype != parameter.dtype or ray_directions.dtype != parameter.dtype
+                or ray_origins.device != parameter.device or ray_directions.device != parameter.device
+                or not torch.isfinite(ray_origins).all() or not torch.isfinite(ray_directions).all()):
+            raise ValueError("rays must be finite and match model dtype/device")
+        ray_lengths = torch.linalg.vector_norm(ray_directions, dim=-1, keepdim=True)
+        if not torch.isfinite(ray_lengths).all() or (ray_lengths == 0).any():
+            raise ValueError("ray directions require finite nonzero lengths")
+
+        # Sample the ray parameter, preserving the input floating precision.
+        scalar_dtype = torch.float32 if parameter.dtype in (torch.float16, torch.bfloat16) else parameter.dtype
+        t_values = torch.linspace(self.near, self.far, num_samples,
+                                  device=parameter.device, dtype=scalar_dtype)
         t_values = t_values.unsqueeze(0).unsqueeze(0).expand(
             ray_origins.shape[0], ray_origins.shape[1], -1
         )
@@ -149,8 +167,10 @@ class NeRFRenderer:
         dirs = dirs.unsqueeze(-2).expand(-1, -1, num_samples, -1)
         
         # Reshape for network
-        points_flat = points.reshape(-1, 3)
-        dirs_flat = dirs.reshape(-1, 3)
+        points_flat = points.reshape(-1, 3).to(parameter.dtype)
+        dirs_flat = dirs.reshape(-1, 3).to(parameter.dtype)
+        if not torch.isfinite(points_flat).all():
+            raise ValueError("sampled ray points must be representable finitely")
         
         # Query network
         with torch.no_grad():
@@ -160,17 +180,20 @@ class NeRFRenderer:
         densities = densities.reshape(ray_origins.shape[0], ray_origins.shape[1], num_samples, 1)
         colors = colors.reshape(ray_origins.shape[0], ray_origins.shape[1], num_samples, 3)
         
-        # Volume rendering
+        # Scalar sample axes [B, R, S]; color alone has a trailing RGB axis.
         delta = t_values[..., 1:] - t_values[..., :-1]
-        delta = torch.cat([delta, torch.full_like(delta[..., -1:], 1e10)], dim=-1)
-        
-        alpha = 1 - torch.exp(-densities * delta)
-        weights = alpha * torch.cumprod(1 - alpha + 1e-10, dim=-2)
-        
-        # Compute RGB
-        rgb = (weights * colors).sum(dim=-2)
-        depth = (weights * t_values).sum(dim=-2)
-        
+        delta = torch.cat([delta, torch.full_like(t_values[..., :1], 1e10)], dim=-1)
+        delta = delta * ray_lengths
+        sigma = densities.squeeze(-1).to(scalar_dtype).clamp_min(0)
+        optical_depth = sigma * delta
+        alpha = -torch.expm1(-optical_depth)
+        # Exclusive transmittance: an opaque front sample receives full weight.
+        previous_depth = torch.cat([torch.zeros_like(optical_depth[..., :1]),
+                                    optical_depth[..., :-1].cumsum(dim=-1)], dim=-1)
+        weights = alpha * torch.exp(-previous_depth)
+        rgb = (weights.unsqueeze(-1) * colors).sum(dim=-2)
+        depth = (weights * t_values).sum(dim=-1)
+
         return {
             'rgb': rgb,
             'depth': depth,

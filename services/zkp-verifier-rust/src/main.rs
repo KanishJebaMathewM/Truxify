@@ -1,10 +1,11 @@
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Address the verification microservice listens on (matches `EXPOSE 8087`).
 const BIND_ADDR: &str = "0.0.0.0:8087";
@@ -123,13 +124,13 @@ fn parse_request_line(head: &str) -> (String, String) {
 }
 
 /// Parses the `Content-Length` header value, defaulting to 0.
-fn parse_content_length(head: &str) -> usize {
+fn parse_content_length(head: &str) -> Option<usize> {
     for line in head.lines() {
         if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-            return value.trim().parse().unwrap_or(0);
+            return value.trim().parse().ok();
         }
     }
-    0
+    Some(0)
 }
 
 /// Builds a minimal HTTP/1.1 JSON response with `Connection: close`.
@@ -171,8 +172,65 @@ fn route(method: &str, path: &str, body: &str) -> (&'static str, String) {
     }
 }
 
-/// Reads one HTTP request and writes the response for a single connection.
-async fn handle_connection(mut stream: TcpStream) {
+const DEFAULT_MAX_CONNECTIONS: usize = 64;
+const CONNECTION_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn parse_connection_limit(raw: Option<&str>) -> Result<usize, std::io::Error> {
+    let limit = match raw {
+        None => DEFAULT_MAX_CONNECTIONS,
+        Some(raw) => raw.trim().parse::<usize>().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "ZKP_MAX_CONNECTIONS must be an integer from 1 to 1024",
+            )
+        })?,
+    };
+    if !(1..=1024).contains(&limit) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "ZKP_MAX_CONNECTIONS must be an integer from 1 to 1024",
+        ));
+    }
+    Ok(limit)
+}
+
+async fn serve_connections(
+    listener: TcpListener,
+    slots: Arc<Semaphore>,
+    deadline: std::time::Duration,
+) -> Result<(), std::io::Error> {
+    loop {
+        // Reserve before accepting: no application queue of accepted sockets or
+        // waiting tasks is created. Excess arrivals stay in the OS listen backlog.
+        let permit = slots.clone().acquire_owned().await.map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "connection admission closed",
+            )
+        })?;
+        let (stream, _peer) = listener.accept().await?;
+        tokio::spawn(handle_admitted_connection(stream, permit, deadline));
+    }
+}
+
+async fn handle_admitted_connection(
+    stream: TcpStream,
+    permit: OwnedSemaphorePermit,
+    deadline: std::time::Duration,
+) {
+    // The owned permit lives as long as the actual task: normal completion,
+    // deadline cancellation, disconnect, panic, and abort all release it.
+    let _permit = permit;
+    handle_connection_with_deadline(stream, deadline).await;
+}
+
+async fn handle_connection_with_deadline(stream: TcpStream, deadline: std::time::Duration) {
+    // One total deadline covers headers, body and response writes. Cancellation
+    // drops the owned stream, releasing stalled connections.
+    let _ = tokio::time::timeout(deadline, process_connection(stream)).await;
+}
+
+async fn process_connection(mut stream: TcpStream) {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
 
@@ -185,19 +243,35 @@ async fn handle_connection(mut stream: TcpStream) {
         };
         buf.extend_from_slice(&chunk[..n]);
         if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            if pos + 4 > 64 * 1024 {
+                let _ = stream.write_all(&http_response("431 Request Header Fields Too Large", r#"{"error":"Headers too large"}"#)).await;
+                let _ = stream.flush().await;
+                return;
+            }
             break pos + 4;
         }
         if buf.len() > 64 * 1024 {
+            let _ = stream.write_all(&http_response("431 Request Header Fields Too Large", r#"{"error":"Headers too large"}"#)).await;
+            let _ = stream.flush().await;
             return;
         }
     };
 
     let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
-    let content_length = parse_content_length(&head);
+    let content_length = match parse_content_length(&head) {
+        Some(len) => len,
+        None => {
+            let _ = stream.write_all(&http_response("400 Bad Request", r#"{"error":"Invalid or missing Content-Length"}"#)).await;
+            let _ = stream.flush().await;
+            return;
+        }
+    };
 
     // Reject unreasonably large or overflowing body lengths from an untrusted
     // Content-Length header before performing any pointer arithmetic.
     if content_length > MAX_BODY {
+        let _ = stream.write_all(&http_response("413 Payload Too Large", r#"{"error":"Payload too large"}"#)).await;
+        let _ = stream.flush().await;
         return;
     }
     let body_end = match header_end.checked_add(content_length) {
@@ -208,7 +282,11 @@ async fn handle_connection(mut stream: TcpStream) {
     // Read the remaining body bytes.
     while buf.len() < body_end {
         let n = match stream.read(&mut chunk).await {
-            Ok(0) => return,
+            Ok(0) => {
+                let _ = stream.write_all(&http_response("400 Bad Request", r#"{"error":"Truncated request body"}"#)).await;
+                let _ = stream.flush().await;
+                return;
+            }
             Ok(n) => n,
             Err(_) => return,
         };
@@ -242,19 +320,259 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Self-test (forged proof must be rejected): {:?}", res);
     assert!(!res.verified, "forged proof must never verify");
 
+    let configured = match std::env::var("ZKP_MAX_CONNECTIONS") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(_) => return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "ZKP_MAX_CONNECTIONS must be UTF-8",
+        ).into()),
+    };
+    let limit = parse_connection_limit(configured.as_deref())?;
     let listener = TcpListener::bind(BIND_ADDR).await?;
     println!("✅ ZKP Verifier listening on {BIND_ADDR}");
-
-    loop {
-        let (stream, _peer) = listener.accept().await?;
-        tokio::spawn(handle_connection(stream));
-    }
+    serve_connections(
+        listener,
+        Arc::new(Semaphore::new(limit)),
+        CONNECTION_DEADLINE,
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    async fn connection_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        (client, server)
+    }
+
+    async fn assert_stalled_connection_closes(request: &[u8]) {
+        let (mut client, server) = connection_pair().await;
+        let handler = tokio::spawn(handle_connection_with_deadline(
+            server,
+            std::time::Duration::from_millis(50),
+        ));
+        client.write_all(request).await.unwrap();
+        let mut byte = [0u8; 1];
+        let read = tokio::time::timeout(std::time::Duration::from_secs(2), client.read(&mut byte))
+            .await
+            .expect("stalled connection must close at its deadline")
+            .unwrap();
+        assert_eq!(read, 0);
+        handler.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn closes_silent_connection_at_deadline() {
+        assert_stalled_connection_closes(b"").await;
+    }
+
+    #[tokio::test]
+    async fn closes_partial_headers_at_deadline() {
+        assert_stalled_connection_closes(b"GET /health HTTP/1.1\r\nHost: local").await;
+    }
+
+    #[tokio::test]
+    async fn closes_incomplete_body_at_deadline() {
+        assert_stalled_connection_closes(b"POST /verify HTTP/1.1\r\nContent-Length: 10\r\n\r\n{")
+            .await;
+    }
+
+    #[tokio::test]
+    async fn completes_health_request_before_deadline() {
+        let (mut client, server) = connection_pair().await;
+        let handler = tokio::spawn(handle_connection_with_deadline(
+            server,
+            std::time::Duration::from_secs(2),
+        ));
+        client
+            .write_all(b"GET /health HTTP/1.1\r\nHost: local\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.read_to_end(&mut response),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(String::from_utf8(response)
+            .unwrap()
+            .starts_with("HTTP/1.1 200 OK"));
+        handler.await.unwrap();
+    }
+
+    #[test]
+    fn validates_connection_capacity_without_unlimited_fallback() {
+        assert_eq!(parse_connection_limit(None).unwrap(), 64);
+        assert_eq!(parse_connection_limit(Some(" 2 ")).unwrap(), 2);
+        assert_eq!(parse_connection_limit(Some("1024")).unwrap(), 1024);
+        for raw in ["", "0", "-1", "1.5", "NaN", "1025", "184467440737095516160"] {
+            assert!(parse_connection_limit(Some(raw)).is_err(), "{raw}");
+        }
+    }
+
+    #[tokio::test]
+    async fn admitted_deadline_releases_actual_capacity_and_stream() {
+        let slots = Arc::new(Semaphore::new(1));
+        let permit = slots.clone().acquire_owned().await.unwrap();
+        let (mut client, server) = connection_pair().await;
+        let task = tokio::spawn(handle_admitted_connection(
+            server,
+            permit,
+            std::time::Duration::from_millis(30),
+        ));
+        assert_eq!(slots.available_permits(), 0);
+        let mut byte = [0];
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), client.read(&mut byte))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        task.await.unwrap();
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn aborting_an_admitted_task_releases_capacity_and_socket() {
+        let slots = Arc::new(Semaphore::new(1));
+        let permit = slots.clone().acquire_owned().await.unwrap();
+        let (mut client, server) = connection_pair().await;
+        let task = tokio::spawn(handle_admitted_connection(
+            server,
+            permit,
+            std::time::Duration::from_secs(30),
+        ));
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(slots.available_permits(), 1);
+        let mut byte = [0];
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), client.read(&mut byte))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnect_and_success_both_release_admitted_capacity() {
+        let slots = Arc::new(Semaphore::new(1));
+        for request in [
+            None,
+            Some(b"GET /health HTTP/1.1\r\nHost: local\r\n\r\n".as_slice()),
+        ] {
+            let permit = slots.clone().acquire_owned().await.unwrap();
+            let (mut client, server) = connection_pair().await;
+            let task = tokio::spawn(handle_admitted_connection(
+                server,
+                permit,
+                std::time::Duration::from_secs(2),
+            ));
+            if let Some(request) = request {
+                client.write_all(request).await.unwrap();
+                let mut response = Vec::new();
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    client.read_to_end(&mut response),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+            } else {
+                drop(client);
+            }
+            task.await.unwrap();
+            assert_eq!(slots.available_permits(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_accept_loop_backpressures_and_recovers_at_capacity_one() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let serving = tokio::spawn(serve_connections(
+            listener,
+            slots.clone(),
+            std::time::Duration::from_secs(2),
+        ));
+        let mut first = TcpStream::connect(addr).await.unwrap();
+        // The first response establishes that the actual loop admitted it.
+        first
+            .write_all(b"GET /health HTTP/1.1\r\nHost: local\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        first.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+        let mut blocker = TcpStream::connect(addr).await.unwrap();
+        blocker
+            .write_all(b"POST /verify HTTP/1.1\r\nContent-Length: 10\r\n\r\n{")
+            .await
+            .unwrap();
+        let mut waiting = TcpStream::connect(addr).await.unwrap();
+        waiting
+            .write_all(b"GET /health HTTP/1.1\r\nHost: local\r\n\r\n")
+            .await
+            .unwrap();
+        let mut byte = [0];
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(30),
+            waiting.read(&mut byte)
+        )
+        .await
+        .is_err());
+        assert_eq!(slots.available_permits(), 0);
+        drop(blocker);
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            waiting.read_to_end(&mut response),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+        serving.abort();
+        assert!(serving.await.unwrap_err().is_cancelled());
+        let _all_returned = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            slots.acquire_many_owned(1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelling_accept_releases_its_unassigned_reservation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let task = tokio::spawn(serve_connections(
+            listener,
+            slots.clone(),
+            std::time::Duration::from_secs(2),
+        ));
+        tokio::task::yield_now().await;
+        assert_eq!(slots.available_permits(), 0);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(slots.available_permits(), 1);
+    }
 
     /// Test-only signing key whose public half matches the default verifying
     /// public key. Never shipped with the verifier in production.

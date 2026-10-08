@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { supabaseAdmin } from '../config/db.js';
@@ -7,6 +7,8 @@ import { auditLogService } from '../services/auditLogService.js';
 import { validateQuery } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { z } from 'zod';
+import { queryAuditLogs, exportAuditLogsJSON } from '../services/auditService.js';
+import { verifyLogBatch } from '../lib/logSigner.js';
 
 const router = express.Router();
 router.use(userLimiter);
@@ -256,6 +258,133 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
   } catch (err) {
     logger.error({ requestId: req.requestId, err: err?.message || err }, '[AuditRoutes] Error fetching audit log entry');
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * @fileoverview Admin endpoints for querying and exporting audit logs.
+ */
+
+const SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET || 'truxify-audit-signing-secret';
+
+/**
+ * GET /api/audit/logs
+ * Queries audit logs with filtering and pagination.
+ */
+router.get('/logs', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+  try {
+    const {
+      userId,
+      eventType,
+      severity,
+      startDate,
+      endDate,
+      requestId,
+      limit = 100,
+      offset = 0
+    } = req.query;
+
+    const result = await queryAuditLogs({
+      userId,
+      eventType,
+      severity,
+      startDate,
+      endDate,
+      requestId,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10)
+    });
+
+    res.json({
+      success: true,
+      logs: result.logs,
+      total: result.total,
+      limit: parseInt(limit, 10),
+      offset: parseInt(offset, 10)
+    });
+  } catch (err) {
+    logger.error({ err }, 'GET /audit/logs error');
+    res.status(500).json({ error: 'Failed to query audit logs' });
+  }
+});
+
+/**
+ * GET /api/audit/export
+ * Exports audit logs to JSON file download.
+ */
+router.get('/export', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+  try {
+    const { startDate, endDate, eventType, userId } = req.query;
+
+    const jsonString = await exportAuditLogsJSON({
+      startDate,
+      endDate,
+      eventType,
+      userId
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=audit_logs_${Date.now()}.json`);
+    res.send(jsonString);
+  } catch (err) {
+    logger.error({ err }, 'GET /audit/export error');
+    res.status(500).json({ error: 'Failed to export audit logs' });
+  }
+});
+
+/**
+ * POST /api/audit/verify
+ * Verifies the HMAC signature of a batch of logs.
+ */
+router.post('/verify', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+  try {
+    const { logs, signature } = req.body;
+
+    if (!logs || !signature) {
+      return res.status(400).json({ error: 'logs and signature are required' });
+    }
+
+    const isValid = verifyLogBatch(logs, signature, SIGNING_SECRET);
+
+    res.json({
+      success: true,
+      isValid,
+      message: isValid ? 'Batch signature is valid' : 'Batch signature is INVALID - logs may be tampered'
+    });
+  } catch (err) {
+    logger.error({ err }, 'POST /audit/verify error');
+    res.status(500).json({ error: 'Failed to verify batch' });
+  }
+});
+
+/**
+ * GET /api/audit/stats
+ * Returns aggregate statistics about audit events.
+ */
+router.get('/stats', authenticate, requireRole(['admin', 'compliance']), async (req, res) => {
+  try {
+    // Simple stats query - in production, use materialized views
+    const { data, error } = await supabaseAdmin
+      .from('audit_logs')
+      .select('event_type, severity');
+
+    if (error) throw error;
+
+    const stats = {
+      total: data.length,
+      byEventType: {},
+      bySeverity: {}
+    };
+
+    for (const log of data) {
+      stats.byEventType[log.event_type] = (stats.byEventType[log.event_type] || 0) + 1;
+      stats.bySeverity[log.severity] = (stats.bySeverity[log.severity] || 0) + 1;
+    }
+
+    res.json({ success: true, stats });
+  } catch (err) {
+    logger.error({ err }, 'GET /audit/stats error');
+    res.status(500).json({ error: 'Failed to fetch audit stats' });
   }
 });
 

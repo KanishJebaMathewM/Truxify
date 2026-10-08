@@ -7,7 +7,6 @@ let mockGetUser = vi.fn();
 let mockGet = vi.fn();
 let mockSet = vi.fn();
 let mockDel = vi.fn();
-let mockPredictPrice = vi.fn();
 let mockPredictDemand = vi.fn();
 let mockPredictEta = vi.fn();
 
@@ -36,10 +35,10 @@ vi.mock('../../src/config/db.js', () => {
       return {
         select: () => ({
           in: () => Promise.resolve({ data: [{ id: 'driver-1', full_name: 'Tata Driver', avatar_url: '', is_digilocker_verified: true }], error: null }),
+          // The hardened authenticate flow resolves the profile with a single
+          // .eq('id', user.id).maybeSingle() after the supabase getUser call.
           eq: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: { id: 'user-123', role: 'customer', is_active: true }, error: null })
-            })
+            maybeSingle: () => Promise.resolve({ data: { id: 'user-123', role: 'customer', is_active: true }, error: null })
           })
         })
       };
@@ -81,7 +80,6 @@ vi.mock('../../src/services/trafficService.js', () => ({
 
 // Mock ML service
 vi.mock('../../src/services/ml.js', () => ({
-  predictPrice: (...args) => mockPredictPrice(...args),
   predictDemand: (...args) => mockPredictDemand(...args),
   predictEta: (...args) => mockPredictEta(...args)
 }));
@@ -116,7 +114,14 @@ describe('Upstash Redis Caching Layer', () => {
     app = buildApp();
     vi.clearAllMocks();
     process.env.BYPASS_AUTH = 'false';
+    // The hardened authenticate middleware fails closed without JWT_SECRET
+    // (93de585a7); this suite signs its tokens with 'secret'.
+    process.env.JWT_SECRET = 'secret';
     mockGetUser.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null });
+
+  afterEach(() => {
+    delete process.env.JWT_SECRET;
+  });
     token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'secret');
 
     // In-memory simple store to mock Upstash Redis behavior
@@ -132,7 +137,6 @@ describe('Upstash Redis Caching Layer', () => {
     });
 
     mockPredictDemand.mockResolvedValue({ predicted_demand: 0.8 });
-    mockPredictPrice.mockResolvedValue({ estimated_price: 12000, currency: 'INR', estimatedPricePaisa: 1200000 });
     mockPredictEta.mockResolvedValue({ eta_minutes: 18, confidence_interval: { lower: 15, upper: 22 } });
   });
 
@@ -194,25 +198,6 @@ describe('Upstash Redis Caching Layer', () => {
 
       const res2 = await request(app)
         .get('/api/ml/demand-heatmap?zoneId=zone-A')
-        .set('Authorization', `Bearer ${token}`);
-
-      expect(res2.status).toBe(200);
-      expect(res2.headers['x-cache']).toBe('HIT');
-    });
-  });
-
-  describe('GET /api/ml/price-forecast', () => {
-    it('caches price forecast with 10 minute TTL', async () => {
-      const res1 = await request(app)
-        .get('/api/ml/price-forecast?origin=BLR&destination=MAA&date=2026-08-10')
-        .set('Authorization', `Bearer ${token}`);
-
-      expect(res1.status).toBe(200);
-      expect(res1.headers['x-cache']).toBe('MISS');
-      expect(mockPredictPrice).toHaveBeenCalled();
-
-      const res2 = await request(app)
-        .get('/api/ml/price-forecast?origin=BLR&destination=MAA&date=2026-08-10')
         .set('Authorization', `Bearer ${token}`);
 
       expect(res2.status).toBe(200);

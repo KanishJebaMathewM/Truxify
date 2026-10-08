@@ -450,6 +450,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundColor: TruxifyColors.success,
                         ),
                       );
+                        }
                     },
                   ),
                 ],

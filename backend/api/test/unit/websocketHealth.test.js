@@ -1,9 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-vi.mock("../../../src/core/health/HealthCheck.js", () => ({
-  HealthStatus: { HEALTHY: "healthy", DEGRADED: "degraded", UNHEALTHY: "unhealthy" },
-  executeCheck: (name, checkFn) => checkFn(),
-}));
+import websocketHealth from "../../src/core/health/checks/websocketHealth.js";
 
 describe("websocketHealth", () => {
   let originalWsState;
@@ -18,8 +15,7 @@ describe("websocketHealth", () => {
 
   it("returns UNHEALTHY when no wsState is registered", async () => {
     globalThis.__truxify_wsState = undefined;
-    const { default: websocketHealth } = await import("../../../src/core/health/checks/websocketHealth.js");
-    const result = await websocketHealth()();
+    const result = await websocketHealth();
     expect(result.status).toBe("unhealthy");
     expect(result.message).toBe("no_websocket_server");
   });
@@ -31,8 +27,7 @@ describe("websocketHealth", () => {
       isSchedulerActive: true,
       pubSub: { enabled: true, ready: true },
     };
-    const { default: websocketHealth } = await import("../../../src/core/health/checks/websocketHealth.js");
-    const result = await websocketHealth()();
+    const result = await websocketHealth();
     expect(result.status).toBe("healthy");
     expect(result.message).toBe("active");
     expect(result.metadata.hasServer).toBe(true);
@@ -45,8 +40,7 @@ describe("websocketHealth", () => {
       isSchedulerActive: false,
       pubSub: null,
     };
-    const { default: websocketHealth } = await import("../../../src/core/health/checks/websocketHealth.js");
-    const result = await websocketHealth()();
+    const result = await websocketHealth();
     expect(result.status).toBe("unhealthy");
     expect(result.message).toBe("server_not_running");
   });

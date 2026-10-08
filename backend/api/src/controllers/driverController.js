@@ -1,5 +1,6 @@
 import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { formatPaginationMeta } from '../utils/pagination.js';
 
 /**
  * GET /api/driver/:driverId
@@ -91,12 +92,16 @@ export const getDriverTrips = async (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch driver trips.' });
     }
 
+    const pagination = formatPaginationMeta(count || 0, page, limit);
+
     return res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+      totalPages: pagination.totalPages,
       trips: trips || [],
+      data: trips || [],
+      pagination
     });
   } catch (err) {
     logger.error({ err: err.message, driverId }, '[driverController] Error fetching driver trips');

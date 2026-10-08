@@ -1,7 +1,7 @@
-const crypto = require('crypto');
+import crypto from 'crypto';
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = [
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+export const ALLOWED_MIME_TYPES = [
     'application/pdf',
     'image/jpeg',
     'image/png',
@@ -10,7 +10,7 @@ const ALLOWED_MIME_TYPES = [
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 
-const validateFile = (file) => {
+export const validateFile = (file) => {
     if (!file) {
         throw new Error('No file provided');
     }
@@ -31,23 +31,21 @@ const validateFile = (file) => {
     return true;
 };
 
-const computeSHA256Hash = (buffer) => {
+export const computeSHA256Hash = (buffer) => {
     return crypto.createHash('sha256').update(buffer).digest('hex');
 };
 
-const sanitizeFileName = (originalName) => {
+export const sanitizeFileName = (originalName) => {
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 8);
     const extension = originalName.substring(originalName.lastIndexOf('.')).toLowerCase();
     return `${timestamp}-${randomString}${extension}`;
 };
 
-module.exports = {
+export default {
     validateFile,
     computeSHA256Hash,
     sanitizeFileName,
     MAX_FILE_SIZE_BYTES,
     ALLOWED_MIME_TYPES,
 };
-
-module.exports.default = module.exports;

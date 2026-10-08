@@ -53,33 +53,30 @@ class SimCLR(nn.Module):
         return h, z
     
     def contrastive_loss(self, z_i: torch.Tensor, z_j: torch.Tensor) -> torch.Tensor:
-        """Compute NT-Xent loss (contrastive loss)"""
+        """NT-Xent: exactly one positive among each anchor's non-self candidates."""
+        if (z_i.ndim != 2 or z_j.shape != z_i.shape or not z_i.size(0)
+                or not z_i.size(1)):
+            raise ValueError("paired embeddings require identical nonempty [batch, features] shapes")
+        if (not z_i.is_floating_point() or not z_j.is_floating_point()
+                or z_i.dtype != z_j.dtype or z_i.device != z_j.device):
+            raise ValueError("paired embeddings must share floating dtype and device")
+        if not torch.isfinite(z_i).all() or not torch.isfinite(z_j).all():
+            raise ValueError("paired embeddings must be finite")
+        if (isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float))
+                or not math.isfinite(self.temperature) or self.temperature <= 0):
+            raise ValueError("temperature must be a finite positive number")
+
         batch_size = z_i.size(0)
-        
-        # Concatenate representations
         z = torch.cat([z_i, z_j], dim=0)
-        
-        # Compute similarity matrix
-        sim = torch.matmul(z, z.T) / self.temperature
-        
-        # Create mask
-        mask = torch.eye(2 * batch_size, device=z.device)
-        sim = sim - mask * 1e9
-        
-        # Positive pairs: i -> i+batch, i+batch -> i
-        positives = torch.cat([
-            torch.diag(sim, batch_size),
-            torch.diag(sim, -batch_size)
-        ]).reshape(2 * batch_size, 1)
-        
-        # Negative pairs
-        negatives = sim[~mask.bool()].reshape(2 * batch_size, -1)
-        
-        # Log-sum-exp
-        logits = torch.cat([positives, negatives], dim=1)
-        loss = -F.log_softmax(logits, dim=1)[:, 0].mean()
-        
-        return loss
+        if z.dtype in (torch.float16, torch.bfloat16):
+            z = z.float()
+        similarities = torch.matmul(z, z.T) / self.temperature
+        if not torch.isfinite(similarities).all():
+            raise ValueError("contrastive logits must be representable finitely")
+        self_mask = torch.eye(2 * batch_size, device=z.device, dtype=torch.bool)
+        logits = similarities.masked_fill(self_mask, float('-inf'))
+        positive_indices = (torch.arange(2 * batch_size, device=z.device) + batch_size) % (2 * batch_size)
+        return F.cross_entropy(logits, positive_indices)
 
 class MoCo(nn.Module):
     """MoCo: Momentum Contrast for Unsupervised Visual Representation Learning"""
@@ -97,6 +94,10 @@ class MoCo(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.projection_dim = projection_dim
+        if isinstance(queue_size, bool) or not isinstance(queue_size, int) or queue_size <= 0:
+            raise ValueError("queue_size must be a positive integer")
+        if not isinstance(momentum, (int, float)) or not math.isfinite(momentum) or not 0 <= momentum <= 1:
+            raise ValueError("momentum must be finite and in [0, 1]")
         self.queue_size = queue_size
         self.momentum = momentum
         
@@ -119,7 +120,9 @@ class MoCo(nn.Module):
         )
         
         # Initialize key encoder with query encoder
-        self._momentum_update_key_encoder(1.0)
+        self._momentum_update_key_encoder(0.0)
+        for parameter in self.key_encoder.parameters():
+            parameter.requires_grad_(False)
         
         # Queue
         self.register_buffer('queue', torch.randn(projection_dim, queue_size))
@@ -131,31 +134,53 @@ class MoCo(nn.Module):
         
         logger.info(f"✅ MoCo initialized with queue size {queue_size}")
     
+    @torch.no_grad()
     def _momentum_update_key_encoder(self, momentum: float):
         """Momentum update of key encoder"""
         for param_q, param_k in zip(self.query_encoder.parameters(), self.key_encoder.parameters()):
-            param_k.data = param_k.data * momentum + param_q.data * (1.0 - momentum)
+            param_k.mul_(momentum).add_(param_q, alpha=1.0 - momentum)
     
     @torch.no_grad()
     def _dequeue_and_enqueue(self, keys: torch.Tensor):
-        """Update queue with new keys"""
-        batch_size = keys.size(0)
-        ptr = int(self.queue_ptr)
-        
-        # Replace keys at ptr
-        self.queue[:, ptr:ptr + batch_size] = keys.T
-        ptr = (ptr + batch_size) % self.queue_size
-        self.queue_ptr[0] = ptr
-    
+        """Admit all rows, retaining only the newest capacity-sized suffix."""
+        if (keys.ndim != 2 or keys.shape[1] != self.projection_dim or not len(keys)
+                or keys.dtype != self.queue.dtype or keys.device != self.queue.device
+                or not torch.isfinite(keys).all()):
+            raise ValueError("queue keys require nonempty finite matching [batch, projection] tensors")
+        ptr = int(self.queue_ptr.item())
+        if not 0 <= ptr < self.queue_size:
+            raise ValueError("queue pointer is outside capacity")
+        count = len(keys)
+        retained = min(count, self.queue_size)
+        start = (ptr + count - retained) % self.queue_size
+        indices = (torch.arange(retained, device=keys.device) + start) % self.queue_size
+        self.queue.index_copy_(1, indices, keys[-retained:].T)
+        self.queue_ptr[0] = (ptr + count) % self.queue_size
+
     def forward(self, x_q: torch.Tensor, x_k: torch.Tensor) -> torch.Tensor:
         """Forward pass with contrastive loss"""
-        # Query
+        if (x_q.ndim != 2 or x_q.shape != x_k.shape or not len(x_q)
+                or x_q.shape[1] != self.input_dim):
+            raise ValueError("MoCo views require identical nonempty [batch, input_dim] shapes")
+        parameter = next(self.query_encoder.parameters())
+        if (x_q.dtype != parameter.dtype or x_k.dtype != parameter.dtype
+                or x_q.device != parameter.device or x_k.device != parameter.device
+                or not torch.isfinite(x_q).all() or not torch.isfinite(x_k).all()):
+            raise ValueError("MoCo views require finite tensors matching encoder dtype/device")
+        if not 0 <= int(self.queue_ptr.item()) < self.queue_size:
+            raise ValueError("queue pointer is outside capacity")
+        if (not isinstance(self.temperature, (int, float)) or not math.isfinite(self.temperature)
+                or self.temperature <= 0):
+            raise ValueError("temperature must be finite and positive")
+        # Query gradients belong only to the query encoder.
         q = self.query_encoder(x_q)
         q = F.normalize(q, dim=1)
         
-        # Key
-        k = self.key_encoder(x_k)
-        k = F.normalize(k, dim=1)
+        # The momentum dictionary is updated before encoding this training key.
+        with torch.no_grad():
+            if self.training:
+                self._momentum_update_key_encoder(self.momentum)
+            k = F.normalize(self.key_encoder(x_k), dim=1)
         
         # Contrastive loss
         l_pos = torch.einsum('nc,nc->n', q, k).unsqueeze(-1) / self.temperature
@@ -166,11 +191,8 @@ class MoCo(nn.Module):
         
         loss = F.cross_entropy(logits, labels)
         
-        # Update queue
-        self._dequeue_and_enqueue(k)
-        
-        # Momentum update
-        self._momentum_update_key_encoder(self.momentum)
+        if self.training:
+            self._dequeue_and_enqueue(k)
         
         return loss
 
@@ -204,8 +226,20 @@ class MaskedAutoencoder(nn.Module):
         
         logger.info(f"✅ Masked Autoencoder initialized with mask ratio {mask_ratio}")
     
+    def _validate_input(self, x: torch.Tensor):
+        """Validate the admitted reconstruction dataset without model mutation."""
+        if (isinstance(self.mask_ratio, bool) or not isinstance(self.mask_ratio, (int, float))
+                or not math.isfinite(self.mask_ratio) or not 0 <= self.mask_ratio <= 1):
+            raise ValueError("mask_ratio must be finite and in [0, 1]")
+        if x.ndim != 3 or not x.shape[0] or not x.shape[1] or x.shape[2] != self.input_dim:
+            raise ValueError("MAE data requires nonempty [batch, tokens, input_dim] shape")
+        if (x.dtype != self.mask_token.dtype or x.device != self.mask_token.device
+                or not x.is_floating_point() or not torch.isfinite(x).all()):
+            raise ValueError("MAE data must be finite floating values matching model dtype/device")
+
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass with masking"""
+        self._validate_input(x)
         batch_size, seq_len, dim = x.shape
         
         # Create mask
@@ -224,8 +258,16 @@ class MaskedAutoencoder(nn.Module):
         reconstructed = self.decoder(encoded)
         
         # Compute loss only on masked tokens
-        loss = F.mse_loss(reconstructed[mask_indices[:, 0], mask_indices[:, 1]], 
-                         x[mask_indices[:, 0], mask_indices[:, 1]])
+        if mask.any():
+            predictions, targets = reconstructed[mask], x[mask]
+            if predictions.dtype in (torch.float16, torch.bfloat16):
+                predictions, targets = predictions.float(), targets.float()
+            loss = F.mse_loss(predictions, targets)
+        else:
+            # Empty observations have a zero objective with a valid zero-gradient graph.
+            loss = reconstructed.reshape(-1)[0] * 0
+        if not torch.isfinite(loss):
+            raise ValueError("masked reconstruction objective must be finite")
         
         return reconstructed, loss, mask
     
@@ -346,8 +388,15 @@ class SSLPreTrainer:
     
     def pretrain_mae(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
         """Pre-train using Masked Autoencoder"""
+        for name, value in (('epochs', epochs), ('batch_size', batch_size)):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        data = data.to(self.device)
+        self.model._validate_input(data)
         losses = []
-        
+        observed_batches = 0
+        skipped_batches = 0
+
         for epoch in range(epochs):
             epoch_loss = 0
             num_batches = 0
@@ -359,14 +408,18 @@ class SSLPreTrainer:
                 batch = data_shuffled[i:i+batch_size]
                 
                 # Forward pass
-                _, loss, _ = self.model(batch)
+                _, loss, mask = self.model(batch)
                 
                 # Backward pass
                 self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
-                
+                if mask.any():
+                    observed_batches += 1
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
+                    self.optimizer.step()
+                else:
+                    skipped_batches += 1
+
                 epoch_loss += loss.item()
                 num_batches += 1
             
@@ -379,7 +432,9 @@ class SSLPreTrainer:
         return {
             'losses': losses,
             'final_loss': losses[-1] if losses else None,
-            'method': 'mae'
+            'method': 'mae',
+            'observed_batches': observed_batches,
+            'skipped_batches': skipped_batches
         }
     
     def save(self, path: str = "models/ssl_model.pth"):

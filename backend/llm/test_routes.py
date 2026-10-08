@@ -104,3 +104,32 @@ def test_idor_protection_admin_reading_other_allowed():
 
     is_allowed = (target_user_id == current_user_id) or ("rag:read" in scopes) or ("admin" in roles)
     assert is_allowed is True
+
+
+def test_query_route_requires_rag_read_and_query_does_not_accept_user_id():
+    from pathlib import Path
+    import ast
+
+    routes_source = Path(__file__).with_name("routes.py").read_text(encoding="utf-8")
+    tree = ast.parse(routes_source)
+
+    query_model = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "QueryRequest"
+    )
+    model_fields = {
+        node.target.id
+        for node in query_model.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    }
+    assert "user_id" not in model_fields
+
+    query_handler = next(
+        node for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "process_query"
+    )
+    dependency_source = ast.unparse(query_handler.args.defaults[-1])
+    assert "require_rag_read" in dependency_source
+
+    service_source = Path(__file__).with_name("llm_service.py").read_text(encoding="utf-8")
+    assert "'context_used': context" not in service_source

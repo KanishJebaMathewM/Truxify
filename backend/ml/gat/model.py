@@ -1,3 +1,7 @@
+import copy
+import functools
+import math
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,6 +47,18 @@ class GraphAttentionLayer(nn.Module):
         x = self.dropout(x)
         
         return x
+
+class GATModel(nn.Module):
+    """Single-block graph attention model: one multi-head attention layer
+    mapping in_features to out_features."""
+
+    def __init__(self, in_features: int, out_features: int, num_heads: int = 8, dropout: float = 0.1):
+        super().__init__()
+        self.layer = GraphAttentionLayer(in_features, out_features, num_heads=num_heads, dropout=dropout)
+
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        return self.layer(x, edge_index)
+
 
 class SpatialTemporalGAT(nn.Module):
     """Spatial-Temporal Graph Attention Network for Traffic Prediction"""
@@ -108,8 +124,21 @@ class SpatialTemporalGAT(nn.Module):
         edge_index: torch.Tensor,
         time_features: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        # x shape: (batch_size, num_nodes, time_steps, features)
+        # Builder/trainer inputs are (nodes, features); serving sequences are
+        # (batch, nodes, time, features). Normalize both at the model boundary.
+        if x.dim() == 2:
+            x = x.unsqueeze(0).unsqueeze(2)
+        if x.dim() != 4:
+            raise ValueError("GAT input must have 2 or 4 dimensions")
         batch_size, num_nodes, time_steps, features = x.shape
+        if not batch_size or not num_nodes or not time_steps:
+            raise ValueError("GAT input batch, nodes and time must be nonempty")
+        if edge_index.dim() != 2 or edge_index.size(0) != 2:
+            raise ValueError("edge_index must have shape (2, edges)")
+        if edge_index.numel() and (
+            edge_index.min().item() < 0 or edge_index.max().item() >= num_nodes
+        ):
+            raise ValueError("edge_index must reference nodes in each input graph")
 
         if features != self.in_features:
             raise ValueError(
@@ -118,13 +147,19 @@ class SpatialTemporalGAT(nn.Module):
 
         x = x.permute(0, 2, 1, 3).contiguous()
 
+        # Each batch sample is an independent copy of the same topology.
+        # Flatten only nodes and offset every graph's edges before GATConv,
+        # which requires a two-dimensional node matrix.
+        edge_index = edge_index.to(device=x.device, dtype=torch.long)
+        offsets = torch.arange(batch_size, device=x.device) * num_nodes
+        batched_edges = (edge_index.unsqueeze(0) + offsets[:, None, None])
+        batched_edges = batched_edges.permute(1, 0, 2).reshape(2, -1)
         outs = []
         for t in range(time_steps):
-            out = x[:, t]
+            out = x[:, t].reshape(batch_size * num_nodes, features)
             for spatial_layer in self.spatial_layers:
-                out = spatial_layer(out, edge_index)
-                out = F.relu(out)
-            outs.append(out)
+                out = F.relu(spatial_layer(out, batched_edges))
+            outs.append(out.reshape(batch_size, num_nodes, self.out_features))
         x = torch.stack(outs, dim=1)
         
         # Temporal attention
@@ -139,7 +174,7 @@ class SpatialTemporalGAT(nn.Module):
         lstm_out, _ = self.lstm(x)
         
         # Prediction
-        predictions = self.prediction_head(lstm_out)
+        predictions = self.prediction_head(lstm_out[:, -1])
         
         # Reshape to (batch, nodes, horizon)
         predictions = predictions.view(batch_size, num_nodes, self.prediction_horizon)
@@ -178,10 +213,18 @@ class TrafficGraphBuilder:
         logger.info("✅ Traffic Graph Builder initialized")
     
     def build_graph(self, nodes: List[Dict], edges: List[Dict]) -> nx.Graph:
-        """Build traffic graph from nodes and edges"""
+        """Build and publish a fresh graph only after a complete valid build."""
+        node_ids = [node['id'] for node in nodes]
+        if len(set(node_ids)) != len(node_ids):
+            raise ValueError("Traffic graph node IDs must be unique")
+        known = set(node_ids)
+        for edge in edges:
+            if edge['source'] not in known or edge['target'] not in known:
+                raise ValueError("Traffic graph edges must reference declared nodes")
+        graph = nx.Graph()
         # Add nodes with features
         for node in nodes:
-            self.graph.add_node(
+            graph.add_node(
                 node['id'],
                 lat=node['lat'],
                 lng=node['lng'],
@@ -192,7 +235,7 @@ class TrafficGraphBuilder:
         
         # Add edges
         for edge in edges:
-            self.graph.add_edge(
+            graph.add_edge(
                 edge['source'],
                 edge['target'],
                 distance=edge['distance'],
@@ -200,14 +243,17 @@ class TrafficGraphBuilder:
                 congestion=edge.get('congestion', 0)
             )
         
-        return self.graph
+        self.graph = graph
+        return graph
     
-    def get_pytorch_data(self) -> Data:
-        """Convert graph to PyTorch Geometric Data"""
+    def get_pytorch_data(self, graph=None) -> Data:
+        """Export one captured graph, mapping public IDs to local tensor rows."""
+        target_graph = self.graph if graph is None else graph
+        node_map = {node: row for row, node in enumerate(target_graph.nodes)}
         # Node features — must contain exactly NODE_FEATURE_DIM entries so the
         # dimensions stay aligned with the model constructed via in_features.
         node_features = []
-        for node in self.graph.nodes(data=True):
+        for node in target_graph.nodes(data=True):
             features = [
                 node[1].get('traffic', 0) / 100,
                 node[1].get('speed', 50) / 100,
@@ -223,14 +269,17 @@ class TrafficGraphBuilder:
         
         # Edge indices
         edge_indices = []
-        for u, v in self.graph.edges():
-            edge_indices.append([u, v])
-            edge_indices.append([v, u])  # Undirected
+        for u, v in target_graph.edges():
+            edge_indices.append([node_map[u], node_map[v]])
+            edge_indices.append([node_map[v], node_map[u]])  # Undirected
         
-        return Data(
-            x=torch.tensor(node_features, dtype=torch.float),
-            edge_index=torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
+        data = Data(
+            x=torch.tensor(node_features, dtype=torch.float).reshape(-1, self.NODE_FEATURE_DIM),
+            edge_index=torch.tensor(edge_indices, dtype=torch.long).reshape(-1, 2).t().contiguous()
         )
+        data.node_map = node_map
+        data.graph = target_graph
+        return data
     
     def _road_type_encoding(self, road_type: str) -> float:
         """Encode road type"""
@@ -238,6 +287,15 @@ class TrafficGraphBuilder:
         if road_type in types:
             return types.index(road_type) / len(types)
         return 0
+
+def _with_gat_state(method):
+    """Serialize native trainer operations; nested training uses an RLock."""
+    @functools.wraps(method)
+    def serialized(self, *args, **kwargs):
+        with self._state_lock:
+            return method(self, *args, **kwargs)
+    return serialized
+
 
 class GATTrainer:
     """Trainer for Graph Attention Network"""
@@ -248,13 +306,32 @@ class GATTrainer:
         lr: float = 1e-3,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
-        self.model = model.to(device)
+        self._state_lock = threading.RLock()
         self.device = device
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        model = model.to(device)
+        self._serving_pair = (model, torch.optim.Adam(model.parameters(), lr=lr))
         self.criterion = nn.MSELoss()
         
         logger.info(f"✅ GAT Trainer initialized on {self.device}")
     
+    def _prediction_targets(self, targets, predictions):
+        """Match a single builder graph without implicit loss broadcasting."""
+        targets = targets.to(self.device)
+        if targets.dim() == 2 and predictions.size(0) == 1:
+            targets = targets.unsqueeze(0)
+        if targets.shape != predictions.shape:
+            raise ValueError("GAT targets must match (batch, nodes, horizon)")
+        return targets
+
+    @property
+    def model(self):
+        return self._serving_pair[0]
+
+    @property
+    def optimizer(self):
+        return self._serving_pair[1]
+
+    @_with_gat_state
     def train_step(self, data: Data, targets: torch.Tensor) -> float:
         """Single training step"""
         self.model.train()
@@ -265,7 +342,7 @@ class GATTrainer:
         predictions = self.model(data.x, data.edge_index)
         
         # Loss
-        loss = self.criterion(predictions, targets.to(self.device))
+        loss = self.criterion(predictions, self._prediction_targets(targets, predictions))
         
         # Backward pass
         loss.backward()
@@ -274,6 +351,7 @@ class GATTrainer:
         
         return loss.item()
     
+    @_with_gat_state
     def train(
         self,
         train_data: Data,
@@ -309,15 +387,17 @@ class GATTrainer:
             'final_val_loss': val_losses[-1] if val_losses else None
         }
     
+    @_with_gat_state
     def validate(self, data: Data, targets: torch.Tensor) -> float:
         """Validate model"""
         self.model.eval()
         with torch.no_grad():
             data = data.to(self.device)
             predictions = self.model(data.x, data.edge_index)
-            loss = self.criterion(predictions, targets.to(self.device))
+            loss = self.criterion(predictions, self._prediction_targets(targets, predictions))
         return loss.item()
     
+    @_with_gat_state
     def predict(self, data: Data) -> Dict:
         """Make predictions"""
         self.model.eval()
@@ -331,6 +411,7 @@ class GATTrainer:
                 'std': predictions.std(dim=1).cpu().numpy()
             }
     
+    @_with_gat_state
     def save(self, path: str = "models/gat_traffic.pth"):
         """Save model"""
         torch.save({
@@ -339,9 +420,56 @@ class GATTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @_with_gat_state
     def load(self, path: str = "models/gat_traffic.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # Copy the pair in one deepcopy operation: optimizer parameter keys must
+        # remain bound to the copied model, never the old serving generation.
+        candidate_model, candidate_optimizer = copy.deepcopy(self._serving_pair)
+        candidate_model.load_state_dict(checkpoint['model_state_dict'])
+        candidate_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self._validate_restored_pair(candidate_model, candidate_optimizer)
+        self._serving_pair = (candidate_model, candidate_optimizer)
         logger.info(f"✅ Model loaded from {path}")
+
+    @staticmethod
+    def _validate_restored_pair(model, optimizer):
+        for value in model.state_dict().values():
+            if not torch.isfinite(value).all():
+                raise ValueError("GAT checkpoint model tensors must be finite")
+        parameters = set(model.parameters())
+        bound = {parameter for group in optimizer.param_groups for parameter in group['params']}
+        if bound != parameters:
+            raise ValueError("GAT checkpoint optimizer must own the restored model")
+        for group in optimizer.param_groups:
+            # Adam's loader does not rerun constructor validation.
+            torch.optim.Adam(group['params'], lr=group['lr'], betas=group['betas'],
+                             eps=group['eps'], weight_decay=group['weight_decay'])
+            for key in ('lr', 'eps', 'weight_decay'):
+                if not math.isfinite(float(group[key])):
+                    raise ValueError("GAT checkpoint optimizer settings must be finite")
+        for parameter, state in optimizer.state.items():
+            if parameter not in parameters:
+                raise ValueError("GAT checkpoint optimizer contains foreign state")
+            if not state:
+                continue
+            for key in ('step', 'exp_avg', 'exp_avg_sq'):
+                if key not in state:
+                    raise ValueError("GAT checkpoint Adam state is incomplete")
+            for key, value in state.items():
+                if not isinstance(value, torch.Tensor) or not torch.isfinite(value).all():
+                    raise ValueError("GAT checkpoint Adam tensors must be finite")
+                if key == 'step':
+                    if value.numel() != 1 or value.item() < 0:
+                        raise ValueError("GAT checkpoint Adam step must be a nonnegative scalar")
+                elif key in ('exp_avg', 'exp_avg_sq', 'max_exp_avg_sq'):
+                    if value.shape != parameter.shape:
+                        raise ValueError("GAT checkpoint Adam moment shape mismatch")
+                    if key != 'exp_avg' and (value < 0).any():
+                        raise ValueError("GAT checkpoint Adam squared moments must be nonnegative")
+                else:
+                    raise ValueError("GAT checkpoint contains unknown Adam state")
+            if any(group.get('amsgrad') and parameter in set(group['params'])
+                   for group in optimizer.param_groups) and 'max_exp_avg_sq' not in state:
+                raise ValueError("GAT checkpoint AMSGrad maximum moment is missing")

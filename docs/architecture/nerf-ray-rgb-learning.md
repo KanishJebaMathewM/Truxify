@@ -68,3 +68,10 @@ image observations supervise the field through differentiable volume rendering.
 This implementation keeps the repository's current discretization; it adds no
 hierarchical/stratified sampler, photometric calibration, new camera model,
 white background, real-world observation accuracy or trained-quality promise.
+
+
+## Request workers and shared route ownership
+
+Native ray fitting, legacy pointwise training, rendering and checkpoint/read routes are synchronous FastAPI endpoints executed by its worker pool. One native reentrant lock serializes the complete operation, including observation conversion and learning-rate changes. The worker owns this lock until its operation finishes; cancellation of an awaiting HTTP request does not release a running worker's model ownership. An admitted operation may finish after its caller cancels; cancellation is not model rollback.
+
+This is one module instance's mounted route ownership, not a cross-process lock or a transaction for direct external model/trainer access. Native tests pause real Torch forwards and verify event-loop progress, blocked overlapping train/save/load/read/render routes and cancellation ownership. The existing spiral/orbital endpoints' flat-ray versus batched-renderer geometry failure remains independently documented; these generic error responses also release the shared lock. Numerical training/checkpoint recovery remains outside this PR.

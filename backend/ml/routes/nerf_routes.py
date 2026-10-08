@@ -3,6 +3,8 @@ import io
 import logging
 import os
 from datetime import datetime
+from functools import wraps
+from threading import RLock
 from typing import Annotated, List
 
 import numpy as np
@@ -23,6 +25,20 @@ model = NeRFNetwork()
 renderer = NeRFRenderer(model)
 trainer = NeRFTrainer(model)
 
+# FastAPI runs these synchronous endpoints in its worker pool. The native
+# lock belongs to the worker, so request cancellation cannot release it while
+# an already admitted operation still accesses the shared model/optimizer.
+_operation_lock = RLock()
+
+
+def serialized_native(function):
+    @wraps(function)
+    def operation(*args, **kwargs):
+        with _operation_lock:
+            return function(*args, **kwargs)
+    return operation
+
+
 class RenderRequest(BaseModel):
     num_poses: int = 30
     radius: float = 2.0
@@ -30,7 +46,8 @@ class RenderRequest(BaseModel):
     image_size: List[int] = [256, 256]
 
 @router.post("/render/spiral")
-async def render_spiral(request: RenderRequest):
+@serialized_native
+def render_spiral(request: RenderRequest):
     """Render spiral video of scene"""
     try:
         # Create spiral poses
@@ -81,7 +98,8 @@ async def render_spiral(request: RenderRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/render/orbital")
-async def render_orbital(request: RenderRequest):
+@serialized_native
+def render_orbital(request: RenderRequest):
     """Render orbital video of scene"""
     try:
         poses = create_orbital_poses(request.num_poses, request.radius)
@@ -138,7 +156,8 @@ class RayTrainingRequest(BaseModel):
 
 
 @router.post('/train/rays')
-async def train_observed_rays(request: RayTrainingRequest):
+@serialized_native
+def train_observed_rays(request: RayTrainingRequest):
     """Fit explicit observed ray RGB, without inventing target scene telemetry."""
     try:
         policy(len(request.origins), request.epochs, request.batch_size,
@@ -161,7 +180,8 @@ async def train_observed_rays(request: RayTrainingRequest):
 
 
 @router.post("/train")
-async def train_nerf(
+@serialized_native
+def train_nerf(
     epochs: int = 100,
     batch_size: int = 4096,
     learning_rate: float = 5e-4
@@ -207,7 +227,8 @@ async def train_nerf(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
-async def save_model(path: str = "models/nerf.pth"):
+@serialized_native
+def save_model(path: str = "models/nerf.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Save NeRF model"""
     try:
@@ -224,7 +245,8 @@ async def save_model(path: str = "models/nerf.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
-async def load_model(path: str = "models/nerf.pth"):
+@serialized_native
+def load_model(path: str = "models/nerf.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Load NeRF model"""
     try:
@@ -241,7 +263,8 @@ async def load_model(path: str = "models/nerf.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
-async def get_model_info():
+@serialized_native
+def get_model_info():
     """Get model information"""
     try:
         return {

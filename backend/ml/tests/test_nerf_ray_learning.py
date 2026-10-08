@@ -1,10 +1,13 @@
 """Actual NeRF two-sample analytic density/color learning and observation ownership."""
 
+import asyncio
 import copy
 import importlib
 import math
 import sys
+import threading
 
+import httpx
 import pytest
 import torch
 from fastapi import FastAPI
@@ -299,3 +302,103 @@ def test_entire_fourier_input_range_rejected_before_earlier_ray_update():
     with pytest.raises(ValueError, match='positional encoding'):
         trainer.train_rays(data, epochs=1, batch_size=1, num_samples=2, near=.1, far=1)
     same(snapshot(trainer), before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['train', 'save', 'load', 'info', 'spiral', 'orbital'])
+async def test_native_route_worker_retains_exclusive_access_without_blocking_loop(
+        mounted, tmp_path, monkeypatch, operation):
+    _, route = mounted
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'models').mkdir()
+    route.model = native(torch.float32)
+    route.trainer = NeRFTrainer(route.model, device='cpu')
+    route.renderer = NeRFRenderer(route.model, num_samples=2, device='cpu')
+    route.trainer.save('models/owned.pth')
+    app = FastAPI()
+    app.include_router(route.router)
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    def hold_actual_native_forward(module, args):
+        calls.append(threading.get_ident())
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(3), 'native forward was not released'
+
+    hook = route.model.register_forward_pre_hook(hold_actual_native_forward)
+    watchdog = threading.Timer(2, release.set)
+    watchdog.start()
+    paths = {
+        'train': ('POST', '/nerf/train?epochs=1&batch_size=10000'),
+        'save': ('POST', '/nerf/save?path=owned.pth'),
+        'load': ('POST', '/nerf/load?path=owned.pth'),
+        'info': ('GET', '/nerf/model-info'),
+        'spiral': ('POST', '/nerf/render/spiral'),
+        'orbital': ('POST', '/nerf/render/orbital')}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            first = asyncio.create_task(client.post('/nerf/train/rays', json=payload()))
+            assert await asyncio.to_thread(entered.wait, 1)
+            # This assertion also proves the loop advanced while real Torch is
+            # blocked. The baseline async endpoint cannot run this until the
+            # watchdog releases its synchronous forward on the loop thread.
+            assert not release.is_set()
+            method, path = paths[operation]
+            second = asyncio.create_task(client.request(method, path, json=(
+                {'num_poses': 1, 'image_size': [2, 2]} if operation in ('spiral', 'orbital') else None)))
+            await asyncio.sleep(.05)
+            assert not second.done()
+            assert len(calls) == 1
+            assert calls[0] != threading.get_ident()
+            release.set()
+            assert (await asyncio.wait_for(first, 3)).status_code == 200
+            response = await asyncio.wait_for(second, 3)
+            # Existing render routes supply flat camera rays to a renderer
+            # requiring a batch axis. That independent baseline failure is
+            # preserved; both routes must still serialize model access and
+            # release the operation lock on their generic error response.
+            assert response.status_code == (500 if operation in ('spiral', 'orbital') else 200)
+            if response.status_code == 500:
+                assert response.json()['detail'] == 'Internal server error'
+            assert (await client.get('/nerf/model-info')).status_code == 200
+    finally:
+        release.set()
+        watchdog.cancel()
+        hook.remove()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_does_not_release_running_native_operation(mounted):
+    _, route = mounted
+    route.model = native(torch.float32)
+    route.trainer = NeRFTrainer(route.model, device='cpu')
+    app = FastAPI()
+    app.include_router(route.router)
+    entered, release = threading.Event(), threading.Event()
+
+    def hold(module, args):
+        entered.set()
+        assert release.wait(3)
+
+    hook = route.model.register_forward_pre_hook(hold)
+    watchdog = threading.Timer(2, release.set)
+    watchdog.start()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            first = asyncio.create_task(client.post('/nerf/train/rays', json=payload()))
+            assert await asyncio.to_thread(entered.wait, 1)
+            assert not release.is_set()
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            observer = asyncio.create_task(client.get('/nerf/model-info'))
+            await asyncio.sleep(.05)
+            assert not observer.done()
+            release.set()
+            assert (await asyncio.wait_for(observer, 3)).status_code == 200
+            assert route.trainer.optimizer.state
+    finally:
+        release.set()
+        watchdog.cancel()
+        hook.remove()

@@ -45,7 +45,7 @@ class _OtpScreenState extends State<OtpScreen> {
   late String _verificationId = widget.verificationId;
 
   /// Mutable resend token — updated after each successful resend call.
-  int? _resendToken = widget.resendToken;
+  late int? _resendToken = widget.resendToken;
 
   bool _loading = false;
   bool _resending = false;

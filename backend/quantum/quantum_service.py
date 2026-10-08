@@ -160,7 +160,7 @@ class QuantumService:
             result = self.hybrid_optimizer.solve(problem)
             return {
                 'success': True,
-                'data': result
+                'data': result 
             }
         except Exception as e:
             logger.error(f"Hybrid optimization failed: {e}")

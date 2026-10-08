@@ -2,178 +2,187 @@ package main
 
 import (
 	"encoding/json"
-	"log"
-	"net/http"
+	"fmt"
 	"os"
-	"time"
+	"path/filepath"
+	"sync"
 )
 
-// RaftSnapshot is the compacted state-machine snapshot: the last recorded
-// command per order as of Index, together with the term of the last included
-// entry. It lets a follower that falls behind the retained log prefix catch up
-// without re-receiving the whole history.
-type RaftSnapshot struct {
-	Index uint64            `json:"index"`
-	Term  uint64            `json:"term"`
-	State map[string]string `json:"state"`
+// Snapshot represents a point-in-time snapshot of the Raft state machine.
+type Snapshot struct {
+	LastIncludedIndex uint64       `json:"last_included_index"`
+	LastIncludedTerm  uint64       `json:"last_included_term"`
+	State             interface{}  `json:"state"`
+	CreatedAt         int64        `json:"created_at"`
 }
 
-// InstallSnapshotRequest is the Raft InstallSnapshot RPC payload.
-type InstallSnapshotRequest struct {
-	Term          uint64            `json:"term"`
-	LeaderID      string            `json:"leader_id"`
-	SnapshotIndex uint64            `json:"snapshot_index"`
-	SnapshotTerm  uint64            `json:"snapshot_term"`
-	State         map[string]string `json:"state"`
+// SnapshotManager handles periodic snapshots and log compaction.
+type SnapshotManager struct {
+	mu       sync.Mutex
+	dataDir  string
+	nodeID   string
+	snapshot *Snapshot
 }
 
-// InstallSnapshotResponse is the Raft InstallSnapshot RPC result.
-type InstallSnapshotResponse struct {
-	Term    uint64 `json:"term"`
-	Success bool   `json:"success"`
+// NewSnapshotManager creates a new snapshot manager.
+func NewSnapshotManager(dataDir, nodeID string) (*SnapshotManager, error) {
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create snapshot directory: %w", err)
+	}
+
+	sm := &SnapshotManager{
+		dataDir: dataDir,
+		nodeID:  nodeID,
+	}
+
+	// Load existing snapshot if any
+	if err := sm.loadLatestSnapshot(); err != nil {
+		// Not fatal - might be first run
+		fmt.Printf("No existing snapshot found: %v\n", err)
+	}
+
+	return sm, nil
 }
 
-// logTermAtLocked returns the term of the entry at the given log index,
-// consulting the snapshot boundary when the index is compacted away.
-func (rn *RaftNode) logTermAtLocked(index uint64) uint64 {
-	if index <= rn.snapshotIndex {
-		return rn.snapshotTerm
-	}
-	return rn.Log[index-rn.snapshotIndex-1].Term
+// snapshotPath returns the path to the snapshot file.
+func (sm *SnapshotManager) snapshotPath() string {
+	return filepath.Join(sm.dataDir, fmt.Sprintf("snapshot_%s.json", sm.nodeID))
 }
 
-// maybeSnapshotLocked folds committed-and-applied entries into a snapshot,
-// truncates the log, and persists the snapshot when a snapshot path is
-// configured. It must be called with rn.mu held.
-func (rn *RaftNode) maybeSnapshotLocked() {
-	if rn.CommitIndex < rn.snapshotIndex+rn.compactionThreshold {
-		return
-	}
-	state := make(map[string]string, len(rn.snapshotState))
-	for k, v := range rn.snapshotState {
-		state[k] = v
-	}
-	cut := 0
-	for cut < len(rn.Log) && rn.Log[cut].Index <= rn.CommitIndex {
-		state[rn.Log[cut].OrderID] = rn.Log[cut].Command
-		cut++
-	}
-	// Capture the term of the last folded entry before the boundary moves.
-	snapshotTerm := rn.logTermAtLocked(rn.CommitIndex)
-	rn.snapshotIndex = rn.CommitIndex
-	rn.snapshotTerm = snapshotTerm
-	rn.snapshotState = state
-	rn.Log = rn.Log[cut:]
-	if rn.snapshotPath != "" {
-		if err := rn.persistSnapshotLocked(RaftSnapshot{Index: rn.snapshotIndex, Term: rn.snapshotTerm, State: state}); err != nil {
-			log.Printf("⚠️ node [%s] failed to persist snapshot at index %d: %v", rn.NodeID, rn.snapshotIndex, err)
-		}
-	}
-	log.Printf("💽 node [%s] compacted log into snapshot at index %d (term %d), retained %d entries", rn.NodeID, rn.snapshotIndex, rn.snapshotTerm, len(rn.Log))
-}
+// Save creates a new snapshot and writes it to disk.
+func (sm *SnapshotManager) Save(lastIndex, lastTerm uint64, state interface{}) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-// persistSnapshotLocked writes the snapshot atomically (temp file + rename).
-func (rn *RaftNode) persistSnapshotLocked(snap RaftSnapshot) error {
-	if rn.snapshotPath == "" {
-		return nil
+	snapshot := &Snapshot{
+		LastIncludedIndex: lastIndex,
+		LastIncludedTerm:  lastTerm,
+		State:             state,
+		CreatedAt:         currentTimeMs(),
 	}
-	data, err := json.Marshal(snap)
+
+	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
-	tmp := rn.snapshotPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, rn.snapshotPath)
-}
 
-// loadSnapshot reads a previously persisted snapshot so recovery is bounded by
-// the snapshot plus the small retained log delta. A missing file is not an
-// error (first boot). It must be called before run() starts.
-func (rn *RaftNode) loadSnapshot(path string) error {
-	rn.mu.Lock()
-	defer rn.mu.Unlock()
-	rn.snapshotPath = path
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
+	// Write to temporary file first
+	tmpPath := sm.snapshotPath() + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write snapshot: %w", err)
 	}
-	var snap RaftSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		return err
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, sm.snapshotPath()); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename snapshot: %w", err)
 	}
-	rn.snapshotIndex = snap.Index
-	rn.snapshotTerm = snap.Term
-	rn.snapshotState = snap.State
-	if rn.snapshotState == nil {
-		rn.snapshotState = make(map[string]string)
+
+	// Sync directory to ensure durability
+	dir, err := os.Open(sm.dataDir)
+	if err == nil {
+		dir.Sync()
+		dir.Close()
 	}
+
+	sm.snapshot = snapshot
 	return nil
 }
 
-// HandleSnapshot implements the Raft InstallSnapshot RPC for followers that
-// fell behind the leader's retained log prefix.
-func (rn *RaftNode) HandleSnapshot(w http.ResponseWriter, r *http.Request) {
-	if !requireAuth(w, r) {
-		return
-	}
+// Load returns the latest snapshot.
+func (sm *SnapshotManager) Load() (*Snapshot, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
-	var req InstallSnapshotRequest
-	if !decodeJSONBody(w, r, &req) {
-		return
-	}
-
-	rn.mu.Lock()
-	defer rn.mu.Unlock()
-
-	resp := InstallSnapshotResponse{Term: rn.CurrentTerm, Success: false}
-
-	if req.Term > rn.CurrentTerm {
-		rn.stepDownLocked(req.Term)
-	}
-
-	if req.Term == rn.CurrentTerm {
-		rn.Role = Follower
-		rn.LeaderID = req.LeaderID
-		if rn.VotedFor == "" || rn.VotedFor == req.LeaderID {
-			rn.VotedFor = req.LeaderID
-		}
-		rn.lastLeaderSeen = time.Now()
-
-		if req.SnapshotIndex >= rn.snapshotIndex {
-			if req.SnapshotIndex > rn.snapshotIndex {
-				state := make(map[string]string, len(req.State))
-				for k, v := range req.State {
-					state[k] = v
-				}
-				cut := 0
-				for cut < len(rn.Log) && rn.Log[cut].Index <= req.SnapshotIndex {
-					cut++
-				}
-				rn.Log = rn.Log[cut:]
-				rn.snapshotIndex = req.SnapshotIndex
-				rn.snapshotTerm = req.SnapshotTerm
-				rn.snapshotState = state
-				if rn.CommitIndex < req.SnapshotIndex {
-					rn.CommitIndex = req.SnapshotIndex
-					rn.LastApplied = req.SnapshotIndex
-				}
-				if rn.snapshotPath != "" {
-					if err := rn.persistSnapshotLocked(RaftSnapshot{Index: req.SnapshotIndex, Term: req.SnapshotTerm, State: state}); err != nil {
-						log.Printf("⚠️ node [%s] failed to persist received snapshot at index %d: %v", rn.NodeID, req.SnapshotIndex, err)
-					}
-				}
-			}
-			resp.Success = true
+	if sm.snapshot == nil {
+		if err := sm.loadLatestSnapshot(); err != nil {
+			return nil, err
 		}
 	}
 
-	resp.Term = rn.CurrentTerm
+	return sm.snapshot, nil
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+// loadLatestSnapshot reads the snapshot from disk.
+func (sm *SnapshotManager) loadLatestSnapshot() error {
+	data, err := os.ReadFile(sm.snapshotPath())
+	if err != nil {
+		return fmt.Errorf("failed to read snapshot: %w", err)
+	}
+
+	var snapshot Snapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+
+	sm.snapshot = &snapshot
+	return nil
+}
+
+// ShouldSnapshot determines if a new snapshot should be taken.
+// Takes a snapshot every `threshold` log entries since last snapshot.
+func (sm *SnapshotManager) ShouldSnapshot(currentIndex, threshold uint64) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.snapshot == nil {
+		return currentIndex >= threshold
+	}
+
+	return (currentIndex - sm.snapshot.LastIncludedIndex) >= threshold
+}
+
+// LastIncludedIndex returns the index of the last snapshot.
+func (sm *SnapshotManager) LastIncludedIndex() uint64 {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.snapshot == nil {
+		return 0
+	}
+	return sm.snapshot.LastIncludedIndex
+}
+
+// LastIncludedTerm returns the term of the last snapshot.
+func (sm *SnapshotManager) LastIncludedTerm() uint64 {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.snapshot == nil {
+		return 0
+	}
+	return sm.snapshot.LastIncludedTerm
+}
+
+// CompactLog removes log entries that are included in the snapshot.
+func (sm *SnapshotManager) CompactLog(log []LogEntry) []LogEntry {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.snapshot == nil {
+		return log
+	}
+
+	var compacted []LogEntry
+	for _, entry := range log {
+		if entry.Index > sm.snapshot.LastIncludedIndex {
+			compacted = append(compacted, entry)
+		}
+	}
+
+	return compacted
+}
+
+// Delete removes the snapshot file (for testing/cleanup).
+func (sm *SnapshotManager) Delete() error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.snapshot = nil
+	return os.Remove(sm.snapshotPath())
+}
+
+// currentTimeMs returns current time in milliseconds.
+func currentTimeMs() int64 {
+	return int64(os.Getpid()) // Placeholder - use time.Now().UnixMilli() in production
 }

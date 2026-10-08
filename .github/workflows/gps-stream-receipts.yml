@@ -1,0 +1,39 @@
+name: Native GPS stream receipt ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/gps/gpsStreamIngestionService.js'
+      - 'backend/api/src/services/gps/gpsStreamObservation.js'
+      - 'backend/api/src/services/gps/kalmanFilter.js'
+      - 'backend/api/src/services/gps/geofenceEvaluator.js'
+      - 'backend/api/test/native/gpsStreamIngestion.node.mjs'
+      - 'backend/api/test/native/ingestion-deps/**'
+      - '.github/workflows/gps-stream-receipts.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-ingestion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.18.1'
+      - name: Install private native Redis fixture and locked test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y redis-server
+          redis-server --version
+          npm ci --ignore-scripts --no-audit --no-fund --prefix backend/api/test/native/ingestion-deps
+          ln -s "$GITHUB_WORKSPACE/backend/api/test/native/ingestion-deps/node_modules" "$GITHUB_WORKSPACE/backend/api/node_modules"
+      - name: Actual Redis stream acknowledgements and retained receipt checks
+        env:
+          NODE_ENV: production
+          LOG_LEVEL: fatal
+        run: node --test backend/api/test/native/gpsStreamIngestion.node.mjs
+      - name: Changed-file analysis
+        run: backend/api/node_modules/.bin/eslint backend/api/src/services/gps/gpsStreamIngestionService.js backend/api/src/services/gps/gpsStreamObservation.js backend/api/test/native/gpsStreamIngestion.node.mjs --config backend/api/eslint.config.js --max-warnings=0

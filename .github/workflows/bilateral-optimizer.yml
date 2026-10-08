@@ -1,0 +1,35 @@
+name: Bilateral optimizer tests
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/bilateral_matcher.py'
+      - 'backend/ml/tests/test_bilateral*'
+      - '.github/workflows/bilateral-optimizer.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/ml/app/models/bilateral_matcher.py'
+      - 'backend/ml/tests/test_bilateral*'
+      - '.github/workflows/bilateral-optimizer.yml'
+permissions:
+  contents: read
+jobs:
+  accepted-objective:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+      TRUXIFY_ML_USE_OSRM: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused solver dependencies
+        run: python -m pip install numpy==1.26.4 scipy==1.11.3 requests==2.34.2 pytest==9.1.1
+      - name: Verify accepted matching objective and existing algorithm behavior
+        run: >-
+          python -m pytest -q
+          backend/ml/tests/test_bilateral_assignment_objective.py
+          backend/ml/tests/test_bilateral_matcher_algo.py
+          backend/ml/tests/test_bilateral_unmatched.py

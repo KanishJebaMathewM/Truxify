@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, Field, ConfigDict
+from typing import Annotated
+from gat.training_transition import TrainingAdmissionError, observed_targets, admit_http_work
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
@@ -61,6 +63,17 @@ class GraphRequest(BaseModel):
         if any(edge.source not in known or edge.target not in known for edge in self.edges):
             raise ValueError("Traffic graph edges must reference declared nodes")
         return self
+
+class ObservedNodeTarget(BaseModel):
+    node_id: Annotated[int, Field(strict=True)]
+    values: List[Annotated[float, Field(strict=True, allow_inf_nan=False)]]
+
+
+class TrainingRequest(GraphRequest):
+    model_config = ConfigDict(extra="forbid")
+    targets: Annotated[List[ObservedNodeTarget], Field(min_length=1, max_length=4096)]
+    epochs: Annotated[int, Field(strict=True, ge=1, le=16)] = 1
+
 
 @router.post("/build-graph")
 async def build_graph(request: GraphRequest):
@@ -125,33 +138,33 @@ async def predict_traffic(request: GraphRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
-async def train_model(request: GraphRequest):
-    """Train GAT model"""
+def train_model(request: TrainingRequest):
+    """Train from explicit observed horizons aligned to public node identity."""
     try:
-        # Build graph
-        request_builder = TrafficGraphBuilder()
-        graph = request_builder.build_graph(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
-        data = request_builder.get_pytorch_data(graph)
-
-        # Generate synthetic targets
-        targets = torch.randn(data.x.shape[0], trainer.model.prediction_horizon)
-
-        # Train
-        results = trainer.train(data, targets, epochs=50)
-
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
+        with trainer._state_lock:
+            if not request.nodes or len(request.nodes) > 4096 or len(request.edges) > 65536:
+                raise TrainingAdmissionError('training graph exceeds supported node/edge bounds')
+            admit_http_work(trainer.model, len(request.nodes), request.epochs)
+            request_builder = TrafficGraphBuilder()
+            graph = request_builder.build_graph(
+                [node.model_dump() for node in request.nodes],
+                [edge.model_dump() for edge in request.edges],
+            )
+            data = request_builder.get_pytorch_data(graph)
+            parameter = next(trainer.model.parameters())
+            data.x = data.x.to(dtype=parameter.dtype)
+            targets = observed_targets(request.targets, list(graph.nodes), trainer.model.prediction_horizon,
+                                       dtype=parameter.dtype, device=trainer.device)
+            results = trainer.train(data, targets, epochs=request.epochs)
+            results['target_source'] = 'provided_observations'
+            results['node_ids'] = list(graph.nodes)
+            results['horizon'] = trainer.model.prediction_horizon
+            return {'success': True, 'data': results, 'timestamp': datetime.now().isoformat()}
+    except TrainingAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(f'GAT observed training failed: {exc}')
+        raise HTTPException(status_code=500, detail='Internal server error') from exc
 
 @router.get("/model-info")
 async def get_model_info():

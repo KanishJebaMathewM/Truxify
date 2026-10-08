@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { ethers } = require('ethers');
+const logger = require('../utils/logger');
 const {
     validateEscrowAmount,
     validateBlockchainAddress,
@@ -24,7 +25,7 @@ const getEscrowContract = (provider) => {
     return new ethers.Contract(escrowContractAddress, ESCROW_ABI, wallet);
 };
 
-const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddress) => {
+const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddress, requestId = null) => {
     try {
         const validAmount = validateEscrowAmount(amount);
         const validBookingId = validateBookingId(bookingId);
@@ -82,7 +83,13 @@ const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddr
             .eq('id', validBookingId);
 
         if (updateError) {
-            console.error('Failed to update booking with escrow details:', updateError.message);
+            logger.error('Failed to update booking with escrow details', {
+                event: 'ESCROW_ERROR',
+                requestId,
+                bookingId: validBookingId,
+                userId,
+                error: updateError.message,
+            });
         }
 
         return {
@@ -92,12 +99,19 @@ const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddr
             bookingId: validBookingId,
         };
     } catch (error) {
-        console.error('Escrow deposit service error:', error.message);
+        logger.error('Escrow deposit service error', {
+            event: 'ESCROW_ERROR',
+            requestId,
+            bookingId,
+            userId,
+            error: error.message,
+            stack: error.stack,
+        });
         throw error;
     }
 };
 
-const releaseEscrowFunds = async (userId, bookingId) => {
+const releaseEscrowFunds = async (userId, bookingId, requestId = null) => {
     try {
         const validBookingId = validateBookingId(bookingId);
 
@@ -120,51 +134,4 @@ const releaseEscrowFunds = async (userId, bookingId) => {
         }
 
         if (booking.escrow_status !== 'deposited') {
-            throw new Error('No escrow deposit found for this booking');
-        }
-
-        const bookingIdBytes32 = ethers.id(validBookingId);
-
-        let receipt;
-        if (process.env.NODE_ENV === 'test') {
-            const provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com');
-            const contract = getEscrowContract(provider);
-            const tx = await contract.releaseEscrow(bookingIdBytes32);
-            receipt = await tx.wait();
-        } else {
-            const { defaultRpcManager } = await import('./blockchain/rpcProviderManager.js');
-            receipt = await defaultRpcManager.executeWithRetry(async (provider) => {
-                const contract = getEscrowContract(provider);
-                const tx = await contract.releaseEscrow(bookingIdBytes32);
-                return await tx.wait();
-            });
-        }
-
-        const { error: updateError } = await supabase
-            .from('bookings')
-            .update({
-                escrow_status: 'released',
-                escrow_released_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', validBookingId);
-
-        if (updateError) {
-            console.error('Failed to update booking escrow status:', updateError.message);
-        }
-
-        return {
-            success: true,
-            transactionHash: receipt.hash,
-            bookingId: validBookingId,
-        };
-    } catch (error) {
-        console.error('Escrow release service error:', error.message);
-        throw error;
-    }
-};
-
-module.exports = {
-    initiateEscrowDeposit,
-    releaseEscrowFunds,
-};
+            throw new

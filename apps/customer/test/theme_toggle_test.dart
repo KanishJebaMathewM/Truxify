@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:truxify/controllers/app_controller.dart';
 import 'package:truxify/screens/profile_screen.dart';
+import 'package:truxify/l10n/app_localizations.dart';
 import 'package:truxify/theme/app_theme.dart';
 
 Widget _buildTestProfileApp({
@@ -14,6 +15,10 @@ Widget _buildTestProfileApp({
       theme: TruxifyTheme.light(),
       darkTheme: TruxifyTheme.dark(),
       themeMode: controller.themeMode,
+      // ProfileScreen resolves AppLocalizations.of(context)! — provide
+      // delegates.
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: const Scaffold(
         body: SingleChildScrollView(
           child: SizedBox(
@@ -51,7 +56,9 @@ void main() {
     final segmentedButton = tester.widget<SegmentedButton<ThemeMode>>(
       find.byType(SegmentedButton<ThemeMode>),
     );
-    expect(segmentedButton.selected, {ThemeMode.light});
+    // The platform-brightness preselection was removed: the tile reflects
+    // controller.themeMode, which defaults to system on first launch.
+    expect(segmentedButton.selected, {ThemeMode.system});
   });
 
   testWidgets(
@@ -74,7 +81,8 @@ void main() {
     final segmentedButton = tester.widget<SegmentedButton<ThemeMode>>(
       find.byType(SegmentedButton<ThemeMode>),
     );
-    expect(segmentedButton.selected, {ThemeMode.dark});
+    // Same alignment: no brightness preselection — the default is system.
+    expect(segmentedButton.selected, {ThemeMode.system});
   });
 
   testWidgets(

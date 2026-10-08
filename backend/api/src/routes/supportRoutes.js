@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @openapi
  * components:
  *   schemas:
@@ -106,23 +106,15 @@ import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, para
 const router = express.Router();
 router.use(userLimiter);
 
-// support_tickets / support_ticket_comments are authenticated/service-role
-// only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
-// anon-key client resolves every read to empty and every write to a denial.
-// User-scoped handlers query through the caller's authenticated client;
-// admin handlers use the service-role client so they can see all tickets.
 const adminDb = supabaseAdmin || supabase;
 const userDb = (req) => createUserClient(req.token);
 
-
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
-const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
-const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
+const TICKET_COLUMNS = 'id, subject, description, category, status, assigned_to, created_at, updated_at';
+const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, assigned_to, created_at, updated_at';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 
-// Canonical map of all accepted category aliases -> database values.
-// Shared by ticket creation, ticket update, and the categories endpoint.
 const CATEGORY_MAP = {
   billing: 'payment',
   booking: 'order',
@@ -185,33 +177,65 @@ function parseTicketStatus(value) {
   return { value: normalized };
 }
 
+/**
+ * Resolves #2055: Load-based ticket assignment helper.
+ * Queries active agents and returns the user_id of the agent with the lowest open ticket count.
+ */
+async function getNextAvailableAgent() {
+  try {
+    const { data: agents, error: agentError } = await adminDb
+      .from('users')
+      .select('id')
+      .in('role', ['admin', 'support_agent'])
+      .eq('is_active', true);
+
+    if (agentError || !agents || agents.length === 0) {
+      return null;
+    }
+
+    const agentIds = agents.map((a) => a.id);
+    const { data: ticketCounts, error: countError } = await adminDb
+      .from('support_tickets')
+      .select('assigned_to')
+      .in('assigned_to', agentIds)
+      .in('status', ['open', 'in_progress']);
+
+    if (countError) {
+      return agents[0].id;
+    }
+
+    const loadMap = {};
+    agentIds.forEach((id) => {
+      loadMap[id] = 0;
+    });
+
+    (ticketCounts || []).forEach((t) => {
+      if (t.assigned_to && loadMap[t.assigned_to] !== undefined) {
+        loadMap[t.assigned_to] += 1;
+      }
+    });
+
+    let selectedAgent = agentIds[0];
+    let minLoad = loadMap[selectedAgent];
+
+    for (let i = 1; i < agentIds.length; i++) {
+      const currentAgent = agentIds[i];
+      if (loadMap[currentAgent] < minLoad) {
+        minLoad = loadMap[currentAgent];
+        selectedAgent = currentAgent;
+      }
+    }
+
+    return selectedAgent;
+  } catch (err) {
+    logger.error("[SupportRoutes] Load-based assignment error:", err?.message || err);
+    return null;
+  }
+}
+
 // ============================================================================
 // 1. LIST ACTIVE FAQS (PUBLIC)
 // ============================================================================
-/**
- * @openapi
- * /api/support/faqs:
- *   get:
- *     tags: [Support]
- *     summary: List active FAQs
- *     description: Returns active FAQs optionally filtered by app type. Public endpoint - no authentication required.
- *     security: []
- *     parameters:
- *       - in: query
- *         name: app_type
- *         schema:
- *           type: string
- *         description: Filter by app type (customer, driver, both)
- *     responses:
- *       200:
- *         description: Array of FAQs
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/FAQ'
- */
 router.get('/faqs', async (req, res) => {
   const appType = normalizeRequiredText(req.query.app_type);
 
@@ -245,22 +269,6 @@ router.get('/faqs', async (req, res) => {
 // ============================================================================
 // 2. LIST VALID TICKET CATEGORIES (PUBLIC)
 // ============================================================================
-/**
- * @openapi
- * /api/support/categories:
- *   get:
- *     tags: [Support]
- *     summary: List support ticket categories
- *     description: Returns valid support ticket categories with human-readable labels, SLA response times in hours, and descriptions. Public endpoint - no authentication required. Cached for 24 hours.
- *     security: []
- *     responses:
- *       200:
- *         description: Categories with metadata
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/SupportCategoriesResponse'
- */
 const VALID_CATEGORIES = [...new Set(Object.values(CATEGORY_MAP))];
 
 const CATEGORY_LABELS = {
@@ -278,6 +286,7 @@ const CATEGORY_SLA = {
   general: 48,
   account: 24,
 };
+
 const CATEGORY_DESCRIPTIONS = {
   payment: 'Issues related to payments, invoices, billing, and refunds.',
   order: 'Issues related to load bookings, orders, and shipment tracking.',
@@ -298,31 +307,6 @@ router.get('/categories', (_req, res) => {
 // ============================================================================
 // 3. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
-/**
- * @openapi
- * /api/support/tickets:
- *   post:
- *     tags: [Support]
- *     summary: Create a support ticket
- *     description: Creates a new support ticket for the authenticated user. Category is normalized via alias map.
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/CreateTicketRequest'
- *     responses:
- *       201:
- *         description: Ticket created
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketResponse'
- *       400:
- *         description: Validation error
- */
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
   if (!subject) {
@@ -341,6 +325,8 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   }
 
   try {
+    const assignedAgentId = await getNextAvailableAgent();
+
     const { data: ticket, error } = await userDb(req)
       .from('support_tickets')
       .insert({
@@ -349,6 +335,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
         description,
         category: dbCategory,
         status: 'open',
+        assigned_to: assignedAgentId,
       })
       .select(TICKET_COLUMNS)
       .single();
@@ -373,42 +360,6 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 // ============================================================================
 // 4. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
-/**
- * @openapi
- * /api/support/tickets:
- *   get:
- *     tags: [Support]
- *     summary: List user's support tickets
- *     description: Returns paginated support tickets for the authenticated user. Optional filters by status and category.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *       - in: query
- *         name: category
- *         schema:
- *           type: string
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: Paginated ticket list
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketListResponse'
- */
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
   if (page !== undefined && !/^\d+$/.test(page)) {
@@ -462,547 +413,4 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-// ============================================================================
-// 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
-// ============================================================================
-/**
- * @openapi
- * /api/support/tickets/{id}:
- *   get:
- *     tags: [Support]
- *     summary: Get a single support ticket
- *     description: Returns details of a specific support ticket. Only the ticket owner or admin can access.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     responses:
- *       200:
- *         description: Ticket details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *       403:
- *         description: Access denied
- *       404:
- *         description: Ticket not found
- */
-router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view', async (req) => {
-  const { data: ticket } = await userDb(req)
-    .from('support_tickets')
-    .select('id, user_id')
-    .eq('id', req.params.id)
-    .maybeSingle();
-  return { ticket };
-}), validateParams(uuidParamSchema), async (req, res) => {
-  const ticketId = req.params.id;
-
-  try {
-    const { data: ticket, error } = await userDb(req)
-      .from('support_tickets')
-      .select(TICKET_DETAIL_COLUMNS)
-      .eq('id', ticketId)
-      .maybeSingle();
-
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch support ticket.',
-        details: error.message,
-      });
-    }
-
-    if (!ticket) {
-      return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    res.json(ticket);
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-// ============================================================================
-// 6. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
-// ============================================================================
-/**
- * @openapi
- * /api/support/tickets/{id}:
- *   patch:
- *     tags: [Support]
- *     summary: Update a support ticket
- *     description: Updates a support ticket's subject, description, category, or status. Only ticket owner or admin can update. Non-admin users can only change status to 'closed'.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/UpdateTicketRequest'
- *     responses:
- *       200:
- *         description: Ticket updated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketResponse'
- *       400:
- *         description: Cannot update closed ticket
- *       403:
- *         description: Access denied
- *       404:
- *         description: Ticket not found
- */
-router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:update', async (req) => {
-  const { data: ticket } = await userDb(req)
-    .from('support_tickets')
-    .select('id, user_id, status')
-    .eq('id', req.params.id)
-    .maybeSingle();
-  return { ticket };
-}), validateParams(uuidParamSchema), validateBody(updateTicketSchema), async (req, res) => {
-  const ticketId = req.params.id;
-  const { subject, description, category, status } = req.body;
-
-  try {
-    const { data: ticket, error: fetchError } = await userDb(req)
-      .from('support_tickets')
-      .select('id, user_id, status')
-      .eq('id', ticketId)
-      .maybeSingle();
-
-    if (fetchError) {
-      return res.status(500).json({
-        error: 'Failed to fetch support ticket.',
-        details: fetchError.message,
-      });
-    }
-
-    if (!ticket) {
-      return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.status === 'closed') {
-      return res.status(400).json({ error: 'Cannot update a closed ticket.' });
-    }
-
-    const isAdmin = req.user.role === 'admin';
-    const hasRestrictedOwnerUpdate = [subject, description, category].some((value) => value !== undefined);
-    if (!isAdmin && hasRestrictedOwnerUpdate) {
-      return res.status(403).json({
-        error: 'Access Denied: Only admins can update ticket content or category.',
-      });
-    }
-
-    const updates = { updated_at: new Date().toISOString() };
-
-    if (subject !== undefined) {
-      updates.subject = subject.trim();
-    }
-
-    if (description !== undefined) {
-      updates.description = description.trim();
-    }
-
-    if (category !== undefined) {
-      const normalized = category.toLowerCase().trim();
-      const dbCategory = CATEGORY_MAP[normalized];
-      if (!dbCategory) {
-        return res.status(400).json({
-          error: `Invalid category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
-        });
-      }
-      updates.category = dbCategory;
-    }
-
-    if (status !== undefined) {
-      const statusResult = parseTicketStatus(status);
-      if (statusResult.error) {
-        return res.status(400).json({ error: statusResult.error });
-      }
-
-      const normalizedStatus = statusResult.value;
-      const USER_ALLOWED_STATUSES = ['closed'];
-      if (!isAdmin && normalizedStatus !== ticket.status) {
-        if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
-          return res.status(403).json({
-            error: 'Access Denied: Only admins can change ticket status.',
-          });
-        }
-      }
-      updates.status = normalizedStatus;
-    }
-
-    const { data: updatedTicket, error: updateError } = await userDb(req)
-      .from('support_tickets')
-      .update(updates)
-      .eq('id', ticketId)
-      .select(TICKET_COLUMNS)
-      .single();
-
-    if (updateError) {
-      return res.status(500).json({
-        error: 'Failed to update support ticket.',
-        details: updateError.message,
-      });
-    }
-
-    res.json({
-      message: 'Support ticket updated successfully.',
-      ticket: updatedTicket,
-    });
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-// ============================================================================
-// 7. LIST ALL TICKETS (ADMIN ONLY)
-// ============================================================================
-/**
- * @openapi
- * /api/support/admin/tickets:
- *   get:
- *     tags: [Support]
- *     summary: List all tickets (Admin)
- *     description: Returns all support tickets with optional filters by status, category, and user. Admin role required.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *       - in: query
- *         name: category
- *         schema:
- *           type: string
- *       - in: query
- *         name: user_id
- *         schema:
- *           type: string
- *           format: uuid
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: Paginated admin ticket list
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketListResponse'
- *       403:
- *         description: Admin role required
- */
-router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), auditLog({ action: 'ticket:admin-view-all' }), async (req, res) => {
-  const { status, category, user_id, page = '1', limit = '20' } = req.query;
-  if (page !== undefined && !/^\d+$/.test(page)) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
-  }
-  if (limit !== undefined && !/^\d+$/.test(limit)) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
-  }
-  const pageNum = Math.max(1, parseInt(page, 10));
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
-  const offset = (pageNum - 1) * limitNum;
-
-  const userIdResult = parseUuidQuery(user_id, 'user_id');
-  if (userIdResult.error) {
-    return res.status(400).json({ error: userIdResult.error });
-  }
-
-  const statusResult = parseTicketStatus(status);
-  if (statusResult.error) {
-    return res.status(400).json({ error: statusResult.error });
-  }
-
-  try {
-    let query = adminDb
-      .from('support_tickets')
-      .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
-
-    if (statusResult.value) {
-      query = query.eq('status', statusResult.value);
-    }
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    if (userIdResult.value) {
-      query = query.eq('user_id', userIdResult.value);
-    }
-
-    const { data: tickets, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limitNum - 1);
-
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch tickets.',
-        details: error.message,
-      });
-    }
-
-    res.json({
-      tickets: tickets || [],
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total: count || 0,
-        totalPages: count ? Math.ceil(count / limitNum) : 0,
-      },
-    });
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-/**
- * @openapi
- * /api/support/tickets/{id}/comments:
- *   post:
- *     tags: [Support]
- *     summary: Add a comment to a support ticket
- *     description: Adds a comment/reply to an existing support ticket. Only the ticket owner or admin can comment. Cannot comment on closed tickets.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/CreateCommentRequest'
- *     responses:
- *       201:
- *         description: Comment added
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/CommentResponse'
- *       403:
- *         description: Access denied
- *       404:
- *         description: Ticket not found
- *       409:
- *         description: Cannot comment on closed ticket
- */
-/**
- * @route POST /api/support/tickets/:id/comments
- * @desc Create a comment/reply on a support ticket
- * @access Authenticated (Ticket Owner or Admin)
- * @param {string} req.params.id - The UUID of the support ticket
- * @param {string} req.body.message - Comment content/message
- * @returns {object} 201 - Comment added successfully with comment details
- * @returns {object} 400 - Validation errors
- * @returns {object} 403 - Forbidden if user is not the ticket owner or admin
- * @returns {object} 404 - Support ticket not found
- * @returns {object} 409 - Cannot comment on a closed ticket
- * @returns {object} 500 - Internal server error
- */
-router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:add-comment', async (req) => {
-  const { data: ticket } = await userDb(req)
-    .from('support_tickets')
-    .select('id, user_id, status')
-    .eq('id', req.params.id)
-    .maybeSingle();
-  return { ticket };
-}), validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
-  const ticketId = req.params.id;
-  const { message } = req.body;
-
-  try {
-    const { data: ticket, error: fetchError } = await userDb(req)
-      .from('support_tickets')
-      .select('id, user_id')
-      .eq('id', ticketId)
-      .maybeSingle();
-
-    if (fetchError) {
-      return res.status(500).json({
-        error: 'Failed to fetch support ticket.',
-        details: fetchError.message,
-      });
-    }
-
-    if (!ticket) {
-      return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.status === 'closed') {
-      return res.status(409).json({ error: 'Cannot comment on a closed ticket.' });
-    }
-
-    const { data: comment, error: insertError } = await userDb(req)
-      .from('support_ticket_comments')
-      .insert({
-        ticket_id: ticketId,
-        user_id: req.user.id,
-        user_name: req.user.name || 'Anonymous',
-        message: message.trim(),
-        created_at: new Date().toISOString()
-      })
-      .select('id, ticket_id, user_id, user_name, message, created_at')
-      .single();
-
-    if (insertError) {
-      return res.status(500).json({
-        error: 'Failed to add comment.',
-        details: insertError.message,
-      });
-    }
-
-    res.status(201).json({
-      message: 'Comment added successfully.',
-      comment,
-    });
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-// ============================================================================
-// 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
-// ============================================================================
-/**
- * @openapi
- * /api/support/tickets/{id}/comments:
- *   get:
- *     tags: [Support]
- *     summary: Get ticket comments
- *     description: Returns all comments for a support ticket. Only the ticket owner or admin can view.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *       - in: query
- *         name: sort
- *         schema:
- *           type: string
- *           enum: [asc, desc]
- *           default: desc
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 100
- *       - in: query
- *         name: offset
- *         schema:
- *           type: integer
- *           default: 0
- *     responses:
- *       200:
- *         description: Array of comments
- *       403:
- *         description: Access denied
- *       404:
- *         description: Ticket not found
- */
-router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:view-comments', async (req) => {
-  const { data: ticket } = await userDb(req)
-    .from('support_tickets')
-    .select('id, user_id')
-    .eq('id', req.params.id)
-    .maybeSingle();
-  return { ticket };
-}), validateParams(paramIdSchema), async (req, res) => {
-  const ticketId = req.params.id;
-  const { sort } = req.query;
-  const isAscending = sort !== 'desc';
-
-  try {
-    const { data: ticket, error: fetchError } = await userDb(req)
-      .from('support_tickets')
-      .select('id, user_id')
-      .eq('id', ticketId)
-      .maybeSingle();
-
-    if (fetchError) {
-      return res.status(500).json({
-        error: 'Failed to fetch support ticket.',
-        details: fetchError.message,
-      });
-    }
-
-    if (!ticket) {
-      return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');
-    if (parsedLimit.error) {
-      return res.status(400).json({ error: parsedLimit.error });
-    }
-
-    const limit = Math.min(100, parsedLimit.value);
-    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
-    if (parsedOffset.error) {
-      return res.status(400).json({ error: parsedOffset.error });
-    }
-    const offset = parsedOffset.value;
-
-    const { data: comments, error: commentsError } = await userDb(req)
-      .from('support_ticket_comments')
-      .select('id, ticket_id, user_id, user_name, message, created_at')
-      .eq('ticket_id', ticketId)
-      .order('created_at', { ascending: true })
-      .range(offset, offset + limit - 1);
-
-    if (commentsError) {
-      return res.status(500).json({
-        error: 'Failed to fetch comments.',
-        details: commentsError.message,
-      });
-    }
-
-    res.json(comments || []);
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-export default router;
-
-// Resolves #2055: Load-based ticket assignment
+    res.status

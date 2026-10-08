@@ -99,7 +99,12 @@ def predict_traffic(request: GraphRequest):
     try:
         with trainer._state_lock:
             generation = trainer.model
-            graph_policy(generation, 1, len(request.nodes), 1, 2 * len(request.edges))
+            # Match the undirected builder's deduplication before native export.
+            native_edges = 2 * len({
+                (min(edge.source, edge.target), max(edge.source, edge.target))
+                for edge in request.edges
+            })
+            graph_policy(generation, 1, len(request.nodes), 1, native_edges)
             request_builder = TrafficGraphBuilder()
             graph = request_builder.build_graph(
                 [node.model_dump() for node in request.nodes],

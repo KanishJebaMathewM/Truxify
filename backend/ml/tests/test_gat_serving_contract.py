@@ -12,7 +12,7 @@ import pytest
 import torch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gat.model import GATTrainer, SpatialTemporalGAT
+from gat.model import GATTrainer, SpatialTemporalGAT, TrafficGraphBuilder
 from gat.serving_contract import GATGraphInputError, graph_policy
 from torch_geometric.data import Data
 
@@ -278,3 +278,24 @@ def test_nonconstant_real_native_population_spread_matches_independent_numpy(dty
     assert values.std(axis=1).max() > 0
     np.testing.assert_allclose(result['mean'].cpu().numpy(), values.mean(axis=1), rtol=2e-6, atol=1e-9)
     np.testing.assert_allclose(result['std'].cpu().numpy(), values.std(axis=1), rtol=2e-6, atol=1e-9)
+
+
+def test_actual_default_route_duplicate_edges_match_native_builder_budget(mounted):
+    client, route = mounted
+    nodes = [{'id': i, 'lat': 0., 'lng': 0.} for i in range(1000)]
+    forward = {'source': 0, 'target': 1, 'distance': 1.}
+    reverse = {'source': 1, 'target': 0, 'distance': 1.}
+    duplicate_body = {'nodes': nodes, 'edges': [forward, reverse] * 50000}
+    # Independent actual builder export is the admission reference: one retained
+    # undirected pair, two directed native edges, despite 100,000 input records.
+    builder = TrafficGraphBuilder()
+    built = builder.build_graph(nodes, duplicate_body['edges'])
+    native = builder.get_pytorch_data(built)
+    assert native.edge_index.shape == (2, 2)
+    graph_policy(route.trainer.model, 1, len(nodes), 1, native.edge_index.shape[1])
+    duplicate = client.post('/gat/predict', json=duplicate_body)
+    assert duplicate.status_code == 200, duplicate.text
+    unique = client.post('/gat/predict', json={'nodes': nodes, 'edges': [forward]})
+    assert unique.status_code == 200, unique.text
+    for key in ('predictions', 'mean', 'std'):
+        np.testing.assert_array_equal(duplicate.json()['data'][key], unique.json()['data'][key])

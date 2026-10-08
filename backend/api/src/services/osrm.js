@@ -2,6 +2,107 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+/**
+ * OSRM Routing Service
+ * 
+ * Interfaces with OSRM (Open Source Routing Machine) for route calculation,
+ * distance matrices, and navigation summaries. Includes structured warning 
+ * logging in catch blocks for robust production observability.
+ */
+
+import axios from 'axios';
+import logger from '../middleware/logger.js';
+
+const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'http://router.project-osrm.org';
+
+/**
+ * Fetches route geometry and distance/duration between coordinates.
+ * @param {Array<[number, number]>} coordinates - Array of [longitude, latitude] pairs.
+ * @returns {Promise<Object|null>} Route details or null on failure (fail-safe).
+ */
+export async function getRoute(coordinates) {
+  if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 2) {
+    logger.warn(
+      { event: 'OSRM_INVALID_COORDINATES', coordinatesCount: coordinates?.length },
+      'Invalid coordinates provided for OSRM route calculation'
+    );
+    return null;
+  }
+
+  const coordString = coordinates.map(c => c.join(',')).join(';');
+  const url = `${OSRM_BASE_URL}/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+
+  try {
+    const response = await axios.get(url, { timeout: 5000 });
+    
+    if (response.data && response.data.code === 'Ok' && response.data.routes && response.data.routes.length > 0) {
+      return response.data.routes[0];
+    }
+
+    logger.warn(
+      { event: 'OSRM_UNEXPECTED_RESPONSE', responseCode: response.data?.code },
+      'OSRM returned non-success response code'
+    );
+    return null;
+  } catch (err) {
+    logger.warn(
+      {
+        event: 'OSRM_ROUTE_FETCH_ERROR',
+        error: err?.message || err,
+        coordCount: coordinates.length,
+      },
+      'Failed to fetch route from OSRM service'
+    );
+    return null;
+  }
+}
+
+/**
+ * Fetches distance matrix between source and destination coordinates.
+ * @param {Array<[number, number]>} coordinates - Array of [longitude, latitude] coordinates.
+ * @returns {Promise<Object|null>} Distance matrix result or null on failure.
+ */
+export async function getDistanceMatrix(coordinates) {
+  if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 2) {
+    logger.warn(
+      { event: 'OSRM_INVALID_MATRIX_COORDINATES', coordinatesCount: coordinates?.length },
+      'Invalid coordinates for OSRM distance matrix'
+    );
+    return null;
+  }
+
+  const coordString = coordinates.map(c => c.join(',')).join(';');
+  const url = `${OSRM_BASE_URL}/table/v1/driving/${coordString}`;
+
+  try {
+    const response = await axios.get(url, { timeout: 5000 });
+    
+    if (response.data && response.data.code === 'Ok') {
+      return response.data;
+    }
+
+    logger.warn(
+      { event: 'OSRM_MATRIX_UNEXPECTED_RESPONSE', responseCode: response.data?.code },
+      'OSRM distance matrix returned non-success code'
+    );
+    return null;
+  } catch (err) {
+    logger.warn(
+      {
+        event: 'OSRM_MATRIX_FETCH_ERROR',
+        error: err?.message || err,
+        coordCount: coordinates.length,
+      },
+      'Failed to fetch distance matrix from OSRM service'
+    );
+    return null;
+  }
+}
+
+export default {
+  getRoute,
+  getDistanceMatrix,
+};
 
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);

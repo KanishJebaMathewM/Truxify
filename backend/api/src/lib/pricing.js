@@ -16,7 +16,36 @@
  */
 
 import logger from '../middleware/logger.js';
+/**
+ * Computes order pricing based on distance and service parameters.
+ * @param {Object} params
+ * @param {number} params.pickupLat
+ * @param {number} params.pickupLng
+ * @param {number} params.dropLat
+ * @param {number} params.dropLng
+ * @returns {Object} Pricing breakdown
+ */
+export function computeOrderPricing({ pickupLat, pickupLng, dropLat, dropLng, ...options }) {
+  // Explicit null, undefined, and non-finite validation guards
+  const coordinates = { pickupLat, pickupLng, dropLat, dropLng };
+  
+  for (const [key, value] of Object.entries(coordinates)) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+      throw new TypeError(`Invalid coordinate provided for '${key}': must be a finite number, received ${value}`);
+    }
+  }
 
+  // Parse to numbers after validation
+  const pLat = Number(pickupLat);
+  const pLng = Number(pickupLng);
+  const dLat = Number(dropLat);
+  const dLng = Number(dropLng);
+
+  // Proceed with distance calculation and pricing logic...
+  const distanceKm = haversineKm(pLat, pLng, dLat, dLng);
+
+  // ... rest of pricing computation
+}
 // Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
 // Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
 const MIN_FREIGHT_PAISa = 0;

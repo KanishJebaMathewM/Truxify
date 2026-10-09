@@ -2,13 +2,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Optional
 import math
 import logging
 import copy
 import threading
 from dataclasses import dataclass
 from functools import wraps
+
+from .training_contract import admit_state, checked_loss, checked_predictions, own_collections, ForecastAdmissionError, check_candidate_observations
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +189,7 @@ class DemandForecastTransformer(nn.Module):
         self.input_dim = input_dim
         self.pred_len = pred_len
         
-        logger.info(f"✅ Demand Forecast Transformer initialized")
+        logger.info("✅ Demand Forecast Transformer initialized")
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.transformer(x)
@@ -217,7 +219,7 @@ class TrafficForecastTransformer(nn.Module):
             dropout=dropout
         )
         
-        logger.info(f"✅ Traffic Forecast Transformer initialized")
+        logger.info("✅ Traffic Forecast Transformer initialized")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.transformer(x)
@@ -247,7 +249,7 @@ class PriceForecastTransformer(nn.Module):
             dropout=dropout
         )
         
-        logger.info(f"✅ Price Forecast Transformer initialized")
+        logger.info("✅ Price Forecast Transformer initialized")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.transformer(x)
@@ -306,6 +308,8 @@ class TransformerTrainer:
     @_serialize_mutation
     def train_step(self, x: torch.Tensor, y: torch.Tensor) -> float:
         """Train one complete batch and publish one complete generation."""
+        if not isinstance(x, torch.Tensor) or x.ndim < 1:
+            raise ForecastAdmissionError('train_step requires a sample tensor')
         return self.train(x, y, epochs=1, batch_size=x.size(0))['final_loss']
 
     @_serialize_mutation
@@ -319,18 +323,12 @@ class TransformerTrainer:
         val_labels: Optional[torch.Tensor] = None
     ) -> Dict:
         """Full training loop"""
-        if epochs < 1:
-            raise ValueError("epochs must be >= 1")
-        if batch_size < 1:
-            raise ValueError("batch_size must be >= 1")
-        if train_data.size(0) == 0:
-            raise ValueError("Training data cannot be empty")
-        if train_data.size(0) != train_labels.size(0):
-            raise ValueError("Training data and labels must have equal sample counts")
-        if val_data is not None and val_labels is not None:
-            if val_data.size(0) != val_labels.size(0):
-                raise ValueError("Validation data and labels must have equal sample counts")
-            
+        if not torch.is_grad_enabled():
+            raise ForecastAdmissionError('native fitting requires an enabled autograd context')
+        train_data, train_labels, val_data, val_labels, epochs, batch_size = own_collections(
+            self.model, train_data, train_labels, val_data, val_labels, epochs, batch_size)
+        admit_state(self.model, self.optimizer)
+
         losses = []
         val_losses = []
         
@@ -360,15 +358,20 @@ class TransformerTrainer:
                 batch_y = batch_y.to(self.device)
                 
                 predictions = working_model(batch_x)
+                checked_predictions(predictions, batch_y)
                 loss = self.criterion(predictions, batch_y)
+                checked_loss(loss)
                 
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(working_model.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(working_model.parameters(), 1.0, error_if_nonfinite=True)
                 working_optimizer.step()
+                admit_state(working_model, working_optimizer)
                 
                 epoch_loss += loss.item()
             
             avg_loss = epoch_loss / num_batches
+            if not math.isfinite(avg_loss):
+                raise ValueError('completed training loss must be finite')
             losses.append(avg_loss)
             
             # Validation
@@ -378,18 +381,23 @@ class TransformerTrainer:
                     val_x = val_data.to(self.device)
                     val_y = val_labels.to(self.device)
                     val_preds = working_model(val_x)
-                    val_loss = self.criterion(val_preds, val_y).item()
+                    checked_predictions(val_preds, val_y)
+                    objective = self.criterion(val_preds, val_y)
+                    checked_loss(objective)
+                    val_loss = objective.item()
                 val_losses.append(val_loss)
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Val Loss={val_loss:.4f}")
             else:
                 logger.info(f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
                 
+        check_candidate_observations(working_model, self.criterion,
+                                     ((train_data, train_labels), (val_data, val_labels)), batch_size)
+        admit_state(working_model, working_optimizer)
         # Never copy weights into a model still owned by native inference.
         from app.execution import is_training_cancelled, TrainingCancelled
         if is_training_cancelled():
             raise TrainingCancelled("Training timed out, aborting swap")
             
-        working_model.eval()
         self._generation = working
         
         return {

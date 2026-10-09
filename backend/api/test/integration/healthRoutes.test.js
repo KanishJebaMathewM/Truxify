@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
@@ -218,14 +218,47 @@ describe('GET /api/health/ready', () => {
 
 describe('GET /api/health/sentry-debug', () => {
   let app;
+  let previousNodeEnv;
+  let previousDebugFlag;
 
   beforeEach(() => {
+    previousNodeEnv = process.env.NODE_ENV;
+    previousDebugFlag = process.env.SENTRY_DEBUG_ENABLED;
+    process.env.NODE_ENV = 'development';
+    delete process.env.SENTRY_DEBUG_ENABLED;
     app = buildApp();
     mockCaptureDebugException.mockReset();
   });
 
+  afterEach(() => {
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    if (previousDebugFlag === undefined) {
+      delete process.env.SENTRY_DEBUG_ENABLED;
+    } else {
+      process.env.SENTRY_DEBUG_ENABLED = previousDebugFlag;
+    }
+  });
+
   it('returns 404 when the debug route is not enabled', async () => {
-    delete process.env.SENTRY_DEBUG_ENABLED;
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the debug flag is false', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'false';
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 in production even when debug is enabled', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
     const res = await request(app).get('/api/health/sentry-debug');
     expect(res.status).toBe(404);
     expect(mockCaptureDebugException).not.toHaveBeenCalled();

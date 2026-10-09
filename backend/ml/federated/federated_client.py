@@ -11,6 +11,7 @@ import time
 from threading import RLock
 
 from .client_round_protocol import MAX_MODEL_ENVELOPE_BYTES, admit_round_model, round_owned
+from .local_training_transition import fit_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ class FederatedClient:
             loss='binary_crossentropy',
             metrics=['accuracy']
         )
+        # Register native Adam moments before any accepted round can train.
+        model.optimizer.build(model.trainable_variables)
         return model
 
     def _register_client(self):
@@ -242,30 +245,9 @@ class FederatedClient:
                 return {'success': False, 'error': 'No accepted server model round'}
             if self._trained_round == self.training_round:
                 return dict(self._training_result, duplicate=True)
-            self.local_data = (data, labels)
-            
-            # Train locally
-            history = self.model.fit(
-                data, labels,
-                epochs=epochs,
-                batch_size=32,
-                verbose=0
-            )
-
-            hist = getattr(history, 'history', {}) if history is not None else {}
-            loss = hist.get('loss', [0.0])[-1] if 'loss' in hist and len(hist['loss']) > 0 else 0.0
-            acc = hist.get('accuracy', [1.0])[-1] if 'accuracy' in hist and len(hist['accuracy']) > 0 else 1.0
-
-            loss_val = float(loss) if isinstance(loss, (int, float, np.number)) else 0.0
-            acc_val = float(acc) if isinstance(acc, (int, float, np.number)) else 1.0
-
-            logger.info(f"📊 Local training completed: loss={loss_val:.4f}")
-
-            if not np.isfinite(loss_val) or not np.isfinite(acc_val) or any(
-                not np.isfinite(w).all() for w in self.model.get_weights()
-            ):
-                return {'success': False, 'error': 'Local training produced a nonfinite model or metrics'}
-            self._training_result = {'success': True, 'loss': loss_val, 'accuracy': acc_val}
+            metrics, owned = fit_candidate(self.model, data, labels, epochs)
+            self.local_data = owned
+            self._training_result = {'success': True, **metrics}
             self._trained_round = self.training_round
             return dict(self._training_result)
             

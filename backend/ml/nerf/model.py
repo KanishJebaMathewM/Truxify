@@ -1,10 +1,11 @@
+import logging
 import math
+from typing import Dict, List, Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-import logging
+from nerf.ray_training import fit_rays
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +128,16 @@ class NeRFRenderer:
         
         logger.info(f"✅ NeRF Renderer initialized on {device}")
     
-    def render_rays(
-        self,
-        ray_origins: torch.Tensor,
-        ray_directions: torch.Tensor,
-        num_samples: Optional[int] = None
-    ) -> Dict:
+    def render_rays(self, ray_origins: torch.Tensor, ray_directions: torch.Tensor,
+                    num_samples: Optional[int] = None, *, differentiable: bool = False) -> Dict:
+        """Opt into the actual native render graph; ordinary inference stays detached."""
+        if not isinstance(differentiable, bool):
+            raise ValueError('differentiable must be a boolean')
+        with torch.set_grad_enabled(differentiable and torch.is_grad_enabled()):
+            return self._render_rays(ray_origins, ray_directions, num_samples)
+
+    def _render_rays(self, ray_origins: torch.Tensor, ray_directions: torch.Tensor,
+                     num_samples: Optional[int] = None) -> Dict:
         """Render rays through the scene"""
         if num_samples is None:
             num_samples = self.num_samples
@@ -173,8 +178,7 @@ class NeRFRenderer:
             raise ValueError("sampled ray points must be representable finitely")
         
         # Query network
-        with torch.no_grad():
-            densities, colors = self.model(points_flat, dirs_flat)
+        densities, colors = self.model(points_flat, dirs_flat)
         
         # Reshape back
         densities = densities.reshape(ray_origins.shape[0], ray_origins.shape[1], num_samples, 1)
@@ -311,8 +315,14 @@ class NeRFTrainer:
             if (epoch + 1) % 10 == 0:
                 logger.info(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.4f}")
         
-        return {'losses': losses, 'final_loss': losses[-1]}
+        return {'losses': losses, 'final_loss': losses[-1], 'objective': 'pointwise_rgb',
+                'density_gradient_path': False}
     
+    def train_rays(self, ray_data: Dict, epochs: int = 100, batch_size: int = 256,
+                   num_samples: int = 64, near: float = 0.1, far: float = 10.0) -> Dict:
+        """Fit explicit pixel/ray observations through density-sensitive rendering."""
+        return fit_rays(self, ray_data, epochs, batch_size, num_samples, near, far, NeRFRenderer)
+
     def save(self, path: str = "models/nerf.pth"):
         """Save model"""
         torch.save({

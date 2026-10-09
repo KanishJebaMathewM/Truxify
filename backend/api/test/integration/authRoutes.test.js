@@ -66,11 +66,13 @@ vi.mock('../../src/middleware/auth.js', () => ({
 }));
 
 const { default: authRouter, withTimeout } = await import('../../src/routes/authRoutes.js');
+const { errorHandler } = await import('../../src/middleware/errorHandler.js');
 
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/auth', authRouter);
+  app.use(errorHandler);
   return app;
 }
 

@@ -32,12 +32,20 @@ class CustomerData(BaseModel):
     TechSupport: str
     OnlineSecurity: str
 
+from fastapi.responses import JSONResponse
+
 @app.get("/health", summary="API Health Check")
 def health_check():
     """Returns the operational status of the API and model loading state."""
+    models_loaded = all([model is not None, preprocessor is not None, kmeans is not None])
+    if not models_loaded:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "models_loaded": False}
+        )
     return {
         "status": "healthy",
-        "models_loaded": all([model is not None, preprocessor is not None, kmeans is not None])
+        "models_loaded": True
     }
 
 @app.post("/predict", summary="Real-time Churn Risk Prediction")

@@ -1122,4 +1122,11 @@ router.post(
   }
 );
 
+
+// backend/api/src/routes/orderRoutes.js (around line 1194)
+
+// Before:
+// module.exports = router;
+
+// After:
 export default router;

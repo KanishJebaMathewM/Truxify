@@ -10,11 +10,16 @@ import logger from '../middleware/logger.js';
 /**
  * Encode opaque cursor data into a URL-safe base64 string.
  * @param {object} data - Cursor data to encode (e.g., { id, createdAt })
- * @returns {string} URL-safe base64 encoded cursor
+ * @returns {string|null} URL-safe base64 encoded cursor, or null if encoding fails
  */
 export function encodeCursor(data) {
-  const json = JSON.stringify(data);
-  return Buffer.from(json).toString('base64url');
+  try {
+    const json = JSON.stringify(data);
+    return Buffer.from(json).toString('base64url');
+  } catch (err) {
+    logger.error('[cursorPagination] Failed to encode cursor:', err?.message);
+    return null;
+  }
 }
 
 /**
@@ -33,14 +38,14 @@ export function decodeCursor(cursor) {
       if (
         typeof ps !== 'number' ||
         !Number.isInteger(ps) ||
-        ps < 1
+        ps <=0
       ) {
         return null;
       }
     }
     return result;
   } catch (err) {
-    logger.error('[cursorPagination] Failed to decode cursor:', err?.message);
+    logger.warn({ err: err?.message, cursorSnippet: cursor?.slice(0, 16) }, '[cursorPagination] Failed to decode cursor');
     return null;
   }
 }

@@ -28,6 +28,11 @@ const { anonFrom } = vi.hoisted(() => ({
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: anonFrom, rpc: vi.fn() },
   supabaseAdmin: m.supabase,
+  createUserClient: () => m.supabase,
+  upstashRedisClient: {
+    get: async () => null,
+    set: async () => 'OK',
+  },
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: {

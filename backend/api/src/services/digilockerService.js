@@ -6,6 +6,10 @@ import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
 
+// Sentinel stored on profiles that have not linked a wallet yet. It is a
+// truthy string, so it must be compared explicitly before any on-chain write.
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
 class DigilockerService {
   constructor() {
     this.clientId = process.env.DIGILOCKER_CLIENT_ID;
@@ -301,12 +305,21 @@ class DigilockerService {
         .maybeSingle();
 
       const walletAddress = profile?.polygon_wallet_address;
-      if (!walletAddress || walletAddress === '0x0000000000000000000000000000000000000000') {
+      // The zero address is the sentinel the code already recognises, but it is
+      // a truthy string, so the old `if (this.documentRegistry && walletAddress)`
+      // guard let it through and submitted a real registerDocument transaction
+      // to 0x0 while the log claimed the write was skipped.
+      const hasUsableWallet =
+        !!walletAddress &&
+        walletAddress !== ZERO_ADDRESS &&
+        String(walletAddress).trim() !== '';
+
+      if (!hasUsableWallet) {
         logger.warn(`[DigilockerService] Skipping blockchain registration for user ${driverId}: no valid wallet address`);
       }
       let txHash = null;
 
-      if (this.documentRegistry && walletAddress) {
+      if (this.documentRegistry && hasUsableWallet) {
         try {
           const tx = await this.documentRegistry.registerDocument(walletAddress, doc.type, docHash, true);
           await tx.wait();

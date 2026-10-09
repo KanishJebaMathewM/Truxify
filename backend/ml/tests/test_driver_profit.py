@@ -40,6 +40,22 @@ def test_driver_profit_short_distance():
     assert "predicted_profit" in data
 
 
+def test_driver_profit_rejects_below_training_range():
+    payload = profit_payload()
+    payload["route_distance"] = 49.0
+    response = client.post("/predict/driver-profit", json=payload)
+    assert response.status_code == 422
+    assert "training range" in response.json()["detail"]
+
+
+def test_driver_profit_rejects_above_training_range():
+    payload = profit_payload()
+    payload["route_distance"] = 2001.0
+    response = client.post("/predict/driver-profit", json=payload)
+    assert response.status_code == 422
+    assert "training range" in response.json()["detail"]
+
+
 def test_driver_profit_invalid_zero_distance():
     payload = profit_payload()
     payload["route_distance"] = 0

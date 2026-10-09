@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import '../services/sync_service.dart';
+import '../services/trip_service.dart';
 import '../services/image_compression_service.dart';
 import '../theme/app_theme.dart';
 
@@ -401,7 +402,7 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                     child: ElevatedButton(
                       onPressed: _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: TruxifyColors.primary,
+                        backgroundColor: TruxifyColors.accent,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: Text('Complete Delivery', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),

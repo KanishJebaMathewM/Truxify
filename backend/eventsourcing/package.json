@@ -15,8 +15,8 @@
   "scripts": {
     "start": "node event-store.js",
     "dev": "node --watch event-store.js",
-    "test": "node --test test/",
-    "test:watch": "node --test --watch test/"
+    "test": "node --test test/event-sourcing-core.test.js test/event-store-adapter.test.js test/eventReplayBuffer.test.js test/read-model-projection.test.js test/read-model-schema.test.js test/status-contract.test.js",
+    "test:watch": "node --test --watch test/event-sourcing-core.test.js test/event-store-adapter.test.js test/eventReplayBuffer.test.js test/read-model-projection.test.js test/read-model-schema.test.js test/status-contract.test.js"
   },
   "dependencies": {
     "uuid": "^14.0.1"

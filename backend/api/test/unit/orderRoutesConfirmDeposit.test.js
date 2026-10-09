@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import orderRoutes from '../../src/routes/orderRoutes.js';
+import { acquireLock, releaseLock, LockAcquisitionError } from '../../src/lib/redisLock.js';
 
-const { repo, validation, depositMock } = vi.hoisted(() => ({
+const { repo, validation, depositMock, lockState } = vi.hoisted(() => ({
   repo: {
     findOrderByIdOrDisplayId: vi.fn(),
     findCustomerWallet: vi.fn(),
@@ -21,6 +22,7 @@ const { repo, validation, depositMock } = vi.hoisted(() => ({
   depositMock: {
     recordDepositTx: vi.fn(),
   },
+  lockState: { held: false },
 }));
 
 vi.mock('../../src/core/container.js', () => ({
@@ -34,6 +36,19 @@ vi.mock('../../src/core/container.js', () => ({
   recordDepositTx: depositMock.recordDepositTx,
   confirmEscrowRefund: vi.fn(),
   submitEscrowRefund: vi.fn(),
+}));
+
+vi.mock('../../src/controllers/orderController.js', () => ({
+  createOrder: vi.fn(),
+  getActiveOrders: vi.fn(),
+  getLoadOffers: vi.fn(),
+  getOrderHistory: vi.fn(),
+  getOrderDetails: vi.fn(),
+  verifyDeliveryController: vi.fn(),
+  resendOtp: vi.fn(),
+  changeDrop: vi.fn(),
+  cancelOrder: vi.fn(),
+  predictRideDemand: vi.fn(),
 }));
 
 vi.mock('../../src/middleware/auth.js', () => ({
@@ -66,8 +81,14 @@ vi.mock('../../src/middleware/idempotency.js', () => ({
 }));
 
 vi.mock('../../src/lib/redisLock.js', () => ({
-  acquireLock: vi.fn(async () => 'lock-value'),
-  releaseLock: vi.fn(async () => {}),
+  acquireLock: vi.fn(async () => {
+    if (lockState.held) return null;
+    lockState.held = true;
+    return 'lock-value';
+  }),
+  releaseLock: vi.fn(async () => {
+    lockState.held = false;
+  }),
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 
@@ -136,6 +157,7 @@ function buildOrder(overrides = {}) {
     escrow_status: 'funding',
     escrow_amount_wei: '1000',
     escrow_driver_wallet: '0xdriver',
+    version: 1,
     pending_bid_acceptance: {
       bid_id: 'bid-1',
       load_id: 'load-1',
@@ -155,6 +177,7 @@ function buildOrder(overrides = {}) {
 describe('POST /api/orders/:id/confirm-deposit', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lockState.held = false;
     validation.findOrderByIdOrDisplayId.mockResolvedValue(buildOrder());
     validation.assertOrderFound.mockReturnValue(undefined);
     validation.assertCustomerOwnership.mockReturnValue(undefined);
@@ -173,6 +196,31 @@ describe('POST /api/orders/:id/confirm-deposit', () => {
       alreadyFunded: false,
       txHash: '0xdep',
     });
+  });
+
+  it('returns 409 without reading the order when another request holds the lock', async () => {
+    lockState.held = true;
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(409);
+    expect(acquireLock).toHaveBeenCalledTimes(1);
+    expect(validation.findOrderByIdOrDisplayId).not.toHaveBeenCalled();
+    expect(releaseLock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the distributed lock is unavailable', async () => {
+    acquireLock.mockRejectedValueOnce(new LockAcquisitionError('Redis unavailable'));
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(503);
+    expect(validation.findOrderByIdOrDisplayId).not.toHaveBeenCalled();
+    expect(releaseLock).not.toHaveBeenCalled();
   });
 
   it('clears pending_bid_acceptance and reverts escrow when acceptance fails (409)', async () => {
@@ -201,6 +249,65 @@ describe('POST /api/orders/:id/confirm-deposit', () => {
       'accept_bid_tx',
       expect.objectContaining({ p_bid_id: 'bid-1' }),
       expect.anything(),
+    );
+    expect(acquireLock).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+    expect(lockState.held).toBe(false);
+  });
+
+  it('calls updateOrderWithFilter exactly once with correct payload and optimistic lock in normal flow', async () => {
+    repo.executeRpc.mockResolvedValue({ error: null });
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(200);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledTimes(1);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledWith(
+      'order-1',
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: 2,
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: 1 },
+      ],
+      'id'
+    );
+  });
+
+  it('calls updateOrderWithFilter exactly once with correct payload and optimistic lock in alreadyFunded path', async () => {
+    depositMock.recordDepositTx.mockResolvedValue({
+      error: null,
+      alreadyFunded: true,
+      txHash: '0xdep',
+    });
+    repo.executeRpc.mockResolvedValue({ error: null });
+
+    const res = await request(app)
+      .post('/order-1/confirm-deposit')
+      .send({ txHash: VALID_TX });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Escrow deposit confirmed (recovered).');
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledTimes(1);
+    expect(repo.updateOrderWithFilter).toHaveBeenCalledWith(
+      'order-1',
+      {
+        escrow_status: 'funded',
+        escrow_funding_error: null,
+        version: 2,
+        updated_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/),
+      },
+      [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'version', value: 1 },
+      ],
+      'id'
     );
   });
 });

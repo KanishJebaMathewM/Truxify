@@ -98,7 +98,16 @@ void main() {
   }
 
   group('OrdersScreen Widget Tests', () {
-    testWidgets('renders active orders correctly and filters driver UUID', (tester) async {
+  
+/// Live indicators on the pushed tracking screen animate forever, so
+/// pumpAndSettle can hang (see #17587). Bounded pumps instead.
+Future<void> _boundedSettle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pump();
+}
+
+  testWidgets('renders active orders correctly and filters driver UUID', (tester) async {
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pump(); // Start load
       await tester.pump(); // Build with loaded data
@@ -124,7 +133,7 @@ void main() {
       // Switch to history tab (index 1)
       final TabController tabController = tester.widget<TabBarView>(find.byType(TabBarView)).controller!;
       tabController.index = 1;
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
       // Verify history order renders
       expect(find.byType(HistoryOrderCard), findsOneWidget);
@@ -139,7 +148,7 @@ void main() {
 
       // Tap the first active order
       await tester.tap(find.byType(ActiveOrderCard).first);
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
       // Verify navigated to LiveTrackingScreen
       expect(find.byType(LiveTrackingScreen), findsOneWidget);
@@ -154,11 +163,11 @@ void main() {
       // Switch to history tab
       final TabController tabController = tester.widget<TabBarView>(find.byType(TabBarView)).controller!;
       tabController.index = 1;
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
       // Tap the history order card
       await tester.tap(find.byType(HistoryOrderCard));
-      await tester.pumpAndSettle();
+      await _boundedSettle(tester);
 
       // Verify navigated to OrderDetailScreen
       expect(find.byType(OrderDetailScreen), findsOneWidget);

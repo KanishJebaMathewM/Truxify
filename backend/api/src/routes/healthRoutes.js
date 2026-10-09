@@ -64,7 +64,58 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+import express from 'express';
+import * as Sentry from '@sentry/node';
+import logger from '../middleware/logger.js';
 
+const router = express.Router();
+
+// ... existing health check routes ...
+
+/**
+ * GET /api/health/sentry-debug
+ * Triggers a test exception capture via Sentry for instrumentation verification.
+ */
+router.get('/sentry-debug', async (req, res) => {
+  try {
+    const testError = new Error('Sentry Test Error from Truxify Node.js Backend');
+    
+    // Explicitly capture exception with Sentry if initialized
+    if (Sentry && typeof Sentry.captureException === 'function') {
+      const eventId = Sentry.captureException(testError, {
+        tags: {
+          endpoint: '/api/health/sentry-debug',
+          environment: process.env.NODE_ENV || 'development'
+        },
+        extra: {
+          timestamp: new Date().toISOString(),
+          requestedBy: req.ip
+        }
+      });
+
+      logger.info({ eventId }, 'Sentry debug test exception captured successfully');
+      
+      return res.status(200).json({
+        success: true,
+        message: 'Sentry test exception captured and sent successfully.',
+        sentryEventId: eventId
+      });
+    } else {
+      // Fallback if Sentry is not active in the current environment
+      logger.warn('Sentry is not initialized; test error logged locally.');
+      throw testError;
+    }
+  } catch (err) {
+    logger.error({ error: err.message }, 'Failed to process Sentry debug endpoint');
+    return res.status(500).json({
+      success: false,
+      error: 'Sentry SDK not configured or capture failed',
+      details: err.message
+    });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;

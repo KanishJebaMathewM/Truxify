@@ -1,9 +1,11 @@
+import logging
+from typing import Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-import logging
+from diffusion.denoiser_admission import MAX_VALUES, admit, geometry, integer
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -13,14 +15,33 @@ class SinusoidalPositionEmbedding(nn.Module):
     
     def __init__(self, dim: int):
         super().__init__()
-        self.dim = dim
-    
+        self.dim = integer(dim, "embedding width", 2, 4096)
+        # Tracks module dtype/device without changing legacy checkpoint keys.
+        self.register_buffer("_dtype_anchor", torch.empty(0), persistent=False)
+
     def forward(self, timesteps: torch.Tensor) -> torch.Tensor:
+        if (not isinstance(timesteps, torch.Tensor) or timesteps.layout != torch.strided
+                or timesteps.ndim != 1 or timesteps.is_complex() or timesteps.dtype == torch.bool
+                or timesteps.numel() * self.dim > MAX_VALUES
+                or not bool(torch.isfinite(timesteps).all())):
+            raise ValueError("embedding requires a bounded finite real timestep vector")
+        dtype = self._dtype_anchor.dtype
+        if dtype not in (torch.float32, torch.float64):
+            raise ValueError("embedding supports float32 or float64")
+        times = timesteps.to(dtype=dtype).clone()
         half_dim = self.dim // 2
-        emb = torch.log(torch.tensor(10000.0, device=timesteps.device)) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=timesteps.device, dtype=torch.float32) * -emb)
-        emb = timesteps.float().unsqueeze(1) * emb.unsqueeze(0)
-        return torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if half_dim == 1:
+            frequencies = torch.ones(1, device=times.device, dtype=dtype)
+        else:
+            scale = torch.log(torch.tensor(10000.0, device=times.device, dtype=dtype)) / (half_dim - 1)
+            frequencies = torch.exp(torch.arange(half_dim, device=times.device, dtype=dtype) * -scale)
+        phase = times.unsqueeze(1) * frequencies.unsqueeze(0)
+        result = torch.cat([torch.sin(phase), torch.cos(phase)], dim=1)
+        if self.dim % 2:
+            result = F.pad(result, (0, 1))
+        if not bool(torch.isfinite(result).all()):
+            raise ValueError("timestep phase cannot be represented in embedding dtype")
+        return result
 
 class AttentionBlock(nn.Module):
     """Self-attention block for diffusion model"""
@@ -93,6 +114,8 @@ class DiffusionRouteModel(nn.Module):
     ):
         super().__init__()
         
+        self._base_parameters = geometry(input_dim, hidden_dim, num_layers,
+                                         num_heads, num_timesteps, cond_dim)
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_timesteps = num_timesteps
@@ -182,33 +205,7 @@ class DiffusionRouteModel(nn.Module):
         condition: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Forward pass through diffusion backbone with condition embedding."""
-        # Admit all context before a lazy projection initializes or dropout
-        # consumes RNG. A materialized condition schema never changes silently.
-        if x.ndim != 3 or not x.shape[0] or not x.shape[1] or x.shape[-1] < self.input_dim:
-            raise ValueError("x must contain nonempty batch/sequence input rows")
-        if x.shape[-1] > self.input_dim:
-            if condition is not None:
-                raise ValueError("conditions cannot be supplied twice")
-            condition = x[..., self.input_dim:]
-            x = x[..., :self.input_dim]
-        if condition is not None:
-            condition = torch.as_tensor(condition, device=x.device)
-            if condition.is_complex() or condition.dtype == torch.bool:
-                raise ValueError("condition must contain finite real numeric values")
-            if condition.ndim == 1:
-                condition = condition.unsqueeze(0)
-            if (condition.ndim not in (2, 3) or condition.shape[-1] < 1
-                    or condition.shape[0] not in (1, x.shape[0])
-                    or (condition.ndim == 3 and condition.shape[1] not in (1, x.shape[1]))
-                    or not torch.isfinite(condition).all()):
-                raise ValueError("condition batch/sequence schema must match input")
-            width = self.cond_proj.weight.shape[1] if not isinstance(
-                self.cond_proj.weight, nn.parameter.UninitializedParameter) else None
-            if width is not None and condition.shape[-1] != width:
-                raise ValueError("condition width differs from the registered projection")
-            condition = condition.to(dtype=self.input_proj.weight.dtype)
-            if not torch.isfinite(condition).all():
-                raise ValueError("condition cannot be represented in model dtype")
+        x, timesteps, condition = admit(self, x, timesteps, condition)
 
         t_emb = self.time_embed(timesteps).to(dtype=self.time_mlp[0].weight.dtype)
         t_emb = self.time_mlp(t_emb)
@@ -228,6 +225,8 @@ class DiffusionRouteModel(nn.Module):
         
         # Output projection
         x = self.output_proj(x)
+        if not bool(torch.isfinite(x).all()):
+            raise RuntimeError("native denoiser produced nonfinite predictions")
         return x
 
 class DiffusionRouteGenerator:

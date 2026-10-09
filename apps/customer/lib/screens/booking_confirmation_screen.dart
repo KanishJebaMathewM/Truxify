@@ -630,6 +630,27 @@ class _UpiPaymentSheet extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 20),
+          // The action row was dropped by a merge — the required callbacks
+          // went unused and the sheet was a dead end. Restore it.
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onLaunchUpi,
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: const Text('Open UPI App'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: PrimaryButton(
+                  label: "I've Paid",
+                  onPressed: onConfirmPaid,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

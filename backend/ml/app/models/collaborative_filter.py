@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Any
 import numpy as np
 
 from .base import save_model, load_model, model_exists
+from .collaborative_payload import own_candidate, own_training_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ class CollaborativeFilter:
     def train(self) -> dict:
         """Prepare and persist a complete model before changing serving state."""
         with self._lifecycle_lock:
-            data = _generate_synthetic_data()
+            data = own_training_inputs(_generate_synthetic_data())
             payload = {
                 "user_load_approx": _svd_reconstruct(data["user_load_matrix"], LATENT_K),
                 "user_truck_approx": _svd_reconstruct(data["user_truck_matrix"], LATENT_K),
@@ -177,6 +178,7 @@ class CollaborativeFilter:
                 "popular_loads": _popularity_ranking(data["user_load_matrix"]),
                 "popular_trucks": _popularity_ranking(data["user_truck_matrix"]),
             }
+            payload = own_candidate(payload)
             metrics = {
                 "n_users": len(payload["user_ids"]),
                 "n_loads": len(payload["load_ids"]),
@@ -184,7 +186,7 @@ class CollaborativeFilter:
                 "latent_k": LATENT_K,
             }
             save_model(payload, MODEL_NAME, metrics)
-            self._publish_payload(payload)
+            self._publish_owned(payload)
             logger.info(
                 "Collaborative filter trained: %d users, %d loads, %d trucks",
                 metrics["n_users"], metrics["n_loads"], metrics["n_trucks"],
@@ -192,6 +194,10 @@ class CollaborativeFilter:
             return metrics
 
     def _publish_payload(self, payload) -> None:
+        self._publish_owned(own_candidate(payload))
+
+    def _publish_owned(self, payload) -> None:
+        # Only fully admitted owned candidates reach this internal publication.
         # Resolve every required field before changing any serving attribute.
         keys = ("user_load_approx", "user_truck_approx", "user_load_matrix",
                 "user_truck_matrix", "user_ids", "load_ids", "truck_ids",

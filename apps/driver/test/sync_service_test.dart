@@ -273,7 +273,7 @@ void main() {
         expect(
           requests.any((r) =>
               r.method == 'PUT' &&
-              r.url.path == '/api/trips/trip-123/stops/stop-456/complete'),
+              r.url.path == '/api/v1/trips/trip-123/stops/stop-456/complete'),
           isTrue,
           reason: 'the stop is only completed after a successful upload',
         );
@@ -304,7 +304,7 @@ void main() {
         expect(
           requests.any((r) =>
               r.method == 'PUT' &&
-              r.url.path == '/api/trips/trip-123/stops/stop-456/complete'),
+              r.url.path == '/api/v1/trips/trip-123/stops/stop-456/complete'),
           isTrue,
         );
       });

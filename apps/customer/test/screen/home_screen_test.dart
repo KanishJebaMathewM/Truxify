@@ -8,9 +8,20 @@ import 'package:truxify/models/app_models.dart';
 import 'package:truxify/screens/home_screen.dart';
 import 'package:truxify/services/order_service.dart';
 import 'package:truxify/services/profile_service.dart';
+import 'package:truxify/core/offline/cache/cache_manager.dart';
 import 'package:truxify/widgets/shipment_card.dart';
+import 'package:flutter/services.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class MockOrderService extends Mock implements OrderService {}
+
+/// sqflite-backed CacheManager hangs in the VM test harness — the screen's
+/// only use is the last-location cache read on load.
+class _FakeCacheManager extends Fake implements CacheManager {
+  @override
+  Future<Map<String, dynamic>?> getLastLocation() async => null;
+}
+
 class MockProfileService extends Mock implements ProfileService {}
 
 List<RouteCardData> computeUsualRoutes(List<Map<String, dynamic>> history) {
@@ -88,6 +99,19 @@ class _TestRouteStats {
 }
 
 void main() {
+  setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    // _loadData awaits Connectivity.checkConnectivity (platform channel) and
+    // CacheManager.open (sqflite) — mock both or the load hangs forever.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('dev.fluttercommunity.plus/connectivity'),
+      (call) async => ['wifi'],
+    );
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
   late MockOrderService mockOrderService;
   late MockProfileService mockProfileService;
 
@@ -157,6 +181,7 @@ void main() {
         home: HomeScreen(
           orderService: mockOrderService,
           profileService: mockProfileService,
+          cacheManager: _FakeCacheManager(),
         ),
       ),
     );
@@ -165,8 +190,11 @@ void main() {
   group('HomeScreen Widget Tests', () {
     testWidgets('renders active shipments list, quick stats, and Book a Truck CTA (Happy Path)', (tester) async {
       await tester.pumpWidget(createTestWidget(tester));
-      await tester.pump(); // Start data loading
-      await tester.pump(); // Build with loaded data
+      // The screen chains several async fetches (profile, stats, orders,
+      // history) — two pumps race them. Bounded settle instead.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
 
       // Verify active shipment card renders
       expect(find.byType(ShipmentCard), findsOneWidget);
@@ -175,10 +203,11 @@ void main() {
       // Verify quick stats render
       expect(find.text('1'), findsOneWidget); // Active shipments count
       expect(find.text('15'), findsOneWidget); // Total shipments
-      expect(find.text('1200'), findsOneWidget); // Savings
+      // Savings are stored in paisa and rendered as rupees (1200 -> ₹12).
+      expect(find.text('₹12'), findsOneWidget);
 
       // Verify Book a Truck CTA button
-      expect(find.text('Book a Truck \u1f69b'), findsOneWidget);
+      expect(find.text('Book a Truck \u{1F69B}'), findsOneWidget);
     });
 
     testWidgets('renders empty state when no active bookings', (tester) async {
@@ -196,7 +225,7 @@ void main() {
       expect(find.text('No active shipments'), findsOneWidget);
 
       // Verify Book a Truck CTA button is still rendered
-      expect(find.text('Book a Truck \u1f69b'), findsOneWidget);
+      expect(find.text('Book a Truck \u{1F69B}'), findsOneWidget);
     });
   });
 

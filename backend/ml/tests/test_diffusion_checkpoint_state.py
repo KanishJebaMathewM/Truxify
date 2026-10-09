@@ -102,6 +102,10 @@ def test_native_checkpoint_roundtrip_and_independent_next_step(
     rng = torch.get_rng_state()
     reference.train()
     opt.zero_grad()
+    if conditional and isinstance(reference.cond_proj.weight, UninitializedParameter):
+        # Upstream now materializes an admitted condition before timestep/noise
+        # draws. Use the actual native initializer, independently of trainer code.
+        reference.cond_proj.initialize_parameters(c)
     t = torch.randint(0, reference.num_timesteps, (len(x),))
     noise = torch.randn_like(x)
     noisy = reference.add_noise(x, t, noise)

@@ -36,6 +36,7 @@ function makeSupabaseMock() {
     select: vi.fn(() => queryBuilder),
     or: vi.fn(() => queryBuilder),
     lt: vi.fn(() => queryBuilder),
+    order: vi.fn(() => queryBuilder),
     limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
     delete: vi.fn(() => queryBuilder),
     eq: vi.fn(() => Promise.resolve({ data: [{ id: 'x' }], error: null })),
@@ -90,6 +91,8 @@ describe('reputationReconciliation', () => {
       select: vi.fn(() => queryBuilder),
       or: vi.fn(() => queryBuilder),
       lt: vi.fn(() => queryBuilder),
+      order: vi.fn(() => queryBuilder),
+    order: vi.fn(() => queryBuilder),
       limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
       delete: vi.fn(() => ({
         eq: deleteEqFn,
@@ -104,6 +107,34 @@ describe('reputationReconciliation', () => {
     mockSupabaseAdmin.from = vi.fn(() => queryBuilder);
     return queryBuilder;
   }
+
+  it('reads the least-recently attempted rows first (#11136)', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+    const qb = withFailedReputations([]);
+
+    await reconcileFailedReputationUpdates();
+
+    expect(qb.order).toHaveBeenCalledWith('last_attempt_at', { ascending: true, nullsFirst: true });
+  });
+
+  it('skips rows still inside their exponential backoff window (#11136)', async () => {
+    mockRedisClient.set.mockResolvedValue('lock-value');
+    mockRedisClient.del.mockResolvedValue(1);
+    const justFailed = { id: 'row-backoff-1', driver_wallet: '0xwallet1', stars: 5, retry_count: 1, last_attempt_at: new Date().toISOString() };
+    // retry 3 → 4-minute backoff; last tried 5 minutes ago, so it is due.
+    const due = { id: 'row-backoff-2', driver_wallet: '0xwallet2', stars: 5, retry_count: 3, last_attempt_at: new Date(Date.now() - 5 * 60 * 1000).toISOString() };
+    // retry 4 → 8-minute backoff; last tried 5 minutes ago, so it waits.
+    const notYet = { id: 'row-backoff-3', driver_wallet: '0xwallet3', stars: 5, retry_count: 4, last_attempt_at: new Date(Date.now() - 5 * 60 * 1000).toISOString() };
+    withFailedReputations([justFailed, due, notYet]);
+
+    await reconcileFailedReputationUpdates();
+
+    expect(mockAwardReputationPoints).toHaveBeenCalledTimes(1);
+    expect(mockAwardReputationPoints).toHaveBeenCalledWith('0xwallet2', 5, expect.anything());
+    expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Row row-backoff-1 in backoff period'));
+    expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Row row-backoff-3 in backoff period'));
+  });
 
   it('skips when supabaseAdmin is not available', async () => {
     mockRedisClient.set.mockResolvedValueOnce('lock-value');

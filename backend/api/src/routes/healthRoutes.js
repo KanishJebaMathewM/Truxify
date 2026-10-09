@@ -83,9 +83,6 @@ function withTimeout(promise) {
 }
 
 async function checkSupabase() {
-  // Probe through the service-role client: anon privileges on profiles are
-  // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
-  // report 42501 permission denied even when Supabase is reachable.
   const client = supabaseAdmin || supabase;
   if (!client) return 'not_configured';
   try {
@@ -94,7 +91,7 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error({ event: 'HEALTH_SUPABASE_ERROR', error: err?.message }, '[health] Supabase check failed');
+    logger.error({ event: 'HEALTH_SUPABASE_CHECK_FAILED', error: err?.message }, 'Supabase check failed');
     return 'failed';
   }
 }
@@ -105,7 +102,7 @@ async function checkMongo() {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error({ event: 'HEALTH_MONGO_ERROR', error: err?.message }, '[health] MongoDB check failed');
+    logger.error({ event: 'HEALTH_MONGODB_CHECK_FAILED', error: err?.message }, 'MongoDB check failed');
     return 'failed';
   }
 }
@@ -116,7 +113,7 @@ async function checkRedis() {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error({ event: 'HEALTH_REDIS_ERROR', error: err?.message }, '[health] Redis check failed');
+    logger.error({ event: 'HEALTH_REDIS_CHECK_FAILED', error: err?.message }, 'Redis check failed');
     return 'failed';
   }
 }
@@ -130,7 +127,7 @@ async function checkEscrow() {
     const result = await checkEscrowHealth();
     return result.status;
   } catch (err) {
-    logger.error({ event: 'HEALTH_ESCROW_ERROR', error: err?.message }, '[Health] checkEscrow failed');
+    logger.error({ event: 'HEALTH_ESCROW_CHECK_FAILED', error: err?.message || err }, 'checkEscrow failed');
     return 'failed';
   }
 }
@@ -140,8 +137,6 @@ function checkPolygon() {
 }
 
 const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
-// MongoDB is optional telemetry storage: only a configured-but-unreachable
-// instance should affect dependency health.
 const CRITICAL_UNHEALTHY_MONGO = new Set(['failed']);
 
 /**
@@ -187,9 +182,6 @@ router.get('/', healthLimiter, async (req, res) => {
       polygon: checkPolygon(),
     };
 
-    // Redis is a non-critical cache: every consumer has an in-memory fallback,
-    // so a Redis failure is reported in `services` but does not degrade overall
-    // health. Supabase and MongoDB remain critical.
     const criticalFailed =
       CRITICAL_UNHEALTHY.has(supabaseStatus) ||
       CRITICAL_UNHEALTHY_MONGO.has(mongoStatus);
@@ -312,15 +304,13 @@ const aggregator = createDefaultAggregator();
 router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
-    // 200 = system operational (healthy or degraded with non-critical failures)
-    // 503 = system not operational (critical services down)
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;
     logger.info({ event: 'HEALTH_AGGREGATION_SUCCESS', status: result.status }, 'Aggregated health check completed.');
     return res.status(httpStatus).json(result);
   } catch (err) {
     logger.error(
-      { event: 'HEALTH_AGGREGATION_ERROR', requestId: req.requestId || req.id, error: err && err.message },
-      '[health] Aggregated health check failed',
+      { event: 'HEALTH_AGGREGATED_CHECK_FAILED', requestId: req.requestId || req.id, error: err && err.message },
+      'Aggregated health check failed',
     );
     return res.status(500).json({
       status: 'unhealthy',
@@ -331,7 +321,6 @@ router.get('/full', healthLimiter, async (req, res) => {
 });
 
 router.get('/sentry-debug', healthLimiter, (req, res) => {
-  // Debug-only route: fail-closed unless explicitly enabled outside production.
   if (process.env.SENTRY_DEBUG_ENABLED !== 'true' || process.env.NODE_ENV === 'production') {
     return res.status(404).json({ error: 'Not found' });
   }

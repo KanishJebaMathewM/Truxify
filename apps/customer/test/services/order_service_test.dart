@@ -200,7 +200,9 @@ test('createOrder forwards a caller-supplied idempotency key', () async {
       {'id': 'ORD-1'},
     ]);
 
-    when(() => apiClient.get('/api/orders/history'))
+    // fetchHistoryOrders hits the /my/history endpoint (a distinct route
+    // from /history) — stub it separately.
+    when(() => apiClient.get('/api/orders/my/history'))
         .thenAnswer((_) async => [{'id': 'ORD-2'}]);
 
     expect(await orderService.fetchHistoryOrders(), [
@@ -278,7 +280,7 @@ test('createOrder forwards a caller-supplied idempotency key', () async {
       () => apiClient.get(captureAny(that: startsWith('/api/trucks/search'))),
     ).captured.single as String;
 
-    expect(captured, contains('truck_type=Open%20Body'));
+    expect(captured, contains('truck_type=Open+Body'));
     expect(captured, contains('min_capacity=5.0'));
     expect(captured, contains('max_capacity=15.0'));
     expect(captured, contains('material_type=Textile'));

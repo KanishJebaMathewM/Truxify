@@ -1,31 +1,16 @@
 import { supabase, mongoDb } from '../config/db.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
-import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
-import { OrderValidationService } from '../services/order/orderValidationService.js';
-import { buildDepositTx, recordDepositTx, submitEscrowRefund } from '../services/escrow.js';
+import { DomainError } from '../services/order/bidAcceptanceService.js';
+// Use the services wired once in core/container.js. Building them here again
+// gave OrderTimelineService a { supabase, logger } bag instead of a repository
+// (every create hit "createTimeline is not a function" after the order row was
+// written) and put every order read on the session-less anon client, which
+// orders RLS filters to zero rows.
+import { orderValidationService, orderLifecycleService } from '../core/container.js';
 import { predictDemand } from '../services/ml.js';
 import { buildStraightLineGeometry, getRouteGeometry } from '../services/osrm.js';
 import logger from '../middleware/logger.js';
+import { AppError } from '../utils/errors.js';
 
-const orderRepository = new OrderRepository(supabase);
-const orderTimelineService = new OrderTimelineService({ supabase, logger });
-const orderValidationService = new OrderValidationService({ supabase, logger });
-
-const bidAcceptanceService = new BidAcceptanceService({
-  orderRepository,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: submitEscrowRefund,
-  logger,
-});
-
-const orderLifecycleService = new OrderLifecycleService({
-  orderRepository,
-  orderTimelineService,
-  bidAcceptanceService,
-});
 
 export const createOrder = async (req, res, next) => {
   try {
@@ -65,7 +50,10 @@ async function fetchLoadOffers(req, res, next, { isEnRoute, label }) {
       .order('created_at', { ascending: false })
       .range(from, to);
 
-    if (error) return next(new AppError(`Failed to fetch ${label}.`, details: error.message, 500, "INTERNAL_ERROR"));
+    if (error) {
+      logger.error(`[orderController] Failed to fetch ${label}:`, error.message);
+      return next(new AppError(`Failed to fetch ${label}.`, 500, "INTERNAL_ERROR", { details: error.message }));
+    }
     res.json(offers);
   } catch (err) {
     logger.error(`[orderController] Failed to fetch ${label}:`, err.message);
@@ -188,7 +176,12 @@ export const verifyDeliveryController = async (req, res, next) => {
         payment_released: true,
       });
     }
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    res.json({
+      message: 'Delivery verified successfully! Payment released to driver.',
+      payment_released: result?.payment_released ?? true,
+      amount_inr: result?.amount_inr ?? null,
+      order_display_id: result?.order_display_id ?? null,
+    });
   } catch (err) {
     if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));
     logger.error('[verify-delivery] Exception:', err.message);
@@ -313,6 +306,11 @@ export const getLiveRouteGeometry = async (req, res, next) => {
     }
 
     if (!order.driver_id) {
+      // Number(null) is zero; reject absent pickup values before conversion
+      // while preserving real zero coordinates at the equator/prime meridian.
+      if (order.pickup_lat == null || order.pickup_lng == null) {
+        return next(new AppError('Order is missing pickup coordinates.', 500, "INTERNAL_ERROR"));
+      }
       const originLat = Number(order.pickup_lat);
       const originLng = Number(order.pickup_lng);
       const destLat = Number(order.drop_lat);

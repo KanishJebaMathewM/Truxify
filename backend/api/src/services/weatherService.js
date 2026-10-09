@@ -22,7 +22,7 @@ export class WeatherService {
    * @returns {Promise<Object>} Weather conditions
    */
   async getWeatherForecast(lat, lng) {
-    this.logger?.debug(`[WeatherService] Fetching forecast for lat: ${lat}, lng: ${lng}`);
+    this.logger?.debug({ event: 'WEATHER_FORECAST_FETCH', lat, lng }, 'Fetching weather forecast');
     
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 50));

@@ -6,6 +6,9 @@ const { mockFrom } = vi.hoisted(() => {
 });
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: { from: mockFrom },
   supabaseAdmin: { from: mockFrom },
 }));
@@ -118,6 +121,16 @@ describe('VerificationService', () => {
       const result = await service.verifyOrder('missing');
       expect(result).toEqual({ verified: false, error: 'Order not found' });
     });
+    it('returns an error when fetching the order fails', async () => {
+  stubTable('orders', { data: null, error: { message: 'database unavailable' } });
+
+  const result = await service.verifyOrder('order-1');
+
+  expect(result).toEqual({
+    verified: false,
+    error: 'database unavailable',
+  });
+});
 
     it('verifies cross-chain when the order has a blockchain tx hash', async () => {
       stubTable('orders', { data: makeOrder({ blockchain_tx_hash: '0xabc' }), error: null });

@@ -1,4 +1,3 @@
-import 'package:flutter/material.io.dart'; // standard material
 import 'package:flutter/material.dart';
 
 class DesktopChatLayout extends StatelessWidget {

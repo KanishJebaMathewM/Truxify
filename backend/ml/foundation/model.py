@@ -1,14 +1,23 @@
+import logging
+from threading import RLock
+from .optimizer_transition import operation_owned, optimizer_transition
+import math
+from datetime import datetime
+from typing import Dict, List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-from datetime import datetime
-from typing import Optional, Dict, List
-import logging
-from threading import RLock
-
-from .optimizer_transition import operation_owned, optimizer_transition
-from .supervised_batch import own_classification_batch
+from foundation.finetuning import (
+    MAX_TOKEN_WORK,
+    FinetuningAdmissionError,
+    objective,
+    own_batch,
+    own_records,
+    pack,
+    policy,
+    task_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -276,16 +285,15 @@ class FoundationModelTrainer:
         logger.info(f"✅ Trainer initialized on {self.device}")
     
     @operation_owned
-    def train_step(self, batch: Dict) -> Dict:
-        """Publish one finite native supervised optimizer/scheduler transition."""
-        owned = own_classification_batch(batch, self.model)
+    def train_step(self, batch: Dict, task: str = 'classification') -> Dict:
+        batch = own_batch(batch, self.model, self.config, task)
         with optimizer_transition(self.model, self.optimizer, self.scheduler):
             self.model.train()
             self.optimizer.zero_grad()
-            outputs = self.model(owned['input_ids'], owned['attention_mask'], task='classification')
-            loss = self.criterion(outputs['output'], owned['labels'])
+            output = self.model(batch['input_ids'], batch['attention_mask'], task=task)['output']
+            loss = objective(output, batch['labels'], task)
             if loss.ndim != 0 or not torch.isfinite(loss):
-                raise ValueError("supervised objective must be a finite scalar")
+                raise ValueError('supervised objective must be a finite scalar')
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
             self.optimizer.step()
@@ -294,90 +302,61 @@ class FoundationModelTrainer:
         return result
 
     @operation_owned
-    def train(self, train_data: List[Dict], val_data: Optional[List[Dict]] = None) -> Dict:
-        """Full training loop"""
-        losses = []
-        val_losses = []
-        
-        for epoch in range(self.config.epochs):
-            epoch_loss = 0
-            num_batches = 0
-            
-            # Shuffle data
-            import random
+    def train(self, train_data: List[Dict], val_data: Optional[List[Dict]] = None,
+              task: str = 'classification', epochs: Optional[int] = None) -> Dict:
+        """Admit both complete collections before the first native update."""
+        import random
+
+        task_name(task)
+        length, batch_size, epochs = policy(self.model, self.config, epochs)
+        train_data = own_records(train_data, self.model, length, task)
+        val_data = own_records([] if val_data is None else val_data, self.model, length, task, allow_empty=True)
+        # Conservative padded-token bound, not a promise of runtime or attention FLOPs.
+        if (len(train_data) + len(val_data)) * length * epochs > MAX_TOKEN_WORK:
+            raise FinetuningAdmissionError('finetuning exceeds padded-token work budget')
+        losses, val_losses = [], []
+        for _ in range(epochs):
             random.shuffle(train_data)
-            
-            for i in range(0, len(train_data), self.config.batch_size):
-                batch = self._prepare_batch(train_data[i:i+self.config.batch_size])
-                result = self.train_step(batch)
-                epoch_loss += result['loss']
-                num_batches += 1
-            
-            avg_loss = epoch_loss / num_batches
-            losses.append(avg_loss)
-            
-            # Validation
+            total, samples = 0.0, 0
+            for start in range(0, len(train_data), batch_size):
+                records = train_data[start:start + batch_size]
+                result = self.train_step(pack(records, self.model, task), task=task)
+                total += result['loss'] * len(records)
+                samples += len(records)
+            losses.append(total / samples)
             if val_data:
-                val_loss = self.validate(val_data)
-                val_losses.append(val_loss)
-                logger.info(f"Epoch {epoch+1}: loss={avg_loss:.4f}, val_loss={val_loss:.4f}")
-            else:
-                logger.info(f"Epoch {epoch+1}: loss={avg_loss:.4f}")
-        
+                val_losses.append(self.validate(val_data, task=task))
         return {
-            'train_losses': losses,
-            'val_losses': val_losses,
-            'final_train_loss': losses[-1] if losses else None,
-            'final_val_loss': val_losses[-1] if val_losses else None
+            'train_losses': losses, 'val_losses': val_losses,
+            'final_train_loss': losses[-1],
+            'final_val_loss': val_losses[-1] if val_losses else None,
         }
-    
+
     @operation_owned
-    def validate(self, val_data: List[Dict]) -> float:
-        """Validate model"""
-        self.model.eval()
-        total_loss = 0
-        num_batches = 0
-        
-        with torch.no_grad():
-            for i in range(0, len(val_data), self.config.batch_size):
-                batch = self._prepare_batch(val_data[i:i+self.config.batch_size])
-                
-                input_ids = batch['input_ids'].to(self.device)
-                attention_mask = batch.get('attention_mask')
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(self.device)
-                labels = batch['labels'].to(self.device)
-                
-                outputs = self.model(input_ids, attention_mask, task='classification')
-                logits = outputs['output']
-                
-                loss = self.criterion(logits, labels)
-                total_loss += loss.item()
-                num_batches += 1
-        
-        return total_loss / num_batches
-    
-    def _prepare_batch(self, batch_data: List[Dict]) -> Dict:
-        """Prepare batch for training"""
-        # In production: implement proper batching with padding
-        # For now, use fixed length
-        max_len = self.config.max_len
-        
-        input_ids = []
-        labels = []
-        
-        for item in batch_data:
-            tokens = item.get('tokens', [])[:max_len]
-            if len(tokens) < max_len:
-                tokens = tokens + [0] * (max_len - len(tokens))
-            input_ids.append(tokens)
-            labels.append(item.get('label', 0))
-        
-        return {
-            'input_ids': torch.tensor(input_ids, dtype=torch.long),
-            'labels': torch.tensor(labels, dtype=torch.long)
-        }
-    
+    def validate(self, val_data: List[Dict], task: str = 'classification') -> float:
+        length, batch_size, _ = policy(self.model, self.config)
+        records = own_records(val_data, self.model, length, task)
+        modes = [(module, module.training) for module in self.model.modules()]
+        total = 0.0
+        try:
+            self.model.eval()
+            with torch.no_grad():
+                for start in range(0, len(records), batch_size):
+                    subset = records[start:start + batch_size]
+                    batch = own_batch(pack(subset, self.model, task), self.model, self.config, task)
+                    output = self.model(batch['input_ids'], batch['attention_mask'], task=task)['output']
+                    total += objective(output, batch['labels'], task).item() * len(subset)
+        finally:
+            for module, training in modes:
+                module.training = training
+        return total / len(records)
+
+    def _prepare_batch(self, batch_data: List[Dict], task: str = 'classification') -> Dict:
+        length, batch_size, _ = policy(self.model, self.config)
+        if len(batch_data) > batch_size:
+            raise FinetuningAdmissionError('records exceed batch_size')
+        return pack(own_records(batch_data, self.model, length, task), self.model, task)
+
     def save(self, path: str = "models/foundation_model.pth"):
         """Save model"""
         torch.save({

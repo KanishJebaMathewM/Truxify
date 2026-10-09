@@ -2,7 +2,67 @@ import logger from '../middleware/logger.js';
 import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
+import { Router } from 'express';
+import { matchEnRouteLoads } from '../services/ml.js';
+import db from '../db/index.js';
+import logger from '../middleware/logger.js';
 
+const router = Router();
+
+/**
+ * GET /api/orders/load-offers
+ * Returns all available load offers for the driver marketplace.
+ */
+router.get('/load-offers', async (req, res, next) => {
+  try {
+    const { rows: offers } = await db.query(
+      `SELECT * FROM load_offers WHERE status = 'available' ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json(offers);
+  } catch (err) {
+    logger.error({ err }, '[API] Failed to fetch load offers');
+    next(err);
+  }
+});
+
+/**
+ * GET /api/orders/load-offers/en-route
+ * Returns en-route load recommendations filtered by driver location and maximum detour.
+ * Query params: current_lat, current_lng, max_detour_km
+ */
+router.get('/load-offers/en-route', async (req, res, next) => {
+  try {
+    const currentLat = parseFloat(req.query.current_lat);
+    const currentLng = parseFloat(req.query.current_lng);
+    const maxDetourKm = req.query.max_detour_km ? parseFloat(req.query.max_detour_km) : 50;
+
+    if (isNaN(currentLat) || isNaN(currentLng)) {
+      return res.status(400).json({
+        error: 'Query parameters current_lat and current_lng are required and must be valid numbers.',
+      });
+    }
+
+    // Fetch active load offers from the database
+    const { rows: offers } = await db.query(
+      `SELECT * FROM load_offers WHERE status = 'available'`
+    );
+
+    // Process through ML en-route matcher (includes built-in haversine fallback)
+    const enrichedOffers = await matchEnRouteLoads({
+      currentLat,
+      currentLng,
+      offers,
+      maxDetourKm,
+    });
+
+    res.json(enrichedOffers);
+  } catch (err) {
+    logger.error({ err }, '[API] Failed to fetch en-route load offers');
+    next(err);
+  }
+});
+
+export default router;
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
 
@@ -275,7 +335,7 @@ export async function predictEta({
   historicalSpeed,
 }) {
   guardMlApiKey();
-  const url = `${getBaseUrl()}/predict/eta`;
+  const url = `${getBaseUrl()}/eta/predict`;
 
   const payload = {
     route_distance: routeDistance,

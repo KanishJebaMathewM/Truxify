@@ -32,18 +32,18 @@ describe('PolicyEvaluator', () => {
 
   describe('evaluate', () => {
     it('returns { allowed: true } for permitted action', () => {
-      mockRegistry.get.mockReturnValue({ action: 'order:view', roles: ['admin', 'customer'], isRoleAllowed: (role) => ['admin', 'customer'].includes(role) });
+      mockRegistry.get.mockReturnValue({ action: 'order:view', roles: ['admin', 'customer'], isRoleAllowed: (role) => ['admin', 'customer'].includes(role), toJSON: () => ({ action: 'order:view' }) });
       expect(evaluator.evaluate({ id: '1', role: 'admin' }, 'order:view').allowed).toBe(true);
     });
 
-    it('returns { allowed: false } for unknown action', () => {
+    it('throws for unknown action', () => {
       mockRegistry.get.mockReturnValue(null);
-      expect(evaluator.evaluate({ id: '1', role: 'admin' }, 'unknown:action').allowed).toBe(false);
+      expect(() => evaluator.evaluate({ id: '1', role: 'admin' }, 'unknown:action')).toThrow('Unknown authorization action');
     });
 
-    it('returns { allowed: false } for unregistered action', () => {
-      mockRegistry.has.mockReturnValue(false);
-      expect(evaluator.evaluate({ id: '1', role: 'admin' }, 'order:delete').allowed).toBe(false);
+    it('throws for unregistered action', () => {
+      mockRegistry.get.mockReturnValue(undefined);
+      expect(() => evaluator.evaluate({ id: '1', role: 'admin' }, 'order:delete')).toThrow('Unknown authorization action');
     });
   });
 });

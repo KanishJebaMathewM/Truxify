@@ -7,6 +7,10 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from tqdm import tqdm
 from datetime import datetime
+from threading import RLock
+
+from foundation.optimizer_transition import operation_owned
+from .checkpoint_state import capture_checkpoint, restore_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +34,11 @@ class DiffusionTrainer:
         # Metrics
         self.train_losses = []
         self.val_losses = []
+        self._operation_lock = RLock()
         
         logger.info(f"✅ Trainer initialized on {device}")
     
+    @operation_owned
     def train_step(
         self,
         x: torch.Tensor,
@@ -125,6 +131,7 @@ class DiffusionTrainer:
             dataset = self._dataset(data, condition)
             yield dataset.tensors[0], dataset.tensors[1] if condition is not None else None
 
+    @operation_owned
     def train_epoch(self, dataloader: DataLoader,
                     condition_loader: Optional[DataLoader] = None) -> float:
         """Train jointly owned examples; never cycle unrelated context."""
@@ -136,6 +143,7 @@ class DiffusionTrainer:
             total_rows += len(data)
         return total_loss / total_rows
 
+    @operation_owned
     def train(self, train_data: torch.Tensor, epochs: int = 100,
               val_data: Optional[torch.Tensor] = None,
               condition_data: Optional[torch.Tensor] = None,
@@ -168,6 +176,7 @@ class DiffusionTrainer:
             'final_val_loss': self.val_losses[-1] if self.val_losses else None
         }
 
+    @operation_owned
     def validate(self, dataloader: DataLoader,
                  condition_loader: Optional[DataLoader] = None,
                  require_condition: bool = False) -> float:
@@ -195,6 +204,7 @@ class DiffusionTrainer:
             self.model.train(prior_mode)
         return total_loss / total_rows
 
+    @operation_owned
     def generate_routes(self, num_routes: int = 10, route_length: int = 50) -> torch.Tensor:
         """Generate routes using trained model"""
         self.model.eval()
@@ -202,22 +212,17 @@ class DiffusionTrainer:
             routes = self.model.sample(num_routes, route_length)
         return routes
     
+    @operation_owned
     def save_checkpoint(self, path: str = "models/diffusion_checkpoint.pth"):
         """Save training checkpoint"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'timestamp': datetime.now().isoformat()
-        }, path)
+        checkpoint = capture_checkpoint(self)
+        checkpoint['timestamp'] = datetime.now().isoformat()
+        torch.save(checkpoint, path)
         logger.info(f"✅ Checkpoint saved to {path}")
     
+    @operation_owned
     def load_checkpoint(self, path: str = "models/diffusion_checkpoint.pth"):
         """Load training checkpoint"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.train_losses = checkpoint['train_losses']
-        self.val_losses = checkpoint['val_losses']
+        restore_checkpoint(self, checkpoint)
         logger.info(f"✅ Checkpoint loaded from {path}")

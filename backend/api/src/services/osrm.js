@@ -2,7 +2,26 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+import logger from '../middleware/logger.js';
 
+// Inside OSRM service methods (e.g., getRouteEstimate, getRouteGeometry)
+async function getRouteEstimate(origin, destination, requestId = null) {
+  try {
+    // ... OSRM API fetch or axios call ...
+  } catch (err) {
+    logger.error({
+      event: 'OSRM_ERROR',
+      error: err.message,
+      stack: err.stack,
+      requestId: requestId,
+      origin,
+      destination,
+    }, 'Failed to fetch route estimate from OSRM service');
+
+    // Return fallback geometry or rethrow depending on service pattern
+    throw err;
+  }
+}
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {

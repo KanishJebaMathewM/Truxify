@@ -217,6 +217,83 @@ router.get('/driver/statement', authenticate, requirePolicy('driver:read'), asyn
  *       404:
  *         description: Profile not found
  */
+// Inside PUT /api/profile
+router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { full_name, language, dark_mode, is_online, phone, email, number_plate } = req.body;
+    const role = req.user.role;
+
+    const profileUpdate = {};
+    if (full_name !== undefined) profileUpdate.full_name = full_name;
+    if (language !== undefined) profileUpdate.language = language;
+    if (dark_mode !== undefined) profileUpdate.dark_mode = dark_mode;
+    if (phone !== undefined) profileUpdate.phone = phone;
+    if (email !== undefined) profileUpdate.email = email;
+
+    // Use per-request user client to respect RLS and security context
+    const userClient = createUserClient(req.token);
+
+    const { data, error } = await userClient
+      .from('profiles')
+      .update(profileUpdate)
+      .eq('id', userId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: 'Profile not found or unauthorized.' });
+    }
+
+    if (role === 'driver') {
+      if (typeof is_online === 'boolean') {
+        const { error: driverError } = await userClient
+          .from('driver_details')
+          .update({ is_online })
+          .eq('user_id', userId);
+
+        if (driverError) throw driverError;
+      }
+
+      if (number_plate !== undefined) {
+        const normalizedPlate = sanitizeNumberPlate(number_plate);
+        const { error: truckError } = await userClient
+          .from('trucks')
+          .update({ number_plate: normalizedPlate })
+          .eq('driver_id', userId);
+
+        if (truckError) {
+          if (truckError.code === '23505') {
+            return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
+          }
+          throw truckError;
+        }
+      }
+    }
+
+    // Invalidate cache...
+    if (req.user?.uid) {
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) {}
+    }
+    if (req.user?.id) {
+      try { await invalidateCachedSupabaseProfileAll(req.user.id); } catch (err) {
+        logger.warn({ userId: req.user.id, err: err.message }, 'Failed to invalidate profile cache');
+      }
+    }
+
+    return res.json({
+      message: 'Profile updated',
+      profile: data
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to update profile',
+      details: err.message
+    });
+  }
+});
 router.get('/', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -679,7 +756,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       return {
         id: trip.id,
         order_display_id: trip.order_display_id,
-        pickup_address: trip.pickup_address,
+        pickup_address: trip.pickup_address,                
         drop_address: trip.drop_address,
         pickup_date: trip.pickup_date,
         base_freight: baseFreight,

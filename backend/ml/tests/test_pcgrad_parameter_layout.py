@@ -3,9 +3,8 @@ import copy
 
 import pytest
 import torch
+from mtl.model import GradientSurgery, MTLLoss, MultiTaskModel, MultiTaskTrainer
 from torch import nn
-
-from mtl.model import GradientSurgery, MultiTaskModel, MultiTaskTrainer, MTLLoss
 
 
 def native(width=2):
@@ -66,8 +65,8 @@ def test_actual_adam_updates_heterogeneous_heads():
 def test_frozen_and_entirely_disconnected_parameters_skip_optimizer():
     model,trainer=native()
     model.register_parameter('unused',nn.Parameter(torch.ones(3)))
-    # Rebuild optimizer to include the disconnected parameter.
-    trainer.optimizer=torch.optim.Adam(model.parameters())
+    # Construct a coherent model/Adam/scheduler generation including the new parameter.
+    trainer=MultiTaskTrainer(model,trainer.loss,device="cpu")
     first=next(model.shared_encoder.parameters())
     first.requires_grad_(False)
     old=first.detach().clone()

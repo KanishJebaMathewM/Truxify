@@ -91,6 +91,32 @@ export async function registerDeviceToken(req, res, next) {
         errorResponse('VALIDATION_ERROR', metadataErr)
       );
     }
+    // Example fix inside backend/api/src/controllers/deviceController.js
+
+import { supabaseAdmin } from '../config/db.js'; // Ensure supabaseAdmin is imported
+
+export async function registerDeviceToken(req, res, next) {
+  try {
+    const { userId, fcmToken, platform } = req.body;
+
+    // ... validation logic ...
+
+    // Call the RPC using supabaseAdmin (service_role) to bypass permission restrictions
+    const { data, error } = await supabaseAdmin.rpc('register_device_token', {
+      p_user_id: userId,
+      p_fcm_token: fcmToken,
+      p_platform: platform,
+    });
+
+    if (error) {
+      throw new Error(`[Database] Failed to register device token: ${error.message}`);
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
 
     if (!supabaseAdmin) {
       logger.error('[DeviceController] Service-role client unavailable for register_device_token');

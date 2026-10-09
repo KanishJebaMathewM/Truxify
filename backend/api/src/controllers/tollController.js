@@ -51,8 +51,24 @@ export async function handleFastagWebhook(req, res, next) {
     const signatureHeader = req.headers['x-fastag-signature'] || req.headers['x-webhook-signature'];
     const payload = req.body;
 
-    // Verify HMAC if signature is present in production
-    if (process.env.NODE_ENV === 'production' && signatureHeader) {
+    // Enforce HMAC signature verification in production or when mandated
+    const requireAuth = process.env.NODE_ENV === 'production' || process.env.FASTAG_REQUIRE_WEBHOOK_AUTH === 'true';
+
+    if (requireAuth) {
+      if (!signatureHeader) {
+        return res.status(401).json({
+          success: false,
+          error: 'Missing required FASTag webhook signature header',
+        });
+      }
+      const isValid = verifyFastagWebhookSignature(req.rawBody || payload, signatureHeader);
+      if (!isValid) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid FASTag webhook HMAC signature',
+        });
+      }
+    } else if (signatureHeader) {
       const isValid = verifyFastagWebhookSignature(req.rawBody || payload, signatureHeader);
       if (!isValid) {
         return res.status(401).json({
@@ -62,7 +78,7 @@ export async function handleFastagWebhook(req, res, next) {
       }
     }
 
-    const { transaction, gpsContext } = payload;
+    const { transaction, gpsContext } = payload || {};
     const txData = transaction || payload;
 
     const result = await processFastagTransaction(txData, gpsContext);

@@ -14,22 +14,37 @@ import { DomainError } from './order/domainError.js';
 import { NHAI_TOLL_PLAZAS } from './tollService.js';
 
 const FASTAG_WEBHOOK_SECRET = process.env.FASTAG_WEBHOOK_SECRET || 'truxify-fastag-webhook-secret-2026';
+const MAX_PROCESSED_TRANSACTIONS = 5000;
 
 // In-memory processed transaction ledger & active order toll accounts
 const processedTransactions = new Map();
 const orderTollLedgers = new Map();
 
 /**
- * Calculates Great-Circle distance in meters.
+ * Calculates Great-Circle distance in meters with coordinate boundary guards.
  */
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+
+  if (
+    !Number.isFinite(nLat1) || !Number.isFinite(nLon1) ||
+    !Number.isFinite(nLat2) || !Number.isFinite(nLon2) ||
+    nLat1 < -90 || nLat1 > 90 || nLat2 < -90 || nLat2 > 90 ||
+    nLon1 < -180 || nLon1 > 180 || nLon2 < -180 || nLon2 > 180
+  ) {
+    return NaN;
+  }
+
   const R = 6371000; // Earth radius in meters
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const dLat = (nLat2 - nLat1) * (Math.PI / 180);
+  const dLon = (nLon2 - nLon1) * (Math.PI / 180);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) *
-      Math.cos(lat2 * (Math.PI / 180)) *
+    Math.cos(nLat1 * (Math.PI / 180)) *
+      Math.cos(nLat2 * (Math.PI / 180)) *
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -38,19 +53,32 @@ function getDistanceMeters(lat1, lon1, lat2, lon2) {
 
 /**
  * Verifies HMAC signature for incoming NETC FASTag webhooks.
+ * Safely guards against RangeError exceptions in timingSafeEqual caused by mismatched buffer lengths.
  */
 export function verifyFastagWebhookSignature(payloadRaw, signatureHeader) {
-  if (!signatureHeader) return false;
+  if (!signatureHeader || typeof signatureHeader !== 'string') return false;
 
+  const normalizedSig = signatureHeader.trim().toLowerCase();
+  // Valid SHA-256 hex signatures must be exactly 64 hexadecimal characters
+  if (!/^[0-9a-f]{64}$/.test(normalizedSig)) {
+    return false;
+  }
+
+  const secret = process.env.FASTAG_WEBHOOK_SECRET || FASTAG_WEBHOOK_SECRET;
   const expectedSignature = crypto
-    .createHmac('sha256', FASTAG_WEBHOOK_SECRET)
+    .createHmac('sha256', secret)
     .update(typeof payloadRaw === 'string' ? payloadRaw : JSON.stringify(payloadRaw))
     .digest('hex');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signatureHeader, 'utf8'),
-    Buffer.from(expectedSignature, 'utf8')
-  );
+  const sigBuffer = Buffer.from(normalizedSig, 'utf8');
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+
+  // crypto.timingSafeEqual throws RangeError if buffer lengths differ
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
 }
 
 /**
@@ -61,19 +89,27 @@ export function verifyFastagWebhookSignature(payloadRaw, signatureHeader) {
  * @returns {Object} Reconciliation outcome and settlement state
  */
 export async function processFastagTransaction(txData, gpsContext = null) {
-  const { transactionId, tagId, vrn, tollPlazaId, amountInr, readerTimestamp, laneId } = txData;
-
-  if (!transactionId || !amountInr || amountInr <= 0) {
+  if (!txData || typeof txData !== 'object') {
     throw new DomainError(400, { error: 'Invalid FASTag transaction payload' });
   }
 
+  const { transactionId, tagId, vrn, tollPlazaId, amountInr, readerTimestamp, laneId } = txData;
+
+  const parsedAmount = Number(amountInr);
+  if (!transactionId || typeof transactionId !== 'string' || !transactionId.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    throw new DomainError(400, { error: 'Invalid FASTag transaction payload: transactionId and positive finite amountInr required' });
+  }
+
+  const safeTransactionId = transactionId.trim();
+  const normalizedAmountInr = Math.round(parsedAmount * 100) / 100;
+
   // Idempotency check: prevent duplicate billing
-  if (processedTransactions.has(transactionId)) {
-    logger.warn({ transactionId }, '[fastagReconciliationService] Duplicate transaction ignored');
+  if (processedTransactions.has(safeTransactionId)) {
+    logger.warn({ transactionId: safeTransactionId }, '[fastagReconciliationService] Duplicate transaction ignored');
     return {
       status: 'DUPLICATE_IGNORED',
       message: 'Transaction has already been processed',
-      transaction: processedTransactions.get(transactionId),
+      transaction: processedTransactions.get(safeTransactionId),
     };
   }
 
@@ -91,11 +127,12 @@ export async function processFastagTransaction(txData, gpsContext = null) {
   let distanceFromPlazaMeters = null;
 
   if (gpsContext?.currentLat && gpsContext?.currentLng && plaza.lat && plaza.lng) {
-    distanceFromPlazaMeters = Math.round(
-      getDistanceMeters(gpsContext.currentLat, gpsContext.currentLng, plaza.lat, plaza.lng)
-    );
-    // Verified if truck is within 3 km of the plaza
-    isGpsVerified = distanceFromPlazaMeters <= (plaza.radiusMeters || 3000);
+    const dist = getDistanceMeters(gpsContext.currentLat, gpsContext.currentLng, plaza.lat, plaza.lng);
+    if (!Number.isNaN(dist)) {
+      distanceFromPlazaMeters = Math.round(dist);
+      // Verified if truck is within 3 km of the plaza
+      isGpsVerified = distanceFromPlazaMeters <= (plaza.radiusMeters || 3000);
+    }
   } else {
     // If telemetry lag, default to verified if VRN matches active order
     isGpsVerified = true;
@@ -106,12 +143,12 @@ export async function processFastagTransaction(txData, gpsContext = null) {
   const matchedDriverId = gpsContext?.driverId || txData.driverId || null;
 
   const reconciliationRecord = {
-    transactionId,
-    tagId,
-    vrn,
+    transactionId: safeTransactionId,
+    tagId: tagId || null,
+    vrn: vrn || null,
     tollPlazaId: plaza.id,
     plazaName: plaza.name,
-    amountInr: Number(amountInr),
+    amountInr: normalizedAmountInr,
     readerTimestamp: readerTimestamp || new Date().toISOString(),
     laneId: laneId || 'LANE_01',
     isGpsVerified,
@@ -133,21 +170,29 @@ export async function processFastagTransaction(txData, gpsContext = null) {
     }
 
     const ledger = orderTollLedgers.get(matchedOrderId);
-    ledger.totalTollsPaidInr += reconciliationRecord.amountInr;
+    ledger.totalTollsPaidInr = Math.round((ledger.totalTollsPaidInr + reconciliationRecord.amountInr) * 100) / 100;
     ledger.transactions.push(reconciliationRecord);
     orderTollLedgers.set(matchedOrderId, ledger);
   }
 
-  processedTransactions.set(transactionId, reconciliationRecord);
+  // Prune processed transactions to prevent memory leaks if ledger grows beyond bound
+  if (processedTransactions.size >= MAX_PROCESSED_TRANSACTIONS) {
+    const firstKey = processedTransactions.keys().next().value;
+    if (firstKey) {
+      processedTransactions.delete(firstKey);
+    }
+  }
+
+  processedTransactions.set(safeTransactionId, reconciliationRecord);
 
   logger.info(
-    { transactionId, plazaName: plaza.name, amountInr, orderId: matchedOrderId, isGpsVerified },
+    { transactionId: safeTransactionId, plazaName: plaza.name, amountInr: normalizedAmountInr, orderId: matchedOrderId, isGpsVerified },
     '[fastagReconciliationService] FASTag transaction settled successfully'
   );
 
   return {
     status: 'SETTLED',
-    message: `FASTag toll of ₹${amountInr} at ${plaza.name} reconciled and settled`,
+    message: `FASTag toll of ₹${normalizedAmountInr} at ${plaza.name} reconciled and settled`,
     reconciliation: reconciliationRecord,
   };
 }
@@ -160,6 +205,11 @@ export async function reconcileOrderTolls(orderId, estimatedTollInr = 0) {
     throw new DomainError(400, { error: 'orderId is required' });
   }
 
+  const parsedEst = Number(estimatedTollInr);
+  const safeEstimated = Number.isFinite(parsedEst) && parsedEst >= 0
+    ? Math.round(parsedEst * 100) / 100
+    : 0;
+
   const ledger = orderTollLedgers.get(orderId) || {
     orderId,
     totalTollsPaidInr: 0,
@@ -167,14 +217,14 @@ export async function reconcileOrderTolls(orderId, estimatedTollInr = 0) {
   };
 
   const actualTollsInr = ledger.totalTollsPaidInr;
-  const varianceInr = Number((actualTollsInr - estimatedTollInr).toFixed(2));
-  const isWithinBudget = actualTollsInr <= estimatedTollInr;
+  const varianceInr = Math.round((actualTollsInr - safeEstimated) * 100) / 100;
+  const isWithinBudget = actualTollsInr <= safeEstimated;
 
   return {
     success: true,
     orderId,
-    estimatedTollInr: Number(estimatedTollInr),
-    actualTollsInr: Number(actualTollsInr),
+    estimatedTollInr: safeEstimated,
+    actualTollsInr,
     varianceInr,
     isWithinBudget,
     totalTransactions: ledger.transactions.length,
@@ -190,9 +240,18 @@ export function getOrderTollTransactions(orderId) {
   return ledger ? ledger.transactions : [];
 }
 
+/**
+ * Internal state reset for unit test isolation.
+ */
+export function _resetState() {
+  processedTransactions.clear();
+  orderTollLedgers.clear();
+}
+
 export default {
   verifyFastagWebhookSignature,
   processFastagTransaction,
   reconcileOrderTolls,
   getOrderTollTransactions,
+  _resetState,
 };

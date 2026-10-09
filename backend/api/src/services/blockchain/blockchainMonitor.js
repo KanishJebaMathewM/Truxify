@@ -4,6 +4,12 @@ import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin, redisClient } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
+// How many times a single on-chain event may fail handling before it is
+// dead-lettered. Failures abort the scan (so the checkpoint is NOT advanced and
+// the event is retried on the next poll) until this limit is reached; after
+// that the event is skipped so one poison event cannot wedge the monitor.
+const DEFAULT_MAX_EVENT_RETRIES = 5;
+
 const ESCROW_ABI = [
   'event BookingCreated(uint256 indexed bookingId, address indexed customer, address indexed driver, uint256 amount)',
   'event PaymentReleased(uint256 indexed bookingId, address indexed driver, uint256 amount)',
@@ -43,6 +49,13 @@ class BlockchainMonitor {
     this.lastError = null;
     this.pollTimer = null;
     this.processedEventKeys = new Set();
+    // eventKey -> consecutive handling failures (only events that failed are tracked).
+    this.eventFailureCounts = new Map();
+    this.maxEventRetries = Number.isInteger(deps.maxEventRetries) && deps.maxEventRetries > 0
+      ? deps.maxEventRetries
+      : (Number.parseInt(process.env.BLOCKCHAIN_EVENT_MAX_RETRIES, 10) > 0
+          ? Number.parseInt(process.env.BLOCKCHAIN_EVENT_MAX_RETRIES, 10)
+          : DEFAULT_MAX_EVENT_RETRIES);
     this.eventHandlers = {};
     // BLOCKCHAIN_MONITOR_START_BLOCK is the first block to scan (inclusive).
     // Store it as-is; we will set lastBlockScanned = startBlock - 1 so that
@@ -154,26 +167,35 @@ class BlockchainMonitor {
 
         // Historical backfill: scan from lastBlockScanned up to current chain head.
         // The checkpoint is only advanced if the full scan and all handlers succeed.
+        // A failed backfill (RPC error, or an event whose handler failed) must NOT
+        // leave the monitor stopped: the cursor is left untouched and the polling
+        // loop started below retries the same range on its next tick.
         if (this.provider && typeof this.provider.getBlockNumber === 'function') {
-          const currentBlock = await this.provider.getBlockNumber();
-          if (currentBlock > this.lastBlockScanned) {
-            logger.info(`[BlockchainMonitor] Performing historical backfill from block ${this.lastBlockScanned + 1} to ${currentBlock}...`);
-            // scanBlockRange throws on failure — if it throws we do NOT save checkpoint.
-            await this.scanBlockRange(this.lastBlockScanned + 1, currentBlock);
-            // Only fetch block hash and save checkpoint after a successful full scan.
-            let blockHash = null;
-            if (typeof this.provider.getBlock === 'function') {
-              const block = await this.provider.getBlock(currentBlock).catch(() => null);
-              blockHash = block?.hash || null;
+          try {
+            const currentBlock = await this.provider.getBlockNumber();
+            if (currentBlock > this.lastBlockScanned) {
+              logger.info(`[BlockchainMonitor] Performing historical backfill from block ${this.lastBlockScanned + 1} to ${currentBlock}...`);
+              // scanBlockRange throws on failure — if it throws we do NOT save checkpoint.
+              await this.scanBlockRange(this.lastBlockScanned + 1, currentBlock);
+              // Only fetch block hash and save checkpoint after a successful full scan.
+              let blockHash = null;
+              if (typeof this.provider.getBlock === 'function') {
+                const block = await this.provider.getBlock(currentBlock).catch(() => null);
+                blockHash = block?.hash || null;
+              }
+              // Only persist if we have a valid block hash; a null hash must not be persisted.
+              if (blockHash) {
+                await this.saveCheckpoint(currentBlock, blockHash);
+              } else {
+                // Update in-memory cursor but do not persist an unverified checkpoint.
+                this.lastBlockScanned = currentBlock;
+                logger.warn('[BlockchainMonitor] Backfill complete but block hash unavailable — in-memory cursor advanced; checkpoint not persisted.');
+              }
             }
-            // Only persist if we have a valid block hash; a null hash must not be persisted.
-            if (blockHash) {
-              await this.saveCheckpoint(currentBlock, blockHash);
-            } else {
-              // Update in-memory cursor but do not persist an unverified checkpoint.
-              this.lastBlockScanned = currentBlock;
-              logger.warn('[BlockchainMonitor] Backfill complete but block hash unavailable — in-memory cursor advanced; checkpoint not persisted.');
-            }
+          } catch (backfillErr) {
+            logger.error(`[BlockchainMonitor] Historical backfill failed (${backfillErr.message}); cursor not advanced, polling will retry.`);
+            this.lastError = backfillErr.message;
+            Sentry.captureException(backfillErr);
           }
         }
 
@@ -364,28 +386,69 @@ class BlockchainMonitor {
     return false;
   }
 
+  /**
+   * Parse, de-duplicate and handle one on-chain log.
+   *
+   * Error contract (this is what keeps the checkpoint honest):
+   *   - A log that cannot be DECODED is permanent and not event-specific work we
+   *     can retry, so it is logged and skipped.
+   *   - A failure while HANDLING a decoded event (persisting it, routing the alert,
+   *     escalating) is re-thrown so scanBlockRange() rejects and the caller does
+   *     NOT advance the checkpoint; the event is retried on the next poll.
+   *   - After `maxEventRetries` consecutive failures the event is dead-lettered
+   *     (logged + reported to Sentry) and skipped so a poison event cannot wedge
+   *     the monitor forever.
+   */
   async processLog(log) {
+    let parsed;
     try {
       const iface = new ethers.Interface(ESCROW_ABI);
-      const parsed = iface.parseLog(log);
-
-      if (!parsed) return;
-
-      const txHash = log.transactionHash;
-      const logIndex = log.index !== undefined ? log.index : (log.logIndex ?? 0);
-      const eventKey = `${txHash}:${logIndex}`;
-
-      if (await this.isEventProcessed(eventKey, txHash, logIndex)) {
-        logger.debug(`[BlockchainMonitor] Event ${eventKey} already processed. Skipping duplicate.`);
-        return;
-      }
-
-      const handler = this.eventHandlers[parsed.name];
-      if (handler) {
-        await handler(parsed.args, log);
-      }
+      parsed = iface.parseLog(log);
     } catch (err) {
       logger.error('[BlockchainMonitor] Log parsing error:', err.message);
+      return;
+    }
+
+    if (!parsed) return;
+
+    const txHash = log.transactionHash;
+    const logIndex = log.index !== undefined ? log.index : (log.logIndex ?? 0);
+    const eventKey = `${txHash}:${logIndex}`;
+
+    if (await this.isEventProcessed(eventKey, txHash, logIndex)) {
+      logger.debug(`[BlockchainMonitor] Event ${eventKey} already processed. Skipping duplicate.`);
+      return;
+    }
+
+    const handler = this.eventHandlers[parsed.name];
+    if (!handler) return;
+
+    const priorFailures = this.eventFailureCounts.get(eventKey) ?? 0;
+    if (priorFailures >= this.maxEventRetries) {
+      logger.warn(`[BlockchainMonitor] Event ${eventKey} (${parsed.name}) was dead-lettered after ${priorFailures} failed attempts. Skipping.`);
+      return;
+    }
+
+    try {
+      await handler(parsed.args, log);
+      this.eventFailureCounts.delete(eventKey);
+    } catch (err) {
+      const attempts = priorFailures + 1;
+      this.eventFailureCounts.set(eventKey, attempts);
+
+      if (attempts < this.maxEventRetries) {
+        logger.error(
+          `[BlockchainMonitor] Handling ${parsed.name} ${eventKey} failed (attempt ${attempts}/${this.maxEventRetries}): ${err.message}. ` +
+          'Aborting scan so the checkpoint is not advanced; the event will be retried.'
+        );
+        throw err;
+      }
+
+      logger.error(
+        `[BlockchainMonitor] Handling ${parsed.name} ${eventKey} failed ${attempts} times (${err.message}). ` +
+        'Dead-lettering the event so it cannot block the monitor.'
+      );
+      Sentry.captureException(err, { extra: { eventKey, eventName: parsed.name, attempts } });
     }
   }
 
@@ -407,8 +470,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
     this.metricsService?.recordPaymentEvent?.('success');
   }
 
@@ -428,8 +491,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
   }
 
   async handleBookingStarted(args, log) {
@@ -448,8 +511,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
   }
 
   async handleBookingDisputed(args, log) {
@@ -467,9 +530,9 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
     await this.escalationHandler?.escalate(alert);
+    await this.storeEvent(alert, log);
   }
 
   async handleDisputeResolved(args, log) {
@@ -490,8 +553,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
   }
 
   async handleBookingCreated(args, log) {
@@ -511,8 +574,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
   }
 
   // ── Legacy / Simulated Handlers ──────────────────────────────────────────
@@ -532,8 +595,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
     this.metricsService?.recordPaymentEvent?.('success');
   }
 
@@ -551,8 +614,8 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
+    await this.storeEvent(alert, log);
     this.metricsService?.recordInsuranceEvent?.('approved');
   }
 
@@ -570,13 +633,13 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordInsuranceEvent?.('rejected');
 
     if (alert.severity === 'HIGH' || alert.severity === 'CRITICAL') {
       await this.escalationHandler?.escalate(alert);
     }
+    await this.storeEvent(alert, log);
+    this.metricsService?.recordInsuranceEvent?.('rejected');
   }
 
   async handleGeofenceBreach(args, log) {
@@ -593,10 +656,10 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordGeofenceBreach?.();
     await this.escalationHandler?.escalate(alert);
+    await this.storeEvent(alert, log);
+    this.metricsService?.recordGeofenceBreach?.();
   }
 
   async handleBalanceUpdateFailed(args, log) {
@@ -614,10 +677,10 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordBalanceUpdateFailure?.();
     await this.escalationHandler?.escalate(alert);
+    await this.storeEvent(alert, log);
+    this.metricsService?.recordBalanceUpdateFailure?.();
   }
 
   async handleSmartContractRevert(args, log) {
@@ -634,10 +697,10 @@ class BlockchainMonitor {
     };
     alert.eventKey = `${alert.txHash}:${alert.logIndex}`;
 
-    await this.storeEvent(alert, log);
     await this.alertRouter?.route(alert);
-    this.metricsService?.recordContractRevert?.();
     await this.escalationHandler?.escalate(alert);
+    await this.storeEvent(alert, log);
+    this.metricsService?.recordContractRevert?.();
   }
 
   // ── Event & Checkpoint Persistence ───────────────────────────────────────
@@ -655,7 +718,9 @@ class BlockchainMonitor {
     const client = supabaseAdmin || supabase;
     if (client?.from) {
       try {
-        await client
+        // supabase-js reports PostgREST/network failures by RETURNING { error }, it
+        // does not throw. Ignoring it would mark an un-persisted event as processed.
+        const result = await client
           .from('blockchain_monitoring_events')
           .insert([{
             type: alert.type,
@@ -663,6 +728,9 @@ class BlockchainMonitor {
             data: alert,
             created_at: new Date().toISOString(),
           }]);
+        if (result?.error) {
+          throw new Error(result.error.message || 'Failed to insert blockchain monitoring event');
+        }
         // Only mark as processed AFTER the DB insert succeeds (atomic deduplication).
         this.processedEventKeys.add(eventKey);
       } catch (err) {
@@ -699,7 +767,7 @@ class BlockchainMonitor {
     const client = supabaseAdmin || supabase;
     if (client?.from) {
       try {
-        await client
+        const result = await client
           .from('blockchain_monitoring_events')
           .insert([{
             type: 'SCAN_CHECKPOINT',
@@ -707,6 +775,9 @@ class BlockchainMonitor {
             data: { blockNumber, blockHash, updatedAt: new Date().toISOString() },
             created_at: new Date().toISOString(),
           }]);
+        if (result?.error) {
+          throw new Error(result.error.message || 'Failed to insert scan checkpoint');
+        }
       } catch (err) {
         logger.warn('[BlockchainMonitor] Failed to persist checkpoint to DB:', err.message);
       }

@@ -348,10 +348,23 @@ class OrderReadModel {
    * Per-status order counts from the canonical `status` column of the single
    * authoritative read model (the same column getOrderList filters on).
    */
-  async getOrderStats() {
-    const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
+    async getOrderStats() {
+    const statuses = [
+      'pending',
+      'created',
+      'truck_assigned',
+      'assigned',
+      'en_route_pickup',
+      'arrived_pickup',
+      'picked_up',
+      'in_transit',
+      'arriving',
+      'delivered',
+      'payment_released',
+      'cancelled',
+    ];
+
     const stats = {};
-    for (const s of statuses) { stats[s] = 0; }
 
     for (const status of statuses) {
       const { count, error } = await this.client
@@ -365,7 +378,6 @@ class OrderReadModel {
 
     return stats;
   }
-
   async clearCache() {
     this.cache.clear();
     logger.info('Read model cache cleared');

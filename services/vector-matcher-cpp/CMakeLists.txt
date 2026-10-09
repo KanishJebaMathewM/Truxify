@@ -31,3 +31,7 @@ add_test(NAME vector_matcher_packing COMMAND test_matcher)
 add_executable(test_search_numeric tests/test_search_numeric.cpp)
 target_link_libraries(test_search_numeric PRIVATE Threads::Threads)
 add_test(NAME vector_matcher_numeric COMMAND test_search_numeric)
+
+add_executable(test_packing_certificates tests/test_packing_certificates.cpp)
+target_link_libraries(test_packing_certificates PRIVATE vector_matcher)
+add_test(NAME vector_matcher_packing_certificates COMMAND test_packing_certificates)

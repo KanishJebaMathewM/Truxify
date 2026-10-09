@@ -1,153 +1,169 @@
 #include "../include/matcher.hpp"
 #include <algorithm>
 #include <array>
-#include <numeric>
+#include <cmath>
+#include <limits>
 #include <vector>
 
 namespace TruxifyMatcher {
-
 namespace {
-
 struct Placement {
-    float x, y, z;
-    float dx, dy, dz;
+    double x, y, z, dx, dy, dz;
 };
 
+bool valid(const Box3D& box) {
+    return std::isfinite(box.length) && box.length > 0 &&
+           std::isfinite(box.width) && box.width > 0 &&
+           std::isfinite(box.height) && box.height > 0;
+}
+
+double volume(const Box3D& box) {
+    // Double covers all products of three positive finite binary32 values.
+    return double(box.length) * double(box.width) * double(box.height);
+}
+
+// Both subtraction comparisons are necessary: adding a subnormal offset to
+// a maximum float loses it even in double. For admitted binary32 operands,
+// the subtraction between the larger near-boundary values is exact.
+bool endsBefore(double start, double span, double endpoint) {
+    return start <= endpoint && span <= endpoint - start &&
+           start <= endpoint - span;
+}
+
 bool overlaps(const Placement& a, const Placement& b) {
-    return a.x < b.x + b.dx && b.x < a.x + a.dx &&
-           a.y < b.y + b.dy && b.y < a.y + a.dy &&
-           a.z < b.z + b.dz && b.z < a.z + a.dz;
+    return !(endsBefore(a.x,a.dx,b.x) || endsBefore(b.x,b.dx,a.x)) &&
+           !(endsBefore(a.y,a.dy,b.y) || endsBefore(b.y,b.dy,a.y)) &&
+           !(endsBefore(a.z,a.dz,b.z) || endsBefore(b.z,b.dz,a.z));
 }
 
 bool fitsBed(const Placement& p, const Box3D& bed) {
-    return p.x + p.dx <= bed.length + 1e-4f &&
-           p.y + p.dy <= bed.width + 1e-4f &&
-           p.z + p.dz <= bed.height + 1e-4f;
+    return p.x >= 0 && p.y >= 0 && p.z >= 0 &&
+           endsBefore(p.x,p.dx,bed.length) &&
+           endsBefore(p.y,p.dy,bed.width) &&
+           endsBefore(p.z,p.dz,bed.height);
 }
 
-std::vector<std::array<float, 3>> generateAnchors(
-    const std::vector<Placement>& placed
-) {
-    std::vector<float> xCoordinates{ 0.0f };
-    std::vector<float> yCoordinates{ 0.0f };
-    std::vector<float> zCoordinates{ 0.0f };
-
-    xCoordinates.reserve(placed.size() + 1);
-    yCoordinates.reserve(placed.size() + 1);
-    zCoordinates.reserve(placed.size() + 1);
-
-    for (const auto& placement : placed) {
-        xCoordinates.push_back(placement.x + placement.dx);
-        yCoordinates.push_back(placement.y + placement.dy);
-        zCoordinates.push_back(placement.z + placement.dz);
-    }
-
-    auto deduplicate = [](std::vector<float>& coordinates) {
-        std::sort(coordinates.begin(), coordinates.end());
-        coordinates.erase(
-            std::unique(coordinates.begin(), coordinates.end()),
-            coordinates.end()
-        );
-    };
-
-    deduplicate(xCoordinates);
-    deduplicate(yCoordinates);
-    deduplicate(zCoordinates);
-
-    std::vector<std::array<float, 3>> anchors;
-    anchors.reserve(
-        xCoordinates.size() * yCoordinates.size() * zCoordinates.size()
-    );
-
-    for (float x : xCoordinates) {
-        for (float y : yCoordinates) {
-            for (float z : zCoordinates) {
-                anchors.push_back({ x, y, z });
-            }
-        }
-    }
-
-    return anchors;
+// Round outward to a representable public float coordinate, including a tiny
+// positive span whose addition is absorbed in the wider temporary arithmetic.
+double boundary(double start, double span) {
+    float result = static_cast<float>(start + span);
+    if (!endsBefore(start, span, result))
+        result = std::nextafter(result, std::numeric_limits<float>::infinity());
+    return double(result);
 }
 
-} // namespace
+std::array<std::vector<double>, 3> coordinates(const std::vector<Placement>& placed) {
+    std::array<std::vector<double>, 3> axes;
+    for (auto& axis : axes) {
+        axis.reserve(placed.size() + 1);
+        axis.push_back(0);
+    }
+    for (const auto& p : placed) {
+        axes[0].push_back(boundary(p.x, p.dx));
+        axes[1].push_back(boundary(p.y, p.dy));
+        axes[2].push_back(boundary(p.z, p.dz));
+    }
+    for (auto& axis : axes) {
+        std::sort(axis.begin(), axis.end());
+        axis.erase(std::unique(axis.begin(), axis.end()), axis.end());
+    }
+    return axes;
+}
+
+VectorMatchResult failure(PackingStatus status, size_t count = 0) {
+    return {false, 0, count, {}, status};
+}
+}
 
 VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
-    const Box3D& truckBed,
-    const std::vector<Box3D>& cargoBoxes
+    const Box3D& truckBed, const std::vector<Box3D>& cargoBoxes
 ) {
-    float totalTruckVolume = truckBed.volume();
-    if (totalTruckVolume <= 0.0f) {
-        return { false, 0.0f, 0, {} };
-    }
+    return evaluatePackingAVX(truckBed, cargoBoxes, PackingLimits{});
+}
+
+VectorMatchResult VectorMatcherEngine::evaluatePackingAVX(
+    const Box3D& truckBed, const std::vector<Box3D>& cargoBoxes,
+    const PackingLimits& limits
+) {
+    if (!valid(truckBed)) return failure(PackingStatus::InvalidInput);
+    if (!limits.maxBoxes || limits.maxBoxes > 128 ||
+        !limits.maxCoordinateProducts || limits.maxCoordinateProducts > 1000000 ||
+        !limits.maxCandidateChecks || limits.maxCandidateChecks > 1000000 ||
+        !limits.maxOverlapChecks || limits.maxOverlapChecks > 10000000)
+        return failure(PackingStatus::InvalidInput);
+    if (cargoBoxes.size() > limits.maxBoxes)
+        return failure(PackingStatus::ResourceLimit);
+    // Complete admission precedes placement: a bad late row never looks like
+    // a partially successful geometric search.
+    if (std::any_of(cargoBoxes.begin(), cargoBoxes.end(),
+                    [](const Box3D& box) { return !valid(box); }))
+        return failure(PackingStatus::InvalidInput);
 
     std::vector<Placement> placed;
-    float totalCargoVolume = 0.0f;
-
+    placed.reserve(cargoBoxes.size());
+    double cargoVolume = 0;
+    size_t candidates = 0, overlapChecks = 0;
     const int permutations[6][3] = {
-        {0, 1, 2}, // (L, W, H)
-        {1, 0, 2}, // (W, L, H)
-        {0, 2, 1}, // (L, H, W)
-        {2, 1, 0}, // (H, W, L)
-        {1, 2, 0}, // (W, H, L)
-        {2, 0, 1}, // (H, L, W)
+        {0,1,2}, {1,0,2}, {0,2,1}, {2,1,0}, {1,2,0}, {2,0,1}
     };
-
     for (const auto& box : cargoBoxes) {
-        const float dims[3] = { box.length, box.width, box.height };
-        const auto anchors = generateAnchors(placed);
-        bool placedBox = false;
-
-        for (int i = 0; i < 6 && !placedBox; ++i) {
-            Placement cand;
-            cand.dx = dims[permutations[i][0]];
-            cand.dy = dims[permutations[i][1]];
-            cand.dz = dims[permutations[i][2]];
-
-            for (const auto& anchor : anchors) {
-                cand.x = anchor[0];
-                cand.y = anchor[1];
-                cand.z = anchor[2];
-
-                if (!fitsBed(cand, truckBed)) {
-                    continue;
-                }
-
-                bool ok = true;
-                for (const auto& placement : placed) {
-                    if (overlaps(cand, placement)) {
-                        ok = false;
-                        break;
+        const auto axes = coordinates(placed);
+        size_t products = 1;
+        for (const auto& axis : axes) {
+            if (axis.size() > limits.maxCoordinateProducts / products)
+                return failure(PackingStatus::ResourceLimit, placed.size());
+            products *= axis.size();
+        }
+        const double dims[3] = {box.length, box.width, box.height};
+        bool accepted = false;
+        for (const auto& permutation : permutations) {
+            if (accepted) break;
+            for (double x : axes[0]) {
+                if (accepted) break;
+                for (double y : axes[1]) {
+                    if (accepted) break;
+                    for (double z : axes[2]) {
+                        if (candidates == limits.maxCandidateChecks)
+                            return failure(PackingStatus::ResourceLimit, placed.size());
+                        ++candidates;
+                        Placement candidate{x,y,z,dims[permutation[0]],
+                                            dims[permutation[1]],dims[permutation[2]]};
+                        if (!fitsBed(candidate, truckBed)) continue;
+                        bool collision = false;
+                        for (const auto& previous : placed) {
+                            if (overlapChecks == limits.maxOverlapChecks)
+                                return failure(PackingStatus::ResourceLimit, placed.size());
+                            ++overlapChecks;
+                            if (overlaps(candidate, previous)) {
+                                collision = true;
+                                break;
+                            }
+                        }
+                        if (!collision) {
+                            placed.push_back(candidate);
+                            cargoVolume += volume(box);
+                            accepted = true;
+                            break;
+                        }
                     }
-                }
-
-                if (ok) {
-                    placed.push_back(cand);
-                    totalCargoVolume += box.volume();
-                    placedBox = true;
-                    break;
                 }
             }
         }
-
-        if (!placedBox) {
-            return { false, 0.0f, placed.size(), {} };
-        }
+        if (!accepted) return failure(PackingStatus::Infeasible, placed.size());
     }
-
-    float utilization = (totalCargoVolume / totalTruckVolume) * 100.0f;
-    bool allFits = (placed.size() == cargoBoxes.size());
-
-    VectorMatchResult res;
-    res.fits = allFits;
-    res.utilizationPercentage = utilization;
-    res.packedCount = placed.size();
-    res.placementMap.reserve(placed.size());
+    VectorMatchResult result;
+    result.fits = true;
+    result.status = PackingStatus::Packed;
+    // Certified disjoint geometry bounds this ratio; clamp only accumulated
+    // arithmetic roundoff, never dimensions or an infeasible certificate.
+    result.utilizationPercentage = static_cast<float>(
+        std::clamp(cargoVolume / volume(truckBed) * 100, 0.0, 100.0));
+    result.packedCount = placed.size();
+    result.placementMap.reserve(placed.size());
     for (const auto& p : placed) {
-        Box3D b{ p.dx, p.dy, p.dz };
-        res.placementMap.push_back({ b, p.x, p.y, p.z });
+        result.placementMap.push_back({
+            {float(p.dx),float(p.dy),float(p.dz)},float(p.x),float(p.y),float(p.z)});
     }
-    return res;
+    return result;
 }
-
 } // namespace TruxifyMatcher

@@ -51,8 +51,18 @@ export async function handleFastagWebhook(req, res, next) {
     const signatureHeader = req.headers['x-fastag-signature'] || req.headers['x-webhook-signature'];
     const payload = req.body;
 
-    // Verify HMAC if signature is present in production
-    if (process.env.NODE_ENV === 'production' && signatureHeader) {
+    // Production must always carry a signature. The previous condition
+    // (`production && signatureHeader`) evaluated to false when the header was
+    // omitted, letting unauthenticated payloads skip HMAC verification.
+    if (process.env.NODE_ENV === 'production' && !signatureHeader) {
+      return res.status(401).json({
+        success: false,
+        error: 'Missing FASTag webhook signature',
+      });
+    }
+
+    // Verify HMAC whenever a signature is supplied.
+    if (signatureHeader) {
       const isValid = verifyFastagWebhookSignature(req.rawBody || payload, signatureHeader);
       if (!isValid) {
         return res.status(401).json({

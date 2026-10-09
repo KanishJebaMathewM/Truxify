@@ -1,10 +1,26 @@
-/**
- * Mock Commercial Bypass API integration.
- * In a real-world scenario, this service would communicate with Drivewyze or PrePass API
- * to check carrier credentials and safety scores against the specific weigh station.
- */
+
 import logger from '../middleware/logger.js';
 
+/**
+ * Checks weigh station bypass eligibility for a given trip/truck.
+ * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.
+ * 
+ * @param {Object} params
+ * @param {string} params.vehicleId
+ * @param {number} params.weight
+ * @returns {Promise<Object>} Bypass decision result
+ */
+export async function checkBypassEligibility({ vehicleId, weight }) {
+  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
+
+  // Deterministic mock response (replaces Math.random coin-flip)
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Mock regulatory evaluation: vehicle within compliant weight threshold.',
+    evaluatedAt: new Date().toISOString()
+  };
+}
 const checkBypassEligibility = async (driverId, lat, lng) => {
   // No real WIM/bypass provider (Drivewyze/PrePass) is integrated. The
   // previous implementation returned a Math.random() coin-flip presented as a

@@ -131,5 +131,38 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
     });
   }
 });
+// Before (using the unprivileged / anon client instance)
+async function authorizeOrderAccess(req, res, orderId) {
+  const { data: order, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .maybeSingle();
 
+  if (error || !order) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+  // ...
+}
+
+// After (using the caller's authenticated client or service client)
+import { createUserClient } from '../config/db.js'; // or service-role client depending on architecture
+
+async function authorizeOrderAccess(req, res, orderId) {
+  // Use the authenticated user client or service client to bypass anon restrictions
+  const client = req.token ? createUserClient(req.token) : supabaseAdmin;
+
+  const { data: order, error } = await client
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (error || !order) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+
+  // Proceed with RLS/policy checks...
+  return order;
+}
 export default router;

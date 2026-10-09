@@ -6,6 +6,12 @@
 #include <vector>
 
 namespace TruxifyMatcher {
+static_assert(std::numeric_limits<float>::is_iec559 &&
+              std::numeric_limits<float>::digits == 24 &&
+              std::numeric_limits<double>::digits >= 48 &&
+              std::numeric_limits<double>::max_exponent >= 384 &&
+              std::numeric_limits<double>::min_exponent <= -447,
+              "Packing certificates require binary32 floats and sufficiently wide doubles");
 namespace {
 struct Placement {
     double x, y, z, dx, dy, dz;

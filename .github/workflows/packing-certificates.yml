@@ -6,6 +6,7 @@ on:
       - 'services/vector-matcher-cpp/src/matcher.cpp'
       - 'services/vector-matcher-cpp/test/test_matcher.cpp'
       - 'services/vector-matcher-cpp/tests/test_packing_certificates.cpp'
+      - 'services/vector-matcher-cpp/tests/test_packing_fraction.py'
       - 'services/vector-matcher-cpp/PACKING_CERTIFICATES.md'
       - 'services/vector-matcher-cpp/CMakeLists.txt'
       - '.github/workflows/packing-certificates.yml'
@@ -35,3 +36,9 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir /tmp/packing-build -R '^vector_matcher_packing' --output-on-failure --verbose
+      - name: Check actual public coordinates with exact binary32 rationals
+        env:
+          NATIVE_COMPILER: ${{ matrix.compiler }}
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: python3 services/vector-matcher-cpp/tests/test_packing_fraction.py --compiler "$NATIVE_COMPILER"

@@ -2,9 +2,12 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from typing import Dict, List, Tuple, Optional
 import logging
+from threading import RLock
+
+from foundation.optimizer_transition import operation_owned
+from .checkpoint_restore import restore_pair
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +252,11 @@ class NeRFTrainer:
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self._operation_lock = RLock()
         
         logger.info(f"✅ NeRF Trainer initialized on {device}")
     
+    @operation_owned
     def train_step(
         self,
         points: torch.Tensor,
@@ -263,7 +268,7 @@ class NeRFTrainer:
         self.optimizer.zero_grad()
         
         # Forward pass
-        densities, colors = self.model(points, directions)
+        _densities, colors = self.model(points, directions)
         
         # Compute loss
         loss = F.mse_loss(colors, target_rgb)
@@ -274,6 +279,7 @@ class NeRFTrainer:
         
         return loss.item()
     
+    @operation_owned
     def train(
         self,
         train_data: Dict,
@@ -313,6 +319,7 @@ class NeRFTrainer:
         
         return {'losses': losses, 'final_loss': losses[-1]}
     
+    @operation_owned
     def save(self, path: str = "models/nerf.pth"):
         """Save model"""
         torch.save({
@@ -321,9 +328,9 @@ class NeRFTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @operation_owned
     def load(self, path: str = "models/nerf.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        restore_pair(self.model, self.optimizer, checkpoint)
         logger.info(f"✅ Model loaded from {path}")

@@ -9,24 +9,34 @@
 using namespace TruxifyMatcher;
 size_t controls=0;
 void require(bool condition){++controls;if(!condition)throw std::runtime_error("certificate control failed");}
+// Independent error-free TwoSum comparison; production uses paired subtraction.
+bool sumAtMost(float a, float b, float c) {
+    const double sum = double(a) + double(b);
+    const double virtualB = sum - double(a);
+    const double error = (double(a) - (sum - virtualB)) + (double(b) - virtualB);
+    return sum < double(c) || (sum == double(c) && error <= 0);
+}
 void certificate(const VectorMatchResult&r,const Box3D&bed,size_t count){
  require(r.fits && r.status==PackingStatus::Packed);
  require(r.packedCount==count && r.placementMap.size()==count);
  require(std::isfinite(r.utilizationPercentage) && r.utilizationPercentage>=0 && r.utilizationPercentage<=100);
  for(const auto&p:r.placementMap){
   require(p.x>=0 && p.y>=0 && p.z>=0);
-  require((long double)p.x+p.box.length<=bed.length);
-  require((long double)p.y+p.box.width<=bed.width);
-  require((long double)p.z+p.box.height<=bed.height);
+  require(sumAtMost(p.x,p.box.length,bed.length));
+  require(sumAtMost(p.y,p.box.width,bed.width));
+  require(sumAtMost(p.z,p.box.height,bed.height));
  }
  for(size_t i=0;i<count;++i)for(size_t j=0;j<i;++j){
   const auto&a=r.placementMap[i];const auto&b=r.placementMap[j];
-  require((long double)a.x+a.box.length<=b.x || (long double)b.x+b.box.length<=a.x ||
-          (long double)a.y+a.box.width<=b.y || (long double)b.y+b.box.width<=a.y ||
-          (long double)a.z+a.box.height<=b.z || (long double)b.z+b.box.height<=a.z);
+  require(sumAtMost(a.x,a.box.length,b.x) || sumAtMost(b.x,b.box.length,a.x) ||
+          sumAtMost(a.y,a.box.width,b.y) || sumAtMost(b.y,b.box.width,a.y) ||
+          sumAtMost(a.z,a.box.height,b.z) || sumAtMost(b.z,b.box.height,a.z));
  }
 }
 int main(){
+ require(!sumAtMost(std::numeric_limits<float>::denorm_min(),std::numeric_limits<float>::max(),std::numeric_limits<float>::max()));
+ require(!sumAtMost(std::numeric_limits<float>::max(),std::numeric_limits<float>::denorm_min(),std::numeric_limits<float>::max()));
+ require(sumAtMost(0,std::numeric_limits<float>::max(),std::numeric_limits<float>::max()));
  const float inf=std::numeric_limits<float>::infinity(),nan=std::numeric_limits<float>::quiet_NaN();
  for(float bad:{-1.f,0.f,inf,-inf,nan})for(int axis=0;axis<3;++axis){
   Box3D shape{2,2,2};std::array<float*,3> fields{&shape.length,&shape.width,&shape.height};*fields[axis]=bad;

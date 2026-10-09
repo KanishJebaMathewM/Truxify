@@ -41,7 +41,8 @@ checkpoint fields and remain those of the live receiver on ordinary success.
 
 ## Verification
 
-Run the workflow's native CPU suite. It uses genuine Torch network, MSE and Adam;
+Run the workflow's native CPU suite on both the reproducible Torch2.8.0 baseline
+and the exact Torch version extracted from backend/ml/requirements.txt. It uses genuine Torch network, MSE and Adam;
 independent direct next-step references, malformed complete state/cast controls,
 late-key/group errors, real renderer identity, private source ownership, corrupt-old
 repair, publication faults/retry and operation ordering accompany existing NeRF

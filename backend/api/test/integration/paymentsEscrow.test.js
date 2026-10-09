@@ -107,8 +107,8 @@ describe('Payment & Escrow Endpoints', () => {
     vi.clearAllMocks();
     // Default mock behavior
     mockOrderRepository.findOrderByAnyId.mockResolvedValue({ data: { ...mockOrder } });
-    mockOrderRepository.findDriverWallet.mockResolvedValue({ data: { polygon_wallet_address: '0xDriverAddress' } });
-    mockOrderRepository.findCustomerWallet.mockResolvedValue({ data: { polygon_wallet_address: '0xCustomerAddress' } });
+    mockOrderRepository.findDriverWallet.mockResolvedValue({ data: { polygon_wallet_address: '0x1111111111111111111111111111111111111111' } });
+    mockOrderRepository.findCustomerWallet.mockResolvedValue({ data: { polygon_wallet_address: '0x2222222222222222222222222222222222222222' } });
     mockOrderRepository.updateOrder.mockResolvedValue({ error: null });
     mockLockPayment.mockResolvedValue({ txHash: '0xMockTxHash', bookingId: '0xMockBookingId' });
     mockStoreDeliveryOtp.mockResolvedValue(true);
@@ -118,6 +118,12 @@ describe('Payment & Escrow Endpoints', () => {
 
   describe('POST /api/payments/lock', () => {
     it('successfully locks payment on-chain and updates DB', async () => {
+      // The lock endpoint only accepts orders staged for escrow funding;
+      // the shared fixture sits at 'pending', so stage this order first.
+      mockOrderRepository.findOrderByAnyId.mockResolvedValue({
+        data: { ...mockOrder, escrow_status: 'funding' },
+      });
+
       const res = await request(app)
         .post('/api/payments/lock')
         .set('user-id', 'customer-user-id')
@@ -132,8 +138,8 @@ describe('Payment & Escrow Endpoints', () => {
       expect(res.body.txHash).toBe('0xMockTxHash');
       expect(mockLockPayment).toHaveBeenCalledWith(
         '#TRX12345',
-        '0xCustomerAddress',
-        '0xDriverAddress',
+        '0x2222222222222222222222222222222222222222',
+        '0x1111111111111111111111111111111111111111',
         expect.any(String)
       );
       expect(mockOrderRepository.updateOrder).toHaveBeenCalledWith('order-123', expect.objectContaining({

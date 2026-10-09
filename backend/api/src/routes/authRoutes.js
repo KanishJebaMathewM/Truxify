@@ -197,6 +197,7 @@ async function checkAuthOtpLockout(phone) {
       const isLocked = await redisClient.get(`auth_otp_lockout:${phoneKey}`);
       return !!isLocked;
     } catch (err) {
+      logger.error({ event: "AUTH_OTP_LOCKOUT_REDIS_ERROR", error: err.message }, "Redis error in checkAuthOtpLockout, falling back to memory");
       logger.error(
         {
           event: "AUTH_OTP_LOCKOUT_REDIS_ERROR",
@@ -228,6 +229,7 @@ async function recordAuthOtpFailure(phone) {
       }
       return count;
     } catch (err) {
+      logger.error({ event: "AUTH_OTP_FAILURE_RECORD_REDIS_ERROR", error: err.message }, "Redis error in recordAuthOtpFailure, falling back to memory");
       logger.error(
         {
           event: "AUTH_OTP_FAILURE_REDIS_ERROR",
@@ -261,6 +263,7 @@ async function clearAuthOtpFailures(phone) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
     } catch (err) {
+      logger.error({ event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR", error: err.message }, "Redis error in clearAuthOtpFailures, falling back to memory");
       logger.error(
         {
           event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR",
@@ -377,6 +380,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .maybeSingle();
 
     if (fetchErr) {
+      logger.error({ event: "AUTH_OTP_DB_FETCH_ERROR", error: fetchErr.message }, "DB fetch error during OTP verification");
       logger.error(
         {
           event: "AUTH_OTP_DB_FETCH_ERROR",
@@ -425,6 +429,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .eq("id", otpRecord.id);
 
     if (updateErr) {
+      logger.error({ event: "AUTH_OTP_MARK_VERIFIED_ERROR", error: updateErr.message }, "Failed to mark OTP as verified");
       logger.error(
         {
           event: "AUTH_OTP_VERIFICATION_UPDATE_ERROR",
@@ -436,6 +441,10 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     }
 
     await clearAuthOtpFailures(phone);
+    logger.info({ event: "OTP_VERIFIED", phone }, "OTP verified");
+    return res.status(200).json({ success: true, message: "OTP verified successfully." });
+  } catch (err) {
+    logger.error({ event: "AUTH_OTP_UNEXPECTED_ERROR", error: err.message }, "Unexpected error during OTP verification");
     logger.info(
       {
         event: "OTP_VERIFIED",

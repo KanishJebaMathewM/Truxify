@@ -44,18 +44,67 @@ export const loadFilterQuerySchema = z.object({
   }
 });
 
+const MIN_LATITUDE = -90;
+const MAX_LATITUDE = 90;
+const MIN_LONGITUDE = -180;
+const MAX_LONGITUDE = 180;
+
+/**
+ * Builds a bounded coordinate schema.
+ *
+ * `z.coerce.number()` alone is unsafe for coordinates because
+ * `Number(null) === 0` and `Number('') === 0`, so a missing value silently
+ * becomes Null Island (0, 0) instead of failing validation. Blank strings and
+ * nullish values are therefore rejected before coercion, and the result must
+ * be finite and inside the valid WGS84 range.
+ */
+const coordinateSchema = (field, min, max) =>
+  z.preprocess(
+    (value) => {
+      if (value === null || value === undefined) return NaN;
+      if (typeof value === 'string' && value.trim() === '') return NaN;
+      return value;
+    },
+    z.coerce
+      .number()
+      .refine(Number.isFinite, { message: `${field} must be a finite number` })
+      .min(min, { message: `${field} must be greater than or equal to ${min}` })
+      .max(max, { message: `${field} must be less than or equal to ${max}` })
+  );
+
+const latitudeSchema = (field) =>
+  coordinateSchema(field, MIN_LATITUDE, MAX_LATITUDE);
+
+const longitudeSchema = (field) =>
+  coordinateSchema(field, MIN_LONGITUDE, MAX_LONGITUDE);
+
+/**
+ * Positive money/weight amounts must also be finite: `.positive()` alone lets
+ * `Infinity` through, which Postgres happily stores in a numeric column.
+ */
+const positiveFiniteNumber = (field, { max } = {}) => {
+  let schema = z.coerce
+    .number()
+    .refine(Number.isFinite, { message: `${field} must be a finite number` })
+    .positive({ message: `${field} must be greater than 0` });
+  if (max !== undefined) {
+    schema = schema.max(max, { message: `${field} must be less than or equal to ${max}` });
+  }
+  return schema;
+};
+
 export const createLoadSchema = z.object({
   origin: z.object({
-    lat: z.coerce.number(),
-    lng: z.coerce.number(),
+    lat: latitudeSchema('origin.lat'),
+    lng: longitudeSchema('origin.lng'),
     address: z.string().optional(),
   }),
   destination: z.object({
-    lat: z.coerce.number(),
-    lng: z.coerce.number(),
+    lat: latitudeSchema('destination.lat'),
+    lng: longitudeSchema('destination.lng'),
     address: z.string().optional(),
   }),
-  weight_tons: z.coerce.number().positive().max(50),
-  expected_price: z.coerce.number().positive(),
+  weight_tons: positiveFiniteNumber('weight_tons', { max: 50 }),
+  expected_price: positiveFiniteNumber('expected_price'),
   material_type: z.string().min(2).max(100).optional(),
 });

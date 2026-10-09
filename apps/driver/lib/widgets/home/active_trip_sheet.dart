@@ -29,6 +29,9 @@ class ActiveTripSheet extends StatelessWidget {
     required this.onOpenMaps,
     this.stopsRemaining,
     this.currentMilestone,
+    this.statusLabel,
+    this.eta,
+    this.progressPercent,
   });
 
   final bool isTripStarted;

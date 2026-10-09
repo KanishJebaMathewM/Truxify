@@ -3,7 +3,17 @@ import { context, trace } from '@opentelemetry/api';
 import spanFactory from './telemetry/SpanFactory.js';
 import { ContextPropagator } from './telemetry/ContextPropagator.js';
 
-const DEFAULT_MAX_RETRIES = parseInt(process.env.SUPABASE_RETRY_MAX_RETRIES || '3', 10);
+function retryCountOrDefault(value, fallback) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
+// Invalid configuration must not skip the initial database operation or
+// create an unbounded retry loop. Zero explicitly disables retries.
+const configuredMaxRetries = process.env.SUPABASE_RETRY_MAX_RETRIES?.trim();
+const DEFAULT_MAX_RETRIES = retryCountOrDefault(
+  configuredMaxRetries ? Number(configuredMaxRetries) : undefined,
+  3,
+);
 const DEFAULT_BASE_DELAY_MS = parseInt(process.env.SUPABASE_RETRY_BASE_DELAY_MS || '100', 10);
 const DEFAULT_MAX_DELAY_MS = parseInt(process.env.SUPABASE_RETRY_MAX_DELAY_MS || '2000', 10);
 
@@ -18,12 +28,11 @@ const NETWORK_ERROR_CODES = new Set([
   'FETCH_ERR',
 ]);
 
-function isTransientHttpStatus(status) {
-  if (status === null) return false;
-  if (status === 408) return true;
-  if (status >= 500 && status <= 599) return true;
-  if (status === 429) return true;
-  return false;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+export function isTransientHttpStatus(status) {
+  if (typeof status !== 'number' || !Number.isFinite(status)) return false;
+  return TRANSIENT_HTTP_STATUSES.has(status) || (status >= 500 && status <= 599);
 }
 
 function isTransientError(error) {
@@ -68,7 +77,7 @@ export function isRetryable(error) {
 }
 
 export async function executeWithRetry(asyncFn, options = {}) {
-  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxRetries = retryCountOrDefault(options.maxRetries, DEFAULT_MAX_RETRIES);
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const operation = options.operation || 'supabase_query';

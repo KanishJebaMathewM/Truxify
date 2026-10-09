@@ -10,7 +10,37 @@
  * Run with: npx vitest run test/unit/services/voiceService.test.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Mock database config export with both supabase and supabaseAdmin to prevent module destructuring errors
+vi.mock('../../../src/config/db.js', () => {
+  const mockSupabase = {
+    from: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    update: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    single: vi.fn().mockResolvedValue({ data: null, error: null }),
+  };
+
+  return {
+    supabase: mockSupabase,
+    supabaseAdmin: mockSupabase, // Fix: provide supabaseAdmin matching the destructuring in voiceService.js
+  };
+});
+
+// Import the service under test after setting up the mock
+const VoiceService = require('../../../src/services/voiceService');
+
+describe('VoiceService Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should load successfully and initialize voice service pipeline', () => {
+    expect(VoiceService).toBeDefined();
+  });
+});
 const mockSupabaseFrom = vi.fn();
 const mockEq = vi.fn();
 const mockOr = vi.fn();
@@ -23,6 +53,9 @@ const mockSupabase = {
 };
 
 vi.mock('../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: mockSupabase,
   supabaseAdmin: mockSupabase,
 }));
@@ -86,7 +119,7 @@ describe('getBookingContext', () => {
     expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-2,driver_id.eq.user-2');
   });
 
-  it('uses the authenticated user when bookingId is not a valid UUID', async () => {
+  it('selects the requested display ID within the authenticated user orders', async () => {
     const mockOrderData = {
       id: '123e4567-e89b-12d3-a456-426614174000',
       order_display_id: '#FF20260101ABC123DEF456',
@@ -99,9 +132,9 @@ describe('getBookingContext', () => {
     expect(result).toEqual(mockOrderData);
     expect(mockSupabaseFrom).toHaveBeenCalledWith('orders');
     expect(mockOr).toHaveBeenCalledWith('customer_id.eq.driver-1,driver_id.eq.driver-1');
-    expect(mockOrder).toHaveBeenCalledWith('created_at', { ascending: false });
-    expect(mockLimit).toHaveBeenCalledWith(1);
-    expect(mockEq).not.toHaveBeenCalled();
+    expect(mockEq).toHaveBeenCalledWith('order_display_id', '#FF20260101ABC123DEF456');
+    expect(mockOrder).not.toHaveBeenCalled();
+    expect(mockLimit).not.toHaveBeenCalled();
   });
 
   it('returns null when supabase query returns null data', async () => {
@@ -149,7 +182,7 @@ describe('getBookingContext', () => {
 
     const invalidUuid = 'not-a-uuid';
     await getBookingContext(invalidUuid, 'user-1');
-    expect(mockEq).not.toHaveBeenCalled();
+    expect(mockEq).toHaveBeenCalledWith('order_display_id', invalidUuid);
     expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-1,driver_id.eq.user-1');
   });
 });

@@ -503,6 +503,19 @@ export function createSupabaseMock(initialStore = {}) {
           };
         }
       }
+      if (fnName === 'update_order_status_tx' && args?.p_order_id) {
+        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
+        if (idx === undefined || idx === -1 || !store.orders) {
+          return Promise.resolve({ data: [], error: null });
+        }
+        store.orders[idx] = {
+          ...store.orders[idx],
+          status: args.p_status,
+          updated_at: new Date().toISOString(),
+          version: (store.orders[idx].version ?? 0) + 1,
+        };
+        return Promise.resolve({ data: [store.orders[idx]], error: null });
+      }
       return Promise.resolve({ data: null, error: null });
     },
     storage: {

@@ -10,7 +10,11 @@ import hashlib
 import os
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 
-from .fl_server import robust_aggregate
+from threading import RLock
+
+from .model_updates import (
+    MAX_ENVELOPE_BYTES, admit_model_weights, prepare_round_candidate, round_synchronized,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +108,7 @@ class FederatedServer:
         min_clients: int = 3,
         clients_per_round: int = 5,
     ):
+        self._round_lock = RLock()
         self.min_clients = min_clients
         self.clients_per_round = clients_per_round
         if self.clients_per_round < self.min_clients:
@@ -332,6 +337,7 @@ class FederatedServer:
         )
         return model
     
+    @round_synchronized
     def start_round(self):
         """Start new federated learning round"""
         # Get available clients
@@ -539,6 +545,7 @@ class FederatedServer:
                 pass
             self.pubsub = None
 
+    @round_synchronized
     def receive_client_update(self, client_id, encrypted_weights):
         """Receive and process a client model update.
 
@@ -562,6 +569,9 @@ class FederatedServer:
                 if not self._refresh_keys_from_redis() or not self.cipher:
                     logger.error(f"Cannot receive client update from {client_id}: cipher not initialized")
                     return {'success': False, 'error': 'cipher not initialized'}
+
+            if not isinstance(encrypted_weights, bytes) or len(encrypted_weights) > MAX_ENVELOPE_BYTES:
+                return {'success': False, 'error': 'invalid or oversized model envelope'}
 
             # Decrypt the envelope
             try:
@@ -605,6 +615,9 @@ class FederatedServer:
                 logger.warning(f"Rejected update from {client_id}: missing round tag")
                 return {'success': False, 'error': 'missing round tag'}
 
+            if type(update_round) is not int:
+                return {'success': False, 'error': 'round tag must be an integer'}
+
             # Reject stale / cross-round / replayed updates
             if update_round != self.round:
                 logger.warning(
@@ -621,7 +634,7 @@ class FederatedServer:
                 return {'success': True, 'duplicate': True}
 
             # Convert back to numpy arrays
-            weights_np = [np.array(w) for w in weights]
+            weights_np = admit_model_weights(weights, self.model.get_weights())
 
             # Store client weights (current-round only)
             self.client_weights[client_id] = weights_np
@@ -640,6 +653,7 @@ class FederatedServer:
             logger.error(f"Failed to process client update: {e}")
             return {'success': False, 'error': str(e)}
 
+    @round_synchronized
     def _aggregate_weights(self):
         """Aggregate client weights using Federated Averaging"""
         if getattr(self, 'round_completed', False) or self.round in getattr(self, 'completed_rounds', set()):
@@ -651,44 +665,15 @@ class FederatedServer:
 
         num_clients = len(self.client_weights)
 
-        # Apply Differential Privacy
-        for client_id in self.client_weights:
-            client_w = self.client_weights[client_id]
-            # Compute gradients from global weights
-            grads = [cw - gw for cw, gw in zip(client_w, self.global_weights)]
-            # Clip gradient L2 norm
-            total_norm = np.sqrt(sum(np.sum(g**2) for g in grads))
-            clip_factor = min(1.0, self.dp_clip_norm / (total_norm + 1e-8))
-            clipped_grads = [g * clip_factor for g in grads]
-            # Add noise to clipped gradients
-            noisy_grads = [g + np.random.normal(0, self.dp_noise_scale, g.shape) for g in clipped_grads]
-            # Apply noisy gradients back to weights
-            self.client_weights[client_id] = [gw + ng for gw, ng in zip(self.global_weights, noisy_grads)]
-
-        # Robust Federated Aggregation: coordinate-wise median (byzantine-robust)
-        # instead of a naive plain mean, so a single malicious or compromised
-        # client submitting extreme weights cannot skew the global model. The
-        # per-layer delta from the previous global weights is also clipped.
-        new_weights = []
-
-        for layer_idx in range(len(self.client_weights[list(self.client_weights.keys())[0]])):
-            layer_weights = []
-            for client_id in self.client_weights:
-                layer_weights.append(self.client_weights[client_id][layer_idx])
-
-            global_layer = (
-                self.global_weights[layer_idx] if self.global_weights else None
-            )
-            agg_weight = robust_aggregate(
-                layer_weights,
-                global_layer,
-                clip_norm=self.dp_clip_norm,
-            )
-            new_weights.append(agg_weight)
-
-        # Update global model
-        self.global_weights = new_weights
+        # Prepare complete native-dtype candidates without changing accepted
+        # buffers or the published baseline. Keras receives only a validated
+        # full schema before global_weights/completion state is published.
+        new_weights = prepare_round_candidate(
+            self.client_weights, self.global_weights, self.model.get_weights(),
+            self.dp_clip_norm, self.dp_noise_scale,
+        )
         self.model.set_weights(new_weights)
+        self.global_weights = [w.copy() for w in new_weights]
 
         # Mark round as completed to prevent duplicate aggregation
         self.round_completed = True
@@ -769,6 +754,7 @@ class FederatedServer:
             })
         )
     
+    @round_synchronized
     def get_global_model(self):
         """Get global model weights"""
         if self.global_weights is None:
@@ -776,6 +762,7 @@ class FederatedServer:
         
         return [w.tolist() for w in self.global_weights]
     
+    @round_synchronized
     def get_model_stats(self):
         """Get model statistics"""
         stats = {

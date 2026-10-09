@@ -27,14 +27,23 @@ class Truck {
   final double cargoWidthFt;
   final double cargoHeightFt;
 
+  static double? _coerceDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return num.tryParse(value)?.toDouble();
+    return null;
+  }
+
   factory Truck.fromJson(Map<String, dynamic> json) {
     return Truck(
       id: json['id']?.toString() ?? '',
       driverId: json['driver_id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
       numberPlate: json['number_plate']?.toString() ?? '',
-      maxCapacityTons: (json['max_capacity_tons'] as num?)?.toDouble() ?? 0.0,
-      averageMpg: (json['average_mpg'] as num?)?.toDouble() ?? 6.0,
+      // Postgres numeric columns can arrive as JSON strings — coerce via
+      // num.tryParse (repo norm: deadhead_recommendation, trips_screen, ...)
+      // instead of a strict `as num?` cast that throws.
+      maxCapacityTons: _coerceDouble(json['max_capacity_tons']) ?? 0.0,
+      averageMpg: _coerceDouble(json['average_mpg']) ?? 6.0,
       insuranceExpiry: json['insurance_expiry'] != null
           ? DateTime.tryParse(json['insurance_expiry'].toString())
           : null,
@@ -44,9 +53,9 @@ class Truck {
       permitExpiry: json['permit_expiry'] != null
           ? DateTime.tryParse(json['permit_expiry'].toString())
           : null,
-      cargoLengthFt: (json['cargo_length_ft'] as num?)?.toDouble() ?? 0.0,
-      cargoWidthFt: (json['cargo_width_ft'] as num?)?.toDouble() ?? 0.0,
-      cargoHeightFt: (json['cargo_height_ft'] as num?)?.toDouble() ?? 0.0,
+      cargoLengthFt: _coerceDouble(json['cargo_length_ft']) ?? 0.0,
+      cargoWidthFt: _coerceDouble(json['cargo_width_ft']) ?? 0.0,
+      cargoHeightFt: _coerceDouble(json['cargo_height_ft']) ?? 0.0,
     );
   }
 

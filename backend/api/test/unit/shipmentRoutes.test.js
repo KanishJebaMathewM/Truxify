@@ -15,6 +15,9 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   createUserClient: vi.fn(() => null),
   supabase: {
     from: vi.fn(() => ({

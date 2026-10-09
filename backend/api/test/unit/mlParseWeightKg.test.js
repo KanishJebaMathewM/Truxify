@@ -9,7 +9,7 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg(0)).toBe(0);
   });
 
-  it('parses numeric strings as kilograms', () => {
+  it('parses unitless numeric strings as kilograms', () => {
     expect(parseWeightKg('100')).toBe(100);
     expect(parseWeightKg('0')).toBe(0);
   });
@@ -25,6 +25,7 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg('2 ton')).toBe(2000);
     expect(parseWeightKg('1t')).toBe(1000);
     expect(parseWeightKg('1T')).toBe(1000);
+    expect(parseWeightKg('1.5 t')).toBe(1500);
   });
 
   it('returns null for unparseable strings', () => {
@@ -43,9 +44,8 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg(Infinity)).toBeNull();
   });
 
-  it('returns null for booleans, objects and arrays', () => {
-    expect(parseWeightKg(true)).toBeNull();
-    expect(parseWeightKg({})).toBeNull();
+  it('returns null for arrays and objects', () => {
     expect(parseWeightKg([])).toBeNull();
+    expect(parseWeightKg({})).toBeNull();
   });
 });

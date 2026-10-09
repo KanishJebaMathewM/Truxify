@@ -29,7 +29,15 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
-import { reverseGeocode, clampGeohashPrecision, getTimeoutMs } from '../../src/lib/reverseGeocode.js';
+import {
+  reverseGeocode,
+  clampGeohashPrecision,
+  getTimeoutMs,
+  parseRetryAfterMs,
+  getReverseGeocode,
+  fetchAddressFromCoords,
+  reverseGeocodePoint
+} from '../../src/lib/reverseGeocode.js';
 
 describe('reverseGeocode - Comprehensive Edge Cases', () => {
   beforeEach(() => {
@@ -411,13 +419,17 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
 
     it('returns null gracefully on network or JSON parsing error', async () => {
       mockRedisGet.mockResolvedValue(null);
-      mockFetch.mockRejectedValue(new Error('Network connection timeout'));
+      const networkError = new Error('Network connection timeout');
+      mockFetch.mockRejectedValue(networkError);
 
       const result = await reverseGeocode(19.076, 72.8777);
 
       expect(result).toBeNull();
       expect(mockRedisSet).not.toHaveBeenCalled();
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: networkError, lat: 19.076, lon: 72.8777 }),
+        '[ReverseGeocode] Error reverse geocoding coordinates'
+      );
     });
 
     it('returns null when Nominatim returns payload without address or display_name', async () => {
@@ -435,13 +447,48 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
     });
 
     it('catches and logs Redis read/write errors without crashing', async () => {
-      mockRedisGet.mockRejectedValue(new Error('Redis connection refused'));
+      const redisError = new Error('Redis connection refused');
+      mockRedisGet.mockRejectedValue(redisError);
 
       const result = await reverseGeocode(19.076, 72.8777);
 
       expect(result).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: redisError, lat: 19.076, lon: 72.8777 }),
+        '[ReverseGeocode] Error reverse geocoding coordinates'
+      );
     });
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('returns default 60000ms when retryAfter is null, undefined, or not a string', () => {
+    expect(parseRetryAfterMs(null)).toBe(60000);
+    expect(parseRetryAfterMs(undefined)).toBe(60000);
+    expect(parseRetryAfterMs(120)).toBe(60000);
+    expect(parseRetryAfterMs({})).toBe(60000);
+    expect(parseRetryAfterMs('')).toBe(60000);
+    expect(parseRetryAfterMs('   ')).toBe(60000);
+  });
+
+  it('parses delay-seconds format accurately into milliseconds', () => {
+    expect(parseRetryAfterMs('30')).toBe(30000);
+    expect(parseRetryAfterMs('  120  ')).toBe(120000);
+    expect(parseRetryAfterMs('0')).toBe(60000);
+  });
+
+  it('parses HTTP-date format accurately relative to now', () => {
+    const now = Date.parse('2026-09-19T12:00:00.000Z');
+    const futureDate = 'Sat, 19 Sep 2026 12:01:00 GMT';
+    expect(parseRetryAfterMs(futureDate, now)).toBe(60000);
+
+    const pastDate = 'Sat, 19 Sep 2026 11:59:00 GMT';
+    expect(parseRetryAfterMs(pastDate, now)).toBe(60000);
+  });
+
+  it('falls back to default 60000ms for invalid date/string formats', () => {
+    expect(parseRetryAfterMs('invalid-date-string')).toBe(60000);
+    expect(parseRetryAfterMs('-50')).toBe(60000);
   });
 });
 
@@ -468,5 +515,14 @@ describe('clampGeohashPrecision', () => {
     expect(clampGeohashPrecision(7)).toBe(7);
     expect(clampGeohashPrecision(8.8)).toBe(8);
     expect(clampGeohashPrecision(12)).toBe(12);
+  });
+});
+
+describe('Enterprise Integration Aliases', () => {
+  it('verifies getReverseGeocode, fetchAddressFromCoords, and reverseGeocodePoint proxy to reverseGeocode', async () => {
+    mockRedisGet.mockResolvedValue('Alias Location');
+    expect(await getReverseGeocode(19.076, 72.878)).toBe('Alias Location');
+    expect(await fetchAddressFromCoords(19.076, 72.878)).toBe('Alias Location');
+    expect(await reverseGeocodePoint(19.076, 72.878)).toBe('Alias Location');
   });
 });

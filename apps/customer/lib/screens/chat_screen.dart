@@ -1,222 +1,135 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify_shared/truxify_shared.dart';
-import '../models/app_models.dart';
-import '../theme/app_theme.dart';
-import '../services/supabase_service.dart';
+import '../widgets/chat/desktop_chat_layout.dart';
 
 class ChatScreen extends StatefulWidget {
-  final HistoryOrderData order;
-
-  const ChatScreen({super.key, required this.order});
+  const ChatScreen({Key? key}) : super(key: key);
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final TextEditingController _controller = TextEditingController();
-  final List<Map<String, dynamic>> _messages = [];
-  RealtimeChannel? _channel;
-  bool _isSending = false;
-  late final String _myUserId;
+  final SupabaseClient _supabase = Supabase.instance.client;
+  final TextEditingController _messageController = TextEditingController();
+  
+  List<Map<String, dynamic>> _conversations = [];
+  String? _selectedConversationId;
+  List<Map<String, dynamic>> _messages = [];
+  RealtimeChannel? _chatChannel;
 
   @override
   void initState() {
     super.initState();
-    _myUserId = SupabaseService.currentUserId ?? 'unknown';
-    _setupSupabaseChannel();
+    _loadConversations();
   }
 
-  void _setupSupabaseChannel() {
-    final orderId = widget.order.orderId;
-    _channel = Supabase.instance.client.channel('chat_$orderId');
+  Future<void> _loadConversations() async {
+    // Fetch active shipment conversations / support threads
+    final response = await _supabase
+        .from('conversations')
+        .select()
+        .order('updated_at', ascending: false);
 
-    _channel!
-      .onBroadcast(
-        event: 'message',
+    setState(() {
+      _conversations = List<Map<String, dynamic>>.from(response);
+      if (_conversations.isNotEmpty && _selectedConversationId == null) {
+        _selectedConversationId = _conversations.first['id'];
+        _subscribeToMessages(_selectedConversationId!);
+      }
+    });
+  }
+
+  void _subscribeToMessages(String conversationId) async {
+    // Fetch initial messages
+    final data = await _supabase
+        .from('messages')
+        .select()
+        .eq('conversation_id', conversationId)
+        .order('created_at', ascending: true);
+
+    setState(() {
+      _messages = List<Map<String, dynamic>>.from(data);
+    });
+
+    // Supabase Realtime subscription
+    _chatChannel?.unsubscribe();
+    _chatChannel = _supabase.channel('public:messages:conversation_id=eq.$conversationId')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'messages',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'conversation_id',
+          value: conversationId,
+        ),
         callback: (payload) {
-          final data = payload;
-          if (data['senderId'] != _myUserId && mounted) {
-            setState(() {
-              _messages.insert(0, {
-                'text': data['text'],
-                'isMe': false,
-                'sender': data['senderName'],
-              });
-            });
-          }
+          setState(() {
+            _messages.add(payload.newRecord);
+          });
         },
       )
       .subscribe();
   }
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    _channel?.unsubscribe();
-    super.dispose();
-  }
+  void _sendMessage() async {
+    if (_messageController.text.trim().isEmpty || _selectedConversationId == null) return;
+    
+    final text = _messageController.text.trim();
+    _messageController.clear();
 
-  Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-
-    final msg = <String, dynamic>{'text': text, 'isMe': true, 'sender': 'Me'};
-
-    setState(() {
-      _isSending = true;
-      _messages.insert(0, msg);
+    await _supabase.from('messages').insert({
+      'conversation_id': _selectedConversationId,
+      'text': text,
+      'isMe': true,
+      'created_at': DateTime.now().toIso8601String(),
     });
-
-    _controller.clear();
-
-    try {
-      await _channel?.sendBroadcastMessage(
-        event: 'message',
-        payload: {
-          'text': text,
-          'senderId': _myUserId,
-          'senderName': 'Customer',
-        },
-      );
-    } catch (e) {
-      debugPrint('Error sending message: $e');
-      if (mounted) {
-        setState(() => msg['failed'] = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Message failed to send.')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSending = false;
-        });
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Chat with ${widget.order.driver}'),
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              reverse: true,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final msg = _messages[index];
-                final isMe = msg['isMe'] == true;
-                return Align(
-                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isMe ? TruxifyColors.accent : Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(16).copyWith(
-                        bottomRight: isMe ? const Radius.circular(0) : null,
-                        bottomLeft: !isMe ? const Radius.circular(0) : null,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 5,
-                          offset: const Offset(0, 2),
-                        )
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          msg['text'],
-                          style: TextStyle(
-                            color: isMe ? Colors.white : Theme.of(context).textTheme.bodyMedium?.color,
-                          ),
-                        ),
-                        if (msg['failed'] == true)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.error_outline,
-                                    size: 14,
-                                    color: Theme.of(context).colorScheme.error),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Failed to send',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16).copyWith(
-              bottom: MediaQuery.of(context).padding.bottom + 16,
-            ),
-            decoration: BoxDecoration(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    decoration: InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  backgroundColor: TruxifyColors.accent,
-                  radius: 24,
-                  child: IconButton(
-                    icon: _isSending
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                    onPressed: _isSending ? null : _sendMessage,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= 900;
+
+        if (isDesktop) {
+          final activeChat = _conversations.firstWhere(
+            (c) => c['id'] == _selectedConversationId,
+            orElse: () => {'name': 'Select Chat', 'subtitle': ''},
+          );
+
+          return DesktopChatLayout(
+            conversations: _conversations,
+            selectedConversationId: _selectedConversationId,
+            onSelectConversation: (id) {
+              setState(() => _selectedConversationId = id);
+              _subscribeToMessages(id);
+            },
+            messages: _messages,
+            messageController: _messageController,
+            onSendMessage: _sendMessage,
+            onFilesDropped: (files) {
+              // Handle dropped attachments (e.g., BOL PDF / Photos)
+            },
+            activeTitle: activeChat['name'] ?? 'Chat',
+            activeSubtitle: activeChat['subtitle'] ?? 'Active Shipment Thread',
+          );
+        }
+
+        // Mobile fallback view
+        return Scaffold(
+          appBar: AppBar(title: const Text('Customer Chat')),
+          body: const Center(child: Text('Mobile Chat View')),
+        );
+      },
     );
+  }
+
+  @override
+  void dispose() {
+    _chatChannel?.unsubscribe();
+    _messageController.dispose();
+    super.dispose();
   }
 }

@@ -461,7 +461,21 @@ class MarketplaceRepository {
   /// Subscribes to new available load offers via Supabase Realtime postgres_changes.
   /// Returns a stream of [LoadOffer] objects as they are inserted.
   /// Callers should cancel the [StreamSubscription] when done.
+  ///
+  /// The realtime channel is SHARED and ref-counted: every subscriber listens
+  /// on the same broadcast stream, so one DB insert is delivered exactly once
+  /// to each subscriber, and the channel is torn down only when the LAST
+  /// listener cancels (broadcast onCancel semantics). Per-subscriber channels
+  /// would duplicate server traffic on the same topic — and with topic-keyed
+  /// clients, later subscribers would overwrite earlier callbacks.
+  StreamController<LoadOffer>? _newLoadsController;
+
   Stream<LoadOffer> subscribeToNewLoads() {
+    final existing = _newLoadsController;
+    if (existing != null && !existing.isClosed) {
+      return existing.stream;
+    }
+
     final controller = StreamController<LoadOffer>.broadcast();
     RealtimeChannel? channel;
 
@@ -506,8 +520,12 @@ class MarketplaceRepository {
         }
       }
       controller.close();
+      if (identical(_newLoadsController, controller)) {
+        _newLoadsController = null;
+      }
     };
 
+    _newLoadsController = controller;
     return controller.stream;
   }
 

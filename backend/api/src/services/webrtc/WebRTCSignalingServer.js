@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient, createUserClient } from '../../config/db.js';
+import { createSocketRateLimiter } from '../../lib/socketRateLimiter.js';
 
 const OFFLINE_GPS_PAGE_SIZE = 1000;
 
@@ -115,21 +116,8 @@ class WebRTCSignalingServer {
       }
 
       const peerId = this.generatePeerId();
-
-      // Security: Validate caller authorization for requested mesh instead of trusting client
-      const requestedMeshId = url.searchParams.get('meshId') || req.headers['x-mesh-id'];
+      // Select a mesh from authenticated server state, never the URL query.
       let meshId = null;
-
-      if (requestedMeshId) {
-        const isAuthorized = await this.isUserAuthorizedForMesh(decoded.id, requestedMeshId, decoded.role);
-        if (isAuthorized) {
-          meshId = requestedMeshId;
-        } else {
-          logger.warn(`WebRTC connection rejected: user ${decoded.id} unauthorized for requested mesh ${requestedMeshId}`);
-          ws.close(4003, 'Unauthorized for requested mesh');
-          return;
-        }
-      }
 
       if (!meshId) {
         for (const [existingPeerId, peer] of this.peers.entries()) {
@@ -184,7 +172,26 @@ class WebRTCSignalingServer {
       });
 
       // Handle messages
+      // WebSocket frames bypass the Express middleware chain, so the HTTP rate
+      // limiters never see them. Signaling messages are cheap individually but
+      // unbounded in aggregate, so each peer gets its own budget here.
+      const messageLimiter = createSocketRateLimiter({
+        refillPerSecond: Number(process.env.WS_WEBRTC_MSG_RATE_PER_SEC) || undefined,
+        capacity: Number(process.env.WS_WEBRTC_MSG_BURST) || undefined,
+      });
+
       ws.on('message', async (data) => {
+        if (!messageLimiter.tryConsume()) {
+          if (messageLimiter.isAbusive()) {
+            logger.error(
+              `[WebRTC] Closing peer ${peerId} for flooding signaling messages ` +
+                `(${messageLimiter.getOverRateCount()} over-rate messages)`,
+            );
+            ws.close(4008, 'Too many signaling messages');
+          }
+          return;
+        }
+
         try {
           const message = JSON.parse(data);
           await this.handleMessage(peerId, message);
@@ -281,28 +288,14 @@ class WebRTCSignalingServer {
       const targetPeer = this.peers.get(targetPeerId);
       if (!targetPeer || targetPeer.ws.readyState !== 1) continue;
 
-      let payloadLocation;
+      const payloadLocation = this.getDisclosedLocation(
+        sourceLoc || location,
+        targetPeer.location,
+        relayRadius,
+        maxRadius
+      );
 
-      if (sourceLoc && targetPeer.location && this.isValidLocation(targetPeer.location)) {
-        const distance = this.calculateDistance(
-          sourceLoc.lat,
-          sourceLoc.lng,
-          targetPeer.location.lat,
-          targetPeer.location.lng
-        );
-
-        if (distance <= relayRadius) {
-          payloadLocation = sourceLoc;
-        } else if (distance <= maxRadius) {
-          payloadLocation = this.capPrecision(sourceLoc, 2);
-        } else {
-          // Beyond max radius: drop
-          continue;
-        }
-      } else {
-        payloadLocation = this.capPrecision(sourceLoc || location, 2);
-      }
-
+      if (payloadLocation === null) continue;
       this.sendToPeer(targetPeerId, {
         type: 'peer-location',
         peerId,
@@ -333,6 +326,25 @@ class WebRTCSignalingServer {
         fromPeerId
       });
     }
+  }
+
+  getDisclosedLocation(sourceLocation, recipientLocation, relayRadius, maxRadius) {
+    if (!sourceLocation) return null;
+
+    if (recipientLocation && this.isValidLocation(recipientLocation) && this.isValidLocation(sourceLocation)) {
+      const distance = this.calculateDistance(
+        sourceLocation.lat,
+        sourceLocation.lng,
+        recipientLocation.lat,
+        recipientLocation.lng
+      );
+
+      if (distance <= relayRadius) return sourceLocation;
+      if (distance <= maxRadius) return this.capPrecision(sourceLocation, 2);
+      return null;
+    }
+
+    return this.capPrecision(sourceLocation, 2);
   }
 
   isValidLocation(location) {
@@ -447,9 +459,16 @@ class WebRTCSignalingServer {
       if (targetPeerId === peerId) continue;
       const targetPeer = this.peers.get(targetPeerId);
       if (targetPeer) {
+        const location = this.getDisclosedLocation(
+          targetPeer.location,
+          peer.location,
+          this.locationRelayRadius || 50,
+          this.maxRelayRadius || 200
+        );
+
         peerList.push({
           peerId: targetPeerId,
-          location: targetPeer.location,
+          ...(location ? { location } : {}),
           connectedAt: targetPeer.connectedAt
         });
       }
@@ -506,27 +525,79 @@ class WebRTCSignalingServer {
     this.wss.close();
   }
 
-  async getPeersNearLocation(lat, lng, radius = 10) {
+  async getPeersNearLocation(lat, lng, radius = 10, requestingUser) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       throw new TypeError('Latitude and longitude must be finite numbers');
     }
+
+    const isAdmin = requestingUser?.role === 'admin';
+    let searchLat = lat;
+    let searchLng = lng;
+    let searchRadius = radius;
+    let authorizedMeshIds = null;
+
+    if (!isAdmin) {
+      if (!requestingUser?.id) {
+        const error = new Error('Authenticated user identity is required');
+        error.statusCode = 403;
+        throw error;
+      }
+
+      const requestingPeers = Array.from(this.peers.values()).filter(
+        (peer) =>
+          peer.userId === requestingUser.id &&
+          peer.meshId &&
+          peer.location &&
+          this.isValidLocation(peer.location),
+      );
+
+      if (requestingPeers.length === 0) {
+        const error = new Error('An active location is required for nearby peer discovery');
+        error.statusCode = 403;
+        throw error;
+      }
+
+      authorizedMeshIds = new Set(requestingPeers.map((peer) => peer.meshId));
+      const requestingPeer = requestingPeers[0];
+
+      searchLat = requestingPeer.location.lat;
+      searchLng = requestingPeer.location.lng;
+      searchRadius = 10;
+    }
+
     const nearbyPeers = [];
     for (const [peerId, peer] of this.peers) {
-      if (peer.location) {
-        const distance = this.calculateDistance(
-          lat, lng,
-          peer.location.lat, peer.location.lng
-        );
-        if (distance <= radius) {
-          nearbyPeers.push({
-            peerId,
-            location: peer.location,
-            distance
-          });
-        }
+      if (
+        !peer.location ||
+        (requestingUser && requestingUser.role !== 'admin' &&
+          !authorizedMeshIds.has(peer.meshId)) ||
+        (requestingUser?.id && peer.userId === requestingUser.id)
+      ) continue;
+
+      const distance = this.calculateDistance(
+        searchLat,
+        searchLng,
+        peer.location.lat,
+        peer.location.lng,
+      );
+
+      if (distance <= searchRadius) {
+        nearbyPeers.push({
+          peerId,
+          location: peer.location,
+          distance,
+        });
       }
     }
-    return nearbyPeers;
+
+    if (isAdmin) return nearbyPeers;
+    if (nearbyPeers.length < 3) return [];
+
+    return nearbyPeers.map((peer) => ({
+      peerId: peer.peerId,
+      location: this.capPrecision(peer.location, 2),
+      distance: Math.round(peer.distance / 5) * 5,
+    }));
   }
 
   calculateDistance(lat1, lng1, lat2, lng2) {

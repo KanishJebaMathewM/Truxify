@@ -92,6 +92,7 @@
  */
 
 import express from 'express';
+import { getStatementPayout } from '../services/driver/statementPayout.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { z } from 'zod';
@@ -115,7 +116,87 @@ function sanitizeNumberPlate(plate) {
   if (!plate || typeof plate !== 'string') return '';
   return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
+/**
+ * GET /driver/statement
+ * Fetches the driver's delivered orders and calculates statement earnings.
+ * Uses offset-based pagination to retrieve all records beyond the PostgREST 1000-row limit.
+ */
+router.get('/driver/statement', authenticate, requirePolicy('driver:read'), async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { start_date, end_date } = req.query;
 
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID not found in token.' });
+    }
+
+    const pageSize = 1000;
+    const trips = [];
+
+    // Loop through paginated results to bypass PostgREST's 1000-row limit
+    while (true) {
+      let pageQuery = supabase
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) pageQuery = pageQuery.gte('pickup_date', start_date);
+      if (end_date) pageQuery = pageQuery.lte('pickup_date', end_date);
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        logger.error(
+          { requestId: req.requestId, event: 'DRIVER_STATEMENT_FETCH_ERROR', error: error.message },
+          'Failed to fetch driver statement records'
+        );
+        return res.status(500).json({ success: false, error: 'Failed to fetch statement records.' });
+      }
+
+      trips.push(...(pageRows || []));
+
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
+    }
+
+    // Restore descending order (newest first)
+    trips.reverse();
+
+    // Calculate aggregated totals across the full trip history
+    const totals = trips.reduce(
+      (acc, trip) => {
+        acc.total_amount += Number(trip.total_amount) || 0;
+        acc.total_base_freight += Number(trip.base_freight) || 0;
+        acc.total_toll_estimate += Number(trip.toll_estimate) || 0;
+        acc.total_platform_fee += Number(trip.platform_fee) || 0;
+        return acc;
+      },
+      { total_amount: 0, total_base_freight: 0, total_toll_estimate: 0, total_platform_fee: 0 }
+    );
+
+    logger.info(
+      { requestId: req.requestId, event: 'DRIVER_STATEMENT_FETCH_SUCCESS', tripCount: trips.length },
+      'Driver statement generated successfully.'
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: trips.length,
+      totals,
+      trips,
+    });
+  } catch (err) {
+    logger.error(
+      { requestId: req.requestId, event: 'DRIVER_STATEMENT_EXCEPTION', error: err?.message || err },
+      'Unhandled exception in driver statement endpoint'
+    );
+    return res.status(500).json({ success: false, error: 'Internal server error while generating statement.' });
+  }
+});
 
 /**
  * @openapi
@@ -136,6 +217,83 @@ function sanitizeNumberPlate(plate) {
  *       404:
  *         description: Profile not found
  */
+// Inside PUT /api/profile
+router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { full_name, language, dark_mode, is_online, phone, email, number_plate } = req.body;
+    const role = req.user.role;
+
+    const profileUpdate = {};
+    if (full_name !== undefined) profileUpdate.full_name = full_name;
+    if (language !== undefined) profileUpdate.language = language;
+    if (dark_mode !== undefined) profileUpdate.dark_mode = dark_mode;
+    if (phone !== undefined) profileUpdate.phone = phone;
+    if (email !== undefined) profileUpdate.email = email;
+
+    // Use per-request user client to respect RLS and security context
+    const userClient = createUserClient(req.token);
+
+    const { data, error } = await userClient
+      .from('profiles')
+      .update(profileUpdate)
+      .eq('id', userId)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: 'Profile not found or unauthorized.' });
+    }
+
+    if (role === 'driver') {
+      if (typeof is_online === 'boolean') {
+        const { error: driverError } = await userClient
+          .from('driver_details')
+          .update({ is_online })
+          .eq('user_id', userId);
+
+        if (driverError) throw driverError;
+      }
+
+      if (number_plate !== undefined) {
+        const normalizedPlate = sanitizeNumberPlate(number_plate);
+        const { error: truckError } = await userClient
+          .from('trucks')
+          .update({ number_plate: normalizedPlate })
+          .eq('driver_id', userId);
+
+        if (truckError) {
+          if (truckError.code === '23505') {
+            return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
+          }
+          throw truckError;
+        }
+      }
+    }
+
+    // Invalidate cache...
+    if (req.user?.uid) {
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) {}
+    }
+    if (req.user?.id) {
+      try { await invalidateCachedSupabaseProfileAll(req.user.id); } catch (err) {
+        logger.warn({ userId: req.user.id, err: err.message }, 'Failed to invalidate profile cache');
+      }
+    }
+
+    return res.json({
+      message: 'Profile updated',
+      profile: data
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to update profile',
+      details: err.message
+    });
+  }
+});
 router.get('/', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -221,7 +379,6 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
-    // Scope to authenticated user to prevent PII enumeration via arbitrary UUIDs
     const targetId = req.user?.id;
     if (!targetId) return res.status(403).json({ error: 'Forbidden' });
 
@@ -309,9 +466,9 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
         .from('driver_details')
         .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
 
-    if (driverDetailsErr) {
-      return res.status(500).json({ error: 'Failed to sync wallet to driver details.', details: driverDetailsErr.message });
-    }
+      if (driverDetailsErr) {
+        return res.status(500).json({ error: 'Failed to sync wallet to driver details.', details: driverDetailsErr.message });
+      }
     }
 
     if (req.user && req.user.uid) {
@@ -407,8 +564,6 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
       }
     }
 
-    // Invalidate the profile cache so that the next request retrieves fresh profile data.
-    // We await to ensure cache consistency — failures are caught and logged internally.
     if (req.user && req.user.uid) {
       try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
@@ -479,7 +634,6 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
       return res.status(500).json({ error: 'Failed to update FCM token.', details: error.message });
     }
 
-    // Invalidate Redis cache — next request will refetch the profile with the new token
     if (req.user.uid) {
       try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
@@ -535,21 +689,18 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
  *             schema:
  *               $ref: '#/components/schemas/DriverStatementResponse'
  */
-// GET DRIVER STATEMENT
 router.get('/driver/statement', authenticate, requirePolicy('profile:view-statement'), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
-    // PostgREST caps a single response at 1000 rows, so page through the
-    // whole history instead of silently truncating the statement.
     const pageSize = 1000;
     const trips = [];
 
     while (true) {
       let pageQuery = supabaseAdmin
         .from('orders')
-        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, bid_amount, total_amount, base_freight, toll_estimate, platform_fee, created_at')
         .eq('driver_id', userId)
         .in('status', ['delivered', 'payment_released'])
         .order('pickup_date', { ascending: true })
@@ -574,11 +725,8 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       }
     }
 
-    // Pages were fetched oldest-first; restore newest-first ordering.
     trips.reverse();
 
-    // Fetch the driver's name/phone so the statement PDF shows the real driver
-    // instead of the app-side 'Driver' fallback.
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('full_name, phone')
@@ -589,7 +737,6 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       return res.status(500).json({ error: 'Failed to fetch driver profile.', details: profileError.message });
     }
 
-    // Compute totals
     let totalBaseFreight = 0;
     let totalPlatformFees = 0;
     let totalTollEstimate = 0;
@@ -599,7 +746,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       const baseFreight = Number(trip.base_freight) || 0;
       const platformFee = Number(trip.platform_fee) || 0;
       const tollEstimate = Number(trip.toll_estimate) || 0;
-      const netEarnings = baseFreight - platformFee;
+      const netEarnings = getStatementPayout(trip);
 
       totalBaseFreight += baseFreight;
       totalPlatformFees += platformFee;
@@ -609,7 +756,7 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       return {
         id: trip.id,
         order_display_id: trip.order_display_id,
-        pickup_address: trip.pickup_address,
+        pickup_address: trip.pickup_address,                
         drop_address: trip.drop_address,
         pickup_date: trip.pickup_date,
         base_freight: baseFreight,
@@ -620,7 +767,6 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       };
     });
 
-    // Apply sorting before formatting output
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {
@@ -630,7 +776,6 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     }
 
     if (format === 'csv') {
-      // Optimize memory: construct CSV string directly using string builder/loop
       const sanitizeCsvValue = (val) => {
         if (val === null || val === undefined) return '""';
         let str = String(val).replace(/[\r\n]+/g, ' ');
@@ -698,10 +843,6 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
  *       404:
  *         description: Profile not found
  */
-// ADMIN CACHE INVALIDATION
-// Invalidates the profile cache for a specific user, forcing the next
-// authenticated request to refetch from Supabase. Use this after admin
-// operations that change role, status, or other cached profile fields.
 router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('admin:invalidate-cache'), auditLog({ action: 'admin:invalidate-cache', resourceType: 'user_profile_cache' }), validateParams(z.object({ userId: z.string().min(1, 'userId is required') })), async (req, res) => {
   try {
     const targetUserId = req.params.userId;
@@ -753,17 +894,10 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
   }
 });
 
-
-// GET DRIVER PERFORMANCE STATISTICS
 router.get('/driver/performance-stats', authenticate, requirePolicy('profile:view-statement'), userLimiter, async (req, res) => {
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats.
-    // `orders` has no distance_km / customer_rating / on_time columns, so the
-    // metrics below are derived from the data that actually exists: trips for
-    // distance, the ratings table for the average rating, and the delivered
-    // order set for the on-time percentage.
     const { data: orders, error } = await supabaseAdmin
       .from('orders')
       .select('id, order_display_id, base_freight, created_at, status, updated_at')
@@ -796,22 +930,16 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
     const completedOrders = orders || [];
     const totalDeliveries = completedOrders.length;
 
-    // Distance is stored as a text field on completed trips (e.g. '620 km').
     const totalDistance = (tripRows || []).reduce((acc, trip) => {
       const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
       return acc + (match ? Number(match[1]) : 0);
     }, 0);
 
-    // Average rating is derived from the ratings table.
     const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
     const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
 
-    // On-time percentage: the query only returns delivered / payment_released
-    // orders, so every order in the set counts as an on-time completion.
     const onTimePercentage = totalDeliveries > 0 ? 100 : null;
 
-    // Data-availability flags — null/missing distance, ratings, or deliveries
-    // are never guessed or fabricated.
     const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
     const insufficientData = {
       distanceKm: distancedTrips.length < totalDeliveries,
@@ -819,10 +947,8 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       onTime: totalDeliveries === 0,
     };
 
-    // Lifetime earnings (base_freight is stored in paisa; report in rupees)
     const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
-    // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
     const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
     const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
@@ -833,7 +959,6 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       earnings: Number(monthlyEarnings.toFixed(2))
     };
 
-    // Achievement badges based on milestones
     const badges = [];
     if (totalDeliveries >= 1) badges.push({ id: 'first_trip', title: 'Road Warrior', description: 'Completed first delivery successfully' });
     if (totalDeliveries >= 10) badges.push({ id: 'pro_driver', title: 'Logistics Pro', description: 'Completed 10+ deliveries' });
@@ -857,123 +982,3 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
 });
 
 export default router;
-
-
-// Resolves #2046: DELETE /admin/cache/:userId endpoint
-
-/*
-const express = require('express');
-const router = express.Router();
-const { createClient } = require('@supabase/supabase-js');
-const authMiddleware = require('../middleware/authMiddleware');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-const VALID_ROLES = ['driver', 'customer', 'admin'];
-const PHONE_REGEX = /^\+?[1-9]\d{1,14}$/;
-
-const validateProfileUpdate = (req, res, next) => {
-  const { role, phone_number, full_name } = req.body;
-  
-  if (role !== undefined) {
-    if (!VALID_ROLES.includes(role)) {
-      return res.status(400).json({ 
-        error: 'Invalid role',
-        message: `Role must be one of: ${VALID_ROLES.join(', ')}` 
-      });
-    }
-    
-    if (role === 'admin' && req.user.role !== 'admin') {
-      return res.status(403).json({ 
-        error: 'Forbidden',
-        message: 'You do not have permission to assign the admin role.' 
-      });
-    }
-  }
-
-  if (phone_number !== undefined && phone_number !== '') {
-    if (!PHONE_REGEX.test(phone_number)) {
-      return res.status(400).json({
-        error: 'Invalid phone number',
-        message: 'Phone number must be in valid E.164 format.'
-      });
-    }
-  }
-
-  if (full_name !== undefined) {
-    if (typeof full_name !== 'string' || full_name.trim().length < 2 || full_name.length > 100) {
-      return res.status(400).json({
-        error: 'Invalid full name',
-        message: 'Full name must be between 2 and 100 characters.'
-      });
-    }
-  }
-  
-  next();
-};
-
-const updateProfile = async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    const { full_name, phone_number, role, company_name, avatar_url } = req.body;
-
-    const updateData = {};
-    if (full_name !== undefined) updateData.full_name = full_name.trim();
-    if (phone_number !== undefined) updateData.phone_number = phone_number;
-    if (role !== undefined) updateData.role = role;
-    if (company_name !== undefined) updateData.company_name = company_name;
-    if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
-    
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ error: 'No valid fields provided for update' });
-    }
-
-    updateData.updated_at = new Date().toISOString();
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updateData)
-      .eq('id', userId)
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return res.status(200).json({
-      success: true,
-      message: 'Profile updated successfully',
-      data,
-    });
-  } catch (err) {
-    console.error('Profile update error:', err.message);
-    return res.status(500).json({ error: 'Failed to update profile' });
-  }
-};
-
-const getProfile = async (req, res) => {
-  try {
-    const userId = req.user.uid;
-    
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error) throw error;
-    if (!data) return res.status(404).json({ error: 'Profile not found' });
-
-    return res.status(200).json({ success: true, data });
-  } catch (err) {
-    console.error('Get profile error:', err.message);
-    return res.status(500).json({ error: 'Failed to fetch profile' });
-  }
-};
-
-router.get('/', authMiddleware, getProfile);
-router.put('/', authMiddleware, validateProfileUpdate, updateProfile);
-
-module.exports = router;
-*/

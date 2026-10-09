@@ -108,17 +108,63 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$response.statusCode}}",
+              "operator": "smallerEqual",
+              "value2": 299
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1200, -100],
+      "id": "rollback-http-ok",
+      "name": "Rollback HTTP Status OK?"
+    },
+    {
+      "parameters": {
         "toEmail": "ml-alerts@truxify.org",
         "subject": "Demand Forecast Rollback: {{$node[\"Demand Rollback Decision\"].json.active_version}}",
         "htmlFormat": true,
-        "message": "<h3>Demand Forecast Rollback</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>.</p><p>Rollback result: {{$json.rolled_back}} at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p><p>The previous demand model remains active only when restoration succeeds.</p>",
+        "message": "<h3>Demand Forecast Rollback — Succeeded</h3><p>Model performance degradation was detected for active generation: <strong>{{$node[\"Demand Rollback Decision\"].json.active_version}}</strong>.</p><p>The system successfully rolled back to the previous model version: <strong>{{$node[\"Demand Rollback Decision\"].json.previous_version}}</strong>.</p><p>Rollback confirmed at {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}.</p>",
         "options": {}
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 1.1,
-      "position": [1200, -100],
+      "position": [1400, -200],
       "id": "send-alert",
       "name": "Send Demand Rollback Alert"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "CRITICAL: Demand Forecast Rollback FAILED — Manual Intervention Required",
+        "htmlFormat": true,
+        "message": "<h3 style=\"color:#c0392b;\">Demand Forecast Rollback FAILED</h3><p>The automated rollback of the demand forecast model encountered an error.</p><p><strong>Active (degraded) version:</strong> {{$node[\"Demand Rollback Decision\"].json.active_version}}</p><p><strong>Target rollback version:</strong> {{$node[\"Demand Rollback Decision\"].json.previous_version}}</p><p><strong>HTTP Status from rollback API:</strong> {{$response.statusCode}}</p><p>The active model may still be the degraded version. Please investigate immediately and trigger a manual rollback if needed.</p><p>Evaluated at: {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [1400, 0],
+      "id": "send-failure-alert",
+      "name": "Send Rollback Failure Alert"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "ML Model Health Check: Demand Forecast Model Healthy",
+        "htmlFormat": true,
+        "message": "<h3>Demand Forecast Model Health Check — No Rollback Needed</h3><p>The hourly model health check completed. The active demand forecast model is performing within acceptable thresholds.</p><p><strong>Active Version:</strong> {{$node[\"Demand Rollback Decision\"].json.active_version}}</p><p>Evaluated at: {{$node[\"Demand Rollback Decision\"].json.evaluated_at}}</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [1000, 100],
+      "id": "send-healthy-email",
+      "name": "Notify Model Healthy"
     }
   ],
   "connections": {
@@ -174,6 +220,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "send-healthy-email",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -181,7 +234,25 @@
       "main": [
         [
           {
+            "node": "rollback-http-ok",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rollback-http-ok": {
+      "main": [
+        [
+          {
             "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-failure-alert",
             "type": "main",
             "index": 0
           }
@@ -191,6 +262,6 @@
   },
   "active": true,
   "settings": {},
-  "versionId": "ml-rollback-v1",
+  "versionId": "ml-rollback-v2",
   "id": "ml-rollback-workflow"
 }

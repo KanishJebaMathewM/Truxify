@@ -73,6 +73,16 @@ class HybridCrypto:
         ``time.time()``-based id which changed on every call (issue #13080).
         """
         def _material_bytes(material) -> bytes:
+            if isinstance(material, dict):
+                # Kyber and Dilithium expose structured public keys. Frame
+                # every field so the digest binds the full key, not its names.
+                parts = []
+                for name in sorted(material):
+                    name_bytes = name.encode('utf-8')
+                    value_bytes = _material_bytes(material[name])
+                    parts.append(len(name_bytes).to_bytes(4, 'big') + name_bytes)
+                    parts.append(len(value_bytes).to_bytes(8, 'big') + value_bytes)
+                return b''.join(parts)
             if hasattr(material, 'tobytes'):
                 return material.tobytes()
             if hasattr(material, 'public_bytes'):
@@ -223,11 +233,25 @@ class HybridCrypto:
     
     def hybrid_sign(self, data: bytes, hybrid_key: Dict) -> bytes:
         """Sign using Dilithium"""
-        return self.dilithium.sign(data)
+        key_material = hybrid_key.get('dilithium') if isinstance(hybrid_key, dict) else None
+        private_key = key_material.get('private') if isinstance(key_material, dict) else None
+        if not isinstance(private_key, dict):
+            raise ValueError("A Dilithium private key is required for signing")
+
+        signer = DilithiumSignature()
+        signer.private_key = private_key
+        return signer.sign(data)
     
     def hybrid_verify(self, data: bytes, signature: bytes, hybrid_key: Dict) -> bool:
         """Verify using Dilithium"""
-        return self.dilithium.verify(data, signature)
+        key_material = hybrid_key.get('dilithium') if isinstance(hybrid_key, dict) else None
+        public_key = key_material.get('public') if isinstance(key_material, dict) else None
+        if not isinstance(public_key, dict):
+            raise ValueError("A Dilithium public key is required for verification")
+
+        verifier = DilithiumSignature()
+        verifier.public_key = public_key
+        return verifier.verify(data, signature)
     
     def get_key_metrics(self, hybrid_key: Dict) -> Dict:
         """Get key metrics"""

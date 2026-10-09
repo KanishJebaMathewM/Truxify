@@ -3,7 +3,21 @@ import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking, weiWithinTolerance } from './escrow.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
+// backend/api/src/services/escrowFundingReconciliation.js
 
+// Inside the reconciliation heal flow after successful accept_bid_tx:
+const { error: updateError } = await _writeRepository.updateOrder(order.id, {
+  escrow_status: 'funded', // <-- Add missing escrow_status transition
+  escrow_funding_attempts: 0,
+  escrow_funding_error: null,
+  escrow_funding_last_attempt_at: null,
+  updated_at: new Date().toISOString()
+});
+
+if (updateError) {
+  logger.error({ orderId: order.id, error: updateError.message }, 'Failed to update order escrow status to funded after successful heal');
+  throw new Error(`Failed to reconcile escrow funding state: ${updateError.message}`);
+}
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status
 // 'funding' but whose escrow deposit never lands within the funding TTL are
 // automatically reverted (driver released, order back to pending, deposit

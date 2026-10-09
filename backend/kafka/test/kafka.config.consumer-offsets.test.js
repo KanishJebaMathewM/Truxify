@@ -7,13 +7,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('kafkajs', () => ({
-  Kafka: vi.fn(() => ({
-    admin: () => ({
-      connect: mocks.connect,
-      disconnect: mocks.disconnect,
-      listConsumerGroupOffsets: mocks.listConsumerGroupOffsets,
-    }),
-  })),
+  Kafka: vi.fn(function () {
+    return {
+      admin: () => ({
+        connect: mocks.connect,
+        disconnect: mocks.disconnect,
+        listConsumerGroupOffsets: mocks.listConsumerGroupOffsets,
+      }),
+    };
+  }),
 }));
 
 vi.mock('@opentelemetry/api', () => ({

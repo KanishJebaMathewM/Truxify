@@ -57,7 +57,10 @@ const releaseEscrow = async (req, res) => {
             data: result,
         });
     } catch (error) {
-        if (error.message.includes('Unauthorized') || error.message.includes('not found') || error.message.includes('can only be released')) {
+        if (error.message.includes('already in progress') || error.message.includes('already been processed') || error.message.includes('already released') || error.message.includes('already been released')) {
+            return res.status(409).json({ error: error.message });
+        }
+        if (error.message.includes('Unauthorized') || error.message.includes('not found') || error.message.includes('can only be released') || error.message.includes('No escrow deposit')) {
             return res.status(403).json({ error: error.message });
         }
 

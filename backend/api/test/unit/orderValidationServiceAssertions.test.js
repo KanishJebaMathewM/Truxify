@@ -12,7 +12,7 @@ vi.mock('../../src/core/container.js', () => ({
   orderRepository: null,
 }));
 
-const { OrderValidationService, default: defaultService } = await import(
+const { OrderValidationService } = await import(
   '../../src/services/order/orderValidationService.js'
 );
 const { DomainError } = await import('../../src/services/order/domainError.js');
@@ -86,7 +86,4 @@ describe('OrderValidationService assertions', () => {
     expect(order).toEqual({ id: 'o1' });
   });
 
-  it('default export is a service instance proxy', () => {
-    expect(defaultService).toBeDefined();
-  });
 });

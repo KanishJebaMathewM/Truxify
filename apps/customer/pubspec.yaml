@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   record: ^7.1.1
-  pointycastle: ^3.7.3
+  pointycastle: ^4.0.0
   firebase_core: ^4.11.0
   firebase_auth: ^6.5.4
   firebase_messaging: ^16.4.1

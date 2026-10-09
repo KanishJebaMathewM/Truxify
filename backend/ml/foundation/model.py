@@ -3,8 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 from datetime import datetime
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List
 import logging
+from threading import RLock
+
+from .optimizer_transition import operation_owned, optimizer_transition
+from .supervised_batch import own_classification_batch
 
 logger = logging.getLogger(__name__)
 
@@ -267,39 +271,29 @@ class FoundationModelTrainer:
         )
         
         self.criterion = nn.CrossEntropyLoss()
+        self._operation_lock = RLock()
         
         logger.info(f"✅ Trainer initialized on {self.device}")
     
+    @operation_owned
     def train_step(self, batch: Dict) -> Dict:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        # Move to device
-        input_ids = batch['input_ids'].to(self.device)
-        attention_mask = batch.get('attention_mask')
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(self.device)
-        labels = batch['labels'].to(self.device)
-        
-        # Forward pass
-        outputs = self.model(input_ids, attention_mask, task='classification')
-        logits = outputs['output']
-        
-        # Compute loss
-        loss = self.criterion(logits, labels)
-        
-        # Backward pass
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
-        self.scheduler.step()
-        
-        return {
-            'loss': loss.item(),
-            'lr': self.optimizer.param_groups[0]['lr']
-        }
-    
+        """Publish one finite native supervised optimizer/scheduler transition."""
+        owned = own_classification_batch(batch, self.model)
+        with optimizer_transition(self.model, self.optimizer, self.scheduler):
+            self.model.train()
+            self.optimizer.zero_grad()
+            outputs = self.model(owned['input_ids'], owned['attention_mask'], task='classification')
+            loss = self.criterion(outputs['output'], owned['labels'])
+            if loss.ndim != 0 or not torch.isfinite(loss):
+                raise ValueError("supervised objective must be a finite scalar")
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
+            self.optimizer.step()
+            self.scheduler.step()
+            result = {'loss': loss.item(), 'lr': self.optimizer.param_groups[0]['lr']}
+        return result
+
+    @operation_owned
     def train(self, train_data: List[Dict], val_data: Optional[List[Dict]] = None) -> Dict:
         """Full training loop"""
         losses = []
@@ -337,6 +331,7 @@ class FoundationModelTrainer:
             'final_val_loss': val_losses[-1] if val_losses else None
         }
     
+    @operation_owned
     def validate(self, val_data: List[Dict]) -> float:
         """Validate model"""
         self.model.eval()

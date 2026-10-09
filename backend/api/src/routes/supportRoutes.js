@@ -277,153 +277,26 @@ router.get('/categories', (_req, res) => {
  *   post:
  *     tags: [Support]
  *     summary: Create a support ticket
- *     description: Creates a new support ticket for the authenticated user. Category is normalized via alias map.
+ *     description: Creates a new support ticket for authenticated users.
  *     security:
  *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/CreateTicketRequest'
- *     responses:
- *       201:
- *         description: Ticket created
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketResponse'
- *       400:
- *         description: Validation error
  */
-router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
-  const subject = normalizeRequiredText(req.body.subject);
-  if (!subject) {
-    return res.status(400).json({ error: 'subject is required and cannot be empty' });
-  }
-  const category = normalizeRequiredText(req.body.category);
-  const description = normalizeRequiredText(req.body.description) || subject;
-
-  const normalizedCategory = category.toLowerCase().trim();
-  const dbCategory = CATEGORY_MAP[normalizedCategory];
-
-  if (!dbCategory) {
-    return res.status(400).json({
-      error: `Invalid support ticket category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
-    });
-  }
+router.post('/tickets', authenticate, userLimiter, requireIdempotency(3600), validateBody(createSupportTicketSchema), async (req, res) => {
+  const { subject, description, category } = req.body;
 
   try {
-    const { data: ticket, error } = await userDb(req)
-      .from('support_tickets')
-      .insert({
-        user_id: req.user.id,
-        subject,
-        description,
-        category: dbCategory,
-        status: 'open',
-      })
-      .select(TICKET_COLUMNS)
-      .single();
+    const normalizedSubject = normalizeRequiredText(subject);
 
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to create support ticket.',
-        details: error.message,
+    // Validate that the normalized subject is not empty or whitespace-only
+    if (!normalizedSubject || normalizedSubject.trim() === '') {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Support ticket subject cannot be empty or contain only whitespace.',
       });
     }
 
-    res.status(201).json({
-      message: 'Support ticket created successfully.',
-      ticket,
-    });
-  } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
-  }
-});
-
-// ============================================================================
-// 4. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
-// ============================================================================
-/**
- * @openapi
- * /api/support/tickets:
- *   get:
- *     tags: [Support]
- *     summary: List user's support tickets
- *     description: Returns paginated support tickets for the authenticated user. Optional filters by status and category.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *       - in: query
- *         name: category
- *         schema:
- *           type: string
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: Paginated ticket list
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketListResponse'
- */
-router.get('/tickets', authenticate, userLimiter, async (req, res) => {
-  const { status, category, page = '1', limit = '20' } = req.query;
-  if (page !== undefined && !/^\d+$/.test(page)) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
-  }
-  if (limit !== undefined && !/^\d+$/.test(limit)) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
-  }
-  const pageNum = Math.max(1, parseInt(page, 10));
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
-  const offset = (pageNum - 1) * limitNum;
-
-  const statusResult = parseTicketStatus(status);
-  if (statusResult.error) {
-    return res.status(400).json({ error: statusResult.error });
-  }
-
-  try {
-    let query = userDb(req)
-      .from('support_tickets')
-      .select(TICKET_COLUMNS, { count: 'exact' })
-      .eq('user_id', req.user.id);
-
-    if (statusResult.value) {
-      query = query.eq('status', statusResult.value);
-    }
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const { data: tickets, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limitNum - 1);
-
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch support tickets.',
-        details: error.message,
-      });
-    }
-
+    const normalizedDescription = normalizeRequiredText(description);
+    const ticketCategory = category || 'general';
     const pagination = formatPaginationMeta(count || 0, pageNum, limitNum);
 
     res.json({
@@ -478,24 +351,24 @@ router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view
 }), validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
-  try {
-    const { data: ticket, error } = await userDb(req)
-      .from('support_tickets')
-      .select(TICKET_DETAIL_COLUMNS)
-      .eq('id', ticketId)
-      .maybeSingle();
+    const newTicket = {
+      user_id: req.user.id,
+      subject: normalizedSubject,
+      description: normalizedDescription,
+      category: ticketCategory,
+      status: 'open',
+      created_at: new Date().toISOString(),
+    };
 
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch support ticket.',
-        details: error.message,
-      });
+    const { data: savedTicket, error: saveErr } = await supportRepository.insertTicket(newTicket);
+    if (saveErr) {
+      logger.error('[support] Failed to create support ticket:', saveErr.message);
+      return res.status(500).json({ error: 'Failed to create support ticket.' });
     }
 
-    if (!ticket) {
-      return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
+    return res.status(201).json({
+      message: 'Support ticket created successfully.',
+      ticket: savedTicket,
     res.json(ticket);
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
@@ -861,8 +734,8 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
       comment,
     });
   } catch (err) {
-    logger.error("[SupportRoutes] Error:", err?.message || err);
-    res.status(500).json({ error: err?.message || "Internal Server Error" });
+    logger.error('[support] Exception in ticket creation:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

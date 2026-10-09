@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mtl.checkpoint_generation import validate_generation
+from mtl.gradient_projection import project_conflicts
 from torch.utils.data import DataLoader, TensorDataset
 
 logger = logging.getLogger(__name__)
@@ -150,25 +151,8 @@ class GradientSurgery:
     
     @staticmethod
     def pcgrad(grads: List[torch.Tensor]) -> List[torch.Tensor]:
-        """Project Conflicting Gradients"""
-        if len(grads) <= 1:
-            return grads
-        
-        # For each gradient, project to remove conflicts
-        projected = [value.clone() for value in grads]
-        for i in range(len(grads)):
-            for j in range(len(grads)):
-                if i != j:
-                    # Compute dot product
-                    dot = torch.dot(projected[i].flatten(), grads[j].flatten())
-                    if dot < 0:  # Conflicting gradients
-                        # Project gradient
-                        norm_sq = torch.norm(grads[j]) ** 2
-                        if norm_sq > 0:
-                            projection = (dot / norm_sq) * grads[j]
-                            projected[i] = projected[i] - projection
-        
-        return projected
+        """Owned sequential projection with checked dynamic-range arithmetic."""
+        return project_conflicts(grads)
     
     @staticmethod
     def grad_drop(grads: List[torch.Tensor], threshold: float = 0.01) -> List[torch.Tensor]:

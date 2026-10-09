@@ -3,7 +3,28 @@
  * Provides regulatory compliance verification across axle groups, spacing, and WIM bypass.
  */
 import logger from '../middleware/logger.js';
+import logger from '../middleware/logger.js';
 
+/**
+ * Checks weigh station bypass eligibility for a given trip/truck.
+ * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.
+ * 
+ * @param {Object} params
+ * @param {string} params.vehicleId
+ * @param {number} params.weight
+ * @returns {Promise<Object>} Bypass decision result
+ */
+export async function checkBypassEligibility({ vehicleId, weight }) {
+  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
+
+  // Deterministic mock response (replaces Math.random coin-flip)
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Mock regulatory evaluation: vehicle within compliant weight threshold.',
+    evaluatedAt: new Date().toISOString()
+  };
+}
 // Standard Federal Limits (lbs)
 export const FHWA_LIMITS = {
     MAX_SINGLE_AXLE_LBS: 20000,

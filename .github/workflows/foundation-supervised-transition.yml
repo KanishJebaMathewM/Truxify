@@ -51,7 +51,7 @@ jobs:
         env:
           PYTHONPATH: backend/ml
           OMP_NUM_THREADS: '1'
-        run: python -m pytest backend/ml/tests/test_foundation_supervised_transition.py backend/ml/tests/test_mlm_optimizer_transition.py backend/ml/tests/test_foundation.py backend/ml/tests/test_foundation_attention_masks.py backend/ml/tests/test_foundation_mlm_objective.py backend/ml/tests/test_foundation_validation.py -q
+        run: python -m pytest backend/ml/tests/test_foundation_supervised_transition.py backend/ml/tests/test_mlm_optimizer_transition.py backend/ml/tests/test_foundation.py backend/ml/tests/test_foundation_attention_masks.py backend/ml/tests/test_foundation_mlm_objective.py backend/ml/tests/test_foundation_validation.py backend/ml/tests/test_foundation_data.py -q
       - name: Analyze new and scoped legacy sources
         run: |
           python -m ruff check backend/ml/foundation/supervised_batch.py backend/ml/foundation/optimizer_transition.py backend/ml/tests/test_foundation_supervised_transition.py

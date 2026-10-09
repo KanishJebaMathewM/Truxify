@@ -12,10 +12,11 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/offline/websocket/resilient_websocket.dart';
+import 'package:truxify_shared/truxify_shared.dart' show WsConnectionState;
 import '../theme/app_theme.dart';
+import '../widgets/common_widgets.dart';
 import '../constants/supabase_config.dart';
 import '../services/supabase_service.dart';
-import '../widgets/common_widgets.dart';
 class LiveTrackingScreen extends StatefulWidget {
   final String orderId;
   final OrderService? orderService;
@@ -58,6 +59,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   LatLng? _currentPosition;
   ResilientWebSocket? _trackingWebSocket;
   StreamSubscription? _trackingSubscription;
+  StreamSubscription<WsConnectionState>? _wsStateSubscription;
   RealtimeChannel? _supabaseRealtimeChannel;
   final MapController _mapController = MapController();
 
@@ -150,6 +152,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       }
     }
     _trackingSubscription?.cancel();
+    _wsStateSubscription?.cancel();
     unawaited(_trackingWebSocket?.close());
     super.dispose();
   }
@@ -178,6 +181,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     final initialWsUrl = buildUrl();
     debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
 
+    final injectedSocket = widget.trackingWebSocket;
+    if (injectedSocket != null) {
+      // Injected socket (tests, previews): use it instead of dialing.
+      _trackingWebSocket = injectedSocket;
+    } else {
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
       urlFactory: buildUrl,
@@ -200,6 +208,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         debugPrint('[LiveTracking] auth frame send result: $authSent');
       },
     );
+    }
+
+    // onConnect only fires for sockets this screen constructs — an injected
+    // socket's reconnects are invisible without it. The connectionState
+    // stream is observable for both: a new 'connected' transition means the
+    // per-connection auth flag must reset so the next 'authenticated' frame
+    // is recognized as a reconnect (and triggers the authoritative refresh).
+    _wsStateSubscription =
+        _trackingWebSocket!.connectionState.listen((state) {
+      if (state == WsConnectionState.connected) {
+        _authenticatedForCurrentConnection = false;
+      }
+    });
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
       debugPrint('Tracking WebSocket message received: $message');
@@ -585,52 +606,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showVoiceAi() async {
+    // The full assistant sheet (presets, query flow, response card) exists as
+    // _VoiceAiSheet but was never wired — the tile opened this inline
+    // placeholder instead. Present the real sheet.
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                  width: 46,
-                  height: 5,
-                  decoration: BoxDecoration(
-                      color: TruxifyColors.border,
-                      borderRadius: BorderRadius.circular(999))),
-              const SizedBox(height: 18),
-              const CircleAvatar(
-                  radius: 34,
-                  backgroundColor: TruxifyColors.accentLight,
-                  child: Icon(Icons.mic_rounded,
-                      color: TruxifyColors.accentDark, size: 34)),
-              const SizedBox(height: 16),
-              Text('Voice AI',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 8),
-              Text(
-                VoiceAiService.buildResponse(VoiceAiOrderInput.fromMap(_order)),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: TruxifyColors.adaptiveSecondaryText(context)),
-              ),
-              const SizedBox(height: 20),
-              const SizedBox(
-                height: 56,
-                child: Center(child: LiveDot(size: 14)),
-              ),
-            ],
-          ),
+        return _VoiceAiSheet(
+          orderId: widget.orderId,
+          orderService: _orderService,
+          orderData: _order,
         );
       },
     );
@@ -1071,40 +1058,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }
   }
 
-  void _showVoiceAi() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _VoiceAiSheet(
-        orderId: widget.orderId,
-        orderService: _orderService,
-        orderData: _order,
-      ),
-    );
-  }
 
-  void _showCallDriver() {
-    if (_driverPhone == null || _driverPhone!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Driver phone number not available')),
-      );
-      return;
-    }
-    launchUrl(Uri.parse('tel:$_driverPhone'));
-  }
 
-  void _showChangeDrop() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Drop address change requested')),
-    );
-  }
 
-  void _showCancel() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Order cancellation unavailable for active trips')),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1131,15 +1087,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       tileProvider: CancellableNetworkTileProvider(),
                       userAgentPackageName: 'com.truxify.customer',
                     ),
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: _routePoints,
-                          strokeWidth: 4,
-                          color: TruxifyColors.accentDark,
-                        ),
-                      ],
-                    ),
+                    if (_routePoints.isNotEmpty)
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: _routePoints,
+                            strokeWidth: 4,
+                            color: TruxifyColors.accentDark,
+                          ),
+                        ],
+                      ),
                     AnimatedBuilder(
                       animation: _movementController,
                       builder: (context, _) {

@@ -71,10 +71,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get phoneMustBeDigits => 'Phone number must contain only digits';
 
   @override
-  String get autoVerificationFailed => 'Auto-verification failed. Please enter OTP manually.';
+  String get autoVerificationFailed =>
+      'Auto-verification failed. Please enter OTP manually.';
 
   @override
-  String get protectedDriverAccess => 'This area is restricted to registered drivers.';
+  String get protectedDriverAccess =>
+      'This area is restricted to registered drivers.';
 
   @override
   String get verifyOtp => 'Verify OTP';
@@ -230,7 +232,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pleaseGoOnline => 'Please go online first';
 
   @override
-  String get noDestinationAvailable2 => 'No destination available. Please set a destination.';
+  String get noDestinationAvailable2 =>
+      'No destination available. Please set a destination.';
 
   @override
   String get locationPermissionRequired => 'Location permission is required';
@@ -239,7 +242,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get locationAccessDenied => 'Location access denied';
 
   @override
-  String get locationPermDenied => 'Location permission permanently denied. Please enable in settings.';
+  String get locationPermDenied =>
+      'Location permission permanently denied. Please enable in settings.';
 
   @override
   String get openSettings => 'Open Settings';
@@ -299,7 +303,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutTruxifyDriverApp => 'About Truxify Driver App';
 
   @override
-  String get truxifyDescription => 'Truxify is a truck logistics platform connecting drivers with loads across East Africa.';
+  String get truxifyDescription =>
+      'Truxify is a truck logistics platform connecting drivers with loads across East Africa.';
 
   @override
   String get documents => 'Documents';
@@ -452,7 +457,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get couldNotLoadRecommendations => 'Could not load recommendations';
 
   @override
-  String get noActiveTripForRecommendations => 'Complete a trip to see return load suggestions';
+  String get noActiveTripForRecommendations =>
+      'Complete a trip to see return load suggestions';
 
   @override
   String get detourDistance => 'Detour';
@@ -528,7 +534,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String resendOtpIn(int seconds) {
-    return 'Resend in $secondss';
+    return 'Resend in ${seconds}s';
   }
 
   @override

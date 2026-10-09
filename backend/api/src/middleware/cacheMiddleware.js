@@ -15,7 +15,17 @@ export function cacheMiddleware(ttlSeconds, keyPrefix, keyGenerator) {
       return next();
     }
 
-    const uniqueKey = await keyGenerator(req);
+    // Key generation is intentionally kept BEFORE the Redis read so a stale or
+    // malformed key never hits storage. If the generator itself throws, the
+    // request must still reach the handler — fail open (skip caching) instead
+    // of letting the request die.
+    let uniqueKey;
+    try {
+      uniqueKey = await keyGenerator(req);
+    } catch (err) {
+      logger.warn({ err, keyPrefix }, '[Cache] Key generation failed; bypassing cache');
+      return next();
+    }
     const cacheKey = `cache:${keyPrefix}:${uniqueKey}`;
 
     try {
@@ -35,10 +45,16 @@ export function cacheMiddleware(ttlSeconds, keyPrefix, keyGenerator) {
     res.json = function (body) {
       res.json = originalJson;
 
-      if (res.statusCode >= 200 && res.statusCode < 300 && body !== null && body !== undefined) {
-        upstashRedisClient.set(cacheKey, body, { ex: ttlSeconds }).catch((err) => {
+      // The write path must mirror the read path's failure tolerance: a
+      // missing/unconfigured Redis client must never fail the request.
+      if (upstashRedisClient && res.statusCode >= 200 && res.statusCode < 300 && body !== null && body !== undefined) {
+        try {
+          upstashRedisClient.set(cacheKey, body, { ex: ttlSeconds }).catch((err) => {
+            logger.warn({ err, cacheKey }, '[Cache] Write error');
+          });
+        } catch (err) {
           logger.warn({ err, cacheKey }, '[Cache] Write error');
-        });
+        }
       }
 
       return originalJson.call(this, body);

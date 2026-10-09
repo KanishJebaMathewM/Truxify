@@ -21,7 +21,7 @@ describe("TruxifyEscrow", function () {
         bookingId,
         driverAddress,
         amount,
-        await escrow.commitmentNonces(customerAddress),
+        await escrow.commitmentNonces(customerAddress, bookingId),
       ],
     );
     return owner.signMessage(ethers.getBytes(commitment));
@@ -504,6 +504,8 @@ describe("TruxifyEscrow", function () {
     it("splits an active booking between driver compensation and customer refund", async function () {
       const { escrow, owner, customer, driver, bookingId, amount } = await loadFixture(deployWithBookingFixture);
       const driverFee = ethers.parseEther("0.5");
+
+      expect((await escrow.getBooking(bookingId)).started).to.be.false;
 
       await expect(escrow.connect(owner).cancelWithPenalty(bookingId, driverFee))
         .to.emit(escrow, "CancellationPenaltyApplied")

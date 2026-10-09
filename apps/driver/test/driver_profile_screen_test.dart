@@ -7,6 +7,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/controllers/app_controller.dart';
 import 'package:truxify_driver/screens/driver_profile_screen.dart';
+import 'package:truxify_driver/widgets/common_widgets.dart';
+import 'package:provider/provider.dart';
+import 'package:truxify_driver/providers/text_scale_provider.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
@@ -20,6 +23,9 @@ class MockHttpOverrides extends HttpOverrides {
 }
 
 class MockHttpClient extends Fake implements HttpClient {
+  @override
+  void close({bool force = false}) {}
+
   @override
   Future<HttpClientRequest> getUrl(Uri url) async {
     return MockHttpClientRequest('GET', url);
@@ -39,6 +45,26 @@ class MockHttpClientRequest extends Fake implements HttpClientRequest {
   final Uri url;
   MockHttpClientRequest(this.method, this.url);
 
+  // The IO machinery drives these (font fetchers, uploads); absorb unknown
+  // setters rather than throw, but keep Future-valued members real.
+  @override
+  bool followRedirects = true;
+  @override
+  int contentLength = -1;
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {}
+  @override
+  Future<void> flush() async {}
+  @override
+  Future<HttpClientResponse> get done =>
+      Future.value(MockHttpClientResponse(method, url));
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    if (invocation.isSetter) return null;
+    return super.noSuchMethod(invocation);
+  }
+
   @override
   final HttpHeaders headers = MockHttpHeaders();
 
@@ -53,6 +79,8 @@ class MockHttpHeaders extends Fake implements HttpHeaders {
   void add(String name, Object value, {bool preserveHeaderCase = false}) {}
   @override
   void set(String name, Object value, {bool preserveHeaderCase = false}) {}
+  @override
+  void forEach(void Function(String name, List<String> values) action) {}
 }
 
 class MockHttpClientResponse extends Fake implements HttpClientResponse {
@@ -62,6 +90,17 @@ class MockHttpClientResponse extends Fake implements HttpClientResponse {
 
   @override
   int get statusCode => 200;
+
+  @override
+  int get contentLength => -1;
+  @override
+  bool get isRedirect => false;
+  @override
+  bool get persistentConnection => false;
+  @override
+  String get reasonPhrase => 'OK';
+  @override
+  List<RedirectInfo> get redirects => const [];
 
   @override
   HttpHeaders get headers => MockHttpHeaders();
@@ -136,9 +175,12 @@ Widget _buildTestApp() {
   final controller = TruxifyController();
   return TruxifyScope(
     controller: controller,
-    child: MaterialApp(
-      theme: TruxifyTheme.light(),
-      home: const DriverProfileScreen(),
+    child: ChangeNotifierProvider(
+      create: (_) => TextScaleProvider(),
+      child: MaterialApp(
+        theme: TruxifyTheme.light(),
+        home: const DriverProfileScreen(),
+      ),
     ),
   );
 }
@@ -188,8 +230,16 @@ void main() {
 
     expect(find.text('Online (Ready for Jobs)'), findsOneWidget);
 
-    // Toggle duty status
-    await tester.tap(find.byType(Switch));
+    // The screen has two switches (availability + Enable Large Text) — target
+    // the availability one, which shares a Card with the status text.
+    final availabilitySwitch = find.descendant(
+      of: find.ancestor(
+        of: find.text('Online (Ready for Jobs)'),
+        matching: find.byType(Card),
+      ),
+      matching: find.byType(Switch),
+    );
+    await tester.tap(availabilitySwitch);
     await tester.pumpAndSettle();
 
     expect(find.text('Offline (Unavailable)'), findsOneWidget);

@@ -88,7 +88,7 @@ void main() {
       fakeClient = FakeApiClient();
     });
 
-    test('token upload on registration sends PUT to /api/profile/fcm-token with correct payload', async () {
+    test('token upload on registration sends PUT to /api/profile/fcm-token with correct payload', () async {
       await FcmService.sendTokenToBackend('test-fcm-token-123', client: fakeClient);
 
       if (fakeClient.putPaths.isNotEmpty) {
@@ -97,7 +97,7 @@ void main() {
       }
     });
 
-    test('token unregistration on logout sends POST to /api/devices/unregister with correct payload', async () {
+    test('token unregistration on logout sends POST to /api/devices/unregister with correct payload', () async {
       await FcmService.unregisterTokenFromBackend('test-fcm-token-456', client: fakeClient);
 
       if (fakeClient.postPaths.isNotEmpty) {
@@ -106,7 +106,7 @@ void main() {
       }
     });
 
-    test('behavior when no authenticated user is present skips API calls gracefully', async () {
+    test('behavior when no authenticated user is present skips API calls gracefully', () async {
       // When no user is signed in (currentUser == null)
       await FcmService.sendTokenToBackend('token-no-auth', client: fakeClient);
       await FcmService.unregisterTokenFromBackend('token-no-auth', client: fakeClient);
@@ -115,7 +115,7 @@ void main() {
       expect(fakeClient.postPaths, isEmpty);
     });
 
-    test('failure paths handle backend API errors gracefully without throwing unhandled exceptions', async () {
+    test('failure paths handle backend API errors gracefully without throwing unhandled exceptions', () async {
       fakeClient.shouldThrow = true;
       fakeClient.errorToThrow = const ApiException(500, 'Server Error');
 
@@ -133,7 +133,7 @@ void main() {
       );
     });
 
-    test('clearToken executes gracefully without throwing', async () {
+    test('clearToken executes gracefully without throwing', () async {
       await expectLater(FcmService.clearToken(), completes);
     });
   });

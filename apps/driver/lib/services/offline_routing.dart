@@ -29,8 +29,26 @@ class OfflineRouteMatrixService {
             sin(dLng / 2);
 
     double c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    double distanceKm = (earthRadiusKm * c * 1.25); // Apply road winding factor
-    double durationMins = (distanceKm / 55.0) * 60.0;
+    final haversineKm = earthRadiusKm * c;
+
+    // Corridor-aware model: urban legs wind more and crawl; highway corridors
+    // are straighter and faster. A single flat 1.25 winding factor and
+    // 55 km/h speed badly misestimates both extremes.
+    final double detourFactor;
+    final double speedKmh;
+    if (haversineKm < 50) {
+      detourFactor = 1.4; // urban grid + last-mile winding
+      speedKmh = 30; // city traffic
+    } else if (haversineKm < 300) {
+      detourFactor = 1.3; // mixed corridor
+      speedKmh = 45;
+    } else {
+      detourFactor = 1.2; // highway corridors are straighter
+      speedKmh = 65; // sustained highway speed
+    }
+
+    double distanceKm = haversineKm * detourFactor;
+    double durationMins = (distanceKm / speedKmh) * 60.0;
     double fuelLiters = distanceKm * 0.32;
 
     return {

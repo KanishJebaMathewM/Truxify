@@ -419,3 +419,14 @@ def test_compatible_cross_dtype_tuple_casts_and_retains_native_next_update(famil
     torch.manual_seed(59)
     assert advance(target) == expected
     same_tree(reference.model.state_dict(), target.model.state_dict())
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_capture_rejects_optimizer_bound_to_different_native_model(family):
+    owner, other = trainer(family), trainer(family, seed=71)
+    advance(other)
+    owner.optimizer = other.optimizer
+    before = snapshot(owner)
+    with pytest.raises(ValueError, match="bind"):
+        capture_pair(owner.model, owner.optimizer)
+    same_tree(before, snapshot(owner))

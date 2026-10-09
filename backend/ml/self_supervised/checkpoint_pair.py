@@ -229,6 +229,13 @@ def prepare_pair(model, optimizer, checkpoint):
     if type(optimizer) is not torch.optim.AdamW:
         raise ValueError("SSL checkpoint restore supports ordinary native AdamW")
     params = list(model.parameters())
+    bound = [p for group in optimizer.param_groups for p in group["params"]]
+    if (
+        len(optimizer.param_groups) != 1
+        or len(bound) != len(params)
+        or any(a is not b for a, b in zip(params, bound))
+    ):
+        raise ValueError("SSL native optimizer must bind ordered registered parameters")
     if not params or any(
         p.dtype not in (torch.float32, torch.float64)
         or p.device.type not in ("cpu", "cuda")

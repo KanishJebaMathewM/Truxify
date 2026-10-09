@@ -1,9 +1,17 @@
+import logging
+import threading
+from typing import Dict
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable
-import logging
+from pinns.training_transition import (
+    PINNInputError,
+    checked_transition,
+    loop_policy,
+    owned_operation,
+)
 from torch.autograd import grad
 
 logger = logging.getLogger(__name__)
@@ -161,6 +169,7 @@ class PINNTrainer:
         lr: float = 1e-3,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        self._operation_lock = threading.RLock()
         self.model = model.to(device)
         self.physics_loss = physics_loss
         self.device = device
@@ -181,45 +190,50 @@ class PINNTrainer:
         values = []
         for name, tensor in (("observations", x_data), ("targets", y_data),
                              ("collocation points", x_phys)):
-            if not isinstance(tensor, torch.Tensor) or not tensor.is_floating_point():
-                raise ValueError(f"{name} must be a finite floating tensor")
-            tensor = tensor.to(device=parameter.device, dtype=parameter.dtype)
+            if not isinstance(tensor, torch.Tensor) or not tensor.is_floating_point() or tensor.layout != torch.strided:
+                raise PINNInputError(f"{name} must be a finite floating tensor")
+            if tensor.numel() > 1048576:
+                raise PINNInputError("training tensor exceeds the owned value budget")
+            tensor = tensor.to(device=parameter.device, dtype=parameter.dtype).clone()
             if not torch.isfinite(tensor).all():
-                raise ValueError(f"{name} must be finite in model dtype")
+                raise PINNInputError(f"{name} must be finite in model dtype")
             values.append(tensor)
         x_data, y_data, x_phys = values
         for points in (x_data, x_phys):
-            if points.ndim != 2 or not len(points) or points.shape[1] != self.model.input_dim:
-                raise ValueError("points must be nonempty rows with input_dim coordinates")
+            if points.ndim != 2 or not 1 <= len(points) <= 10000 or points.shape[1] != self.model.input_dim:
+                raise PINNInputError("points must be nonempty rows with input_dim coordinates")
         if self.model.output_dim != 1:
-            raise ValueError("physics training requires one scalar model output")
+            raise PINNInputError("physics training requires one scalar model output")
         if y_data.ndim == 1:
             y_data = y_data[:, None]
         if y_data.shape != (len(x_data), 1):
-            raise ValueError("targets must contain exactly one scalar per observation")
+            raise PINNInputError("targets must contain exactly one scalar per observation")
         kind = self.physics_loss.physics_type
         if kind not in ("poisson", "diffusion", "advection", "burger"):
-            raise ValueError("unknown physics type")
+            raise PINNInputError("unknown physics type")
         if kind != "poisson" and x_phys.shape[1] != 2:
-            raise ValueError("evolution physics requires space/time coordinates")
+            raise PINNInputError("evolution physics requires space/time coordinates")
         kwargs = dict(physics_kwargs)
         key = {"diffusion": "D", "advection": "v", "burger": "nu"}.get(kind)
         if key is not None and key in kwargs:
-            coefficient = torch.as_tensor(kwargs[key], device=parameter.device, dtype=parameter.dtype)
+            coefficient = torch.as_tensor(kwargs[key], device=parameter.device, dtype=parameter.dtype).clone()
             if coefficient.ndim != 0 or not torch.isfinite(coefficient):
-                raise ValueError("physics coefficient must be a finite scalar")
+                raise PINNInputError("physics coefficient must be a finite scalar")
             kwargs[key] = coefficient
         if kind == "poisson" and "f" in kwargs:
-            forcing = torch.as_tensor(kwargs["f"], device=parameter.device, dtype=parameter.dtype)
+            forcing = torch.as_tensor(kwargs["f"], device=parameter.device, dtype=parameter.dtype).clone()
             if forcing.shape == (len(x_phys),):
                 forcing = forcing[:, None]
             if (forcing.ndim != 0 and forcing.shape != (len(x_phys), 1)) or not torch.isfinite(forcing).all():
-                raise ValueError("forcing must be finite scalar or paired collocation rows")
+                raise PINNInputError("forcing must be finite scalar or paired collocation rows")
             kwargs["f"] = forcing
         if not np.isfinite(self.data_weight) or not np.isfinite(self.physics_weight):
-            raise ValueError("loss weights must be finite")
+            raise PINNInputError("loss weights must be finite")
+        if x_data.numel() + y_data.numel() + x_phys.numel() > 1048576:
+            raise PINNInputError("complete observations exceed the owned value budget")
         return x_data, y_data, x_phys, kwargs
 
+    @checked_transition
     def train_step(
         self,
         x_data: torch.Tensor,
@@ -230,6 +244,8 @@ class PINNTrainer:
         """Single training step"""
         x_data, y_data, x_phys, physics_kwargs = self._admit(
             x_data, y_data, x_phys, physics_kwargs)
+        if (len(x_data) + len(x_phys)) * sum(p.numel() for p in self.model.parameters()) > 200000000:
+            raise PINNInputError("native PINN step exceeds admitted point/parameter work")
         self.model.train()
         self.optimizer.zero_grad()
         x_phys = x_phys.detach().clone().requires_grad_(True)
@@ -259,6 +275,7 @@ class PINNTrainer:
             'lr': self.optimizer.param_groups[0]['lr']
         }
     
+    @owned_operation
     def train(
         self,
         x_data: torch.Tensor,
@@ -271,10 +288,11 @@ class PINNTrainer:
         """Full training loop"""
         if any(isinstance(value, bool) or not isinstance(value, int) or value < 1
                for value in (epochs, batch_size)):
-            raise ValueError("epochs and batch_size must be positive integers")
+            raise PINNInputError("epochs and batch_size must be positive integers")
         # Validate the entire dataset before any batch can advance Adam.
         x_data, y_data, x_phys, physics_kwargs = self._admit(
             x_data, y_data, x_phys, physics_kwargs)
+        loop_policy(self, len(x_data), len(x_phys), epochs, batch_size)
         losses, data_losses, phys_losses = [], [], []
         for epoch in range(epochs):
             indices = torch.randperm(len(x_data), device=x_data.device)
@@ -308,6 +326,7 @@ class PINNTrainer:
             'final_physics_loss': phys_losses[-1]
         }
     
+    @owned_operation
     def predict(self, x: torch.Tensor) -> np.ndarray:
         """Make predictions"""
         self.model.eval()
@@ -316,6 +335,7 @@ class PINNTrainer:
             predictions = self.model(x)
         return predictions.cpu().numpy()
     
+    @owned_operation
     def save(self, path: str = "models/pinns_model.pth"):
         """Save model"""
         torch.save({
@@ -324,6 +344,7 @@ class PINNTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @owned_operation
     def load(self, path: str = "models/pinns_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)

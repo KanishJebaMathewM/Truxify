@@ -1,6 +1,12 @@
 """
 Unit tests for LLM security and route authorization (#13894).
 """
+import os
+
+# security.py raises at import time without JWT_SECRET — set a suite-local
+# value BEFORE the first import of the module.
+os.environ.setdefault('JWT_SECRET', 'llm-suite-test-secret-key-0001')
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi import HTTPException

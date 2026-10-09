@@ -12,113 +12,11 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/offline/websocket/resilient_websocket.dart';
+import 'package:truxify_shared/truxify_shared.dart' show WsConnectionState;
 import '../theme/app_theme.dart';
+import '../widgets/common_widgets.dart';
 import '../constants/supabase_config.dart';
 import '../services/supabase_service.dart';
-import '../widgets/common_widgets.dart';
-import 'package:flutter/material.dart';
-import '../widgets/tracking/desktop_tracking_panel.dart';
-
-class LiveTrackingScreen extends StatefulWidget {
-  const LiveTrackingScreen({Key? key}) : super(key: key);
-
-  @override
-  State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
-}
-
-class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
-  bool _isTrafficEnabled = true;
-
-  final Map<String, dynamic> _shipmentData = {
-    'status': 'In Transit',
-    'driverName': 'Rajesh Kumar',
-    'truckNumber': 'TN-01-AX-9821',
-    'speed': '68',
-    'distanceRemaining': '142',
-    'eta': '2 hrs 15 min',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth >= 900;
-
-        if (isDesktop) {
-          return Scaffold(
-            body: Stack(
-              children: [
-                // Full-Screen Interactive Vector Map Area (Placeholder for Mapbox/Google Maps Web)
-                Container(
-                  color: Colors.blueGrey.shade50,
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.map_outlined,
-                                size: 80, color: Colors.blueGrey.shade300),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Interactive Widescreen Map Canvas\n(Vector rendering & smooth pan/zoom active)',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: Colors.blueGrey.shade600, fontSize: 16),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Floating Desktop Command-Center Telemetry Panel & Controls
-                DesktopTrackingPanel(
-                  shipmentData: _shipmentData,
-                  onCallDriver: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Calling driver securely...')),
-                    );
-                  },
-                  onOpenChat: () {
-                    // Navigate to chat screen or open overlay
-                  },
-                  onShareLink: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Tracking link copied to clipboard!')),
-                    );
-                  },
-                  onViewWaybill: () {
-                    // Open waybill dialog / view
-                  },
-                  onFitRoute: () {
-                    // Map camera fit bounds
-                  },
-                  onCenterTruck: () {
-                    // Map camera center on vehicle marker
-                  },
-                  onToggleTraffic: (val) {
-                    setState(() => _isTrafficEnabled = val);
-                  },
-                  isTrafficEnabled: _isTrafficEnabled,
-                ),
-              ],
-            ),
-          );
-        }
-
-        // Mobile fallback view with bottom sheet
-        return Scaffold(
-          appBar: AppBar(title: const Text('Live Tracking')),
-          body: const Center(
-            child: Text('Mobile Bottom Sheet Tracking View'),
-          ),
-        );
-      },
-    );
-  }
-}
 class LiveTrackingScreen extends StatefulWidget {
   final String orderId;
   final OrderService? orderService;
@@ -161,6 +59,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   LatLng? _currentPosition;
   ResilientWebSocket? _trackingWebSocket;
   StreamSubscription? _trackingSubscription;
+  StreamSubscription<WsConnectionState>? _wsStateSubscription;
   RealtimeChannel? _supabaseRealtimeChannel;
   final MapController _mapController = MapController();
 
@@ -253,6 +152,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       }
     }
     _trackingSubscription?.cancel();
+    _wsStateSubscription?.cancel();
     unawaited(_trackingWebSocket?.close());
     super.dispose();
   }
@@ -308,6 +208,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         debugPrint('[LiveTracking] auth frame send result: $authSent');
       },
     );
+    }
+
+    // onConnect only fires for sockets this screen constructs — an injected
+    // socket's reconnects are invisible without it. The connectionState
+    // stream is observable for both: a new 'connected' transition means the
+    // per-connection auth flag must reset so the next 'authenticated' frame
+    // is recognized as a reconnect (and triggers the authoritative refresh).
+    _wsStateSubscription =
+        _trackingWebSocket!.connectionState.listen((state) {
+      if (state == WsConnectionState.connected) {
+        _authenticatedForCurrentConnection = false;
+      }
+    });
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
       debugPrint('Tracking WebSocket message received: $message');
@@ -364,7 +277,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }, onDone: () {
       if (mounted) setState(() => _wsConnected = false);
     });
-    }
 
     _trackingWebSocket!.connect();
   }
@@ -694,52 +606,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showVoiceAi() async {
+    // The full assistant sheet (presets, query flow, response card) exists as
+    // _VoiceAiSheet but was never wired — the tile opened this inline
+    // placeholder instead. Present the real sheet.
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                  width: 46,
-                  height: 5,
-                  decoration: BoxDecoration(
-                      color: TruxifyColors.border,
-                      borderRadius: BorderRadius.circular(999))),
-              const SizedBox(height: 18),
-              const CircleAvatar(
-                  radius: 34,
-                  backgroundColor: TruxifyColors.accentLight,
-                  child: Icon(Icons.mic_rounded,
-                      color: TruxifyColors.accentDark, size: 34)),
-              const SizedBox(height: 16),
-              Text('Voice AI',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 8),
-              Text(
-                VoiceAiService.buildResponse(VoiceAiOrderInput.fromMap(_order)),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: TruxifyColors.adaptiveSecondaryText(context)),
-              ),
-              const SizedBox(height: 20),
-              const SizedBox(
-                height: 56,
-                child: Center(child: LiveDot(size: 14)),
-              ),
-            ],
-          ),
+        return _VoiceAiSheet(
+          orderId: widget.orderId,
+          orderService: _orderService,
+          orderData: _order,
         );
       },
     );

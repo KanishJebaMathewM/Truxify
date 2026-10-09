@@ -31,6 +31,7 @@ export default function headerSizeMonitor(req, res, next) {
       {
         method: req.method,
         path: req.originalUrl,
+        ip: req.ip,
         headerSize: totalSize,
         limit,
       },

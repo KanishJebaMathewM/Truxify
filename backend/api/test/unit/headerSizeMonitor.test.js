@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import headerSizeMonitor from '../../src/middleware/headerSizeMonitor.js'
 import logger from '../../src/middleware/logger.js'
 
@@ -39,17 +39,25 @@ describe('headerSizeMonitor middleware', () => {
     const req = {
       method: 'POST',
       path: '/api/submit',
+      originalUrl: '/api/submit',
       ip: '192.168.1.50',
       headers: {
         'x-custom-payload': largeHeaderValue
       }
     }
     const res = {}
+    res.status = vi.fn(() => res)
+    res.json = vi.fn(() => res)
     const next = vi.fn()
 
     headerSizeMonitor(req, res, next)
 
-    expect(next).toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(431)
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: 'Request header fields too large',
+    })
     expect(logger.warn).toHaveBeenCalled()
     
     const logCallArg = JSON.stringify(logger.warn.mock.calls[0])
@@ -62,6 +70,7 @@ describe('headerSizeMonitor middleware', () => {
     const req = {
       method: 'GET',
       path: '/api/data',
+      originalUrl: '/api/data',
       ip: '10.0.0.5',
       headers: {
         'h1': 'a'.repeat(4000),
@@ -70,11 +79,14 @@ describe('headerSizeMonitor middleware', () => {
       }
     }
     const res = {}
+    res.status = vi.fn(() => res)
+    res.json = vi.fn(() => res)
     const next = vi.fn()
 
     headerSizeMonitor(req, res, next)
 
-    expect(next).toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(431)
     expect(logger.warn).toHaveBeenCalled()
   })
 })

@@ -107,6 +107,7 @@ import { formatPaginationMeta } from '../utils/pagination.js';
 const router = express.Router();
 router.use(userLimiter);
 
+const adminDb = supabaseAdmin || supabase;
 // support_tickets / support_ticket_comments are authenticated/service-role
 // only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
 // anon-key client resolves every read to empty and every write to a denial.
@@ -115,15 +116,12 @@ router.use(userLimiter);
 const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
 
-
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
-const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
-const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
+const TICKET_COLUMNS = 'id, subject, description, category, status, assigned_to, created_at, updated_at';
+const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, assigned_to, created_at, updated_at';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 
-// Canonical map of all accepted category aliases -> database values.
-// Shared by ticket creation, ticket update, and the categories endpoint.
 const CATEGORY_MAP = {
   billing: 'payment',
   booking: 'order',
@@ -158,33 +156,65 @@ function parseTicketStatus(value) {
   return { value: normalized };
 }
 
+/**
+ * Resolves #2055: Load-based ticket assignment helper.
+ * Queries active agents and returns the user_id of the agent with the lowest open ticket count.
+ */
+async function getNextAvailableAgent() {
+  try {
+    const { data: agents, error: agentError } = await adminDb
+      .from('users')
+      .select('id')
+      .in('role', ['admin', 'support_agent'])
+      .eq('is_active', true);
+
+    if (agentError || !agents || agents.length === 0) {
+      return null;
+    }
+
+    const agentIds = agents.map((a) => a.id);
+    const { data: ticketCounts, error: countError } = await adminDb
+      .from('support_tickets')
+      .select('assigned_to')
+      .in('assigned_to', agentIds)
+      .in('status', ['open', 'in_progress']);
+
+    if (countError) {
+      return agents[0].id;
+    }
+
+    const loadMap = {};
+    agentIds.forEach((id) => {
+      loadMap[id] = 0;
+    });
+
+    (ticketCounts || []).forEach((t) => {
+      if (t.assigned_to && loadMap[t.assigned_to] !== undefined) {
+        loadMap[t.assigned_to] += 1;
+      }
+    });
+
+    let selectedAgent = agentIds[0];
+    let minLoad = loadMap[selectedAgent];
+
+    for (let i = 1; i < agentIds.length; i++) {
+      const currentAgent = agentIds[i];
+      if (loadMap[currentAgent] < minLoad) {
+        minLoad = loadMap[currentAgent];
+        selectedAgent = currentAgent;
+      }
+    }
+
+    return selectedAgent;
+  } catch (err) {
+    logger.error("[SupportRoutes] Load-based assignment error:", err?.message || err);
+    return null;
+  }
+}
+
 // ============================================================================
 // 1. LIST ACTIVE FAQS (PUBLIC)
 // ============================================================================
-/**
- * @openapi
- * /api/support/faqs:
- *   get:
- *     tags: [Support]
- *     summary: List active FAQs
- *     description: Returns active FAQs optionally filtered by app type. Public endpoint - no authentication required.
- *     security: []
- *     parameters:
- *       - in: query
- *         name: app_type
- *         schema:
- *           type: string
- *         description: Filter by app type (customer, driver, both)
- *     responses:
- *       200:
- *         description: Array of FAQs
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/FAQ'
- */
 router.get('/faqs', async (req, res) => {
   const appType = normalizeRequiredText(req.query.app_type);
 
@@ -218,22 +248,6 @@ router.get('/faqs', async (req, res) => {
 // ============================================================================
 // 2. LIST VALID TICKET CATEGORIES (PUBLIC)
 // ============================================================================
-/**
- * @openapi
- * /api/support/categories:
- *   get:
- *     tags: [Support]
- *     summary: List support ticket categories
- *     description: Returns valid support ticket categories with human-readable labels, SLA response times in hours, and descriptions. Public endpoint - no authentication required. Cached for 24 hours.
- *     security: []
- *     responses:
- *       200:
- *         description: Categories with metadata
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/SupportCategoriesResponse'
- */
 const VALID_CATEGORIES = [...new Set(Object.values(CATEGORY_MAP))];
 
 const CATEGORY_LABELS = {
@@ -251,6 +265,7 @@ const CATEGORY_SLA = {
   general: 48,
   account: 24,
 };
+
 const CATEGORY_DESCRIPTIONS = {
   payment: 'Issues related to payments, invoices, billing, and refunds.',
   order: 'Issues related to load bookings, orders, and shipment tracking.',
@@ -271,31 +286,6 @@ router.get('/categories', (_req, res) => {
 // ============================================================================
 // 3. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
-/**
- * @openapi
- * /api/support/tickets:
- *   post:
- *     tags: [Support]
- *     summary: Create a support ticket
- *     description: Creates a new support ticket for the authenticated user. Category is normalized via alias map.
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/CreateTicketRequest'
- *     responses:
- *       201:
- *         description: Ticket created
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketResponse'
- *       400:
- *         description: Validation error
- */
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
   if (!subject) {
@@ -314,6 +304,8 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   }
 
   try {
+    const assignedAgentId = await getNextAvailableAgent();
+
     const { data: ticket, error } = await userDb(req)
       .from('support_tickets')
       .insert({
@@ -322,6 +314,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
         description,
         category: dbCategory,
         status: 'open',
+        assigned_to: assignedAgentId,
       })
       .select(TICKET_COLUMNS)
       .single();
@@ -346,42 +339,6 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 // ============================================================================
 // 4. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
-/**
- * @openapi
- * /api/support/tickets:
- *   get:
- *     tags: [Support]
- *     summary: List user's support tickets
- *     description: Returns paginated support tickets for the authenticated user. Optional filters by status and category.
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *       - in: query
- *         name: category
- *         schema:
- *           type: string
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *     responses:
- *       200:
- *         description: Paginated ticket list
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/TicketListResponse'
- */
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
   if (page !== undefined && !/^\d+$/.test(page)) {
@@ -433,6 +390,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
     });
   } catch (err) {
     logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status
     res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });

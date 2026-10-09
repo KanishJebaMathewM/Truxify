@@ -350,19 +350,24 @@ void main() {
       final repository = TruckRepository(
         client: truckClient(Future.value(null)),
       );
-      test('throws on non-list response for maintenance tickets', () async {
-  // The typed Postgrest chain guarantees a List return type, making this guard defensive.
-  // Verified asynchronously using expectLater.
-  // ignore: dead_code
-  expectLater(
-    truckRepository.fetchMaintenanceTickets(),
-    throwsA(isA<StateError>()),
-  );
-}, skip: 'Unreachable via typed Postgrest chain; kept as defensive runtime check.');
-
       final success = await repository.updateTruckMileage(truckId: 'truck-1', currentMileage: 12345.0);
 
       expect(success, isFalse);
+    });
+
+    test('throws on non-list response', skip: 'guard unreachable through the typed Postgrest chain (see issue)', () async {
+      final repository = TruckRepository(
+        client: FakeSupabaseClient(
+          onFrom: (relation) => FakeSupabaseQueryBuilder(Future.value({'not': 'a list'})),
+        ),
+      );
+
+      // The rejection is asynchronous — expectLater on the future, not a
+      // sync closure (the closure form can never observe it and hangs).
+      await expectLater(
+        repository.fetchMaintenanceTickets('truck-1'),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }

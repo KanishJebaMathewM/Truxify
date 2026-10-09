@@ -138,6 +138,23 @@
  *         duration_minutes:
  *           type: number
  */
+// backend/api/src/routes/orderRoutes.js
+
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
+import { handleGeofenceConfirm } from '../controllers/orderController.js'; // Or relevant controller function
+
+// Before:
+// router.post('/api/deliveries/:id/geofence-confirm', handleGeofenceConfirm);
+
+// After:
+router.post('/:id/geofence-confirm', authenticate, userLimiter, async (req, res, next) => {
+  try {
+    await handleGeofenceConfirm(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
 
 import express from 'express';
 import multer from 'multer';

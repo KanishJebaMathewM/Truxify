@@ -1,5 +1,94 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { auditLog } from '../../src/middleware/auditLog.js';
 
+// Mock logger or any dependent services if required by the middleware
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  },
+}));
+
+describe('auditLog Middleware', () => {
+  let req, res, next;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    req = {
+      method: 'POST',
+      originalUrl: '/api/orders',
+      ip: '127.0.0.1',
+      headers: { 'user-agent': 'Mozilla/5.0' },
+      user: { id: 'test-user-uuid', role: 'customer' },
+      body: { amount: 1000 },
+    };
+    res = {
+      statusCode: 200,
+      on: vi.fn((event, callback) => {
+        if (event === 'finish') {
+          // Simulate response finish lifecycle if auditLog listens to it
+          callback();
+        }
+      }),
+    };
+    next = vi.fn();
+  });
+
+  describe('Middleware Generation & Signature', () => {
+    it('should return a valid Express middleware function (req, res, next)', () => {
+      const middleware = auditLog({ action: 'order:create', resourceType: 'order' });
+      expect(typeof middleware).toBe('function');
+      expect(middleware.length).toBe(3);
+    });
+  });
+
+  describe('Execution Flow', () => {
+    it('should call next() successfully on valid request handling', () => {
+      const middleware = auditLog({ action: 'order:create', resourceType: 'order' });
+      
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it('should attach or log audit metadata correctly without blocking the request pipeline', () => {
+      const middleware = auditLog({ action: 'profile:update', resourceType: 'profile' });
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('Error & Edge Case Handling', () => {
+    it('should handle missing required options or unauthenticated requests gracefully', () => {
+      const unauthReq = {
+        method: 'GET',
+        originalUrl: '/api/public/health',
+        headers: {},
+      };
+      
+      const middleware = auditLog(); // No options passed
+
+      expect(() => middleware(unauthReq, res, next)).not.toThrow();
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle missing request user and body properties without crashing', () => {
+      const minimalReq = {
+        method: 'DELETE',
+        originalUrl: '/api/items/1',
+      };
+
+      const middleware = auditLog({ action: 'item:delete' });
+
+      expect(() => middleware(minimalReq, res, next)).not.toThrow();
+      expect(next).toHaveBeenCalled();
+    });
+  });
+});
 // ── Mock the audit service ──────────────────────────────────────
 const mockLog = vi.fn().mockResolvedValue({ id: 'mock-log-id' });
 

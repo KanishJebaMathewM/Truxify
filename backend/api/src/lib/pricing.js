@@ -21,7 +21,27 @@ import logger from '../middleware/logger.js';
 // Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
 const MIN_FREIGHT_PAISa = 0;
 const MAX_FREIGHT_PAISa = 100_000_000;
+// Inside backend/api/src/lib/pricing.js (calculateDistance or computeOrderPricing)
 
+export async function calculateDistance(origin, destination) {
+  try {
+    const routeResult = await getRouteEstimate(origin, destination);
+    
+    // Extract distance (e.g., in kilometers or meters based on schema)
+    const distance = routeResult?.distance;
+
+    // Add NaN and null-distance guard before using the result
+    if (!distance || Number.isNaN(Number(distance))) {
+      logger.warn({ origin, destination, routeResult }, 'OSRM returned invalid or zero distance');
+      return { error: 'Unable to calculate distance' };
+    }
+
+    return { distance: Number(distance) };
+  } catch (err) {
+    logger.error({ error: err.message, origin, destination }, 'Failed to compute distance via OSRM');
+    throw err;
+  }
+}
 export function sanitizePrice(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;

@@ -340,6 +340,11 @@ class OrderReadModel {
   }
 
   /**
+   * Per-status order counts from the canonical status column of the single
+   * authoritative read model.
+   */
+  async getOrderStats() {
+    const statuses = ORDER_STATUSES;
    * Per-status order counts from the canonical `status` column of the single
    * authoritative read model (the same column getOrderList filters on).
    */
@@ -370,7 +375,6 @@ class OrderReadModel {
 export default new OrderReadModel();
 export { OrderReadModel };
 
-// ============================================================================
 // Enterprise CQRS Telemetry, Projection Metrics & Health Diagnostics (Issue #14785)
 // ============================================================================
 class OrderReadModelTelemetry {

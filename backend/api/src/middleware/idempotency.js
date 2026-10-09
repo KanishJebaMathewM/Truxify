@@ -67,6 +67,105 @@ function readAndParse(str) {
   }
 }
 
+/**
+ * Atomically deletes `lockKey` only if it is still owned by `lockValue`.
+ *
+ * A plain GET followed by DEL is a check-then-act race: if the lock expires
+ * between the two calls and another request acquires it, the DEL would remove
+ * the *new* owner's lock. ioredis exposes EVAL, so use a Lua compare-and-delete;
+ * fall back to GET+DEL only for minimal clients that cannot run scripts.
+ */
+const RELEASE_LOCK_LUA = `
+  if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+  end
+  return 0
+`;
+
+async function deleteLockIfOwner(client, lockKey, lockValue) {
+  if (typeof client.eval === 'function') {
+    await client.eval(RELEASE_LOCK_LUA, 1, lockKey, lockValue);
+    return;
+  }
+  const currentVal = await client.get(lockKey);
+  if (currentVal === lockValue) {
+    await client.del(lockKey);
+  }
+}
+
+/**
+ * Ties the idempotency lock lifetime to the *handler*, not to the socket.
+ *
+ * Node emits `close` on a ServerResponse both after a normal response AND when
+ * the client's TCP connection dies while the handler is still running (mobile
+ * network drop, app killed, proxy timeout). Treating every `close` as "request
+ * finished" released the lock while the handler was still executing. The
+ * client's automatic retry (same X-Idempotency-Key) then found no cached
+ * response and no lock, acquired the lock and ran the handler a second time:
+ * a duplicate wallet withdrawal / escrow funding / bid acceptance.
+ *
+ * Rules:
+ *  - `finish`                         -> response fully sent: finalize.
+ *  - `close` after res.end() was called -> handler is done: finalize.
+ *  - `close` BEFORE res.end()         -> client aborted but the handler is still
+ *                                        running: keep holding the lock and
+ *                                        finalize when the handler ends the
+ *                                        response (res.end is wrapped), so the
+ *                                        result is cached for the retry.
+ *  - A watchdog releases the lock after `maxHoldMs` if the handler never
+ *    ends the response, so an abandoned request cannot wedge the key forever
+ *    (matters most for the in-memory lock, which has no TTL of its own).
+ *
+ * `finalize` must be idempotent.
+ */
+function bindLockLifecycle(res, finalize, maxHoldMs) {
+  let abortedBeforeEnd = false;
+  let watchdog = null;
+
+  const clearWatchdog = () => {
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+  };
+
+  const finalizeOnce = () => {
+    clearWatchdog();
+    return finalize();
+  };
+
+  res.once('finish', finalizeOnce);
+  res.once('close', () => {
+    // `writableEnded === false` is the only reliable "handler has not responded
+    // yet" signal. Anything else (true, or undefined on minimal test doubles)
+    // means the response was already ended, so it is safe to finalize now.
+    if (res.writableEnded === false) {
+      abortedBeforeEnd = true;
+      watchdog = setTimeout(() => {
+        watchdog = null;
+        Promise.resolve(finalize()).catch(() => {});
+      }, maxHoldMs);
+      watchdog.unref?.();
+      return;
+    }
+    finalizeOnce();
+  });
+
+  if (typeof res.end === 'function') {
+    const originalEnd = res.end;
+    res.end = function patchedEnd(...args) {
+      try {
+        return originalEnd.apply(this, args);
+      } finally {
+        // The handler finally produced its response after the client had gone
+        // away: no `finish` will ever fire, so finalize explicitly. finalize()
+        // awaits the pending cache write before releasing the lock.
+        if (abortedBeforeEnd) finalizeOnce();
+      }
+    };
+  }
+}
+
 export function requireIdempotency(ttlSeconds = 3600) {
   // Guard against invalid TTL: use default of 3600 if not a positive integer.
   const safeTtlSeconds = Number.isInteger(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 3600;
@@ -156,10 +255,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
           if (lockReleased) return;
           lockReleased = true;
           try {
-            const currentVal = await redisClient.get(lockKey);
-            if (currentVal === lockValue) {
-              await redisClient.del(lockKey);
-            }
+            await deleteLockIfOwner(redisClient, lockKey, lockValue);
           } catch (err) {
             logger.error({ err, lockKey }, '[Idempotency] Failed to release Redis lock.');
           }
@@ -190,9 +286,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
           return finalizationPromise;
         };
 
-        // Ensure lock is reliably released when response terminates
-        res.once('finish', finalize);
-        res.once('close', finalize);
+        // Release the lock when the HANDLER finishes (not merely when the socket
+        // closes); see bindLockLifecycle for why `close` alone is unsafe.
+        bindLockLifecycle(res, finalize, LOCK_TTL_MS);
       } else {
         // Memory-only mode: use in-memory lock to prevent concurrent handler execution
         if (inFlightRequests.has(key)) {
@@ -212,10 +308,9 @@ export function requireIdempotency(ttlSeconds = 3600) {
         }
         // Mark as in-flight
         inFlightRequests.set(key, true);
-        // Release when response terminates
+        // Release when the handler finishes (not merely when the socket closes).
         const releaseMemoryLock = () => { inFlightRequests.delete(key); };
-        res.once('finish', releaseMemoryLock);
-        res.once('close', releaseMemoryLock);
+        bindLockLifecycle(res, releaseMemoryLock, LOCK_TTL_MS);
       }
 
       const originalJson = res.json.bind(res);

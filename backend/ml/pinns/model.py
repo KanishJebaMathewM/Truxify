@@ -1,10 +1,15 @@
+import logging
+from threading import RLock
+from typing import Dict
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable
-import logging
+from foundation.optimizer_transition import operation_owned
 from torch.autograd import grad
+
+from .checkpoint_state import capture_state, restore_state
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +166,7 @@ class PINNTrainer:
         lr: float = 1e-3,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        self._operation_lock = RLock()
         self.model = model.to(device)
         self.physics_loss = physics_loss
         self.device = device
@@ -176,6 +182,15 @@ class PINNTrainer:
         
         logger.info(f"✅ PINN Trainer initialized on {self.device}")
     
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_operation_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._operation_lock = RLock()
+
     def _admit(self, x_data, y_data, x_phys, physics_kwargs):
         parameter = next(self.model.parameters())
         values = []
@@ -220,6 +235,7 @@ class PINNTrainer:
             raise ValueError("loss weights must be finite")
         return x_data, y_data, x_phys, kwargs
 
+    @operation_owned
     def train_step(
         self,
         x_data: torch.Tensor,
@@ -259,6 +275,7 @@ class PINNTrainer:
             'lr': self.optimizer.param_groups[0]['lr']
         }
     
+    @operation_owned
     def train(
         self,
         x_data: torch.Tensor,
@@ -308,6 +325,7 @@ class PINNTrainer:
             'final_physics_loss': phys_losses[-1]
         }
     
+    @operation_owned
     def predict(self, x: torch.Tensor) -> np.ndarray:
         """Make predictions"""
         self.model.eval()
@@ -316,17 +334,15 @@ class PINNTrainer:
             predictions = self.model(x)
         return predictions.cpu().numpy()
     
+    @operation_owned
     def save(self, path: str = "models/pinns_model.pth"):
         """Save model"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
-        }, path)
+        torch.save(capture_state(self), path)
         logger.info(f"✅ Model saved to {path}")
     
+    @operation_owned
     def load(self, path: str = "models/pinns_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        restore_state(self, checkpoint)
         logger.info(f"✅ Model loaded from {path}")

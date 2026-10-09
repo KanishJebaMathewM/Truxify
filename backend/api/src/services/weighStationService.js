@@ -25,6 +25,20 @@ export async function checkBypassEligibility({ vehicleId, weight }) {
     evaluatedAt: new Date().toISOString()
   };
 }
+ * @param {number} params.weight
+ * @returns {Promise<Object>} Bypass decision result
+ */
+export async function checkBypassEligibility({ vehicleId, weight }) {
+  logger.info({ vehicleId, weight }, 'Evaluating weigh station bypass eligibility (Mock Service)');
+
+  // Deterministic mock response (replaces Math.random coin-flip)
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Mock regulatory evaluation: vehicle within compliant weight threshold.',
+    evaluatedAt: new Date().toISOString()
+  };
+}
 // Standard Federal Limits (lbs)
 export const FHWA_LIMITS = {
     MAX_SINGLE_AXLE_LBS: 20000,

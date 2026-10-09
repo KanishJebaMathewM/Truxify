@@ -32,12 +32,12 @@ class BiometricAuthService {
 
     if (available) {
       try {
+        // local_auth v3 removed AuthenticationOptions — options are direct
+        // named parameters now (stickyAuth → persistAcrossBackgrounding).
         final bool didAuthenticate = await _auth.authenticate(
           localizedReason: reason,
-          options: const AuthenticationOptions(
-            stickyAuth: true,
-            biometricOnly: false,
-          ),
+          persistAcrossBackgrounding: true,
+          biometricOnly: false,
         );
         if (didAuthenticate) return true;
       } catch (e) {

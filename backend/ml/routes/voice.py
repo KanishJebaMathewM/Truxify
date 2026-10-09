@@ -1,22 +1,30 @@
 import os
 from typing import Optional
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 import httpx
+
+
 router = APIRouter(
     prefix="/voice",
     tags=["Voice Assistant"],
 )
+
+
 class VoiceQueryResponse(BaseModel):
     success: bool
     transcript: str
     language: str
     intent: str
     response: str
+
+
 class TextVoiceRequest(BaseModel):
     text: str
     language: Optional[str] = "auto"
-    
+
+
 @router.get("/health")
 async def voice_health():
     """
@@ -27,6 +35,7 @@ async def voice_health():
         "service": "voice",
         "status": "ready",
     }
+
 
 @router.post("/transcribe", response_model=VoiceQueryResponse)
 async def transcribe_voice(
@@ -178,7 +187,7 @@ async def process_voice_query(request: TextVoiceRequest):
 async def text_to_speech(request: TextVoiceRequest):
     """
     Convert the assistant response into regional-language audio.
-
+    """
     elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
     if elevenlabs_key:
         voice_id = "21m00Tcm4TlvDq8ikWAM"  # Default realistic voice

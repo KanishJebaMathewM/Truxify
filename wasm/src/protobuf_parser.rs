@@ -99,9 +99,16 @@ fn read_varint(bytes: &[u8], mut idx: usize) -> Option<(u64, usize)> {
         }
         let byte = bytes[idx];
         idx += 1;
-        if shift < 64 {
-            result |= ((byte & 0x7f) as u64) << shift;
+        if shift >= 64 {
+            return None;
         }
+        let payload = (byte & 0x7f) as u64;
+        // On the tenth byte only one payload bit fits in a u64. A plain
+        // left shift would discard the others and accept a different value.
+        if payload > (u64::MAX >> shift) {
+            return None;
+        }
+        result |= payload << shift;
         if byte & 0x80 == 0 {
             break;
         }
@@ -170,7 +177,7 @@ mod tests {
     #[test]
     fn missing_fields_is_flagged_not_fabricated() {
         // Single field 3 only — no lat/lng, must not return the old constant.
-        let mut payload = encode_fixed64(3, 1.0);
+        let payload = encode_fixed64(3, 1.0);
         let out = decode_protobuf_telemetry_zero_copy(&payload);
         assert!(out.contains("\"status\":\"error\""));
         assert!(!out.contains("28.6139"));
@@ -184,6 +191,36 @@ mod tests {
         let mut payload = encode_varint(tag);
         payload.extend(encode_varint(u64::MAX));
         payload.extend_from_slice(&[0u8; 16]);
+        let out = decode_protobuf_telemetry_zero_copy(&payload);
+        assert!(out.contains("\"status\":\"error\""));
+    }
+
+    #[test]
+    fn largest_u64_varint_is_valid() {
+        let encoded = encode_varint(u64::MAX);
+        assert_eq!(read_varint(&encoded, 0), Some((u64::MAX, 10)));
+    }
+
+    #[test]
+    fn rejects_payload_bits_beyond_u64_on_tenth_byte() {
+        let mut overflow = vec![0x80; 9];
+        overflow.push(0x02);
+        assert_eq!(read_varint(&overflow, 0), None);
+    }
+
+    #[test]
+    fn rejects_varint_with_tenth_continuation_byte() {
+        assert_eq!(read_varint(&[0x80; 10], 0), None);
+    }
+
+    #[test]
+    fn overflowing_length_cannot_skip_into_valid_telemetry() {
+        let mut payload = encode_varint((3u64 << 3) | 2);
+        payload.extend([0x80; 9]);
+        payload.push(0x02);
+        payload.extend(encode_fixed64(1, 12.9716));
+        payload.extend(encode_fixed64(2, 77.5946));
+
         let out = decode_protobuf_telemetry_zero_copy(&payload);
         assert!(out.contains("\"status\":\"error\""));
     }

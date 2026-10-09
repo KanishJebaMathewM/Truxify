@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import RenderScheduler, { Priority, PriorityNames } from '../../../../scheduler/RenderScheduler.js';
+import RenderScheduler, { Priority, PriorityNames } from '../../../scheduler/RenderScheduler.js';
 
 describe('RenderScheduler', () => {
   let scheduler;
@@ -13,10 +13,13 @@ describe('RenderScheduler', () => {
     expect(s).toBeDefined();
   });
 
-  it('schedule returns a taskId string', () => {
+  it('schedule returns a numeric taskId', () => {
+    // Task ids are sequential integers; scheduler/routes.js parses them back
+    // with parseInt for cancel and priority changes.
     const id = scheduler.schedule('test-component', Priority.MEDIUM, {});
-    expect(typeof id).toBe('string');
-    expect(id.length).toBeGreaterThan(0);
+    expect(Number.isInteger(id)).toBe(true);
+    expect(id).toBeGreaterThan(0);
+    expect(scheduler.schedule('next', Priority.MEDIUM, {})).toBe(id + 1);
   });
 
   it('cancel returns true for scheduled task', () => {

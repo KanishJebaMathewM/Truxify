@@ -40,7 +40,7 @@ vi.mock('../../src/services/escrow.js', () => ({
   submitEscrowRefund: vi.fn(),
   submitEscrowCancelWithPenalty: vi.fn(),
   paisaToMaticWei: vi.fn(),
-  getEscrowBooking: vi.fn(),
+  getOnChainEscrowBooking: vi.fn(),
   weiWithinTolerance: vi.fn((a, b) => {
     if (a == null || b == null) return false;
     return BigInt(a) === BigInt(b);
@@ -75,7 +75,7 @@ import {
   stopEscrowFundingReconciliation,
 } from '../../src/services/escrowFundingReconciliation.js';
 import { acquireLock, renewLock, releaseLock, withLockRenewal } from '../../src/lib/redisLock.js';
-import { getEscrowBooking, submitEscrowRefund, weiWithinTolerance } from '../../src/services/escrow.js';
+import { getOnChainEscrowBooking, submitEscrowRefund, weiWithinTolerance } from '../../src/services/escrow.js';
 import { sendPushNotification } from '../../src/services/notificationService.js';
 
 describe('escrowFundingReconciliation', () => {
@@ -106,7 +106,7 @@ describe('escrowFundingReconciliation', () => {
         await processQueue(mockOrderRepository);
 
         expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenCalledTimes(1);
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
         expect(submitEscrowRefund).not.toHaveBeenCalled();
         expect(mockOrderRepository.updateOrderWithFilter).not.toHaveBeenCalled();
       });
@@ -117,7 +117,7 @@ describe('escrowFundingReconciliation', () => {
         await processQueue(mockOrderRepository);
 
         expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenCalledTimes(1);
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
       });
     });
 
@@ -134,7 +134,7 @@ describe('escrowFundingReconciliation', () => {
           '[escrow-funding] Failed to load stale funding orders:',
           'Database connection failed'
         );
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
       });
 
       it('handles string error responses from orderRepository gracefully', async () => {
@@ -198,7 +198,7 @@ describe('escrowFundingReconciliation', () => {
         expect(mockLogger.info).toHaveBeenCalledWith(
           '[escrow-funding] Order DIS-LOCKED-1 locked by another process, skipping.'
         );
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
       });
     });
 
@@ -228,12 +228,12 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [healedOrder], error: null });
-        getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+        getOnChainEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
         mockOrderRepository.executeRpc.mockResolvedValueOnce({ error: null });
 
         await processQueue(mockOrderRepository);
 
-        expect(getEscrowBooking).toHaveBeenCalledWith('booking-heal-1');
+        expect(getOnChainEscrowBooking).toHaveBeenCalledWith('booking-heal-1');
         expect(mockOrderRepository.executeRpc).toHaveBeenCalledWith(
           'accept_bid_tx',
           expect.objectContaining({
@@ -279,7 +279,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [unconfirmedOrder], error: null });
-        getEscrowBooking.mockResolvedValueOnce(null); // deposit never landed
+        getOnChainEscrowBooking.mockResolvedValueOnce(null); // deposit never landed
         const waitForConfirmation = vi.fn().mockResolvedValueOnce(undefined);
         submitEscrowRefund.mockResolvedValueOnce({ txHash: '0xrefundtx123', waitForConfirmation });
 
@@ -327,7 +327,7 @@ describe('escrowFundingReconciliation', () => {
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [mismatchedOrder], error: null });
         // Actual on-chain amount is 1 wei instead of 5 ETH
-        getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+        getOnChainEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
         const waitForConfirmation = vi.fn().mockResolvedValueOnce(undefined);
         submitEscrowRefund.mockResolvedValueOnce({ txHash: '0xmismatchtx', waitForConfirmation });
 
@@ -363,7 +363,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [cancelledOrder], error: null });
-        getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+        getOnChainEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
         const waitForConfirmation = vi.fn().mockResolvedValueOnce(undefined);
         submitEscrowRefund.mockResolvedValueOnce({ txHash: '0xcanceltx', waitForConfirmation });
 
@@ -396,7 +396,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [failingOrder], error: null });
-        getEscrowBooking.mockRejectedValueOnce(new Error('RPC provider network error'));
+        getOnChainEscrowBooking.mockRejectedValueOnce(new Error('RPC provider network error'));
 
         await processQueue(mockOrderRepository);
 
@@ -429,7 +429,7 @@ describe('escrowFundingReconciliation', () => {
         await processQueue(mockOrderRepository);
 
         // Order is not due for retry yet, so finalizeOrRevert should not run
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
       });
 
       it('processes orders whose backoff window has expired', async () => {
@@ -445,7 +445,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [expiredBackoffOrder], error: null });
-        getEscrowBooking.mockResolvedValueOnce(null);
+        getOnChainEscrowBooking.mockResolvedValueOnce(null);
         submitEscrowRefund.mockResolvedValueOnce({
           txHash: '0xrefund',
           waitForConfirmation: vi.fn().mockResolvedValueOnce(undefined),
@@ -453,7 +453,7 @@ describe('escrowFundingReconciliation', () => {
 
         await processQueue(mockOrderRepository);
 
-        expect(getEscrowBooking).toHaveBeenCalledWith('booking-expired');
+        expect(getOnChainEscrowBooking).toHaveBeenCalledWith('booking-expired');
       });
 
       it('records refund_failed when submitEscrowRefund returns an error for cancelled order', async () => {
@@ -470,7 +470,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [cancelledOrder], error: null });
-        getEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
+        getOnChainEscrowBooking.mockResolvedValueOnce({ amount: 1000000000000000000n });
         submitEscrowRefund.mockResolvedValueOnce({ txHash: null, error: 'out of gas' });
 
         await processQueue(mockOrderRepository);
@@ -506,7 +506,7 @@ describe('escrowFundingReconciliation', () => {
 
         await processQueue(mockOrderRepository);
 
-        expect(getEscrowBooking).not.toHaveBeenCalled();
+        expect(getOnChainEscrowBooking).not.toHaveBeenCalled();
         expect(submitEscrowRefund).not.toHaveBeenCalled();
       });
 
@@ -522,7 +522,7 @@ describe('escrowFundingReconciliation', () => {
         };
 
         mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: [ninthAttemptOrder], error: null });
-        getEscrowBooking.mockRejectedValueOnce(new Error('Persistent contract revert'));
+        getOnChainEscrowBooking.mockRejectedValueOnce(new Error('Persistent contract revert'));
 
         await processQueue(mockOrderRepository);
 

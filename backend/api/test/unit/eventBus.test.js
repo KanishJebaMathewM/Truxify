@@ -15,12 +15,12 @@ vi.mock("@opentelemetry/api", () => ({
 }));
 
 // Mock logger
-vi.mock("../../../src/middleware/logger.js", () => ({
+vi.mock("../../src/middleware/logger.js", () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
 // Mock SpanFactory
-vi.mock("../../../src/core/telemetry/SpanFactory.js", () => ({
+vi.mock("../../src/core/telemetry/SpanFactory.js", () => ({
   default: {
     startEventPublishSpan: vi.fn().mockReturnValue({
       setStatus: vi.fn(),
@@ -35,13 +35,19 @@ vi.mock("../../../src/core/telemetry/SpanFactory.js", () => ({
       recordException: vi.fn(),
       setAttribute: vi.fn(),
     }),
+    startEventHandlerSpan: vi.fn().mockReturnValue({
+      setStatus: vi.fn(),
+      end: vi.fn(),
+      recordException: vi.fn(),
+      setAttribute: vi.fn(),
+    }),
     recordError: vi.fn(),
   },
   STANDARD_ATTRIBUTES: {},
 }));
 
 // Mock ContextPropagator
-vi.mock("../../../src/core/telemetry/ContextPropagator.js", () => ({
+vi.mock("../../src/core/telemetry/ContextPropagator.js", () => ({
   ContextPropagator: {
     extractFromEventPayload: vi.fn().mockReturnValue(undefined),
     injectIntoEventPayload: vi.fn((e) => e),
@@ -124,10 +130,11 @@ describe("EventBus", () => {
 
     it("accepts an EventHandler instance", async () => {
       const { EventHandler } = await import("../../src/core/events/EventHandler.js");
-      const handlerInstance = new EventHandler(vi.fn().mockResolvedValue("handled"));
+      const inner = vi.fn().mockResolvedValue("handled");
+      const handlerInstance = new EventHandler(inner);
       eventBus.subscribe("async.event", handlerInstance);
       await eventBus.publishAsync("async.event", {});
-      expect(handlerInstance.handle).toHaveBeenCalled();
+      expect(inner).toHaveBeenCalled();
     });
 
     it("throws for non-function handler", () => {
@@ -154,7 +161,7 @@ describe("EventBus", () => {
   });
 
   describe("emitSafe", () => {
-    it("calls listeners and returns number of listeners", () => {
+    it("calls listeners and reports delivery", () => {
       const handler1 = vi.fn();
       const handler2 = vi.fn();
       eventBus.on("safe.test", handler1);
@@ -162,7 +169,7 @@ describe("EventBus", () => {
       const result = eventBus.emitSafe("safe.test", { data: 1 });
       expect(handler1).toHaveBeenCalledWith({ data: 1 });
       expect(handler2).toHaveBeenCalledWith({ data: 1 });
-      expect(result).toBe(2);
+      expect(result).toBe(true);
     });
 
     it("handles throwing handlers gracefully", () => {
@@ -181,8 +188,9 @@ describe("EventBus", () => {
       const handler = vi.fn().mockRejectedValue(new Error("async error"));
       eventBus.on("asyncerror.test", handler);
       const result = eventBus.emitSafe("asyncerror.test", {});
-      // emitSafe doesn't wait for promises, so it just checks sync errors
-      expect(typeof result).toBe("number");
+      // Async listeners settle through the returned promise instead of a count.
+      expect(result).toBeInstanceOf(Promise);
+      await expect(result).resolves.toBe(true);
     });
   });
 

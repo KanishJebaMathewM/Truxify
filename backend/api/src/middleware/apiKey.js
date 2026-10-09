@@ -563,9 +563,14 @@ export const enforceIpWhitelist = (req, res, next) => {
  * IP filtering, and zero-downtime key rotation.
  */
 export const requireApiKey = (req, res, next) => {
+  authConfig.reload();
+
   // 1. Extract API Key from Headers only
   let apiKey = req.headers[authConfig.keyHeaderName];
 
+  if (Array.isArray(apiKey)) {
+    apiKey = apiKey[0];
+  }
 
   // 2. Load environment keys into repository if empty
   if (keyRepo.keyStore.size === 0 && authConfig.isConfigured()) {
@@ -585,7 +590,7 @@ export const requireApiKey = (req, res, next) => {
   // 4. Missing Key Check
   if (!apiKey) {
     AuditLogger.logFailure(req, 'Missing API Key in request headers', 'missing_api_key');
-    return res.status(401).json({ error: 'Unauthorized: Missing API Key' });
+    return res.status(401).json({ error: 'Missing API Key' });
   }
 
   // 5. Lookup Key Metadata via Repository (or Timing-Safe Dynamic Evaluation)

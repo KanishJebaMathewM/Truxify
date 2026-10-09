@@ -84,8 +84,8 @@ class TestPredictSpeedForecast:
         for speed in result["forecast_speeds_kmh"]:
             assert abs(speed - round(speed, 2)) < 1e-9
 
-    def test_more_than_three_nodes_raises(self):
-        """The fixed 3-entry gcn_weights array limits the predictor to 3 nodes."""
+    def test_more_than_three_nodes_supported(self):
+        """gcn_weights extend dynamically, so the default 5-node predictor works."""
         predictor = TemporalGcnSpeedPredictor(num_nodes=5)
-        with pytest.raises(ValueError):
-            predictor.predict_speed_forecast(np.full((5, 4), 50.0))
+        result = predictor.predict_speed_forecast(np.full((5, 4), 50.0))
+        assert len(result["forecast_speeds_kmh"]) == 5

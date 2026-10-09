@@ -146,3 +146,38 @@ def test_hybrid_sign_verify_and_metrics(hybrid, hybrid_key):
     metrics = hybrid.get_key_metrics(hybrid_key)
     assert metrics['classical_key_size'] == 2048
     assert metrics['algorithm'] == 'RSA-2048 + Kyber-768 + Dilithium'
+
+
+def test_hybrid_sign_uses_supplied_key_after_another_keypair_is_generated(hybrid):
+    first_key = hybrid.generate_hybrid_keypair()
+    second_key = hybrid.generate_hybrid_keypair()
+    message = b"signed by the first key"
+
+    signature = hybrid.hybrid_sign(message, first_key)
+
+    assert hybrid.hybrid_verify(message, signature, first_key) is True
+    assert hybrid.hybrid_verify(message, signature, second_key) is False
+
+
+def test_hybrid_verify_uses_supplied_public_key_without_shared_state(hybrid):
+    first_key = hybrid.generate_hybrid_keypair()
+    message = b"signed by an independent client"
+    signature = hybrid.hybrid_sign(message, first_key)
+
+    other_client = HybridCrypto()
+    assert other_client.hybrid_verify(message, signature, first_key) is True
+    assert other_client.hybrid_verify(message, signature, other_client.generate_hybrid_keypair()) is False
+
+
+def test_hybrid_sign_requires_private_key(hybrid, hybrid_key):
+    public_only_key = {'dilithium': {'public': hybrid_key['dilithium']['public']}}
+
+    with pytest.raises(ValueError, match="private key is required"):
+        hybrid.hybrid_sign(b"message", public_only_key)
+
+
+def test_hybrid_verify_requires_public_key(hybrid, hybrid_key):
+    private_only_key = {'dilithium': {'private': hybrid_key['dilithium']['private']}}
+
+    with pytest.raises(ValueError, match="public key is required"):
+        hybrid.hybrid_verify(b"message", b"signature", private_only_key)

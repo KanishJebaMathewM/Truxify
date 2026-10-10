@@ -12,7 +12,18 @@ import logger from '../middleware/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+import pkg from 'pg';
+const { Pool } = pkg;
 
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+export default {
+  query: (text, params) => pool.query(text, params),
+  getClient: () => pool.connect()
+};
 // Load environment variables relative to this module instead of process.cwd()
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 

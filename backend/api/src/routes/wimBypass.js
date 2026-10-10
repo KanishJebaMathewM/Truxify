@@ -7,6 +7,7 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { getMaxWimMeasurementAgeMs, hasWimSigningSecret } from '../config/wim.js';
+import { LBS_PER_TONNE } from '../services/wimBypass.js';
 import {
   evaluateBypassEligibility,
   buildTrustedMeasurement,
@@ -116,6 +117,7 @@ router.post(
         const axleWeight = Number(rawLoadWeight) * LBS_PER_TONNE;
         // There is no safety-score column in the schema; derive the safety
         // signal from the driver's verified registration (fail closed to 0).
+        const isVerified = profile?.is_digilocker_verified === true;
         const safetyScore = isVerified ? 100 : 0;
 
 
@@ -139,12 +141,14 @@ router.post(
             });
         }
 
-        const isEligible = evaluateBypassEligibility({
-            safetyScore,
-            axleWeight,
-            maxWeightLimit,
-        });
-      }
+
+      // Build the trusted measurement from server-side records — never from
+      // client-supplied fields (see the comment at the route top).
+      const measurement = buildTrustedMeasurement({
+        truck,
+        order,
+        driverProfile: profile,
+      });
 
       // Server-side freshness + vehicle/load correlation of the trusted measurement.
       const measurementCheck = validateTrustedMeasurement(measurement, {
@@ -174,6 +178,13 @@ router.post(
           signal: 'PULL_IN',
           message: 'Truck must pull into weigh station.',
         });
+      }
+
+      // Fail closed BEFORE persisting anything: without the signing secret no
+      // measurement or credential may be recorded (partial state invites
+      // replay). getWimSigningSecret throws when unset — caught below as a 500.
+      if (!hasWimSigningSecret()) {
+        return res.status(500).json({ error: 'Unable to issue bypass credential.' });
       }
 
       const storedMeasurement = await storeWimMeasurement(measurement);

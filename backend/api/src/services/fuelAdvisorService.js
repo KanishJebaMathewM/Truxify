@@ -43,7 +43,7 @@ class FuelAdvisorService {
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
-      console.error(`Error in FuelAdvisorService for truck ${truckId}:`, error.message);
+      logger.error({ err: error, truckId }, 'Error in FuelAdvisorService');
       // Fallback response with default load on critical failure
       return {
         success: false,
@@ -94,7 +94,7 @@ class FuelAdvisorService {
 
       return Math.round((totalLoad / validCount) * 100) / 100;
     } catch (err) {
-      console.error('Failed to calculate average engine load from trip_events:', err);
+      logger.error({ err, truckId }, 'Failed to calculate average engine load from trip_events');
       return 50; // Fallback default load
     }
   }

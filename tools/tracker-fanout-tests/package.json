@@ -1,0 +1,14 @@
+{
+  "name": "truxify-tracker-fanout-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "ws": "8.22.0",
+    "ioredis": "6.0.0",
+    "jsonwebtoken": "9.0.3",
+    "vitest": "4.1.11",
+    "eslint": "9.39.5",
+    "@eslint/js": "9.39.5",
+    "globals": "17.12.0"
+  }
+}

@@ -1,6 +1,5 @@
-  import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 1. Mock Logger with debug support
 vi.mock('../../../src/utils/logger.js', () => ({

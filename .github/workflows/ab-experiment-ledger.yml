@@ -4,6 +4,9 @@ on:
     paths:
       - 'backend/ml/services/ab_testing.py'
       - 'backend/ml/services/ab_experiment_ledger.py'
+      - 'backend/ml/services/ab_rollback.py'
+      - 'backend/ml/app/models/generation_rollback.py'
+      - 'backend/ml/tests/test_ab_rollback_ownership.py'
       - 'backend/ml/routes/ab_testing.py'
       - 'backend/ml/tests/test_ab_experiment_ledger.py'
       - 'backend/ml/tests/test_ab_testing_model.py'
@@ -28,8 +31,8 @@ jobs:
       - name: Verify native ledger and existing comparison contracts
         env:
           PYTHONPATH: backend/ml
-        run: python -m pytest backend/ml/tests/test_ab_experiment_ledger.py backend/ml/tests/test_ab_testing_model.py backend/ml/tests/test_ab_testing_shadow_metrics.py -q
+        run: python -m pytest backend/ml/tests/test_ab_experiment_ledger.py backend/ml/tests/test_ab_testing_model.py backend/ml/tests/test_ab_testing_shadow_metrics.py backend/ml/tests/test_ab_rollback_ownership.py -q
       - name: Analyze changed ledger sources
         run: |
-          python -m ruff check backend/ml/services/ab_experiment_ledger.py backend/ml/services/ab_testing.py backend/ml/tests/test_ab_experiment_ledger.py backend/ml/tests/test_ab_testing_model.py backend/ml/tests/test_ab_testing_shadow_metrics.py
+          python -m ruff check backend/ml/services/ab_experiment_ledger.py backend/ml/services/ab_testing.py backend/ml/tests/test_ab_experiment_ledger.py backend/ml/tests/test_ab_testing_model.py backend/ml/tests/test_ab_testing_shadow_metrics.py backend/ml/services/ab_rollback.py backend/ml/app/models/generation_rollback.py backend/ml/tests/test_ab_rollback_ownership.py
           python -m ruff check backend/ml/routes/ab_testing.py --ignore DTZ005,DTZ003,BLE001

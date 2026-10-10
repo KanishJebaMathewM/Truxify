@@ -1,5 +1,46 @@
 import logger from '../middleware/logger.js';
+// lib/circuitBreaker.js
 
+class CircuitBreaker {
+  constructor(options = {}) {
+    // ... existing initialization ...
+    this._halfOpenTimer = null;
+  }
+
+  open() {
+    this.state = 'OPEN';
+    
+    // Clear any existing timer before setting a new one
+    if (this._halfOpenTimer) {
+      clearTimeout(this._halfOpenTimer);
+      this._halfOpenTimer = null;
+    }
+
+    // Schedule transition to half-open
+    this._halfOpenTimer = setTimeout(() => {
+      this.halfOpen();
+    }, this.halfOpenTimeout);
+  }
+
+  reset() {
+    // Clear orphaned timer on manual reset
+    if (this._halfOpenTimer) {
+      clearTimeout(this._halfOpenTimer);
+      this._halfOpenTimer = null;
+    }
+
+    this.state = 'CLOSED';
+    this.failures = 0;
+    this.successes = 0;
+  }
+
+  halfOpen() {
+    this.state = 'HALF_OPEN';
+    this._halfOpenTimer = null;
+  }
+}
+
+module.exports = CircuitBreaker;
 export const CircuitState = {
   CLOSED: 'CLOSED',
   OPEN: 'OPEN',

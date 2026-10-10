@@ -331,12 +331,17 @@ describe('supportRoutes', () => {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
               order: vi.fn().mockReturnValue({
-                range: vi.fn().mockResolvedValue({ data: mockTickets, error: null, count: 2 }),
+                range: vi.fn().mockResolvedValue({
+                  data: mockTickets,
+                  error: null,
+                  count: 2,
+                }),
               }),
             }),
           }),
         }),
       });
+      
 
       const res = await request(makeApp()).get('/support/tickets');
 

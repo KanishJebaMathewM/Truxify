@@ -652,11 +652,16 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
  */
 router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), auditLog({ action: 'ticket:admin-view-all' }), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
-  if (page !== undefined && !/^\d+$/.test(page)) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
+  if (page !== undefined && (!/^\d+$/.test(page) || Number(page) < 1)) {
+    return res.status(400).json({
+      error: 'page must be a positive integer',
+    });
   }
-  if (limit !== undefined && !/^\d+$/.test(limit)) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
+
+  if (limit !== undefined && (!/^\d+$/.test(limit) || Number(limit) < 1)) {
+    return res.status(400).json({
+      error: 'limit must be a positive integer',
+    });
   }
   const pageNum = Math.max(1, parseInt(page, 10));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));

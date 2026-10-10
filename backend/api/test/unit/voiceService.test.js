@@ -102,15 +102,13 @@ describe('voiceService', () => {
 
     it('returns order when bookingId is a display ID matching driver_id', async () => {
       const mockOrder = { id: 'order-1', order_display_id: 'DISP-001', status: 'picked_up' };
-      const orFn = vi.fn(() => ({
-        order: vi.fn(() => ({
-          limit: vi.fn(() => ({
-            maybeSingle: vi.fn(() => Promise.resolve({ data: mockOrder, error: null })),
-          })),
+      const eqFn = vi.fn(() => ({
+        or: vi.fn(() => ({
+          maybeSingle: vi.fn(() => Promise.resolve({ data: mockOrder, error: null })),
         })),
       }));
       const selectFn = vi.fn(() => ({
-        or: orFn,
+        eq: eqFn,
       }));
       mockSupabaseFrom.mockReturnValue({ select: selectFn });
 
@@ -244,7 +242,7 @@ describe('voiceService', () => {
       const result = await processVoiceQuery('user-1', 'booking-1', Buffer.from('audio'), 'audio.wav');
 
       expect(result.transcript).toBeTruthy();
-      expect(result.response_text).toContain('in transit');
+      expect(result.response_text).toContain('in_transit');
     });
 
     it('returns mock when only OPENAI_API_KEY is set', async () => {

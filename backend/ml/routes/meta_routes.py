@@ -1,12 +1,19 @@
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, model_validator
-from typing import Optional, List, Dict, Any, Annotated
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from meta.model import MAML, MAMLModel, FewShotLearner, TaskGenerator, TaskGenerationUnavailable
 import os
+from datetime import datetime
+from typing import Annotated, Dict, List
+
+import numpy as np
+from fastapi import APIRouter, HTTPException, Query
+from meta.model import (
+    MAML,
+    FewShotLearner,
+    MAMLModel,
+    TaskGenerationUnavailable,
+    TaskGenerator,
+)
+from meta.training_admission import MetaTrainingInputError
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/meta", tags=["Meta-Learning"])
@@ -22,9 +29,9 @@ few_shot = FewShotLearner(maml)
 task_generator = TaskGenerator()
 
 class TrainRequest(BaseModel):
-    epochs: int = 50
-    tasks_per_epoch: int = 10
-    k_shot: int = 5
+    epochs: StrictInt = Field(default=50, ge=1, le=10000)
+    tasks_per_epoch: StrictInt = Field(default=10, ge=1, le=256)
+    k_shot: StrictInt = Field(default=5, ge=1, le=4096)
 
 class FewShotRequest(BaseModel):
     support_x: List[List[float]]
@@ -59,6 +66,8 @@ async def train_maml(request: TrainRequest):
             'data': results,
             'timestamp': datetime.now().isoformat()
         }
+    except MetaTrainingInputError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as e:
         logger.error(f"Training failed: {e}")
         logger.error(f"Internal error: {e}")

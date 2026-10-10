@@ -1,106 +1,117 @@
-/**
- * KalmanFilter: 2D Kinematic Kalman Filter for GPS Trajectory Smoothing
- * 
- * Tracks position [lat, lng] and velocity [v_lat, v_lng] to remove GPS sensor noise,
- * jitter, and multipath reflection drift.
- */
+const MAX_DATE_MS = 8640000000000000;
+const MAX_NOISE_VARIANCE = 1e12;
+const METERS_PER_DEGREE = 111320;
+
+function finite(value, label) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number`);
+  }
+  return value;
+}
+
+function observation(lat, lng, timestamp, accuracy) {
+  finite(lat, 'latitude');
+  finite(lng, 'longitude');
+  finite(accuracy, 'accuracy');
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new RangeError('coordinates must be geographic');
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0 || timestamp > MAX_DATE_MS) {
+    throw new RangeError('timestamp must be nonnegative integer milliseconds in the Date range');
+  }
+  if (accuracy < 0 || accuracy > 1e6) throw new RangeError('accuracy must be in [0,1000000] metres');
+  return Object.freeze({ lat, lng, timestamp, accuracy });
+}
+
+function wrappedDegrees(value) {
+  const result = value % 360;
+  if (result > 180) return result - 360;
+  if (result < -180) return result + 360;
+  return result;
+}
+
+function result(state) {
+  return {
+    lat: Number(state.lat.toFixed(7)), lng: Number(state.lng.toFixed(7)),
+    vLat: state.vLat, vLng: state.vLng, speedMps: Number(state.speedMps.toFixed(2)),
+  };
+}
+
+/** Scalar position smoothing with a displacement-derived velocity estimate, not a full covariance kinematic model. */
 export class KalmanFilter2D {
-  /**
-   * @param {object} [options={}]
-   * @param {number} [options.measurementNoise=4.0] - Measurement noise variance R (meters^2)
-   * @param {number} [options.processNoise=1.5] - Process noise variance Q
-   */
+  #state = null;
+  #r;
+  #q;
+
   constructor(options = {}) {
-    this.r = options.measurementNoise || 4.0;
-    this.q = options.processNoise || 1.5;
-
-    this.lat = null;
-    this.lng = null;
-    this.vLat = 0;
-    this.vLng = 0;
-    this.pLat = 1.0;
-    this.pLng = 1.0;
-    this.lastTimestamp = null;
+    this.#r = finite(options.measurementNoise ?? 4, 'measurement noise');
+    this.#q = finite(options.processNoise ?? 1.5, 'process noise');
+    if (this.#r <= 0 || this.#r > MAX_NOISE_VARIANCE || this.#q < 0 || this.#q > MAX_NOISE_VARIANCE) {
+      throw new RangeError('noise variances must be bounded; measurement positive and process nonnegative');
+    }
   }
 
-  /**
-   * Initializes or resets the filter with a starting GPS coordinate.
-   * @param {number} lat
-   * @param {number} lng
-   * @param {number} [timestamp=Date.now()]
-   */
-  init(lat, lng, timestamp = Date.now()) {
-    this.lat = lat;
-    this.lng = lng;
-    this.vLat = 0;
-    this.vLng = 0;
-    this.pLat = 1.0;
-    this.pLng = 1.0;
-    this.lastTimestamp = timestamp;
+  // Preserve readable legacy fields while keeping one privately owned state receipt.
+  get r() { return this.#r; }
+  get q() { return this.#q; }
+  get lat() { return this.#state?.lat ?? null; }
+  get lng() { return this.#state?.lng ?? null; }
+  get vLat() { return this.#state?.vLat ?? 0; }
+  get vLng() { return this.#state?.vLng ?? 0; }
+  get pLat() { return this.#state?.pLat ?? 1; }
+  get pLng() { return this.#state?.pLng ?? 1; }
+  get lastTimestamp() { return this.#state?.input.timestamp ?? null; }
+
+  /** Explicitly reset only after completely admitting a new starting observation. */
+  init(lat, lng, timestamp = Date.now(), accuracy = 4) {
+    const input = observation(lat, lng, timestamp, accuracy);
+    this.#state = Object.freeze({ lat, lng, vLat: 0, vLng: 0, pLat: 1, pLng: 1, speedMps: 0, input });
   }
 
-  /**
-   * Updates state estimate with a new raw GPS observation.
-   * 
-   * @param {number} zLat - Observed latitude
-   * @param {number} zLng - Observed longitude
-   * @param {number} [timestamp=Date.now()] - Measurement timestamp in ms
-   * @param {number} [accuracy=4.0] - Reported GPS accuracy in meters
-   * @returns {{lat: number, lng: number, vLat: number, vLng: number, speedMps: number}}
-   */
-  update(zLat, zLng, timestamp = Date.now(), accuracy = 4.0) {
-    if (this.lat === null || this.lng === null || this.lastTimestamp === null) {
-      this.init(zLat, zLng, timestamp);
-      return { lat: zLat, lng: zLng, vLat: 0, vLng: 0, speedMps: 0 };
+  /** Prepare and admit an entire candidate before publishing any state or time. */
+  update(zLat, zLng, timestamp = Date.now(), accuracy = 4) {
+    const input = observation(zLat, zLng, timestamp, accuracy);
+    if (!this.#state) {
+      this.init(zLat, zLng, timestamp, accuracy);
+      return result(this.#state);
+    }
+    const previous = this.#state;
+    if (timestamp < previous.input.timestamp) throw new RangeError('observation time must not move backwards');
+    if (timestamp === previous.input.timestamp) {
+      if (zLat !== previous.input.lat || zLng !== previous.input.lng || accuracy !== previous.input.accuracy) {
+        throw new RangeError('conflicting observations at the same timestamp');
+      }
+      return result(previous);
     }
 
-    const dt = Math.max(0.1, (timestamp - this.lastTimestamp) / 1000.0); // Elapsed seconds
-    this.lastTimestamp = timestamp;
-
-    // Measurement noise dynamically scaled by sensor reported accuracy
-    const varianceR = Math.max(1.0, (accuracy / 2.0) ** 2);
-
-    // --- 1. Predict Step ---
-    // Project state ahead: x_k = x_{k-1} + v * dt
-    const predLat = this.lat + this.vLat * dt;
-    const predLng = this.lng + this.vLng * dt;
-
-    // Project error covariance ahead: P_k = P_{k-1} + Q * dt
-    const predPLat = this.pLat + this.q * dt;
-    const predPLng = this.pLng + this.q * dt;
-
-    // --- 2. Update Step ---
-    // Kalman gain: K = P / (P + R)
+    const dt = (timestamp - previous.input.timestamp) / 1000;
+    const travelLng = previous.vLng * dt;
+    if (Math.abs(travelLng) >= 180) throw new RangeError('ambiguous longitude prediction; explicitly reinitialize');
+    const predLat = previous.lat + previous.vLat * dt;
+    const predLng = wrappedDegrees(previous.lng + travelLng);
+    const residualLng = wrappedDegrees(zLng - predLng);
+    if (Math.abs(residualLng) === 180) throw new RangeError('antipodal longitude observation is ambiguous');
+    // P, R are local metre-squared variances; Q is metre-squared per second.
+    // Scaling both P and R to either angular axis cancels in the dimensionless gain.
+    const varianceR = Math.max(this.#r, (accuracy / 2) ** 2);
+    const predPLat = previous.pLat + this.#q * dt;
+    const predPLng = previous.pLng + this.#q * dt;
     const kLat = predPLat / (predPLat + varianceR);
     const kLng = predPLng / (predPLng + varianceR);
-
-    // State update with measurement residual
-    const newLat = predLat + kLat * (zLat - predLat);
-    const newLng = predLng + kLng * (zLng - predLng);
-
-    // Update estimated velocity
-    this.vLat = (newLat - this.lat) / dt;
-    this.vLng = (newLng - this.lng) / dt;
-
-    // Update state covariance: P = (1 - K) * P
-    this.pLat = (1 - kLat) * predPLat;
-    this.pLng = (1 - kLng) * predPLng;
-
-    this.lat = newLat;
-    this.lng = newLng;
-
-    // Approximate ground speed in m/s (1 deg latitude ~ 111,320m)
-    const dyMeters = (this.vLat * 111320);
-    const dxMeters = (this.vLng * 111320 * Math.cos((this.lat * Math.PI) / 180.0));
-    const speedMps = Math.sqrt(dxMeters ** 2 + dyMeters ** 2);
-
-    return {
-      lat: Number(newLat.toFixed(7)),
-      lng: Number(newLng.toFixed(7)),
-      vLat: this.vLat,
-      vLng: this.vLng,
-      speedMps: Number(speedMps.toFixed(2)),
-    };
+    const lat = predLat + kLat * (zLat - predLat);
+    const lng = wrappedDegrees(predLng + kLng * residualLng);
+    const vLat = (lat - previous.lat) / dt;
+    const vLng = wrappedDegrees(lng - previous.lng) / dt;
+    const pLat = (1 - kLat) * predPLat;
+    const pLng = (1 - kLng) * predPLng;
+    const speedMps = Math.hypot(vLat * METERS_PER_DEGREE, vLng * METERS_PER_DEGREE * Math.cos(lat * Math.PI / 180));
+    const candidate = { lat, lng, vLat, vLng, pLat, pLng, speedMps, input };
+    for (const [key, value] of Object.entries(candidate)) {
+      if (key !== 'input') finite(value, `candidate ${key}`);
+    }
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || pLat < 0 || pLng < 0) {
+      throw new RangeError('candidate state is outside the geographic/covariance domain');
+    }
+    this.#state = Object.freeze(candidate);
+    return result(this.#state);
   }
 }
 

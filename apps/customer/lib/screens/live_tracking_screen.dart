@@ -281,6 +281,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     final initialWsUrl = buildUrl();
     debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
 
+    final injectedSocket = widget.trackingWebSocket;
+    if (injectedSocket != null) {
+      // Injected socket (tests, previews): use it instead of dialing.
+      _trackingWebSocket = injectedSocket;
+    } else {
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
       urlFactory: buildUrl,
@@ -359,6 +364,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }, onDone: () {
       if (mounted) setState(() => _wsConnected = false);
     });
+    }
 
     _trackingWebSocket!.connect();
   }
@@ -1203,15 +1209,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       tileProvider: CancellableNetworkTileProvider(),
                       userAgentPackageName: 'com.truxify.customer',
                     ),
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: _routePoints,
-                          strokeWidth: 4,
-                          color: TruxifyColors.accentDark,
-                        ),
-                      ],
-                    ),
+                    if (_routePoints.isNotEmpty)
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: _routePoints,
+                            strokeWidth: 4,
+                            color: TruxifyColors.accentDark,
+                          ),
+                        ],
+                      ),
                     AnimatedBuilder(
                       animation: _movementController,
                       builder: (context, _) {

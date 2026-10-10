@@ -314,7 +314,7 @@ function extractEscrowEventAmount(receipt, eventType) {
 
 // Asserts the on-chain release/refund transferred exactly the escrowed amount.
 function assertReceiptAmount(receipt, order, eventType) {
-  if (order.escrow_amount_wei == null) {
+  if (!order.escrow_amount_wei) {
     return;
   }
   const actual = extractEscrowEventAmount(receipt, eventType);
@@ -354,7 +354,6 @@ async function handlePaymentReleased(payload) {
   const receipt = await verifyPolygonTransactionReceipt(payload.txHash);
   const order = await findOrderByIdOrDisplayId(payload.orderId);
   assertBookingBinding(payload, order);
-  assertReceiptAmount(receipt, order, 'PaymentReleased');
   const now = new Date().toISOString();
 
   // Idempotent duplicate delivery: the release was already applied.
@@ -416,6 +415,8 @@ async function handlePaymentReleased(payload) {
       { retryable: false },
     );
   }
+  // Amount binding only after the order is known release-eligible.
+  assertReceiptAmount(receipt, order, 'PaymentReleased');
   const txHash = normalizeTxHash(payload.txHash);
   if (!txHash) {
     throw new EscrowVerificationError(

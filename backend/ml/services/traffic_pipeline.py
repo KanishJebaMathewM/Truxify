@@ -25,6 +25,7 @@ import redis
 import os
 import tempfile
 import logging
+from math import isfinite
 from functools import partial
 from collections import deque, OrderedDict
 from app.execution import is_training_cancelled, TrainingCancelled
@@ -43,14 +44,15 @@ def eta_seconds_from_speed(route_distance_m: float, predicted_speed_mps: float) 
 
     The LSTM is trained on traffic_speed (m/s) (see train_model), so its raw
     output is a speed, not a duration. eta_seconds = distance_m / speed_mps.
-    Returns None when either input is missing or non-positive so callers can
+    Returns None when either input or the result is invalid so callers can
     fall back to the routing engine's own duration estimate.
     """
-    if not route_distance_m or route_distance_m <= 0:
+    if not route_distance_m or not isfinite(route_distance_m) or route_distance_m <= 0:
         return None
-    if not predicted_speed_mps or predicted_speed_mps <= 0:
+    if not predicted_speed_mps or not isfinite(predicted_speed_mps) or predicted_speed_mps <= 0:
         return None
-    return route_distance_m / predicted_speed_mps
+    eta_seconds = route_distance_m / predicted_speed_mps
+    return eta_seconds if isfinite(eta_seconds) and eta_seconds > 0 else None
 
 class TrafficData(Base):
     __tablename__ = 'traffic_data'
@@ -613,12 +615,8 @@ class TrafficPipeline:
                 if predicted_speed_mps is not None:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)
                     route_distance_m = float(osrm_data.get('distance') or 0)
-                    if route_distance_m > 0 and predicted_speed_mps > 0:
-                        # Distance (m) / speed (m/s) yields seconds. The speed
-                        # is already m/s — do NOT divide by 3.6 as if it were
-                        # km/h, that inflated the ETA by 3.6x.
-                        eta_seconds = route_distance_m / predicted_speed_mps
-                    else:
+                    eta_seconds = eta_seconds_from_speed(route_distance_m, predicted_speed_mps)
+                    if eta_seconds is None:
                         # Fall back to the routing engine's duration estimate.
                         eta_seconds = float(osrm_data.get('duration') or 0)
 

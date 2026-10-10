@@ -655,7 +655,8 @@ const VERIFY_DELIVERY_WINDOW_MS =
   15 * 60 * 1000;
 
 const VERIFY_DELIVERY_MAX_REQUESTS =
-  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) ||
+  (process.env.NODE_ENV === 'test' ? 1000 : 10);
 
 export const verifyDeliveryLimiter = rateLimit({
   windowMs: VERIFY_DELIVERY_WINDOW_MS,

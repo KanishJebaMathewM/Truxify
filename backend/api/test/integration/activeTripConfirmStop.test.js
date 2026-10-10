@@ -187,7 +187,7 @@ describe('Driver Active Trip — Confirm Stop API', () => {
       .send({ stopId: 'stop-111', otp: '123' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('6-digit OTP');
+    expect(res.body.error).toContain('OTP must be exactly 6 digits');
   });
 
   it('should return 400 when wrong OTP is provided', async () => {

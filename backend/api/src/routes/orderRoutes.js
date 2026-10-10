@@ -197,6 +197,7 @@ import {
   getOrderHistory,
   getOrderDetails,
   verifyDeliveryController,
+  getOrderTimeline,
   resendOtp,
   changeDrop,
   cancelOrder,
@@ -210,7 +211,6 @@ import {
   uploadPodFile,
   createPodSignedUrl
 } from '../lib/storage/podStorage.js';
-import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
 
 const router = express.Router();
 const MAX_GEOFENCE_RADIUS_M = 500;
@@ -600,6 +600,9 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), get
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), getOrderDetails);
 
+// 6b. FETCH ORDER TIMELINE (CUSTOMER OR ASSIGNED DRIVER)
+router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), getOrderTimeline);
+
 // 13c. DRIVER OTP CONFIRM ALIAS — POST /api/orders/:id/confirm-otp
 // Friendly alias of /:id/verify-delivery for the driver app. It accepts the
 // same body { otp } and delegates to the identical pipeline so the driver's
@@ -829,11 +832,85 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       });
     }
   }
-});
+}); 
+router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
+     const orderId = req.params.id;
+     
+     try {
+       const result = await escrowLockManager.withLock(orderId, async (ctx) => {
+         // SINGLE READ - no more duplicate readOrder() calls
+         const { data: order, error } = await orderRepository.findOrderById(orderId);
+         if (error || !order) {
+           throw new DomainError(404, { error: 'Order not found' });
+         }
+         
+         // Resolve expected deposit amount once
+         const expectedAmount = resolveExpectedDepositAmount(order);
+         
+         // Transition to confirming state
+         const transitionResult = await ctx.transition('confirming');
+         if (!transitionResult.success) {
+           throw new DomainError(409, { error: 'Invalid state transition' });
+         }
+         
+         // Verify on-chain deposit
+         const depositTx = await recordDepositTx(order, expectedAmount);
+         
+         try {
+           // Execute acceptance RPC (may take time)
+           await finalizeAcceptance(order, depositTx);
+           
+           // Transition to funded
+           await ctx.transition('funded');
+           
+           // Update DB atomically
+           await orderRepository.updateOrder(orderId, {
+             escrow_status: 'funded',
+             deposit_tx_hash: depositTx.hash
+           });
+           
+           return { success: true, txHash: depositTx.hash };
+         } catch (rpcError) {
+           // EXTEND LOCK for refund processing
+           await ctx.extend();
+           
+           // Transition to refund_pending
+           await ctx.transition('refund_pending');
+           
+           // Execute refund WHILE HOLDING LOCK
+           const refundResult = await submitEscrowRefund(orderId, depositTx);
+           
+           // Transition to refunded
+           await ctx.transition('refunded');
+           
+           await orderRepository.updateOrder(orderId, {
+             escrow_status: 'refunded',
+             refund_tx_hash: refundResult.txHash
+           });
+           
+           throw new DomainError(500, { 
+             error: 'Acceptance failed, refund processed',
+             refundTxHash: refundResult.txHash 
+           });
+         }
+       }, { 
+         expectedState: 'funding',
+         targetState: 'confirming'
+       });
+       
+       res.json(result);
+     } catch (err) {
+       next(err);
+     }
+   });
 
 
-// ============================================================================
-// 18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
+
+//  ============================================================================
+//  18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
+//  18b. VIEW BIDS FOR AN ORDER (CUSTOMER) — GET /api/orders/:id/bids
+//  18c. ACCEPT A BID (CUSTOMER) — POST /api/orders/:id/bids/:bidId/accept
+
 // ============================================================================
 /**
  * @openapi

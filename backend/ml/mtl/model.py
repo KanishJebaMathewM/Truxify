@@ -1,12 +1,26 @@
+import copy
+import logging
+import os
+import tempfile
+import threading
+from functools import wraps
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-import logging
+from mtl.checkpoint_generation import validate_generation
 from torch.utils.data import DataLoader, TensorDataset
 
 logger = logging.getLogger(__name__)
+
+def _owned_generation(method):
+    @wraps(method)
+    def owned(self, *args, **kwargs):
+        with self._generation_lock:
+            return method(self, *args, **kwargs)
+    return owned
+
 
 class SharedEncoder(nn.Module):
     """Shared encoder for multi-task learning"""
@@ -70,12 +84,12 @@ class MultiTaskModel(nn.Module):
     ):
         super().__init__()
         
-        self.tasks = tasks
+        self.tasks = copy.deepcopy(tasks)
         self.shared_encoder = SharedEncoder(input_dim, hidden_dim)
         
         # Task-specific heads
         self.task_heads = nn.ModuleDict()
-        for task_name, task_config in tasks.items():
+        for task_name, task_config in self.tasks.items():
             output_dim = task_config.get('output_dim', 1)
             task_type = task_config.get('type', 'regression')
             self.task_heads[task_name] = TaskSpecificHead(
@@ -223,15 +237,15 @@ class MultiTaskTrainer:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         task_weights: Optional[Dict[str, float]] = None
     ):
-        self.model = model.to(device)
+        self._generation_lock = threading.RLock()
+        self._generation = (model.to(device), None, None)
         self.loss = loss
         self.device = device
         self.task_weights = task_weights or {}
         
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, patience=10, factor=0.5
-        )
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
+        self._generation = (self.model, optimizer, scheduler)
         
         # Gradient surgery methods
         self.gradient_surgery = GradientSurgery()
@@ -239,6 +253,19 @@ class MultiTaskTrainer:
         
         logger.info(f"✅ Multi-Task Trainer initialized on {self.device}")
     
+    @property
+    def model(self):
+        return self._generation[0]
+
+    @property
+    def optimizer(self):
+        return self._generation[1]
+
+    @property
+    def scheduler(self):
+        return self._generation[2]
+
+    @_owned_generation
     def train_step(
         self,
         x: torch.Tensor,
@@ -305,6 +332,10 @@ class MultiTaskTrainer:
             'task_losses': {k: v.item() for k, v in losses.items()}
         }
     
+    @_owned_generation
+    def _step_scheduler(self, loss):
+        self.scheduler.step(loss)
+
     def _validate_dataset(self, data, targets, *, name):
         """Check the complete named dataset before any training mutation."""
         if not isinstance(data, torch.Tensor) or data.ndim != 2:
@@ -337,6 +368,7 @@ class MultiTaskTrainer:
                 raise ValueError(f"{name} target {task_name} must contain finite values")
         return task_names
 
+    @_owned_generation
     def train(
         self,
         train_data: torch.Tensor,
@@ -384,7 +416,7 @@ class MultiTaskTrainer:
             losses.append(avg_loss)
             
             # Update scheduler
-            self.scheduler.step(avg_loss)
+            self._step_scheduler(avg_loss)
             
             # Validation
             if val_data is not None and val_targets is not None:
@@ -403,6 +435,7 @@ class MultiTaskTrainer:
             'final_val_loss': val_losses[-1] if val_losses else None
         }
     
+    @_owned_generation
     def validate(
         self,
         val_data: torch.Tensor,
@@ -425,25 +458,52 @@ class MultiTaskTrainer:
         
         return total_loss.item()
     
-    def predict(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Make predictions"""
-        self.model.eval()
-        with torch.no_grad():
-            x = x.to(self.device)
-            return self.model(x)
-    
+    @_owned_generation
+    def predict(self, x: torch.Tensor, task_name=None) -> Dict[str, torch.Tensor]:
+        """Own one serving generation and restore every native module mode."""
+        model = self.model
+        if task_name is not None and task_name not in model.task_heads:
+            raise ValueError("Unknown MTL task")
+        modes = [(module, module.training) for module in model.modules()]
+        model.eval()
+        try:
+            with torch.no_grad():
+                x = x.to(self.device)
+                return model(x) if task_name is None else model.forward_single_task(x, task_name)
+        finally:
+            for module, training in modes:
+                module.training = training
+
     def save(self, path: str = "models/mtl_model.pth"):
-        """Save model"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'task_config': self.model.tasks
-        }, path)
-        logger.info(f"✅ Model saved to {path}")
-    
+        """Capture one owned generation, then atomically replace the file."""
+        with self._generation_lock:
+            model, optimizer, scheduler = self._generation
+            snapshot = copy.deepcopy({'model_state_dict':model.state_dict(),
+                'optimizer_state_dict':optimizer.state_dict(), 'task_config':model.tasks,
+                'scheduler_state_dict':scheduler.state_dict()})
+            self._candidate_generation(snapshot)
+        destination = os.path.abspath(os.fspath(path))
+        fd, temporary = tempfile.mkstemp(prefix='.mtl-',suffix='.tmp',dir=os.path.dirname(destination))
+        try:
+            with os.fdopen(fd,'wb') as output:
+                torch.save(snapshot,output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary,destination)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _candidate_generation(self, checkpoint):
+        model = copy.deepcopy(self.model)
+        model.zero_grad(set_to_none=True)
+        optimizer = torch.optim.Adam(model.parameters(),lr=self.optimizer.param_groups[0]['lr'])
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,patience=10,factor=0.5)
+        validate_generation(model,optimizer,scheduler,checkpoint)
+        return model,optimizer,scheduler
+
     def load(self, path: str = "models/mtl_model.pth"):
-        """Load model"""
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        logger.info(f"✅ Model loaded from {path}")
+        """Validate a private model/Adam/scheduler and publish one native pair."""
+        checkpoint = torch.load(path,map_location=self.device,weights_only=True)
+        with self._generation_lock:
+            self._generation = self._candidate_generation(checkpoint)

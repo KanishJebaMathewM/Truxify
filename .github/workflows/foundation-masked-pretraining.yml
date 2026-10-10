@@ -5,6 +5,7 @@ on:
       - 'backend/ml/foundation/**'
       - 'backend/ml/routes/foundation_routes.py'
       - 'backend/ml/tests/test_foundation_mlm_objective.py'
+      - 'backend/ml/tests/test_mlm_optimizer_transition.py'
       - '.github/workflows/foundation-masked-pretraining.yml'
   workflow_dispatch:
 permissions:
@@ -25,6 +26,6 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install numpy==1.26.4 pytest==9.0.3 ruff==0.16.9
-      - run: python -m ruff check backend/ml/foundation/pretraining.py backend/ml/tests/test_foundation_mlm_objective.py
+      - run: python -m ruff check backend/ml/foundation/pretraining.py backend/ml/foundation/optimizer_transition.py backend/ml/tests/test_foundation_mlm_objective.py backend/ml/tests/test_mlm_optimizer_transition.py
       - run: python -m ruff check backend/ml/foundation/data.py backend/ml/foundation/model.py backend/ml/routes/foundation_routes.py --select E9,F63,F7,F82
-      - run: python -m pytest -q backend/ml/tests/test_foundation_mlm_objective.py
+      - run: python -m pytest -q backend/ml/tests/test_foundation_mlm_objective.py backend/ml/tests/test_mlm_optimizer_transition.py

@@ -152,11 +152,11 @@ describe('TrafficService - Complete Enterprise & Edge Case Test Suite (Issues #1
       }
     });
 
-    it('calculates correct multiplier from TomTom speedDiffPercent (45 percent slower traffic)', async () => {
+    it('calculates correct multiplier from TomTom travel times (positive traffic delay)', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          flowSegmentData: { speedDiffPercent: -45 }
+          flowSegmentData: { currentTravelTime: 145, freeFlowTravelTime: 100 }
         })
       });
       vi.stubGlobal('fetch', mockFetch);
@@ -166,11 +166,11 @@ describe('TrafficService - Complete Enterprise & Edge Case Test Suite (Issues #1
       expect(logger.info).toHaveBeenCalled();
     });
 
-    it('clamps TomTom multiplier to MAX_SURGE_MULTIPLIER (2.5) when traffic is heavily delayed', async () => {
+    it('clamps TomTom multiplier to MAX_SURGE_MULTIPLIER (2.5) when travel time is extremely high', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          flowSegmentData: { speedDiffPercent: -200 }
+          flowSegmentData: { currentTravelTime: 300, freeFlowTravelTime: 100 }
         })
       });
       vi.stubGlobal('fetch', mockFetch);
@@ -179,11 +179,11 @@ describe('TrafficService - Complete Enterprise & Edge Case Test Suite (Issues #1
       expect(multiplier).toBe(2.5);
     });
 
-    it('clamps TomTom multiplier to minimum 1.0 when traffic runs faster than free flow', async () => {
+    it('clamps TomTom multiplier to minimum 1.0 when travel time is below free flow', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          flowSegmentData: { speedDiffPercent: 20 }
+          flowSegmentData: { currentTravelTime: 80, freeFlowTravelTime: 100 }
         })
       });
       vi.stubGlobal('fetch', mockFetch);
@@ -213,11 +213,11 @@ describe('TrafficService - Complete Enterprise & Edge Case Test Suite (Issues #1
       expect(logger.error).toHaveBeenCalled();
     });
 
-    it('raises the surge multiplier when TomTom reports slower traffic (speedDiffPercent -35 => 1.35)', async () => {
+    it('raises the surge multiplier when TomTom reports longer travel time (135/100 => 1.35)', async () => {
       process.env.TOMTOM_API_KEY = 'test-key';
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ flowSegmentData: { speedDiffPercent: -35 } }),
+        json: async () => ({ flowSegmentData: { currentTravelTime: 135, freeFlowTravelTime: 100 } }),
       });
       vi.stubGlobal('fetch', mockFetch);
 

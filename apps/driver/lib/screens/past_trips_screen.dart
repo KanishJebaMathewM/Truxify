@@ -10,7 +10,11 @@ import '../theme/app_theme.dart';
 import '../services/trip_service.dart';
 
 class PastTripsScreen extends StatefulWidget {
-  const PastTripsScreen({super.key});
+  const PastTripsScreen({super.key, this.client});
+
+  /// Test seam — defaults to the global Supabase client (same pattern as
+  /// the customer app's screens and TripService's constructor injection).
+  final SupabaseClient? client;
 
   @override
   State<PastTripsScreen> createState() => _PastTripsScreenState();
@@ -133,7 +137,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
     });
 
     try {
-      final client = Supabase.instance.client;
+      final client = widget.client ?? Supabase.instance.client;
       final driverId = client.auth.currentUser?.id;
       if (driverId == null) {
         if (mounted) {
@@ -439,12 +443,15 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
                             ),
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            '/ 100',
-                            style: GoogleFonts.dmSans(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white60,
+                          Flexible(
+                            child: Text(
+                              '/ 100',
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white60,
+                              ),
                             ),
                           ),
                         ],

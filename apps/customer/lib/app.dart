@@ -7,7 +7,25 @@ import 'providers/language_provider.dart';
 import 'screens/public_tracking_screen.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
+import 'package:flutter/material.dart';
+import 'config/routes.dart';
 
+class TruxifyCustomerApp extends StatelessWidget {
+  const TruxifyCustomerApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: 'Truxify Customer Logistics',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      routerConfig: AppRouter.router,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
 class TruxifyApp extends StatefulWidget {
   const TruxifyApp({super.key, this.languageProvider});
   final LanguageProvider? languageProvider;

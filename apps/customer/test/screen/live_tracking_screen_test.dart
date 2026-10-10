@@ -31,6 +31,16 @@ void main() {
   late MockGoTrueClient mockAuth;
   late MockUser mockUser;
 
+  setUpAll(() {
+    registerFallbackValue(MockRealtimeChannel());
+    registerFallbackValue(PostgresChangeEvent.update);
+    registerFallbackValue(PostgresChangeFilter(
+      type: PostgresChangeFilterType.eq,
+      column: 'id',
+      value: '',
+    ));
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     mockOrderService = MockOrderService();
@@ -43,6 +53,22 @@ void main() {
     when(() => mockUser.id).thenReturn('mock-user-id');
     when(() => mockAuth.currentUser).thenReturn(mockUser);
     when(() => mockSupabase.auth).thenReturn(mockAuth);
+    final mockRealtimeChannel = MockRealtimeChannel();
+    when(() => mockRealtimeChannel.onBroadcast(
+          event: any(named: 'event'),
+          callback: any(named: 'callback'),
+        )).thenReturn(mockRealtimeChannel);
+    when(() => mockRealtimeChannel.onPostgresChanges(
+          event: any(named: 'event'),
+          schema: any(named: 'schema'),
+          table: any(named: 'table'),
+          filter: any(named: 'filter'),
+          callback: any(named: 'callback'),
+        )).thenReturn(mockRealtimeChannel);
+    when(() => mockRealtimeChannel.subscribe(any())).thenReturn(mockRealtimeChannel);
+    when(() => mockSupabase.channel(any())).thenReturn(mockRealtimeChannel);
+    when(() => mockSupabase.removeChannel(any())).thenAnswer((_) async => '');
+    when(() => mockSupabase.removeAllChannels()).thenAnswer((_) async => <String>[]);
     SupabaseService.mockClient = mockSupabase;
 
     // Stub WebSocket

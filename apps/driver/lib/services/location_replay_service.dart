@@ -40,6 +40,19 @@ class LocationReplayService {
   /// Production singleton.
   static final LocationReplayService instance = LocationReplayService._();
 
+  /// Isolated instance with injected queue and transport hooks — used by the
+  /// committed unit tests to drive replay without the singleton. The
+  /// singleton keeps its private `._()` constructor.
+  @visibleForTesting
+  LocationReplayService({
+    OfflineLocationQueue? queue,
+    this.sendLocation,
+    this.sendMilestone,
+    this.driverIdProvider,
+    this.tokenProvider,
+    this.isConnected,
+  }) : queueOverride = queue;
+
   /// Test hook: substitute the queue backing the replay worker.
   @visibleForTesting
   OfflineLocationQueue? queueOverride;
@@ -103,7 +116,8 @@ class LocationReplayService {
 
       if (pending.isEmpty) return;
       if (isConnected?.call() == false) return;
-      if (token == null) return;
+      // Location pings ride the tracking WebSocket and need no token; only
+      // milestone HTTP calls do. A missing token skips milestones, not pings.
 
       final locationItems = <QueueItem>[];
       final locationPayloads = <Map<String, dynamic>>[];
@@ -145,6 +159,11 @@ class LocationReplayService {
             if (orderId == null || milestone == null || sendMs == null) {
               continue;
             }
+            if (token == null) {
+              // Milestones need the auth token for HTTP delivery — leave them
+              // queued for the next reconnect rather than dropping them.
+              continue;
+            }
             final delivered =
                 await sendMs(orderId: orderId, milestone: milestone, token: token);
             if (!delivered) {
@@ -163,7 +182,7 @@ class LocationReplayService {
 
       if (locationPayloads.isNotEmpty) {
         final syncLocs = sendSyncLocations;
-        if (syncLocs != null) {
+        if (syncLocs != null && token != null) {
           final delivered = await syncLocs(locations: locationPayloads, token: token);
           if (delivered) {
             for (final item in locationItems) {
@@ -172,6 +191,24 @@ class LocationReplayService {
             debugPrint('[Replay] Synced ${locationItems.length} offline locations successfully');
           } else {
             debugPrint('[Replay] Location sync failed, stopping replay');
+          }
+        } else {
+          // No batch-sync hook — deliver each ping over the tracking socket,
+          // removing it from the queue only after the socket accepts it.
+          final send = sendLocation;
+          if (send != null) {
+            for (int i = 0; i < locationItems.length; i++) {
+              if (_stopRequested) break;
+              if (isConnected?.call() == false) break;
+              final result = send(locationItems[i].payload);
+              if (result == WsSendResult.delivered) {
+                await _queue.remove(locationItems[i].id);
+                sentInBatch++;
+              } else {
+                break;
+              }
+              await Future<void>.delayed(replayDelay);
+            }
           }
         }
       }

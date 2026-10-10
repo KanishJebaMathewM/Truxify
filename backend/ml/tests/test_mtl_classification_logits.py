@@ -5,9 +5,8 @@ import httpx
 import pytest
 import torch
 from fastapi import FastAPI
+from mtl.model import MTLLoss, MultiTaskModel, MultiTaskTrainer
 from torch import nn
-
-from mtl.model import MultiTaskModel, MTLLoss, MultiTaskTrainer
 
 
 def native(mixed=False,bias=(10.,-10.)):
@@ -81,6 +80,8 @@ def test_checkpoint_keys_roundtrip_and_prediction_probabilities(tmp_path):
     assert list(model.state_dict())==keys
     path=tmp_path/'native.pth';t.save(path)
     restored,other=native(mixed=True);other.load(path)
+    # Loading publishes a private validated generation; refresh the consumer reference.
+    restored=other.model
     for k,v in model.state_dict().items():torch.testing.assert_close(v,restored.state_dict()[k])
     torch.testing.assert_close(other.predict(torch.zeros(2,2))['risk'].sum(-1),torch.ones(2))
     assert list(prior)==list(restored.state_dict())

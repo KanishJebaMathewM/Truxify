@@ -181,7 +181,12 @@ export const verifyDeliveryController = async (req, res, next) => {
         payment_released: true,
       });
     }
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
+    res.json({
+      message: 'Delivery verified successfully! Payment released to driver.',
+      payment_released: result?.payment_released ?? true,
+      amount_inr: result?.amount_inr ?? null,
+      order_display_id: result?.order_display_id ?? null,
+    });
   } catch (err) {
     if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));
     logger.error('[verify-delivery] Exception:', err.message);

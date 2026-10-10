@@ -23,6 +23,8 @@
  * few seconds. The defaults below therefore leave a wide margin while stopping
  * the flood.
  */
+import { performance } from 'node:perf_hooks';
+
 export const SOCKET_RATE_LIMIT_DEFAULTS = {
   /** Sustained messages per second allowed on one connection. */
   refillPerSecond: 5,
@@ -44,10 +46,11 @@ export const SOCKET_RATE_LIMIT_DEFAULTS = {
  *   to the safe default rather than disabling the guard
  * @param {number} [options.capacity] burst capacity
  * @param {number} [options.maxOverRate] over-rate messages before reporting abuse
- * @param {() => number} [options.now] clock injection point for tests
+ * @param {() => number} [options.now] elapsed millisecond clock injection point for tests
  */
 export function createSocketRateLimiter(options = {}) {
-  const now = options.now ?? (() => Date.now());
+  // Token refill measures elapsed time, independent of wall-clock adjustments.
+  const now = options.now ?? (() => performance.now());
 
   let refillPerSecond = options.refillPerSecond ?? SOCKET_RATE_LIMIT_DEFAULTS.refillPerSecond;
   let capacity = options.capacity ?? SOCKET_RATE_LIMIT_DEFAULTS.capacity;

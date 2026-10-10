@@ -226,7 +226,9 @@ void main() {
 
     test('Throws fallback message when stop update error is not JSON', () async {
       final mockHttp = MockClient((request) async {
-        return http.Response('Bad gateway', 502);
+        // The shared ApiClient surfaces the response's reasonPhrase for
+        // non-JSON error bodies ('Unknown error' when absent) — set it.
+        return http.Response('Bad gateway', 502, reasonPhrase: 'Bad Gateway');
       });
 
       final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
@@ -236,7 +238,7 @@ void main() {
         throwsA(isA<Exception>().having(
           (e) => e.toString(),
           'message',
-          contains('Failed to mark stop completed (502)'),
+          contains('Bad Gateway'),
         )),
       );
     });

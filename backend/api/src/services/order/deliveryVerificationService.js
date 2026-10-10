@@ -655,12 +655,18 @@ export class DeliveryVerificationService {
         // already "released". If the release failed again, the driver is told
         // the retry failed instead of being notified that they are paid while
         // the funds remain stuck on-chain.
+        // The confirmation guard only applies to escrow-backed orders — a
+        // plain order (no escrow_status/amount) has nothing on-chain to
+        // confirm.
+        const escrowExpected =
+          ["funded", "release_failed", "release_pending"].includes(order.escrow_status) ||
+          order.escrow_amount_wei != null;
         const releaseConfirmed = Boolean(
           releaseTxHash ||
             escrowAlreadyReleased ||
             order.escrow_status === "released",
         );
-        if (!releaseConfirmed) {
+        if (escrowExpected && !releaseConfirmed) {
           logger.error(
             `[verify-delivery] On-chain escrow release not confirmed for order ${orderId} (escrow_status=${order.escrow_status}) — aborting before notification.`,
           );
@@ -872,7 +878,12 @@ export class DeliveryVerificationService {
           }
         }
 
-        return { escrowUpdateFailed };
+        return {
+          escrowUpdateFailed,
+          payment_released: true,
+          amount_inr: order.total_amount != null ? order.total_amount / 100 : null,
+          order_display_id: order.order_display_id,
+        };
       },
     );
   }

@@ -47,7 +47,7 @@ describe('trafficCoordinateBounds - Geographic range guard tests', () => {
     it('calls external API for valid coordinates', async () => {
       global.fetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ flowSegmentData: { speedDiffPercent: -20 } }),
+        json: async () => ({ flowSegmentData: { currentTravelTime: 120, freeFlowTravelTime: 100 } }),
       });
 
       const mult = await getLiveTrafficMultiplier(28.6139, 77.2090);
@@ -82,7 +82,7 @@ describe('trafficCoordinateBounds - Geographic range guard tests', () => {
     it('accepts exact boundary coordinates and 0 without rejecting', async () => {
       global.fetch.mockResolvedValue({
         ok: true,
-        json: async () => ({ flowSegmentData: { speedDiffPercent: 0 } }),
+        json: async () => ({ flowSegmentData: { currentTravelTime: 100, freeFlowTravelTime: 100 } }),
       });
 
       await getLiveTrafficMultiplier(0, 0);

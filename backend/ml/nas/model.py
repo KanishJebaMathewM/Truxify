@@ -1,15 +1,13 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-import random
 import logging
-from collections import OrderedDict
-import itertools
+import math
+import random
 from copy import deepcopy
 from numbers import Integral
-import math
+from typing import Dict, List, Tuple
+
+import torch
+import torch.nn as nn
+from nas.construction_plan import NASPlanError, plan_construction
 
 logger = logging.getLogger(__name__)
 
@@ -148,87 +146,79 @@ class NASSearchSpace:
         return architecture
 
 class NASModel(nn.Module):
-    """Dynamic model based on architecture"""
-    
-    def __init__(self, architecture: Dict, input_shape: Tuple[int, ...] = (1, 28, 28)):
+    """Native NAS execution with a complete owned geometry/resource plan."""
+
+    def __init__(self, architecture: Dict, input_shape: Tuple[int, ...] = (1, 28, 28),
+                 *, max_parameters=50000000, max_flops=100000000000,
+                 max_activation_values=16000000, max_batch_size=1024):
         super().__init__()
-        self.architecture = _snapshot_architecture(architecture)
-        self.input_shape = input_shape
-        
-        self.layers = nn.ModuleList()
+        snapshot = _snapshot_architecture(architecture)
+        self._plan = plan_construction(snapshot, input_shape, max_parameters=max_parameters,
+            max_flops=max_flops, max_activation_values=max_activation_values,
+            max_batch_size=max_batch_size)
+        self._architecture = snapshot
         self.build_model()
-        
-        logger.info(f"✅ NAS Model built with {len(architecture['layers'])} layers")
-    
+
+    @property
+    def architecture(self):
+        return deepcopy(self._architecture)
+
+    @property
+    def input_shape(self):
+        return self._plan.shape
+
     def build_model(self):
-        """Build model from architecture"""
-        in_channels = self.input_shape[0]
-        current_size = self.input_shape[1]
-        
-        for i, (op, filters, activation) in enumerate(zip(
-            self.architecture['layers'],
-            self.architecture['filters'],
-            self.architecture['activations']
-        )):
-            if op == 'conv3x3':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=3, padding=1)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'conv5x5':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=5, padding=2)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'conv7x7':
-                layer = nn.Conv2d(in_channels, filters, kernel_size=7, padding=3)
-                self.layers.append(layer)
-                in_channels = filters
-            elif op == 'maxpool3x3':
-                layer = nn.MaxPool2d(3, stride=1, padding=1)
-                self.layers.append(layer)
-            elif op == 'avgpool3x3':
-                layer = nn.AvgPool2d(3, stride=1, padding=1)
-                self.layers.append(layer)
-            elif op == 'identity':
-                layer = nn.Identity()
-                self.layers.append(layer)
-            elif op == 'zero':
-                layer = nn.ZeroPad2d(0)
-                self.layers.append(layer)
-            
-            # Add activation
-            if op not in ['maxpool3x3', 'avgpool3x3', 'zero']:
-                if activation == 'relu':
-                    self.layers.append(nn.ReLU())
-                elif activation == 'tanh':
-                    self.layers.append(nn.Tanh())
-                elif activation == 'sigmoid':
-                    self.layers.append(nn.Sigmoid())
-                elif activation == 'swish':
-                    self.layers.append(nn.SiLU())
-        
-        # Adaptive pooling and classifier
-        self.layers.append(nn.AdaptiveAvgPool2d((1, 1)))
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(in_channels, 10))
-    
+        """Allocate privately, then replace one coherent registered module list."""
+        layers = nn.ModuleList()
+        channels = self.input_shape[0]
+        for operation, filters, activation in self._plan.stages:
+            if operation in ('conv3x3', 'conv5x5', 'conv7x7'):
+                kernel = {'conv3x3':3, 'conv5x5':5, 'conv7x7':7}[operation]
+                layers.append(nn.Conv2d(channels, filters, kernel_size=kernel, padding=kernel // 2))
+                channels = filters
+            elif operation == 'maxpool3x3':
+                layers.append(nn.MaxPool2d(3, stride=1, padding=1))
+            elif operation == 'avgpool3x3':
+                layers.append(nn.AvgPool2d(3, stride=1, padding=1))
+            elif operation == 'identity':
+                layers.append(nn.Identity())
+            elif operation == 'zero':
+                layers.append(nn.ZeroPad2d(0))
+            if operation not in ('maxpool3x3', 'avgpool3x3', 'zero'):
+                layers.append({'relu':nn.ReLU, 'tanh':nn.Tanh,
+                               'sigmoid':nn.Sigmoid, 'swish':nn.SiLU}[activation]())
+        layers.append(nn.AdaptiveAvgPool2d((1, 1)))
+        layers.append(nn.Flatten())
+        layers.append(nn.Linear(channels, 10))
+        self.layers = layers
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.layers:
+        if (not isinstance(x, torch.Tensor) or x.layout != torch.strided
+                or not x.is_floating_point() or x.ndim != 4
+                or tuple(x.shape[1:]) != self.input_shape):
+            raise NASPlanError("input must be dense floating NCHW with the declared geometry")
+        batch = x.shape[0]
+        if (not 1 <= batch <= self._plan.max_batch_size
+                or batch * self._plan.flops > self._plan.max_flops
+                or batch * self._plan.activation_values > self._plan.max_activation_values):
+            raise NASPlanError("complete NAS batch exceeds execution work/activation budget")
+        reference = next(self.parameters())
+        if x.dtype != reference.dtype or x.device != reference.device or not torch.isfinite(x).all():
+            raise NASPlanError("input must match model dtype/device and contain finite values")
+        # Keep one admitted module generation for the whole forward.
+        layers = self.layers
+        for layer in layers:
             x = layer(x)
+        if not torch.isfinite(x).all():
+            raise NASPlanError("native NAS result cannot be represented finitely")
         return x
-    
+
     def get_flops(self) -> int:
-        """Calculate FLOPs (simplified)"""
-        total = 0
-        for layer in self.layers:
-            if isinstance(layer, nn.Conv2d):
-                total += layer.weight.numel() * 2
-            elif isinstance(layer, nn.Linear):
-                total += layer.weight.numel() * 2
-        return total
-    
+        """Per-sample convolution/dense multiply-add estimate (two FLOPs per MAC)."""
+        return self._plan.flops
+
     def get_params(self) -> int:
-        """Get number of parameters"""
-        return sum(p.numel() for p in self.parameters())
+        return sum(parameter.numel() for parameter in self.parameters())
 
 class RLNASController:
     """Reinforcement Learning based NAS Controller"""

@@ -165,7 +165,12 @@ class ApiClient {
       // Firebase not initialised; fall through to Supabase session
     }
     _cachedFirebaseToken = null;
-    return _supabase.auth.currentSession?.accessToken;
+    try {
+      return _supabase.auth.currentSession?.accessToken;
+    } catch (_) {
+      // Supabase not initialised (tests, headless) — no token.
+      return null;
+    }
   }
 
   String? get _accessToken {

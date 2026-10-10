@@ -3,10 +3,17 @@
 import copy
 import math
 from numbers import Integral, Real
+from threading import RLock
 
 import numpy as np
 import torch
 from torch import nn
+
+from .optimizer_transition import (
+    finite_policy_number,
+    operation_owned,
+    optimizer_transition,
+)
 
 IGNORE_INDEX = -100
 
@@ -131,6 +138,7 @@ class MaskedTokenTrainer:
     """Separate masked-token optimizer; legacy supervised trainer stays intact."""
 
     def __init__(self, model, config):
+        self._operation_lock = RLock()
         self.model, self.config = model, config
         self.batch_size = _positive_int(config.batch_size, "batch_size")
         self.epochs = _positive_int(config.epochs, "epochs")
@@ -139,8 +147,11 @@ class MaskedTokenTrainer:
             raise ValueError("max_len exceeds model positional capacity")
         self.vocab_size = model.token_embedding.num_embeddings
         self.device = next(model.parameters()).device
+        learning_rate = finite_policy_number(config.learning_rate, "learning_rate")
+        if learning_rate < 0:
+            raise ValueError("learning_rate must be nonnegative")
         self.optimizer = torch.optim.AdamW(
-            model.parameters(), lr=config.learning_rate, weight_decay=0.01
+            model.parameters(), lr=learning_rate, weight_decay=0.01
         )
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=self.epochs
@@ -171,22 +182,25 @@ class MaskedTokenTrainer:
             raise ValueError("MLM objective is not finite")
         return loss, count
 
+    @operation_owned
     def train_step(self, samples):
         batch = collate_mlm(samples, self.vocab_size, self.max_len)
         count = int((batch["labels"] != IGNORE_INDEX).sum())
         if count == 0:
             return {"loss": 0.0, "supervised_tokens": 0}
-        self.model.train()
-        self.optimizer.zero_grad(set_to_none=True)
-        loss, count = self._forward_loss(batch)
-        loss.backward()
-        norm = nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        if not torch.isfinite(norm):
+        with optimizer_transition(self.model, self.optimizer):
+            self.model.train()
             self.optimizer.zero_grad(set_to_none=True)
-            raise ValueError("MLM gradients are not finite")
-        self.optimizer.step()
+            loss, count = self._forward_loss(batch)
+            loss.backward()
+            norm = nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            if not torch.isfinite(norm):
+                self.optimizer.zero_grad(set_to_none=True)
+                raise ValueError("MLM gradients are not finite")
+            self.optimizer.step()
         return {"loss": float(loss.detach()), "supervised_tokens": count}
 
+    @operation_owned
     def validate(self, samples):
         owned = copy.deepcopy(list(samples))
         batches = [
@@ -209,6 +223,7 @@ class MaskedTokenTrainer:
                 module.training = mode
         return total / count if count else 0.0
 
+    @operation_owned
     def train(self, train_data, val_data=None):
         train_data = copy.deepcopy(list(train_data))
         val_data = copy.deepcopy(list(val_data)) if val_data is not None else None

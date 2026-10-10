@@ -1,4 +1,7 @@
 import { DomainError } from './order/domainError.js';
+// ESM import — the CJS require here bypassed vitest's module mocking
+// entirely (the suite's supabaseAdmin mock never applied).
+import { supabaseAdmin } from '../config/db.js';
 
 /**
  * Calculates fuel efficiency (e.g. km/L) from distance and fuel consumed.
@@ -15,7 +18,7 @@ export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
 
   const numDistance = Number(distance);
   const numFuel = Number(fuelAmount);
-  const { supabaseAdmin } = require('../config/db');
+
 
 class FuelAdvisorService {
   /**

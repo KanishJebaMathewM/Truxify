@@ -7,6 +7,10 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  // The route builds a caller-scoped client for the ownership check and reads
+  // service-side via supabaseAdmin.
+  createUserClient: () => m.supabase,
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -68,9 +72,11 @@ describe('Fuel Advisor Routes', () => {
   it('GET /api/v1/trucks/:id/fuel-advisor recommends B5 for sub-zero weather and low engine load', async () => {
     // Lat 45 is sub-zero (-5C) in our mock
     m.store.orders = [{ id: 'order-1', truck_id: 'truck-1', status: 'in_transit' }];
+    // The service resolves order → trip, then reads trip_events by trip_id.
+    m.store.trips = [{ id: 'trip-1', order_id: 'order-1', truck_id: 'truck-1' }];
     m.store.trip_events = [
-      { trip_id: 'order-1', event_type: 'gpsUpdate', payload: { engineLoad: 40 } },
-      { trip_id: 'order-1', event_type: 'gpsUpdate', payload: { engineLoad: 50 } },
+      { trip_id: 'trip-1', event_type: 'gpsUpdate', metadata: { engineLoad: 40 } },
+      { trip_id: 'trip-1', event_type: 'gpsUpdate', metadata: { engineLoad: 50 } },
     ];
 
     const res = await request(buildApp())
@@ -86,9 +92,10 @@ describe('Fuel Advisor Routes', () => {
   it('GET /api/v1/trucks/:id/fuel-advisor recommends B20 for sub-zero weather and high engine load', async () => {
     // Lat 45 is sub-zero (-5C) in our mock
     m.store.orders = [{ id: 'order-1', truck_id: 'truck-1', status: 'in_transit' }];
+    m.store.trips = [{ id: 'trip-1', order_id: 'order-1', truck_id: 'truck-1' }];
     m.store.trip_events = [
-      { trip_id: 'order-1', event_type: 'gpsUpdate', payload: { engineLoad: 70 } },
-      { trip_id: 'order-1', event_type: 'gpsUpdate', payload: { engineLoad: 80 } },
+      { trip_id: 'trip-1', event_type: 'gpsUpdate', metadata: { engineLoad: 70 } },
+      { trip_id: 'trip-1', event_type: 'gpsUpdate', metadata: { engineLoad: 80 } },
     ];
 
     const res = await request(buildApp())

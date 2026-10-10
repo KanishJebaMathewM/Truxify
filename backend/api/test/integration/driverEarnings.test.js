@@ -42,8 +42,7 @@ const mockTrips = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const supabaseMock = {
       from: (table) => {
         if (table === 'trips') {
           return {
@@ -62,9 +61,9 @@ vi.mock('../../src/config/db.js', () => {
           }),
         };
       },
-    },
-    mongoDb: null,
-    redisClient: {
+  };
+  const mongoDb = null;
+  const redisClient = {
       get: () => Promise.resolve(null),
       set: () => Promise.resolve('OK'),
       del: () => Promise.resolve(1),
@@ -74,9 +73,16 @@ vi.mock('../../src/config/db.js', () => {
         return Promise.resolve(1);
       },
       status: 'ready',
-    },
+  };
+  return {
+    supabase: supabaseMock,
+    // The driver routes build caller-scoped clients via createUserClient;
+    // service-role reads go through supabaseAdmin.
+    createUserClient: () => supabaseMock,
+    supabaseAdmin: supabaseMock,
+    mongoDb,
+    redisClient,
     upstashRedisClient: null,
-    supabaseAdmin: null,
     firebaseAdmin: null,
   };
 });

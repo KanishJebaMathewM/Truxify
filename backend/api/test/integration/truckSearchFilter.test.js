@@ -24,8 +24,7 @@ const mockProfiles = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const supabaseMock = {
       from: (table) => {
         if (table === 'driver_details') {
           return {
@@ -58,12 +57,30 @@ vi.mock('../../src/config/db.js', () => {
             }),
           };
         }
-        return {};
+        // Unknown tables get a deep chainable empty stub (the handler queries
+        // more tables than the three named above — e.g. the access check).
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          not: () => chain,
+          in: () => chain,
+          gte: () => chain,
+          lte: () => chain,
+          order: () => chain,
+          limit: () => chain,
+          or: () => chain,
+          single: () => Promise.resolve({ data: null, error: null }),
+          maybeSingle: () => Promise.resolve({ data: null, error: null }),
+          then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+        };
+        return chain;
       },
-    },
-    mongoDb: {
-      collection: () => ({
-        find: () => ({
+  };
+  const mongoDb = {
+    collection: () => ({
+      // The handler chains .find().limit(200).toArray()
+      find: () => ({
+        limit: () => ({
           toArray: () => Promise.resolve([
             { driver_id: 'drv-1' },
             { driver_id: 'drv-2' },
@@ -71,8 +88,9 @@ vi.mock('../../src/config/db.js', () => {
           ]),
         }),
       }),
-    },
-    redisClient: {
+    }),
+  };
+  const redisClient = {
       get: () => Promise.resolve(null),
       set: () => Promise.resolve('OK'),
       del: () => Promise.resolve(1),
@@ -82,8 +100,8 @@ vi.mock('../../src/config/db.js', () => {
         return Promise.resolve(1);
       },
       status: 'ready',
-    },
-    upstashRedisClient: {
+  };
+  const upstashRedisClient = {
       get: () => Promise.resolve(null),
       set: () => Promise.resolve('OK'),
       del: () => Promise.resolve(1),
@@ -93,8 +111,15 @@ vi.mock('../../src/config/db.js', () => {
         return Promise.resolve(1);
       },
       status: 'ready',
-    },
-    supabaseAdmin: null,
+  };
+  return {
+    supabase: supabaseMock,
+    // The search handler reads via the service-role client.
+    supabaseAdmin: supabaseMock,
+    createUserClient: () => supabaseMock,
+    mongoDb,
+    redisClient,
+    upstashRedisClient,
     firebaseAdmin: null,
   };
 });

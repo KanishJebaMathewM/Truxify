@@ -44,7 +44,18 @@ const ALLOWED_NOTIF_TYPES = new Set([
   'payment_released',
   'delivery_otp',
 ]);
+// backend/api/src/services/notificationService.js
 
+// Before:
+// console.error('Error inserting notification:', error);
+
+// After:
+logger.error({
+  event: 'NOTIFICATION_INSERT_ERROR',
+  error: error.message || error,
+  code: error.code,
+  details: error.details
+}, '[NotificationService] Error inserting notification');
 // Tokens that can never be delivered again — the device row is deactivated so
 // future notifications stop targeting it. Exact client codes from the installed
 // firebase-admin v14 (MessagingErrorCode).

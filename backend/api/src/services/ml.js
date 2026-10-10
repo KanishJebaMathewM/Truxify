@@ -4,7 +4,125 @@ import { LRUCache } from '../utils/cache.js';
 
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
+// backend/api/src/services/ml.js
+import axios from 'axios';
+import logger from '../middleware/logger.js';
 
+const ML_BASE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
+const ML_API_KEY = process.env.ML_API_KEY || '';
+
+function getHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    ...(ML_API_KEY ? { 'X-API-Key': ML_API_KEY } : {})
+  };
+}
+
+async function handleResponse(responsePromise, url = '', method = 'GET') {
+  try {
+    const response = await responsePromise;
+    return response.data;
+  } catch (error) {
+    const status = error.response?.status;
+    const errorMsg = error.response?.data?.error || error.message;
+    
+    if (status === 401 || status === 403) {
+      logger.error({ status, url, method, err: errorMsg }, `[ML] Authentication failed (${status}) for ${method} ${url}`);
+      throw new Error(`[ML] Authentication failed (${status})`);
+    }
+    
+    logger.error({ status, url, method, err: errorMsg }, `[ML] Request failed (${status || 'network'}) for ${method} ${url}`);
+    throw new Error(`[ML] Request failed (${status || 'network'})`);
+  }
+}
+
+export function parseWeightKgSafe(value) {
+  if (value === undefined || value === null) return 0;
+  const cleaned = String(value).replace(/[^0-9.]/g, '');
+  const normalized = cleaned.replace(/(\..*?)\..*/g, '$1');
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export async function predictDriverProfit(params) {
+  const url = `${ML_BASE_URL}/predict/profit`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function predictDemand(features) {
+  const url = `${ML_BASE_URL}/predict/demand`;
+  return handleResponse(axios.post(url, features, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function predictPrice(params) {
+  const url = `${ML_BASE_URL}/predict/price`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function predictEta(params) {
+  const url = `${ML_BASE_URL}/predict/eta`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function matchDeadhead(params) {
+  const url = `${ML_BASE_URL}/match/deadhead`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function matchEnRouteLoads(params) {
+  const url = `${ML_BASE_URL}/match/en-route`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function optimisePacking(params) {
+  const url = `${ML_BASE_URL}/optimise/packing`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function recommendLoads(params) {
+  const url = `${ML_BASE_URL}/recommend/loads`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function recommendTrucks(params) {
+  const url = `${ML_BASE_URL}/recommend/trucks`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function scoreTrust(params) {
+  const url = `${ML_BASE_URL}/score/trust`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function matchBilateral(params) {
+  const url = `${ML_BASE_URL}/match/bilateral`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function optimiseMidTrip(params) {
+  const url = `${ML_BASE_URL}/optimise/mid-trip`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function trainDemandModel(params) {
+  const url = `${ML_BASE_URL}/train/demand`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function trainPriceModel(params) {
+  const url = `${ML_BASE_URL}/train/price`;
+  return handleResponse(axios.post(url, params, { headers: getHeaders(), timeout: 5000 }), url, 'POST');
+}
+
+export async function listModels() {
+  const url = `${ML_BASE_URL}/models`;
+  return handleResponse(axios.get(url, { headers: getHeaders(), timeout: 5000 }), url, 'GET');
+}
+
+export const __testing = {
+  getHeaders,
+  handleResponse
+};
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 

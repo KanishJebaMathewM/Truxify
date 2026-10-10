@@ -45,7 +45,7 @@ function generateNonce() {
 }
 
 function generateFallbackOtp() {
-    const digits = Math.floor(Math.random() * 10 ** FALLBACK_OTP_DIGITS);
+    const digits = crypto.randomInt(10 ** (FALLBACK_OTP_DIGITS - 1), 10 ** FALLBACK_OTP_DIGITS);
     return String(digits).padStart(FALLBACK_OTP_DIGITS, '0');
 }
 

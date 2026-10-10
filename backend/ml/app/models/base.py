@@ -381,6 +381,9 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
             from .generation_publication import recoverable_publication
 
             with recoverable_publication(model_name):
+                # Snapshot copying may take time; recheck the existing native
+                # cancellation policy before any serving-state mutation.
+                _raise_if_cancelled(model_name)
                 if current:
                     _atomic_write_json(previous_path, {"generation": current})
                 _atomic_write_json(active_path, {"generation": generation})

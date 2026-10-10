@@ -8,6 +8,7 @@ from threading import Event
 
 import numpy as np
 import pytest
+from app.execution import TrainingCancelled
 from app.models import base
 from app.models.generation_publication import PublicationRecoveryError
 from sklearn.linear_model import LinearRegression
@@ -239,3 +240,26 @@ def test_failed_republication_preserves_deleted_reader_tombstone(monkeypatch):
         assert base.load_model_snapshot("demo") is None
         assert Path(path).exists()
     assert not Path(path).exists()
+
+
+def test_cancellation_during_snapshot_copy_does_not_publish(monkeypatch):
+    from app.models import generation_publication
+
+    publish("A")
+    publish("B")
+    before = snapshot("demo")
+    native = generation_publication.shutil.copyfile
+    cancelled = False
+
+    def copy_then_cancel(*args):
+        nonlocal cancelled
+        result = native(*args)
+        cancelled = True
+        return result
+
+    monkeypatch.setattr(generation_publication.shutil, "copyfile", copy_then_cancel)
+    monkeypatch.setattr(base, "_training_cancelled", lambda: cancelled)
+    with pytest.raises(TrainingCancelled):
+        publish("C")
+    assert_exact(before)
+    assert not list(Path(base.MODEL_STORAGE_DIR).rglob("*.tmp"))

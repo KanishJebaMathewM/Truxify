@@ -10,7 +10,8 @@ If pointer, mirror or signing publication raises, recovery restores the exact
 prior bytes or removes a newly introduced destination, and preserves the prior
 deleted-reader tombstone. Readers/writers using the existing native owner wait
 through recovery; an already admitted immutable reader keeps its lease. Snapshot
-preparation failure never begins publication. A recovered failed save propagates
+preparation failure never begins publication. The existing native cancellation
+policy is rechecked after snapshot I/O and before serving-state mutation. A recovered failed save propagates
 its original error, and the original model/history remains available for retry.
 A failed first save stays unpublished; a legacy flat store stays intact.
 

@@ -1,3 +1,5 @@
+from foundation.optimizer_transition import operation_owned
+from .checkpoint_state import capture_checkpoint, restore_checkpoint
 from threading import RLock
 from .training_transition import (
     integer, observations, owned, policy, initialize_condition, transition, finite_tree,
@@ -212,6 +214,7 @@ class DiffusionTrainer:
                 module.training = mode
         return total_loss / total_rows
 
+    @operation_owned
     def generate_routes(self, num_routes: int = 10, route_length: int = 50) -> torch.Tensor:
         """Generate routes using trained model"""
         self.model.eval()
@@ -219,22 +222,17 @@ class DiffusionTrainer:
             routes = self.model.sample(num_routes, route_length)
         return routes
     
+    @operation_owned
     def save_checkpoint(self, path: str = "models/diffusion_checkpoint.pth"):
         """Save training checkpoint"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'timestamp': datetime.now().isoformat()
-        }, path)
+        checkpoint = capture_checkpoint(self)
+        checkpoint['timestamp'] = datetime.now().isoformat()
+        torch.save(checkpoint, path)
         logger.info(f"✅ Checkpoint saved to {path}")
     
+    @operation_owned
     def load_checkpoint(self, path: str = "models/diffusion_checkpoint.pth"):
         """Load training checkpoint"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.train_losses = checkpoint['train_losses']
-        self.val_losses = checkpoint['val_losses']
+        restore_checkpoint(self, checkpoint)
         logger.info(f"✅ Checkpoint loaded from {path}")

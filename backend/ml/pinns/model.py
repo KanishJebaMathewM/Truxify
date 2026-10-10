@@ -1,5 +1,6 @@
 import logging
 import threading
+from threading import RLock
 from typing import Dict
 
 import numpy as np
@@ -13,6 +14,8 @@ from pinns.training_transition import (
     owned_operation,
 )
 from torch.autograd import grad
+
+from .checkpoint_state import capture_state, restore_state
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +188,15 @@ class PINNTrainer:
         
         logger.info(f"✅ PINN Trainer initialized on {self.device}")
     
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_operation_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._operation_lock = RLock()
+
     def _admit(self, x_data, y_data, x_phys, physics_kwargs):
         parameter = next(self.model.parameters())
         values = []
@@ -338,16 +350,12 @@ class PINNTrainer:
     @owned_operation
     def save(self, path: str = "models/pinns_model.pth"):
         """Save model"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
-        }, path)
+        torch.save(capture_state(self), path)
         logger.info(f"✅ Model saved to {path}")
     
     @owned_operation
     def load(self, path: str = "models/pinns_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        restore_state(self, checkpoint)
         logger.info(f"✅ Model loaded from {path}")

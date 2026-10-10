@@ -18,7 +18,7 @@ const initConsumerGroup = async () => {
     await redisClient.xGroupCreate(STREAM_NAME, CONSUMER_GROUP, '0', { MKSTREAM: true });
   } catch (err) {
     if (!err.message.includes('BUSYGROUP')) {
-      console.error('Error creating consumer group:', err.message);
+      logger.error({ err }, 'Error creating consumer group');
     }
   }
 };
@@ -52,14 +52,14 @@ const processBatch = async (events) => {
     
     console.log(`Successfully processed and acknowledged ${events.length} audit events.`);
   } catch (err) {
-    console.error('Failed to write audit batch to DB:', err.message);
+    logger.error({ err }, 'Failed to write audit batch to DB');
   }
 };
 
 const startConsumer = async () => {
   await redisClient.connect();
   await initConsumerGroup();
-  console.log(`Audit Log Consumer ${CONSUMER_NAME} started...`);
+  logger.info({ consumer: CONSUMER_NAME }, 'Audit Log Consumer started');
 
   while (true) {
     try {
@@ -75,7 +75,7 @@ const startConsumer = async () => {
         await processBatch(messages);
       }
     } catch (err) {
-      console.error('Consumer loop error:', err.message);
+      logger.error({ err }, 'Consumer loop error');
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }

@@ -25,6 +25,10 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   final ScrollController _scrollController = ScrollController();
 
   List<Map<String, dynamic>> _trips = [];
+  /// Monotonic token: bumped by every refresh, captured by load-more. A
+  /// load-more that completes after a refresh started is stale and must be
+  /// discarded (refresh/load-more race — duplicates and stale pages).
+  int _tripsRequestToken = 0;
   bool _isLoadingTrips = true;
   bool _isLoadingMoreTrips = false;
   String? _tripsError;
@@ -62,6 +66,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
 
   Future<void> _loadTrips() async {
     if (!mounted) return;
+    _tripsRequestToken++;
     setState(() {
       _isLoadingTrips = true;
       _tripsError = null;
@@ -94,6 +99,7 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   Future<void> _loadMoreTrips() async {
     if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
 
+    final requestToken = _tripsRequestToken;
     setState(() {
       _isLoadingMoreTrips = true;
     });
@@ -108,8 +114,23 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
           (result['trips'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
       if (!mounted) return;
+      if (requestToken != _tripsRequestToken) {
+        // A refresh started while this page was in flight — the result
+        // belongs to the old list; discard it.
+        setState(() {
+          _isLoadingMoreTrips = false;
+        });
+        return;
+      }
+      // Overlap guard: a racing/refetching page can re-include ids already
+      // shown — never append duplicates.
+      final existingIds =
+          _trips.map((t) => t['id']?.toString()).toSet();
+      final deduped = newTrips
+          .where((t) => !existingIds.contains(t['id']?.toString()))
+          .toList();
       setState(() {
-        _trips.addAll(newTrips);
+        _trips.addAll(deduped);
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;

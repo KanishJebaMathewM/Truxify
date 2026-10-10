@@ -16,10 +16,17 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient,
+  // The cache middleware reads the Upstash client directly.
+  upstashRedisClient: redisClient,
+  // The route builds a caller-scoped client via createUserClient.
+  createUserClient: () => m.supabase,
   mongoDb: {
     collection: () => ({
+      // The handler chains .find().limit(200).toArray()
       find: () => ({
-        toArray: () => Promise.resolve(mockTelemetryResults),
+        limit: () => ({
+          toArray: () => Promise.resolve(mockTelemetryResults),
+        }),
       }),
     }),
   },
@@ -80,13 +87,15 @@ describe('truck search caching', () => {
         'x-user-name': 'Test Customer',
       });
 
+    if (res.status !== 200) console.log('PROBE-BODY:', res.status, JSON.stringify(res.body), (res.text || ''));
+    process.on('uncaughtException', e => console.log('PROBE-UNCAUGHT:', e.message, e.stack?.split('\n')[1]));
     expect(res.status).toBe(200);
     expect(redisClient.set).toHaveBeenCalledTimes(1);
-    const [cacheKey, cachedPayload, mode, ttl] = redisClient.set.mock.calls[0];
-    expect(cacheKey).toContain('"truckType":"Open Body"');
-    expect(cacheKey).toContain('"materialType":"Textile"');
-    expect(JSON.parse(cachedPayload)).toEqual(res.body);
-    expect(mode).toBe('EX');
-    expect(ttl).toBe(60);
+    const [cacheKey, cachedPayload, options] = redisClient.set.mock.calls[0];
+    // cacheMiddleware namespacing + hashed filters (raw filters no longer
+    // appear in keys — deliberate), upstash options-object TTL.
+    expect(cacheKey).toMatch(/^cache:truck_search:/);
+    expect(cachedPayload).toEqual(res.body);
+    expect(options).toEqual({ ex: 30 });
   });
 });

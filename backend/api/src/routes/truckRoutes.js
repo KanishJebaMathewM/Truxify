@@ -537,18 +537,6 @@ router.get(
   };
   const cacheKey = `truck_search:${JSON.stringify(searchCacheFilters)}`;
 
-  if (redisClient) {
-    try {
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        logger.info({ cacheKey }, 'Serving truck search results from Redis cache');
-        return res.json(JSON.parse(cachedResult));
-      }
-    } catch (err) {
-      logger.warn({ err: err.message }, 'Redis cache read error during search');
-    }
-  }
-
   try {
     const routeEstimate = await getRouteEstimate({
       pickupLat: numPickupLat,
@@ -727,14 +715,8 @@ router.get(
 
     const responseResults = filteredResults.map(({ capacityTons, ...rest }) => rest);
 
-    if (redisClient) {
-      try {
-        await redisClient.set(cacheKey, JSON.stringify(responseResults), 'EX', 60);
-      } catch (err) {
-        logger.warn({ err: err.message }, 'Redis cache write error during search');
-      }
-    }
-
+    // Caching is handled by cacheMiddleware — the manual read/write here was
+    // a second, divergent cache layer (double writes, different TTLs/keys).
     res.json(responseResults);
   } catch (err) {
     logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');

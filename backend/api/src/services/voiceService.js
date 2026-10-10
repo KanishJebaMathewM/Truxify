@@ -137,9 +137,9 @@ function buildCustomerQueryResponse(intent, bookingData) {
     case CUSTOMER_QUERY_INTENTS.LOCATION:
       return `Your shipment ${orderRef} is currently ${status}.`;
     case CUSTOMER_QUERY_INTENTS.ETA:
-      return `Your shipment ${orderRef} is ${status}, with an estimated arrival of ${bookingData?.eta || 'soon'}.`;
+      return `Your shipment ${orderRef} is currently ${status}, with an estimated arrival of ${bookingData?.eta || 'soon'}.`;
     case CUSTOMER_QUERY_INTENTS.ESCROW:
-      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}.`;
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}. Your shipment is currently ${status}.`;
     default:
       return `Your shipment ${orderRef} is currently ${status}.`;
   }

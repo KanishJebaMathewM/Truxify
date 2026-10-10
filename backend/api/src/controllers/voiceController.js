@@ -37,7 +37,7 @@ const handleVoiceQuery = async (req, res) => {
             audio_url: audioUrl,
         });
     } catch (err) {
-        console.error('Voice query error:', err.message);
+        logger.error({ err, requestId: req.id }, 'Voice query error');
         return res.status(500).json({ error: err.message });
     }
 };

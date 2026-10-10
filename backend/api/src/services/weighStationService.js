@@ -64,6 +64,7 @@ export function evaluateBridgeFormulaCompliance(truckProfile = {}) {
     }
 
     const violations = [];
+    const numericWeights = [];
     let totalWeightLbs = 0;
 
     // 1. Single Axle Check
@@ -76,6 +77,7 @@ export function evaluateBridgeFormulaCompliance(truckProfile = {}) {
                 violations: []
             };
         }
+        numericWeights.push(weight);
         totalWeightLbs += weight;
 
         // Individual single axle check (20,000 lbs max)
@@ -114,7 +116,7 @@ export function evaluateBridgeFormulaCompliance(truckProfile = {}) {
 
             let groupWeight = 0;
             for (let k = i; k <= j; k++) {
-                groupWeight += axles[k].weightLbs;
+                groupWeight += numericWeights[k];
             }
 
             // Standard tandem check for axles spaced <= 8 feet (96 inches)

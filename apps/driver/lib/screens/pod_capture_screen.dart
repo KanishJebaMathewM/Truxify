@@ -49,14 +49,11 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
       return;
     }
 
-    setState(() {
-      _saving = true;
-      _uploadStatus = 'Saving proof of delivery...';
-    });
-
     try {
       String? savedSignaturePath;
       if (_signatureController.isNotEmpty) {
+        // Capture BEFORE the saving spinner swaps the body out — otherwise the
+        // Signature widget is disposed while toPngBytes is still reading it.
         final signatureImage = await _signatureController.toPngBytes();
         if (signatureImage != null) {
           final directory = await getApplicationDocumentsDirectory();
@@ -66,6 +63,11 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
           savedSignaturePath = path;
         }
       }
+
+      setState(() {
+        _saving = true;
+        _uploadStatus = 'Saving proof of delivery...';
+      });
 
       String? savedPhotoPath;
       if (_photoPath != null) {

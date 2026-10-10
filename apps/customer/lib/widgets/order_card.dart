@@ -52,7 +52,7 @@ class ActiveOrderCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Driver: ${order.driver}',
+              '${order.driver}',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
@@ -101,6 +101,13 @@ class HistoryOrderCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              order.orderId,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
+            ),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(
@@ -153,7 +160,7 @@ class HistoryOrderCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Driver: ${order.driver}',
+              '${order.driver}',
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium

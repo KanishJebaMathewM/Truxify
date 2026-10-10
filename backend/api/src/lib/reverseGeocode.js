@@ -71,7 +71,7 @@ export function parseRetryAfterMs(retryAfter, now = Date.now()) {
  * @returns {Promise<string|null>} Formatted location string or null if failed
  */
 export async function reverseGeocode(lat, lon) {
-  // === Issue #14036: Explicit early null-guard without Number coercion ===
+  // === Explicit early null-guard without Number coercion ===
   if (lat == null || lon == null) {
     logger.debug('[ReverseGeocode] Aborted early: Coordinates contain null or undefined values.');
     return null;

@@ -71,6 +71,7 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
     // 'abc' and -100 are rejected there instead of being coerced to NaN and
     // persisted as a minted credit.
     const token = await carbonTokenService.calculateAndMintCarbonCredits({
+      ownerId: req.user.id,
       truckId: truck_id,
       tripId: trip_id,
       distanceKm: distance_km,

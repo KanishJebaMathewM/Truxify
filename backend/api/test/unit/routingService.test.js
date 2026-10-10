@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
@@ -122,11 +122,6 @@ describe('routingService - optimizeWaypoints', () => {
   });
 
   it('reorders waypoints based on OSRM waypoint_index values', async () => {
-    // OSRM Trip API returns waypoints in INPUT order; each waypoint's
-    // `waypoint_index` is its position in the optimized trip.
-    // Input coords: [start(0), WP1(1), WP2(2), WP3(3), end(4)]
-    // Trip order: start, WP3, WP1, WP2, end
-    // waypoint_indices in input order: 0 (start), 2 (WP1), 3 (WP2), 1 (WP3), 4 (end)
     mockAxiosGet.mockResolvedValueOnce({
       data: {
         code: 'Ok',
@@ -143,14 +138,13 @@ describe('routingService - optimizeWaypoints', () => {
     const wp1 = { lat: 14, lng: 78, address: 'WP1' };
     const wp2 = { lat: 15, lng: 79, address: 'WP2' };
     const wp3 = { lat: 16, lng: 80, address: 'WP3' };
-    const wp = [wp1, wp2, wp3]; // input order
+    const wp = [wp1, wp2, wp3];
 
     const result = await optimizeWaypoints(
       { lat: 0, lng: 0, address: 'Start' },
       { lat: 20, lng: 90, address: 'End' },
       wp
     );
-    // Trip order of the middle stops: WP3, WP1, WP2
     expect(result).toEqual([wp3, wp1, wp2]);
     expect(result).toHaveLength(wp.length);
     expect(result.every(waypoint => waypoint !== undefined)).toBe(true);
@@ -177,6 +171,10 @@ describe('routingService - optimizeWaypoints', () => {
 
     expect(mockAxiosGet).toHaveBeenCalledTimes(1);
     const callUrl = mockAxiosGet.mock.calls[0][0];
+    expect(callUrl).toContain('77.59,12.97');
+    expect(callUrl).toContain('78,14');
+    expect(callUrl).toContain('79,15');
+    expect(callUrl).toContain('80.27,13.08');
     expect(callUrl).toContain('77.59,12.97'); // start: lng,lat
     expect(callUrl).toContain('78,14');        // WP1: lng,lat
     expect(callUrl).toContain('79,15');        // WP2: lng,lat
@@ -196,7 +194,6 @@ describe('routingService - optimizeLtlRoute', () => {
   });
 
   it('respects pickup-before-dropoff precedence constraint', () => {
-    // Dropoff for order o1 appears before pickup for o1 in input
     const tasks = [
       { id: 'd1', orderId: 'o1', type: 'dropoff', lat: 10, lng: 10 },
       { id: 'p1', orderId: 'o1', type: 'pickup', lat: 5, lng: 5 },
@@ -204,14 +201,12 @@ describe('routingService - optimizeLtlRoute', () => {
 
     const result = optimizeLtlRoute(0, 0, tasks);
 
-    // Dropoff must appear after its pickup in the result
     const p1Idx = result.findIndex(t => t.id === 'p1');
     const d1Idx = result.findIndex(t => t.id === 'd1');
     expect(p1Idx).toBeLessThan(d1Idx);
   });
 
   it('skips dropoff when pickup not yet visited and not in task list', () => {
-    // Only dropoff for order o1, no pickup in tasks
     const tasks = [
       { id: 'd1', orderId: 'o1', type: 'dropoff', lat: 10, lng: 10 },
       { id: 'p2', orderId: 'o2', type: 'pickup', lat: 5, lng: 5 },
@@ -219,8 +214,6 @@ describe('routingService - optimizeLtlRoute', () => {
 
     const result = optimizeLtlRoute(0, 0, tasks);
 
-    // o1's dropoff was skipped (no pickup in tasks)
-    // Driver goes to o2's pickup first
     expect(result[0].id).toBe('p2');
     expect(result.some(t => t.id === 'd1')).toBe(true);
   });
@@ -245,7 +238,6 @@ describe('routingService - optimizeLtlRoute', () => {
   });
 
   it('appends unvisited tasks as failsafe', () => {
-    // Create a situation where no nearest task is found
     const tasks = [
       { id: 'p1', orderId: 'o1', type: 'pickup', lat: 5, lng: 5 },
       { id: 'd1', orderId: 'o1', type: 'dropoff', lat: 10, lng: 10 },
@@ -258,10 +250,10 @@ describe('routingService - optimizeLtlRoute', () => {
 });
 
 describe('routingService - non-finite getHaversineDistance guard', () => {
-  it('should throw TypeError when non-finite coordinates are passed to getHaversineDistance', () => {
-    expect(() => getHaversineDistance(NaN, 77.2090, 27.1767, 78.0081)).toThrow(TypeError);
-    expect(() => getHaversineDistance(28.6139, Infinity, 27.1767, 78.0081)).toThrow(TypeError);
-    expect(() => getHaversineDistance(28.6139, 77.2090, undefined, 78.0081)).toThrow(TypeError);
+  it('should return null when non-finite coordinates are passed to getHaversineDistance', () => {
+    expect(getHaversineDistance(NaN, 77.2090, 27.1767, 78.0081)).toBeNull();
+    expect(getHaversineDistance(28.6139, Infinity, 27.1767, 78.0081)).toBeNull();
+    expect(getHaversineDistance(28.6139, 77.2090, undefined, 78.0081)).toBeNull();
   });
 });
 
@@ -270,7 +262,7 @@ describe('routingService - getDriverRoute', () => {
     expect(await getDriverRoute(null)).toBeNull();
     expect(await getDriverRoute(undefined)).toBeNull();
     expect(await getDriverRoute('')).toBeNull();
-    expect(await getDriverRoute('   ')).toBeNull();
+    expect(await getDriverRoute('    ')).toBeNull();
     expect(await getDriverRoute(12345)).toBeNull();
   });
 

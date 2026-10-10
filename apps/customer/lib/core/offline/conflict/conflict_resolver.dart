@@ -35,7 +35,7 @@ class ConflictResolver {
       final sorted = List<TripEvent>.of(events)
         ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));
 
-      final gpsEvents = <TripEvent>[];
+      final gpsByTrip = <String, TripEvent>{};
       final otpByStop = <String, TripEvent>{};
       final stopByTripStop = <String, TripEvent>{};
       final lifecycleByTrip = <String, TripEvent>{};
@@ -46,7 +46,15 @@ class ConflictResolver {
         try {
           switch (event.type) {
             case 'gpsUpdate':
-              gpsEvents.add(event);
+              {
+                // Latest-wins per trip: a stale queued ping must not override
+                // the freshest position after offline replay.
+                final current = gpsByTrip[event.tripId];
+                if (current == null ||
+                    _compareTimestamp(event.occurredAt, current.occurredAt) >= 0) {
+                  gpsByTrip[event.tripId] = event;
+                }
+              }
               break;
             case 'otpDelivery':
               {
@@ -92,7 +100,7 @@ class ConflictResolver {
       }
 
       final resolved = <TripEvent>[
-        ...gpsEvents,
+        ...gpsByTrip.values,
         ...otpByStop.values,
         ...stopByTripStop.values,
         ...podByTrip.values,

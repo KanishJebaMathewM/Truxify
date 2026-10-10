@@ -35,6 +35,7 @@ export class MultiTierCache {
 
     // L1 in-memory storage (Map maintains insertion/access order for simple LRU eviction)
     this.l1 = new Map();
+    this._computeFlights = new Map(); // normalized key -> complete publication flight
 
     this.stampedeLock = new StampedeLock({
       lockPrefix: `${this.prefix}lock:`,
@@ -172,27 +173,48 @@ export class MultiTierCache {
    */
   async _computeAndSet(key, computeFn, options = {}) {
     const fullKey = this._buildKey(key);
-    const ttlSeconds = options.ttl || this.defaultTtl;
+    if (this._computeFlights.has(fullKey)) {
+      return this._computeFlights.get(fullKey);
+    }
+    // Include contention rechecks, emergency fallback and publication in the
+    // local flight, not just the distributed leader's computation callback.
+    const flight = Promise.resolve()
+      .then(() => this._computeAndPublish(key, computeFn, options))
+      .finally(() => {
+        if (this._computeFlights.get(fullKey) === flight) {
+          this._computeFlights.delete(fullKey);
+        }
+      });
+    this._computeFlights.set(fullKey, flight);
+    return flight;
+  }
 
-    const result = await this.stampedeLock.execute(fullKey, computeFn, {
+  async _computeAndPublish(key, computeFn, options = {}) {
+    const fullKey = this._buildKey(key);
+    const ttlSeconds = options.ttl || this.defaultTtl;
+    let computeDurationMs = 0;
+
+    const result = await this.stampedeLock.execute(fullKey, async () => {
+      const start = Date.now();
+      const value = await computeFn();
+      computeDurationMs = Date.now() - start;
+      // Publication is part of the acquired lock lifetime. Keep XFetch's
+      // delta tied to computation time rather than Redis write latency.
+      await this.set(key, value, { ttl: ttlSeconds, deltaMs: computeDurationMs });
+      return value;
+    }, {
       ttlSeconds: Math.max(10, Math.ceil(ttlSeconds / 2)),
       waitTimeoutMs: 300,
     });
 
     if (result.isLeader) {
       this.metrics.recordStampedeLockAcquired();
-      this.metrics.recordComputeDuration(result.durationMs);
-
-      await this.set(key, result.value, {
-        ttl: ttlSeconds,
-        deltaMs: result.durationMs,
-      });
-
+      this.metrics.recordComputeDuration(computeDurationMs);
       return result.value;
     }
 
     // Lock was contended or shared in-flight
-    if (result.value !== null && result.value !== undefined) {
+    if (!result.lockContended) {
       return result.value;
     }
 

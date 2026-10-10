@@ -8,6 +8,7 @@
  * 4. Fail-safe emergency decoupling & heartbeat telemetry monitoring
  */
 
+import { randomUUID } from 'node:crypto';
 import { DomainError } from './order/domainError.js';
 import logger from '../middleware/logger.js';
 
@@ -122,6 +123,17 @@ export function calculateFuelSavingsPercent(role, gapFeet, speedMph = 65) {
  * Autonomous Truck Platooning Coordinator Class
  */
 export class PlatooningCoordinatorService {
+  #vehicleOwners = new Map();
+  #sessionVehicles = new WeakMap();
+
+  #releaseVehicles(session) {
+    // Compare the owner: delayed calls must never release a subsequent session.
+    for (const truckId of this.#sessionVehicles.get(session) || []) {
+      if (this.#vehicleOwners.get(truckId) === session.platoonId) {
+        this.#vehicleOwners.delete(truckId);
+      }
+    }
+  }
   constructor({ supabase, logger: customLogger } = {}) {
     this.supabase = supabase;
     this.logger = customLogger || logger;
@@ -191,11 +203,27 @@ export class PlatooningCoordinatorService {
    * @returns {Object} Created Platoon Session
    */
   createPlatoonSession({ leadTruckId, leadDriverName, followerTruckId, followerDriverName, targetSpeedMph = 65.0 }) {
-    if (!leadTruckId || !followerTruckId) {
-      throw new DomainError(400, { error: 'Both leadTruckId and followerTruckId are required to form a platoon.' });
+    if ([leadTruckId, followerTruckId].some(
+      id => typeof id !== 'string' || id.trim().length === 0
+    )) {
+      throw new DomainError(400, { error: 'Both leadTruckId and followerTruckId must be nonempty strings.' });
+    }
+    leadTruckId = leadTruckId.trim();
+    followerTruckId = followerTruckId.trim();
+    if (leadTruckId === followerTruckId) {
+      throw new DomainError(400, { error: 'A platoon requires two distinct vehicles.' });
+    }
+    for (const truckId of [leadTruckId, followerTruckId]) {
+      if (this.#vehicleOwners.has(truckId)) {
+        throw new DomainError(409, { error: `Vehicle ${truckId} already belongs to an active platoon.` });
+      }
     }
 
-    const platoonId = `PLT-${Date.now().toString(36).toUpperCase()}`;
+    // Timestamp-only keys overwrite independent creations in one clock tick.
+    let platoonId;
+    do {
+      platoonId = `PLT-${randomUUID()}`;
+    } while (this.activeSessions.has(platoonId));
     const speed = Number(targetSpeedMph) || 65.0;
     const optimalGap = calculateOptimalGapFeet(speed);
 
@@ -231,6 +259,10 @@ export class PlatooningCoordinatorService {
       ],
     };
 
+    // No await separates admission and publication: ownership is instance-local.
+    this.#sessionVehicles.set(session, [leadTruckId, followerTruckId]);
+    this.#vehicleOwners.set(leadTruckId, platoonId);
+    this.#vehicleOwners.set(followerTruckId, platoonId);
     this.activeSessions.set(platoonId, session);
     this.logger.info(`[PlatooningCoordinator] Formed platoon session ${platoonId} with 2 vehicles at target speed ${speed}mph`);
     return session;
@@ -288,12 +320,22 @@ export class PlatooningCoordinatorService {
       throw new DomainError(404, { error: `Platoon session ${platoonId} not found.` });
     }
 
+    if (session.status !== PLATOON_STATUS.ACTIVE) {
+      return {
+        platoonId,
+        status: session.status,
+        action: 'ALREADY_DISENGAGED',
+        safeSeparationInitiated: false,
+      };
+    }
+
     const accel = Number(accelerationMps2);
     const isHardBrake = Number.isFinite(accel) && accel <= PLATOON_CONFIG.EMERGENCY_DECEL_THRESHOLD_MPS2;
     const isHeartbeatLost = (Date.now() - session.lastHeartbeat) > PLATOON_CONFIG.HEARTBEAT_TIMEOUT_MS;
 
     if (isHardBrake || manualOverride || isHeartbeatLost) {
       session.status = PLATOON_STATUS.EMERGENCY_SPLIT;
+      this.#releaseVehicles(session);
       const reason = isHardBrake
         ? `Emergency brake detected (${accel} m/s²)`
         : manualOverride
@@ -331,12 +373,15 @@ export class PlatooningCoordinatorService {
       throw new DomainError(404, { error: `Platoon session ${platoonId} not found.` });
     }
 
-    session.status = PLATOON_STATUS.DISENGAGED;
+    if (session.status === PLATOON_STATUS.ACTIVE) {
+      session.status = PLATOON_STATUS.DISENGAGED;
+      this.#releaseVehicles(session);
+    }
     this.logger.info(`[PlatooningCoordinator] Platoon ${platoonId} safely disengaged.`);
 
     return {
       platoonId,
-      status: PLATOON_STATUS.DISENGAGED,
+      status: session.status,
       summary: {
         totalFuelSavedGallons: session.totalFuelSavedGallons,
         totalFinancialSavings: session.totalFinancialSavings,

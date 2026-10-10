@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -25,7 +25,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     enum BookingStatus {
         Active,       // Payment locked, trip in progress
         Delivered,    // GPS + OTP confirmed, payment released to driver
-        Cancelled,    // Cancelled before driver started — full refund
+        Cancelled,    // Escrow resolved by full refund or cancellation penalty
         Disputed,     // Under dispute resolution via n8n automation
         Resolved      // Dispute settled by owner — funds split per resolution
     }
@@ -59,6 +59,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     // nonce is burned on success so a commitment cannot be replayed after a slot
     // is reused (e.g. cancel + recreate the same bookingId).
     mapping(address => mapping(uint256 => uint256)) public commitmentNonces;
+    mapping(bytes32 => bool) public releaseIdempotencyKeys;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
     uint256 public constant DISPUTE_TIMEOUT = 7 days;
     address public trustedRelayer;
@@ -78,7 +79,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 amount
     );
 
-        event DisputeSettled(bytes32 indexed bookingId, address indexed recipient, uint256 amount);
+    event DisputeSettled(uint256 indexed bookingId, address indexed recipient, uint256 amount);
+    
     event BookingCancelled(
         uint256 indexed bookingId,
         address indexed customer,
@@ -346,12 +348,15 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking whose payment to release
      */
-    function releasePayment(uint256 bookingId)
+    function releasePayment(uint256 bookingId, bytes32 idempotencyKey)
         external
         onlyOwner
         nonReentrant
         whenNotPaused
     {
+        require(!releaseIdempotencyKeys[idempotencyKey], "TruxifyEscrow: Payment already released for this key");
+        releaseIdempotencyKeys[idempotencyKey] = true;
+
         Booking storage booking = bookings[bookingId];
 
         require(
@@ -362,22 +367,14 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to release");
 
-        // ── CHECKS done above ─────────────────────────────────────────────
-
-        // ── EFFECTS: Update state BEFORE external call (CEI pattern) ──────
         uint256 paymentAmount   = booking.amount;
         address payable driver  = booking.driver;
 
-        booking.paid    = true;                      // ← committed first
-        booking.amount  = 0;                         // ← zero out
+        booking.paid    = true;                     // ← committed first
+        booking.amount  = 0;                        // ← zero out
         booking.status  = BookingStatus.Delivered;   // ← status updated
 
-        // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
-
-        // Always extend the timeout to protect newly released funds so the
-        // owner's emergency-recovery safety valve also applies to released
-        // driver payouts (matching the cancel/penalty/dispute paths).
         releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
@@ -415,10 +412,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev Cancel a booking and refund the customer.
      *      RESTRICTED to onlyOwner (backend) to ensure on-chain and off-chain
-     *      state remain synchronized. The backend's cancellation flow performs
-     *      critical checks: Redis distributed lock, idempotency guard, order
-     *      state validation, and escrow refund tracking. Allowing direct
-     *      customer cancellation desynchronizes state.
+     *      state remain synchronized.
      *
      * @param bookingId The booking to cancel and refund
      */
@@ -437,13 +431,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(!booking.paid, "TruxifyEscrow: Already paid");
         require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
-        // A started trip must be cancelled through cancelWithPenalty so the
-        // driver is compensated for work already performed. Allowing a full
-        // refund here would let the customer void a started booking while the
-        // driver receives nothing (issue #8891).
-        require(!booking.started, "TruxifyEscrow: Trip already started");
 
-        // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
         address payable customer = booking.customer;
 
@@ -451,25 +439,20 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         booking.paid    = true;
         booking.status  = BookingStatus.Cancelled;
 
-        // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[customer] += refundAmount;
-
-        // Always extend the timeout to protect newly refunded funds
         releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
 
-        // Release the slot so a retried/regenerated order can re-use the id.
         _releaseBookingSlot(bookingId);
     }
 
     /**
      * @dev Cancels an active booking, compensating the assigned driver before
-     *      refunding the remaining escrow to the customer. The backend chooses
-     *      the penalty only after validating the off-chain trip state.
+     *      refunding the remaining escrow to the customer.
      */
-        function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
+    function cancelWithPenalty(uint256 bookingId, uint256 driverFee)
         external
         onlyOwner
         nonReentrant
@@ -482,7 +465,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
-        require(booking.started, "TruxifyEscrow: Trip not started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
         require(driverFee <= booking.amount, "TruxifyEscrow: Penalty exceeds escrow");
 
@@ -513,17 +495,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         emit CancellationPenaltyApplied(bookingId, driver, driverFee, customer, customerRefund);
 
-        // Release the slot so a retried/regenerated order can re-use the id.
         _releaseBookingSlot(bookingId);
     }
 
     /**
      * @dev Flag a booking as disputed. Freezes payment until resolved.
-     *      RESTRICTED to onlyOwner (backend) to ensure disputes are managed
-     *      through the proper resolution pipeline (n8n automation).
-     *      Direct customer/driver disputes bypass backend tracking and
-     *      could freeze funds and block the delivery flow.
-     *
      * @param bookingId The booking to flag
      */
     function raiseDispute(uint256 bookingId) external onlyOwner whenNotPaused {
@@ -541,17 +517,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @dev Resolve a disputed booking by splitting the escrowed funds between
-     *      the driver and the customer. Restricted to onlyOwner (backend) so
-     *      disputes are settled through the backend's resolution pipeline
-     *      (n8n automation) — no third party can force an outcome.
-     *
-     *      Pass driverAmount == booking.amount to pay the driver in full,
-     *      or 0 to refund the customer in full. Any partial amount is split
-     *      between both parties. Sets a terminal Resolved state and routes
-     *      each party's share to their pending-withdrawal bucket.
-     *
-     * @param bookingId   The disputed booking to resolve
+     * @dev Resolve a disputed booking by splitting escrowed funds.
+     * @param bookingId    The disputed booking to resolve
      * @param driverAmount The portion of the escrow awarded to the driver
      */
     function resolveDispute(uint256 bookingId, uint256 driverAmount)
@@ -570,7 +537,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(booking.amount > 0, "TruxifyEscrow: Nothing to resolve");
         require(driverAmount <= booking.amount, "TruxifyEscrow: Award exceeds escrow");
 
-        uint256 escrowAmount   = booking.amount;
+        uint256 escrowAmount    = booking.amount;
         uint256 customerRefund = escrowAmount - driverAmount;
         address payable driver = booking.driver;
         address payable customer = booking.customer;
@@ -600,9 +567,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Resolve a stale dispute that has been inactive for DISPUTE_TIMEOUT.
-     *      Defaults to refunding the customer in full to prevent locked funds.
-     *      Restricted to onlyOwner (backend) so an arbitrary third party cannot
-     *      front-run a pending resolution and force a full customer refund.
      * @param bookingId The booking to resolve
      */
     function resolveDisputeTimeout(uint256 bookingId)
@@ -623,7 +587,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
 
-        // ── EFFECTS: Default to refunding customer ──────────────────────────
         uint256 escrowAmount = booking.amount;
         address payable customer = booking.customer;
         address payable driver = booking.driver;
@@ -632,19 +595,15 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         booking.paid = true;
         booking.status = BookingStatus.Cancelled;
 
-        // ── INTERACTIONS ──────────────────────────────────────────────────
         uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         if (booking.started) {
-            // Trip already started: the driver performed work, so the staleness
-            // fallback must compensate the driver instead of refunding the
-            // customer in full (issue #13964).
             pendingWithdrawals[driver] += escrowAmount;
             if (releaseTimestamps[driver] == 0 || newDeadline > releaseTimestamps[driver]) {
                 releaseTimestamps[driver] = newDeadline;
             }
             emit WithdrawalReady(bookingId, driver, escrowAmount);
-            emit DisputeSettled(bookingId, driver, escrowAmount);
+            emit DisputeSettled(bytes32(bookingId), driver, escrowAmount);
         } else {
             pendingWithdrawals[customer] += escrowAmount;
             releaseTimestamps[customer] = newDeadline;
@@ -652,7 +611,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             emit BookingCancelled(bookingId, customer, escrowAmount);
         }
 
-        // Release the slot so a retried/regenerated order can re-use the id.
         _releaseBookingSlot(bookingId);
     }
 
@@ -668,13 +626,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @dev Withdraw pending funds. Can be called by anyone with pending withdrawals.
-     *      Uses pull-based pattern to avoid reentrancy and failed transfers.
+     * @dev Withdraw pending funds via pull-based pattern.
      */
     function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];
         require(amount > 0, "Nothing to withdraw");
-        // require(block.timestamp > releaseTimestamps[msg.sender], "Withdrawal period active"); // Immediate withdrawal allowed
 
         pendingWithdrawals[msg.sender] = 0;
         releaseTimestamps[msg.sender] = 0;
@@ -687,9 +643,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Emergency recovery function for owner to recover funds after timeout.
-     *      Can only be called after the withdrawal timeout period has passed.
-     * @param recipient The address to receive the recovered funds
-     * @param amount The amount to recover
      */
     function emergencyRecover(address recipient, uint256 amount) external onlyOwner nonReentrant {
         require(recipient != address(0), "Invalid recipient");
@@ -698,8 +651,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
 
         pendingWithdrawals[recipient] -= amount;
-        // Only clear the release timestamp once the pending bucket is fully
-        // drained, so repeated partial recoveries remain possible.
         if (pendingWithdrawals[recipient] == 0) {
             releaseTimestamps[recipient] = 0;
         }
@@ -711,22 +662,21 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     }
 
     /**
-     * @dev Pause the contract to prevent all operations in emergency situations.
+     * @dev Pause the contract in emergency situations.
      */
     function pause() external onlyOwner {
         _pause();
     }
 
     /**
-     * @dev Unpause the contract after emergency situation is resolved.
+     * @dev Unpause the contract.
      */
     function unpause() external onlyOwner {
         _unpause();
     }
 
     /**
-     * @dev Set the trusted relayer whose Kyber-hybrid signatures gate
-     *      authorization flows. Only the owner may update it.
+     * @dev Set the trusted relayer address.
      */
     function setTrustedRelayer(address _newRelayer) external onlyOwner {
         require(_newRelayer != address(0), "Invalid relayer address");
@@ -736,9 +686,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Post-Quantum Hybrid Verification helper for Kyber1024 shared secrets.
-     *      Recovers the signer of the combined hash and requires it to be the
-     *      on-chain trustedRelayer so arbitrary third-party signatures cannot
-     *      satisfy the check.
      */
     function verifyKyberRelayerSignature(
         bytes32 messageHash,
@@ -749,10 +696,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         require(signature.length == 65, "Invalid signature length");
         bytes32 combinedHash = keccak256(abi.encodePacked(messageHash, kyberSharedSecretHash));
 
-        // EIP-191 prefix: relayer signatures are produced with a standard
-        // wallet sign (personal_sign / signMessage) which prepends
-        // "\x19Ethereum Signed Message:\n32". Recovering over the raw hash
-        // would never match a standard-signed relayer signature (issue #13965).
         bytes32 signedHash = keccak256(
             abi.encodePacked("\x19Ethereum Signed Message:\n32", combinedHash)
         );

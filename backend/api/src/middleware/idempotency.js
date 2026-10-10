@@ -105,7 +105,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
       }
 
       if (cached) {
-        logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
+        logger.info({ event: 'IDEMPOTENCY_KEY_DETECTED', requestId: req.requestId, idempotencyKey }, 'Cache hit for idempotency key');
         return res.status(cached.statusCode).json(cached.body);
       }
 
@@ -169,17 +169,25 @@ export function requireIdempotency(ttlSeconds = 3600) {
         // a duplicate arriving after 'finish' finds the cached entry and
         // short-circuits instead of re-acquiring the lock and re-entering the
         // handler.
-        const finalize = async () => {
-          if (pendingCache) {
-            const cachePromise = pendingCache;
-            pendingCache = null;
-            try {
-              await cachePromise;
-            } catch (err) {
-              /* error already logged by the cache write's own .catch */
-            }
+        // finish and close can both fire while the cache write is pending.
+        // Share one completion promise so neither event bypasses the wait.
+        let finalizationPromise;
+        const finalize = () => {
+          if (!finalizationPromise) {
+            finalizationPromise = (async () => {
+              if (pendingCache) {
+                const cachePromise = pendingCache;
+                pendingCache = null;
+                try {
+                  await cachePromise;
+                } catch (err) {
+                  /* error already logged by the cache write's own .catch */
+                }
+              }
+              await releaseLock();
+            })();
           }
-          await releaseLock();
+          return finalizationPromise;
         };
 
         // Ensure lock is reliably released when response terminates

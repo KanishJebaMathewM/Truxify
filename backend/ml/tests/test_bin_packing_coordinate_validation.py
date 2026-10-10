@@ -42,7 +42,7 @@ def test_invalid_delivery_coordinates_fail_before_sequencing(address, expected_f
     packages, truck = _valid_payload()
 
     with pytest.raises(ValueError, match=re.escape(expected_fragment)):
-        optimise_packing(packages, truck, [address])
+        optimise_packing(packages, truck, [address], {"lat": 19.0, "lng": 72.8})
 
 
 def test_boundary_valid_delivery_coordinates_are_accepted():
@@ -52,6 +52,7 @@ def test_boundary_valid_delivery_coordinates_are_accepted():
         packages,
         truck,
         [{"lat": 90.0, "lng": -180.0}],
+        {"lat": 19.0, "lng": 72.8},
     )
 
     assert result["stop_sequence"] == [0]

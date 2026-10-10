@@ -342,7 +342,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               final apiClient = ApiClient();
                               final tokenRes = await apiClient.post(
                                 '/api/verify/digilocker/token',
-                                {'code': 'mock_auth_code_from_oauth'},
+                                body: {'code': 'mock_auth_code_from_oauth'},
                               );
                               final accessToken =
                                   tokenRes['data']?['access_token'];
@@ -352,7 +352,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 );
                               }
                               final verifyRes = await apiClient
-                                  .post('/api/verify/digilocker/verify', {
+                                  .post('/api/verify/digilocker/verify', body: {
                                     'accessToken': accessToken,
                                     'userId': Supabase
                                         .instance

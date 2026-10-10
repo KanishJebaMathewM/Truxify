@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +12,9 @@ import 'battery_service.dart';
 import 'location_replay_service.dart';
 import 'offline_location_queue.dart';
 import 'secure_storage.dart';
+
+/// WebSocket connection lifecycle for the driver location channel.
+enum WsConnectionStatus { connecting, connected, disconnected }
 
 /// Outcome of a location ping attempt.
 ///
@@ -260,6 +265,24 @@ class LocationService {
     _maxIntervalTimer = Timer.periodic(_maxInterval, (_) {
       if (_isTracking) {
         unawaited(_sendFallbackPing());
+      }
+    });
+  }
+
+  /// Fallback heartbeat: re-send the last known position when nothing went
+  /// out within [_maxInterval]. Serialized with position-stream sends and
+  /// re-checks the throttle so it never duplicates a recent ping (#13955).
+  Future<void> _sendFallbackPing() async {
+    await _serializeSend(() async {
+      if (!_isTracking) return;
+      final last = _lastSentPosition;
+      if (last == null) return;
+      final lastTime = _lastSentTime;
+      if (lastTime != null && DateTime.now().difference(lastTime) < _maxInterval) return;
+      final result = await _sendLocationPing(last);
+      if (result == LocationDelivery.delivered ||
+          result == LocationDelivery.queued) {
+        _lastSentTime = DateTime.now();
       }
     });
   }
@@ -626,7 +649,7 @@ class LocationService {
         _wsAuthenticated = false;
         final token = await _resolveAuthToken();
         if (token != null && token.isNotEmpty) {
-          ws.send({'event': 'auth', 'data': {'token': token}});
+          _resilientWs?.send({'event': 'auth', 'data': {'token': token}});
         }
       },
       urlFactory: () => _buildWsUri().toString(),

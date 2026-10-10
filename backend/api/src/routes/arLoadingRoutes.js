@@ -305,7 +305,7 @@ router.post('/optimize', authenticate, userLimiter, async (req, res) => {
  *         description: Loading plan identifier.
  *         schema:
  *           type: string
- *         example: AR-PLAN-1710000000000
+ *         example: PLAN-59db5c9a-1203-4e3f-a6ab-5f3fc7e7d623
  *     responses:
  *       200:
  *         description: AR loading plan.

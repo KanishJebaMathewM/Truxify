@@ -1260,4 +1260,135 @@ router.post(
   }
 );
 
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status');
+    orderValidationService.assertOrderFound(order);
+
+    if (!order.driver_id) {
+      return res.status(404).json({ error: 'No driver assigned to this order.' });
+    }
+
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id, order_id: order.id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const telemetry = latestTelemetry[0];
+    return res.json({
+      driverId: telemetry.driver_id,
+      orderId: telemetry.order_id || order.id,
+      lat: telemetry.lat,
+      lng: telemetry.lng,
+      timestamp: telemetry.timestamp,
+    });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error({ err }, 'Fetch driver location exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
+router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status, pickup_lat, pickup_lng, drop_lat, drop_lng');
+    orderValidationService.assertOrderFound(order);
+
+    if (order.drop_lat == null || order.drop_lng == null) {
+      return res.status(500).json({ error: 'Order is missing destination coordinates.' });
+    }
+
+    if (!order.driver_id) {
+      const originLat = Number(order.pickup_lat);
+      const originLng = Number(order.pickup_lng);
+      const destLat = Number(order.drop_lat);
+      const destLng = Number(order.drop_lng);
+
+      if (!Number.isFinite(originLat) || !Number.isFinite(originLng) ||
+        !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+        return res.status(500).json({ error: 'Order has invalid coordinates.' });
+      }
+
+      const feature = buildStraightLineGeometry({ originLat, originLng, destLat, destLng });
+      if (!feature) {
+        return res.status(500).json({ error: 'Failed to compute route.' });
+      }
+      return res.json({ ...feature, fallback: true });
+    }
+
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id, order_id: order.id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const originLat = Number(latestTelemetry[0].lat);
+    const originLng = Number(latestTelemetry[0].lng);
+
+    if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
+      return res.status(404).json({ error: 'Latest telemetry record is missing valid coordinates.' });
+    }
+
+    const destLat = Number(order.drop_lat);
+    const destLng = Number(order.drop_lng);
+
+    if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+      logger.error(`[route] Order ${order.id} has non-numeric destination coordinates.`);
+      return res.status(500).json({ error: 'Order has invalid destination coordinates.' });
+    }
+
+    let feature = await getRouteGeometry({ originLat, originLng, destLat, destLng });
+    let usedFallback = false;
+
+    if (!feature) {
+      logger.warn(`[route] OSRM unavailable for order ${order.id}, falling back to straight line.`);
+      feature = buildStraightLineGeometry({ originLat, originLng, destLat, destLng });
+      usedFallback = true;
+    }
+
+    if (!feature) {
+      return res.status(502).json({ error: 'Failed to compute route.' });
+    }
+
+    return res.json({ ...feature, fallback: usedFallback });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error({ err }, 'Fetch order route exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;

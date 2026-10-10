@@ -17,6 +17,10 @@ process.env.ENABLE_TEST_AUTH = 'true';
 process.env.DEV_ACCESS_TOKEN = 'test-dev-token-123';
 process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
 process.env.ESCROW_MATIC_PER_PAISA = '0.000004';
+// Delivery-OTP suites make several attempts per driver per test — keep the
+// per-user limiter out of the way (its in-memory fallback store persists
+// across tests in one module process).
+process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS = '1000';
 process.env.MAX_ESCROW_MATIC = '10000';
 
 // Deterministic test-only secret for WIM bypass packet signing. It is long

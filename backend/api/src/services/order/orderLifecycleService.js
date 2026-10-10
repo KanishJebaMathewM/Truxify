@@ -5,7 +5,8 @@ import { expireDeliveryOtps, sendPushNotification } from '../notificationService
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 import { acquireLockOrFallback } from '../../lib/lockFallback.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
-import { supabaseAdmin } from '../../config/db.js';
+import { createHash } from 'crypto';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import {
   submitEscrowRefund,
   recordDepositTx,
@@ -104,7 +105,7 @@ export class OrderLifecycleService {
     }
   }
 
-  async createOrder(customerId, customerName, body) {
+  async createOrder(customerId, customerName, body, idempotencyKey = null) {
     return measureExecution('OrderLifecycleService.createOrder', async () => {
       const {
         pickup_address, pickup_lat, pickup_lng,
@@ -181,75 +182,92 @@ export class OrderLifecycleService {
         logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
       }
 
+      // Atomic, idempotent creation: create_order_tx inserts the order, its
+      // default timeline, and the load offer in ONE transaction (#11434), and
+      // honors the X-Idempotency-Key claim with a request fingerprint (#7135).
+      // This was silently reverted to separate inserts by ea533a2f92 (an
+      // unrelated ML commit) — restored from the orderCreationService
+      // implementation, which still carries the correct RPC contract.
+      const fingerprint = createHash('sha256')
+        .update(`${customerId}:${JSON.stringify(body ?? {})}`)
+        .digest('hex');
+
       const MAX_ID_RETRIES = ORDER_DISPLAY_ID_MAX_RETRIES;
       let order = null;
-      let orderErr = null;
       let orderDisplayId = null;
 
       for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
         orderDisplayId = generateOrderDisplayId();
-        const result = await this.orderRepository.createOrder({
-          order_display_id: orderDisplayId,
-          customer_id: customerId,
-          status: 'pending',
-          pickup_address, pickup_lat, pickup_lng,
-          drop_address, drop_lat, drop_lng,
-          pickup_date, pickup_time,
-          goods_type, weight_tonnes, length_ft, width_ft, height_ft,
-          is_stackable, is_fragile, special_requirements,
-          base_freight: finalBaseFreight,
-          toll_estimate: finalTollEstimate,
-          platform_fee: finalPlatformFee,
-          total_amount: finalTotalAmount,
-          estimated_price: estimatedPrice,
-          payment_method_id, upi_id,
-          waypoints: optimizedWaypoints,
+        const { data: rpcData, error: rpcErr } = await (supabaseAdmin ?? supabase).rpc('create_order_tx', {
+          p_order_display_id: orderDisplayId,
+          p_customer_id: customerId,
+          p_customer_name: customerName || 'Customer',
+          p_pickup_address: pickup_address,
+          p_pickup_lat: pickup_lat,
+          p_pickup_lng: pickup_lng,
+          p_drop_address: drop_address,
+          p_drop_lat: drop_lat,
+          p_drop_lng: drop_lng,
+          p_pickup_date: pickup_date,
+          p_pickup_time: pickup_time,
+          p_goods_type: goods_type,
+          p_weight_tonnes: weight_tonnes,
+          p_length_ft: length_ft || null,
+          p_width_ft: width_ft || null,
+          p_height_ft: height_ft || null,
+          p_is_stackable: is_stackable,
+          p_is_fragile: is_fragile,
+          p_special_requirements: special_requirements || null,
+          p_base_freight: finalBaseFreight,
+          p_toll_estimate: finalTollEstimate,
+          p_platform_fee: finalPlatformFee,
+          p_total_amount: finalTotalAmount,
+          p_estimated_price: estimatedPrice,
+          p_payment_method_id: payment_method_id || null,
+          p_upi_id: upi_id || null,
+          p_route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
+          p_route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
+          p_weight_text: `${weight_tonnes} tonnes`,
+          p_fuel_cost: pricing.fuelCost,
+          p_net_profit: pricing.netProfit,
+          p_extra_distance_km: pricing.distanceKm,
+          p_idempotency_key: idempotencyKey,
+          p_request_fingerprint: fingerprint
         });
 
-        order = result.data;
-        orderErr = result.error;
+        if (rpcErr) {
+          if (rpcErr.code === '23505') {
+            logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+            continue;
+          }
+          logger.error('Order RPC Insertion Error:', rpcErr.message);
+          throw new DomainError(500, { error: 'Failed to create order record via transaction.', details: rpcErr.message });
+        }
 
-        if (!orderErr || orderErr.code !== '23505') break;
-        logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+        order = rpcData;
+        break;
       }
 
-      if (orderErr) {
-        logger.error('Order Insertion Error:', orderErr.message);
-        throw new DomainError(500, { error: 'Failed to create order record.', details: orderErr.message });
+      if (!order) {
+        throw new DomainError(500, { error: 'Failed to generate a unique order display ID after max retries.' });
       }
 
-      const { error: timelineErr } = await this.orderTimelineService.generateDefaultTimeline(orderDisplayId);
-
-      if (timelineErr) {
-        logger.error('Timeline Insertion Error:', timelineErr.message);
-        await this.orderRepository.deleteOrder(order.id);
-        throw new DomainError(500, { error: 'Failed to create order timeline.', details: timelineErr.message });
-      }
-
-      const { error: offerErr } = await this.orderRepository.createLoadOffer({
-        order_display_id: orderDisplayId,
-        customer_id: customerId,
-        customer_name: customerName || 'Customer',
-        route_label: `${pickup_address.split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
-        route_subtitle: `${weight_tonnes} tonnes \u2022 ${goods_type}`,
-        pickup_address, pickup_lat, pickup_lng,
-        drop_address, drop_lat, drop_lng,
-        goods_type,
-        weight: `${weight_tonnes} tonnes`,
-        freight_value: pricing.totalAmount,
-        fuel_cost: pricing.fuelCost,
-        toll_cost: pricing.tollEstimate,
-        net_profit: pricing.netProfit,
-        extra_distance_km: pricing.distanceKm,
-        status: 'available',
-        waypoints: optimizedWaypoints,
-      });
-
-      if (offerErr) {
-        logger.error('Load Offer Insertion Error:', offerErr.message);
-        await this.orderTimelineService.deleteTimeline(orderDisplayId);
-        await this.orderRepository.deleteOrder(order.id);
-        throw new DomainError(500, { error: 'Failed to create load offer.', details: offerErr.message });
+      // Durable idempotency discriminator (#7135): create_order_tx returns
+      // idempotent=true for every path taken while a key was supplied.
+      if (order.idempotent === true) {
+        if (order.outcome === 'conflict') {
+          throw new DomainError(409, { error: 'Idempotency key has already been used for a different request.' });
+        }
+        if (order.outcome === 'in_progress') {
+          throw new DomainError(409, { error: 'Duplicate request being processed' });
+        }
+        if (order.outcome === 'replayed') {
+          return { order: order.response.order };
+        }
+        if (order.outcome !== 'created') {
+          throw new DomainError(500, { error: `Unexpected idempotency outcome: ${order.outcome}` });
+        }
+        order = order.response.order;
       }
 
       return { order };
@@ -1056,6 +1074,17 @@ export class OrderLifecycleService {
 
             const refundTxHash = cancelSaga.getContext().refundTxHash ?? workingOrder.refund_tx_hash ?? null;
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
+            // The saga compensates only COMPLETED steps — a step-2 execute
+            // failure never reaches its own compensate, so the failure state
+            // must be persisted here or the row stays 'refund_pending' while
+            // the client was told refund_failed (reconciliation would never
+            // retry it under the wrong status).
+            await this.orderRepository.updateOrder(currentOrder.id, {
+              escrow_status: nextEscrowStatus,
+              escrow_refund_error: String(originalError?.message ?? originalError).slice(0, 1000),
+              escrow_refund_last_attempt_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }).catch((persistErr) => logger.warn('[escrow] Failed to persist refund failure state:', persistErr?.message));
             return {
               status: 202,
               body: {

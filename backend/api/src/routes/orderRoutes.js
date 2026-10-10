@@ -958,7 +958,9 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy(
 });
 // POST /api/orders/:id/ratings
 router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  // The service returns the order ROW directly (not { data }) — destructuring
+  // { data } silently yielded undefined, denying every legitimate owner.
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), auditLog({ action: 'order:submit-rating', resourceType: 'order_rating' }), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
@@ -979,5 +981,8 @@ router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:subm
   }
 });
 
+// POST /api/orders/predict-demand — ML demand prediction (registration lost in
+// the 06fc87a72e bid-route refactor; controller, schema, and limiter intact).
+router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), predictRideDemand);
 
 export default router;

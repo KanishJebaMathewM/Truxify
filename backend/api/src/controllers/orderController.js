@@ -14,7 +14,12 @@ import { AppError } from '../utils/errors.js';
 
 export const createOrder = async (req, res, next) => {
   try {
-    const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
+    const { order } = await orderLifecycleService.createOrder(
+      req.user.id,
+      req.user.fullName || 'Customer',
+      req.body,
+      req.idempotencyKey ?? req.headers['x-idempotency-key'] ?? null
+    );
     res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));

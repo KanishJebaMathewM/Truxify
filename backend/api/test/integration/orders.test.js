@@ -130,6 +130,33 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
     });
     return { data: order, error: null };
   }
+  if (fnName === 'update_order_status_tx') {
+    // Event-sourced status write — apply the guarded transition and return
+    // the updated row set the service expects. Honors the guards the real
+    // RPC enforces: p_not_statuses (terminal-state rejection) and
+    // p_escrow_in_statuses (escrow-phase guard) — both yield zero rows.
+    m.calls.push({ rpc: fnName, args });
+    const order = m.store.orders.find(o => o.id === args.p_order_id);
+    if (!order) return { data: null, error: { message: 'Order not found' } };
+    if (Array.isArray(args.p_not_statuses) && args.p_not_statuses.includes(order.status)) {
+      return { data: [], error: null };
+    }
+    if (Array.isArray(args.p_escrow_in_statuses) && !args.p_escrow_in_statuses.includes(order.escrow_status)) {
+      return { data: [], error: null };
+    }
+    order.status = args.p_status;
+    // Column-mapped params the cancellation saga writes through the RPC.
+    if (args.p_escrow_status) order.escrow_status = args.p_escrow_status;
+    if (args.p_cancellation_reason !== undefined) order.cancellation_reason = args.p_cancellation_reason;
+    if (args.p_cancellation_fee !== undefined) order.cancellation_fee = args.p_cancellation_fee;
+    if (args.p_refund_tx_hash) order.refund_tx_hash = args.p_refund_tx_hash;
+    if (args.p_escrow_refunded_at) order.escrow_refunded_at = args.p_escrow_refunded_at;
+    if (args.p_escrow_refund_attempts !== undefined) order.escrow_refund_attempts = args.p_escrow_refund_attempts;
+    if (args.p_escrow_refund_error !== undefined) order.escrow_refund_error = args.p_escrow_refund_error;
+    if (args.p_clear_escrow_refund_error) delete order.escrow_refund_error;
+    if (args.p_payload_extra) Object.assign(order, args.p_payload_extra);
+    return { data: [{ ...order }], error: null };
+  }
   if (fnName === 'update_order_and_load_offer') {
     m.calls.push({ rpc: fnName, args });
     const orderIdx = m.store.orders.findIndex(o => o.id === args.p_order_id);
@@ -184,10 +211,86 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
   }
   return originalRpc(fnName, args);
 });
-let mockRedis = null;
+// Distributed-lock backend for the financial/mutation routes (bid submit,
+// milestones, OTP verify) — they refuse to run without one. Tests that
+// exercise the redis-down fallback override this explicitly.
+const defaultRedis = (() => {
+  const store = new Map();
+  const exp = new Map(); // key → epoch ms (honored so Date.now() time travel works)
+  const expired = k => exp.has(k) && Date.now() > exp.get(k);
+  const read = k => {
+    if (expired(k)) { store.delete(k); exp.delete(k); return null; }
+    return store.get(k) ?? null;
+  };
+  return {
+    get: async k => read(k),
+    set: async (k, v, ...rest) => {
+      if (rest.some(r => typeof r === 'string' && r.toUpperCase() === 'NX') && read(k) !== null) return null;
+      store.set(k, String(v));
+      for (let i = 0; i < rest.length; i++) {
+        if (typeof rest[i] === 'string' && rest[i].toUpperCase() === 'EX') exp.set(k, Date.now() + Number(rest[i + 1]) * 1000);
+      }
+      return 'OK';
+    },
+    del: async (...keys) => { let n = 0; for (const k of keys) { n += store.delete(k) ? 1 : 0; exp.delete(k); } return n; },
+    incr: async k => { const v = (parseInt(read(k) ?? '0', 10) || 0) + 1; store.set(k, String(v)); return v; },
+    expire: async (k, seconds) => { if (read(k) === null) return 0; exp.set(k, Date.now() + Number(seconds) * 1000); return 1; },
+    // Compare-and-delete release (redisLock.releaseLock's Lua) — actually
+    // remove the key so the next acquire succeeds.
+    eval: async (script, numKeys, key, val) => {
+      const src = String(script);
+      if (src.includes('GET') && src.includes('DEL')) {
+        if (val === undefined || store.get(key) === val) { store.delete(key); return 1; }
+        return 0;
+      }
+      return 1;
+    },
+    // rate-limit-redis sends SCRIPT LOAD + EVALSHA via call(): window counter
+    // (PTTL+SET-PX/INCR) and read (GET+PTTL) scripts. The read script must NOT
+    // increment — capture the loaded script to tell them apart.
+    ...(() => {
+      let lastLoadedScript = '';
+      return {
+        call: async (command, ...args) => {
+          const cmd = String(command).toUpperCase();
+          if (process.env.PROBE_RL_CALL) console.log('RLCALL:', cmd, JSON.stringify(args).slice(0, 120));
+          if (cmd === 'SCRIPT') {
+            if (String(args[0]).toUpperCase() === 'LOAD') lastLoadedScript = String(args[1] ?? '');
+            return 'sha-orders-test';
+          }
+          if (cmd === 'EVALSHA' || cmd === 'EVAL') {
+            const script = cmd === 'EVAL' ? String(args[0]) : lastLoadedScript;
+            const numKeys = Number(args[1]);
+            const key = args[2];
+            const windowMs = Number(args[2 + numKeys]);
+            const cur = read(key);
+            const ttl = Math.max(0, (exp.get(key) ?? Date.now()) - Date.now());
+            if (script.includes('INCR') || script.includes('SET')) {
+              // increment script
+              if (cur === null) {
+                store.set(key, '1');
+                exp.set(key, Date.now() + windowMs);
+                return [1, windowMs];
+              }
+              const v = (parseInt(cur, 10) || 0) + 1;
+              store.set(key, String(v));
+              return [v, ttl];
+            }
+            // read script: [count, ttl] without mutating
+            return [cur === null ? null : parseInt(cur, 10), cur === null ? -2 : ttl];
+          }
+          return null;
+        },
+      };
+    })(),
+    clear: () => { store.clear(); exp.clear(); },
+  };
+})();
+let mockRedis = defaultRedis;
 let mockMongoDb = null;
 afterEach(() => {
-  mockRedis = null;
+  mockRedis = defaultRedis;
+  defaultRedis.clear(); // locks (milestone_lock:*, bid locks) must not leak across tests
 });
 
 vi.mock('../../src/config/db.js', () => ({
@@ -218,10 +321,14 @@ function makeMongoDbMock(records) {
 }
 
 function seedDriverAtDropOff(orderId, driverId) {
+  // The geofence provenance check cross-verifies order_display_id against the
+  // order row — stamp it from the seeded order.
+  const seeded = m.store.orders.find(o => o.id === orderId);
   mockMongoDb = makeMongoDbMock([
     {
       driver_id: driverId,
       order_id: orderId,
+      order_display_id: seeded?.order_display_id,
       lat: 28.6139,
       lng: 77.209,
       server_received_at: new Date(Date.now())
@@ -248,6 +355,7 @@ vi.mock('../../src/services/reputation.js', () => ({
 
 const escrowReleaseMock = vi.fn();
 const submitEscrowRefundMock = vi.fn();
+const submitEscrowCancelWithPenaltyMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
 vi.mock('../../src/services/escrow.js', async () => {
   const actual = await vi.importActual('../../src/services/escrow.js');
@@ -255,6 +363,7 @@ vi.mock('../../src/services/escrow.js', async () => {
     ...actual,
     escrowRelease: escrowReleaseMock,
     submitEscrowRefund: submitEscrowRefundMock,
+    submitEscrowCancelWithPenalty: submitEscrowCancelWithPenaltyMock,
     confirmEscrowRefund: confirmEscrowRefundMock
   };
 });
@@ -267,6 +376,9 @@ vi.mock('../../src/services/ml.js', () => ({
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
+// The on-chain reputation award moved to an event subscriber (registered via
+// app.js in production) — register it here so rating:submitted is handled.
+await import('../../src/subscribers/reputationSubscriber.js');
 const { computeOrderPricing } = await import('../../src/lib/pricing.js');
 import express from 'express';
 
@@ -274,6 +386,14 @@ function buildApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/orders', orderRouter);
+  // The controllers forward DomainErrors as AppError (payload in `details`);
+  // express's default handler would render HTML, so map it back to the JSON
+  // payload the routes returned before the AppError refactor.
+  app.use((err, req, res, next) => {
+    const status = err.statusCode || err.status || 500;
+    const payload = { error: err.message || 'Internal Server Error', ...(err.details && typeof err.details === 'object' ? err.details : {}) };
+    res.status(status).json(payload);
+  });
   return app;
 }
 
@@ -393,8 +513,10 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(offer.freight_value).toBe(
       args.p_base_freight + args.p_toll_estimate + args.p_platform_fee
     );
-    // Component fields continue to preserve the driver-side ledger invariant.
-    expect(args.p_fuel_cost + args.p_toll_estimate + args.p_net_profit).toBe(args.p_base_freight);
+    // Driver-ledger invariant per #15504's deliberate pricing change (pinned
+    // by test/unit/pricing.test.js): netProfit = baseFreight − fuelCost, toll
+    // is not deducted from the driver's net line anymore.
+    expect(args.p_fuel_cost + args.p_net_profit).toBe(args.p_base_freight);
   });
 
   it('uses OSRM road distance for persisted pricing when routing succeeds', async () => {
@@ -407,12 +529,14 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const res = await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
 
     expect(res.status).toBe(201);
-    expect(routeEstimateMock).toHaveBeenCalledWith({
+    expect(routeEstimateMock).toHaveBeenCalledWith(expect.objectContaining({
       pickupLat: validOrderBody.pickup_lat,
       pickupLng: validOrderBody.pickup_lng,
       dropLat: validOrderBody.drop_lat,
-      dropLng: validOrderBody.drop_lng
-    });
+      dropLng: validOrderBody.drop_lng,
+      // The circuit breaker injects an AbortSignal for timeout enforcement.
+      signal: expect.anything(),
+    }));
 
     const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
     const persisted = createOrderRpc.args;
@@ -551,7 +675,6 @@ describe('POST /api/orders — server-side pricing contract', () => {
       .send({
         milestone: 'Goods Loaded'
       });
-
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Milestone updated successfully/i);
   });
@@ -964,8 +1087,7 @@ describe('POST /api/orders/:id/bids — duplicate bid prevention', () => {
       .post('/api/orders/load-duplicate/bids')
       .set(DRIVER_HEADERS)
       .send({ bid_amount: 510000 });
-
-    expect(res.status).toBe(409);
+      expect(res.status).toBe(409);
     expect(res.body).toEqual({
       error: 'You already have a pending bid for this load.'
     });
@@ -1102,7 +1224,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     const app = buildApp();
 
-    const res = await request(app).get('/api/orders/order-1').set(CUSTOMER_HEADERS);
+    const res = await request(app).get('/api/orders/OD1').set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(403);
   });
@@ -1124,7 +1246,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     const app = buildApp();
 
-    const res = await request(app).get('/api/orders/order-1').set(CUSTOMER_HEADERS);
+    const res = await request(app).get('/api/orders/OD1').set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
     expect(res.body.order.id).toBe('order-1');
@@ -1154,7 +1276,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     const app = buildApp();
 
-    const res = await request(app).get('/api/orders/order-2').set(CUSTOMER_HEADERS);
+    const res = await request(app).get('/api/orders/OD2').set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
     expect(res.body.driver.name).toBe('Test Driver');
@@ -1269,21 +1391,14 @@ describe('PUT /api/orders/:id/milestones — edge cases', () => {
       }
     ];
 
-    const originalFrom = m.supabase.from.bind(m.supabase);
-    m.supabase.from = table => {
-      const builder = originalFrom(table);
-      if (table === 'orders') {
-        const originalUpdate = builder.update.bind(builder);
-        builder.update = payload => {
-          const b = originalUpdate(payload);
-          b._exec = async () => ({
-            data: null,
-            error: { message: 'update failed' }
-          });
-          return b;
-        };
+    // Status writes go through the update_order_status_tx RPC (event-sourced
+    // era) — inject the failure there, not at the table builder.
+    const originalRpcFn = m.supabase.rpc;
+    m.supabase.rpc = async (fnName, args) => {
+      if (fnName === 'update_order_status_tx') {
+        return { data: null, error: { message: 'update failed' } };
       }
-      return builder;
+      return originalRpcFn(fnName, args);
     };
 
     const app = buildApp();
@@ -1293,7 +1408,7 @@ describe('PUT /api/orders/:id/milestones — edge cases', () => {
       .set(DRIVER_HEADERS)
       .send({ milestone: 'Goods Loaded' });
 
-    m.supabase.from = originalFrom;
+    m.supabase.rpc = originalRpcFn;
 
     expect(res.status).toBe(500);
   });
@@ -1484,7 +1599,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-1/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -1510,12 +1625,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-1/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
+      .send({ otp: '462915' });
 
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('Access Denied: You are not assigned to this order.');
@@ -1534,7 +1649,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-1',
         order_id: 'order-1',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1544,7 +1659,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-1/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -1562,6 +1677,10 @@ describe('Delivery OTP Verification and Milestones', () => {
         driver_id: 'driver-123',
         order_display_id: 'ORD001',
         status: 'arriving',
+        // Already-paid order: the fail-closed release check passes via the
+        // persisted hash; no on-chain call is attempted.
+        escrow_status: 'released',
+        release_tx_hash: '0x' + 'b'.repeat(64),
         drop_lat: 28.6139,
         drop_lng: 77.209
       }
@@ -1570,7 +1689,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-1',
         order_id: 'order-1',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1588,13 +1707,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-1/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: 123456 }); // Numeric input, verifies type safety
-
+      .send({ otp: 462915 }); // Numeric input, verifies type safety
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Delivery verified successfully/i);
 
@@ -1613,8 +1731,9 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(rpcCall.args).toEqual({
       p_order_id: 'order-1',
       p_otp_id: 'otp-1',
-      // Escrow payout hash is only set once the release succeeds
-      p_release_tx_hash: null
+      // The confirmed release hash flows into the trip-completion RPC (the
+      // release is verified BEFORE the RPC runs now — payout sequencing).
+      p_release_tx_hash: '0x' + 'b'.repeat(64)
     });
   });
 
@@ -1625,6 +1744,8 @@ describe('Delivery OTP Verification and Milestones', () => {
         driver_id: 'driver-123',
         order_display_id: 'ORD-RETRY',
         status: 'arriving',
+        escrow_status: 'released',
+        release_tx_hash: '0x' + 'b'.repeat(64),
         drop_lat: 28.6139,
         drop_lng: 77.209
       }
@@ -1633,7 +1754,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-retry',
         order_id: 'order-retry',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1646,24 +1767,23 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const firstResponse = await request(app)
       .post('/api/orders/order-retry/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
-
+      .send({ otp: '462915' });
     expect(firstResponse.status).toBe(500);
     expect(m.store.delivery_otps[0].verified).toBe(false);
 
     const retryResponse = await request(app)
       .post('/api/orders/order-retry/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
+      .send({ otp: '462915' });
 
     expect(retryResponse.status).toBe(200);
     expect(m.store.delivery_otps[0].verified).toBe(true);
@@ -1691,7 +1811,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-2',
         order_id: 'order-2',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1709,12 +1829,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-2/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-456',
         'x-user-role': 'driver'
       })
-      .send({ otp: 123456 });
+      .send({ otp: 462915 });
 
     expect(res.status).toBe(200);
 
@@ -1757,7 +1877,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-release-failed',
         order_id: 'order-release-failed',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1768,12 +1888,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-release-failed/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-456',
         'x-user-role': 'driver'
       })
-      .send({ otp: 123456 });
+      .send({ otp: 462915 });
 
     // The route now fails fast with 503 and leaves the database untouched
     // when the on-chain release fails, so the driver can simply retry.
@@ -1817,7 +1937,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-no-release-hash',
         order_id: 'order-no-release-hash',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1828,12 +1948,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-no-release-hash/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-456',
         'x-user-role': 'driver'
       })
-      .send({ otp: 123456 });
+      .send({ otp: 462915 });
 
     // A missing transaction hash is treated like any other release failure:
     // fail fast with 503 and leave the database untouched for a retry.
@@ -1860,7 +1980,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-expired',
         order_id: 'order-expired',
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() - 1 * 60 * 1000).toISOString(), // expired 1 minute ago
         verified: false,
         created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
@@ -1870,12 +1990,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders/order-expired/verify-delivery')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
+      .send({ otp: '462915' });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('expired');
@@ -1889,6 +2009,8 @@ describe('Delivery OTP Verification and Milestones', () => {
         driver_id: 'driver-123',
         order_display_id: 'ORD-LOCK',
         status: 'arriving',
+        escrow_status: 'released',
+        release_tx_hash: '0x' + 'b'.repeat(64),
         drop_lat: 28.6139,
         drop_lng: 77.209
       }
@@ -1897,7 +2019,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-lockout',
         order_id: orderId,
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -1911,7 +2033,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     for (let i = 1; i <= 4; i++) {
       const res = await request(app)
         .post(`/api/orders/${orderId}/verify-delivery`)
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({
           'x-user-id': 'driver-123',
           'x-user-role': 'driver'
@@ -1924,7 +2046,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     // 2. 5th failure: triggers lockout
     const res5 = await request(app)
       .post(`/api/orders/${orderId}/verify-delivery`)
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -1936,12 +2058,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     // 3. 6th attempt (even with correct OTP) returns 429 Too Many Requests
     const res6 = await request(app)
       .post(`/api/orders/${orderId}/verify-delivery`)
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
+      .send({ otp: '462915' });
     expect(res6.status).toBe(429);
     expect(res6.body.error).toContain('Too many failed OTP attempts');
 
@@ -1958,12 +2080,12 @@ describe('Delivery OTP Verification and Milestones', () => {
       // Correct OTP should now succeed
       const resAfterLockout = await request(app)
         .post(`/api/orders/${orderId}/verify-delivery`)
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({
           'x-user-id': 'driver-123',
           'x-user-role': 'driver'
         })
-        .send({ otp: '123456' });
+        .send({ otp: '462915' });
       expect(resAfterLockout.status).toBe(200);
       expect(resAfterLockout.body.message).toMatch(/Delivery verified successfully/i);
     } finally {
@@ -1979,6 +2101,8 @@ describe('Delivery OTP Verification and Milestones', () => {
         driver_id: 'driver-123',
         order_display_id: 'ORD-CLEAR',
         status: 'arriving',
+        escrow_status: 'released',
+        release_tx_hash: '0x' + 'b'.repeat(64),
         drop_lat: 28.6139,
         drop_lng: 77.209
       }
@@ -1987,7 +2111,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-clear-state',
         order_id: orderId,
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         verified: false,
         created_at: new Date().toISOString()
@@ -2001,7 +2125,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     for (let i = 0; i < 3; i++) {
       await request(app)
         .post(`/api/orders/${orderId}/verify-delivery`)
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({
           'x-user-id': 'driver-123',
           'x-user-role': 'driver'
@@ -2012,12 +2136,12 @@ describe('Delivery OTP Verification and Milestones', () => {
     // Succeed — complete_trip_tx atomically marks the OTP as verified.
     const resSuccess = await request(app)
       .post(`/api/orders/${orderId}/verify-delivery`)
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
-      .send({ otp: '123456' });
+      .send({ otp: '462915' });
     expect(resSuccess.status).toBe(200);
 
     // Reset OTP record in isolated table so subsequent verifications can find it
@@ -2033,7 +2157,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     for (let i = 1; i <= 4; i++) {
       const resFail = await request(app)
         .post(`/api/orders/${orderId}/verify-delivery`)
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({
           'x-user-id': 'driver-123',
           'x-user-role': 'driver'
@@ -2059,7 +2183,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       {
         id: 'otp-regen-old',
         order_id: orderId,
-        otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+        otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
         expires_at: new Date(Date.now() - 1 * 60 * 1000).toISOString(), // expired
         verified: false,
         created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
@@ -2093,7 +2217,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(oldOtp).toBeTruthy();
 
     // A new OTP should have been created
-    const expectedOldHash = crypto.createHash('sha256').update('123456').digest('hex');
+    const expectedOldHash = crypto.createHash('sha256').update('462915').digest('hex');
     const newOtps = m.store.delivery_otps.filter(o => o.order_id === orderId && o.otp_hash !== expectedOldHash);
     expect(newOtps.length).toBeGreaterThan(0);
     const newOtp = newOtps[0];
@@ -2184,7 +2308,7 @@ describe('Delivery OTP Verification and Milestones', () => {
         {
           id: 'otp-redis-active',
           order_id: 'order-redis-active',
-          otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+          otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
           verified: false,
           created_at: new Date().toISOString()
@@ -2196,7 +2320,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       // Send 1st invalid OTP
       const res1 = await request(app)
         .post('/api/orders/order-redis-active/verify-delivery')
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
         .send({ otp: '000000' });
       expect(res1.status).toBe(400);
@@ -2207,7 +2331,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       for (let i = 0; i < 4; i++) {
         await request(app)
           .post('/api/orders/order-redis-active/verify-delivery')
-          .set('X-Idempotency-Key', Math.random().toString())
+          .set('X-Idempotency-Key', crypto.randomUUID())
           .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
           .send({ otp: '000000' });
       }
@@ -2218,9 +2342,9 @@ describe('Delivery OTP Verification and Milestones', () => {
       // Verify next request is blocked with 429 even with correct OTP
       const res6 = await request(app)
         .post('/api/orders/order-redis-active/verify-delivery')
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
-        .send({ otp: '123456' });
+        .send({ otp: '462915' });
       expect(res6.status).toBe(429);
       expect(res6.body.error).toContain('Too many failed OTP attempts');
 
@@ -2263,7 +2387,7 @@ describe('Delivery OTP Verification and Milestones', () => {
         {
           id: 'otp-redis-failing',
           order_id: 'order-redis-failing',
-          otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+          otp_hash: crypto.createHash('sha256').update('462915').digest('hex'),
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
           verified: false,
           created_at: new Date().toISOString()
@@ -2275,7 +2399,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       // Verify that even if Redis fails, the endpoint handles it gracefully and returns 400 (not 500)
       const res1 = await request(app)
         .post('/api/orders/order-redis-failing/verify-delivery')
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
         .send({ otp: '000000' });
 
@@ -2286,7 +2410,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       for (let i = 0; i < 4; i++) {
         await request(app)
           .post('/api/orders/order-redis-failing/verify-delivery')
-          .set('X-Idempotency-Key', Math.random().toString())
+          .set('X-Idempotency-Key', crypto.randomUUID())
           .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
           .send({ otp: '000000' });
       }
@@ -2294,9 +2418,9 @@ describe('Delivery OTP Verification and Milestones', () => {
       // 6th attempt should return 429
       const res6 = await request(app)
         .post('/api/orders/order-redis-failing/verify-delivery')
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
-        .send({ otp: '123456' });
+        .send({ otp: '462915' });
 
       expect(res6.status).toBe(429);
       expect(res6.body.error).toContain('Too many failed OTP attempts');
@@ -2324,11 +2448,10 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/ORD-1/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Great delivery' });
-
-    expect(res.status).toBe(201);
+      expect(res.status).toBe(201);
     expect(res.body.message).toBe('Rating submitted successfully.');
     expect(m.calls.some(c => c.rpc === 'submit_rating_tx')).toBe(true);
 
@@ -2364,7 +2487,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/ORD-1/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 4, comment: 'Second attempt' });
 
@@ -2386,7 +2509,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/ORD-1/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Too early' });
 
@@ -2408,12 +2531,13 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/ORD-1/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Not mine' });
 
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe('Access Denied: You do not own this order.');
+    // The policy engine denies non-owners before the service runs.
+    expect(res.body.error).toBe('Access Denied: You do not have permission to access this resource.');
     expect(m.calls.some(c => c.rpc === 'submit_rating_tx')).toBe(false);
   });
 
@@ -2429,7 +2553,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
     ];
 
     const app = buildApp();
-    const res = await request(app).post('/api/orders/order-1/ratings').set(CUSTOMER_HEADERS).send({ stars: 6 });
+    const res = await request(app).post('/api/orders/ORD-1/ratings').set(CUSTOMER_HEADERS).send({ stars: 6 });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Validation failed');
@@ -2455,7 +2579,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/ORD-1/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 4, comment: 'Good job' });
 
@@ -2463,7 +2587,11 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
     // Give the fire-and-forget promise a tick to resolve.
     await new Promise(r => setTimeout(r, 0));
     expect(awardReputationPointsMock).toHaveBeenCalledOnce();
-    expect(awardReputationPointsMock).toHaveBeenCalledWith('0xAbCd1234567890abcdef1234567890abcdef1234', 4);
+    // The subscriber adds an idempotency awardKey (deliberate).
+    expect(awardReputationPointsMock).toHaveBeenCalledWith(
+      '0xAbCd1234567890abcdef1234567890abcdef1234', 4,
+      expect.objectContaining({ awardKey: expect.any(String) })
+    );
   });
 
   it('skips on-chain update when driver has no polygon_wallet_address', async () => {
@@ -2485,7 +2613,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
     ];
 
     const app = buildApp();
-    const res = await request(app).post('/api/orders/order-1/ratings').set(CUSTOMER_HEADERS).send({ stars: 3 });
+    const res = await request(app).post('/api/orders/ORD-1/ratings').set(CUSTOMER_HEADERS).send({ stars: 3 });
 
     expect(res.status).toBe(201);
     await new Promise(r => setTimeout(r, 0));
@@ -2615,7 +2743,6 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
     expect(rateLimitLayer).toBeDefined();
 
     const limiter = rateLimitLayer.handle;
-    expect(limiter.getKey).toBeDefined();
 
     const mockUserVal = 'test-user-rate-limit-123';
     const mockReq = {
@@ -2635,7 +2762,8 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
     await limiter(mockReq, mockRes, next);
     expect(nextCalled).toBe(true);
 
-    const info = await limiter.getKey(mockUserVal);
+    // getKey takes the GENERATED key (user:<id> per userKeyGenerator).
+    const info = await limiter.getKey(`user:${mockUserVal}`);
     expect(info).toBeDefined();
     expect(info.totalHits).toBe(1);
   });
@@ -2753,7 +2881,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(app)
       .post('/api/orders/aaaa0003-0000-4000-8000-000000000003/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
@@ -2775,7 +2903,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       escrow_refund_attempts: 0,
       cancellation_fee: 500
     });
-    submitEscrowRefundMock.mockImplementation(async () => {
+    // driverFeeWei decides which refund entry point runs — stub both.
+    const refundImpl = async () => {
       const stored = m.store.orders.find(o => o.id === 'aaaa0004-0000-4000-8000-000000000004');
       expect(stored.status).toBe('cancelled');
       expect(stored.escrow_status).toBe('refund_pending');
@@ -2783,11 +2912,13 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
         txHash: `0x${'a'.repeat(64)}`,
         waitForConfirmation: vi.fn().mockResolvedValue({ hash: `0x${'a'.repeat(64)}`, status: 1 })
       };
-    });
+    };
+    submitEscrowCancelWithPenaltyMock.mockImplementation(refundImpl);
+    submitEscrowRefundMock.mockImplementation(refundImpl);
 
     const res = await request(buildApp())
       .post('/api/orders/aaaa0004-0000-4000-8000-000000000004/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
@@ -2808,11 +2939,12 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       escrow_status: 'funded',
       cancellation_fee: 500
     });
+    submitEscrowCancelWithPenaltyMock.mockRejectedValue(new Error('Polygon unavailable'));
     submitEscrowRefundMock.mockRejectedValue(new Error('Polygon unavailable'));
 
     const res = await request(buildApp())
       .post('/api/orders/aaaa0005-0000-4000-8000-000000000005/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
@@ -2840,12 +2972,18 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       const app = buildApp();
       const res = await request(app)
         .post('/api/orders/aaaa0006-0000-4000-8000-000000000006/cancel')
-        .set('X-Idempotency-Key', Math.random().toString())
+        .set('X-Idempotency-Key', crypto.randomUUID())
         .set(CUSTOMER_HEADERS)
         .send({ reason: 'Change of plans' });
 
       expect(res.status).toBe(409);
-      expect(res.body.error).toBe('Cannot cancel: the shipment has already been picked up and is in transit.');
+      // Terminal statuses are rejected by the RPC guard with its own message;
+      // in-transit statuses by the service's trip guard.
+      expect(res.body.error).toBe(
+        status === 'delivered'
+          ? 'Order was already delivered or payment released. Cannot cancel.'
+          : 'Cannot cancel: the shipment has already been picked up and is in transit.'
+      );
       const storedOrder = m.store.orders.find(o => o.id === 'aaaa0006-0000-4000-8000-000000000006');
       expect(storedOrder.status).toBe(status);
       expect(storedOrder.escrow_status).toBe('funded');
@@ -2867,7 +3005,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(buildApp())
       .post('/api/orders/aaaa0006-0000-4000-8000-000000000006/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
@@ -2890,7 +3028,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(app)
       .post('/api/orders/aaaa0007-0000-4000-8000-000000000007/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set({ 'x-user-id': 'some-other-user', 'x-user-role': 'customer' })
       .send({ reason: 'Not owner' });
 
@@ -2939,7 +3077,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(app)
       .post('/api/orders/aaaa0009-0000-4000-8000-000000000009/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'delivered' });
 
@@ -2960,7 +3098,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(app)
       .post('/api/orders/aaaa0010-0000-4000-8000-000000000010/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'payment released' });
 
@@ -3054,7 +3192,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
     const res = await request(app)
       .post('/api/orders/aaaa9999-0000-4000-8000-000000009999/cancel')
-      .set('X-Idempotency-Key', Math.random().toString())
+      .set('X-Idempotency-Key', crypto.randomUUID())
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Non-existent' });
 

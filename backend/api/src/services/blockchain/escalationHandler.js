@@ -1,4 +1,5 @@
 import logger from '../../middleware/logger.js';
+import crypto from 'crypto';
 import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
@@ -179,8 +180,11 @@ class EscalationHandler {
   }
 
   generateAlertId(alert) {
+    // Hash the full key: truncating the raw encoding kept only the alert
+    // type prefix, so different drivers' alerts collided and the second was
+    // dropped as already tracked.
     const key = [alert.type, alert.driver || alert.wallet || alert.shipmentId || 'unknown'].join('_');
-    return Buffer.from(key).toString('hex').slice(0, 16);
+    return crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
   }
 
   async storeEscalation(record) {

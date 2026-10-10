@@ -1,4 +1,4 @@
-﻿import shardManager from '../services/sharding/ShardManager.js';
+import shardManager from '../services/sharding/ShardManager.js';
 import logger from './logger.js';
 import { validateCoordinateRange } from '../utils/coordinates.js';
 
@@ -87,8 +87,10 @@ export const shardMiddleware = async (req, res, next) => {
 };
 
 export const crossShardQuery = async (req, res, next) => {
-  req.executeCrossShard = async (query, params) => {
-    return await shardManager.executeCrossShardQuery({ query, params });
+  req.executeCrossShard = async (query, params, options) => {
+    return options !== undefined
+      ? await shardManager.executeCrossShardQuery({ query, params }, options)
+      : await shardManager.executeCrossShardQuery({ query, params });
   };
   next();
 };

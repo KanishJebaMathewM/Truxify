@@ -1,0 +1,34 @@
+name: ML deadhead routing batches
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/deadhead_eliminator.py'
+      - 'backend/ml/tests/test_deadhead_routing_batches.py'
+      - 'backend/ml/tests/test_deadhead_eliminator.py'
+      - 'backend/ml/requirements.txt'
+      - '.github/workflows/ml-deadhead-routing-batches.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deadhead-routing-batches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused service-compatible dependencies
+        run: python -m pip install pytest==9.0.3 numpy==1.26.4 scipy==1.11.3 scikit-learn==1.9.0 fastapi==0.116.1 pydantic==2.11.1 requests==2.33.0 httpx==0.27.0 ruff==0.16.9
+      - name: Verify bounded routing and existing matcher semantics
+        run: python -m pytest backend/ml/tests/test_deadhead_routing_batches.py backend/ml/tests/test_deadhead_eliminator.py -q
+      - name: Analyze regressions and verify production syntax
+        run: |
+          ruff check backend/ml/tests/test_deadhead_routing_batches.py
+          ruff check --select E9,F63,F7,F82 backend/ml/app/models/deadhead_eliminator.py
+          python -m py_compile backend/ml/app/models/deadhead_eliminator.py

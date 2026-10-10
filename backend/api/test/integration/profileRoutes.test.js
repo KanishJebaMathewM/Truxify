@@ -97,13 +97,13 @@ describe('Profile Routes', () => {
         is_active: true,
       });
 
-      m.store.customer_stats.push({
-        id: 'stats-1',
-        user_id: 'customer-uuid-123',
-        total_orders: 42,
-        total_saved: 12500, // paisa
-        co2_reduced_kg: 15.6,
-      });
+      // getCustomerStats computes from the customer's orders (the
+      // customer_stats table is no longer read by any write path).
+      m.store.orders.push(
+        { id: 'order-1', customer_id: 'customer-uuid-123', status: 'delivered', total_amount: 1000 },
+        { id: 'order-2', customer_id: 'customer-uuid-123', status: 'in_transit', total_amount: 2000 },
+        { id: 'order-3', customer_id: 'customer-uuid-123', status: 'pending', total_amount: 500 },
+      );
 
       const res = await request(buildApp())
         .get('/api/profile')
@@ -127,9 +127,10 @@ describe('Profile Routes', () => {
       });
 
       expect(res.body.extra).toEqual({
-        totalOrders: 42,
-        totalSaved: 12500,
-        co2ReducedKg: 15.6,
+        totalOrders: 3,
+        // No broker-baseline data exists on orders, so savings/CO2 stay 0.
+        totalSaved: 0,
+        co2ReducedKg: 0,
       });
     });
 
@@ -192,6 +193,13 @@ describe('Profile Routes', () => {
         walletConfirmed: 50000,
         walletPending: 12000,
         walletTotal: 62000,
+        kycStatus: 'Unverified',
+        kycDocNumber: null,
+        badges: [
+          { id: 'first_delivery', label: 'First Delivery', icon: '📦' },
+          { id: '100_deliveries', label: '100 Deliveries Completed', icon: '💯' },
+          { id: 'top_earner', label: 'Top Earner', icon: '💰' },
+        ],
       });
     });
   });
@@ -221,13 +229,11 @@ describe('Profile Routes', () => {
         full_name: 'Jane Doe',
       });
 
-      m.store.customer_stats.push({
-        id: 'stats-1',
-        user_id: 'customer-uuid-123',
-        total_orders: 42,
-        total_saved: 12500,
-        co2_reduced_kg: 15.6,
-      });
+      // Stats are computed from the customer's orders at request time.
+      m.store.orders.push(
+        { id: 'order-1', customer_id: 'customer-uuid-123', status: 'delivered', total_amount: 1000 },
+        { id: 'order-2', customer_id: 'customer-uuid-123', status: 'pending', total_amount: 500 },
+      );
 
       const res = await request(buildApp())
         .get('/api/profile/customer-stats')
@@ -235,13 +241,13 @@ describe('Profile Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.stats).toEqual({
-        totalOrders: 42,
-        totalSaved: 12500,
-        co2ReducedKg: 15.6,
+        totalOrders: 2,
+        totalSaved: 0,
+        co2ReducedKg: 0,
       });
     });
 
-    it('returns null stats when no customer_stats row exists', async () => {
+    it('returns computed zero stats when the customer has no orders', async () => {
       m.store.profiles.push({
         id: 'customer-uuid-123',
         firebase_uid: 'firebase-cust-uid',
@@ -254,7 +260,12 @@ describe('Profile Routes', () => {
         .set(CUSTOMER_HEADERS);
 
       expect(res.status).toBe(200);
-      expect(res.body.stats).toBeNull();
+      // Stats are computed from orders, so a customer with none gets zeros.
+      expect(res.body.stats).toEqual({
+        totalOrders: 0,
+        totalSaved: 0,
+        co2ReducedKg: 0,
+      });
     });
   });
 
@@ -399,8 +410,9 @@ describe('Profile Routes', () => {
       expect(invalidateCachedSupabaseProfileAll).toHaveBeenCalledWith('customer-uuid-123');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
+      // The wallet route persists the normalized address under
+      // polygon_wallet_address only.
       expect(profileUpdateCall.payload).toEqual({
-        wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
         polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
       });
     });
@@ -537,7 +549,10 @@ describe('Profile Routes', () => {
         total_base_freight: 20000,
         total_platform_fees: 1000,
         total_toll_estimate: 2000,
-        total_net_earnings: 19000
+        // getStatementPayout matches complete_trip_tx's wallet credit: the
+        // legacy full customer price (base + toll + platform fee) when the
+        // row carries no bid/total payout fields.
+        total_net_earnings: 23000
       });
       expect(res.body.trips).toHaveLength(1);
       expect(res.body.trips[0].id).toBe('order-2');

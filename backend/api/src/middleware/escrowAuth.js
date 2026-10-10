@@ -28,7 +28,7 @@ const requireEscrowPermissions = async (req, res, next) => {
         req.userProfile = profile;
         next();
     } catch (err) {
-        console.error('Escrow auth middleware error:', err.message);
+        logger.error({ err, requestId: req.id }, 'Escrow auth middleware error');
         return res.status(500).json({ error: 'Internal server error during escrow authorization' });
     }
 };

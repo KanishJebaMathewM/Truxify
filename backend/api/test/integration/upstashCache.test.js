@@ -115,14 +115,15 @@ describe('Upstash Redis Caching Layer', () => {
     vi.clearAllMocks();
     process.env.BYPASS_AUTH = 'false';
     // The hardened authenticate middleware fails closed without JWT_SECRET
-    // (93de585a7); this suite signs its tokens with 'secret'.
-    process.env.JWT_SECRET = 'secret';
+    // (93de585a7) AND rejects secrets under 32 chars — sign with a compliant
+    // suite-local secret.
+    process.env.JWT_SECRET = 'upstash-cache-suite-secret-key-0001';
     mockGetUser.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null });
 
   afterEach(() => {
     delete process.env.JWT_SECRET;
   });
-    token = jwt.sign({ iss: 'https://xyz.supabase.co' }, 'secret');
+    token = jwt.sign({ iss: 'https://xyz.supabase.co' }, process.env.JWT_SECRET);
 
     // In-memory simple store to mock Upstash Redis behavior
     cacheStore = {};

@@ -134,6 +134,24 @@ fn parse_content_length(head: &str) -> Option<usize> {
 }
 
 /// Builds a minimal HTTP/1.1 JSON response with `Connection: close`.
+// services/zkp-verifier-rust/src/main.rs
+
+// Line 135 (/health response):
+// Before: let body = "{"status":"UP","service":"truxify-zkp-verifier"}";
+// After (Escaped):
+let body = "{\"status\":\"UP\",\"service\":\"truxify-zkp-verifier\"}";
+// Alternatively using raw string literals:
+// let body = r#"{"status":"UP","service":"truxify-zkp-verifier"}"#;
+
+// Line 173 (/verify error response):
+// Before: let body = "{"error":"Invalid ZKPProofRequest JSON"}";
+// After:
+let body = "{\"error\":\"Invalid ZKPProofRequest JSON\"}";
+
+// Line 188 (404 Not Found response):
+// Before: let body = "{"error":"Not Found"}";
+// After:
+let body = "{\"error\":\"Not Found\"}";
 fn http_response(status_line: &str, body: &str) -> Vec<u8> {
     let body = body.as_bytes();
     let mut resp = Vec::with_capacity(128 + body.len());

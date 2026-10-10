@@ -2,7 +2,13 @@ import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { AppError } from '../utils/errors.js';
 import { createUserClient } from '../config/db.js';
+// Inside backend/api/src/controllers/escortWalletController.js
 
+// CHANGE FROM:
+// import { AppError } from '../errors/AppError.js';
+
+// CHANGE TO:
+import { AppError } from '../utils/errors.js';
 /**
  * Resolve the resource for the 'escort:issue-credential' ownership check:
  * the normalized subject from the body and the authenticated caller's own

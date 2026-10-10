@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+// vitest runs this directory — node:test leaves zero suites behind
+import { test } from 'vitest';
 import { buildSchema, graphql } from 'graphql';
 import { mapOrder } from '../shared/orderMapping.js';
 

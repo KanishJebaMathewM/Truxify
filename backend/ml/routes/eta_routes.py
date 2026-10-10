@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import logging
 import os
@@ -10,7 +11,7 @@ from sqlalchemy import text
 import numpy as np
 
 from services.traffic_pipeline import TrafficPipeline, eta_seconds_from_speed
-from app.execution import run_inference
+from app.execution import run_inference, run_training_job
 
 logger = logging.getLogger(__name__)
 
@@ -294,15 +295,17 @@ async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=
 async def train_model(_auth=Depends(verify_api_key)):
     """Trigger model retraining"""
     try:
-        # LSTM training is very CPU-heavy and would otherwise freeze the event
-        # loop for every other request; run it on the bounded inference worker.
-        await run_inference(traffic_pipeline.train_model, epochs=50)
+        await run_training_job("eta_lstm", traffic_pipeline.train_model, epochs=50)
         utc_now = datetime.now(timezone.utc)
         return {
             'status': 'success',
             'message': 'Model trained successfully',
             'timestamp': utc_now.isoformat()
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="ETA model training timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Internal error: {e}")
 

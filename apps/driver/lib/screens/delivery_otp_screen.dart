@@ -133,8 +133,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
           permission == LocationPermission.deniedForever) return;
 
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
       final d = Geolocator.distanceBetween(
         pos.latitude,
@@ -217,8 +216,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
 
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
+        desiredAccuracy: LocationAccuracy.high,
       );
 
       // Client path stays under /api/orders; server route alignment is separate.
@@ -678,7 +676,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              id: 'btn_confirm_delivery_otp',
+              key: const ValueKey('btn_confirm_delivery_otp'),
               onPressed: (_isVerifying || _otp.length < 6)
                   ? null
                   : _confirmOtp,
@@ -711,7 +709,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
           // Clear button
           Center(
             child: TextButton.icon(
-              id: 'btn_clear_otp',
+              key: const ValueKey('btn_clear_otp'),
               onPressed: _clearOtp,
               icon: const Icon(Icons.backspace_outlined, size: 16),
               label: Text(
@@ -834,7 +832,8 @@ class _GeofenceBadge extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ),
+      );
   }
 }
 

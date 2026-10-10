@@ -58,7 +58,7 @@ import {
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
-import { refreshToken } from "../controllers/authController.js";
+import { getJwtSecret } from "../config/jwtSecret.js";
 
 const router = express.Router();
 
@@ -183,7 +183,6 @@ import crypto from "crypto";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
 
-
 const AUTH_OTP_IN_MEMORY_MAX = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || "10000", 10);
 const authOtpFailedAttempts = new Map();
 
@@ -198,7 +197,14 @@ async function checkAuthOtpLockout(phone) {
       const isLocked = await redisClient.get(`auth_otp_lockout:${phoneKey}`);
       return !!isLocked;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in checkAuthOtpLockout, falling back to memory:", err.message);
+      logger.error({ event: "AUTH_OTP_LOCKOUT_REDIS_ERROR", error: err.message }, "Redis error in checkAuthOtpLockout, falling back to memory");
+      logger.error(
+        {
+          event: "AUTH_OTP_LOCKOUT_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in checkAuthOtpLockout, falling back to memory"
+      );
     }
   }
   const record = authOtpFailedAttempts.get(phoneKey);
@@ -223,7 +229,14 @@ async function recordAuthOtpFailure(phone) {
       }
       return count;
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in recordAuthOtpFailure, falling back to memory:", err.message);
+      logger.error({ event: "AUTH_OTP_FAILURE_RECORD_REDIS_ERROR", error: err.message }, "Redis error in recordAuthOtpFailure, falling back to memory");
+      logger.error(
+        {
+          event: "AUTH_OTP_FAILURE_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in recordAuthOtpFailure, falling back to memory"
+      );
     }
   }
 
@@ -250,7 +263,14 @@ async function clearAuthOtpFailures(phone) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
     } catch (err) {
-      logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
+      logger.error({ event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR", error: err.message }, "Redis error in clearAuthOtpFailures, falling back to memory");
+      logger.error(
+        {
+          event: "AUTH_OTP_CLEAR_FAILURES_REDIS_ERROR",
+          error: err.message,
+        },
+        "Redis error in clearAuthOtpFailures, falling back to memory"
+      );
     }
   }
   authOtpFailedAttempts.delete(phoneKey);
@@ -347,11 +367,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, unexpired OTP for this phone number
+    // Look up the latest unused, active, unexpired OTP for this phone number
     const { data: otpRecord, error: fetchErr } = await supabase
       .from("phone_otps")
-      .select("id, otp_hash, otp_salt, expires_at, verified")
+      .select("id, otp_hash, otp_salt, expires_at, verified, is_active")
       .eq("phone", phone)
+      .eq("is_active", true)
       .eq("verified", false)
       .gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false })
@@ -359,7 +380,14 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       .maybeSingle();
 
     if (fetchErr) {
-      logger.error("[auth/verify-otp] DB fetch error:", fetchErr.message);
+      logger.error({ event: "AUTH_OTP_DB_FETCH_ERROR", error: fetchErr.message }, "DB fetch error during OTP verification");
+      logger.error(
+        {
+          event: "AUTH_OTP_DB_FETCH_ERROR",
+          error: fetchErr.message,
+        },
+        "DB fetch error"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
@@ -397,24 +425,50 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     // Consume the OTP so it cannot be reused
     const { error: updateErr } = await supabase
       .from("phone_otps")
-      .update({ verified: true, verified_at: new Date().toISOString() })
+      .update({ verified: true, verified_at: new Date().toISOString(), is_active: false })
       .eq("id", otpRecord.id);
 
     if (updateErr) {
-      logger.error("[auth/verify-otp] Failed to mark OTP as verified:", updateErr.message);
+      logger.error({ event: "AUTH_OTP_MARK_VERIFIED_ERROR", error: updateErr.message }, "Failed to mark OTP as verified");
+      logger.error(
+        {
+          event: "AUTH_OTP_VERIFICATION_UPDATE_ERROR",
+          error: updateErr.message,
+        },
+        "Failed to mark OTP as verified"
+      );
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
     await clearAuthOtpFailures(phone);
-    logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
+    logger.info({ event: "OTP_VERIFIED", phone }, "OTP verified");
     return res.status(200).json({ success: true, message: "OTP verified successfully." });
   } catch (err) {
-    logger.error("[auth/verify-otp] Unexpected error:", err.message);
+    logger.error({ event: "AUTH_OTP_UNEXPECTED_ERROR", error: err.message }, "Unexpected error during OTP verification");
+    logger.info(
+      {
+        event: "OTP_VERIFIED",
+        phone,
+      },
+      "OTP verified"
+    );
+    return res.status(200).json({ success: true, message: "OTP verified successfully." });
+  } catch (err) {
+    logger.error(
+      {
+        event: "AUTH_OTP_UNEXPECTED_ERROR",
+        error: err.message,
+      },
+      "Unexpected error"
+    );
     return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
 
-const JWT_SECRET = process.env.JWT_SECRET;
+// Signing and verification share one resolver so they can never drift apart.
+// In production this throws when JWT_SECRET is missing or too short instead of
+// silently falling back to a publicly known key.
+const JWT_SECRET = getJwtSecret();
 
 /**
  * @openapi
@@ -422,134 +476,118 @@ const JWT_SECRET = process.env.JWT_SECRET;
  *   post:
  *     tags: [Authentication]
  *     summary: Exchange Firebase/Supabase ID Token for Backend JWT
- *     description: Verifies Firebase or Supabase ID token and returns a signed backend JWT token.
+ *   description: Verifies a Firebase ID token and returns a signed backend JWT token.
+ *     Identity and role are derived exclusively from the verified token and the
+ *     stored profile; caller-supplied identity or role fields are ignored.
  *     responses:
  *       200:
  *         description: JWT exchanged successfully
  *       400:
- *         description: Missing token or email
+ *         description: Missing idToken
+ *       401:
+ *         description: Invalid or expired idToken
+ *       403:
+ *         description: No provisioned profile for this identity
+ *       503:
+ *         description: Token verification unavailable
  */
 router.post("/verify", async (req, res) => {
   try {
-    const { idToken, token, email, role, phone, uid } = req.body || {};
+    const { idToken, token } = req.body || {};
     const inputToken = idToken || token;
 
     if (!inputToken) {
-      if (process.env.NODE_ENV === "production" || (!process.env.ENABLE_TEST_AUTH && process.env.NODE_ENV !== "test")) {
-        return res.status(400).json({
-          success: false,
-          error: "idToken is required for authentication verification.",
-        });
-      }
-      if (!email) {
-        return res.status(400).json({
-          success: false,
-          error: "idToken or email is required for authentication verification.",
-        });
-      }
+      return res.status(400).json({
+        success: false,
+        error: "idToken is required for authentication verification.",
+      });
     }
 
-    let verifiedUid = uid || `uid-${Date.now()}`;
-    let verifiedEmail = email || "user@truxify.com";
-    let verifiedRole = (process.env.NODE_ENV === "test" && role) ? role : "customer";
-
-    if (inputToken) {
-      let tokenVerified = false;
-      if (firebaseAdmin) {
-        try {
-          const decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
-          verifiedUid = decoded.uid;
-          if (decoded.email) verifiedEmail = decoded.email;
-          tokenVerified = true;
-        } catch (err) {
-          logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
-          if (process.env.NODE_ENV === "production" || !supabase) {
-            return res.status(401).json({
-              success: false,
-              error: "Invalid or expired authentication token.",
-            });
-          }
-        }
-      }
-
-      if (!tokenVerified && supabase) {
-        try {
-          const { data: { user }, error: authErr } = await supabase.auth.getUser(inputToken);
-          if (authErr || !user) {
-            return res.status(401).json({
-              success: false,
-              error: "Invalid or expired authentication token.",
-            });
-          }
-          verifiedUid = user.id;
-          if (user.email) verifiedEmail = user.email;
-          tokenVerified = true;
-        } catch (err) {
-          return res.status(401).json({
-            success: false,
-            error: "Invalid or expired authentication token.",
-          });
-        }
-      }
-
-      if (!tokenVerified && (firebaseAdmin || supabase)) {
-        return res.status(401).json({
-          success: false,
-          error: "Invalid or expired authentication token.",
-        });
-      }
+    // Fail closed. Without the Admin SDK there is no way to establish that the
+    // caller owns the identity they are asking for, so no token is issued.
+    if (!firebaseAdmin) {
+      logger.error("[auth/verify] Firebase Admin SDK unavailable; refusing to issue a token");
+      return res.status(503).json({
+        success: false,
+        error: "Token verification is unavailable. Please try again later.",
+      });
     }
 
-    let userId = null;
-    if (supabase) {
-      try {
-        const { data: profile, error: profileErr } = await supabase
+    // The token is the only accepted proof of identity. A verification failure is
+    // terminal: previously it was only logged, which left the caller-supplied
+    // uid/email/role in place and turned this endpoint into an account takeover.
+    let decoded;
+    try {
+      decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
+    } catch (err) {
+      logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired idToken.",
+      });
+    }
+
+    const verifiedUid = decoded.uid;
+    const verifiedEmail = typeof decoded.email === "string" ? decoded.email : null;
+
+    if (!verifiedUid) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired idToken.",
+      });
+    }
+
+    if (!supabase) {
+      logger.error("[auth/verify] Supabase client unavailable; refusing to issue a token");
+      return res.status(503).json({
+        success: false,
+        error: "Token verification is unavailable. Please try again later.",
+      });
+    }
+
+    // Match on the verified uid. The verified email is accepted as a fallback for
+    // rows provisioned before the uid was recorded, never the other way round.
+    let profile = null;
+    try {
+      const byUid = await supabase
+        .from("profiles")
+        .select("id, role, full_name, phone, email, firebase_uid")
+        .eq("firebase_uid", verifiedUid)
+        .maybeSingle();
+
+      profile = byUid.data || null;
+
+      if (!profile && verifiedEmail) {
+        const byEmail = await supabase
           .from("profiles")
-          .select("id, role, full_name, phone, is_active")
-          .or(`firebase_uid.eq.${verifiedUid},email.eq.${verifiedEmail}`)
+          .select("id, role, full_name, phone, email, firebase_uid")
+          .eq("email", verifiedEmail)
           .maybeSingle();
-
-        if (profileErr) {
-          logger.error(`[auth/verify] Supabase profile query error: ${profileErr.message}`);
-          return res.status(500).json({ success: false, error: "Database error during authentication." });
-        }
-
-        if (profile) {
-          if (profile.is_active === false) {
-            return res.status(403).json({
-              success: false,
-              error: "User account is inactive or deactivated.",
-            });
-          }
-          userId = profile.id;
-          verifiedRole = profile.role || verifiedRole;
-        } else if (process.env.NODE_ENV !== "test") {
-          return res.status(401).json({
-            success: false,
-            error: "User profile not found. Please complete profile registration before signing in.",
-            code: "PROFILE_NOT_FOUND",
-          });
-        }
-      } catch (dbErr) {
-        logger.error(`[auth/verify] Supabase profile lookup failed: ${dbErr.message}`);
-        return res.status(500).json({ success: false, error: "Internal server error." });
+        profile = byEmail.data || null;
       }
+    } catch (dbErr) {
+      logger.warn(`[auth/verify] Supabase profile lookup failed: ${dbErr.message}`);
     }
 
-    if (!userId) {
-      userId = `usr-${verifiedUid.slice(-8)}`;
+    // Fail closed rather than minting a token for an unprovisioned identity.
+    if (!profile) {
+      logger.warn(`[auth/verify] No profile provisioned for verified uid ${verifiedUid}`);
+      return res.status(403).json({
+        success: false,
+        error: "No account is provisioned for this identity.",
+      });
     }
 
-    if (!JWT_SECRET) {
-      logger.error('[auth/verify] JWT_SECRET is not configured');
-      return res.status(503).json({ success: false, error: 'Authentication service is temporarily unavailable.' });
-    }
+    // Role comes only from the stored profile, so a caller can never escalate by
+    // sending {"role":"admin"}.
+    const verifiedRole =
+      typeof profile.role === "string" && profile.role.trim() ? profile.role : "customer";
 
     const backendJwt = jwt.sign(
       {
-        id: userId,
+        id: profile.id,
         uid: verifiedUid,
-        email: verifiedEmail,
+        email: verifiedEmail || profile.email || null,
         role: verifiedRole,
         iss: "truxify-backend-api",
       },
@@ -561,15 +599,15 @@ router.post("/verify", async (req, res) => {
       success: true,
       token: backendJwt,
       user: {
-        id: userId,
+        id: profile.id,
         uid: verifiedUid,
-        email: verifiedEmail,
+        email: verifiedEmail || profile.email || null,
         role: verifiedRole,
       },
     });
   } catch (err) {
     logger.error("[auth/verify] Error during token verification:", err.stack || err.message);
-    return res.status(500).json({ success: false, error: "Internal server error.", details: err.message });
+    return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
 

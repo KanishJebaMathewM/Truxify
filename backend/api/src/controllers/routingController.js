@@ -89,7 +89,7 @@ export const getRoute = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Routing controller route calculation error:', error.message);
+        logger.error({ err: error, requestId: req.id }, 'Routing controller route calculation error');
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate route',
@@ -202,7 +202,7 @@ export const getDistanceMatrix = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Distance matrix controller execution error:', error.message);
+        logger.error({ err: error, requestId: req.id }, 'Distance matrix controller execution error');
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate distance matrix',

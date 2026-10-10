@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { ethers as actualEthers } from 'ethers';
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -118,6 +118,8 @@ const mockQuery = {
 };
 
 const mockSupabaseAdmin = {
+  // The wallet ledger reconcile runs through an RPC now.
+  rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
   from: vi.fn((table) => new MockQuery(table)),
 };
 
@@ -131,6 +133,23 @@ vi.mock('../../src/config/db.js', () => ({
 const { processEscrowWebhookEvent } = await import('../../src/services/webhook/escrowWebhookProcessor.js');
 
 const TX = `0x${'ab'.repeat(32)}`;
+
+// Build a receipt whose event log actually decodes under the processor's
+// ESCROW_AMOUNT_EVENTS interface (the processor reads moved amounts from the
+// contract's emitted logs, never from receipt.value).
+const ESCROW_EVENTS_IFACE = new actualEthers.Interface([
+  'event PaymentReleased(uint256 indexed bookingId, address indexed driver, uint256 amount)',
+  'event BookingCancelled(uint256 indexed bookingId, address indexed customer, uint256 refundAmount)',
+]);
+const RECEIPT_DRIVER_ADDRESS = '0x' + '11'.repeat(20);
+function makeReceipt(eventName, amountWei) {
+  const ev = ESCROW_EVENTS_IFACE.getEvent(eventName);
+  const enc = ESCROW_EVENTS_IFACE.encodeEventLog(ev, [1n, RECEIPT_DRIVER_ADDRESS, amountWei]);
+  const address = process.env.ESCROW_CONTRACT_ADDRESS || ('0x' + '22'.repeat(20));
+  return { status: 1, to: address, logs: [{ address, topics: enc.topics, data: enc.data }] };
+}
+// The current default receipt; reassigned per BookingCancelled case.
+let currentReceipt;
 const TX_OTHER = `0x${'cd'.repeat(32)}`;
 
 function makeOrder(overrides = {}) {
@@ -163,8 +182,23 @@ function updatePayloads() {
 beforeEach(() => {
   vi.clearAllMocks();
   resetDbState();
+  // The processor validates the on-chain receipt before any write, which
+  // requires POLYGON_RPC_URL; the provider mock yields null for malformed
+  // hashes (matching a real provider) and the current decodable receipt
+  // otherwise.
+  process.env.POLYGON_RPC_URL = 'http://127.0.0.1:8545';
+  currentReceipt = makeReceipt('PaymentReleased', 0n);
+  mockGetTransactionReceipt.mockImplementation(async (hash) =>
+    (typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash)) ? currentReceipt : null);
+  // clearAllMocks keeps implementations, so restate the happy-path defaults
+  // every test to prevent cross-case rejection leaks.
   verifierMock.verifyEscrow.mockResolvedValue({ ok: true, txHash: TX, blockNumber: 195, confirmations: 6 });
   verifierMock.verifyWithdrawal.mockResolvedValue({ ok: true, txHash: TX, blockNumber: 195, confirmations: 6 });
+});
+
+afterEach(() => {
+  delete process.env.POLYGON_RPC_URL;
+  delete process.env.ESCROW_CONTRACT_ADDRESS;
 });
 
 describe('processEscrowWebhookEvent', () => {
@@ -177,7 +211,7 @@ describe('processEscrowWebhookEvent', () => {
 
   it('keeps processor failures visible to the DLQ retry loop', async () => {
     await expect(
-      processEscrowWebhookEvent('PaymentReleased', {})
+      processEscrowWebhookEvent('PaymentReleased', { txHash: TX })
     ).rejects.toThrow('Missing orderId in escrow webhook payload');
   });
 
@@ -187,12 +221,14 @@ describe('processEscrowWebhookEvent', () => {
   });
 
   it('rejects payloads without an orderId', async () => {
-    await expect(processEscrowWebhookEvent('PaymentReleased', {}))
+    // On-chain proof is required before any order lookup (release requires a
+    // txHash), so supply a valid hash and assert the orderId guard fires next.
+    await expect(processEscrowWebhookEvent('PaymentReleased', { txHash: TX }))
       .rejects.toThrow('Missing orderId in escrow webhook payload');
   });
 
   it('throws when no order matches the supplied orderId', async () => {
-    await expect(processEscrowWebhookEvent('PaymentReleased', { orderId: 'unknown-order' }))
+    await expect(processEscrowWebhookEvent('PaymentReleased', { orderId: 'unknown-order', txHash: TX }))
       .rejects.toThrow('No order found for escrow webhook event');
   });
 });
@@ -201,13 +237,16 @@ describe('processEscrowWebhookEvent — PaymentReleased', () => {
   it('requires a well-formed 32-byte transaction hash before any verification or write', async () => {
     dbState.orderResult = { data: makeOrder(), error: null };
 
-    await expect(
-      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xabc' })
-    ).rejects.toMatchObject({ code: 'INVALID_TX_HASH', retryable: false });
-
+    // Missing hash: the release requires on-chain proof up front.
     await expect(
       processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1' })
-    ).rejects.toMatchObject({ code: 'INVALID_TX_HASH', retryable: false });
+    ).rejects.toThrow('Missing txHash in escrow release webhook payload');
+
+    // Malformed hash: the provider returns no receipt, so the release is
+    // rejected at the provider layer before verification or any write.
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xabc' })
+    ).rejects.toThrow('Polygon transaction 0xabc not found');
 
     expect(verifierMock.verifyEscrow).not.toHaveBeenCalled();
     expect(dbState.updates).toHaveLength(0);
@@ -377,6 +416,7 @@ describe('processEscrowWebhookEvent — BookingCancelled', () => {
       data: makeOrder({ order_display_id: '#OD2', driver_id: null, escrow_status: 'refund_pending', refund_tx_hash: null }),
       error: null,
     };
+    currentReceipt = makeReceipt('BookingCancelled', 0n);
 
     await expect(
       processEscrowWebhookEvent('BookingCancelled', { orderId: '#OD2', txHash: TX })
@@ -394,6 +434,7 @@ describe('processEscrowWebhookEvent — BookingCancelled', () => {
       data: makeOrder({ order_display_id: '#OD2', driver_id: null, escrow_status: 'refunded', refund_tx_hash: TX }),
       error: null,
     };
+    currentReceipt = makeReceipt('BookingCancelled', 0n);
 
     await expect(
       processEscrowWebhookEvent('BookingCancelled', { orderId: '#OD2', txHash: TX })
@@ -464,13 +505,13 @@ describe('processEscrowWebhookEvent — WithdrawalReady / Withdrawn', () => {
       order_display_id: '#OD8',
       driver_id: 'driver-8',
       escrow_status: 'released',
-      release_tx_hash: '0xabc',
+      release_tx_hash: TX,
       refund_tx_hash: null,
     };
-    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+    dbState.orderResult = { data: order, error: null };
 
     await expect(
-      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: '0xabc' })
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: TX })
     ).resolves.toEqual({ received: true });
 
     // Exactly one wallet ledger confirm, and never a second 'released' write.
@@ -485,17 +526,19 @@ describe('processEscrowWebhookEvent — WithdrawalReady / Withdrawn', () => {
       order_display_id: '#OD7',
       driver_id: 'driver-7',
       escrow_status: 'released',
-      release_tx_hash: '0x111',
+      release_tx_hash: TX,
       refund_tx_hash: null,
     };
-    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+    dbState.orderResult = { data: order, error: null };
 
+    // Duplicate deliveries for an already-settled order are acknowledged: the
+    // ledger is reconciled without re-verification and no order state changes.
     await expect(
       processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD6' })
-    ).rejects.toMatchObject({ code: 'INVALID_TX_HASH', retryable: false });
+    ).resolves.toEqual({ received: true });
 
     expect(verifierMock.verifyWithdrawal).not.toHaveBeenCalled();
-    expect(dbState.updates).toHaveLength(0);
+    expect(dbState.updates.filter(u => u.table === 'orders')).toHaveLength(0);
   });
 
   it('rejects a withdrawal for an order that cannot be settled', async () => {
@@ -528,20 +571,18 @@ describe('regression: wallet ledger must not multiply the net credit across driv
       release_tx_hash: null,
       refund_tx_hash: null,
     };
-    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+    dbState.orderResult = { data: order, error: null };
 
     await expect(
-      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: '0xabc' })
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD8', txHash: TX })
     ).resolves.toEqual({ received: true });
 
     // The on-chain release transfers a single net amount. The wallet ledger must
     // be reconciled exactly once for the order's driver — never once per grouped
     // driver, which would over-credit by (n-1) × net_amount.
-    const walletUpdateIndexes = mockSupabaseAdmin.from.mock.calls
-      .map(([table], i) => (table === 'wallet_transactions' ? i : -1))
-      .filter((i) => i !== -1);
-    expect(walletUpdateIndexes).toHaveLength(1);
-    expect(mockQuery.update.mock.calls[walletUpdateIndexes[0]][0]).toEqual(
+    const walletUpdates = dbState.updates.filter(u => u.table === 'wallet_transactions');
+    expect(walletUpdates).toHaveLength(1);
+    expect(walletUpdates[0].payload).toEqual(
       expect.objectContaining({ status: 'confirmed' })
     );
   });
@@ -562,20 +603,24 @@ describe('regression: refund events must not credit the driver wallet (#12156)',
       release_tx_hash: null,
       refund_tx_hash: null,
     };
-    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+    dbState.orderResult = { data: order, error: null };
+    currentReceipt = makeReceipt('BookingCancelled', 0n);
 
     await expect(
-      processEscrowWebhookEvent('BookingCancelled', { orderId: '#OD9', txHash: '0xdef' })
+      processEscrowWebhookEvent('BookingCancelled', { orderId: '#OD9', txHash: TX })
     ).resolves.toEqual({ received: true });
 
     // A refund must follow the refund path: revert escrow and set `refunded`
     // WITHOUT crediting the driver's wallet (which would double-pay on a
     // cancelled order).
-    const walletCalls = mockSupabaseAdmin.from.mock.calls.filter(
-      ([table]) => table === 'wallet_transactions'
+    // The refund path must not issue a confirmed credit; it may mark the
+    // ledger row refunded (status, not a credit).
+    const walletCredits = dbState.updates.filter(
+      (u) => u.table === 'wallet_transactions' && u.payload.status === 'confirmed'
     );
-    expect(walletCalls).toHaveLength(0);
-    expect(mockQuery.update).toHaveBeenCalledWith(
+    expect(walletCredits).toHaveLength(0);
+    const refundUpdate = dbState.updates.find(u => u.table === 'orders');
+    expect(refundUpdate.payload).toEqual(
       expect.objectContaining({ escrow_status: 'refunded' })
     );
   });

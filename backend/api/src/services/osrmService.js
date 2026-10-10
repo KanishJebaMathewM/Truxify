@@ -108,8 +108,18 @@ export const osrmCircuitBreaker = new CircuitBreaker();
  * @param {string} label
  */
 export const validateCoordinate = (lon, lat, label = 'coordinate') => {
-    const numLon = typeof lon === 'number' ? lon : parseFloat(lon);
-    const numLat = typeof lat === 'number' ? lat : parseFloat(lat);
+    if (
+        lon === null || lon === undefined || lat === null || lat === undefined ||
+        typeof lon === 'boolean' || typeof lat === 'boolean' ||
+        Array.isArray(lon) || Array.isArray(lat) ||
+        (typeof lon === 'string' && lon.trim() === '') ||
+        (typeof lat === 'string' && lat.trim() === '')
+    ) {
+        throw new Error(`Invalid ${label}: Longitude and latitude must be finite numbers`);
+    }
+
+    const numLon = Number(lon);
+    const numLat = Number(lat);
 
     if (!Number.isFinite(numLon) || !Number.isFinite(numLat)) {
         throw new Error(`Invalid ${label}: Longitude and latitude must be finite numbers`);

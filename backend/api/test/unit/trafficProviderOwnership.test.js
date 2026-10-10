@@ -10,7 +10,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-const body = { flowSegmentData: { speedDiffPercent: -35, currentDelaySec: 900 } };
+const body = { flowSegmentData: { currentTravelTime: 1350, freeFlowTravelTime: 1000 } };
 const route = { origin: [12, 77], destination: [13, 78] };
 let service, redis;
 beforeEach(async () => {
@@ -48,7 +48,7 @@ describe('actual traffic provider ownership', () => {
     const count = fetch.mock.calls.length;
     pending.resolve(response());
     expect(await point).toBe(1.35);
-    expect(await routed).toMatchObject({ multiplier: 1.35, delayMinutes: 15 });
+    expect(await routed).toMatchObject({ multiplier: 1.35, delayMinutes: 6 });
     expect(count).toBe(1);
   });
   it('shares provider work for concurrent enterprise cache misses', async () => {

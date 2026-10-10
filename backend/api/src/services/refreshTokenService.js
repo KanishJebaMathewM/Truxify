@@ -22,18 +22,20 @@ export const hashRefreshToken = (token) =>
   crypto.createHash('sha256').update(token).digest('hex');
 
 export const revokeToken = async (token) => {
-  await supabase
+  const { error } = await supabase
     .from('refresh_tokens')
     .update({ is_revoked: true, revoked_at: new Date().toISOString() })
     .eq('token_hash', hashRefreshToken(token));
+  if (error) throw new Error('Failed to revoke refresh token', { cause: error });
 };
 
 export const revokeAllUserTokens = async (userId) => {
-  await supabase
+  const { error } = await supabase
     .from('refresh_tokens')
     .update({ is_revoked: true, revoked_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('is_revoked', false);
+  if (error) throw new Error('Failed to revoke user refresh tokens', { cause: error });
 };
 
 export const createRefreshToken = async (userId, deviceId, deviceInfo, familyId = null, generation = 0) => {
@@ -87,15 +89,16 @@ export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
     throw new Error('Token reuse detected. All sessions revoked.');
   }
 
+  const expiresAtMs = new Date(tokenRecord.expires_at).getTime();
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    await revokeToken(oldToken);
+    throw new Error('Refresh token expired');
+  }
+
   const rotationCheck = verifyAndRotateFamily(currentFamilyId, currentGen);
   if (!rotationCheck.valid) {
     await revokeAllUserTokens(tokenRecord.user_id);
     throw new Error('Token reuse detected. All sessions revoked.');
-  }
-
-  if (new Date(tokenRecord.expires_at) < new Date()) {
-    await revokeToken(oldToken);
-    throw new Error('Refresh token expired');
   }
 
   await revokeToken(oldToken);

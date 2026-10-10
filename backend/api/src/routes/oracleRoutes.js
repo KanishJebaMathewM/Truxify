@@ -54,7 +54,7 @@ router.get('/status', authenticate, async (req, res) => {
       data: status
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Status error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_STATUS_ERROR', error: error?.message || String(error) }, 'Status error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -85,7 +85,7 @@ router.post('/confirm', oracleVerificationLimiter, authenticate, validateBody(or
       });
     }
 
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Confirm error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_CONFIRM_ERROR', error: error?.message || String(error) }, 'Confirm error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -124,12 +124,45 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
       });
     }
 
-    logger.error({ requestId: req.requestId }, '[OracleRoutes] Verify-crosschain error:', error?.message || error);
+    logger.error({ requestId: req.requestId, event: 'ORACLE_VERIFY_CROSSCHAIN_ERROR', error: error?.message || String(error) }, 'Verify-crosschain error');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
     });
   }
 });
+// Before (using the unprivileged / anon client instance)
+async function authorizeOrderAccess(req, res, orderId) {
+  const { data: order, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .maybeSingle();
 
+  if (error || !order) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+  // ...
+}
+
+// After (using the caller's authenticated client or service client)
+import { createUserClient } from '../config/db.js'; // or service-role client depending on architecture
+
+async function authorizeOrderAccess(req, res, orderId) {
+  // Use the authenticated user client or service client to bypass anon restrictions
+  const client = req.token ? createUserClient(req.token) : supabaseAdmin;
+
+  const { data: order, error } = await client
+    .from('orders')
+    .select('*')
+    .eq('id', orderId)
+    .maybeSingle();
+
+  if (error || !order) {
+    return res.status(404).json({ error: 'Order not found.' });
+  }
+
+  // Proceed with RLS/policy checks...
+  return order;
+}
 export default router;

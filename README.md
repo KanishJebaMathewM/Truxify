@@ -7,7 +7,7 @@
 **Directly connecting manufacturers and truck drivers — eliminating the middleman, maximising earnings, and bringing transparency to India's ₹14 lakh crore freight industry.**
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter)](https://flutter.dev)
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=flat-square&logo=nodedotjs)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-339933?style=flat-square&logo=nodedotjs)](https://nodejs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Polygon](https://img.shields.io/badge/Polygon-Blockchain-8247E5?style=flat-square&logo=polygon)](https://polygon.technology)
 [![License](https://img.shields.io/badge/License-MIT-00897B?style=flat-square)](LICENSE)
@@ -248,7 +248,7 @@ Note: Truxify is in active development (Phase 2). The core platform features are
 
 ### Prerequisites
 - Flutter SDK `>= 3.19.0`
-- Node.js `>= 20.x` (LTS)
+- Node.js `>= 22.x` (LTS)
 - Python `>= 3.11.x`
 - Docker Engine and Docker Compose
 - Git
@@ -448,3 +448,6 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
+
+## Development
+Run the project's existing test suite before submitting changes.

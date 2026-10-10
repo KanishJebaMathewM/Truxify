@@ -382,5 +382,30 @@ class WASIRuntime {
         logger.info('✅ WASI instances cleaned up');
     }
 }
+function parseWasiJsonOutput(stdout) {
+    const lines = String(stdout)
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
 
+    // Start from the end so runtime/logging noise before the
+    // actual JSON payload is ignored.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+            return JSON.parse(lines[i]);
+        } catch {
+            // Ignore non-JSON runtime/logging lines.
+        }
+    }
+
+    throw new Error(
+        `WASI execution returned no valid JSON. Raw stdout: ${stdout}`
+    );
+}
+
+// Replace:
+// const result = JSON.parse(stdout);
+//
+// With:
+const result = parseWasiJsonOutput(stdout);
 export default new WASIRuntime();

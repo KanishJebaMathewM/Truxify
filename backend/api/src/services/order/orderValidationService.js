@@ -21,16 +21,22 @@ export class OrderValidationService {
     const targetId = typeof identifier === 'string' && identifier.startsWith('TX-')
       ? identifier.slice(3)
       : identifier;
+    // Display IDs cannot be compared to the UUID-typed orders.id column.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
 
     if (this.orderRepository) {
-      const byId = await this._unwrapOrderResult(this.orderRepository.findOrderById(targetId, select));
-      if (byId) return byId;
+      if (isUuid) {
+        const byId = await this._unwrapOrderResult(this.orderRepository.findOrderById(targetId, select));
+        if (byId) return byId;
+      }
       return (await this._unwrapOrderResult(this.orderRepository.findOrderByDisplayId(targetId, select))) || null;
     }
 
-    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
-    if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
-    if (byId) return byId;
+    if (isUuid) {
+      const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
+      if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
+      if (byId) return byId;
+    }
     const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', targetId).maybeSingle();
     if (errDisplay) throw new DomainError(500, { error: 'Query failed.', details: errDisplay.message });
     return byDisplay || null;

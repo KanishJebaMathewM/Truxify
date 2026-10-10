@@ -100,6 +100,16 @@ class ColdChainAnomalyDetector:
                 "severity": "CRITICAL" if excursion > 3.0 else "MEDIUM"
             })
 
+        # 2. Humidity SLA Excursion (per-cargo max relative humidity)
+        max_humidity = float(max(humidities)) if humidities else 0.0
+        if max_humidity > profile["max_humidity"]:
+            excursion = max_humidity - profile["max_humidity"]
+            violations.append({
+                "code": "HUMIDITY_EXCURSION_HIGH",
+                "message": f"Maximum humidity {max_humidity:.1f}% exceeded upper threshold {profile['max_humidity']:.1f}% (+{excursion:.1f}%)",
+                "severity": "CRITICAL" if excursion > 10.0 else "MEDIUM"
+            })
+
         # 2. Sensor Tampering / Probe Loss Detection (Zero variance over >= 10 readings)
         if len(temps) >= 10 and std_temp == 0.0:
             violations.append({

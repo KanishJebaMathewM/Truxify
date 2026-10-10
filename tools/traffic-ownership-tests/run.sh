@@ -8,7 +8,7 @@ mkdir -p "$TRAFFIC_HARNESS/backend/api/src/services" "$TRAFFIC_HARNESS/backend/a
  "$TRAFFIC_HARNESS/backend/api/test/unit"
 cp "${TRAFFIC_SERVICE_SOURCE:-$REPO_ROOT/backend/api/src/services/trafficService.js}" "$TRAFFIC_HARNESS/backend/api/src/services/"
 cp "$REPO_ROOT/backend/api/src/lib/trafficProviderFlights.js" "$TRAFFIC_HARNESS/backend/api/src/lib/"
-cp "$REPO_ROOT/backend/api/test/unit/trafficProviderOwnership.test.js" "$TRAFFIC_HARNESS/backend/api/test/unit/"
+cp "$REPO_ROOT/backend/api/test/unit/trafficProviderOwnership.test.js" "$REPO_ROOT/backend/api/test/unit/trafficService.test.js" "$TRAFFIC_HARNESS/backend/api/test/unit/"
 cp "$REPO_ROOT/backend/api/eslint.config.js" "$TRAFFIC_HARNESS/backend/api/eslint.config.js"
 printf '{"type":"module"}\n' > "$TRAFFIC_HARNESS/package.json"
 printf 'export const redisClient = null;\n' > "$TRAFFIC_HARNESS/backend/api/src/config/db.js"

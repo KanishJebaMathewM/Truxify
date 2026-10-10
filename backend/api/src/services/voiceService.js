@@ -60,9 +60,8 @@ async function getBookingContext(bookingId, userId) {
         .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
       orderQuery = orderQuery
-        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('order_display_id', bookingId)
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     }
 
     const { data: order, error } = await orderQuery.maybeSingle();

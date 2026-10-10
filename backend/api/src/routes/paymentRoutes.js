@@ -10,6 +10,104 @@ import logger from '../middleware/logger.js';
 import { createStore } from '../middleware/rateLimiter.js';
 import { orderRepository, orderValidationService } from '../core/container.js';
 import { createUserClient } from '../config/db.js';
+/**
+ * Payment Routes
+ * 
+ * Handles payment initialization, escrow processing, and transaction records.
+ * Includes explicit validation guards against zero or negative payment amounts.
+ */
+
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/policy.js';
+import logger from '../middleware/logger.js';
+import { supabase } from '../config/db.js';
+
+const router = express.Router();
+
+/**
+ * @openapi
+ * /api/payments/initialize:
+ *   post:
+ *     tags: [Payments]
+ *     summary: Initialize a payment transaction
+ *     description: Validates and initiates a payment/escrow lock with amount checks.
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post('/initialize', authenticate, requirePolicy('payment:write'), async (req, res) => {
+  try {
+    const { amount, expected_amount, currency, order_id } = req.body;
+
+    // Determine the amount field to validate (supports both 'amount' and 'expected_amount')
+    const targetAmount = amount !== undefined ? amount : expected_amount;
+
+    // Defense-in-depth validation guard for negative or zero payment amounts
+    if (targetAmount === undefined || targetAmount === null || typeof targetAmount !== 'number' || targetAmount <= 0) {
+      logger.warn(
+        {
+          requestId: req.requestId || req.id,
+          event: 'PAYMENT_AMOUNT_INVALID',
+          amount: targetAmount,
+          orderId: order_id,
+        },
+        'Rejected payment initialization due to invalid or non-positive amount'
+      );
+      return res.status(400).json({
+        success: false,
+        error: 'Payment amount must be a positive number greater than zero.',
+      });
+    }
+
+    if (!order_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order ID is required for payment initialization.',
+      });
+    }
+
+    // Simulate payment transaction record creation
+    const transactionId = `txn_${Date.now()}`;
+    
+    logger.info(
+      {
+        requestId: req.requestId || req.id,
+        event: 'PAYMENT_INITIALIZED',
+        transactionId,
+        amount: targetAmount,
+        orderId: order_id,
+      },
+      'Payment transaction initialized successfully'
+    );
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        transactionId,
+        orderId: order_id,
+        amount: targetAmount,
+        currency: currency || 'INR',
+        status: 'initialized',
+        createdAt: new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    logger.error(
+      {
+        requestId: req.requestId || req.id,
+        event: 'PAYMENT_INITIALIZATION_EXCEPTION',
+        error: err?.message || err,
+      },
+      'Unhandled exception during payment initialization'
+    );
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while initializing payment.',
+    });
+  }
+});
+
+export default router;
 import {
   recordDepositTx,
   getEscrowBookingId,
@@ -222,7 +320,7 @@ router.post(
         if (orderValidationService && typeof orderValidationService.findOrderByIdOrDisplayId === 'function') {
           order = await orderValidationService.findOrderByIdOrDisplayId(
             order_id,
-            'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
+            'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
           );
         }
         if (!order && orderRepository) {

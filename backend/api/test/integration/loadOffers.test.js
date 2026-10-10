@@ -91,6 +91,7 @@ describe('Load Offers Routes Integration Tests', () => {
         total: 1,
         totalPages: 1,
         hasNextPage: false,
+        hasPreviousPage: false,
       });
       
       const load = res.body.loads[0];

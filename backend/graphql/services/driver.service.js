@@ -127,9 +127,7 @@ const typeDefs = gql`
         currentLocation: Location
         rating: Float!
         tripsCompleted: Int!
-        user: User @external
         orders: [Order] @external
-        currentTrip: Trip @external
     }
 
     type Location {

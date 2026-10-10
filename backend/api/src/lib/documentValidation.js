@@ -67,19 +67,15 @@ export function validateDocumentBuffer(buffer, declaredMimeType) {
     );
   }
 
-  // Normalize the declared type: MIME types are case-insensitive, and an
-  // empty/whitespace-only declared type is treated as absent rather than a
-  // mismatch.
-  const declared =
-    typeof declaredMimeType === 'string'
-      ? declaredMimeType.trim().toLowerCase()
-      : '';
-  if (declared && detected !== declared) {
-    throw new DocumentValidationError(
-      `File content (${detected}) does not match declared type (${declaredMimeType}).`
-    );
-  }
+  const normalizedDeclared = declaredMimeType && declaredMimeType.trim().toLowerCase()
+  ? declaredMimeType.trim().toLowerCase()
+  : null;
 
+if (normalizedDeclared && detected !== normalizedDeclared) {
+  throw new DocumentValidationError(
+    `File content (${detected}) does not match declared type (${normalizedDeclared}).`
+  );
+}
   return detected;
 }
 

@@ -269,11 +269,20 @@ describe('Reverse Geocode Utility (Issue #14036)', () => {
 
     it('returns null and logs error when fetch throws an exception (e.g., network failure)', async () => {
       redisClient.get.mockResolvedValueOnce(null);
-      global.fetch.mockRejectedValueOnce(new Error('Network connection dropped'));
+      const networkError = new Error('Network connection dropped');
+      global.fetch.mockRejectedValueOnce(networkError);
 
       const result = await reverseGeocode(51.507, -0.127);
 
       expect(result).toBeNull();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: networkError,
+          lat: 51.507,
+          lon: -0.127,
+        }),
+        expect.stringContaining('Error reverse geocoding coordinates')
+      );
     });
   });
 

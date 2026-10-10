@@ -4,6 +4,10 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 
 // Mock DB module
+// Lost to a splice — the factory below references it; hoist so the lazy
+// factory sees it initialized.
+const verifyIdTokenMock = vi.hoisted(() => vi.fn());
+
 vi.mock('../../src/config/db.js', () => {
   return {
     supabase: null,

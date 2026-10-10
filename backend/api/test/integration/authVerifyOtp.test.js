@@ -29,6 +29,8 @@ vi.mock('../../src/config/db.js', () => ({
 vi.mock('../../src/middleware/rateLimiter.js', () => ({
   userLimiter: (req, res, next) => next(),
   otpVerificationLimiter: (req, res, next) => next(),
+  // authRoutes' request-otp limiter uses createStore.
+  createStore: () => undefined,
 }));
 
 const { default: authRouter } = await import('../../src/routes/authRoutes.js');
@@ -102,7 +104,8 @@ describe('POST /api/auth/verify-otp', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe('Invalid OTP.');
+    // The message gained the lockout countdown suffix (deliberate UX).
+      expect(res.body.error).toMatch(/^Invalid OTP\. \d+ attempt\(s\) remaining before lockout\.$/);
   });
 
   it('returns 400 for incorrect OTP (legacy fallback)', async () => {
@@ -120,6 +123,7 @@ describe('POST /api/auth/verify-otp', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe('Invalid OTP.');
+    // The message gained the lockout countdown suffix (deliberate UX).
+      expect(res.body.error).toMatch(/^Invalid OTP\. \d+ attempt\(s\) remaining before lockout\.$/);
   });
 });

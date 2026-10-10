@@ -1,0 +1,32 @@
+name: Telemetry shutdown ownership
+on:
+  pull_request:
+    paths:
+      - backend/api/src/sockets/telemetryBuffer.js
+      - backend/api/test/unit/telemetryShutdown.test.js
+      - tools/telemetry-shutdown-tests/**
+      - .github/workflows/telemetry-shutdown.yml
+  push:
+    branches: [main]
+    paths:
+      - backend/api/src/sockets/telemetryBuffer.js
+      - backend/api/test/unit/telemetryShutdown.test.js
+      - tools/telemetry-shutdown-tests/**
+      - .github/workflows/telemetry-shutdown.yml
+permissions:
+  contents: read
+jobs:
+  shutdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/telemetry-shutdown-tests/package-lock.json
+      - run: npm ci --prefix tools/telemetry-shutdown-tests --ignore-scripts
+      - run: bash tools/telemetry-shutdown-tests/run.sh

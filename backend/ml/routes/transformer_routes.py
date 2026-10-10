@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import torch
-import numpy as np
 from datetime import datetime
 import logging
 import asyncio
@@ -13,6 +12,7 @@ from transformers.model import (
     TransformerTrainer
 )
 from app.execution import run_training_job, run_inference
+from transformers.training_contract import ForecastAdmissionError, request_tensors
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/transformer", tags=["Time Series Transformers"])
@@ -128,14 +128,7 @@ async def train_demand(request: TrainRequest):
     """Train demand forecast transformer"""
     async with demand_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "demand",
@@ -154,6 +147,8 @@ async def train_demand(request: TrainRequest):
             }
         except HTTPException:
             raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -163,14 +158,7 @@ async def train_traffic(request: TrainRequest):
     """Train traffic forecast transformer"""
     async with traffic_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "traffic",
@@ -189,6 +177,8 @@ async def train_traffic(request: TrainRequest):
             }
         except HTTPException:
             raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")
@@ -198,14 +188,7 @@ async def train_price(request: TrainRequest):
     """Train price forecast transformer"""
     async with price_lock:
         try:
-            train_data = torch.tensor(request.train_data, dtype=torch.float32)
-            train_labels = torch.tensor(request.train_labels, dtype=torch.float32)
-            
-            val_data = None
-            val_labels = None
-            if request.val_data is not None and request.val_labels is not None:
-                val_data = torch.tensor(request.val_data, dtype=torch.float32)
-                val_labels = torch.tensor(request.val_labels, dtype=torch.float32)
+            train_data, train_labels, val_data, val_labels = request_tensors(request)
             
             results = await run_training_job(
                 "price",
@@ -224,6 +207,8 @@ async def train_price(request: TrainRequest):
             }
         except HTTPException:
             raise
+        except ForecastAdmissionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise HTTPException(status_code=500, detail="Internal server error")

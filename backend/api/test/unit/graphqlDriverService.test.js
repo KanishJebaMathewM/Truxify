@@ -1,4 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// The subgraph server packages are not installed in this workspace; the
+// suite exercises pure helpers and resolvers, so stub the server layer.
+vi.mock('@apollo/server', () => ({
+  ApolloServer: class MockApolloServer {},
+}));
+
+vi.mock('@apollo/server/standalone', () => ({
+  startStandaloneServer: vi.fn(),
+}));
+
+vi.mock('@apollo/federation', () => ({
+  buildSubgraphSchema: vi.fn((x) => x),
+}));
+
+vi.mock('graphql-tag', () => ({
+  gql: vi.fn((parts) => (Array.isArray(parts) ? parts.join('') : parts)),
+}));
 import {
   resolvers,
   requireUser,
@@ -8,17 +26,17 @@ import {
   sanitizeDriverForCaller,
   mapDriver,
   isWithinRadius,
-} from '../../../backend/graphql/services/driver.service.js';
-import { supabase } from '../../../backend/api/src/config/db.js';
+} from '../../../graphql/services/driver.service.js';
+import { supabase } from '../../src/config/db.js';
 
 // Mock dependencies
-vi.mock('../../../backend/api/src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: {
     from: vi.fn(),
   },
 }));
 
-vi.mock('../../../backend/api/src/middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: {
     info: vi.fn(),
     warn: vi.fn(),

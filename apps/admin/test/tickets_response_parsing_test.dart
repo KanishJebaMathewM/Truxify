@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:admin_app/utils/support_ticket_parser.dart';
+import 'package:admin_dashboard/utils/support_ticket_parser.dart';
 
 void main() {
   group('Support Tickets Parser Utility Tests', () {

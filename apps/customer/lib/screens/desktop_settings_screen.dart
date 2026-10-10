@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 class DesktopSettingsScreen extends StatefulWidget {
-  const DesktopSettingsScreen({Key? key}) : super(key: key);
   const DesktopSettingsScreen({super.key});
 
   @override
@@ -36,6 +35,8 @@ class _DesktopSettingsScreenState extends State<DesktopSettingsScreen> {
   final List<Map<String, dynamic>> _paymentMethods = [
     {'type': 'Escrow Wallet', 'details': 'Balance: ₹1,45,000 (Active)', 'isDefault': true},
     {'type': 'Corporate Credit Card', 'details': 'HDFC Bank ending in •••• 4092', 'isDefault': false},
+  ];
+
   int selectedIndex = 0;
 
   final List<String> sections = [
@@ -198,7 +199,7 @@ class _DesktopSettingsScreenState extends State<DesktopSettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.between,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -237,7 +238,7 @@ class _DesktopSettingsScreenState extends State<DesktopSettingsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.between,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(addr['title'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           if (addr['isDefault'])
@@ -383,31 +384,6 @@ class _DesktopSettingsScreenState extends State<DesktopSettingsScreen> {
           onChanged: null,
         ),
       ],
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FA),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        title: const Text(
-          'Settings',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSidebar(),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: _buildContent(),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

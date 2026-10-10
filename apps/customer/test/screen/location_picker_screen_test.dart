@@ -35,6 +35,11 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Selected Address'), findsOneWidget);
       expect(find.text('Confirm Location'), findsOneWidget);
+
+      // The reverse-geocode Dio request fails against the harness-blocked
+      // network; its internal timer would otherwise be pending at teardown.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
     });
   });
 }

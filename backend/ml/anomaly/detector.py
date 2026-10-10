@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import redis
 import json
 import logging
@@ -7,7 +6,9 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from .models import LSTMAutoencoder
-from sklearn.preprocessing import StandardScaler
+from threading import RLock
+from pathlib import Path
+from .generation_contract import admit_training, capture, prepare_candidate, finite_array
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,9 @@ class AnomalyDetector:
     
     def __init__(self, redis_url: str = "redis://localhost:6379"):
         self.redis = redis.Redis.from_url(redis_url)
+        self._generation_lock = RLock()
+        self._training_lock = RLock()
+        self._generations = {}
         
         # Initialize models for different data types
         self.models = {
@@ -58,115 +62,103 @@ class AnomalyDetector:
             self._feature_buffers[key] = deque(maxlen=seq_len)
         return self._feature_buffers[key]
     
-    def train_models(self, data: Dict[str, np.ndarray], epochs: int = 50):
-        """Train all models"""
-        results = {}
-        
-        for name, X_train in data.items():
-            if name in self.models:
-                logger.info(f"Training {name} model...")
-                
-                # Scale data
-                scaler = StandardScaler()
-                X_scaled = scaler.fit_transform(X_train.reshape(-1, X_train.shape[-1]))
-                X_scaled = X_scaled.reshape(X_train.shape)
-                
-                # Save scaler
-                self.scalers[name] = scaler
-                
-                # Train model
-                history = self.models[name].train(X_scaled, epochs=epochs)
-                results[name] = {
-                    'loss': history.history['loss'][-1],
-                    'val_loss': history.history.get('val_loss', [0])[-1]
+    def train_models(self, data: Dict[str, np.ndarray], epochs: int = 1):
+        """Fit privately, then publish every requested runtime generation together."""
+        with self._training_lock:
+            with self._generation_lock:
+                owned = admit_training(data, self.models, epochs)
+                snapshots = {name: capture(self.models[name]) for name in owned}
+            candidates = {}
+            for name, raw in owned.items():
+                candidates[name] = prepare_candidate(snapshots[name], raw, epochs)
+            # Legacy files are not a crash-atomic multi-file checkpoint. An I/O
+            # failure can alter disk files, but cannot publish runtime candidates.
+            Path('models').mkdir(parents=True, exist_ok=True)
+            for name, (model, _, _) in candidates.items():
+                model.save(f'models/anomaly_{name}')
+            with self._generation_lock:
+                for name, (model, scaler, result) in candidates.items():
+                    self.models[name] = model
+                    self.scalers[name] = scaler
+                    self._generations[name] = self._generations.get(name, 0) + 1
+                    result['generation'] = self._generations[name]
+                self._feature_buffers = {
+                    key: value for key, value in self._feature_buffers.items()
+                    if key[0] not in candidates
                 }
-                
-                # Save model
-                self.models[name].save(f"models/anomaly_{name}")
-        
-        return results
-    
+                return {name: result for name, (_, _, result) in candidates.items()}
+
     def detect_anomaly(self, data_type: str, data: np.ndarray, entity_key: str = None) -> Dict:
-        """Detect anomalies in real-time data"""
+        """Consume one paired generation and commit only a valid temporal frame."""
         try:
-            if data_type not in self.models:
-                return {'error': f'Unknown data type: {data_type}'}
-            
-            model = self.models[data_type]
-            
-            # Reshape if needed
-            if len(data.shape) == 1:
-                data = data.reshape(1, -1)
-            
-            # Scale data
-            if data_type in self.scalers:
-                scaler = self.scalers[data_type]
-                data_scaled = scaler.transform(data)
-            else:
-                data_scaled = data
-
-            # Build a genuine rolling window for this entity (padded at the
-            # front by repeating the earliest observation during warm-up)
-            # instead of tiling the single timestep (issue #11669).
-            buffer = self._get_feature_buffer(data_type, entity_key)
-            buffer.append(data_scaled[0])
-
-            seq = list(buffer)
-            seq_len = model.sequence_length
-            if len(seq) < seq_len:
-                seq = [seq[0]] * (seq_len - len(seq)) + seq
-            window = np.array(seq, dtype=np.float32)
-
-            # Get anomaly score
-            result = model.get_anomaly_score(window)
-            
-            # Determine severity
-            score = result['anomaly_score']
-            if score >= self.alert_thresholds['high']:
-                severity = 'CRITICAL'
-            elif score >= self.alert_thresholds['medium']:
-                severity = 'WARNING'
-            elif score >= self.alert_thresholds['low']:
-                severity = 'INFO'
-            else:
-                severity = 'NORMAL'
-            
-            # Add metadata
-            result.update({
-                'data_type': data_type,
-                'severity': severity,
-                'timestamp': datetime.now().isoformat(),
-                'data': data.tolist() if isinstance(data, np.ndarray) else data
-            })
-            
-            # Store anomaly history
-            if result['is_anomaly']:
-                self.anomaly_history.append(result)
-                
-                # Store in Redis
-                self.redis.setex(
-                    f'anomaly:latest:{data_type}',
-                    3600,
-                    json.dumps(result)
-                )
-                
-                # Push to alerts channel
-                self.redis.publish(
-                    'anomaly:alerts',
-                    json.dumps({
-                        'type': data_type,
-                        'severity': severity,
-                        'data': result,
-                        'timestamp': datetime.now().isoformat()
-                    })
-                )
-            
-            return result
-            
+            with self._generation_lock:
+                if data_type not in self.models:
+                    raise ValueError(f'Unknown data type: {data_type}')
+                model = self.models[data_type]
+                scaler = self.scalers.get(data_type)
+                if scaler is None or model.threshold is None or not np.isfinite(model.threshold) or model.threshold <= 0:
+                    raise ValueError('A calibrated model/scaler generation is required')
+                owned = finite_array(data, 'observation')
+                if owned.shape == (model.input_dim,):
+                    owned = owned.reshape(1, -1)
+                if owned.shape != (1, model.input_dim):
+                    raise ValueError(f'Expected exactly one observation with {model.input_dim} features')
+                with np.errstate(over='raise', invalid='raise', divide='raise'):
+                    scaled = scaler.transform(owned).astype(np.float32)
+                if not np.isfinite(scaled).all():
+                    raise ValueError('Observation is not representable after normalization')
+                key = (data_type, entity_key or 'default')
+                previous = self._feature_buffers.get(key, ())
+                seq = (list(previous) + [scaled[0]])[-model.sequence_length:]
+                if len(seq) < model.sequence_length:
+                    seq = [seq[0]] * (model.sequence_length - len(seq)) + seq
+                window = np.array(seq, dtype=np.float32)
+                raw_result = model.get_anomaly_score(window)
+                score = float(raw_result['anomaly_score'])
+                error = float(raw_result['reconstruction_error'])
+                if not np.isfinite([score, error]).all() or min(score, error) < 0:
+                    raise ValueError('Native reconstruction score is nonfinite or negative')
+                if score >= self.alert_thresholds['high']:
+                    severity = 'CRITICAL'
+                elif score >= self.alert_thresholds['medium']:
+                    severity = 'WARNING'
+                elif score >= self.alert_thresholds['low']:
+                    severity = 'INFO'
+                else:
+                    severity = 'NORMAL'
+                result = {
+                    'reconstruction_error': error, 'anomaly_score': score,
+                    'is_anomaly': bool(raw_result['is_anomaly']),
+                    'data_type': data_type, 'severity': severity,
+                    'timestamp': datetime.now().isoformat(), 'data': owned.tolist(),
+                    'generation': self._generations.get(data_type, 0),
+                }
+                encoded = json.dumps(result, allow_nan=False)
+                buffer = self._get_feature_buffer(data_type, entity_key)
+                buffer.append(scaled[0].copy())
+                if result['is_anomaly']:
+                    self.anomaly_history.append(result)
+                    self.redis.setex(f'anomaly:latest:{data_type}', 3600, encoded)
+                    self.redis.publish('anomaly:alerts', json.dumps({
+                        'type': data_type, 'severity': severity, 'data': result,
+                        'timestamp': datetime.now().isoformat(),
+                    }, allow_nan=False))
+                return result
         except Exception as e:
-            logger.error(f"Anomaly detection failed: {e}")
+            logger.error(f'Anomaly detection failed: {e}')
             return {'error': str(e)}
-    
+
+    def set_threshold(self, data_type, threshold):
+        value = float(threshold)
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError('threshold must be positive and finite')
+        with self._training_lock, self._generation_lock:
+            self.models[data_type].threshold = value
+
+    def get_threshold(self, data_type):
+        with self._generation_lock:
+            return self.models[data_type].threshold
+
     def detect_driver_anomaly(self, driver_data: Dict) -> Dict:
         """Detect anomalies in driver behavior"""
         try:
@@ -288,9 +280,11 @@ class AnomalyDetector:
     
     def get_anomaly_history(self, data_type: Optional[str] = None) -> List[Dict]:
         """Get anomaly detection history"""
+        with self._generation_lock:
+            history = list(self.anomaly_history)
         if data_type:
-            return [h for h in self.anomaly_history if h.get('data_type') == data_type]
-        return list(self.anomaly_history)
+            return [h for h in history if h.get('data_type') == data_type]
+        return history
     
     def get_alerts(self, severity: Optional[str] = None) -> List[Dict]:
         """Get recent alerts"""
@@ -313,7 +307,8 @@ class AnomalyDetector:
     
     def get_stats(self) -> Dict:
         """Get anomaly detection statistics"""
-        total_anomalies = len(self.anomaly_history)
+        history = self.get_anomaly_history()
+        total_anomalies = len(history)
         if total_anomalies == 0:
             return {
                 'total_anomalies': 0,
@@ -324,13 +319,13 @@ class AnomalyDetector:
         
         # Count by type
         by_type = {}
-        for anomaly in self.anomaly_history:
+        for anomaly in history:
             data_type = anomaly.get('data_type', 'unknown')
             by_type[data_type] = by_type.get(data_type, 0) + 1
         
         # Count by severity
         by_severity = {}
-        for anomaly in self.anomaly_history:
+        for anomaly in history:
             severity = anomaly.get('severity', 'unknown')
             by_severity[severity] = by_severity.get(severity, 0) + 1
         
@@ -338,5 +333,5 @@ class AnomalyDetector:
             'total_anomalies': total_anomalies,
             'by_type': by_type,
             'by_severity': by_severity,
-            'last_anomaly': self.anomaly_history[-1] if self.anomaly_history else None
+            'last_anomaly': history[-1] if history else None
         }

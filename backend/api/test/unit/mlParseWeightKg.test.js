@@ -9,9 +9,9 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg(0)).toBe(0);
   });
 
-  it('requires an explicit unit for numeric strings', () => {
-    expect(Number.isNaN(parseWeightKg('100'))).toBe(true);
-    expect(Number.isNaN(parseWeightKg('0'))).toBe(true);
+  it('parses unitless numeric strings as kilograms', () => {
+    expect(parseWeightKg('100')).toBe(100);
+    expect(parseWeightKg('0')).toBe(0);
   });
 
   it('parses kg suffix', () => {
@@ -34,9 +34,9 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg('kg')).toBeNull();
   });
 
-  it('coerces null like Number and returns NaN for undefined', () => {
-    expect(parseWeightKg(null)).toBe(0);
-    expect(Number.isNaN(parseWeightKg(undefined))).toBe(true);
+  it('returns null for null and undefined', () => {
+    expect(parseWeightKg(null)).toBeNull();
+    expect(parseWeightKg(undefined)).toBeNull();
   });
 
   it('returns null for non-finite numbers', () => {
@@ -44,8 +44,8 @@ describe('parseWeightKg', () => {
     expect(parseWeightKg(Infinity)).toBeNull();
   });
 
-  it('coerces arrays like Number and returns NaN for objects', () => {
-    expect(parseWeightKg([])).toBe(0);
-    expect(Number.isNaN(parseWeightKg({}))).toBe(true);
+  it('returns null for arrays and objects', () => {
+    expect(parseWeightKg([])).toBeNull();
+    expect(parseWeightKg({})).toBeNull();
   });
 });

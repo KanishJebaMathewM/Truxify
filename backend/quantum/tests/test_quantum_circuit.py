@@ -22,7 +22,7 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    for var_name, value in zip(result['variables'], result['solution']):
         if value is not None and abs(value - 1) < 1e-6:
             _, u, v = var_name.split('_')
             selected.add((u, v))
@@ -83,7 +83,7 @@ def test_module_parses_and_has_single_solve_qubo():
     # Exactly one solve_qubo definition (no duplicate-merge signatures).
     solve_defs = [
         n
-        for n in module.body
+        for n in ast.walk(module)
         if isinstance(n, ast.FunctionDef) and n.name == "solve_qubo"
     ]
     assert len(solve_defs) == 1, (

@@ -57,9 +57,8 @@ class QuantumCircuitDesigner:
         qaoa = qaoa.assign_parameters(
             {parameter: 0.0 for parameter in qaoa.parameters}
         )
-        qaoa.measure_all()
-        
-        # Ensure measurements are present so execution returns valid counts
+        # Measure every qubit ONCE so execution produces counts. The previous
+        # double call (discarded copy + inplace) duplicated the classical bits.
         qaoa.measure_all(inplace=True)
         
         self.circuit = qaoa
@@ -157,12 +156,37 @@ class QUBOFormatter:
         objective = {}
         for (u, v), var in edge_vars.items():
             weight = graph[u][v].get('weight', 1)
-            objective[(var, var)] = weight
+            # Linear terms are keyed by variable NAME; tuple keys are
+            # quadratic pairs and break qiskit's string-dtype handling.
+            objective[var] = weight
 
-        # Edge costs are linear because every route variable is binary.
-        # Keeping the objective linear also allows the mixed-integer flow model
-        # to be solved directly by ScipyMilpOptimizer in regression tests.
-        qubo.minimize(linear=objective)
+        # The objective is applied AFTER every variable is declared (the flow
+        # formulation adds integer vars below) — otherwise the objective array
+        # is shorter than the variable vector and scipy's MILP rejects the
+        # mismatched integrality broadcast.
+        _objective = objective
+
+        # Declare ALL variables before any objective/constraint — qiskit sizes
+        # the objective/constraint arrays at assignment time, so adding the
+        # integer flow variables later leaves earlier arrays short and scipy's
+        # MILP rejects the broadcast.
+        flow_vars = {}
+        if len(nodes) >= 6:
+            root = nodes[0]
+            for u, v in graph.edges():
+                forward = f'flow_{u}_{v}'
+                reverse = f'flow_{v}_{u}'
+                qubo.integer_var(
+                    name=forward,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
+                )
+                qubo.integer_var(
+                    name=reverse,
+                    lowerbound=0,
+                    upperbound=len(nodes) - 1,
+                )
+                flow_vars[(u, v)] = (forward, reverse)
 
         # Degree constraints: each node must have degree exactly 2.
         for node in nodes:
@@ -186,24 +210,10 @@ class QUBOFormatter:
             # Each non-root node consumes one unit of flow. A selected route edge
             # can carry at most n-1 units in either direction. This prevents
             # disconnected cycles without enumerating all node subsets.
-            root = nodes[0]
-            flow_vars = {}
+            # (The flow variables are declared above, alongside the edge vars.)
+            capacity = len(nodes) - 1
             for u, v in graph.edges():
-                forward = f'flow_{u}_{v}'
-                reverse = f'flow_{v}_{u}'
-                qubo.integer_var(
-                    name=forward,
-                    lowerbound=0,
-                    upperbound=len(nodes) - 1,
-                )
-                qubo.integer_var(
-                    name=reverse,
-                    lowerbound=0,
-                    upperbound=len(nodes) - 1,
-                )
-                flow_vars[(u, v)] = (forward, reverse)
-
-                capacity = len(nodes) - 1
+                forward, reverse = flow_vars[(u, v)]
                 qubo.linear_constraint(
                     linear={forward: 1, edge_vars[(u, v)]: -capacity},
                     sense='<=',
@@ -250,6 +260,7 @@ class QUBOFormatter:
         self.qubo = qubo
         self.variables = list(edge_vars.values())
 
+        qubo.minimize(linear=_objective)
         return qubo
 
     def solve_qubo(self, qubo: QuadraticProgram,

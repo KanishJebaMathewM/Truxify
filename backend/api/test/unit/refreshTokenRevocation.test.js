@@ -8,15 +8,16 @@ vi.mock('../../src/security/tokenFamilyManager.js', () => ({
 }));
 import { revokeToken, revokeAllUserTokens, rotateRefreshToken, hashRefreshToken } from '../../src/services/refreshTokenService.js';
 
-let query, writeError;
+let query, writeError, consumedRows;
 beforeEach(() => {
   writeError = null;
+  consumedRows = [{ token_hash: 'consumed' }];
   mocks.insert.mockReset().mockReturnValue({ select: () => ({ single: async () => ({ data: { token_hash: 'new' }, error: null }) }) });
   query = {
     update: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(), insert: mocks.insert,
     single: vi.fn().mockResolvedValue({ data: { user_id: 'u1', is_revoked: false, expires_at: new Date(Date.now() + 60000).toISOString() }, error: null }),
-    then: (resolve, reject) => Promise.resolve({ data: null, error: writeError }).then(resolve, reject)
+    then: (resolve, reject) => Promise.resolve({ data: writeError ? null : consumedRows, error: writeError }).then(resolve, reject)
   };
   mocks.from.mockReset().mockReturnValue(query);
 });
@@ -42,10 +43,18 @@ describe('refresh-token revocation database failures', () => {
     expect(query.eq).toHaveBeenCalledWith('is_revoked', false);
   });
 
-  it('aborts rotation before creating a replacement when old-token revocation fails', async () => {
+  it('propagates a failed old-token revocation and never returns the replacement', async () => {
     writeError = { message: 'update unavailable' };
     await expect(rotateRefreshToken('test-token', 'device', {})).rejects.toMatchObject({ cause: writeError });
-    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it('treats a conditional update that consumed no row as token reuse', async () => {
+    consumedRows = [];
+    await expect(rotateRefreshToken('test-token', 'device', {})).rejects.toThrow(
+      'Token reuse detected. All sessions revoked.'
+    );
+    expect(query.eq).toHaveBeenCalledWith('is_revoked', false);
+    expect(query.eq).toHaveBeenCalledWith('user_id', 'u1');
   });
 
   it('still creates a replacement after successful revocation', async () => {

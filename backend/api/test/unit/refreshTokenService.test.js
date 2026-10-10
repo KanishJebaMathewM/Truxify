@@ -9,6 +9,7 @@ const {
   mockSelectEq,
   mockSelectSingle,
   mockUpdate,
+  mockUpdateSelect,
 } = vi.hoisted(() => {
   const mInsertSingle = vi.fn();
   const mInsertSelect = vi.fn(() => ({ single: mInsertSingle }));
@@ -18,7 +19,12 @@ const {
   const mSelectEq = vi.fn(() => ({ single: mSelectSingle }));
   const mSelect = vi.fn(() => ({ eq: mSelectEq }));
 
-  const mUpdateEq2 = vi.fn().mockResolvedValue({ data: null, error: null });
+  // update(...).eq(...).eq(...) is awaited directly by revokeAllUserTokens and is also the
+  // conditional "consume" statement, which chains .select() to read the rows it updated.
+  const mUpdateSelect = vi.fn().mockResolvedValue({ data: [{ token_hash: 'consumed' }], error: null });
+  const mUpdateEq2 = vi.fn(() =>
+    Object.assign(Promise.resolve({ data: null, error: null }), { select: mUpdateSelect })
+  );
   const mUpdateEq1 = vi.fn(() => ({ eq: mUpdateEq2 }));
   const mUpdate = vi.fn(() => ({ eq: mUpdateEq1 }));
 
@@ -42,6 +48,7 @@ const {
     mockSelectEq: mSelectEq,
     mockSelectSingle: mSelectSingle,
     mockUpdate: mUpdate,
+    mockUpdateSelect: mUpdateSelect,
   };
 });
 
@@ -174,6 +181,25 @@ describe('refreshTokenService', () => {
       const result = await rotateRefreshToken('valid-active-token', 'dev-2', 'Android');
       expect(result).toMatchObject(newRecord);
       expect(result.token).toMatch(/^[0-9a-f]{80}$/);
+    });
+
+    it('treats a lost conditional update (no row consumed) as token reuse', async () => {
+      const futureDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 10);
+      mockSelectSingle.mockResolvedValue({
+        data: {
+          user_id: 'usr-1',
+          token_hash: hashRefreshToken('raced-token'),
+          is_revoked: false,
+          expires_at: futureDate.toISOString(),
+        },
+        error: null,
+      });
+      mockInsertSingle.mockResolvedValue({ data: { user_id: 'usr-1', is_revoked: false }, error: null });
+      mockUpdateSelect.mockResolvedValueOnce({ data: [], error: null });
+
+      await expect(rotateRefreshToken('raced-token', 'dev-2', 'Android')).rejects.toThrow(
+        'Token reuse detected. All sessions revoked.'
+      );
     });
   });
 

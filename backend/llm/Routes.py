@@ -1,39 +1,175 @@
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Security
+from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+import json
+import logging 
 import os
-import logging
+import tempfile
+from datetime import datetime
 from uuid import uuid4
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from backend.llm.security import validate_upload_file
-from backend.llm.service import llm_service
+from llm_service import LLMService
+from security import (
+    require_user,
+    require_rag_write,
+    require_rag_read,
+    validate_upload_file,
+    decode_token,
+    bearer,
+)
 
-logger = logging.getLogger("truxify.llm.routes")
-router = APIRouter()
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/llm", tags=["LLM Support"])
+
+# Initialize LLM service
+llm_service = LLMService()
+
+class QueryRequest(BaseModel):
+    query: str
+    language: Optional[str] = 'en'
+
+class DocumentRequest(BaseModel):
+    documents: List[str]
+    metadata: Optional[List[Dict]] = None
+
+@router.post("/query")
+async def process_query(
+    request: QueryRequest,
+    current_user_id: str = Depends(require_rag_read)
+):
+    """Process driver query with LLM"""
+    try:
+        result = await llm_service.process_query(
+            request.query,
+            request.language,
+            current_user_id
+        )
+        return {
+            'success': True,
+            'data': result,
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Query processing failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/rag/documents")
+async def add_documents(
+    request: DocumentRequest,
+    user_id: str = Depends(require_rag_write)
+):
+    """Add documents to RAG vector DB"""
+    try:
+        result = await llm_service.add_to_vector_db(
+            request.documents,
+            request.metadata
+        )
+        return {
+            'success': True,
+            'data': result,
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Document addition failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/history/{user_id}")
+async def get_conversation_history(
+    user_id: str,
+    limit: int = 10,
+    credentials: HTTPAuthorizationCredentials = Security(bearer)
+):
+    """Get conversation history with IDOR protection"""
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Provide Bearer token in Authorization header."
+        )
+    payload = decode_token(credentials.credentials)
+    current_user_id = payload.get("sub")
+    if not current_user_id:
+        raise HTTPException(status_code=401, detail="Token missing subject claim")
+
+    scopes = payload.get("scopes", [])
+    roles = payload.get("roles", [])
+
+    # IDOR check: caller can access their own history, or must have rag:read scope or admin role
+    if user_id != current_user_id and "rag:read" not in scopes and "admin" not in roles:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Cannot view conversation history of another user."
+        )
+
+    try:
+        history = await llm_service.get_conversation_history(user_id, limit)
+        return {
+            'success': True,
+            'data': history,
+            'count': len(history),
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"History retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/fine-tune")
-async def fine_tune_model(file: UploadFile = File(...)):
-    # Fix 1: Validate upload file size and content type via security utility
-    await validate_upload_file(file)
-    
-    # Fix 2: Generate per-request unique filename to prevent race conditions / data clobbering
-    unique_filename = f"training_{uuid4()}.json"
-    
+async def fine_tune_model(
+    file: UploadFile = File(...),
+    user_id: str = Depends(require_rag_write)
+):
+    """Fine-tune LLM with custom data securely with per-request temp paths"""
+    tmp_path = None
     try:
-        content = await file.read()
-        with open(unique_filename, 'wb') as f:
+        # Validate upload file size and type
+        content = await validate_upload_file(file)
+
+        # Write to a unique per-request path to avoid concurrent clobbering
+        fd, tmp_path = tempfile.mkstemp(prefix=f"training_{uuid4().hex}_", suffix=".json")
+        with os.fdopen(fd, 'wb') as f:
             f.write(content)
-            
-        logger.info(f"Starting model fine-tuning with secure temporary dataset: {unique_filename}")
-        result = await llm_service.fine_tune_model(unique_filename)
-        return {"success": True, "result": result}
-        
-    except Exception as err:
-        logger.error(f"Error during LLM fine-tuning process: {err}")
-        raise HTTPException(status_code=500, detail=str(err))
-        
+
+        result = await llm_service.fine_tune_model(tmp_path)
+        return {
+            'success': True,
+            'data': result,
+            'timestamp': datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Fine-tuning failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Fix 3: Ensure temporary training file is cleaned up in a finally block
-        if os.path.exists(unique_filename):
+        if tmp_path and os.path.exists(tmp_path):
             try:
-                os.remove(unique_filename)
-                logger.info(f"Cleaned up temporary training dataset: {unique_filename}")
-            except Exception as cleanup_err:
-                logger.warning(f"Failed to remove temporary file {unique_filename}: {cleanup_err}")
+                os.remove(tmp_path)
+            except OSError as cleanup_err:
+                logger.warning(f"Failed to remove temp file {tmp_path}: {cleanup_err}")
+
+@router.get("/stats")
+async def get_model_stats(
+    user_id: str = Depends(require_user)
+):
+    """Get LLM model statistics"""
+    try:
+        stats = await llm_service.get_model_stats()
+        return {
+            'success': True,
+            'data': stats,
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Stats retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/languages")
+async def get_supported_languages():
+    """Get supported languages"""
+    return {
+        'success': True,
+        'data': {
+            'languages': llm_service.supported_languages,
+            'count': len(llm_service.supported_languages)
+        },
+        'timestamp': datetime.now().isoformat()
+    }

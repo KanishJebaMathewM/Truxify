@@ -2,10 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import {
   generateFamilyId,
-  registerTokenFamily,
-  verifyAndRotateFamily,
   revokeTokenFamily,
-  isFamilyRevoked,
 } from '../security/tokenFamilyManager.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -45,8 +42,6 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo, familyId 
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
-  registerTokenFamily(activeFamilyId, generation);
-
   const { data, error } = await supabase
     .from('refresh_tokens')
     .insert({
@@ -67,6 +62,35 @@ export const createRefreshToken = async (userId, deviceId, deviceInfo, familyId 
   return { ...data, token, familyId: activeFamilyId, generation };
 };
 
+// Atomically consumes a refresh token that is still live.
+//
+// This is ONE conditional statement: UPDATE ... WHERE token_hash = $1 AND
+// is_revoked = false RETURNING token_hash. Postgres serializes concurrent writers on
+// the row, so when N requests rotate the same token at once exactly one of them gets
+// a row back and the rest get none. The database is the only arbiter shared by every
+// API replica: a SELECT followed by an unconditional UPDATE (check-then-act), or the
+// per-process maps in tokenFamilyManager, cannot provide that guarantee.
+const consumeRefreshToken = async (token) => {
+  const { data, error } = await supabase
+    .from('refresh_tokens')
+    .update({ is_revoked: true, revoked_at: new Date().toISOString() })
+    .eq('token_hash', hashRefreshToken(token))
+    .eq('is_revoked', false)
+    .select('token_hash');
+  if (error) throw new Error('Failed to revoke refresh token', { cause: error });
+  return Array.isArray(data) && data.length > 0;
+};
+
+// A refresh token that was already consumed has been presented again: treat it as
+// theft, terminate every session of the user and report the reuse.
+const rejectReusedToken = async (tokenRecord) => {
+  if (tokenRecord.family_id) {
+    revokeTokenFamily(tokenRecord.family_id, 'TOKEN_REUSE_DETECTED');
+  }
+  await revokeAllUserTokens(tokenRecord.user_id);
+  throw new Error('Token reuse detected. All sessions revoked.');
+};
+
 export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
   const { data: tokenRecord, error } = await supabase
     .from('refresh_tokens')
@@ -78,15 +102,8 @@ export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
     throw new Error('Invalid or expired refresh token');
   }
 
-  const currentFamilyId = tokenRecord.family_id;
-  const currentGen = tokenRecord.generation ?? 0;
-
-  if (tokenRecord.is_revoked || (currentFamilyId && isFamilyRevoked(currentFamilyId))) {
-    if (currentFamilyId) {
-      revokeTokenFamily(currentFamilyId, 'TOKEN_REUSE_DETECTED');
-    }
-    await revokeAllUserTokens(tokenRecord.user_id);
-    throw new Error('Token reuse detected. All sessions revoked.');
+  if (tokenRecord.is_revoked) {
+    return rejectReusedToken(tokenRecord);
   }
 
   const expiresAtMs = new Date(tokenRecord.expires_at).getTime();
@@ -95,22 +112,40 @@ export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
     throw new Error('Refresh token expired');
   }
 
-  const rotationCheck = verifyAndRotateFamily(currentFamilyId, currentGen);
-  if (!rotationCheck.valid) {
-    await revokeAllUserTokens(tokenRecord.user_id);
-    throw new Error('Token reuse detected. All sessions revoked.');
-  }
-
-  await revokeToken(oldToken);
-  const nextGen = rotationCheck.nextGen ?? (currentGen + 1);
-  const newTokenData = await createRefreshToken(
+  // Mint the replacement BEFORE consuming the old token (and from the generation of
+  // the row we read, never from process memory). The order matters for two reasons:
+  //  1. A transient failure here no longer burns the user's still-valid token.
+  //  2. It closes the revoke-all race. If the old token is reused concurrently, the
+  //     loser sweeps every live token of the user (rejectReusedToken). Because the
+  //     winner's replacement is committed before the winner's conditional UPDATE, and
+  //     the loser only sweeps after that UPDATE has lost, the sweep always sees and
+  //     revokes it. Consuming first would let a replacement inserted a moment later
+  //     survive "all sessions revoked", possibly in the thief's hands.
+  const replacement = await createRefreshToken(
     tokenRecord.user_id,
     deviceId,
     deviceInfo,
-    currentFamilyId,
-    nextGen
+    tokenRecord.family_id,
+    (tokenRecord.generation ?? 0) + 1
   );
-  return newTokenData;
+
+  // The database decides the winner: only the request whose conditional UPDATE
+  // actually flipped is_revoked may hand its replacement to the caller. A concurrent
+  // request presenting the same token (same or another replica) gets zero rows back
+  // and is handled as reuse instead of forking the token chain.
+  let consumed;
+  try {
+    consumed = await consumeRefreshToken(oldToken);
+  } catch (err) {
+    // The replacement was never returned, so it is unreachable; revoke it anyway.
+    await revokeToken(replacement.token).catch(() => {});
+    throw err;
+  }
+  if (!consumed) {
+    return rejectReusedToken(tokenRecord);
+  }
+
+  return replacement;
 };
 
 const refreshTokenService = {

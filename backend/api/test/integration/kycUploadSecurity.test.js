@@ -7,7 +7,9 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
-  supabaseAdmin: null,
+  // verificationRoutes updates driver_details via the service-role client —
+  // null here crashed with 'Cannot read properties of null (reading from)'.
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -47,15 +49,21 @@ describe('KYC Upload Route Security Tests', () => {
   beforeEach(() => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
+    // The route updates driver_details by user_id (the production column).
     m.store.driver_details = [
-      { driver_id: 'kyc-driver-uuid-123', kyc_status: 'Not Submitted' },
+      { user_id: 'kyc-driver-uuid-123', kyc_status: 'Not Submitted' },
     ];
     m.calls.length = 0;
     scanDocument.mockResolvedValue({ clean: true, engine: 'mock' });
+    // The route 503s without the ML endpoint configured — set a suite-local one.
+    process.env.ML_API_URL = 'http://127.0.0.1:8000';
+    process.env.ML_API_KEY = 'kyc-suite-key';
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.ML_API_URL;
+    delete process.env.ML_API_KEY;
   });
 
   it('returns 413 for an oversized image', async () => {
@@ -67,7 +75,9 @@ describe('KYC Upload Route Security Tests', () => {
       .attach('image', oversized, { filename: 'big.jpg', contentType: 'image/jpeg' });
 
     expect(res.status).toBe(413);
-    expect(res.body.error).toMatch(/File upload error/);
+    // errorHandler wraps Multer errors as { code, message } — the message
+    // carries the text.
+    expect(res.body.error.message).toMatch(/File upload error/);
   });
 
   it('rejects a disallowed MIME type (400, file is skipped by fileFilter)', async () => {
@@ -93,7 +103,7 @@ describe('KYC Upload Route Security Tests', () => {
     expect(res.status).toBe(422);
     expect(res.body.error).toMatch(/Invalid document type/);
     expect(fetchMock).not.toHaveBeenCalled();
-    const row = m.store.driver_details.find((d) => d.driver_id === 'kyc-driver-uuid-123');
+    const row = m.store.driver_details.find((d) => d.user_id === 'kyc-driver-uuid-123');
     expect(row.kyc_status).toBe('Not Submitted');
   });
 
@@ -123,7 +133,9 @@ describe('KYC Upload Route Security Tests', () => {
   it('accepts a real JPEG and forwards it to the ML endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ verified: true, extracted_number: 'DL-12345678' }),
+      // The route requires BOTH flags (deliberate government-attestation
+      // contract) — verified alone takes the Rejected path.
+      json: async () => ({ attested: true, verified: true, extracted_number: 'DL-12345678' }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -137,7 +149,7 @@ describe('KYC Upload Route Security Tests', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8000/verify/kyc');
 
-    const row = m.store.driver_details.find((d) => d.driver_id === 'kyc-driver-uuid-123');
+    const row = m.store.driver_details.find((d) => d.user_id === 'kyc-driver-uuid-123');
     expect(row.kyc_status).toBe('Verified');
     expect(row.kyc_doc_number).toBe('DL-12345678');
   });

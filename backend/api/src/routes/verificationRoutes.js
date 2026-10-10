@@ -203,7 +203,8 @@ const OCR_HTTP_TIMEOUT_MS = 15000;
 function normalizeKycDocNumber(value) {
   if (typeof value !== 'string') return null;
   const cleaned = value.replace(/\s+/g, '').toUpperCase();
-  if (!/^[A-Z0-9]{4,30}$/.test(cleaned)) return null;
+  // Hyphens are common in document numbers (DL-12345678) — allow them.
+  if (!/^[A-Z0-9-]{4,30}$/.test(cleaned)) return null;
   return cleaned;
 }
 

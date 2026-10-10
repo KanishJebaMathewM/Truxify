@@ -57,7 +57,35 @@ class DigilockerService {
       logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
     }
   }
+// backend/api/src/services/digilockerService.js
 
+// Example 1: Token exchange call (approx. line 52 & 168)
+const tokenResponse = await axios.post(
+  'https://api.digitallocker.gov.in/public/oauth2/1/token',
+  params,
+  {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    timeout: 10000 // 10 second timeout
+  }
+);
+
+// Example 2: Issued files list call (approx. line 207)
+const filesResponse = await axios.get(
+  'https://api.digitallocker.gov.in/public/oauth2/1/files/issued',
+  {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    timeout: 10000
+  }
+);
+
+// Example 3: Individual file download/verification call (approx. line 214)
+const fileResponse = await axios.get(
+  `https://api.digitallocker.gov.in/public/oauth2/1/file/${fileUri}`,
+  {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    timeout: 10000
+  }
+);
   /**
    * Returns true when every configured contract is deployed at its configured
    * address and answers an ABI probe, so a typo'd or cross-contract address is

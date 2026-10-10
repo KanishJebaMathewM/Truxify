@@ -1,3 +1,6 @@
+from threading import RLock
+from foundation.optimizer_transition import operation_owned, optimizer_transition
+from .reward_transition import admit_reward_optimizer, own_population, own_populations, reward_owned
 import logging
 from numbers import Integral
 from typing import Dict, List, Tuple
@@ -82,24 +85,44 @@ class InverseRL:
         )
         
         self.optimizer = torch.optim.Adam(self.reward_model.parameters(), lr=1e-3)
+        self._operation_lock = RLock()
         
-        logger.info(f"✅ Inverse RL initialized")
+        logger.info("✅ Inverse RL initialized")
     
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_operation_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._operation_lock = RLock()
+
+    @operation_owned
     def infer_reward(self, state: np.ndarray, action: np.ndarray) -> float:
-        """Infer reward from state-action pair"""
-        self.reward_model.eval()
-        with torch.no_grad():
-            state_tensor = torch.tensor(state, dtype=torch.float32)
-            action_tensor = torch.tensor(action, dtype=torch.float32)
-            if len(state_tensor.shape) == 1:
-                state_tensor = state_tensor.unsqueeze(0)
-            if len(action_tensor.shape) == 1:
-                action_tensor = action_tensor.unsqueeze(0)
-            
-            combined = torch.cat([state_tensor, action_tensor], dim=-1)
-            reward = self.reward_model(combined)
-        return reward.item()
-    
+        """Read one owned native reward observation without changing training modes."""
+        state_tensor = torch.as_tensor(state if isinstance(state, torch.Tensor) else np.asarray(state))
+        action_tensor = torch.as_tensor(action if isinstance(action, torch.Tensor) else np.asarray(action))
+        if state_tensor.ndim == 1:
+            state_tensor = state_tensor.unsqueeze(0)
+        if action_tensor.ndim == 1:
+            action_tensor = action_tensor.unsqueeze(0)
+        combined = own_population(self, state_tensor, action_tensor)
+        if len(combined) != 1:
+            raise ValueError("Reward inference requires one paired observation")
+        modes = [(module, module.training) for module in self.reward_model.modules()]
+        try:
+            self.reward_model.eval()
+            with torch.no_grad():
+                reward = self.reward_model(combined)
+            if reward.shape != (1, 1) or not torch.isfinite(reward).all():
+                raise ValueError("Native reward must be a finite scalar")
+            return reward.item()
+        finally:
+            for module, mode in modes:
+                module.training = mode
+
+    @operation_owned
     def train_reward_model(
         self,
         expert_states: np.ndarray,
@@ -108,41 +131,36 @@ class InverseRL:
         learner_actions: np.ndarray,
         epochs: int = 100
     ) -> Dict:
-        """Train reward model using IRL"""
+        """Fit the original expert/learner mean difference through verified epochs."""
+        expert, learner, epochs = own_populations(
+            self, expert_states, expert_actions, learner_states, learner_actions, epochs
+        )
+        admit_reward_optimizer(self)
         losses = []
-        
         for epoch in range(epochs):
-            # Convert to tensors
-            expert_states_t = torch.tensor(expert_states, dtype=torch.float32)
-            expert_actions_t = torch.tensor(expert_actions, dtype=torch.float32)
-            learner_states_t = torch.tensor(learner_states, dtype=torch.float32)
-            learner_actions_t = torch.tensor(learner_actions, dtype=torch.float32)
-            
-            # Expert rewards
-            expert_combined = torch.cat([expert_states_t, expert_actions_t], dim=-1)
-            expert_rewards = self.reward_model(expert_combined)
-            
-            # Learner rewards
-            learner_combined = torch.cat([learner_states_t, learner_actions_t], dim=-1)
-            learner_rewards = self.reward_model(learner_combined)
-            
-            # Loss: maximize expert rewards, minimize learner rewards
-            loss = -torch.mean(expert_rewards) + torch.mean(learner_rewards)
-            
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            
+            with optimizer_transition(self.reward_model, self.optimizer):
+                self.reward_model.train()
+                expert_rewards = self.reward_model(expert)
+                learner_rewards = self.reward_model(learner)
+                if (expert_rewards.shape != (len(expert), 1)
+                        or learner_rewards.shape != (len(learner), 1)
+                        or not torch.isfinite(expert_rewards).all()
+                        or not torch.isfinite(learner_rewards).all()):
+                    raise ValueError("Native reward populations must be finite scalar rows")
+                loss = -expert_rewards.mean() + learner_rewards.mean()
+                if not torch.isfinite(loss):
+                    raise ValueError("Native reward objective must be finite")
+                self.optimizer.zero_grad()
+                loss.backward()
+                # Preserve finite derivatives without adding a clipping algorithm.
+                if any(p.grad is not None and not torch.isfinite(p.grad).all()
+                       for p in self.reward_model.parameters()):
+                    raise ValueError("Native reward derivatives must be finite")
+                self.optimizer.step()
             losses.append(loss.item())
-            
             if (epoch + 1) % 20 == 0:
                 logger.info(f"IRL Epoch {epoch+1}/{epochs}: Loss={loss.item():.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1]
-        }
+        return {'losses': losses, 'final_loss': losses[-1]}
 
 class PolicyGradient:
     """Policy Gradient for behavior learning"""
@@ -426,6 +444,7 @@ class ImitationLearningModel:
         
         return adjusted
     
+    @reward_owned
     def save(self, path: str = "models/imitation_model.pth"):
         """Save model"""
         torch.save({
@@ -436,6 +455,7 @@ class ImitationLearningModel:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @reward_owned
     def load(self, path: str = "models/imitation_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location='cpu')

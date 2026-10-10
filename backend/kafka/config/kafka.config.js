@@ -154,11 +154,16 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId || event.orderId,
+            // Partition by the AGGREGATE/ORDER id so every event for one
+            // aggregate keeps its ordering — the unique per-event id would
+            // scatter them across partitions. Never key by eventId.
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
-              ...event,
-              timestamp: event.timestamp || new Date().toISOString(),
+              // version/timestamp first so event fields win — the spread
+              // order previously clobbered event.version to '1.0'.
               version: '1.0',
+              timestamp: new Date().toISOString(),
+              ...event,
             }),
             headers: traceHeaders,
             timestamp: Date.now(),
@@ -186,11 +191,11 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId,
+            key: key || event.aggregateId || event.orderId || event.eventId,
             value: JSON.stringify({
-              ...event,
-              timestamp: event.timestamp || new Date().toISOString(),
               version: '1.0',
+              timestamp: new Date().toISOString(),
+              ...event,
             }),
             headers: traceHeaders,
             timestamp: Date.now(),

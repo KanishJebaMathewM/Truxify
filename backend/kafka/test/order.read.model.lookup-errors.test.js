@@ -31,7 +31,9 @@ describe('OrderReadModel.getOrderReadModel lookup errors', () => {
     query.eq.mockClear();
     query.maybeSingle.mockClear();
     mocks.result = { data: null, error: null };
-    readModel = new OrderReadModel({ from: vi.fn(), rpc: vi.fn() });
+    // Wire the mocked query chain — a bare vi.fn() returns undefined and the
+    // model crashes on .select before the lookup logic runs.
+    readModel = new OrderReadModel({ from: mocks.from, rpc: vi.fn() });
   });
 
   it('rebuilds only when the lookup confirms that no row exists', async () => {

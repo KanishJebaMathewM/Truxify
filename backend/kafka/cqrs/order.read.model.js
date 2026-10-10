@@ -344,7 +344,10 @@ class OrderReadModel {
    * authoritative read model (the same column getOrderList filters on).
    */
   async getOrderStats() {
-    const statuses = ['pending', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'payment_released', 'cancelled'];
+    // The read model stores raw/normalized statuses including the legacy
+    // event-sourced ones (created/completed) and 'settled' — all must be
+    // counted, not just the lifecycle list.
+    const statuses = ['pending', 'created', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered', 'completed', 'payment_released', 'settled', 'cancelled'];
     const stats = {};
     for (const s of statuses) { stats[s] = 0; }
 

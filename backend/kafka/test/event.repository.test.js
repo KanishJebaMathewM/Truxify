@@ -39,7 +39,10 @@ const queryChain = {
     }),
 };
 vi.mock('../../api/src/config/db.js', () => ({
+  // The repository migrated to the service-role client (issue #9202) — mock
+  // both exports.
   supabase: { from: () => queryChain },
+  supabaseAdmin: { from: () => queryChain },
 }));
 vi.mock('../../api/src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },

@@ -1,7 +1,10 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
-const anonFrom = vi.fn(() => {
-  throw new Error('anon Supabase client must not access orders_read_model');
+const { anonFrom } = vi.hoisted(() => {
+  const anonFrom = vi.fn(() => {
+    throw new Error('anon Supabase client must not access orders_read_model');
+  });
+  return { anonFrom };
 });
 
 vi.mock('../../api/src/config/db.js', () => ({
@@ -50,7 +53,9 @@ describe('OrderReadModel service-role access (issue #9202)', () => {
     const stats = await model.getOrderStats();
 
     expect(stats.pending).toBe(1);
-    expect(serviceClient.from).toHaveBeenCalledTimes(10);
+    // One count query per tracked status — the list covers the lifecycle
+    // plus the legacy event-sourced statuses (created/completed/settled).
+    expect(serviceClient.from).toHaveBeenCalledTimes(13);
     expect(serviceClient.from).toHaveBeenCalledWith('orders_read_model');
     expect(anonFrom).not.toHaveBeenCalled();
   });

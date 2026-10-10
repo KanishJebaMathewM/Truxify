@@ -1,24 +1,27 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
-const anonFrom = vi.fn(() => {
-  throw new Error('anon Supabase client must not access events');
+const { anonFrom, query, adminFrom } = vi.hoisted(() => {
+  const anonFrom = vi.fn(() => {
+    throw new Error('anon Supabase client must not access events');
+  });
+  
+  const query = {
+    insert: vi.fn().mockReturnThis(),
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({
+      data: { event_id: 'evt-9202' },
+      error: null,
+    }),
+    single: vi.fn().mockResolvedValue({
+      data: { event_id: 'evt-save-9202' },
+      error: null,
+    }),
+  };
+  
+  const adminFrom = vi.fn(() => query);
+  return { anonFrom, query, adminFrom };
 });
-
-const query = {
-  insert: vi.fn().mockReturnThis(),
-  select: vi.fn().mockReturnThis(),
-  eq: vi.fn().mockReturnThis(),
-  maybeSingle: vi.fn().mockResolvedValue({
-    data: { event_id: 'evt-9202' },
-    error: null,
-  }),
-  single: vi.fn().mockResolvedValue({
-    data: { event_id: 'evt-save-9202' },
-    error: null,
-  }),
-};
-
-const adminFrom = vi.fn(() => query);
 
 vi.mock('../../api/src/config/db.js', () => ({
   supabase: { from: anonFrom },

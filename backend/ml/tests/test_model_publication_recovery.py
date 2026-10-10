@@ -182,7 +182,8 @@ def test_real_fitted_model_and_metadata_remain_paired_after_failed_save(monkeypa
     observed = base.load_model_snapshot("demo")
     assert observed.generation == a
     assert observed.metadata["metrics"] == {"slope": 2}
-    np.testing.assert_allclose(observed.model.predict(x), x[:, 0] * 2)
+    np.testing.assert_array_equal(observed.model.predict(x), original.predict(x))
+    np.testing.assert_allclose(observed.model.predict(x), x[:, 0] * 2, atol=1e-12)
 
 
 def test_snapshot_preparation_failure_never_starts_publication(monkeypatch):

@@ -14,6 +14,16 @@ from gat.serving_contract import predictions as checked_predictions
 from torch_geometric.data import Data
 from torch_geometric.nn import GATConv
 
+from .training_transition import (
+    TrainingAdmissionError,
+    admit_tuple,
+    evaluation_mode,
+    finite_gradients,
+    finite_objective,
+    recover_step,
+    require_state,
+)
+
 logger = logging.getLogger(__name__)
 
 # Number of node features emitted by TrafficGraphBuilder.get_pytorch_data().
@@ -291,6 +301,9 @@ def _with_gat_state(method):
     return serialized
 
 
+
+
+
 class GATTrainer:
     """Trainer for Graph Attention Network"""
     
@@ -327,70 +340,52 @@ class GATTrainer:
 
     @_with_gat_state
     def train_step(self, data: Data, targets: torch.Tensor) -> float:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        # Forward pass
-        data = data.to(self.device)
-        predictions = self.model(data.x, data.edge_index)
-        
-        # Loss
-        loss = self.criterion(predictions, self._prediction_targets(targets, predictions))
-        
-        # Backward pass
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
-        
-        return loss.item()
-    
+        """Accept one finite native GAT/Adam candidate or recover registered state."""
+        owned, paired_targets = admit_tuple(self, data, targets)
+        with recover_step(self):
+            self.model.train()
+            self.optimizer.zero_grad()
+            predictions = self.model(owned.x, owned.edge_index)
+            loss = self.criterion(predictions, paired_targets)
+            finite_objective(predictions, paired_targets, loss)
+            loss.backward()
+            finite_gradients(self.model)
+            norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
+            if not torch.isfinite(norm):
+                raise RuntimeError('GAT clipping norm is nonfinite')
+            finite_gradients(self.model)
+            self.optimizer.step()
+            return float(loss.item())
+
     @_with_gat_state
-    def train(
-        self,
-        train_data: Data,
-        train_targets: torch.Tensor,
-        epochs: int = 100,
-        val_data: Optional[Data] = None,
-        val_targets: Optional[torch.Tensor] = None
-    ) -> Dict:
-        """Full training loop"""
-        losses = []
-        val_losses = []
-        
-        for epoch in range(epochs):
-            # Training
-            loss = self.train_step(train_data, train_targets)
-            losses.append(loss)
-            
-            # Validation
-            if val_data is not None and val_targets is not None:
-                val_loss = self.validate(val_data, val_targets)
-                val_losses.append(val_loss)
-            
-            if (epoch + 1) % 10 == 0:
-                if val_losses:
-                    logger.info(f"Epoch {epoch+1}/{epochs}: Loss={loss:.4f}, Val Loss={val_loss:.4f}")
-                else:
-                    logger.info(f"Epoch {epoch+1}/{epochs}: Loss={loss:.4f}")
-        
+    def train(self, train_data: Data, train_targets: torch.Tensor, epochs: int = 1,
+              val_data: Optional[Data] = None, val_targets: Optional[torch.Tensor] = None) -> Dict:
+        """Own the full train/validation tuple before accepting any epoch."""
+        train_data, train_targets = admit_tuple(self, train_data, train_targets, epochs)
+        if (val_data is None) != (val_targets is None):
+            raise TrainingAdmissionError('provide both validation graph and targets')
+        if val_data is not None:
+            val_data, val_targets = admit_tuple(self, val_data, val_targets, epochs)
+        losses, val_losses = [], []
+        for _ in range(epochs):
+            losses.append(self.train_step(train_data, train_targets))
+            if val_data is not None:
+                val_losses.append(self.validate(val_data, val_targets))
         return {
-            'train_losses': losses,
-            'val_losses': val_losses,
-            'final_loss': losses[-1],
-            'final_val_loss': val_losses[-1] if val_losses else None
+            'train_losses': losses, 'val_losses': val_losses,
+            'final_loss': losses[-1], 'final_val_loss': val_losses[-1] if val_losses else None,
         }
-    
+
     @_with_gat_state
     def validate(self, data: Data, targets: torch.Tensor) -> float:
-        """Validate model"""
-        self.model.eval()
-        with torch.no_grad():
-            data = data.to(self.device)
-            predictions = self.model(data.x, data.edge_index)
-            loss = self.criterion(predictions, self._prediction_targets(targets, predictions))
-        return loss.item()
-    
+        owned, paired_targets = admit_tuple(self, data, targets)
+        require_state(self)
+        with evaluation_mode(self.model):
+            predictions = self.model(owned.x, owned.edge_index)
+            loss = self.criterion(predictions, paired_targets)
+            finite_objective(predictions, paired_targets, loss)
+            return float(loss.item())
+
     @_with_gat_state
     def predict(self, data: Data) -> Dict:
         """Make predictions"""

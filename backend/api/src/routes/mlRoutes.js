@@ -185,8 +185,8 @@ router.get(
     const tripId = req.query.tripId || 'unknown';
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
-    const latBucket = lat ? lat.toFixed(4) : '';
-    const lngBucket = lng ? lng.toFixed(4) : '';
+    const latBucket = Number.isFinite(lat) ? lat.toFixed(4) : '';
+    const lngBucket = Number.isFinite(lng) ? lng.toFixed(4) : '';
     const gpsBucket = `${latBucket},${lngBucket}`;
     const routeDistance = req.query.routeDistance || '10';
     const timeOfDay = req.query.timeOfDay || '12';

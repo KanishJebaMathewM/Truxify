@@ -5,6 +5,10 @@
  * and system telemetry/metrics retrieval. All endpoints are protected 
  * with Redis-backed rate limiting and admin-level access controls.
  */
+// Inside backend/api/src/routes/ebpf/routes.js
+
+// Add this import to the top import block:
+import path from 'node:path';
 
 import express from 'express';
 import rateLimit from 'express-rate-limit';

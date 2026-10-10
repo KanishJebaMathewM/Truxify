@@ -9,7 +9,7 @@ const path = require("path");
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomicfoundation/hardhat-network-helpers");
-require("@nomicfoundation/hardhat-verify");
+// require("@nomicfoundation/hardhat-verify");
 require("@openzeppelin/hardhat-upgrades");
 
 const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";

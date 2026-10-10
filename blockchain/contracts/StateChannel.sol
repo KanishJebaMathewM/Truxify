@@ -1,200 +1,76 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/**
- * @title StateChannel
- * @dev Off-chain state channel dispute settlement and unilateral exit contract for Truxify freight micro-payments.
- */
-contract StateChannel is ReentrancyGuard {
-    using ECDSA for bytes32;
+contract StateChannel is Ownable, ReentrancyGuard {
     using MessageHashUtils for bytes32;
+    using ECDSA for bytes32;
 
     struct Channel {
-        address userA;
-        address userB;
+        address participantA;
+        address participantB;
         uint256 balanceA;
         uint256 balanceB;
-        uint256 sequence;
-        uint256 challengeExpiry;
-        bool isDisputed;
-        bool isClosed;
+        uint256 nonce;
+        bool isOpen;
     }
 
     mapping(bytes32 => Channel) public channels;
-    mapping(address => uint256) public pendingWithdrawals;
-    uint256 public channelCounter;
-    uint256 public constant CHALLENGE_PERIOD = 1 days;
 
-    event ChannelOpened(bytes32 indexed channelId, address indexed userA, address indexed userB, uint256 deposit);
-    event DisputeInitiated(bytes32 indexed channelId, uint256 sequence, uint256 challengeExpiry);
-    event ChannelClosed(bytes32 indexed channelId, uint256 finalBalanceA, uint256 finalBalanceB);
-    event WithdrawalCredited(address indexed recipient, uint256 amount);
-    event Withdrawn(address indexed recipient, uint256 amount);
+    event ChannelOpened(bytes32 indexed channelId, address participantA, address participantB);
+    event ChannelClosed(bytes32 indexed channelId, uint256 balanceA, uint256 balanceB);
 
-    function openChannel(address userB) external payable returns (bytes32 channelId) {
-        require(msg.value > 0, "Deposit required");
-        require(userB != address(0), "Invalid user B");
+    constructor() Ownable(msg.sender) {}
 
-        channelCounter++;
-        channelId = keccak256(abi.encodePacked(msg.sender, userB, block.timestamp, channelCounter));
-        require(channels[channelId].userA == address(0), "Channel exists");
+    function openChannel(bytes32 channelId, address participantB) external payable nonReentrant {
+        require(channels[channelId].participantA == address(0), "Channel already exists");
+        require(participantB != address(address(0)), "Invalid participant");
+
         channels[channelId] = Channel({
-            userA: msg.sender,
-            userB: userB,
+            participantA: msg.sender,
+            participantB: participantB,
             balanceA: msg.value,
             balanceB: 0,
-            sequence: 0,
-            challengeExpiry: 0,
-            isDisputed: false,
-            isClosed: false
+            nonce: 0,
+            isOpen: true
         });
 
-        emit ChannelOpened(channelId, msg.sender, userB, msg.value);
+        emit ChannelOpened(channelId, msg.sender, participantB);
     }
 
-    function initiateUnilateralExit(
+    function closeChannel(
         bytes32 channelId,
-        uint256 sequence,
+        uint256 nonce,
         uint256 balanceA,
         uint256 balanceB,
-        bytes memory sig
+        bytes memory signatureA,
+        bytes memory signatureB
     ) external nonReentrant {
         Channel storage channel = channels[channelId];
-        require(!channel.isClosed, "Channel closed");
-        require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
+        require(channel.isOpen, "Channel is closed");
+        require(nonce > channel.nonce, "Stale nonce");
+        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid total balance");
 
-        // Prevent indefinite challenge extension griefing: subsequent challenges
-        // must present a strictly higher sequence number.
-        if (channel.isDisputed) {
-            require(sequence > channel.sequence, "Stale sequence");
-        } else {
-            require(sequence >= channel.sequence, "Stale sequence");
-        }
+        bytes32 message = keccak256(abi.encodePacked(channelId, nonce, balanceA, balanceB)).toEthSignedMessageHash();
 
-        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
+        address signerA = message.recover(signatureA);
+        address signerB = message.recover(signatureB);
 
-        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
-        
-        if (msg.sender == channel.userA) {
-            require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");
-        } else {
-            require(stateHash.recover(sig) == channel.userA, "Invalid signature from userA");
-        }
+        require(signerA == channel.participantA && signerB == channel.participantB, "Invalid signatures");
 
-        channel.sequence = sequence;
-        channel.balanceA = balanceA;
-        channel.balanceB = balanceB;
-        channel.isDisputed = true;
-        channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        channel.isOpen = false;
+        channel.nonce = nonce;
 
-        emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
-    }
+        (bool successA, ) = channel.participantA.call{value: balanceA}("");
+        require(successA, "Transfer to A failed");
 
-    event DisputeResponded(bytes32 indexed channelId, uint256 sequence, uint256 challengeExpiry);
-
-    /**
-     * @notice Allows the counterparty to respond to a unilateral exit with a higher-sequence signed state (#14776)
-     */
-    function respondWithState(
-        bytes32 channelId,
-        uint256 sequence,
-        uint256 balanceA,
-        uint256 balanceB,
-        bytes memory sig
-    ) external nonReentrant {
-        Channel storage channel = channels[channelId];
-        require(!channel.isClosed, "Channel closed");
-        require(channel.isDisputed, "No active dispute");
-        require(block.timestamp < channel.challengeExpiry, "Challenge period expired");
-        require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
-        require(sequence > channel.sequence, "Sequence must be higher");
-        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
-
-        bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
-        
-        if (msg.sender == channel.userA) {
-            require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");
-        } else {
-            require(stateHash.recover(sig) == channel.userA, "Invalid signature from userA");
-        }
-
-        channel.sequence = sequence;
-        channel.balanceA = balanceA;
-        channel.balanceB = balanceB;
-
-        emit DisputeResponded(channelId, sequence, channel.challengeExpiry);
-    }
-
-
-    function cooperativeClose(
-        bytes32 channelId,
-        uint256 balanceA,
-        uint256 balanceB,
-        bytes memory sigA,
-        bytes memory sigB
-    ) external nonReentrant {
-        Channel storage channel = channels[channelId];
-        require(!channel.isClosed, "Channel already closed");
-        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
-
-        bytes32 stateHash = keccak256(abi.encodePacked(block.chainid, address(this), channelId, channel.sequence + 1, balanceA, balanceB)).toEthSignedMessageHash();
-        require(stateHash.recover(sigA) == channel.userA, "Invalid sig A");
-        require(stateHash.recover(sigB) == channel.userB, "Invalid sig B");
-
-        channel.isClosed = true;
-
-        _safeTransferOrCredit(channel.userA, balanceA);
-        _safeTransferOrCredit(channel.userB, balanceB);
+        (bool successB, ) = channel.participantB.call{value: balanceB}("");
+        require(successB, "Transfer to B failed");
 
         emit ChannelClosed(channelId, balanceA, balanceB);
-    }
-
-    function finalizeExit(bytes32 channelId) external nonReentrant {
-        Channel storage channel = channels[channelId];
-        require(channel.isDisputed, "No active dispute");
-        require(block.timestamp >= channel.challengeExpiry, "Challenge period active");
-        require(!channel.isClosed, "Already closed");
-
-        uint256 amountA = channel.balanceA;
-        uint256 amountB = channel.balanceB;
-
-        channel.isClosed = true;
-
-        _safeTransferOrCredit(channel.userA, amountA);
-        _safeTransferOrCredit(channel.userB, amountB);
-
-        emit ChannelClosed(channelId, amountA, amountB);
-    }
-
-    /**
-     * @dev Attempts direct push transfer, falling back to pull-based credit if the
-     *      recipient reverts or runs out of gas. This prevents Denial-of-Service
-     *      attacks where a malicious counterparty traps funds.
-     */
-    function _safeTransferOrCredit(address recipient, uint256 amount) internal {
-        if (amount == 0) return;
-        (bool sent, ) = recipient.call{value: amount}("");
-        if (!sent) {
-            pendingWithdrawals[recipient] += amount;
-            emit WithdrawalCredited(recipient, amount);
-        }
-    }
-
-    /**
-     * @dev Allows participants to pull funds that could not be transferred directly.
-     */
-    function withdraw() external nonReentrant {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "No pending withdrawal");
-        pendingWithdrawals[msg.sender] = 0;
-
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Withdrawal transfer failed");
-
-        emit Withdrawn(msg.sender, amount);
     }
 }

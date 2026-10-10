@@ -32,7 +32,7 @@ const depositEscrow = async (req, res) => {
         return res.status(403).json({ error: error.message });
     }
 
-    console.error('Escrow deposit controller error:', error.message);
+    logger.error({ err: error, requestId: req.id }, 'Escrow deposit controller error');
     return res.status(500).json({
         error: 'Failed to process escrow deposit',
         details: error.message
@@ -64,7 +64,7 @@ const releaseEscrow = async (req, res) => {
             return res.status(403).json({ error: error.message });
         }
 
-        console.error('Escrow release controller error:', error.message);
+        logger.error({ err: error, requestId: req.id }, 'Escrow release controller error');
         return res.status(500).json({
             error: 'Failed to release escrow funds',
             details: error.message

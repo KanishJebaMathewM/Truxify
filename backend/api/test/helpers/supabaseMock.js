@@ -464,6 +464,45 @@ export function createSupabaseMock(initialStore = {}) {
           profile.fcm_token_updated_at = nowIso;
         }
       }
+      if (fnName === 'apply_fcm_lifecycle_outcomes') {
+        // Mirror the #17056 migration: apply outcomes only to the still-active
+        // registration that was actually sent (matching id AND token), and clear
+        // the profile fallback token only if it still points at the invalid token.
+        const outcomes = Array.isArray(args?.p_outcomes) ? args.p_outcomes : null;
+        const userId = args?.p_user_id;
+        if (!userId || !outcomes
+          || outcomes.some((o) => !o || typeof o.token !== 'string' || o.token === ''
+            || (o.outcome !== 'success' && o.outcome !== 'invalid')
+            || (o.outcome === 'success' && o.id == null))) {
+          return Promise.resolve({ data: null, error: { message: 'Invalid FCM lifecycle batch' } });
+        }
+        const nowIso = new Date().toISOString();
+        let deactivated = 0;
+        let touched = 0;
+        store.user_devices = store.user_devices || [];
+        for (const row of store.user_devices) {
+          if (row.user_id !== userId || row.is_active === false) continue;
+          const invalid = outcomes.some((o) => o.outcome === 'invalid' && o.id === row.id && o.token === row.fcm_token);
+          const success = outcomes.some((o) => o.outcome === 'success' && o.id === row.id && o.token === row.fcm_token);
+          if (invalid) {
+            row.is_active = false;
+            row.deactivated_at = nowIso;
+            deactivated += 1;
+          } else if (success) {
+            row.last_seen = nowIso;
+            touched += 1;
+          }
+        }
+        store.profiles = store.profiles || [];
+        for (const p of store.profiles) {
+          if (p.id !== userId) continue;
+          if (outcomes.some((o) => o.outcome === 'invalid' && o.token === p.fcm_token)) {
+            p.fcm_token = null;
+            p.fcm_token_updated_at = nowIso;
+          }
+        }
+        return Promise.resolve({ data: { deactivated, touched }, error: null });
+      }
       if (fnName === 'unregister_device_token') {
         const nowIso = new Date().toISOString();
         const userId = args.p_user_id;

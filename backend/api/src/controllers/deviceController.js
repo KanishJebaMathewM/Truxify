@@ -62,7 +62,7 @@ export async function registerDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
     // Support both 'fcmToken' (original) and 'fcm_token' (new snippet)
-    const { fcmToken, fcm_token, platform, device_type, device_model, metadata, deviceId } = req.body;
+    const { fcmToken, fcm_token, platform, device_type, metadata, deviceId } = req.body;
     
     const finalToken = fcmToken || fcm_token;
 
@@ -91,6 +91,32 @@ export async function registerDeviceToken(req, res, next) {
         errorResponse('VALIDATION_ERROR', metadataErr)
       );
     }
+    // Example fix inside backend/api/src/controllers/deviceController.js
+
+import { supabaseAdmin } from '../config/db.js'; // Ensure supabaseAdmin is imported
+
+export async function registerDeviceToken(req, res, next) {
+  try {
+    const { userId, fcmToken, platform } = req.body;
+
+    // ... validation logic ...
+
+    // Call the RPC using supabaseAdmin (service_role) to bypass permission restrictions
+    const { data, error } = await supabaseAdmin.rpc('register_device_token', {
+      p_user_id: userId,
+      p_fcm_token: fcmToken,
+      p_platform: platform,
+    });
+
+    if (error) {
+      throw new Error(`[Database] Failed to register device token: ${error.message}`);
+    }
+
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
 
     if (!supabaseAdmin) {
       logger.error('[DeviceController] Service-role client unavailable for register_device_token');
@@ -126,8 +152,6 @@ export async function registerDeviceToken(req, res, next) {
       p_prev_user_id: previousUserId ?? null,
       p_device_id:    deviceId ?? null,
       p_last_seen:    new Date().toISOString(),
-      // Pass additional fields if the RPC supports them, otherwise they are ignored
-      p_device_model: device_model ?? null, 
     });
 
     if (rpcError) {
@@ -429,6 +453,9 @@ export async function syncLocations(req, res, next) {
     let newestTimestamp = 0;
 
     for (const loc of locations) {
+      if (!loc || typeof loc !== 'object' || Array.isArray(loc)) {
+        continue;
+      }
       const lat = parseFloat(loc.latitude);
       const lng = parseFloat(loc.longitude);
       if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
@@ -437,7 +464,13 @@ export async function syncLocations(req, res, next) {
       
       const parsedHeading = Number.isFinite(parseFloat(loc.heading)) ? parseFloat(loc.heading) : null;
       const parsedSpeed   = Number.isFinite(parseFloat(loc.speed))   ? parseFloat(loc.speed)   : null;
-      const recordedAt    = loc.recorded_at ? new Date(loc.recorded_at).toISOString() : new Date().toISOString();
+      const capturedAt = loc.recorded_at ? new Date(loc.recorded_at) : new Date();
+      // Match invalid-coordinate handling: a malformed point must not abort
+      // the other valid captures in an offline replay batch.
+      if (!Number.isFinite(capturedAt.getTime())) {
+        continue;
+      }
+      const recordedAt = capturedAt.toISOString();
 
       validLocations.push({
         driver_id: userId,

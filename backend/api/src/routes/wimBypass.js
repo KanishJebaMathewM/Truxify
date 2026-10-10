@@ -58,86 +58,91 @@ router.post(
     const { truckId, bolId } = req.body;
 
     try {
-      // Fail closed before doing any work: if the signing secret is not
-      // configured, no credential can ever be issued safely.
-      if (!hasWimSigningSecret()) {
-        logger.error(
-          { event: 'WIM_SIGNING_FAILURE', truckId, bolId, actorId: req.user.id },
-          '[WIM] Signing secret unavailable; refusing to issue bypass credential.',
-        );
-        return res.status(500).json({ error: 'Unable to issue bypass credential.' });
-      }
+        const { truckId, bolId } = req.body;
 
-      // Never trust client-supplied safetyScore / axleWeight / maxWeightLimit.
-      // Resolve every eligibility input from server-side records: the truck's
-      // registered capacity and the load's registered weight, scoped to the
-      // authenticated driver.
-      const [{ data: truck, error: truckErr }, { data: order, error: orderErr }] = await Promise.all([
-        supabaseAdmin
-          .from('trucks')
-          .select('id, driver_id, max_capacity_tons')
-          .eq('id', truckId)
-          .maybeSingle(),
-        supabaseAdmin
-          .from('orders')
-          .select('id, order_display_id, driver_id, truck_id, weight_tonnes')
-          .eq('order_display_id', bolId)
-          .maybeSingle(),
-      ]);
+        if (!truckId || !bolId) {
+            return res.status(400).json({ error: 'Missing required truck/load parameters' });
+        }
 
-      if (truckErr || orderErr) {
-        logger.error('[WIM] Failed to resolve truck/load records:', { truckErr: truckErr?.message, orderErr: orderErr?.message });
-        return res.status(500).json({ error: 'Failed to verify truck/load records.' });
-      }
+        // Never trust client-supplied safetyScore / axleWeight / maxWeightLimit.
+        // Resolve every eligibility input from server-side records: the truck's
+        // registered capacity and the load's registered weight, scoped to the
+        // authenticated driver.
+        const [{ data: truck, error: truckErr }, { data: order, error: orderErr }] = await Promise.all([
+            supabaseAdmin
+                .from('trucks')
+                .select('id, driver_id, max_capacity_tons')
+                .eq('id', truckId)
+                .maybeSingle(),
+            supabaseAdmin
+                .from('orders')
+                .select('id, order_display_id, driver_id, truck_id, weight_tonnes')
+                .eq('order_display_id', bolId)
+                .maybeSingle(),
+        ]);
 
-      if (!truck) {
-        return res.status(404).json({ error: 'Truck not found.' });
-      }
+        if (truckErr || orderErr) {
+            logger.error('[WIM] Failed to resolve truck/load records:', { truckErr: truckErr?.message, orderErr: orderErr?.message });
+            return res.status(500).json({ error: 'Failed to verify truck/load records.' });
+        }
 
-      if (truck.driver_id !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden: You do not own this truck.' });
-      }
+        if (!truck) {
+            return res.status(404).json({ error: 'Truck not found.' });
+        }
 
-      if (!order || order.driver_id !== req.user.id || order.truck_id !== truck.id) {
-        return res.status(403).json({ error: 'Forbidden: Load is not assigned to this truck.' });
-      }
+        if (truck.driver_id !== req.user.id) {
+            return res.status(403).json({ error: 'Forbidden: You do not own this truck.' });
+        }
 
-      const { data: profile, error: profileErr } = await supabaseAdmin
-        .from('profiles')
-        .select('is_digilocker_verified')
-        .eq('id', req.user.id)
-        .maybeSingle();
+        if (!order || order.driver_id !== req.user.id || order.truck_id !== truck.id) {
+            return res.status(403).json({ error: 'Forbidden: Load is not assigned to this truck.' });
+        }
 
-      if (profileErr) {
-        logger.error('[WIM] Failed to resolve driver verification:', profileErr.message);
-        return res.status(500).json({ error: 'Failed to verify driver registration.' });
-      }
+        const { data: profile, error: profileErr } = await supabaseAdmin
+            .from('profiles')
+            .select('is_digilocker_verified')
+            .eq('id', req.user.id)
+            .maybeSingle();
 
-      // A driver verified through an approved government document counts the
-      // same as a DigiLocker-verified profile (see 1edfc5f66).
-      let isVerified = Boolean(profile?.is_digilocker_verified);
-      if (!isVerified) {
-        const { data: verifiedDocs } = await supabaseAdmin
-          .from('driver_documents')
-          .select('id')
-          .eq('driver_id', req.user.id)
-          .or('is_govt_verified.eq.true,status.in.(approved,verified)')
-          .limit(1);
-        isVerified = Boolean(verifiedDocs && verifiedDocs.length > 0);
-      }
+        if (profileErr) {
+            logger.error('[WIM] Failed to resolve driver verification:', profileErr.message);
+            return res.status(500).json({ error: 'Failed to verify driver registration.' });
+        }
 
-      const measurement = buildTrustedMeasurement({
-        truck,
-        order,
-        driverProfile: { ...profile, is_digilocker_verified: isVerified },
-      });
+        const rawTruckCapacity = truck.max_capacity_tons;
+        const rawLoadWeight = order.weight_tonnes;
 
-      if (!Number.isFinite(measurement.weightLbs) || !Number.isFinite(measurement.capacityLbs)) {
-        logger.warn('[WIM] Truck/load records missing weight data, failing closed:', { truckId, bolId });
-        res.locals.wimMetadata = { outcome: 'rejected', reason: 'missing-weight-data', truckId, bolId };
-        return res.json({
-          signal: 'PULL_IN',
-          message: 'Truck must pull into weigh station.',
+        const maxWeightLimit = Number(rawTruckCapacity) * LBS_PER_TONNE;
+        const axleWeight = Number(rawLoadWeight) * LBS_PER_TONNE;
+        // There is no safety-score column in the schema; derive the safety
+        // signal from the driver's verified registration (fail closed to 0).
+        const safetyScore = isVerified ? 100 : 0;
+
+
+        // Number(null) and Number('') are both 0, so a load with no registered
+        // weight used to coerce to the lightest possible axle weight and be
+        // granted a bypass. The service's own typeof check cannot catch this
+        // because by the time it runs the value is already the number 0.
+        // Validate the raw column values and fail closed on anything missing,
+        // non-numeric or non-positive.
+        if (!Number.isFinite(axleWeight) || axleWeight <= 0
+            || !Number.isFinite(maxWeightLimit) || maxWeightLimit <= 0) {
+            logger.warn('[WIM] Truck/load records missing or invalid weight data, failing closed:', {
+                truckId,
+                bolId,
+                rawTruckCapacity,
+                rawLoadWeight,
+            });
+            return res.json({
+                signal: 'PULL_IN',
+                message: 'Truck must pull into weigh station.',
+            });
+        }
+
+        const isEligible = evaluateBypassEligibility({
+            safetyScore,
+            axleWeight,
+            maxWeightLimit,
         });
       }
 

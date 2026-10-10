@@ -124,13 +124,13 @@ fn parse_request_line(head: &str) -> (String, String) {
 }
 
 /// Parses the `Content-Length` header value, defaulting to 0.
-fn parse_content_length(head: &str) -> usize {
+fn parse_content_length(head: &str) -> Option<usize> {
     for line in head.lines() {
         if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-            return value.trim().parse().unwrap_or(0);
+            return value.trim().parse().ok();
         }
     }
-    0
+    Some(0)
 }
 
 /// Builds a minimal HTTP/1.1 JSON response with `Connection: close`.
@@ -243,19 +243,35 @@ async fn process_connection(mut stream: TcpStream) {
         };
         buf.extend_from_slice(&chunk[..n]);
         if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            if pos + 4 > 64 * 1024 {
+                let _ = stream.write_all(&http_response("431 Request Header Fields Too Large", r#"{"error":"Headers too large"}"#)).await;
+                let _ = stream.flush().await;
+                return;
+            }
             break pos + 4;
         }
         if buf.len() > 64 * 1024 {
+            let _ = stream.write_all(&http_response("431 Request Header Fields Too Large", r#"{"error":"Headers too large"}"#)).await;
+            let _ = stream.flush().await;
             return;
         }
     };
 
     let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
-    let content_length = parse_content_length(&head);
+    let content_length = match parse_content_length(&head) {
+        Some(len) => len,
+        None => {
+            let _ = stream.write_all(&http_response("400 Bad Request", r#"{"error":"Invalid or missing Content-Length"}"#)).await;
+            let _ = stream.flush().await;
+            return;
+        }
+    };
 
     // Reject unreasonably large or overflowing body lengths from an untrusted
     // Content-Length header before performing any pointer arithmetic.
     if content_length > MAX_BODY {
+        let _ = stream.write_all(&http_response("413 Payload Too Large", r#"{"error":"Payload too large"}"#)).await;
+        let _ = stream.flush().await;
         return;
     }
     let body_end = match header_end.checked_add(content_length) {
@@ -266,7 +282,11 @@ async fn process_connection(mut stream: TcpStream) {
     // Read the remaining body bytes.
     while buf.len() < body_end {
         let n = match stream.read(&mut chunk).await {
-            Ok(0) => return,
+            Ok(0) => {
+                let _ = stream.write_all(&http_response("400 Bad Request", r#"{"error":"Truncated request body"}"#)).await;
+                let _ = stream.flush().await;
+                return;
+            }
             Ok(n) => n,
             Err(_) => return,
         };

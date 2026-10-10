@@ -45,7 +45,6 @@ export function validateCoordinateRange(lat, lng, latName = 'lat', lngName = 'ln
 }
 
 const EARTH_RADIUS_KM = 6371;
-const KM_PER_LAT_DEGREE = 111.32;
 
 /**
  * Calculates exact spherical distance between two geographic coordinates using Haversine formula.
@@ -76,6 +75,7 @@ export function haversineDistance(lat1, lon1, lat2, lon2, unit = 'km') {
 
 /**
  * Computes a rectangular bounding box around a center coordinate for fast pre-filtering.
+ * A longitude interval with minLng > maxLng crosses the antimeridian.
  *
  * @param {number} centerLat Center latitude
  * @param {number} centerLng Center longitude
@@ -83,15 +83,24 @@ export function haversineDistance(lat1, lon1, lat2, lon2, unit = 'km') {
  * @returns {{ minLat: number, maxLat: number, minLng: number, maxLng: number }}
  */
 export function getBoundingBox(centerLat, centerLng, radiusKm) {
-  const latDelta = radiusKm / KM_PER_LAT_DEGREE;
+  const angle = Math.min(Math.PI, radiusKm / EARTH_RADIUS_KM);
+  const latDelta = angle * 180 / Math.PI;
   const latRad = (centerLat * Math.PI) / 180;
-  const lngDelta = radiusKm / (KM_PER_LAT_DEGREE * Math.max(0.0001, Math.cos(latRad)));
+  const minLat = Math.max(-90, centerLat - latDelta);
+  const maxLat = Math.min(90, centerLat + latDelta);
+
+  // A spherical cap touching either pole can contain every longitude.
+  if (minLat <= -90 || maxLat >= 90) {
+    return { minLat, maxLat, minLng: -180, maxLng: 180 };
+  }
+  const lngDelta = Math.asin(Math.min(1, Math.sin(angle) / Math.cos(latRad))) * 180 / Math.PI;
+  const wrapLongitude = (lng) => ((lng + 540) % 360) - 180;
 
   return {
-    minLat: Math.max(-90, centerLat - latDelta),
-    maxLat: Math.min(90, centerLat + latDelta),
-    minLng: Math.max(-180, centerLng - lngDelta),
-    maxLng: Math.min(180, centerLng + lngDelta),
+    minLat,
+    maxLat,
+    minLng: wrapLongitude(centerLng - lngDelta),
+    maxLng: wrapLongitude(centerLng + lngDelta),
   };
 }
 
@@ -107,11 +116,15 @@ export function isWithinBoundingBox(point, box) {
   const lng = point.lng ?? point.longitude;
   if (lat == null || lng == null) return false;
 
+  // +180 and -180 describe the same meridian, including zero-radius boxes.
+  const longitude = lng === 180 ? -180 : lng;
+  const withinLongitude = box.minLng <= box.maxLng
+    ? longitude >= box.minLng && longitude <= box.maxLng
+    : longitude >= box.minLng || longitude <= box.maxLng;
   return (
     lat >= box.minLat &&
     lat <= box.maxLat &&
-    lng >= box.minLng &&
-    lng <= box.maxLng
+    withinLongitude
   );
 }
 

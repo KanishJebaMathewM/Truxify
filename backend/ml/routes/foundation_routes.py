@@ -1,13 +1,22 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
-import torch
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Literal, Optional
 
-from foundation.model import LogisticsFoundationModel, FoundationModelConfig, FoundationModelTrainer
+import torch
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from foundation.data import LogisticsDataProcessor, LogisticsDatasetGenerator
-from routes.foundation_validation import UploadTooLarge, read_training_json, safe_model_path
+from foundation.finetuning import FinetuningAdmissionError
+from foundation.model import (
+    FoundationModelConfig,
+    FoundationModelTrainer,
+    LogisticsFoundationModel,
+)
+from pydantic import BaseModel, Field
+from routes.foundation_validation import (
+    UploadTooLarge,
+    read_training_json,
+    safe_model_path,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/foundation", tags=["Foundation Model"])
@@ -108,7 +117,8 @@ async def pretrain_model(file: Optional[UploadFile] = None):
         val_data = processor.create_pretraining_data(data[8000:])
         
         # Train
-        results = trainer.train(train_data, val_data)
+        from foundation.pretraining import MaskedTokenTrainer
+        results = MaskedTokenTrainer(model, config).train(train_data, val_data)
         
         return {
             'success': True,
@@ -116,6 +126,7 @@ async def pretrain_model(file: Optional[UploadFile] = None):
                 'final_train_loss': results['final_train_loss'],
                 'final_val_loss': results['final_val_loss'],
                 'train_losses': results['train_losses'],
+                'supervised_tokens_per_epoch': results['supervised_tokens_per_epoch'],
                 'val_losses': results['val_losses']
             },
             'timestamp': datetime.now().isoformat()
@@ -138,12 +149,8 @@ async def finetune_model(
         train_data = processor.create_finetuning_data(data[:800], task)
         val_data = processor.create_finetuning_data(data[800:], task)
         
-        # Update config
-        config.epochs = epochs
-        trainer.config = config
-        
-        # Train
-        results = trainer.train(train_data, val_data)
+        # Task and epoch selection belong to this invocation, not shared config.
+        results = trainer.train(train_data, val_data, task=task, epochs=epochs)
         
         return {
             'success': True,
@@ -154,6 +161,8 @@ async def finetune_model(
             },
             'timestamp': datetime.now().isoformat()
         }
+    except FinetuningAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Finetuning failed: {e}")
 

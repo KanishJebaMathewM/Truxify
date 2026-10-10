@@ -3,19 +3,64 @@ import logger from './logger.js';
 import { firebaseAdmin, supabase, createUserClient } from '../config/db.js';
 import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCachedProfile, getCachedSupabaseProfile, setCachedSupabaseProfile, invalidateCachedSupabaseProfile, isValidCachedSupabaseProfile, TOMBSTONE_TTL_SECONDS, TTL_SECONDS } from '../lib/profileCache.js';
 
-// Compute at write time so database latency cannot extend the token's cache lifetime.
-async function cacheActiveFirebaseProfile(firebaseUid, profile, tokenExpiry) {
-  const remaining = Number.isFinite(tokenExpiry)
-    ? Math.floor(tokenExpiry - Date.now() / 1000)
-    : TTL_SECONDS;
-  const ttlSeconds = Math.min(TTL_SECONDS, remaining);
-  // setCachedProfile coerces nonpositive TTLs to one second; skip expired tokens.
-  if (ttlSeconds > 0) await setCachedProfile(firebaseUid, profile, ttlSeconds);
-}
-
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
+/**
+ * Authentication Middleware
+ * 
+ * Verifies JWT Bearer tokens on incoming requests and attaches user context.
+ * Implements structured warning logging for unauthenticated or missing token attempts.
+ */
+
+import jwt from 'jsonwebtoken';
+import logger from './logger.js';
+
+export const authenticate = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const clientIp = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress;
+    logger.warn(
+      {
+        event: 'AUTH_NO_TOKEN',
+        requestId: req.requestId || req.id,
+        clientIp,
+        path: req.originalUrl || req.url,
+        method: req.method,
+      },
+      'Missing or invalid authorization token format'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Access denied. No token provided.',
+    });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const secret = process.env.JWT_SECRET || 'default_secret';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    logger.warn(
+      {
+        event: 'AUTH_INVALID_TOKEN',
+        requestId: req.requestId || req.id,
+        error: err?.message,
+      },
+      'Invalid or expired token provided'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid or expired token.',
+    });
+  }
+};
+
+export default authenticate;
 export async function authenticate(req, res, next) {
   if (req.user) {
     return next();
@@ -259,7 +304,7 @@ export async function authenticate(req, res, next) {
         isActive: true,
       };
 
-      await cacheActiveFirebaseProfile(firebaseUid, req.user, decodedToken.exp).catch((err) => logger.error({ err }, "Cache set failed"));
+      await setCachedProfile(firebaseUid, req.user).catch((err) => logger.error({ err }, "Cache set failed"));
       return next();
     }
   } catch (error) {
@@ -318,17 +363,22 @@ export function requireRole(allowedRoles) {
     next();
   };
 }
-
-// Development-only fallback. This value is public (it is committed to an
-// open-source repo), so it must never protect a production deployment.
-// validateConfig() refuses to boot a production process without JWT_SECRET;
-// this warning makes the fallback obvious everywhere else.
-const DEFAULT_DEV_JWT_SECRET = "truxify-jwt-secret-key";
-if (!process.env.JWT_SECRET) {
-  logger.warn(
-    "[auth] JWT_SECRET is not set. Falling back to the built-in development secret — never use this in production.",
-  );
-}
+import { firebaseAdmin, supabase, createUserClient } from "../config/db.js";
+import jwt from "jsonwebtoken";
+import {
+  getCachedProfile,
+  setCachedProfile,
+  invalidateCachedProfile,
+  TOMBSTONE_TTL_SECONDS,
+  TTL_SECONDS,
+  isValidCachedProfile,
+  getCachedSupabaseProfile,
+  setCachedSupabaseProfile,
+  invalidateCachedSupabaseProfile,
+  isValidCachedSupabaseProfile,
+} from "../lib/profileCache.js";
+import logger from "./logger.js";
+import { getJwtSecret } from "../config/jwtSecret.js";
 
 /**
  * Verification helper for direct programmatic calls (e.g., WebSockets, gRPC, workers).
@@ -894,7 +944,7 @@ export async function authenticate(req, res, next) {
   const token = authHeader.split(" ")[1];
   req.token = token;
 
-  const secret = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
+  const secret = getJwtSecret();
   try {
     const verified = jwt.verify(token, secret);
     if (verified && (verified.id || verified.uid)) {
@@ -1143,7 +1193,7 @@ export async function authenticate(req, res, next) {
  * Middleware to restrict route access to specific roles.
  * Must be used after authenticate middleware.
  */
-function requireRoleV2(allowedRoles) {
+export function requireRole(allowedRoles) {
   if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
     throw new Error(
       "requireRole middleware requires a non-empty array of allowed roles.",

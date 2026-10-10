@@ -19,7 +19,7 @@ export async function validateWalletAddress(walletAddress) {
 
 export async function getWalletDetails(walletAddress) {
     const validatedAddress = await validateWalletAddress(walletAddress);
-    logger.info(`[WalletService] Fetching details for wallet: ${validatedAddress}`);
+    logger.info(`[WalletService] Fetching details for wallet: ${walletAddress}`);
     
     // Core wallet lookup logic placeholder
     return {

@@ -373,6 +373,7 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(state.tables).toContain(ORDER_READ_MODEL_TABLE);
     expect(state.eqCalls).toEqual(
       expect.arrayContaining([
+        [ORDER_READ_MODEL_TABLE, 'status', 'created'],
         [ORDER_READ_MODEL_TABLE, 'payload->>status', 'created'],
         [ORDER_READ_MODEL_TABLE, 'payload->>customer_id', 'c1'],
       ])
@@ -405,4 +406,5 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(row.payload.customer_id).toBe('c1');
     expect(row.data).toBeUndefined();
   });
+});
 });

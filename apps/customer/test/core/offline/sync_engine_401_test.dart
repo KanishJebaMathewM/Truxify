@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:truxify/core/offline/db/offline_event_db.dart';
 import 'package:truxify/core/offline/models/trip_event.dart';
 import 'package:truxify/core/offline/sync/sync_engine.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class FakeOfflineEventDb extends OfflineEventDb {
   final List<TripEvent> pending = [];
@@ -37,6 +38,17 @@ class FakeOfflineEventDb extends OfflineEventDb {
 
 class MockHttpClient extends Mock implements http.Client {}
 
+class MockConnectivity extends Mock implements Connectivity {}
+
+MockConnectivity onlineConnectivity() {
+  final conn = MockConnectivity();
+  when(() => conn.checkConnectivity())
+      .thenAnswer((_) async => [ConnectivityResult.wifi]);
+  when(() => conn.onConnectivityChanged)
+      .thenAnswer((_) => const Stream<List<ConnectivityResult>>.empty());
+  return conn;
+}
+
 void main() {
   TripEvent event(String id, {int retryCount = 0}) =>
       TripEvent.gpsUpdate('trip-1', {'lat': 1.0, 'lng': 2.0}, id: id, retryCount: retryCount);
@@ -65,10 +77,11 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () async => 'expired-token',
+      connectivity: onlineConnectivity(),
+      getCurrentToken: () => 'expired-token',
       refreshAuthToken: () async {
         refreshCalls++;
-        return true;
+        return 'fresh-token';
       },
     );
 
@@ -97,8 +110,9 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () async => 'expired-token',
-      refreshAuthToken: () async => false,
+      connectivity: onlineConnectivity(),
+      getCurrentToken: () => 'expired-token',
+      refreshAuthToken: () async => null,
     );
 
     final uploaded = await engine.syncPending();
@@ -128,8 +142,9 @@ void main() {
       db: db,
       apiBaseUrl: 'http://localhost:8080',
       httpClient: client,
-      getCurrentToken: () async => 'expired-token',
-      refreshAuthToken: () async => true,
+      connectivity: onlineConnectivity(),
+      getCurrentToken: () => 'expired-token',
+      refreshAuthToken: () async => 'fresh-token',
     );
 
     final uploaded = await engine.syncPending();

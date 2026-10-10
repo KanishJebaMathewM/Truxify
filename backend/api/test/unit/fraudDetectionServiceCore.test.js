@@ -162,8 +162,10 @@ describe('FraudDetectionService - Complete Core & Edge Case Test Suite', () => {
       await fraudService.trackBehavior('user-batch-1', { type: 'transaction', amount: 250 });
       expect(fraudService.pendingUpserts.size).toBeGreaterThan(0);
 
-      // Fast-forward timers to trigger batch flush interval (5000ms)
-      vi.advanceTimersByTime(5000);
+      // Fast-forward timers to trigger batch flush interval (5000ms).
+      // The async variant also flushes the upsert microtasks: the service
+      // deliberately clears entries only after the write succeeds.
+      await vi.advanceTimersByTimeAsync(5000);
 
       expect(flushSpy).toHaveBeenCalled();
       expect(fraudService.pendingUpserts.size).toBe(0);

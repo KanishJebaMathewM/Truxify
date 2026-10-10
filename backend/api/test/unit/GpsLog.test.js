@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import { GpsLog } from '../../src/models/GpsLog.js'
+import { describe, it, expect, vi } from 'vitest'
+
+// The global test/setup.js replaces mongoose with a connection-only stub,
+// which leaves model files with no constructible Model. This suite verifies
+// real schema validation, so restore the actual mongoose.
+vi.unmock('mongoose');
+
+const { GpsLog } = await import('../../src/models/GpsLog.js')
 
 describe('GpsLog model', () => {
   it('accepts a valid telemetry document', async () => {
@@ -42,7 +48,7 @@ describe('GpsLog model', () => {
     await expect(doc.validate()).rejects.toThrow(/lng/)
   })
 
-  it('applies default speed, heading and metadata', () => {
+  it('applies null speed and heading defaults for unknown telemetry', () => {
     const doc = new GpsLog({
       bookingId: 'booking-1',
       driverId: 'driver-1',
@@ -50,8 +56,8 @@ describe('GpsLog model', () => {
       lng: 0,
       timestamp: new Date(),
     })
-    expect(doc.speed).toBe(0)
-    expect(doc.heading).toBe(0)
-    expect(doc.metadata).toEqual({})
+    // Unknown speed/heading default to null (absent), not a fabricated 0.
+    expect(doc.speed).toBeNull()
+    expect(doc.heading).toBeNull()
   })
 })

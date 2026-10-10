@@ -1,18 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock @sentry/node before importing the middleware
-vi.mock('@sentry/node', () => ({
-  captureException: vi.fn(),
-  setUser: vi.fn(),
-  configureScope: vi.fn((callback) => {
-    const mockScope = {
-      setExtra: vi.fn(),
-      setTag: vi.fn(),
-      setUser: vi.fn(),
-    };
-    callback(mockScope);
-  }),
-}));
+vi.mock('@sentry/node', () => {
+  const mockScope = {
+    setExtra: vi.fn(),
+    setTag: vi.fn(),
+    setUser: vi.fn(),
+  };
+  const api = {
+    init: vi.fn(),
+    flush: vi.fn(async () => true),
+    captureException: vi.fn(),
+    setUser: vi.fn(),
+    configureScope: vi.fn((callback) => callback(mockScope)),
+    withScope: vi.fn((callback) => callback(mockScope)),
+    Handlers: {
+      requestHandler: vi.fn(() => (req, res, next) => next()),
+      errorHandler: vi.fn(() => (err, req, res, next) => next(err)),
+    },
+  };
+  return { ...api, default: api };
+});
 
 import Sentry from '@sentry/node';
 import { sentryRequestHandler, sentryErrorHandler } from '../../../src/middleware/sentry.js';
@@ -33,7 +41,7 @@ describe('Sentry Middleware', () => {
       const res = {};
       const next = vi.fn();
 
-      sentryRequestHandler(req, res, next);
+      sentryRequestHandler()(req, res, next);
 
       expect(Sentry.setUser).toHaveBeenCalledWith({
         id: 'user-123',
@@ -52,7 +60,7 @@ describe('Sentry Middleware', () => {
       const res = {};
       const next = vi.fn();
 
-      sentryRequestHandler(req, res, next);
+      sentryRequestHandler()(req, res, next);
 
       expect(Sentry.setUser).not.toHaveBeenCalled();
       expect(next).toHaveBeenCalledTimes(1);
@@ -71,7 +79,7 @@ describe('Sentry Middleware', () => {
       const res = { headersSent: false };
       const next = vi.fn();
 
-      sentryErrorHandler(error, req, res, next);
+      sentryErrorHandler()(error, req, res, next);
 
       expect(Sentry.captureException).toHaveBeenCalledWith(error);
       expect(next).toHaveBeenCalledWith(error);

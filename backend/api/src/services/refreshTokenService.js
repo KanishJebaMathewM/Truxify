@@ -89,15 +89,16 @@ export const rotateRefreshToken = async (oldToken, deviceId, deviceInfo) => {
     throw new Error('Token reuse detected. All sessions revoked.');
   }
 
+  const expiresAtMs = new Date(tokenRecord.expires_at).getTime();
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    await revokeToken(oldToken);
+    throw new Error('Refresh token expired');
+  }
+
   const rotationCheck = verifyAndRotateFamily(currentFamilyId, currentGen);
   if (!rotationCheck.valid) {
     await revokeAllUserTokens(tokenRecord.user_id);
     throw new Error('Token reuse detected. All sessions revoked.');
-  }
-
-  if (new Date(tokenRecord.expires_at) < new Date()) {
-    await revokeToken(oldToken);
-    throw new Error('Refresh token expired');
   }
 
   await revokeToken(oldToken);

@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import threading
 import time
@@ -94,7 +95,7 @@ FEATURE_NAMES = [
 #
 # Configurable via the PROMOTION_MAE_IMPROVEMENT_THRESHOLD env var so the
 # gate can be tuned per-environment without a code change; falls back to
-# the 0.01 default if unset, unparsable, or negative.
+# the 0.01 default if unset, unparsable, non-finite, or negative.
 DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD = 0.01
 
 
@@ -109,9 +110,9 @@ def _load_promotion_mae_improvement_threshold() -> float:
         )
         return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
 
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         logger.warning(
-            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s is negative; falling back to default %.4f.",
+            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s must be finite and nonnegative; falling back to default %.4f.",
             value, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
         )
         return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD

@@ -1,269 +1,739 @@
-import { DomainError } from './order/domainError.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FuelAdvisorService, calculateFuelEfficiency } from '../../src/services/fuelAdvisorService.js';
+import { DomainError } from '../../src/services/order/domainError.js';
 
-/**
- * Calculates fuel efficiency (distance per litre).
- * 
- * @param {number|string} distanceKm - Distance traveled in kilometers
- * @param {number|string} fuelUsedLitres - Fuel consumed in litres
- * @param {Object|number} [options={}] - Options object or fallback number
- * @returns {number} Efficiency in km/litre
- */
-export function calculateFuelEfficiency(distanceKm, fuelUsedLitres, options = {}) {
-  const opts = typeof options === 'number' ? { fallback: options } : options;
-  const { fallback = 0, throwOnError = false } = opts;
-
-  const dist = Number(distanceKm);
-  const fuel = Number(fuelUsedLitres);
-
-  const isValidInput = 
-    Number.isFinite(dist) && 
-    Number.isFinite(fuel) && 
-    dist >= 0 && 
-    fuel > 0;
-
-  if (!isValidInput) {
-    if (throwOnError) {
-      throw new DomainError('Invalid distance or fuel amount for efficiency calculation');
-    }
-    return fallback;
-  }
-
-  return Number((dist / fuel).toFixed(2));
+function makeChain(result) {
+  const chain = {
+    from: vi.fn(() => chain),
+    select: vi.fn(() => chain),
+    eq: vi.fn(() => chain),
+    in: vi.fn(() => chain),
+    order: vi.fn(() => chain),
+    limit: vi.fn(() => chain),
+    maybeSingle: vi.fn().mockResolvedValue(result),
+  };
+  return chain;
 }
 
-export class FuelAdvisorService {
-  constructor({ supabase, weatherService, logger, fuelPrices = {}, fuelEfficiency = {} } = {}) {
-    this.supabase = supabase;
-    this.weatherService = weatherService;
-    this.logger = logger || {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    };
-    this.fuelPrices = {
-      truck: 100,
-      van: 90,
-      car: 95,
-      default: 100,
-      ...fuelPrices,
-    };
-    this.fuelEfficiency = {
-      truck: 3.5,
-      van: 8,
-      car: 12,
-      ...fuelEfficiency,
-    };
-  }
+function makeLogger() {
+  return {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  };
+}
 
-  static calculateFuelEfficiency(distanceKm, fuelUsedLitres, options) {
-    return calculateFuelEfficiency(distanceKm, fuelUsedLitres, options);
-  }
+function makeService(overrides = {}) {
+  const logger = overrides.logger || makeLogger();
+  const weatherService = overrides.weatherService || {
+    getWeatherForecast: vi.fn().mockResolvedValue({ temperature_c: 20 }),
+  };
+  const supabase = overrides.supabase || makeChain({ data: null, error: null });
+  const service = new FuelAdvisorService({
+    supabase,
+    weatherService,
+    logger,
+    fuelPrices: { truck: 100, van: 90, car: 95, default: 100 },
+    ...overrides,
+  });
+  return { service, logger, weatherService, supabase };
+}
 
-  calculateFuelEfficiency(distanceKm, fuelUsedLitres, options) {
-    return FuelAdvisorService.calculateFuelEfficiency(distanceKm, fuelUsedLitres, options);
-  }
+function expectFiniteEstimate(result) {
+  expect(result.success).toBe(true);
+  expect(Number.isFinite(result.distanceKm)).toBe(true);
+  expect(Number.isFinite(result.fuelUsedLitres)).toBe(true);
+  expect(Number.isFinite(result.fuelCost)).toBe(true);
+}
 
-  tripFuelEstimate(distanceKm, vehicleType, fuelPricePerLitre) {
-    const dist = Number(distanceKm);
-    if (distanceKm == null || Number.isNaN(dist) || !Number.isFinite(dist) || dist < 0) {
-      this.logger.debug('[FuelAdvisorService] Invalid trip distance supplied');
-      return {
+describe('calculateFuelEfficiency standalone function', () => {
+  it('calculates fuel efficiency correctly for valid inputs', () => {
+    expect(calculateFuelEfficiency(100, 25)).toBe(4);
+    expect(calculateFuelEfficiency(350, 100)).toBe(3.5);
+    expect(calculateFuelEfficiency(0, 10)).toBe(0);
+    expect(calculateFuelEfficiency('120', '30')).toBe(4);
+  });
+
+  it('handles custom fallback values for invalid inputs', () => {
+    expect(calculateFuelEfficiency(null, 25)).toBe(0);
+    expect(calculateFuelEfficiency(100, null)).toBe(0);
+    expect(calculateFuelEfficiency(undefined, 25, 5)).toBe(5);
+    expect(calculateFuelEfficiency(100, undefined, { fallback: 3.5 })).toBe(3.5);
+    expect(calculateFuelEfficiency('abc', 25, 2)).toBe(2);
+    expect(calculateFuelEfficiency(100, 'xyz', 2)).toBe(2);
+    expect(calculateFuelEfficiency(NaN, 25, 1)).toBe(1);
+    expect(calculateFuelEfficiency(100, NaN, 1)).toBe(1);
+    expect(calculateFuelEfficiency(-10, 25, 0)).toBe(0);
+    expect(calculateFuelEfficiency(100, 0, 0)).toBe(0);
+    expect(calculateFuelEfficiency(100, -5, 0)).toBe(0);
+    expect(calculateFuelEfficiency(Infinity, 25, 0)).toBe(0);
+    expect(calculateFuelEfficiency(100, Infinity, 0)).toBe(0);
+  });
+
+  it('throws DomainError when throwOnError is true for invalid inputs', () => {
+    expect(() => calculateFuelEfficiency(null, 20, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency(100, null, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency(-5, 20, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency(100, 0, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency(100, -10, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency('invalid', 20, { throwOnError: true })).toThrow(DomainError);
+    expect(() => calculateFuelEfficiency(100, 'invalid', { throwOnError: true })).toThrow(DomainError);
+  });
+});
+
+describe('FuelAdvisorService constructor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('accepts and stores the injected logger', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger });
+
+    expect(service.logger).toBe(logger);
+  });
+
+  it('stores the injected data and weather dependencies', () => {
+    const supabase = makeChain({ data: null, error: null });
+    const weatherService = { getWeatherForecast: vi.fn() };
+    const { service } = makeService({ supabase, weatherService });
+
+    expect(service.supabase).toBe(supabase);
+    expect(service.weatherService).toBe(weatherService);
+  });
+
+  it('provides standard efficiency values for supported vehicle types', () => {
+    const { service } = makeService();
+
+    expect(service.fuelEfficiency).toEqual({ truck: 3.5, van: 8, car: 12 });
+  });
+
+  it('allows callers to override fuel prices and efficiency values', () => {
+    const { service } = makeService({
+      fuelPrices: { truck: 110 },
+      fuelEfficiency: { truck: 4 },
+    });
+
+    expect(service.fuelPrices).toEqual({ truck: 110 });
+    expect(service.fuelEfficiency.truck).toBe(4);
+  });
+
+  it('provides calculateFuelEfficiency instance and static methods', () => {
+    const { service } = makeService();
+    expect(service.calculateFuelEfficiency(100, 20)).toBe(5);
+    expect(FuelAdvisorService.calculateFuelEfficiency(100, 20)).toBe(5);
+  });
+});
+
+describe('FuelAdvisorService.tripFuelEstimate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calculates litres and cost for a valid truck trip', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(350, 'truck', 100);
+
+    expectFiniteEstimate(result);
+    expect(result).toMatchObject({
+      distanceKm: 350,
+      vehicleType: 'truck',
+      fuelEfficiencyKmPerLitre: 3.5,
+      fuelUsedLitres: 100,
+      fuelPricePerLitre: 100,
+      fuelCost: 10000,
+    });
+  });
+
+  it('uses the configured price when no price override is supplied', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(80, 'van');
+
+    expect(result.success).toBe(true);
+    expect(result.fuelPricePerLitre).toBe(90);
+    expect(result.fuelUsedLitres).toBe(10);
+    expect(result.fuelCost).toBe(900);
+  });
+
+  it('uses the default configured price for an explicitly configured fallback', () => {
+    const { service } = makeService({ fuelPrices: { default: 75 } });
+
+    const result = service.tripFuelEstimate(35, 'truck');
+
+    expect(result.success).toBe(true);
+    expect(result.fuelPricePerLitre).toBe(75);
+    expect(result.fuelCost).toBe(750);
+  });
+
+  it('normalizes vehicle type casing', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(12, 'VAN', 90);
+
+    expect(result.success).toBe(true);
+    expect(result.vehicleType).toBe('van');
+    expect(result.fuelUsedLitres).toBe(1.5);
+  });
+
+  it('returns zero cost for zero distance', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(0, 'truck', 100);
+
+    expect(result).toMatchObject({
+      success: true,
+      distanceKm: 0,
+      fuelUsedLitres: 0,
+      fuelCost: 0,
+    });
+  });
+
+  it('accepts numeric strings for distance and fuel price', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate('70', 'truck', '105');
+
+    expect(result.success).toBe(true);
+    expect(result.distanceKm).toBe(70);
+    expect(result.fuelPricePerLitre).toBe(105);
+    expect(result.fuelCost).toBe(2100);
+  });
+
+  it.each([null, undefined, NaN, Infinity, -1, 'not-a-number'])(
+    'returns an error for invalid distance %p',
+    (distance) => {
+      const { service } = makeService();
+
+      const result = service.tripFuelEstimate(distance, 'truck', 100);
+
+      expect(result).toEqual({
         success: false,
         error: 'distanceKm must be a non-negative finite number',
-      };
-    }
+      });
+    },
+  );
 
-    const normalizedVehicle = typeof vehicleType === 'string' ? vehicleType.toLowerCase() : vehicleType;
-    const efficiency = this.fuelEfficiency[normalizedVehicle];
-    if (!efficiency) {
-      this.logger.debug(`[FuelAdvisorService] Unsupported vehicle type: ${vehicleType}`);
-      return {
-        success: false,
-        error: `Unsupported vehicle type: ${vehicleType}`,
-      };
-    }
+  it.each([null, undefined, '', 'unknown', 'motorcycle'])(
+    'returns an error for unsupported vehicle type %p',
+    (vehicleType) => {
+      const { service } = makeService();
 
-    let resolvedPrice = fuelPricePerLitre;
-    if (resolvedPrice == null) {
-      resolvedPrice = this.fuelPrices[normalizedVehicle] ?? this.fuelPrices.default;
-    }
+      const result = service.tripFuelEstimate(100, vehicleType, 100);
 
-    const price = Number(resolvedPrice);
-    if (Number.isNaN(price) || !Number.isFinite(price) || price < 0) {
-      this.logger.debug('[FuelAdvisorService] Fuel price is unavailable');
-      return {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unsupported vehicle type');
+    },
+  );
+
+  it('rejects an omitted vehicle type instead of defaulting to truck', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(100, undefined, 100);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Unsupported vehicle type: undefined',
+    });
+  });
+
+  it.each([null, undefined, NaN, Infinity, -1, 'invalid'])(
+    'returns an error when the fuel price is missing or invalid: %p',
+    (price) => {
+      const { service } = makeService({ fuelPrices: {} });
+
+      const result = service.tripFuelEstimate(100, 'truck', price);
+
+      expect(result).toEqual({
         success: false,
         error: 'fuelPricePerLitre must be a finite non-negative number',
-      };
+      });
+    },
+  );
+
+  it('allows a zero fuel price without producing NaN', () => {
+    const { service } = makeService();
+
+    const result = service.tripFuelEstimate(100, 'truck', 0);
+
+    expectFiniteEstimate(result);
+    expect(result.fuelCost).toBe(0);
+  });
+
+  it('logs invalid distance input at debug level', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger });
+
+    service.tripFuelEstimate(NaN, 'truck', 100);
+
+    expect(logger.debug).toHaveBeenCalledWith('[FuelAdvisorService] Invalid trip distance supplied');
+  });
+
+  it('logs unsupported vehicle input at debug level', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger });
+
+    service.tripFuelEstimate(100, 'bus', 100);
+
+    expect(logger.debug).toHaveBeenCalledWith('[FuelAdvisorService] Unsupported vehicle type: bus');
+  });
+
+  it('logs missing fuel price at debug level', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger, fuelPrices: {} });
+
+    service.tripFuelEstimate(100, 'truck');
+
+    expect(logger.debug).toHaveBeenCalledWith('[FuelAdvisorService] Fuel price is unavailable');
+  });
+
+  it('logs the completed estimate with its calculated values', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger });
+
+    const result = service.tripFuelEstimate(10, 'car', 100);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      '[FuelAdvisorService] Trip fuel estimate calculated',
+      result,
+    );
+  });
+
+  it('returns finite values for every supported default vehicle type', () => {
+    const { service } = makeService();
+
+    for (const vehicleType of ['truck', 'van', 'car']) {
+      expectFiniteEstimate(service.tripFuelEstimate(100, vehicleType, 100));
     }
+  });
+});
 
-    const fuelUsedLitres = Number((dist / efficiency).toFixed(2));
-    const fuelCost = Number((fuelUsedLitres * price).toFixed(2));
+describe('FuelAdvisorService.routeFuelEstimate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-    const result = {
+  it('returns zero totals for an empty route', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([], 'truck', 100);
+
+    expect(result).toEqual({
       success: true,
-      distanceKm: dist,
-      vehicleType: normalizedVehicle,
-      fuelEfficiencyKmPerLitre: efficiency,
-      fuelUsedLitres,
-      fuelPricePerLitre: price,
-      fuelCost,
+      legs: 0,
+      distanceKm: 0,
+      fuelUsedLitres: 0,
+      fuelCost: 0,
+      vehicleType: 'truck',
+    });
+  });
+
+  it('combines multiple distanceKm legs correctly', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate(
+      [{ distanceKm: 35 }, { distanceKm: 70 }, { distanceKm: 105 }],
+      'truck',
+      100,
+    );
+
+    expectFiniteEstimate(result);
+    expect(result).toMatchObject({
+      legs: 3,
+      distanceKm: 210,
+      fuelUsedLitres: 60,
+      fuelCost: 6000,
+      vehicleType: 'truck',
+      fuelPricePerLitre: 100,
+    });
+    expect(result.estimates).toHaveLength(3);
+  });
+
+  it('accepts numeric legs as a convenience input', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([10, 20, 30], 'van', 80);
+
+    expect(result.success).toBe(true);
+    expect(result.legs).toBe(3);
+    expect(result.distanceKm).toBe(60);
+    expect(result.fuelUsedLitres).toBe(7.5);
+    expect(result.fuelCost).toBe(600);
+  });
+
+  it('accepts distance and distance_km leg property names', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate(
+      [{ distance: 12 }, { distance_km: 8 }],
+      'car',
+      100,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.distanceKm).toBe(20);
+    expect(result.fuelUsedLitres).toBeCloseTo(20 / 12);
+    expect(result.fuelCost).toBeCloseTo((20 / 12) * 100);
+  });
+
+  it('supports a per-leg fuel price override', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate(
+      [{ distanceKm: 35, fuelPricePerLitre: 80 }, { distanceKm: 35, fuelPricePerLitre: 120 }],
+      'truck',
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.fuelCost).toBe(2000);
+    expect(result.estimates[0].fuelPricePerLitre).toBe(80);
+    expect(result.estimates[1].fuelPricePerLitre).toBe(120);
+  });
+
+  it('applies one route-level price override to every leg', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([{ distanceKm: 35 }, { distanceKm: 70 }], 'truck', 110);
+
+    expect(result.success).toBe(true);
+    expect(result.fuelCost).toBe(3300);
+    expect(result.estimates.every(estimate => estimate.fuelPricePerLitre === 110)).toBe(true);
+  });
+
+  it.each([null, undefined, {}, 'not-an-array'])(
+    'returns an error for invalid route legs: %p',
+    (legs) => {
+      const { service } = makeService();
+
+      const result = service.routeFuelEstimate(legs, 'truck', 100);
+
+      expect(result).toEqual({ success: false, error: 'legs must be an array' });
+    },
+  );
+
+  it('rejects an omitted route instead of defaulting to an empty route', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate(undefined, 'truck', 100);
+
+    expect(result).toEqual({ success: false, error: 'legs must be an array' });
+  });
+
+  it('returns the invalid leg error and stops aggregation', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate(
+      [{ distanceKm: 40 }, { distanceKm: -1 }, { distanceKm: 40 }],
+      'truck',
+      100,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'distanceKm must be a non-negative finite number',
+      legIndex: 1,
+    });
+  });
+
+  it('returns an error when a leg omits its distance', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([{ name: 'missing distance' }], 'truck', 100);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('distanceKm must be a non-negative finite number');
+  });
+
+  it('returns an invalid-distance error for a null route leg', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([null], 'truck', 100);
+
+    expect(result).toEqual({
+      success: false,
+      error: 'distanceKm must be a non-negative finite number',
+      legIndex: 0,
+    });
+  });
+
+  it('returns an error for an unsupported route vehicle type', () => {
+    const { service } = makeService();
+
+    const result = service.routeFuelEstimate([{ distanceKm: 100 }], 'spaceship', 100);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unsupported vehicle type');
+    expect(result.legIndex).toBe(0);
+  });
+
+  it('logs aggregate route calculations at info level', () => {
+    const logger = makeLogger();
+    const { service } = makeService({ logger });
+
+    const result = service.routeFuelEstimate([{ distanceKm: 35 }], 'truck', 100);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      '[FuelAdvisorService] Route fuel estimate calculated',
+      result,
+    );
+  });
+});
+
+describe('FuelAdvisorService.getFuelRecommendation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('recommends B20 with LOW risk when destination weather is warm (> 0C)', async () => {
+    const weatherService = {
+      getWeatherForecast: vi.fn().mockResolvedValue({ temperature_c: 25, condition: 'Sunny' }),
+    };
+    const { service } = makeService({ weatherService });
+    vi.spyOn(service, '_getAverageEngineLoad').mockResolvedValue(55);
+
+    const recommendation = await service.getFuelRecommendation('truck-123', 28.6139, 77.209);
+
+    expect(recommendation.recommended_blend).toBe('B20');
+    expect(recommendation.risk_level).toBe('LOW');
+    expect(recommendation.reasoning).toContain('Weather is warm enough');
+    expect(recommendation.factors.average_engine_load_percent).toBe(55);
+    expect(recommendation.factors.weather_forecast).toEqual({ temperature_c: 25, condition: 'Sunny' });
+  });
+
+  it('recommends B5 with HIGH risk when temperature <= 0C and avgEngineLoad < 60%', async () => {
+    const weatherService = {
+      getWeatherForecast: vi.fn().mockResolvedValue({ temperature_c: -5, condition: 'Snow' }),
+    };
+    const { service } = makeService({ weatherService });
+    vi.spyOn(service, '_getAverageEngineLoad').mockResolvedValue(45);
+
+    const recommendation = await service.getFuelRecommendation('truck-123', 34.0837, 74.7973);
+
+    expect(recommendation.recommended_blend).toBe('B5');
+    expect(recommendation.risk_level).toBe('HIGH');
+    expect(recommendation.reasoning).toContain('Sub-zero temperatures expected and recent engine load is low');
+    expect(recommendation.factors.average_engine_load_percent).toBe(45);
+  });
+
+  it('recommends B20 with MEDIUM risk when temperature <= 0C and avgEngineLoad >= 60%', async () => {
+    const weatherService = {
+      getWeatherForecast: vi.fn().mockResolvedValue({ temperature_c: -2, condition: 'Freezing' }),
+    };
+    const { service } = makeService({ weatherService });
+    vi.spyOn(service, '_getAverageEngineLoad').mockResolvedValue(75);
+
+    const recommendation = await service.getFuelRecommendation('truck-123', 34.0837, 74.7973);
+
+    expect(recommendation.recommended_blend).toBe('B20');
+    expect(recommendation.risk_level).toBe('MEDIUM');
+    expect(recommendation.reasoning).toContain('high average engine load will maintain sufficient heat');
+    expect(recommendation.factors.average_engine_load_percent).toBe(75);
+  });
+
+  it('falls back to safe default B20 and LOW risk when weather forecast is null or invalid', async () => {
+    const weatherService = {
+      getWeatherForecast: vi.fn().mockResolvedValue(null),
+    };
+    const { service, logger } = makeService({ weatherService });
+    vi.spyOn(service, '_getAverageEngineLoad').mockResolvedValue(50);
+
+    const recommendation = await service.getFuelRecommendation('truck-123', null, null);
+
+    expect(recommendation.recommended_blend).toBe('B20');
+    expect(recommendation.risk_level).toBe('LOW');
+    expect(recommendation.reasoning).toContain('Weather forecast unavailable');
+    expect(recommendation.factors.weather_forecast).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Weather service unavailable or returned invalid data'),
+    );
+  });
+
+  it('falls back to safe default B20 when weather temperature_c is NaN', async () => {
+    const weatherService = {
+      getWeatherForecast: vi.fn().mockResolvedValue({ temperature_c: NaN }),
+    };
+    const { service } = makeService({ weatherService });
+    vi.spyOn(service, '_getAverageEngineLoad').mockResolvedValue(50);
+
+    const recommendation = await service.getFuelRecommendation('truck-123', 28.0, 77.0);
+
+    expect(recommendation.recommended_blend).toBe('B20');
+    expect(recommendation.risk_level).toBe('LOW');
+  });
+});
+
+describe('FuelAdvisorService._getAverageEngineLoad', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calculates average engine load from recent telemetry events', async () => {
+    const mockEvents = [
+      { metadata: { engineLoad: 60 } },
+      { metadata: { engineLoad: 80 } },
+      { metadata: { engineLoad: null } },
+      { metadata: {} },
+    ];
+
+    const supabase = {
+      from: vi.fn((table) => {
+        if (table === 'orders') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'order-1', driver_id: 'driver-1' }, error: null }),
+          };
+        }
+        if (table === 'trips') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'trip-1' }, error: null }),
+          };
+        }
+        if (table === 'trip_events') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockResolvedValue({ data: mockEvents, error: null }),
+          };
+        }
+        return makeChain({ data: null, error: null });
+      }),
     };
 
-    this.logger.debug('[FuelAdvisorService] Trip fuel estimate calculated', result);
-    return result;
-  }
+    const { service } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-1');
 
-  routeFuelEstimate(legs, vehicleType, routeFuelPricePerLitre) {
-    if (!Array.isArray(legs)) {
-      return { success: false, error: 'legs must be an array' };
-    }
+    expect(load).toBe(70); // (60 + 80) / 2
+  });
 
-    let totalDistance = 0;
-    let totalFuel = 0;
-    let totalCost = 0;
-    const estimates = [];
-
-    for (let i = 0; i < legs.length; i++) {
-      const leg = legs[i];
-      if (leg == null) {
-        return { success: false, error: 'distanceKm must be a non-negative finite number', legIndex: i };
-      }
-
-      const dist = typeof leg === 'number' ? leg : (leg.distanceKm ?? leg.distance ?? leg.distance_km);
-      const legPrice = leg.fuelPricePerLitre ?? routeFuelPricePerLitre;
-
-      const estimate = this.tripFuelEstimate(dist, vehicleType, legPrice);
-      if (!estimate.success) {
-        return { ...estimate, legIndex: i };
-      }
-
-      totalDistance += estimate.distanceKm;
-      totalFuel += estimate.fuelUsedLitres;
-      totalCost += estimate.fuelCost;
-      estimates.push(estimate);
-    }
-
-    const aggregated = {
-      success: true,
-      legs: legs.length,
-      distanceKm: Number(totalDistance.toFixed(2)),
-      fuelUsedLitres: Number(totalFuel.toFixed(2)),
-      fuelCost: Number(totalCost.toFixed(2)),
-      vehicleType: typeof vehicleType === 'string' ? vehicleType.toLowerCase() : vehicleType,
-      fuelPricePerLitre: routeFuelPricePerLitre,
-      estimates,
+  it('returns default 50 when no active order is found', async () => {
+    const supabase = {
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      })),
     };
 
-    this.logger.info('[FuelAdvisorService] Route fuel estimate calculated', aggregated);
-    return aggregated;
-  }
+    const { service } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-unknown');
 
-  async getFuelRecommendation(truckId, lat, lon) {
-    let weather = null;
-    try {
-      if (this.weatherService && typeof this.weatherService.getWeatherForecast === 'function') {
-        weather = await this.weatherService.getWeatherForecast(lat, lon);
-      }
-    } catch (err) {
-      this.logger.warn(`[FuelAdvisorService] Weather service error: ${err.message}`);
-    }
+    expect(load).toBe(50);
+  });
 
-    const avgEngineLoad = await this._getAverageEngineLoad(truckId);
-
-    if (!weather || typeof weather.temperature_c !== 'number' || Number.isNaN(weather.temperature_c)) {
-      this.logger.warn('[FuelAdvisorService] Weather service unavailable or returned invalid data');
-      return {
-        recommended_blend: 'B20',
-        risk_level: 'LOW',
-        reasoning: 'Weather forecast unavailable. Defaulting to standard B20 blend.',
-        factors: {
-          average_engine_load_percent: avgEngineLoad,
-          weather_forecast: null,
-        },
-      };
-    }
-
-    const temp = weather.temperature_c;
-    if (temp <= 0 && avgEngineLoad < 60) {
-      return {
-        recommended_blend: 'B5',
-        risk_level: 'HIGH',
-        reasoning: 'Sub-zero temperatures expected and recent engine load is low.',
-        factors: {
-          average_engine_load_percent: avgEngineLoad,
-          weather_forecast: weather,
-        },
-      };
-    } else if (temp <= 0 && avgEngineLoad >= 60) {
-      return {
-        recommended_blend: 'B20',
-        risk_level: 'MEDIUM',
-        reasoning: 'Sub-zero temperatures expected, but high average engine load will maintain sufficient heat.',
-        factors: {
-          average_engine_load_percent: avgEngineLoad,
-          weather_forecast: weather,
-        },
-      };
-    }
-
-    return {
-      recommended_blend: 'B20',
-      risk_level: 'LOW',
-      reasoning: 'Weather is warm enough for standard operation.',
-      factors: {
-        average_engine_load_percent: avgEngineLoad,
-        weather_forecast: weather,
-      },
+  it('returns default 50 when order lookup has an error', async () => {
+    const supabase = {
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: null, error: new Error('DB error') }),
+      })),
     };
-  }
 
-  async _getAverageEngineLoad(truckId) {
-    try {
-      if (!this.supabase) return 50;
+    const { service } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-1');
 
-      const orderRes = await this.supabase
-        .from('orders')
-        .select('id, driver_id')
-        .eq('truck_id', truckId)
-        .in('status', ['in_progress', 'active'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    expect(load).toBe(50);
+  });
 
-      if (orderRes.error || !orderRes.data) return 50;
+  it('returns default 50 when order has no associated trip', async () => {
+    const supabase = {
+      from: vi.fn((table) => {
+        if (table === 'orders') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+          };
+        }
+        if (table === 'trips') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        return makeChain({ data: null, error: null });
+      }),
+    };
 
-      const tripRes = await this.supabase
-        .from('trips')
-        .select('id')
-        .eq('order_id', orderRes.data.id)
-        .maybeSingle();
+    const { service } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-1');
 
-      if (tripRes.error || !tripRes.data) return 50;
+    expect(load).toBe(50);
+  });
 
-      const eventsRes = await this.supabase
-        .from('trip_events')
-        .select('metadata')
-        .eq('trip_id', tripRes.data.id)
-        .order('timestamp', { ascending: false })
-        .limit(20);
+  it('returns default 50 when trip events query returns no events or error', async () => {
+    const supabase = {
+      from: vi.fn((table) => {
+        if (table === 'orders') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+          };
+        }
+        if (table === 'trips') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'trip-1' }, error: null }),
+          };
+        }
+        if (table === 'trip_events') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+          };
+        }
+        return makeChain({ data: null, error: null });
+      }),
+    };
 
-      if (eventsRes.error || !Array.isArray(eventsRes.data) || eventsRes.data.length === 0) {
-        return 50;
-      }
+    const { service } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-1');
 
-      const loads = eventsRes.data
-        .map(e => e?.metadata?.engineLoad)
-        .filter(val => typeof val === 'number' && !Number.isNaN(val));
+    expect(load).toBe(50);
+  });
 
-      if (loads.length === 0) return 50;
+  it('returns fallback 50 and logs error when an unexpected exception is thrown', async () => {
+    const supabase = {
+      from: vi.fn(() => {
+        throw new Error('Unexpected network failure');
+      }),
+    };
 
-      const sum = loads.reduce((acc, val) => acc + val, 0);
-      return Math.round(sum / loads.length);
-    } catch (err) {
-      this.logger.error(`[FuelAdvisorService] Error computing engine load: ${err.message}`);
-      return 50;
-    }
-  }
-}
+    const { service, logger } = makeService({ supabase });
+    const load = await service._getAverageEngineLoad('truck-1');
+
+    expect(load).toBe(50);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'FUEL_ENGINE_LOAD_ERROR',
+      }),
+      expect.any(String)
+    );
+  });
+});

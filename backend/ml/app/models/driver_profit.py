@@ -10,14 +10,14 @@ predictions meaningful.
 """
 
 import logging
-from typing import Optional
+import threading
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
-from .base import save_model, load_model_snapshot, model_exists
+from .base import load_model_snapshot, model_exists, save_model
 
 logger = logging.getLogger(__name__)
 
@@ -118,32 +118,41 @@ class DriverProfitPredictor:
     """Gradient-boosting model that predicts net driver profit for a trip."""
 
     def __init__(self) -> None:
-        self.model: Optional[GradientBoostingRegressor] = None
-        self.feature_ranges = dict(TRAINING_FEATURE_RANGES)
+        self.model: GradientBoostingRegressor | None = None
+        self.feature_ranges = {
+            feature: dict(bounds) for feature, bounds in TRAINING_FEATURE_RANGES.items()
+        }
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
 
     # -- persistence --------------------------------------------------------
 
     def train(self) -> dict:
         """Train on synthetic data and persist via ``base.save_model``."""
+        with self._lifecycle_lock:
+            return self._train_candidate()
+
+    def _train_candidate(self) -> dict:
+        """Prepare/persist privately; failures leave the published state intact."""
         X, y = _generate_synthetic_data()
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42,
         )
 
-        self.model = GradientBoostingRegressor(
+        candidate = GradientBoostingRegressor(
             n_estimators=200,
             max_depth=5,
             learning_rate=0.1,
             random_state=42,
         )
-        self.model.fit(X_train, y_train)
+        candidate.fit(X_train, y_train)
 
-        y_pred = self.model.predict(X_test)
+        y_pred = candidate.predict(X_test)
         mae = mean_absolute_error(y_test, y_pred)
         rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
         r2 = r2_score(y_test, y_pred)
 
-        self.feature_ranges = {
+        feature_ranges = {
             feature: dict(bounds)
             for feature, bounds in TRAINING_FEATURE_RANGES.items()
         }
@@ -156,16 +165,22 @@ class DriverProfitPredictor:
             "feature_names": FEATURE_NAMES,
         }
         training_meta = {
-            "feature_ranges": self.feature_ranges,
+            "feature_ranges": feature_ranges,
             "feature_statistics": _feature_statistics(X),
         }
 
-        save_model(self.model, MODEL_NAME, metrics, training_meta=training_meta)
+        save_model(candidate, MODEL_NAME, metrics, training_meta=training_meta)
+        self._publish(candidate, feature_ranges)
         logger.info("Driver-profit model trained. R2: %.3f, MAE: %.1f", r2, mae)
         return metrics
 
     def load(self) -> None:
         """Load a persisted model, auto-training if none exists or metadata is incomplete."""
+        with self._lifecycle_lock:
+            self._load_candidate()
+
+    def _load_candidate(self) -> None:
+        """Prepare all domain metadata before making the loaded model visible."""
         if not model_exists(MODEL_NAME):
             self.train()
             return
@@ -184,24 +199,52 @@ class DriverProfitPredictor:
             self.train()
             return
 
-        self.model = loaded
-        self.feature_ranges = {
+        prepared_ranges = {
             feature: {
                 "min": float(feature_ranges[feature]["min"]),
                 "max": float(feature_ranges[feature]["max"]),
             }
             for feature in FEATURE_NAMES
         }
+        for feature, bounds in prepared_ranges.items():
+            if not (np.isfinite(bounds["min"]) and np.isfinite(bounds["max"])):
+                raise ValueError(f"Training range for {feature} must be finite")
+            if bounds["min"] > bounds["max"]:
+                raise ValueError(f"Training range for {feature} is inverted")
+        self._publish(loaded, prepared_ranges)
+
+    def _publish(self, model, feature_ranges: dict) -> None:
+        """Replace a complete serving pair under the short state lock."""
+        with self._state_lock:
+            self.model = model
+            self.feature_ranges = feature_ranges
+
+    def _capture_state(self) -> tuple:
+        """Capture warm state promptly; serialize and recheck cold initialization."""
+        with self._state_lock:
+            if self.model is not None:
+                return self.model, self.feature_ranges
+        # Lock order is lifecycle -> state. Never wait on lifecycle while
+        # holding state; warm requests do not join a candidate's expensive work.
+        with self._lifecycle_lock:
+            with self._state_lock:
+                needs_load = self.model is None
+            if needs_load:
+                self._load_candidate()
+            with self._state_lock:
+                if self.model is None:
+                    raise RuntimeError("Driver-profit initialization produced no model")
+                return self.model, self.feature_ranges
 
     # -- inference ----------------------------------------------------------
 
-    def _validate_feature_domain(self, values: dict[str, float]) -> None:
+    def _validate_feature_domain(self, values: dict[str, float], feature_ranges: dict) -> None:
         """Reject requests containing features outside the training domain."""
         for feature, value in values.items():
             if not np.isfinite(value):
                 raise ValueError(f"{feature} must be a finite number")
 
-            bounds = self.feature_ranges.get(feature)
+            bounds = feature_ranges.get(feature)
             if not bounds:
                 raise ValueError(f"No training range is available for {feature}")
 
@@ -240,8 +283,7 @@ class DriverProfitPredictor:
             ``confidence_interval`` – ``{lower, upper}`` derived from
             ensemble staged-prediction spread.
         """
-        if self.model is None:
-            self.load()
+        model, feature_ranges = self._capture_state()
 
         values = {
             "route_distance": route_distance,
@@ -251,7 +293,7 @@ class DriverProfitPredictor:
             "cargo_weight": cargo_weight,
             "trip_duration": trip_duration,
         }
-        self._validate_feature_domain(values)
+        self._validate_feature_domain(values, feature_ranges)
 
         features = np.array([[
             route_distance,
@@ -262,7 +304,7 @@ class DriverProfitPredictor:
             trip_duration,
         ]])
 
-        prediction = float(self.model.predict(features)[0])
+        prediction = float(model.predict(features)[0])
 
         # Confidence interval.
         # `staged_predict` yields the CUMULATIVE prediction after each boosting
@@ -273,7 +315,7 @@ class DriverProfitPredictor:
         # meaningful proxy for model disagreement/uncertainty, and we clamp the
         # lower bound to be non-negative.
         staged_preds = np.array(
-            [pred for pred in self.model.staged_predict(features)]
+            [pred for pred in model.staged_predict(features)]
         ).flatten()
         if len(staged_preds) > 1:
             increments = np.diff(staged_preds)

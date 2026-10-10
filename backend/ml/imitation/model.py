@@ -1,11 +1,18 @@
+import logging
+from numbers import Integral
+from typing import Dict, List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-import logging
-from collections import deque
-import random
+from imitation.advisory import (
+    MAX_RULES,
+    AdvisoryAdmissionError,
+    evaluate_rules,
+    own_rule,
+    recommend,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -277,59 +284,24 @@ class SafetyConstraints:
     """Safety constraints for driver behavior"""
     
     def __init__(self):
-        self.safety_rules = []
-        
-        logger.info(f"✅ Safety Constraints initialized")
-    
+        self._rules = []
+
+    @property
+    def safety_rules(self):
+        # Mutate through add_rule; callers receive a defensive rule collection.
+        return [dict(rule) for rule in self._rules]
+
     def add_rule(self, rule: Dict):
-        """Add safety rule"""
-        self.safety_rules.append(rule)
-    
+        owned = own_rule(rule)
+        if len(self._rules) >= MAX_RULES:
+            raise AdvisoryAdmissionError('rule collection exceeds admitted capacity')
+        self._rules.append(owned)
+
     def check_safety(self, state: np.ndarray, action: np.ndarray) -> Tuple[bool, str]:
-        """Check if action is safe"""
-        for rule in self.safety_rules:
-            if rule['type'] == 'speed':
-                if self._check_speed_rule(state, action, rule):
-                    return False, f"Speed violation: {rule['description']}"
-            
-            elif rule['type'] == 'lane':
-                if self._check_lane_rule(state, action, rule):
-                    return False, f"Lane violation: {rule['description']}"
-            
-            elif rule['type'] == 'distance':
-                if self._check_distance_rule(state, action, rule):
-                    return False, f"Distance violation: {rule['description']}"
-            
-            elif rule['type'] == 'brake':
-                if self._check_brake_rule(state, action, rule):
-                    return False, f"Brake violation: {rule['description']}"
-        
-        return True, "Safe"
-    
-    def _check_speed_rule(self, state: np.ndarray, action: np.ndarray, rule: Dict) -> bool:
-        """Check speed limit rule"""
-        speed = state[0] if len(state) > 0 else 0
-        max_speed = rule.get('max_speed', 80)
-        return speed > max_speed
-    
-    def _check_lane_rule(self, state: np.ndarray, action: np.ndarray, rule: Dict) -> bool:
-        """Check lane keeping rule"""
-        lane_deviation = state[1] if len(state) > 1 else 0
-        max_deviation = rule.get('max_deviation', 0.5)
-        return abs(lane_deviation) > max_deviation
-    
-    def _check_distance_rule(self, state: np.ndarray, action: np.ndarray, rule: Dict) -> bool:
-        """Check following distance rule"""
-        distance = state[2] if len(state) > 2 else 100
-        min_distance = rule.get('min_distance', 50)
-        return distance < min_distance
-    
-    def _check_brake_rule(self, state: np.ndarray, action: np.ndarray, rule: Dict) -> bool:
-        """Check braking rule"""
-        brake = action[2] if len(action) > 2 else 0
-        max_brake = rule.get('max_brake', 0.8)
-        return brake > max_brake
-    
+        """Evaluate configured toy predicates; unknown observations never satisfy them."""
+        result = evaluate_rules(self._rules, state, action)
+        return result['safe'] is True, result['message']
+
     def get_default_rules(self) -> List[Dict]:
         """Get default safety rules"""
         return [
@@ -356,6 +328,8 @@ class ImitationLearningModel:
         self.inverse_rl = InverseRL(state_dim, action_dim, hidden_dim)
         self.policy_gradient = PolicyGradient(state_dim, action_dim, hidden_dim)
         self.safety = SafetyConstraints()
+        for rule in self.safety.get_default_rules():
+            self.safety.add_rule(rule)
         
         self.bc_optimizer = torch.optim.Adam(self.behavioral_cloning.parameters(), lr=1e-3)
         
@@ -369,44 +343,41 @@ class ImitationLearningModel:
         batch_size: int = 32
     ) -> Dict:
         """Train behavioral cloning"""
+        for name, value in (('epochs', epochs), ('batch_size', batch_size)):
+            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        parameter = next(self.behavioral_cloning.parameters())
+        # Own and admit the entire dataset before shuffle, mode or Adam changes.
+        states = torch.as_tensor(expert_states, dtype=parameter.dtype, device=parameter.device).detach().clone()
+        actions = torch.as_tensor(expert_actions, dtype=parameter.dtype, device=parameter.device).detach().clone()
+        if states.ndim != 2 or not len(states) or states.shape[1] != self.state_dim:
+            raise ValueError("states must be nonempty rows with state_dim features")
+        if actions.shape != (len(states), self.action_dim):
+            raise ValueError("actions must have one action_dim vector per state row")
+        if not torch.isfinite(states).all() or not torch.isfinite(actions).all():
+            raise ValueError("expert demonstrations must be finite")
+
         losses = []
-        
+        self.behavioral_cloning.train()
         for epoch in range(epochs):
-            # Shuffle data
-            indices = np.random.permutation(len(expert_states))
-            states_shuffled = expert_states[indices]
-            actions_shuffled = expert_actions[indices]
-            
-            total_loss = 0
-            num_batches = 0
-            
-            for i in range(0, len(expert_states), batch_size):
-                batch_states = torch.tensor(states_shuffled[i:i+batch_size], dtype=torch.float32)
-                batch_actions = torch.tensor(actions_shuffled[i:i+batch_size], dtype=torch.float32)
-                
-                # Forward pass
-                pred_actions = self.behavioral_cloning(batch_states)
-                loss = F.mse_loss(pred_actions, batch_actions)
-                
-                # Backward pass
+            indices = np.random.permutation(len(states))
+            total_loss = 0.0
+            for start in range(0, len(states), batch_size):
+                rows = torch.as_tensor(indices[start:start + batch_size], device=parameter.device)
+                prediction = self.behavioral_cloning(states[rows])
+                loss = F.mse_loss(prediction, actions[rows])
+                if not torch.isfinite(loss):
+                    raise ValueError("cloning objective cannot be represented finitely")
                 self.bc_optimizer.zero_grad()
                 loss.backward()
+                # Infinite max_norm preserves finite gradients without clipping bias.
+                torch.nn.utils.clip_grad_norm_(self.behavioral_cloning.parameters(),
+                                               float('inf'), error_if_nonfinite=True)
                 self.bc_optimizer.step()
-                
-                total_loss += loss.item()
-                num_batches += 1
-            
-            avg_loss = total_loss / num_batches
-            losses.append(avg_loss)
-            
-            if (epoch + 1) % 20 == 0:
-                logger.info(f"BC Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1]
-        }
-    
+                total_loss += loss.item() * len(rows)
+            losses.append(total_loss / len(states))
+        return {'losses': losses, 'final_loss': losses[-1]}
+
     def train_irl(
         self,
         expert_states: np.ndarray,
@@ -431,33 +402,9 @@ class ImitationLearningModel:
         return self.policy_gradient.train(trajectories, epochs)
     
     def predict_action(self, state: np.ndarray, safety_check: bool = True) -> Dict:
-        """Predict action with safety check"""
-        # Behavioral cloning prediction
-        bc_action = self.behavioral_cloning.predict_action(state)
-        
-        # Policy gradient prediction
-        pg_action = self.policy_gradient.get_action(state, explore=False)
-        
-        # Combine predictions
-        action = (bc_action + pg_action) / 2
-        action = np.clip(action, -1, 1)
-        
-        # Safety check
-        if safety_check:
-            is_safe, message = self.safety.check_safety(state, action)
-            if not is_safe:
-                logger.warning(f"Unsafe action detected: {message}")
-                # Adjust action to be safe
-                action = self._adjust_action(state, action)
-        
-        return {
-            'action': action.tolist(),
-            'bc_action': bc_action.tolist(),
-            'pg_action': pg_action.tolist(),
-            'safe': safety_check,
-            'message': 'Safe' if safety_check else 'Unsafe'
-        }
-    
+        """Continuous advisory plus separate categorical identity and honest toy predicates."""
+        return recommend(self, state, safety_check)
+
     def _adjust_action(self, state: np.ndarray, action: np.ndarray) -> np.ndarray:
         """Adjust action to satisfy safety constraints"""
         adjusted = action.copy()

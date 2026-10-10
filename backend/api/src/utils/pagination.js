@@ -22,8 +22,10 @@ export function parsePage(raw) {
 
 export function parseLimit(raw, max = DEFAULTS.maxLimit) {
   const l = normalizeNumber(raw);
-  if (!Number.isFinite(l) || l < 1) return DEFAULTS.limit;
-  const maxLimit = Number.isFinite(max) ? max : DEFAULTS.maxLimit;
+  const maxLimit = Number.isFinite(max)
+    ? Math.max(1, Math.floor(max))
+    : DEFAULTS.maxLimit;
+  if (!Number.isFinite(l) || l < 1) return Math.min(DEFAULTS.limit, maxLimit);
   return Math.min(Math.floor(l), maxLimit);
 }
 
@@ -38,7 +40,7 @@ export function buildPagination(params = {}) {
 
   const limit = Number.isFinite(rawLimit)
     ? Math.min(Math.max(1, Math.floor(rawLimit)), maxLimit)
-    : DEFAULTS.limit;
+    : Math.min(DEFAULTS.limit, maxLimit);
 
   let page;
   let offset;

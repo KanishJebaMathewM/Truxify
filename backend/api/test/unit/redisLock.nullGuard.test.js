@@ -93,13 +93,10 @@ describe('RedisLock Null Safety (#9427)', () => {
         });
 
         it('should throw LockAcquisitionError when redisClient is null', async () => {
-            // This test verifies the null guard behavior
-            // In actual execution, if redisClient is null, it should throw
+            // The null guard rejects with LockAcquisitionError instead of
+            // resolving (or throwing a TypeError on the null client).
             await expect(acquireLock('test-resource', 30000))
-                .resolves.toBeDefined()
-                .catch((err) => {
-                    expect(err).toBeInstanceOf(LockAcquisitionError);
-                });
+                .rejects.toBeInstanceOf(LockAcquisitionError);
         });
 
         it('should throw LockAcquisitionError for empty resourceKey', async () => {

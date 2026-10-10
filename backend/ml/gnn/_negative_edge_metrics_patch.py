@@ -31,9 +31,18 @@ class GraphNetworkBuilder(_BaseGraphNetworkBuilder):
 class RouteOptimizer(_BaseRouteOptimizer):
     """Reject negative route scores instead of masking them with a clamp."""
 
-    def _calculate_score(self, embeddings, current, neighbor, objectives, graph_data, node_map=None):
+    def _calculate_score(self, embeddings, current, neighbor, objectives, graph_data, node_map=None, edge_data=None):
         score = 0.0
-        edge_data = graph_data.graph[current][neighbor]
+        if edge_data is None:
+            edge_container = graph_data.graph[current][neighbor]
+            if graph_data.graph.is_multigraph():
+                # Fastest parallel segment, matching _find_pareto_routes.
+                edge_data = min(
+                    edge_container.values(),
+                    key=lambda data: float(data.get('time', 0)),
+                )
+            else:
+                edge_data = edge_container
         weights = {
             "time": 1.0,
             "cost": 0.5,

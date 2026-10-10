@@ -1,4 +1,61 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+/**
+ * Unit Tests for WorkZone Service
+ * 
+ * Tests delay prediction logic, fail-open error handling, 
+ * and bypass waypoint generation.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { predictWorkZoneDelays, generateBypassWaypoint } from '../../src/services/workZoneService.js';
+
+describe('WorkZone Service Unit Tests', () => {
+  describe('predictWorkZoneDelays', () => {
+    it('should return hasSevereDelay=false when allPoints is empty', async () => {
+      const result = await predictWorkZoneDelays([]);
+      
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('hasSevereDelay', false);
+    });
+
+    it('should return hasSevereDelay=false on error (fail-open behavior)', async () => {
+      // Passing invalid data (null) to simulate an internal exception or failure
+      const result = await predictWorkZoneDelays(null);
+      
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('hasSevereDelay', false);
+    });
+  });
+
+  describe('generateBypassWaypoint', () => {
+    it('should return null for invalid input', () => {
+      const result1 = generateBypassWaypoint(null);
+      const result2 = generateBypassWaypoint(undefined);
+      const result3 = generateBypassWaypoint({});
+
+      expect(result1).toBeNull();
+      expect(result2).toBeNull();
+      expect(result3).toBeNull();
+    });
+
+    it('should return a valid bypass point for valid input', () => {
+      const workZone = {
+        lat: 13.0827,
+        lng: 80.2707,
+        radiusKm: 5,
+      };
+
+      const result = generateBypassWaypoint(workZone);
+
+      expect(result).toBeDefined();
+      expect(result).not.toBeNull();
+      expect(typeof result.lat).toBe('number');
+      expect(typeof result.lng).toBe('number');
+      expect(result.lat).not.toEqual(workZone.lat);
+      expect(result.lng).not.toEqual(workZone.lng);
+    });
+  });
+});
 import workZoneService, {
   WorkZoneService,
   predictWorkZoneDelays,
@@ -857,9 +914,10 @@ describe('WorkZoneService Unit Tests', () => {
         expect(result.problematicPoint).not.toBeNull();
 
         expect(logger.info).toHaveBeenCalledWith(
-          expect.stringContaining(
-            '[WorkZoneService] Predicted severe commercial delay'
-          )
+          expect.objectContaining({
+            event: 'WORKZONE_SEVERE_DELAY_PREDICTED',
+          }),
+          expect.any(String)
         );
       }
     });
@@ -892,9 +950,10 @@ describe('WorkZoneService Unit Tests', () => {
       });
 
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining(
-          '[WorkZoneService] Error predicting work-zone delays'
-        )
+        expect.objectContaining({
+          event: 'WORKZONE_PREDICTION_ERROR',
+        }),
+        expect.any(String)
       );
     });
   });

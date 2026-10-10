@@ -333,7 +333,7 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
       driverId: "driver-1",
       otp: "123456",
     });
-    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n);
+    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n, expect.any(String)); // idempotency key (c29260a73)
     expect(repo.executeRpc).toHaveBeenCalled();
     expect(result.escrowUpdateFailed).toBe(false);
   });
@@ -368,7 +368,7 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
       driverId: "driver-1",
       otp: "123456",
     });
-    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n);
+    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 600000000000000000n, expect.any(String)); // idempotency key (c29260a73)
     expect(repo.executeRpc).toHaveBeenCalled();
     expect(result.escrowUpdateFailed).toBe(false);
   });
@@ -403,7 +403,7 @@ describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
       driverId: "driver-1",
       otp: "123456",
     });
-    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 1500000000000000000n);
+    expect(escrowReleaseFn).toHaveBeenCalledWith("ORD-GEO", 1500000000000000000n, expect.any(String));
   });
 
   it("aborts before escrow release when the driver is outside the geofence", async () => {

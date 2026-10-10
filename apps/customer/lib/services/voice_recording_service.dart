@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 /// Platform-agnostic voice recording service.
@@ -48,7 +50,11 @@ class VoiceRecordingService {
         bitRate: 64000,
       );
 
-      await _recorder.start(config);
+      final dir = await getTemporaryDirectory();
+      final recordingPath =
+          '${dir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.opus';
+
+      await _recorder.start(config, path: recordingPath);
 
       _isRecording = true;
 
@@ -75,9 +81,8 @@ class VoiceRecordingService {
         return null;
       }
 
-      // The record package handles the platform-specific
-      // audio storage/recording implementation.
-      final audioBytes = await _recorder.read(path);
+      // record v5 removed read(): read the file the recorder wrote.
+      final audioBytes = await File(path).readAsBytes();
 
       return audioBytes;
     } catch (e) {

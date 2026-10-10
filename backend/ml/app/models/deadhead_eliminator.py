@@ -37,6 +37,8 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         math.sin(dlat / 2) ** 2
         + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(dlon / 2) ** 2
     )
+    # Valid antipodes can round slightly above one in floating-point arithmetic.
+    a = min(max(a, 0.0), 1.0)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return _EARTH_RADIUS_KM * c
 

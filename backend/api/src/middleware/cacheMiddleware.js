@@ -45,10 +45,16 @@ export function cacheMiddleware(ttlSeconds, keyPrefix, keyGenerator) {
     res.json = function (body) {
       res.json = originalJson;
 
-      if (res.statusCode >= 200 && res.statusCode < 300 && body !== null && body !== undefined) {
-        upstashRedisClient.set(cacheKey, body, { ex: ttlSeconds }).catch((err) => {
+      // The write path must mirror the read path's failure tolerance: a
+      // missing/unconfigured Redis client must never fail the request.
+      if (upstashRedisClient && res.statusCode >= 200 && res.statusCode < 300 && body !== null && body !== undefined) {
+        try {
+          upstashRedisClient.set(cacheKey, body, { ex: ttlSeconds }).catch((err) => {
+            logger.warn({ err, cacheKey }, '[Cache] Write error');
+          });
+        } catch (err) {
           logger.warn({ err, cacheKey }, '[Cache] Write error');
-        });
+        }
       }
 
       return originalJson.call(this, body);

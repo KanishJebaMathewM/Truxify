@@ -80,13 +80,23 @@ export function evaluateBypassEligibility(truckData = {}) {
   if (typeof maxWeightLimit !== 'number' || !Number.isFinite(maxWeightLimit)) {
     return false;
   }
-
   if (safetyScore < MIN_SAFETY_SCORE) {
     return false;
   }
-  if (axleWeight > maxWeightLimit) {
-    return false;
-  }
+
+    // Reject non-numeric, non-finite and non-positive weights. `typeof` alone
+    // is not enough: a caller that coerces its database value with Number()
+    // turns a NULL column into the number 0 before we ever see it, and 0 would
+    // otherwise look like the safest possible load.
+    if (typeof axleWeight !== 'number' || !Number.isFinite(axleWeight) || axleWeight <= 0) {
+        return false;
+    }
+    if (typeof maxWeightLimit !== 'number' || !Number.isFinite(maxWeightLimit) || maxWeightLimit <= 0) {
+        return false;
+    }
+    if (axleWeight > maxWeightLimit) {
+        return false;
+    }
 
   if (Array.isArray(axles) && axles.length >= 2) {
     const compliance = evaluateBridgeFormulaCompliance({

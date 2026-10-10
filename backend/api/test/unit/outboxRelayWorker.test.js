@@ -45,14 +45,22 @@ vi.mock("../../src/config/db.js", () => ({ supabase: null, supabaseAdmin: null }
 const worker = await import("../../src/workers/outboxRelayWorker.js");
 
 describe("outboxRelayWorker", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockOutboxService.renewClaim.mockResolvedValue(true);
-    mockOutboxService.markFailed.mockResolvedValue(true);
-    mockEventBus.publishAndReport.mockResolvedValue({
-      published: true, deduplicated: false, adapterAttempted: 1,
-      adapterFailures: 0, adapterErrors: [],
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+
+  mockOutboxService.renewClaim.mockResolvedValue(true);
+  mockOutboxService.markFailed.mockResolvedValue(true);
+  mockOutboxService.markPublished.mockResolvedValue(true);
+
+  mockEventBus.publishAndReport.mockResolvedValue({
+    published: true,
+    deduplicated: false,
+    consumed: true,
+    adapterAttempted: 1,
+    adapterFailures: 0,
+    adapterErrors: [],
+  });
+});
     worker.stopOutboxRelayWorker();
   });
 
@@ -224,6 +232,124 @@ describe("outboxRelayWorker", () => {
     });
 
     expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-5");
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
+      "evt-5",
+      expect.any(String),
+      expect.stringContaining("unsuccessful"),
+    );
+    worker.stopOutboxRelayWorker();
+  });
+
+  it("does NOT mark an event published when outcome.published is false", async () => {
+    mockOutboxService.claimBatch.mockResolvedValue([
+      {
+        id: "evt-6",
+        event_type: "order.created",
+        aggregate_id: "order-6",
+        aggregate_type: "order",
+        payload: {},
+      },
+    ]);
+    mockEventBus.publishAndReport.mockResolvedValue({
+      published: false,
+      deduplicated: false,
+      consumed: false,
+      adapterAttempted: 1,
+      adapterFailures: 0,
+      adapterErrors: [],
+    });
+
+    worker.startOutboxRelayWorker();
+    await vi.waitFor(() => {
+      expect(mockOutboxService.markFailed).toHaveBeenCalled();
+    });
+
+    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-6");
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
+      "evt-6",
+      expect.any(String),
+      expect.stringContaining("unsuccessful"),
+    );
+    worker.stopOutboxRelayWorker();
+  });
+
+  it("does NOT mark an event published when event is deduplicated", async () => {
+    mockOutboxService.claimBatch.mockResolvedValue([
+      {
+        id: "evt-7",
+        event_type: "order.created",
+        aggregate_id: "order-7",
+        aggregate_type: "order",
+        payload: {},
+      },
+    ]);
+    mockEventBus.publishAndReport.mockResolvedValue({
+      published: false,
+      deduplicated: true,
+      consumed: false,
+      adapterAttempted: 0,
+      adapterFailures: 0,
+      adapterErrors: [],
+    });
+
+    worker.startOutboxRelayWorker();
+    await vi.waitFor(() => {
+      expect(mockOutboxService.markFailed).toHaveBeenCalled();
+    });
+
+    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-7");
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
+      "evt-7",
+      expect.any(String),
+      expect.stringContaining("deduplicated"),
+    );
+    worker.stopOutboxRelayWorker();
+  });
+
+  it("supports events keyed by event_id instead of id", async () => {
+    mockOutboxService.claimBatch.mockResolvedValue([
+      {
+        event_id: "evt-8",
+        event_type: "order.created",
+        aggregate_id: "order-8",
+        aggregate_type: "order",
+        payload: {},
+      },
+    ]);
+    mockOutboxService.markPublished.mockResolvedValue(true);
+
+    worker.startOutboxRelayWorker();
+    await vi.waitFor(() => {
+      expect(mockEventBus.publishAndReport).toHaveBeenCalled();
+    });
+
+    expect(mockOutboxService.markPublished).toHaveBeenCalledWith("evt-8");
+    worker.stopOutboxRelayWorker();
+  });
+
+  it("does NOT mark an event published when outcome is null", async () => {
+    mockOutboxService.claimBatch.mockResolvedValue([
+      {
+        id: "evt-9",
+        event_type: "order.created",
+        aggregate_id: "order-9",
+        aggregate_type: "order",
+        payload: {},
+      },
+    ]);
+    mockEventBus.publishAndReport.mockResolvedValue(null);
+
+    worker.startOutboxRelayWorker();
+    await vi.waitFor(() => {
+      expect(mockOutboxService.markFailed).toHaveBeenCalled();
+    });
+
+    expect(mockOutboxService.markPublished).not.toHaveBeenCalledWith("evt-9");
+    expect(mockOutboxService.markFailed).toHaveBeenCalledWith(
+      "evt-9",
+      expect.any(String),
+      expect.stringContaining("No outcome"),
+    );
     worker.stopOutboxRelayWorker();
   });
 });

@@ -19,6 +19,9 @@ async def _run_inference_stub(*args, **kwargs):
     return None
 
 
+_orig_traffic_module = sys.modules.get("services.traffic_pipeline")
+_orig_execution_module = sys.modules.get("app.execution")
+
 mock_traffic_module = types.ModuleType("services.traffic_pipeline")
 mock_traffic_module.TrafficPipeline = _TrafficPipelineStub
 mock_traffic_module.eta_seconds_from_speed = lambda distance, speed: (
@@ -31,7 +34,27 @@ mock_execution_module.run_inference = _run_inference_stub
 mock_execution_module.run_training_job = _run_inference_stub
 sys.modules["app.execution"] = mock_execution_module
 
+sys.modules.pop("routes.eta_routes", None)
+import routes as _routes_pkg
+if hasattr(_routes_pkg, "eta_routes"):
+    # `from routes import eta_routes` would otherwise return the cached package
+    # attribute without re-importing under the stubs above.
+    delattr(_routes_pkg, "eta_routes")
 from routes import eta_routes
+
+# The stubs above exist only so `routes.eta_routes` imports its heavy
+# dependencies in stubbed form. eta_routes has now bound the stubbed names it
+# needs, so restore the real modules for every test module collected after
+# this one (a leaked stub previously broke test_execution and
+# test_traffic_pipeline_route_windows with ImportError: unknown location).
+if _orig_traffic_module is not None:
+    sys.modules["services.traffic_pipeline"] = _orig_traffic_module
+else:
+    sys.modules.pop("services.traffic_pipeline", None)
+if _orig_execution_module is not None:
+    sys.modules["app.execution"] = _orig_execution_module
+else:
+    sys.modules.pop("app.execution", None)
 
 
 @pytest.mark.asyncio

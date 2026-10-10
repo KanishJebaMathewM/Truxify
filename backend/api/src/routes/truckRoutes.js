@@ -97,6 +97,7 @@ import { getTruckSearchVersion } from '../utils/cacheInvalidation.js';
 import logger from '../middleware/logger.js';
 import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
+import { validateCoordinate } from '../utils/coordinates.js';
 
 const weatherService = new WeatherService({ logger });
 const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
@@ -274,7 +275,8 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
   const { name, min_capacity, max_capacity } = req.query;
 
   try {
-    let query = createUserClient(req.token)
+    const userClient = createUserClient(req.token);
+    let query = userClient
       .from('trucks')
       .select('id, name, number_plate, max_capacity_tons, created_at')
       .eq('driver_id', req.user.id);
@@ -340,12 +342,13 @@ const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
   Furniture: ['Closed Body', 'Container'],
 });
 
-async function canViewTruckNumber(user, truck) {
+async function canViewTruckNumber(user, truck, client) {
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
   }
 
-  const { data: order, error } = await supabaseAdmin
+  const db = client || supabaseAdmin;
+  const { data: order, error } = await db
     .from('orders')
     .select('id')
     .eq('truck_id', truck.id)
@@ -515,6 +518,7 @@ router.get(
     return res.status(400).json({ error: 'min_capacity must be less than or equal to max_capacity' });
   }
 
+  const userClient = createUserClient(req.token);
   const searchCacheFilters = {
     userId: req.user.id,
     pickupLat: numPickupLat,
@@ -665,7 +669,7 @@ router.get(
       const truck = truckMap[d.truck_id] || {};
       let truckNumber = '';
       if (truck.id) {
-        const access = await canViewTruckNumber(req.user, truck);
+        const access = await canViewTruckNumber(req.user, truck, userClient);
         truckNumber = access.allowed ? (truck.number_plate || '') : '';
       }
       return {
@@ -766,6 +770,7 @@ router.get(
  */
 router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
+    const userClient = createUserClient(req.token);
     // Authorized customers may view a truck assigned to their order, even
     // though the truck owner RLS policy cannot expose it through their token.
     const { data: truck, error } = await supabaseAdmin
@@ -777,7 +782,7 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
     if (error) return res.status(500).json({ error: 'Failed to fetch truck number.', details: error.message });
     if (!truck) return res.status(404).json({ error: 'Truck not found.' });
 
-    const access = await canViewTruckNumber(req.user, truck);
+    const access = await canViewTruckNumber(req.user, truck, userClient);
     if (access.error) {
       return res.status(500).json({ error: 'Failed to verify truck access.', details: access.error.message });
     }
@@ -831,12 +836,14 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
  */
 router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const truckId = req.params.id;
-  const destinationLat = Number(req.query.destination_lat);
-  const destinationLng = Number(req.query.destination_lng);
+  const latitude = validateCoordinate(req.query.destination_lat, 'lat');
+  const longitude = validateCoordinate(req.query.destination_lng, 'lng');
 
-  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) {
+  if (!latitude.valid || !longitude.valid) {
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
+  const destinationLat = latitude.value;
+  const destinationLng = longitude.value;
 
   if (req.user.role !== 'driver' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden: fuel advice is restricted to assigned drivers and admins' });

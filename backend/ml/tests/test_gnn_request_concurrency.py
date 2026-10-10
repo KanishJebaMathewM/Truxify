@@ -6,6 +6,7 @@ import pytest
 pytest.importorskip("torch_geometric")
 
 from gnn.models import GraphNetworkBuilder, RouteOptimizer
+from routes import gnn_routes
 from routes.gnn_routes import (
     build_graph,
     optimize_route,
@@ -14,6 +15,13 @@ from routes.gnn_routes import (
     Edge,
     RouteRequest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _allow_untrained_optimizer(monkeypatch):
+    """These tests exercise graph/route concurrency, not the untrained-serving
+    guard (4f9113d7f); opt the module-global optimizer into dev mode."""
+    monkeypatch.setattr(gnn_routes.optimizer, "allow_untrained", True)
 
 
 def test_concurrent_disjoint_graphs():

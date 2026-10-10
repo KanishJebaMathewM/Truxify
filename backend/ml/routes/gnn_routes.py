@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.params import Depends as DependsClass
-from pydantic import BaseModel, confloat
+from pydantic import BaseModel, confloat, field_validator
 from typing import List, Dict, Any, Optional
 import networkx as nx
 import json
@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 
 from app.execution import run_inference
-from gnn.models import GraphNetworkBuilder, RouteOptimizer
+from gnn.models import GNN_ROAD_TYPES, GraphNetworkBuilder, RouteOptimizer
 import os
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,15 @@ class Node(BaseModel):
     road_type: Optional[str] = "local"
     speed_limit: Optional[confloat(allow_inf_nan=False, ge=0)] = 50
 
+    @field_validator('road_type')
+    @classmethod
+    def _validate_road_type(cls, value):
+        if value is not None and value not in GNN_ROAD_TYPES:
+            raise ValueError(
+                f"Unsupported road type '{value}'; expected one of {GNN_ROAD_TYPES}"
+            )
+        return value
+
 class Edge(BaseModel):
     source: str
     target: str
@@ -122,6 +131,11 @@ class TrainRequest(BaseModel):
 def _multi_objective_optimization(start, end, graph_data, objectives=None, constraints=None, route_optimizer=None):
     """Select a representative route from the optimizer's Pareto frontier."""
     opt = _resolve_optimizer(route_optimizer)
+    snapshot = getattr(opt, '_serving_snapshot', None)
+    if callable(snapshot):
+        _, _, is_trained = snapshot()
+        if not is_trained and not getattr(opt, 'allow_untrained', False):
+            raise RuntimeError("GNN model is untrained. Load a trained checkpoint or enable dev mode.")
     requested_objectives = list(objectives) if objectives else ["time", "cost", "fuel"]
     allowed_objectives = {"time", "cost", "fuel", "distance", "congestion"}
     invalid_objectives = [objective for objective in requested_objectives if objective not in allowed_objectives]
@@ -224,6 +238,18 @@ async def optimize_route(
             except TypeError:
                 graph_data = active_builder.get_pytorch_data()
 
+            graph = getattr(graph_data, 'graph', None)
+            if isinstance(graph, nx.Graph):
+                missing_nodes = [
+                    node for node in (request.start_node, request.end_node)
+                    if node not in graph
+                ]
+                if missing_nodes:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Node(s) not found in graph: {', '.join(missing_nodes)}"
+                    )
+
             result = active_optimizer.optimize_route(
                 request.start_node,
                 request.end_node,
@@ -250,6 +276,11 @@ async def optimize_route(
             }
     except HTTPException:
         raise
+    except RuntimeError as e:
+        if 'untrained' in str(e).lower():
+            raise HTTPException(status_code=503, detail=str(e))
+        logger.error(f"Route optimization failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.error(f"Route optimization failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -278,6 +309,18 @@ async def multi_objective_optimize(
                 graph_data = active_builder.get_pytorch_data(graph)
             except TypeError:
                 graph_data = active_builder.get_pytorch_data()
+
+            graph = getattr(graph_data, 'graph', None)
+            if isinstance(graph, nx.Graph):
+                missing_nodes = [
+                    node for node in (request.start_node, request.end_node)
+                    if node not in graph
+                ]
+                if missing_nodes:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Node(s) not found in graph: {', '.join(missing_nodes)}"
+                    )
 
             try:
                 result = _multi_objective_optimization(
@@ -315,6 +358,11 @@ async def multi_objective_optimize(
             }
     except HTTPException:
         raise
+    except RuntimeError as e:
+        if 'untrained' in str(e).lower():
+            raise HTTPException(status_code=503, detail=str(e))
+        logger.error(f"Multi-objective optimization failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.error(f"Multi-objective optimization failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -347,6 +395,11 @@ async def train_model(
             },
             'timestamp': datetime.now().isoformat()
         }
+    except ValueError as e:
+        if 'empty' in str(e).lower():
+            raise HTTPException(status_code=422, detail="Training dataset is empty")
+        logger.error(f"Model training failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.error(f"Model training failed: {e}")
         logger.error(f"Internal error: {e}")

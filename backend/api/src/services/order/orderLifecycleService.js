@@ -354,13 +354,15 @@ export class OrderLifecycleService {
 
   async getOrderTimeline(orderId, userId) {
     return measureExecution('OrderLifecycleService.getOrderTimeline', async () => {
-      let order;
-      if (UUID_RE.test(orderId)) {
-        const { data } = await this.orderRepository.findOrderById(orderId, 'customer_id, driver_id, order_display_id');
-        order = data;
-      }
+      // Resolve by internal id first, then display id — internal ids are not
+      // UUID-shaped in every environment (the contract suite uses readable
+      // ids), so a UUID gate would 404 valid orders. DB failures surface as
+      // 500, never a misleading 404.
+      let { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'customer_id, driver_id, order_display_id');
+      if (orderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: orderErr.message });
       if (!order) {
-        const { data } = await this.orderRepository.findOrderByDisplayId(orderId, 'customer_id, driver_id, order_display_id');
+        const { data, error } = await this.orderRepository.findOrderByDisplayId(orderId, 'customer_id, driver_id, order_display_id');
+        if (error) throw new DomainError(500, { error: 'Failed to fetch order.', details: error.message });
         order = data;
       }
 

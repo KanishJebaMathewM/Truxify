@@ -1,5 +1,97 @@
 import { describe, it, expect, vi } from 'vitest';
 import StateDivergenceDetector, { FINALITY_THRESHOLD } from '../../../../src/services/blockchain/stateDivergenceDetector.js';
+const StateDivergenceDetector = require('../../../../src/services/blockchain/stateDivergenceDetector');
+
+describe('StateDivergenceDetector', () => {
+  let detector;
+
+  beforeEach(() => {
+    detector = new StateDivergenceDetector({
+      defaultThreshold: 0.01, // 1% or absolute tolerance depending on implementation
+    });
+  });
+
+  describe('Divergence Threshold Checking', () => {
+    test('should detect divergence when on-chain and off-chain values differ beyond threshold', () => {
+      const onChainState = { escrowBalance: 1000.00, status: 'LOCKED' };
+      const offChainState = { escrowBalance: 950.00, status: 'LOCKED' }; // 5% diff > 1% threshold
+
+      const result = detector.checkDivergence(onChainState, offChainState, { threshold: 0.01 });
+
+      expect(result.isDivergent).toBe(true);
+      expect(result.discrepancy).toBeGreaterThan(0.01);
+      expect(result.alertTriggered).toBe(true);
+    });
+
+    test('should not trigger an alert when state values are within tolerance', () => {
+      const onChainState = { escrowBalance: 1000.00, status: 'LOCKED' };
+      const offChainState = { escrowBalance: 1000.05, status: 'LOCKED' }; // Within minor rounding tolerance
+
+      const result = detector.checkDivergence(onChainState, offChainState, { threshold: 0.001 });
+
+      expect(result.isDivergent).toBe(false);
+      expect(result.alertTriggered).toBe(false);
+    });
+
+    test('should report zero divergence when on-chain and off-chain values are identical', () => {
+      const onChainState = { escrowBalance: 5000.00, status: 'RELEASED' };
+      const offChainState = { escrowBalance: 5000.00, status: 'RELEASED' };
+
+      const result = detector.checkDivergence(onChainState, offChainState);
+
+      expect(result.isDivergent).toBe(false);
+      expect(result.discrepancy).toEqual(0);
+    });
+  });
+
+  describe('Edge Case & Invalid Input Handling', () => {
+    test('should handle null or undefined inputs gracefully without throwing exceptions', () => {
+      expect(() => {
+        const resultNull = detector.checkDivergence(null, null);
+        expect(resultNull.isDivergent).toBe(false);
+      }).not.toThrow();
+
+      expect(() => {
+        const resultUndefined = detector.checkDivergence(undefined, { escrowBalance: 100 });
+        expect(resultUndefined.isDivergent).toBe(true);
+      }).not.toThrow();
+    });
+
+    test('should handle NaN or non-numeric values safely', () => {
+      const onChainState = { escrowBalance: NaN };
+      const offChainState = { escrowBalance: 500.00 };
+
+      const result = detector.checkDivergence(onChainState, offChainState);
+
+      expect(result.isDivergent).toBe(true);
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('Blockchain Provider & Database Mocking Integration', () => {
+    test('should successfully query and compare state fetched from mocked providers', async () => {
+      // Mock blockchain provider and database client
+      const mockBlockchainProvider = {
+        fetchContractState: jest.fn().mockResolvedValue({ balance: 15000, active: true }),
+      };
+      
+      const mockDbClient = {
+        queryOrderLedger: jest.fn().mockResolvedValue({ balance: 14800, active: true }),
+      };
+
+      const customDetector = new StateDivergenceDetector({
+        blockchainProvider: mockBlockchainProvider,
+        dbClient: mockDbClient,
+      });
+
+      const auditResult = await customDetector.auditOrderState('ORD-778899');
+
+      expect(mockBlockchainProvider.fetchContractState).toHaveBeenCalledWith('ORD-778899');
+      expect(mockDbClient.queryOrderLedger).toHaveBeenCalledWith('ORD-778899');
+      expect(auditResult.verified).toBe(false); // Discrepancy detected between 15000 and 14800
+    });
+  });
+});
 
 vi.mock('../../../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

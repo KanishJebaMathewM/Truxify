@@ -166,6 +166,7 @@ describe('securityHeaderDuplicates setHeader guard', () => {
     securityHeaderDuplicates(req, res, next);
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('x-frame-options', 'SAMEORIGIN');
+    res.setHeader('x-frame-options', 'SAMEORIGIN');
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(res.originalSetHeader).toHaveBeenCalledTimes(2);
   });

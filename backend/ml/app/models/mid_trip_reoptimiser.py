@@ -343,9 +343,15 @@ def find_mid_trip_loads(
             else:
                 deadline_dt = deadline_dt.astimezone(timezone.utc)
 
+            # Lazily track (a) the best insertion whose own arrival meets the
+            # deadline and (b) the append-at-end option, whose arrival gates
+            # overall feasibility: a pickup that only fits by jumping ahead of
+            # queued stops is not allowed. No list materialization (streaming).
             best_option = None
             estimated_pickup_time = None
+            append_option = None
             for option in insertion_options:
+                append_option = option
                 candidate_pickup_time = now + timedelta(minutes=option[3])
                 if candidate_pickup_time <= deadline_dt and (
                     best_option is None or option < best_option
@@ -353,7 +359,9 @@ def find_mid_trip_loads(
                     best_option = option
                     estimated_pickup_time = candidate_pickup_time
 
-            if best_option is None:
+            if append_option is None or best_option is None:
+                continue
+            if now + timedelta(minutes=append_option[3]) > deadline_dt:
                 continue
 
             detour_km, detour_minutes, pickup_route_distance, pickup_route_minutes = best_option

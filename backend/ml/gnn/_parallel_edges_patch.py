@@ -14,8 +14,14 @@ class GraphNetworkBuilder(_BaseGraphNetworkBuilder):
         self.edge_features = {}
 
     def build_road_network(self, nodes, edges):
+        # Build into a local and publish once, matching the base class's
+        # fresh-graph-per-call contract: concurrent requests on the shared
+        # builder never see each other's partially built graph.
+        import networkx as _nx
+
+        graph = _nx.MultiDiGraph()
         for node in nodes:
-            self.graph.add_node(
+            graph.add_node(
                 node["id"],
                 lat=node["lat"],
                 lng=node["lng"],
@@ -37,9 +43,10 @@ class GraphNetworkBuilder(_BaseGraphNetworkBuilder):
             }
             if edge.get("key") is not None:
                 edge_kwargs["key"] = edge["key"]
-            self.graph.add_edge(edge["source"], edge["target"], **edge_kwargs)
+            graph.add_edge(edge["source"], edge["target"], **edge_kwargs)
 
-        return self.graph
+        self.graph = graph
+        return graph
 
     def extract_features(self, graph=None):
         """Export the requested graph in the raw units expected by its scaler.

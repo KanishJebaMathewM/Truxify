@@ -184,7 +184,7 @@ class GNNRouteModel(nn.Module):
     def __init__(self, input_dim=GNN_NODE_FEATURE_DIM, hidden_dim=128, output_dim=32, edge_dim=GNN_EDGE_FEATURE_DIM,
                  in_channels=None, hidden_channels=None, out_channels=None):
         """Initialize GNN route model layers, dimensions, and attention."""
-        super(GNNRouteModel, self).__init__()
+        super().__init__()
         if in_channels is not None:
             input_dim = in_channels
         if hidden_channels is not None:
@@ -207,7 +207,6 @@ class GNNRouteModel(nn.Module):
         
         
         # Attention mechanism
-        self.attention = nn.MultiheadAttention(hidden_dim, num_heads=8)
         
         # Output layers
         self.lin1 = nn.Linear(hidden_dim, output_dim)
@@ -647,7 +646,7 @@ class RouteOptimizer:
         return max(score, 1e-6)
     
     @_serialize_model_mutation
-    def train(self, train_data, val_data=None, epochs=100):
+    def train(self, train_data, val_data=None, epochs=100, learning_rate=0.001):
         """Train GNN model with training-derived feature scaling."""
         if not train_data:
             raise ValueError("Training dataset cannot be empty")
@@ -658,7 +657,7 @@ class RouteOptimizer:
         model = copy.deepcopy(serving_model)
         scaler = GNNFeatureScaler.default().fit(train_data)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
         avg_loss = 0.0
@@ -736,7 +735,12 @@ class RouteOptimizer:
             if name.endswith('scale') and not (values > 0).all():
                 raise ValueError(f"Saved GNN feature scaler has nonpositive {name}")
         model = GNNRouteModel().to(self.device)
-        model.load_state_dict(checkpoint["state_dict"])
+        state_dict = {
+            key: value
+            for key, value in checkpoint["state_dict"].items()
+            if not key.startswith("attention.")
+        }
+        model.load_state_dict(state_dict)
         self._publish_model(model, scaler)
         logger.info(f"✅ Model and feature scaler loaded from {path}")
 
@@ -820,7 +824,16 @@ class RouteOptimizer:
                     if neighbor in current_path:
                         continue
 
-                    edge_data = graph_data.graph[current_node][neighbor]
+                    edge_container = graph_data.graph[current_node][neighbor]
+                    if graph_data.graph.is_multigraph():
+                        # Parallel segments between the same nodes: evaluate the
+                        # fastest one for label expansion.
+                        edge_data = min(
+                            edge_container.values(),
+                            key=lambda data: float(data.get('time', 0)),
+                        )
+                    else:
+                        edge_data = edge_container
                     if not self._edge_is_feasible(edge_data, constraints):
                         continue
 
@@ -868,6 +881,10 @@ class RouteOptimizer:
     
     def multi_objective_optimization(self, start, end, graph_data, constraints=None):
         """Return a representative route together with the exact Pareto frontier."""
+        _, _, is_trained = self._serving_snapshot()
+        if not is_trained and not self.allow_untrained:
+            logger.error("Attempted route optimization on untrained model")
+            raise RuntimeError("GNN model is untrained. Load a trained checkpoint or enable dev mode.")
         objectives = ['time', 'cost', 'fuel']
         frontier = self._find_pareto_routes(start, end, graph_data, objectives, constraints)
         if not frontier:
@@ -893,7 +910,8 @@ class RouteOptimizer:
             return updated_route
         graph = graph_data.graph.copy()
         edge_lookup = {}
-        for u, v in graph.edges:
+        edge_iter = graph.edges(keys=False) if graph.is_multigraph() else graph.edges
+        for u, v in edge_iter:
             edge_lookup[f"{u}-{v}"] = (u, v)
             edge_lookup[f"{v}-{u}"] = (u, v)
         changed = False
@@ -905,13 +923,17 @@ class RouteOptimizer:
             if endpoints is None:
                 continue
             u, v = endpoints
-            edge_attrs = graph[u][v]
-            for field in ('time', 'cost', 'fuel', 'congestion'):
-                if field in update and update[field] is not None:
-                    value = float(update[field])
-                    if edge_attrs.get(field) != value:
-                        edge_attrs[field] = value
-                        changed = True
+            edge_container = graph[u][v]
+            edge_attrs_list = (
+                list(edge_container.values()) if graph.is_multigraph() else [edge_container]
+            )
+            for edge_attrs in edge_attrs_list:
+                for field in ('time', 'cost', 'fuel', 'congestion'):
+                    if field in update and update[field] is not None:
+                        value = float(update[field])
+                        if edge_attrs.get(field) != value:
+                            edge_attrs[field] = value
+                            changed = True
         self._apply_traffic_to_route(updated_route, new_traffic_data)
         if not changed:
             return updated_route

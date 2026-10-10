@@ -158,7 +158,7 @@ class _FatigueMonitorScreenState extends State<FatigueMonitorScreen> {
   Widget _buildStatusHeader(Color color) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: BorderSide(color: color, width: 2)),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: color, width: 2)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -179,7 +179,7 @@ class _FatigueMonitorScreenState extends State<FatigueMonitorScreen> {
         Container(
           width: 80,
           height: 80,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white, border: BorderSide(color: Colors.blueGrey[200]!, width: 4)),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white, border: Border.all(color: Colors.blueGrey[200]!, width: 4)),
           alignment: Alignment.center,
           child: Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
         ),

@@ -1,12 +1,19 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, model_validator
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from meta.model import MAML, MAMLModel, FewShotLearner, TaskGenerator
 import os
+from datetime import datetime
+from typing import Annotated, Dict, List
+
+from fastapi import APIRouter, HTTPException, Query
+from meta.fewshot_admission import FewShotInputError
+from meta.model import (
+    MAML,
+    FewShotLearner,
+    MAMLModel,
+    TaskGenerationUnavailable,
+    TaskGenerator,
+)
+from meta.training_admission import MetaTrainingInputError
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/meta", tags=["Meta-Learning"])
@@ -22,15 +29,20 @@ few_shot = FewShotLearner(maml)
 task_generator = TaskGenerator()
 
 class TrainRequest(BaseModel):
-    epochs: int = 50
-    tasks_per_epoch: int = 10
-    k_shot: int = 5
+    epochs: StrictInt = Field(default=50, ge=1, le=10000)
+    tasks_per_epoch: StrictInt = Field(default=10, ge=1, le=256)
+    k_shot: StrictInt = Field(default=5, ge=1, le=4096)
+
+FiniteObservation = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+ObservationRow = Annotated[List[FiniteObservation], Field(min_length=1, max_length=4096)]
+ObservationRows = Annotated[List[ObservationRow], Field(min_length=1, max_length=4096)]
+
 
 class FewShotRequest(BaseModel):
-    support_x: List[List[float]]
-    support_y: List[float]
-    query_x: List[List[float]]
-    steps: int = 5
+    support_x: ObservationRows
+    support_y: List[FiniteObservation] = Field(min_length=1, max_length=4096)
+    query_x: ObservationRows
+    steps: StrictInt = Field(default=5, ge=1, le=32)
 
     @model_validator(mode="after")
     def validate_support_rows(self):
@@ -39,9 +51,9 @@ class FewShotRequest(BaseModel):
         return self
 
 class FewShotClassifyRequest(BaseModel):
-    support_set: Dict[str, List[List[float]]]
-    query_x: List[List[float]]
-    steps: int = 5
+    support_set: Dict[str, ObservationRows] = Field(min_length=2, max_length=2)
+    query_x: ObservationRows
+    steps: StrictInt = Field(default=5, ge=1, le=32)
 
 @router.post("/train")
 async def train_maml(request: TrainRequest):
@@ -59,6 +71,8 @@ async def train_maml(request: TrainRequest):
             'data': results,
             'timestamp': datetime.now().isoformat()
         }
+    except MetaTrainingInputError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as e:
         logger.error(f"Training failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -66,12 +80,12 @@ async def train_maml(request: TrainRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/few-shot/predict")
-async def few_shot_predict(request: FewShotRequest):
+def few_shot_predict(request: FewShotRequest):
     """Few-shot prediction"""
     try:
-        support_x = np.array(request.support_x)
-        support_y = np.array(request.support_y)
-        query_x = np.array(request.query_x)
+        support_x = request.support_x
+        support_y = request.support_y
+        query_x = request.query_x
         
         predictions = few_shot.few_shot_predict(
             support_x, support_y, query_x, request.steps
@@ -85,6 +99,8 @@ async def few_shot_predict(request: FewShotRequest):
             },
             'timestamp': datetime.now().isoformat()
         }
+    except FewShotInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Few-shot prediction failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -92,14 +108,11 @@ async def few_shot_predict(request: FewShotRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/few-shot/classify")
-async def few_shot_classify(request: FewShotClassifyRequest):
+def few_shot_classify(request: FewShotClassifyRequest):
     """Few-shot classification"""
     try:
-        support_set = {}
-        for label, data in request.support_set.items():
-            support_set[label] = np.array(data)
-        
-        query_x = np.array(request.query_x)
+        support_set = request.support_set
+        query_x = request.query_x
         
         predictions = few_shot.few_shot_classify(
             support_set, query_x, request.steps
@@ -113,6 +126,8 @@ async def few_shot_classify(request: FewShotClassifyRequest):
             },
             'timestamp': datetime.now().isoformat()
         }
+    except FewShotInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Few-shot classification failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -142,7 +157,10 @@ async def sample_task(k_shot: int = 5):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/few-shot")
-async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
+async def sample_few_shot_task(
+    k_shot: Annotated[int, Query(ge=1, le=1000)] = 5,
+    num_classes: Annotated[int, Query(ge=2, le=2)] = 2,
+):
     """Sample a few-shot classification task"""
     try:
         task = task_generator.generate_few_shot_task(k_shot, num_classes)
@@ -161,6 +179,8 @@ async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
             },
             'timestamp': datetime.now().isoformat()
         }
+    except TaskGenerationUnavailable:
+        raise HTTPException(status_code=503, detail="Binary task generation unavailable")
     except Exception as e:
         logger.error(f"Few-shot task sampling failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -177,7 +197,7 @@ async def get_model_info():
                 'input_dim': input_dim,
                 'hidden_dim': hidden_dim,
                 'output_dim': output_dim,
-                'parameters': sum(p.numel() for p in model.parameters()),
+                'parameters': sum(p.numel() for p in maml.model.parameters()),
                 'device': str(maml.device),
                 'total_tasks': len(task_generator.tasks)
             },

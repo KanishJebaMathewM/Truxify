@@ -419,13 +419,17 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
 
     it('returns null gracefully on network or JSON parsing error', async () => {
       mockRedisGet.mockResolvedValue(null);
-      mockFetch.mockRejectedValue(new Error('Network connection timeout'));
+      const networkError = new Error('Network connection timeout');
+      mockFetch.mockRejectedValue(networkError);
 
       const result = await reverseGeocode(19.076, 72.8777);
 
       expect(result).toBeNull();
       expect(mockRedisSet).not.toHaveBeenCalled();
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: networkError, lat: 19.076, lon: 72.8777 }),
+        '[ReverseGeocode] Error reverse geocoding coordinates'
+      );
     });
 
     it('returns null when Nominatim returns payload without address or display_name', async () => {
@@ -443,12 +447,16 @@ describe('reverseGeocode - Comprehensive Edge Cases', () => {
     });
 
     it('catches and logs Redis read/write errors without crashing', async () => {
-      mockRedisGet.mockRejectedValue(new Error('Redis connection refused'));
+      const redisError = new Error('Redis connection refused');
+      mockRedisGet.mockRejectedValue(redisError);
 
       const result = await reverseGeocode(19.076, 72.8777);
 
       expect(result).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: redisError, lat: 19.076, lon: 72.8777 }),
+        '[ReverseGeocode] Error reverse geocoding coordinates'
+      );
     });
   });
 });

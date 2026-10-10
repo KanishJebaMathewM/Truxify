@@ -3,6 +3,7 @@ import logger from "../middleware/logger.js";
 import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase, redisClient } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
+import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
 import { createSocketRateLimiter } from "../lib/socketRateLimiter.js";
 
 let io = null;
@@ -310,7 +311,7 @@ export function initLocationServer(httpServer) {
      * live `driver_location` broadcast proceeds immediately without waiting on
      * any MongoDB round-trip.
      */
-socket.on("location_update", (payload) => {
+socket.on("location_update", async (payload) => {
     // HTTP rate limiters never see socket frames, so this handler is throttled
     // per connection. Without it a single socket can drive an unbounded number
     // of telemetry writes and room broadcasts per second, evicting other

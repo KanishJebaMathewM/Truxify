@@ -26,7 +26,7 @@ dependencies:
   audioplayers: ^5.2.1
 
   google_fonts: ^8.1.0
-  fl_chart: ^0.66.0
+  fl_chart: ^1.2.0
   flutter_riverpod: ^2.5.1
   provider: ^6.1.2
   flutter_map: ^8.1.1
@@ -36,21 +36,23 @@ dependencies:
   sqflite: ^2.3.0
   path_provider: ^2.1.2
   connectivity_plus: ^7.2.0
+  record: ^5.0.5
+  workmanager: ^0.9.0
   intl: ^0.20.2
   url_launcher: ^6.3.2
-  geolocator: ^11.0.0
+  geolocator: ^14.0.2
   socket_io_client: ^2.0.3+1
   shimmer: ^3.0.0
-  permission_handler: ^12.0.3
+  permission_handler: ^13.0.2
   share_plus: ^10.1.4
   pdf: ^3.11.2
   printing: ^5.13.4
   qr_flutter: ^4.1.0
-  camera: ^0.11.0
+  camera: ^0.12.1
   signature: ^6.3.0
   image_picker: ^1.1.2
   flutter_image_compress: ^2.3.0
-  battery_plus: ^6.2.1
+  battery_plus: ^7.1.2
   flutter_dotenv: ^5.2.0
   sentry_flutter: ^8.14.1
 

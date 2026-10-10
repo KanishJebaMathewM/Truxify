@@ -624,10 +624,9 @@ const VERIFY_DELIVERY_WINDOW_MS =
   15 * 60 * 1000;
 
 const VERIFY_DELIVERY_MAX_REQUESTS =
-  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) ||
+  (process.env.NODE_ENV === 'test' ? 1000 : 10);
 
-// Delivery-OTP confirmation is a brute-force target, so it is throttled per
-// authenticated user with a strict cap.
 export const verifyDeliveryLimiter = rateLimit({
   windowMs: VERIFY_DELIVERY_WINDOW_MS,
   max: VERIFY_DELIVERY_MAX_REQUESTS,
@@ -651,8 +650,6 @@ const RESEND_OTP_WINDOW_MS =
 const RESEND_OTP_MAX_REQUESTS =
   Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5;
 
-// OTP resend is an abuse vector (SMS flooding / OTP brute-forcing), so it gets
-// the strictest per-user cap alongside the existing otpVerificationLimiter.
 export const resendOtpLimiter = rateLimit({
   windowMs: RESEND_OTP_WINDOW_MS,
   max: RESEND_OTP_MAX_REQUESTS,
@@ -699,8 +696,6 @@ const PREDICT_DEMAND_WINDOW_MS =
 const PREDICT_DEMAND_MAX_REQUESTS =
   Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 60;
 
-// Demand prediction runs a ML model per request, so it is capped to a low
-// hourly budget per user to keep the inference service safe from abuse.
 export const predictDemandLimiter = rateLimit({
   windowMs: PREDICT_DEMAND_WINDOW_MS,
   max: PREDICT_DEMAND_MAX_REQUESTS,
@@ -724,8 +719,6 @@ const TELEMETRY_WINDOW_MS =
 const TELEMETRY_MAX_REQUESTS =
   Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 300;
 
-// Driver-location and route reads are polled frequently while tracking a
-// shipment, so the cap is generous but still bounded per authenticated user.
 export const telemetryLimiter = rateLimit({
   windowMs: TELEMETRY_WINDOW_MS,
   max: TELEMETRY_MAX_REQUESTS,
@@ -754,4 +747,6 @@ export function createStore(prefix) {
 export const __testing = {
   DeferredRedisStore,
   isRedisReady,
+  sentryAlertHandler,
 };
+

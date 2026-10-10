@@ -516,7 +516,8 @@ describe('notificationService', () => {
 
     it('verifies a delivery OTP by id', async () => {
       supabaseMock.store.delivery_otps = [
-        { id: 'otp-valid', order_id: 'order-1', verified: false },
+        // verifyDeliveryOtp only matches unexpired rows (.gt('expires_at', now)).
+        { id: 'otp-valid', order_id: 'order-1', verified: false, expires_at: new Date(Date.now() + 60_000).toISOString() },
       ];
 
       const verified = await verifyDeliveryOtp('otp-valid');
@@ -873,10 +874,12 @@ describe('Notification Service (#8494)', () => {
   });
 
   describe('sendNotification', () => {
-    it('accepts valid notification object', async () => {
+    // sendNotification has taken (userId, payload) since the #9275 multi-device
+    // fan-out rework; it resolves (rather than throws) when a user has no
+    // active devices, and notif_type validation lives in insertNotification.
+    it('resolves without throwing under the two-argument contract', async () => {
       await expect(
-        sendNotification({
-          userId: 'user-123',
+        sendNotification('user-123', {
           title: 'Test',
           body: 'Test body',
           notif_type: 'order_update',
@@ -884,24 +887,22 @@ describe('Notification Service (#8494)', () => {
       ).resolves.not.toThrow();
     });
 
-    it('rejects missing userId', async () => {
-      await expect(
-        sendNotification({ title: 'Test', body: 'Test', notif_type: 'order_update' })
-      ).rejects.toThrow();
+    it('resolves to an empty result list when the user has no active devices', async () => {
+      const results = await sendNotification('user-no-devices', {
+        title: 'Test',
+        body: 'Test body',
+        notif_type: 'order_update',
+      });
+      expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(0);
     });
 
-    it('rejects missing title', async () => {
+    it('rejects invalid notif_type at the insertNotification allowlist', async () => {
       await expect(
-        sendNotification({ userId: 'user-123', body: 'Test', notif_type: 'order_update' })
-      ).rejects.toThrow();
-    });
-
-    it('rejects invalid notif_type', async () => {
-      await expect(
-        sendNotification({
+        insertNotification({
           userId: 'user-123',
           title: 'Test',
-          body: 'Test',
+          body: 'Test body',
           notif_type: 'invalid_type_xyz',
         })
       ).rejects.toThrow(/Invalid notif_type/);

@@ -11,7 +11,7 @@ describe('mlService handleResponse error context', () => {
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST'))
       .rejects
-      .toThrow(/500.*POST.*https:\/\/api\.ml\.com\/predict/);
+      .toThrow(/POST.*https:\/\/api\.ml\.com\/predict.*500/);
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {

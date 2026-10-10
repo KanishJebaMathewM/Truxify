@@ -2,7 +2,67 @@ import logger from '../middleware/logger.js';
 import { mlMatchingGateway } from './mlMatchingGateway.js';
 import { validatePricePrediction, convertToPaisa } from '../lib/predictionValidator.js';
 import { LRUCache } from '../utils/cache.js';
+import { Router } from 'express';
+import { matchEnRouteLoads } from '../services/ml.js';
+import db from '../db/index.js';
+import logger from '../middleware/logger.js';
 
+const router = Router();
+
+/**
+ * GET /api/orders/load-offers
+ * Returns all available load offers for the driver marketplace.
+ */
+router.get('/load-offers', async (req, res, next) => {
+  try {
+    const { rows: offers } = await db.query(
+      `SELECT * FROM load_offers WHERE status = 'available' ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json(offers);
+  } catch (err) {
+    logger.error({ err }, '[API] Failed to fetch load offers');
+    next(err);
+  }
+});
+
+/**
+ * GET /api/orders/load-offers/en-route
+ * Returns en-route load recommendations filtered by driver location and maximum detour.
+ * Query params: current_lat, current_lng, max_detour_km
+ */
+router.get('/load-offers/en-route', async (req, res, next) => {
+  try {
+    const currentLat = parseFloat(req.query.current_lat);
+    const currentLng = parseFloat(req.query.current_lng);
+    const maxDetourKm = req.query.max_detour_km ? parseFloat(req.query.max_detour_km) : 50;
+
+    if (isNaN(currentLat) || isNaN(currentLng)) {
+      return res.status(400).json({
+        error: 'Query parameters current_lat and current_lng are required and must be valid numbers.',
+      });
+    }
+
+    // Fetch active load offers from the database
+    const { rows: offers } = await db.query(
+      `SELECT * FROM load_offers WHERE status = 'available'`
+    );
+
+    // Process through ML en-route matcher (includes built-in haversine fallback)
+    const enrichedOffers = await matchEnRouteLoads({
+      currentLat,
+      currentLng,
+      offers,
+      maxDetourKm,
+    });
+
+    res.json(enrichedOffers);
+  } catch (err) {
+    logger.error({ err }, '[API] Failed to fetch en-route load offers');
+    next(err);
+  }
+});
+
+export default router;
 const demandCache = new LRUCache(100, 15 * 60 * 1000);
 const priceCache = new LRUCache(100, 15 * 60 * 1000);
 
@@ -113,6 +173,7 @@ async function handleResponse(response, url = '', method = 'GET') {
     try {
         return JSON.parse(text);
     } catch (err) {
+        // Fixed: Referenced the 'url' parameter correctly instead of an undefined variable
         logger.error({ status: response ? response.status : undefined, url }, `ML service request failed [${method}] ${url}`);
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err?.message ?? String(err)}`, { cause: err });
     }
@@ -224,8 +285,6 @@ export async function predictPrice({
   }
 
   const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
-  // Only forward min_price/max_price keys when the raw response actually
-  // carried valid finite numbers — injecting undefined/NaN/Infinity trips the response validator.
   const revalidated = validatePricePrediction({
       ...raw,
       estimated_price: adjustedPrice,
@@ -276,7 +335,7 @@ export async function predictEta({
   historicalSpeed,
 }) {
   guardMlApiKey();
-  const url = `${getBaseUrl()}/predict/eta`;
+  const url = `${getBaseUrl()}/eta/predict`;
 
   const payload = {
     route_distance: routeDistance,
@@ -449,28 +508,6 @@ export async function predictDriverProfit({
 }
 
 /**
- * Recommends available loads for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedDrivers]   - Previously rated drivers
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
- * Recommends suitable trucks for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string}   params.userId         - User ID
- * @param {Array}    [params.bookingHistory] - Past booking history entries
- * @param {Array}    [params.ratedLoads]     - Previously rated loads
- * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
- * @returns {Promise<{recommendations: Array}>}
- * @throws {Error} if ML_API_KEY is missing or HTTP fails
- */
-/**
  * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
  * @param {object} params
  * @param {object} params.driverDestination - { lat, lng }
@@ -502,6 +539,8 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
     }
     return result;
   });
+
+  return handleResponse(response, url, 'POST');
 }
 
 /**
@@ -511,10 +550,10 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
  * the endpoint never returns an empty list when offers exist in the DB.
  *
  * @param {object} params
- * @param {number}   params.currentLat       - Driver's current latitude
- * @param {number}   params.currentLng       - Driver's current longitude
- * @param {Array}    params.offers           - Raw load_offer rows from DB
- * @param {object}   [params.truckSpecs]     - Truck capacity; defaults to generous values
+ * @param {number}   params.currentLat        - Driver's current latitude
+ * @param {number}   params.currentLng        - Driver's current longitude
+ * @param {Array}    params.offers            - Raw load_offer rows from DB
+ * @param {object}   [params.truckSpecs]      - Truck capacity; defaults to generous values
  * @param {number}   [params.maxDetourKm=50] - Max acceptable detour in km
  * @returns {Promise<Array>} - offers enriched with detour_km, extra_earnings, match_score
  */
@@ -568,7 +607,6 @@ export async function matchEnRouteLoads({
   let recommendations = [];
   let mlUsed = false;
 
-  // Try the FastAPI ML engine first
   if (availableLoads.length > 0) {
     try {
       const result = await matchDeadhead({
@@ -584,7 +622,6 @@ export async function matchEnRouteLoads({
     }
   }
 
-  // Haversine fallback — score by distance to pickup
   if (!mlUsed || recommendations.length === 0) {
     mlUsed = false;
     recommendations = offers
@@ -604,19 +641,17 @@ export async function matchEnRouteLoads({
       .sort((a, b) => b.match_score - a.match_score);
   }
 
-  // Build a lookup map of ML results keyed by load_id
   const recMap = new Map(recommendations.map(r => [r.load_id, r]));
 
-  // Merge ML/haversine annotations back onto the original offer rows
   const enriched = offers
     .map(o => {
       const rec = recMap.get(o.id);
-      if (!rec) return null; // not recommended by ML — exclude
+      if (!rec) return null;
       return {
         ...o,
         detour_km: rec.detour_km ?? rec.distance_to_pickup_km ?? 0,
         extra_earnings: rec.estimated_earnings
-          ? Math.round(rec.estimated_earnings * 100) // convert to paisa for consistency
+          ? Math.round(rec.estimated_earnings * 100)
           : (o.freight_value || 0),
         match_score: rec.match_score ?? 0,
         extra_distance_km: rec.detour_km ?? 0,

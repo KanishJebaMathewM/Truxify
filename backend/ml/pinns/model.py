@@ -1,9 +1,17 @@
+import logging
+import threading
+from typing import Dict
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional, Callable
-import logging
+from pinns.training_transition import (
+    PINNInputError,
+    checked_transition,
+    loop_policy,
+    owned_operation,
+)
 from torch.autograd import grad
 
 logger = logging.getLogger(__name__)
@@ -161,6 +169,7 @@ class PINNTrainer:
         lr: float = 1e-3,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        self._operation_lock = threading.RLock()
         self.model = model.to(device)
         self.physics_loss = physics_loss
         self.device = device
@@ -176,6 +185,55 @@ class PINNTrainer:
         
         logger.info(f"✅ PINN Trainer initialized on {self.device}")
     
+    def _admit(self, x_data, y_data, x_phys, physics_kwargs):
+        parameter = next(self.model.parameters())
+        values = []
+        for name, tensor in (("observations", x_data), ("targets", y_data),
+                             ("collocation points", x_phys)):
+            if not isinstance(tensor, torch.Tensor) or not tensor.is_floating_point() or tensor.layout != torch.strided:
+                raise PINNInputError(f"{name} must be a finite floating tensor")
+            if tensor.numel() > 1048576:
+                raise PINNInputError("training tensor exceeds the owned value budget")
+            tensor = tensor.to(device=parameter.device, dtype=parameter.dtype).clone()
+            if not torch.isfinite(tensor).all():
+                raise PINNInputError(f"{name} must be finite in model dtype")
+            values.append(tensor)
+        x_data, y_data, x_phys = values
+        for points in (x_data, x_phys):
+            if points.ndim != 2 or not 1 <= len(points) <= 10000 or points.shape[1] != self.model.input_dim:
+                raise PINNInputError("points must be nonempty rows with input_dim coordinates")
+        if self.model.output_dim != 1:
+            raise PINNInputError("physics training requires one scalar model output")
+        if y_data.ndim == 1:
+            y_data = y_data[:, None]
+        if y_data.shape != (len(x_data), 1):
+            raise PINNInputError("targets must contain exactly one scalar per observation")
+        kind = self.physics_loss.physics_type
+        if kind not in ("poisson", "diffusion", "advection", "burger"):
+            raise PINNInputError("unknown physics type")
+        if kind != "poisson" and x_phys.shape[1] != 2:
+            raise PINNInputError("evolution physics requires space/time coordinates")
+        kwargs = dict(physics_kwargs)
+        key = {"diffusion": "D", "advection": "v", "burger": "nu"}.get(kind)
+        if key is not None and key in kwargs:
+            coefficient = torch.as_tensor(kwargs[key], device=parameter.device, dtype=parameter.dtype).clone()
+            if coefficient.ndim != 0 or not torch.isfinite(coefficient):
+                raise PINNInputError("physics coefficient must be a finite scalar")
+            kwargs[key] = coefficient
+        if kind == "poisson" and "f" in kwargs:
+            forcing = torch.as_tensor(kwargs["f"], device=parameter.device, dtype=parameter.dtype).clone()
+            if forcing.shape == (len(x_phys),):
+                forcing = forcing[:, None]
+            if (forcing.ndim != 0 and forcing.shape != (len(x_phys), 1)) or not torch.isfinite(forcing).all():
+                raise PINNInputError("forcing must be finite scalar or paired collocation rows")
+            kwargs["f"] = forcing
+        if not np.isfinite(self.data_weight) or not np.isfinite(self.physics_weight):
+            raise PINNInputError("loss weights must be finite")
+        if x_data.numel() + y_data.numel() + x_phys.numel() > 1048576:
+            raise PINNInputError("complete observations exceed the owned value budget")
+        return x_data, y_data, x_phys, kwargs
+
+    @checked_transition
     def train_step(
         self,
         x_data: torch.Tensor,
@@ -184,13 +242,13 @@ class PINNTrainer:
         **physics_kwargs
     ) -> Dict:
         """Single training step"""
+        x_data, y_data, x_phys, physics_kwargs = self._admit(
+            x_data, y_data, x_phys, physics_kwargs)
+        if (len(x_data) + len(x_phys)) * sum(p.numel() for p in self.model.parameters()) > 200000000:
+            raise PINNInputError("native PINN step exceeds admitted point/parameter work")
         self.model.train()
         self.optimizer.zero_grad()
-        
-        # Move to device
-        x_data = x_data.to(self.device)
-        y_data = y_data.to(self.device)
-        x_phys = x_phys.to(self.device).detach().clone().requires_grad_(True)
+        x_phys = x_phys.detach().clone().requires_grad_(True)
         
         # Data loss
         y_pred = self.model(x_data)
@@ -203,9 +261,11 @@ class PINNTrainer:
         # Combined loss
         loss = self.data_weight * data_loss + self.physics_weight * phys_loss
         
+        if not torch.isfinite(loss):
+            raise ValueError("PINN objective must be finite")
         # Backward pass
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
         self.optimizer.step()
         
         return {
@@ -215,6 +275,7 @@ class PINNTrainer:
             'lr': self.optimizer.param_groups[0]['lr']
         }
     
+    @owned_operation
     def train(
         self,
         x_data: torch.Tensor,
@@ -225,54 +286,37 @@ class PINNTrainer:
         **physics_kwargs
     ) -> Dict:
         """Full training loop"""
-        losses = []
-        data_losses = []
-        phys_losses = []
-        
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 1
+               for value in (epochs, batch_size)):
+            raise PINNInputError("epochs and batch_size must be positive integers")
+        # Validate the entire dataset before any batch can advance Adam.
+        x_data, y_data, x_phys, physics_kwargs = self._admit(
+            x_data, y_data, x_phys, physics_kwargs)
+        loop_policy(self, len(x_data), len(x_phys), epochs, batch_size)
+        losses, data_losses, phys_losses = [], [], []
         for epoch in range(epochs):
-            # Shuffle data
-            indices = torch.randperm(x_data.size(0))
-            x_data_shuffled = x_data[indices]
-            y_data_shuffled = y_data[indices]
-            
-            epoch_loss = 0
-            epoch_data_loss = 0
-            epoch_phys_loss = 0
-            num_batches = 0
-            
-            for i in range(0, x_data.size(0), batch_size):
-                batch_x = x_data_shuffled[i:i+batch_size]
-                batch_y = y_data_shuffled[i:i+batch_size]
-                
-                # Random physics points
-                phys_indices = torch.randperm(x_phys.size(0))[:batch_size]
-                batch_x_phys = x_phys[phys_indices]
-                
-                # Training step
-                result = self.train_step(batch_x, batch_y, batch_x_phys, **physics_kwargs)
-                
-                epoch_loss += result['loss']
-                epoch_data_loss += result['data_loss']
-                epoch_phys_loss += result['physics_loss']
-                num_batches += 1
-            
-            avg_loss = epoch_loss / num_batches
-            avg_data_loss = epoch_data_loss / num_batches
-            avg_phys_loss = epoch_phys_loss / num_batches
-            
+            indices = torch.randperm(len(x_data), device=x_data.device)
+            epoch_loss = epoch_data_loss = epoch_phys_loss = 0.0
+            for start in range(0, len(x_data), batch_size):
+                data_indices = indices[start:start + batch_size]
+                phys_indices = torch.randperm(len(x_phys), device=x_phys.device)[:batch_size]
+                kwargs = dict(physics_kwargs)
+                if "f" in kwargs and self.physics_loss.physics_type == "poisson" and kwargs["f"].ndim:
+                    kwargs["f"] = kwargs["f"][phys_indices]
+                result = self.train_step(x_data[data_indices], y_data[data_indices],
+                                         x_phys[phys_indices], **kwargs)
+                rows = len(data_indices)
+                epoch_loss += result["loss"] * rows
+                epoch_data_loss += result["data_loss"] * rows
+                epoch_phys_loss += result["physics_loss"] * rows
+            avg_loss = epoch_loss / len(x_data)
             losses.append(avg_loss)
-            data_losses.append(avg_data_loss)
-            phys_losses.append(avg_phys_loss)
-            
-            # Update scheduler
+            data_losses.append(epoch_data_loss / len(x_data))
+            phys_losses.append(epoch_phys_loss / len(x_data))
             self.scheduler.step(avg_loss)
-            
             if (epoch + 1) % 100 == 0:
-                logger.info(
-                    f"Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, "
-                    f"Data={avg_data_loss:.4f}, Physics={avg_phys_loss:.4f}"
-                )
-        
+                logger.info("PINN Epoch %s/%s: Loss=%.4f", epoch + 1, epochs, avg_loss)
+
         return {
             'losses': losses,
             'data_losses': data_losses,
@@ -282,6 +326,7 @@ class PINNTrainer:
             'final_physics_loss': phys_losses[-1]
         }
     
+    @owned_operation
     def predict(self, x: torch.Tensor) -> np.ndarray:
         """Make predictions"""
         self.model.eval()
@@ -290,6 +335,7 @@ class PINNTrainer:
             predictions = self.model(x)
         return predictions.cpu().numpy()
     
+    @owned_operation
     def save(self, path: str = "models/pinns_model.pth"):
         """Save model"""
         torch.save({
@@ -298,6 +344,7 @@ class PINNTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @owned_operation
     def load(self, path: str = "models/pinns_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)

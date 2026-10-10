@@ -55,6 +55,7 @@ import internalRoutes from '../../src/routes/internalRoutes.js';
 import { requireApiKey, authConfig } from '../../src/middleware/apiKey.js';
 
 function buildApp() {
+  // Route-mounted middleware reads the plural operator list.
   process.env.ESCROW_OPERATOR_API_KEYS = VALID_KEY;
   const app = express();
   app.use(express.json());
@@ -82,8 +83,11 @@ const OPERATOR_KEY = 'escrow-operator-test-key';
  * the auth assertions below exercise the middleware chain that actually
  * guards these routes in production rather than a stand-in.
  */
-function buildGuardedApp({ operatorConfigured = true } = {}) {
-  process.env.VALID_API_KEYS = `${VALID_KEY},${OPERATOR_KEY}`;
+function buildGuardedApp(validKeys = `${VALID_KEY},${OPERATOR_KEY}`, { operatorConfigured = true } = {}) {
+  process.env.VALID_API_KEYS = validKeys;
+  // The route-mounted middleware gates every pause-escrow request on the
+  // plural operator list; the singular key additionally gates unpause.
+  process.env.ESCROW_OPERATOR_API_KEYS = `${VALID_KEY},${OPERATOR_KEY}`;
   if (operatorConfigured) {
     process.env.ESCROW_OPERATOR_API_KEY = OPERATOR_KEY;
   } else {
@@ -141,6 +145,7 @@ describe('POST /api/internal/pause-escrow', () => {
 
   afterEach(() => {
     delete process.env.ESCROW_OPERATOR_API_KEY;
+    delete process.env.ESCROW_OPERATOR_API_KEYS;
   });
 
   it('opens the circuit when no body is supplied (defaults to paused)', async () => {
@@ -201,7 +206,7 @@ describe('POST /api/internal/pause-escrow', () => {
   it('returns 502 with correct message if on-chain unpause fails', async () => {
     circuitBreakerMock.setEscrowPaused.mockResolvedValue({ paused: false, updatedAt: 't', persisted: true });
     escrowServiceMock.setEscrowContractPaused.mockResolvedValue({ error: 'Reverted' });
-    const res = await request(buildApp()).post('/api/internal/pause-escrow').send({ paused: false });
+    const res = await request(buildApp()).post('/api/internal/pause-escrow').set('x-api-key', OPERATOR_KEY).send({ paused: false });
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('Redis unpause completed, but on-chain unpause failed.');
   });
@@ -273,6 +278,7 @@ describe('POST /api/internal/pause-escrow operator authorization', () => {
 
   afterEach(() => {
     delete process.env.ESCROW_OPERATOR_API_KEY;
+    delete process.env.ESCROW_OPERATOR_API_KEYS;
   });
 
   it('answers 403 and leaves the breaker untouched when a normal internal API key unpauses', async () => {
@@ -307,6 +313,8 @@ describe('POST /api/internal/pause-escrow operator authorization', () => {
       paused: false,
       updatedAt: '2026-09-16T00:00:00.000Z',
       persisted: true,
+      // The route now reports the on-chain confirmation in the response.
+      onChain: { success: true, txHash: '0xabc', alreadyInState: undefined },
     });
   });
 
@@ -333,7 +341,7 @@ describe('POST /api/internal/pause-escrow operator authorization', () => {
   });
 
   it('fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured', async () => {
-    const res = await request(buildGuardedApp({ operatorConfigured: false }))
+    const res = await request(buildGuardedApp(undefined, { operatorConfigured: false }))
       .post('/api/internal/pause-escrow')
       .set('x-api-key', VALID_KEY)
       .send({ paused: false });
@@ -345,7 +353,7 @@ describe('POST /api/internal/pause-escrow operator authorization', () => {
   it('fails closed even when the unconfigured operator key value is presented', async () => {
     // The key value is still in VALID_API_KEYS (so requireApiKey admits it),
     // but with the operator designation gone nothing may unpause.
-    const res = await request(buildGuardedApp({ operatorConfigured: false }))
+    const res = await request(buildGuardedApp(undefined, { operatorConfigured: false }))
       .post('/api/internal/pause-escrow')
       .set('x-api-key', OPERATOR_KEY)
       .send({ paused: false });

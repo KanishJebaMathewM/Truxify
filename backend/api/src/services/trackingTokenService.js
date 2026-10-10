@@ -6,6 +6,7 @@ const TOKEN_EXPIRY_DAYS = 7;
 const PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS = parseInt(process.env.PUBLIC_TRACKING_LOCATION_FRESHNESS_SECONDS || '900', 10);
 
 // Helper to validate standard UUID format
+// backend/api/src/services/trackingTokenService.js
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidUUID(uuid) {
@@ -105,7 +106,11 @@ export class TrackingTokenService {
       return { valid: false, reason: 'revoked' };
     }
 
-    if (new Date(token.expires_at) < new Date()) {
+    const expiresAt = new Date(token.expires_at).getTime();
+    if (!Number.isFinite(expiresAt)) {
+      return { valid: false, reason: 'validation_error' };
+    }
+    if (expiresAt <= Date.now()) {
       return { valid: false, reason: 'expired', tokenId: token.id };
     }
 
@@ -322,6 +327,35 @@ export class TrackingTokenService {
     }
 
     return location || null;
+  }
+
+  async validateAndGetPublicTrackingData(rawToken) {
+    const validation = await this.validateToken(rawToken);
+    if (!validation.valid) {
+      return validation;
+    }
+
+    const orderDisplayId = validation.token.order_display_id;
+
+    // Fetch order, timeline, and driver location using service-role client
+    const [orderRes, timelineRes, locationRes] = await Promise.all([
+      this._supabase.from('orders').select('*').eq('display_id', orderDisplayId).maybeSingle(),
+      this._supabase.from('order_timeline').select('*').eq('order_display_id', orderDisplayId),
+      this._supabaseAdmin.from('driver_locations').select('*').eq('order_display_id', orderDisplayId).maybeSingle(),
+    ]);
+
+    if (!orderRes.data) {
+      return { valid: false, reason: 'order_not_found' };
+    }
+
+    return {
+      valid: true,
+      data: {
+        order: orderRes.data,
+        timeline: timelineRes.data || [],
+        driverLocation: locationRes.data || null,
+      },
+    };
   }
 }
 

@@ -333,7 +333,7 @@ router.post(
           }
         }
       } catch (err) {
-        console.error('FETCH ORDER ERROR:', err);
+        logger.error({ err, requestId: req.id }, 'FETCH ORDER ERROR');
         return res.status(500).json({ error: 'Failed to fetch order.' });
       }
 
@@ -608,7 +608,7 @@ router.post(
         tx_hash,
       });
     } catch (err) {
-      console.error('OUTER PAYMENT LOCK ERROR:', err);
+      logger.error({ err, requestId: req.id }, 'OUTER PAYMENT LOCK ERROR');
       if (err instanceof LockAcquisitionError) {
         // Redis is down — do NOT proceed with the payment mutation.
         logger.error({ event: 'PAYMENT_REDIS_UNAVAILABLE', orderId: order_id, error: err.message }, '[payments] Redis unavailable — refusing payment lock');

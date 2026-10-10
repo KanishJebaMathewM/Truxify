@@ -5,7 +5,9 @@ fragility, and vehicle axle Center-of-Gravity (CoG) load balance.
 """
 
 from typing import List, Dict, Any, Tuple, Optional
-import math
+from fractions import Fraction
+
+from .packing_support import finite, observations, order, supported
 
 
 class BinPacking3D:
@@ -21,10 +23,11 @@ class BinPacking3D:
         container_height: float = 2.6,    # meters (standard ~ 2.6m)
         max_weight_kg: float = 25000.0,   # kg (max payload ~ 25 tonnes)
     ):
-        self.L = float(container_length)
-        self.W = float(container_width)
-        self.H = float(container_height)
-        self.max_weight_kg = float(max_weight_kg)
+        self.L = finite(container_length, "container_length")
+        self.W = finite(container_width, "container_width")
+        self.H = finite(container_height, "container_height")
+        self.max_weight_kg = finite(max_weight_kg, "max_weight_kg")
+        finite(self.L * self.W * self.H, "container volume")
 
     def pack(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -41,18 +44,13 @@ class BinPacking3D:
           - allow_rotation: bool (default True)
         """
         # Sort items by volume and weight descending (largest/heaviest first for stability)
-        sorted_items = sorted(
-            items,
-            key=lambda it: (
-                it.get("weight_kg", 0) * (it.get("length", 1) * it.get("width", 1) * it.get("height", 1))
-            ),
-            reverse=True,
-        )
+        admitted_items = observations(items)
+        sorted_items = sorted(admitted_items, key=order, reverse=True)
 
         packed_items: List[Dict[str, Any]] = []
         unpacked_items: List[Dict[str, Any]] = []
         extreme_points: List[Tuple[float, float, float]] = [(0.0, 0.0, 0.0)]
-        current_weight_kg = 0.0
+        current_weight_kg = Fraction(0)
 
         for item in sorted_items:
             item_id = item.get("id", f"item_{len(packed_items)}")
@@ -65,7 +63,7 @@ class BinPacking3D:
             allow_rotation = bool(item.get("allow_rotation", True))
 
             # Check weight limit
-            if current_weight_kg + weight_kg > self.max_weight_kg:
+            if current_weight_kg + Fraction(weight_kg) > Fraction(self.max_weight_kg):
                 unpacked_items.append({
                     "id": item_id,
                     "reason": "Exceeds maximum payload weight capacity",
@@ -86,45 +84,21 @@ class BinPacking3D:
                 px, py, pz = pt
 
                 for dim_l, dim_w, dim_h in orientations:
-                    # 1. Container boundary checks
-                    if px + dim_l > self.L or py + dim_w > self.W or pz + dim_h > self.H:
-                        continue
-
-                    # 2. Overlap check with already packed items
-                    overlap = False
-                    for p_item in packed_items:
-                        ix, iy, iz = p_item["position"]["x"], p_item["position"]["y"], p_item["position"]["z"]
-                        il, iw, ih = p_item["dimensions"]["l"], p_item["dimensions"]["w"], p_item["dimensions"]["h"]
-
-                        # Check 3D AABB intersection
-                        if not (
-                            px + dim_l <= ix or px >= ix + il or
-                            py + dim_w <= iy or py >= iy + iw or
-                            pz + dim_h <= iz or pz >= iz + ih
-                        ):
-                            overlap = True
-                            break
-
-                        # Check stackability constraint: do not place on top of non-stackable or fragile cargo
-                        if (not p_item["stackable"] or p_item["fragile"]) and pz >= iz + ih:
-                            if not (px + dim_l <= ix or px >= ix + il or py + dim_w <= iy or py >= iy + iw):
-                                overlap = True
-                                break
-
-                    if overlap:
+                    if not supported((px, py, pz), (dim_l, dim_w, dim_h),
+                                     packed_items, (self.L, self.W, self.H)):
                         continue
 
                     # 3. Valid placement found!
                     placed_entry = {
                         "id": item_id,
-                        "position": {"x": round(px, 3), "y": round(py, 3), "z": round(pz, 3)},
-                        "dimensions": {"l": round(dim_l, 3), "w": round(dim_w, 3), "h": round(dim_h, 3)},
+                        "position": {"x": px, "y": py, "z": pz},
+                        "dimensions": {"l": dim_l, "w": dim_w, "h": dim_h},
                         "weight_kg": weight_kg,
                         "stackable": stackable,
                         "fragile": fragile,
                     }
                     packed_items.append(placed_entry)
-                    current_weight_kg += weight_kg
+                    current_weight_kg += Fraction(weight_kg)
                     placed = True
 
                     # Generate new extreme points along bounding faces
@@ -150,21 +124,20 @@ class BinPacking3D:
                 })
 
         # Calculate volume utilization
-        total_container_vol = self.L * self.W * self.H
-        used_volume = sum(
-            p["dimensions"]["l"] * p["dimensions"]["w"] * p["dimensions"]["h"]
-            for p in packed_items
-        )
-        vol_utilization_pct = (used_volume / total_container_vol) * 100 if total_container_vol > 0 else 0
-
-        # Calculate Longitudinal Center of Gravity (CoG_x)
+        total_container_vol = Fraction(self.L) * Fraction(self.W) * Fraction(self.H)
+        used_volume = sum((Fraction(p["dimensions"]["l"]) *
+                           Fraction(p["dimensions"]["w"]) *
+                           Fraction(p["dimensions"]["h"]) for p in packed_items), Fraction(0))
+        vol_utilization_pct = float(used_volume / total_container_vol * 100)
+        # Normalize exact moments before conversion, avoiding intermediate
+        # float overflow for otherwise finite observations.
         cog_x = 0.0
         if current_weight_kg > 0:
-            weighted_x_sum = sum(
-                p["weight_kg"] * (p["position"]["x"] + p["dimensions"]["l"] / 2.0)
-                for p in packed_items
-            )
-            cog_x = weighted_x_sum / current_weight_kg
+            weighted_x_sum = sum((Fraction(p["weight_kg"]) *
+                                  (Fraction(p["position"]["x"]) +
+                                   Fraction(p["dimensions"]["l"]) / 2)
+                                  for p in packed_items), Fraction(0))
+            cog_x = float(weighted_x_sum / current_weight_kg)
 
         # Safe axle range is between 40% and 60% of container length
         is_axle_balanced = (0.35 * self.L) <= cog_x <= (0.65 * self.L) if current_weight_kg > 0 else True
@@ -176,14 +149,14 @@ class BinPacking3D:
                 "width": self.W,
                 "height": self.H,
                 "max_weight_kg": self.max_weight_kg,
-                "total_volume_m3": round(total_container_vol, 2),
+                "total_volume_m3": round(float(total_container_vol), 2),
             },
             "statistics": {
                 "total_items": len(items),
                 "packed_count": len(packed_items),
                 "unpacked_count": len(unpacked_items),
-                "total_packed_weight_kg": round(current_weight_kg, 2),
-                "weight_utilization_pct": round((current_weight_kg / self.max_weight_kg) * 100, 2),
+                "total_packed_weight_kg": round(float(current_weight_kg), 2),
+                "weight_utilization_pct": round(float(current_weight_kg / Fraction(self.max_weight_kg) * 100), 2),
                 "volume_utilization_pct": round(vol_utilization_pct, 2),
                 "center_of_gravity_x_m": round(cog_x, 3),
                 "is_axle_balanced": is_axle_balanced,

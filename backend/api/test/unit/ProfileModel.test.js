@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProfileModel } from '../../../src/models/ProfileModel.js';
+import { ProfileModel } from '../../src/models/ProfileModel.js';
 
 describe('ProfileModel', () => {
   describe('fromProfile', () => {

@@ -1,16 +1,18 @@
 import copy
 import functools
+import logging
 import math
 import threading
+from typing import Dict, List, Optional
+
+import networkx as nx
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Optional
-from torch_geometric.nn import GATConv, global_mean_pool
-from torch_geometric.data import Data, DataLoader
-import networkx as nx
-import logging
+from gat.serving_contract import admit_graph
+from gat.serving_contract import predictions as checked_predictions
+from torch_geometric.data import Data
+from torch_geometric.nn import GATConv
 
 from .training_transition import (
     admit_tuple, recover_step, finite_objective, finite_gradients,
@@ -129,26 +131,8 @@ class SpatialTemporalGAT(nn.Module):
         edge_index: torch.Tensor,
         time_features: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        # Builder/trainer inputs are (nodes, features); serving sequences are
-        # (batch, nodes, time, features). Normalize both at the model boundary.
-        if x.dim() == 2:
-            x = x.unsqueeze(0).unsqueeze(2)
-        if x.dim() != 4:
-            raise ValueError("GAT input must have 2 or 4 dimensions")
+        x, edge_index = admit_graph(self, x, edge_index, time_features)
         batch_size, num_nodes, time_steps, features = x.shape
-        if not batch_size or not num_nodes or not time_steps:
-            raise ValueError("GAT input batch, nodes and time must be nonempty")
-        if edge_index.dim() != 2 or edge_index.size(0) != 2:
-            raise ValueError("edge_index must have shape (2, edges)")
-        if edge_index.numel() and (
-            edge_index.min().item() < 0 or edge_index.max().item() >= num_nodes
-        ):
-            raise ValueError("edge_index must reference nodes in each input graph")
-
-        if features != self.in_features:
-            raise ValueError(
-                f"Expected feature dimension {self.in_features}, got {features}"
-            )
 
         x = x.permute(0, 2, 1, 3).contiguous()
 
@@ -184,7 +168,7 @@ class SpatialTemporalGAT(nn.Module):
         # Reshape to (batch, nodes, horizon)
         predictions = predictions.view(batch_size, num_nodes, self.prediction_horizon)
         
-        return predictions
+        return checked_predictions(self, predictions, batch_size, num_nodes)
     
     def predict_traffic(
         self,
@@ -193,15 +177,25 @@ class SpatialTemporalGAT(nn.Module):
         time_features: Optional[torch.Tensor] = None
     ) -> Dict:
         """Predict traffic for next time steps"""
-        self.eval()
-        with torch.no_grad():
-            predictions = self.forward(node_features, edge_index, time_features)
-            
-            return {
-                'predictions': predictions,
-                'mean': predictions.mean(dim=1),
-                'std': predictions.std(dim=1)
-            }
+        node_features, edge_index = admit_graph(self, node_features, edge_index, time_features)
+        modes = [(module, module.training) for module in self.modules()]
+        try:
+            self.eval()
+            with torch.no_grad():
+                result = self.forward(node_features, edge_index)
+                # Spread across the admitted node population, not an unbiased
+                # sample estimate with undefined singleton degrees of freedom.
+                scale = result.abs().amax(dim=1, keepdim=True)
+                scale = torch.where(scale == 0, torch.ones_like(scale), scale)
+                normalized = result.to(torch.float64) / scale.to(torch.float64)
+                mean = (normalized.mean(dim=1) * scale[:, 0].to(torch.float64)).to(result.dtype)
+                std = (normalized.std(dim=1, correction=0) * scale[:, 0].to(torch.float64)).to(result.dtype)
+                if not torch.isfinite(mean).all() or not torch.isfinite(std).all():
+                    raise RuntimeError("native node population summaries must remain finite")
+                return {'predictions': result, 'mean': mean, 'std': std}
+        finally:
+            for module, training in modes:
+                module.training = training
 
 class TrafficGraphBuilder:
     """Build traffic graph from road network"""
@@ -390,16 +384,10 @@ class GATTrainer:
     @_with_gat_state
     def predict(self, data: Data) -> Dict:
         """Make predictions"""
-        self.model.eval()
-        with torch.no_grad():
-            data = data.to(self.device)
-            predictions = self.model(data.x, data.edge_index)
-            
-            return {
-                'predictions': predictions.cpu().numpy(),
-                'mean': predictions.mean(dim=1).cpu().numpy(),
-                'std': predictions.std(dim=1).cpu().numpy()
-            }
+        data = data.to(self.device)
+        features = data.x.to(dtype=next(self.model.parameters()).dtype)
+        result = self.model.predict_traffic(features, data.edge_index)
+        return {name: value.detach().cpu().numpy().copy() for name, value in result.items()}
     
     @_with_gat_state
     def save(self, path: str = "models/gat_traffic.pth"):

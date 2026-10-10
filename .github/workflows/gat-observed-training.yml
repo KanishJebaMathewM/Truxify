@@ -29,7 +29,7 @@ jobs:
         env:
           PYTHONPATH: backend/ml
           OMP_NUM_THREADS: '1'
-        run: python -m pytest backend/ml/tests/test_gat_observed_training.py backend/ml/tests/test_gat_tensor_contract.py backend/ml/tests/test_gat_request_topology.py backend/ml/tests/test_gat_restore_transaction.py backend/ml/tests/test_gat.py backend/ml/tests/test_gat_temporal.py -q
+        run: python -m pytest backend/ml/tests/test_gat_observed_training.py backend/ml/tests/test_gat_serving_contract.py backend/ml/tests/test_gat_tensor_contract.py backend/ml/tests/test_gat_request_topology.py backend/ml/tests/test_gat_restore_transaction.py backend/ml/tests/test_gat.py backend/ml/tests/test_gat_temporal.py -q
       - name: Analyze new and scoped legacy sources
         run: |
           python -m ruff check backend/ml/gat/training_transition.py backend/ml/tests/test_gat_observed_training.py

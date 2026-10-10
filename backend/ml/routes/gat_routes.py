@@ -1,15 +1,18 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, model_validator, Field, ConfigDict
-from typing import Annotated
-from gat.training_transition import TrainingAdmissionError, observed_targets, admit_http_work
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-import networkx as nx
-from datetime import datetime
 import logging
-from gat.model import SpatialTemporalGAT, TrafficGraphBuilder, GATTrainer
 import os
+from datetime import datetime
+from typing import Annotated, List
+
+import networkx as nx
+from fastapi import APIRouter, HTTPException
+from gat.model import GATTrainer, SpatialTemporalGAT, TrafficGraphBuilder
+from gat.serving_contract import GATGraphInputError, graph_policy
+from gat.training_transition import (
+    TrainingAdmissionError,
+    admit_http_work,
+    observed_targets,
+)
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gat", tags=["Graph Attention Networks"])
@@ -35,24 +38,27 @@ model = SpatialTemporalGAT(
 trainer = GATTrainer(model)
 builder = TrafficGraphBuilder()
 
+FiniteObservation = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+
+
 class Node(BaseModel):
-    id: int
-    lat: float
-    lng: float
-    traffic: Optional[float] = 0
-    speed: Optional[float] = 50
-    road_type: Optional[str] = "local"
+    id: StrictInt
+    lat: FiniteObservation
+    lng: FiniteObservation
+    traffic: FiniteObservation = 0
+    speed: FiniteObservation = 50
+    road_type: str = Field(default="local", strict=True, min_length=1, max_length=64)
 
 class Edge(BaseModel):
-    source: int
-    target: int
-    distance: float
-    travel_time: Optional[float] = 0
-    congestion: Optional[float] = 0
+    source: StrictInt
+    target: StrictInt
+    distance: FiniteObservation
+    travel_time: FiniteObservation = 0
+    congestion: FiniteObservation = 0
 
 class GraphRequest(BaseModel):
-    nodes: List[Node]
-    edges: List[Edge]
+    nodes: List[Node] = Field(max_length=4096)
+    edges: List[Edge] = Field(max_length=100000)
 
     @model_validator(mode="after")
     def validate_topology(self):
@@ -81,8 +87,8 @@ async def build_graph(request: GraphRequest):
     try:
         request_builder = TrafficGraphBuilder()
         graph = request_builder.build_graph(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
+            [node.model_dump() for node in request.nodes],
+            [edge.model_dump() for edge in request.edges]
         )
         data = request_builder.get_pytorch_data(graph)
 
@@ -103,34 +109,29 @@ async def build_graph(request: GraphRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
-async def predict_traffic(request: GraphRequest):
+def predict_traffic(request: GraphRequest):
     """Predict traffic using GAT"""
     try:
-        # Build graph
-        request_builder = TrafficGraphBuilder()
-        graph = request_builder.build_graph(
-            [node.dict() for node in request.nodes],
-            [edge.dict() for edge in request.edges]
-        )
-        data = request_builder.get_pytorch_data(graph)
-
-        # Generate synthetic node features for time steps
-        # Model expects (batch_size, num_nodes, time_steps, features); build
-        # (1, num_nodes, 1, features) so batch_size == 1 and time_steps == 1.
-        node_features = data.x.unsqueeze(0)        # (1, num_nodes, features)
-        node_features = node_features.unsqueeze(2) # (1, num_nodes, 1, features) - aligns with (batch, num_nodes, time_steps, features)
-        predictions = trainer.model.predict_traffic(node_features, data.edge_index)
-
-        return {
-            'success': True,
-            'data': {
-                'predictions': predictions['predictions'].cpu().numpy().tolist(),
-                'mean': predictions['mean'].cpu().numpy().tolist(),
-                'std': predictions['std'].cpu().numpy().tolist(),
-                'horizon': trainer.model.prediction_horizon
-            },
-            'timestamp': datetime.now().isoformat()
-        }
+        with trainer._state_lock:
+            generation = trainer.model
+            # Match the undirected builder's deduplication before native export.
+            native_edges = 2 * len({
+                (min(edge.source, edge.target), max(edge.source, edge.target))
+                for edge in request.edges
+            })
+            graph_policy(generation, 1, len(request.nodes), 1, native_edges)
+            request_builder = TrafficGraphBuilder()
+            graph = request_builder.build_graph(
+                [node.model_dump() for node in request.nodes],
+                [edge.model_dump() for edge in request.edges])
+            data = request_builder.get_pytorch_data(graph)
+            result = trainer.predict(data)
+            return {'success': True,
+                    'data': {**{name: value.tolist() for name, value in result.items()},
+                             'horizon': generation.prediction_horizon},
+                    'timestamp': datetime.now().isoformat()}
+    except GATGraphInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -192,7 +193,7 @@ async def get_model_info():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
-async def save_model(path: str = "models/gat_traffic.pth"):
+def save_model(path: str = "models/gat_traffic.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Save GAT model"""
     try:
@@ -209,7 +210,7 @@ async def save_model(path: str = "models/gat_traffic.pth"):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
-async def load_model(path: str = "models/gat_traffic.pth"):
+def load_model(path: str = "models/gat_traffic.pth"):
     path = os.path.join("models", os.path.basename(path))
     """Load GAT model"""
     try:

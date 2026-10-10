@@ -2,7 +2,125 @@ import { ethers } from 'ethers';
 import logger from '../api/src/middleware/logger.js';
 import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 import { getMevRelayer } from './flashbots_relayer.js';
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+import db from '../config/db.js';
 
+// Escrow Smart Contract ABI including escrowCounter and EscrowCreated event
+const ESCROW_ABI = [
+  "constructor(address tokenAddress)",
+  "function createEscrow(address beneficiary, uint256 amount, uint256 unlockTime) external returns (uint256)",
+  "function releaseEscrow(uint256 escrowId) external",
+  "function getEscrow(uint256 escrowId) external view returns (address depositor, address beneficiary, uint256 amount, uint256 unlockTime, bool released)",
+  "function escrowCounter() external view returns (uint256)",
+  "event EscrowCreated(uint256 indexed escrowId, address indexed depositor, address indexed beneficiary, uint256 amount)"
+];
+
+export class MEVService {
+  constructor(providerOrSigner, escrowContractAddress) {
+    this.provider = providerOrSigner;
+    this.contractAddress = escrowContractAddress;
+    this.escrow = new ethers.Contract(escrowContractAddress, ESCROW_ABI, providerOrSigner);
+  }
+
+  /**
+   * Get the current escrow counter from the smart contract.
+   * @returns {Promise<string>}
+   */
+  async getEscrowCount() {
+    try {
+      const count = await this.escrow.escrowCounter();
+      return count.toString();
+    } catch (error) {
+      logger.error('Failed to get escrow count from contract:', error);
+      return '0';
+    }
+  }
+
+  /**
+   * Creates an escrow on-chain and persists it in the database with the correct escrow_id.
+   * Extracts the escrowId directly from transaction receipt logs to prevent race conditions.
+   * 
+   * @param {object} params
+   * @returns {Promise<object>}
+   */
+  async createEscrow({ beneficiary, amount, unlockTime }) {
+    try {
+      const tx = await this.escrow.createEscrow(beneficiary, amount, unlockTime);
+      const receipt = await tx.wait();
+
+      // Parse event logs to get the precise escrowId generated on-chain
+      let escrowId = null;
+      for (const log of receipt.logs) {
+        try {
+          const parsedLog = this.escrow.interface.parseLog(log);
+          if (parsedLog && parsedLog.name === 'EscrowCreated') {
+            escrowId = parsedLog.args.escrowId.toString();
+            break;
+          }
+        } catch (e) {
+          // Skip logs from other contracts
+        }
+      }
+
+      // Fallback to contract counter if log parsing missed it
+      if (!escrowId) {
+        escrowId = await this.getEscrowCount();
+      }
+
+      const escrowData = {
+        escrow_id: escrowId,
+        beneficiary,
+        amount: amount.toString(),
+        unlock_time: unlockTime,
+        tx_hash: receipt.transactionHash,
+        status: 'active',
+        created_at: new Date().toISOString(),
+      };
+
+      await this.storeEscrow(escrowData);
+      return escrowData;
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to create escrow on-chain');
+      throw error;
+    }
+  }
+
+  /**
+   * Persists escrow metadata in the database.
+   * @private
+   */
+  async storeEscrow(data) {
+    const { error } = await db.supabase.from('mev_escrows').insert([data]);
+    if (error) {
+      logger.error({ err: error }, 'Failed to persist escrow in database');
+      throw new Error(`[MEV] Database insert failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Releases an escrow on-chain.
+   * @param {string|number} escrowId
+   */
+  async releaseEscrow(escrowId) {
+    try {
+      const tx = await this.escrow.releaseEscrow(escrowId);
+      const receipt = await tx.wait();
+
+      await db.supabase
+        .from('mev_escrows')
+        .update({ status: 'released', released_at: new Date().toISOString() })
+        .eq('escrow_id', escrowId.toString());
+
+      return { success: true, txHash: receipt.transactionHash };
+    } catch (error) {
+      logger.error({ err: error, escrowId }, 'Failed to release escrow');
+      throw error;
+    }
+  }
+}
+
+export default MEVService;
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
  *

@@ -1,0 +1,61 @@
+name: Native SSL checkpoint tuples
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/self_supervised/**'
+      - 'backend/ml/foundation/optimizer_transition.py'
+      - 'backend/ml/tests/test_ssl_checkpoint_pair.py'
+      - 'backend/ml/tests/test_moco_key_queue_protocol.py'
+      - 'backend/ml/tests/test_simclr_pair_objective.py'
+      - 'backend/ml/tests/test_mae_observation_objective.py'
+      - '.github/workflows/ssl-checkpoint-pair.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-checkpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [baseline, repository]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Resolve the audited native Torch runtime
+        id: runtime
+        env:
+          REQUESTED_RUNTIME: ${{ matrix.runtime }}
+        run: |
+          python - <<'PYTORCH'
+          import os
+          import re
+          from pathlib import Path
+          pins = [re.fullmatch(r"torch==([0-9]+\.[0-9]+\.[0-9]+)", line.strip())
+                  for line in Path("backend/ml/requirements.txt").read_text().splitlines()]
+          pins = [match.group(1) for match in pins if match]
+          if len(pins) != 1:
+              raise ValueError("Expected one exact repository Torch pin")
+          version = pins[0] if os.environ["REQUESTED_RUNTIME"] == "repository" else "2.8.0"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          print(f"Native Torch runtime: {version}")
+          PYTORCH
+      - name: Scoped native dependencies
+        run: |
+          python -m pip install "torch==${{ steps.runtime.outputs.version }}" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy==1.26.4 pytest==9.0.3 ruff==0.16.9 fastapi==0.116.1 httpx==0.28.1 pytest-asyncio==1.4.0
+      - name: Native SSL paired checkpoints and existing objectives
+        env:
+          PYTHONPATH: backend/ml
+          OMP_NUM_THREADS: '1'
+        run: python -m pytest backend/ml/tests/test_ssl_checkpoint_pair.py backend/ml/tests/test_moco_key_queue_protocol.py backend/ml/tests/test_simclr_pair_objective.py backend/ml/tests/test_mae_observation_objective.py -q
+      - name: Analyze new and scoped legacy sources
+        run: |
+          python -m ruff check backend/ml/self_supervised/checkpoint_pair.py backend/ml/tests/test_ssl_checkpoint_pair.py
+          python -m ruff check backend/ml/self_supervised/model.py --select E9,F63,F7,F82,I,F401

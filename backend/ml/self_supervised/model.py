@@ -1,11 +1,15 @@
 import logging
 import math
+from threading import RLock
 from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from foundation.optimizer_transition import operation_owned
 from self_supervised.moco_transition import forward_candidate
+
+from .checkpoint_pair import capture_pair, restore_pair
 
 logger = logging.getLogger(__name__)
 
@@ -257,12 +261,25 @@ class SSLPreTrainer:
         learning_rate: float = 1e-4,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        self._operation_lock = RLock()
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
         
         logger.info(f"✅ SSL Pre-Trainer initialized on {self.device}")
     
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_operation_lock', None)
+        state.pop('_training_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._operation_lock = RLock()
+        self._training_lock = self._operation_lock
+
+    @operation_owned
     def pretrain_simclr(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
         """Pre-train using SimCLR"""
         losses = []
@@ -310,6 +327,7 @@ class SSLPreTrainer:
             'method': 'simclr'
         }
     
+    @operation_owned
     def pretrain_moco(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
         """Pre-train using MoCo"""
         losses = []
@@ -352,6 +370,7 @@ class SSLPreTrainer:
             'method': 'moco'
         }
     
+    @operation_owned
     def pretrain_mae(self, data: torch.Tensor, epochs: int = 50, batch_size: int = 32) -> Dict:
         """Pre-train using Masked Autoencoder"""
         for name, value in (('epochs', epochs), ('batch_size', batch_size)):
@@ -403,17 +422,15 @@ class SSLPreTrainer:
             'skipped_batches': skipped_batches
         }
     
+    @operation_owned
     def save(self, path: str = "models/ssl_model.pth"):
         """Save model"""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict()
-        }, path)
+        torch.save(capture_pair(self.model, self.optimizer), path)
         logger.info(f"✅ Model saved to {path}")
     
+    @operation_owned
     def load(self, path: str = "models/ssl_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        restore_pair(self.model, self.optimizer, checkpoint)
         logger.info(f"✅ Model loaded from {path}")

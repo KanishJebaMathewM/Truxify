@@ -237,6 +237,7 @@ class DriverProfitInput(BaseModel):
 class DriverProfitOutput(BaseModel):
     predicted_profit: float
     confidence_interval: dict
+    interval_calibration: dict | None = None
 
 
 # ---------------------------------------------------------------------------

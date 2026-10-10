@@ -10,7 +10,7 @@ class CircuitBreaker {
   async execute(fn) {
     if (this.state === 'OPEN') {
       if (Date.now() - this.lastFailureTime > this.resetTimeout) {
-        console.log(`Circuit breaker '${this.name}' transitioning to HALF-OPEN`);
+        logger.info({ breaker: this.name, state: 'HALF-OPEN' }, 'Circuit breaker transitioning to HALF-OPEN');
         this.state = 'HALF-OPEN';
       } else {
         throw new Error(`Circuit breaker '${this.name}' is OPEN. Service unavailable.`);

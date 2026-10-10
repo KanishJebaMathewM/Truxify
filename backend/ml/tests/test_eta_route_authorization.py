@@ -23,6 +23,7 @@ def eta_routes(monkeypatch):
 
     fake_execution_module = types.ModuleType("app.execution")
     fake_execution_module.run_inference = AsyncMock()
+    fake_execution_module.run_training_job = AsyncMock()
 
     monkeypatch.setitem(sys.modules, "services.traffic_pipeline", fake_pipeline_module)
     monkeypatch.setitem(sys.modules, "app.execution", fake_execution_module)

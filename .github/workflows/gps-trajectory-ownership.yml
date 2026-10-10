@@ -1,0 +1,32 @@
+name: GPS trajectory acknowledged batch ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/gps/batchTrajectoryPersistence.js'
+      - 'backend/api/src/services/gps/trajectoryObservation.js'
+      - 'backend/api/test/native/trajectoryPersistence.node.mjs'
+      - 'backend/api/test/native/trajectory-deps/**'
+      - '.github/workflows/gps-trajectory-ownership.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-trajectory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.18.1'
+      - name: Install pinned and locked isolated native SDK dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix backend/api/test/native/trajectory-deps
+          ln -s "$GITHUB_WORKSPACE/backend/api/test/native/trajectory-deps/node_modules" "$GITHUB_WORKSPACE/backend/api/node_modules"
+      - name: Actual SDK loopback insert and ownership checks
+        env:
+          NODE_ENV: production
+          LOG_LEVEL: fatal
+        run: node --test backend/api/test/native/trajectoryPersistence.node.mjs
+      - name: Changed-file analysis
+        run: backend/api/node_modules/.bin/eslint backend/api/src/services/gps/batchTrajectoryPersistence.js backend/api/src/services/gps/trajectoryObservation.js backend/api/test/native/trajectoryPersistence.node.mjs --config backend/api/eslint.config.js --max-warnings=0

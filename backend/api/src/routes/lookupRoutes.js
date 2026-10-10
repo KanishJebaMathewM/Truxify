@@ -28,7 +28,7 @@ async function getCachedOrFetch(key, fetchFn) {
       return await existing.promise;
     } finally {
       existing.waiters -= 1;
-      if (existing.waiters === 0) {
+      if (existing.waiters === 0 && inflight.get(key) === existing) {
         inflight.delete(key);
       }
     }
@@ -90,13 +90,16 @@ async function getCachedOrFetch(key, fetchFn) {
   // map until every waiter (including this one) is done awaiting it.
   const entry = { promise: fetchPromise, waiters: 1 };
   inflight.set(key, entry);
-  setTimeout(() => inflight.delete(key), 30000);
+  const deadline = setTimeout(() => {
+    if (inflight.get(key) === entry) inflight.delete(key);
+  }, 30000);
   try {
     return await entry.promise;
   } finally {
     entry.waiters -= 1;
     if (entry.waiters === 0) {
-      inflight.delete(key);
+      clearTimeout(deadline);
+      if (inflight.get(key) === entry) inflight.delete(key);
     }
   }
 }

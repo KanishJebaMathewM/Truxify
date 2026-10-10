@@ -1,0 +1,33 @@
+name: GPS filter observation state
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/gps/kalmanFilter.js'
+      - 'backend/api/test/native/kalmanFilter.node.mjs'
+      - '.github/workflows/gps-filter-observations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-filter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.18.1'
+      - name: Install isolated native protocol dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/gps-filter-deps"
+          cd "$RUNNER_TEMP/gps-filter-deps"
+          npm init -y
+          npm install --ignore-scripts --no-audit --no-fund pino@10.3.1 eslint@9.39.1 @eslint/js@9.39.1 globals@17.12.0
+          ln -s "$RUNNER_TEMP/gps-filter-deps/node_modules" "$GITHUB_WORKSPACE/backend/api/node_modules"
+      - name: Native filter and geofence observation evidence
+        env:
+          NODE_ENV: production
+          LOG_LEVEL: fatal
+        run: node --test backend/api/test/native/kalmanFilter.node.mjs
+      - name: Changed-file analysis
+        run: backend/api/node_modules/.bin/eslint backend/api/src/services/gps/kalmanFilter.js backend/api/test/native/kalmanFilter.node.mjs --config backend/api/eslint.config.js --max-warnings=0

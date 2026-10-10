@@ -74,7 +74,7 @@ class _LidarDimensioningScreenState extends State<LidarDimensioningScreen> {
       icon = Icons.warning_amber_rounded;
     } else if (s.scanProgressPct > 0) {
       headerColor = Colors.blue[700]!;
-      icon = Icons.360;
+      icon = Icons.threesixty;
     }
 
     return AnimatedContainer(

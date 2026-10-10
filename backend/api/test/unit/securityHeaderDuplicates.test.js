@@ -2,7 +2,7 @@
  * Unit tests for backend/api/src/middleware/securityHeaderDuplicates.js
  *
  * Coverage:
- *   - Skips all monitoring in production
+ *   - Detects duplicates in production without altering header forwarding
  *   - No warning on the first assignment of a monitored security header
  *   - Warning when the same monitored header is assigned more than once
  *   - No false-positive duplicate warning for repeated Set-Cookie arrays
@@ -14,7 +14,7 @@
  *
  * Run with: npx vitest run test/unit/securityHeaderDuplicates.test.js
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import securityHeaderDuplicates from '../../src/middleware/securityHeaderDuplicates.js';
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -26,7 +26,9 @@ let logger;
 beforeEach(async () => {
   logger = (await import('../../src/middleware/logger.js')).default;
   vi.clearAllMocks();
+  vi.stubEnv('NODE_ENV', 'production');
 });
+afterEach(() => vi.unstubAllEnvs());
 
 function makeReq() {
   return {
@@ -46,23 +48,19 @@ function makeRes() {
 }
 
 describe('securityHeaderDuplicates', () => {
-  it('skips monitoring in production', () => {
-    const originalEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production';
-    try {
-      const req = makeReq();
-      const originalSetHeader = vi.fn();
-      const res = { setHeader: originalSetHeader, on: vi.fn() };
-      const next = vi.fn();
-      securityHeaderDuplicates(req, res, next);
-      expect(next).toHaveBeenCalledOnce();
-      expect(res.setHeader).toBe(originalSetHeader);
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('X-Frame-Options', 'DENY');
-      expect(logger.warn).not.toHaveBeenCalled();
-    } finally {
-      process.env.NODE_ENV = originalEnv;
-    }
+  it('monitors duplicates in production while preserving header calls and returns', () => {
+    const req = makeReq();
+    const res = makeRes();
+    res.originalSetHeader.mockReturnValue(res);
+    const next = vi.fn();
+    securityHeaderDuplicates(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.setHeader('X-Frame-Options', 'DENY')).toBe(res);
+    expect(res.setHeader('x-frame-options', 'SAMEORIGIN')).toBe(res);
+    expect(res.originalSetHeader.mock.calls).toEqual([
+      ['X-Frame-Options', 'DENY'], ['x-frame-options', 'SAMEORIGIN'],
+    ]);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
   it('does not warn on the first assignment of a monitored header', () => {
@@ -166,6 +164,8 @@ describe('securityHeaderDuplicates setHeader guard', () => {
     const res = makeRes();
     const next = vi.fn();
     securityHeaderDuplicates(req, res, next);
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('x-frame-options', 'SAMEORIGIN');
     res.setHeader('x-frame-options', 'SAMEORIGIN');
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(res.originalSetHeader).toHaveBeenCalledTimes(2);

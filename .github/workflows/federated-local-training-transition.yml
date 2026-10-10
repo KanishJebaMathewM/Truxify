@@ -1,0 +1,39 @@
+name: Native federated local training transition
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/federated/federated_client.py'
+      - 'backend/ml/federated/local_training_transition.py'
+      - 'backend/ml/tests/test_federated_local_training_transition.py'
+      - '.github/workflows/federated-local-training-transition.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-rounds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install scoped native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          python -m pip install tensorflow-cpu==2.16.1 numpy==1.26.4 redis==5.0.0 cryptography==44.0.0 fastapi==0.116.1 httpx==0.27.0 pytest==9.0.3 ruff==0.16.9
+      - name: Native Keras candidates and existing encrypted round consumers
+        env:
+          PYTHONPATH: backend/ml
+          MPLCONFIGDIR: /tmp/truxify-mpl-cache
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TF_NUM_INTRAOP_THREADS: '1'
+          TF_NUM_INTEROP_THREADS: '1'
+        run: python -c 'import tensorflow; import pytest; raise SystemExit(pytest.main(["backend/ml/tests/test_federated_local_training_transition.py", "backend/ml/tests/test_federated_client_round_protocol.py", "backend/ml/tests/test_federated.py", "backend/ml/tests/test_federated_orchestration.py::TestFederatedOrchestration::test_client_receive_weights_synchronizes_round", "backend/ml/tests/test_federated_encryption.py::TestFederatedEncryption::test_client_key_refresh_on_invalid_token", "-q"]))'
+      - name: Analyze new sources and scoped legacy server
+        run: |
+          python -m ruff check backend/ml/federated/local_training_transition.py backend/ml/tests/test_federated_local_training_transition.py
+          python -m ruff check backend/ml/federated/federated_client.py --ignore I001,F401,UP035,UP006,BLE001,S110,SIM102,F541

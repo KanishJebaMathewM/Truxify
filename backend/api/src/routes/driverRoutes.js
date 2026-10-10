@@ -1642,7 +1642,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
         drop_address: trip.drop_address,
         pickup_date: trip.pickup_date,
         base_freight: baseFreight,
-        platform_fee: platformFee,
+        platform_fee: platformFee;
         toll_estimate: tollEstimate,
         net_earnings: netEarnings,
         status: trip.status
@@ -1650,6 +1650,7 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
     });
 
     // Apply sorting before formatting output
+    avg_earning_per_km: totalKm > 0 ? totalNetEarnings / totalKm : 0,
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {

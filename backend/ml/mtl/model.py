@@ -11,6 +11,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mtl.checkpoint_generation import validate_generation
 from mtl.gradient_projection import project_conflicts
+from mtl.training_transition import (
+    TrainingCandidateError,
+    prepare_step,
+    recover_step,
+    require_scalar,
+)
 from torch.utils.data import DataLoader, TensorDataset
 
 logger = logging.getLogger(__name__)
@@ -255,67 +261,78 @@ class MultiTaskTrainer:
         x: torch.Tensor,
         targets: Dict[str, torch.Tensor]
     ) -> Dict[str, Any]:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        # Forward pass
-        x = x.to(self.device)
-        predictions = self.model.forward_for_loss(x)
-        
-        # Move targets to device
-        targets_device = {}
-        for task_name, target in targets.items():
-            targets_device[task_name] = target.to(self.device)
-        
-        # Compute losses
-        losses = self.loss.compute_losses(predictions, targets_device)
-        
-        # Compute weighted loss
-        total_loss = self.loss.compute_weighted_loss(losses, self.task_weights)
-        
-        # Backward pass
-        if self.gradient_method == 'pcgrad':
-            # PCGrad operates on per-task gradients, not the summed gradient.
-            # Backpropagate each task loss separately to collect one gradient
-            # vector per task, then resolve conflicts across tasks.
-            grad_params = [p for p in self.model.parameters() if p.requires_grad]
-            if not grad_params or not losses:
-                raise ValueError("PCGrad requires trainable parameters and task losses")
-            task_vecs = []
-            connected = [False] * len(grad_params)
-            for task_name, task_loss in losses.items():
-                weighted_loss = task_loss * self.task_weights.get(task_name, 1.0)
-                task_grads = (torch.autograd.grad(weighted_loss, grad_params,
-                                                 retain_graph=True, allow_unused=True)
-                              if weighted_loss.requires_grad else [None] * len(grad_params))
-                # Every task uses the same full parameter coordinate layout.
-                # Unused private heads occupy zero slots, not shifted slots.
-                task_vecs.append(torch.cat([
-                    (value.detach() if value is not None else torch.zeros_like(param)).flatten()
-                    for param, value in zip(grad_params, task_grads)
-                ]))
-                connected = [old or value is not None for old, value in zip(connected, task_grads)]
-            processed = self.gradient_surgery.pcgrad(task_vecs)
-            final_grad = torch.stack(processed).sum(0)
-            offset = 0
-            for param, used in zip(grad_params, connected):
-                count = param.numel()
-                # Entirely disconnected parameters remain None, so Adam does
-                # not advance their moments or apply a stale momentum update.
-                param.grad = (final_grad[offset:offset + count].view_as(param).clone()
-                              if used else None)
-                offset += count
-        else:
-            total_loss.backward()
+        """Admit an owned batch and commit a checked native Adam transition."""
+        validate = self._validate_dataset if isinstance(self.model, MultiTaskModel) else None
+        x, targets, weights, method = prepare_step(self, x, targets, validate=validate)
+        with recover_step(self):
+            self.model.train()
+            self.optimizer.zero_grad()
 
-        self.optimizer.step()
-        
-        return {
-            'total_loss': total_loss.item(),
-            'task_losses': {k: v.item() for k, v in losses.items()}
-        }
-    
+            # Forward pass over the owned admitted batch.
+            predictions = self.model.forward_for_loss(x)
+
+            # Move targets to device
+            targets_device = {}
+            for task_name, target in targets.items():
+                targets_device[task_name] = target.to(self.device)
+
+            # Compute losses
+            losses = self.loss.compute_losses(predictions, targets_device)
+
+            if set(losses) != set(targets):
+                raise TrainingCandidateError("MTL loss outputs must match the admitted tasks")
+            for value in losses.values():
+                require_scalar(value, "task loss")
+
+            # Compute weighted loss
+            total_loss = self.loss.compute_weighted_loss(losses, weights)
+
+            require_scalar(total_loss, "weighted loss")
+
+            # Backward pass
+            if method == 'pcgrad':
+                # PCGrad operates on per-task gradients, not the summed gradient.
+                # Backpropagate each task loss separately to collect one gradient
+                # vector per task, then resolve conflicts across tasks.
+                grad_params = [p for p in self.model.parameters() if p.requires_grad]
+                if not grad_params or not losses:
+                    raise ValueError("PCGrad requires trainable parameters and task losses")
+                task_vecs = []
+                connected = [False] * len(grad_params)
+                for task_name, task_loss in losses.items():
+                    weighted_loss = task_loss * weights.get(task_name, 1.0)
+                    task_grads = (torch.autograd.grad(weighted_loss, grad_params,
+                                                     retain_graph=True, allow_unused=True)
+                                  if weighted_loss.requires_grad else [None] * len(grad_params))
+                    # Every task uses the same full parameter coordinate layout.
+                    # Unused private heads occupy zero slots, not shifted slots.
+                    task_vecs.append(torch.cat([
+                        (value.detach() if value is not None else torch.zeros_like(param)).flatten()
+                        for param, value in zip(grad_params, task_grads)
+                    ]))
+                    connected = [old or value is not None for old, value in zip(connected, task_grads)]
+                processed = self.gradient_surgery.pcgrad(task_vecs)
+                final_grad = torch.stack(processed).sum(0)
+                offset = 0
+                for param, used in zip(grad_params, connected):
+                    count = param.numel()
+                    # Entirely disconnected parameters remain None, so Adam does
+                    # not advance their moments or apply a stale momentum update.
+                    param.grad = (final_grad[offset:offset + count].view_as(param).clone()
+                                  if used else None)
+                    offset += count
+            else:
+                total_loss.backward()
+
+            if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in self.model.parameters()):
+                raise TrainingCandidateError("MTL derivatives must remain finite before Adam")
+            self.optimizer.step()
+
+            return {
+                'total_loss': total_loss.item(),
+                'task_losses': {k: v.item() for k, v in losses.items()}
+            }
+
     @_owned_generation
     def _step_scheduler(self, loss):
         self.scheduler.step(loss)

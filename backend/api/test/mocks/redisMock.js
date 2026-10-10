@@ -76,8 +76,6 @@ class RedisMock {
             return result === 'OK' ? 1 : 0;
         }
 
-<<<<<<< Updated upstream
-=======
         // Sequence gate (locationServer.applySequenceGate): ioredis-style
         // eval(script, numKeys, key, ...args) — accept when the incoming epoch
         // is newer than the stored one, then persist it.
@@ -118,7 +116,6 @@ class RedisMock {
             return [current == null ? 0 : Number(current), ttl];
         }
 
->>>>>>> Stashed changes
         return 0;
     }
 

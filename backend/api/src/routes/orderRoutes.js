@@ -206,6 +206,52 @@ import {
 } from '../controllers/orderController.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';
+// backend/api/src/routes/orderRoutes.js
+import { Router } from 'express';
+import { 
+  createOrderSchema, 
+  submitBidSchema, 
+  submitRatingSchema, 
+  acceptBidParamsSchema, 
+  updateMilestoneSchema 
+} from '../schemas/orderSchemas.js';
+import { validateBody, validateParams } from '../middleware/validation.js';
+import { requirePolicy } from '../middleware/auth.js';
+import * as orderController from '../controllers/orderController.js'; // or corresponding service handlers
+
+const router = Router();
+
+// --- Core Order Management ---
+
+// POST /api/orders (Create order)
+router.post(
+  '/',
+  requirePolicy('customer:create'),
+  validateBody(createOrderSchema),
+  orderController.createOrder
+);
+
+// GET /api/orders/my/active (Customer active orders)
+router.get(
+  '/my/active',
+  requirePolicy('customer:read'),
+  orderController.getActiveOrders
+);
+
+// GET /api/orders/load-offers (Load offers)
+router.get(
+  '/load-offers',
+  requirePolicy('driver:read'),
+  orderController.getLoadOffers
+);
+
+// GET /api/orders/load-offers/en-route (En-route load offers)
+router.get(
+  '/load-offers/en-route',
+  requirePolicy('driver:read'),
+  orderController.getEnRouteLoadOffers
+);
 import {
   validatePodFile,
   generatePodStoragePath,
@@ -213,6 +259,61 @@ import {
   createPodSignedUrl
 } from '../lib/storage/podStorage.js';
 
+// GET /api/orders/:id (Order detail)
+router.get(
+  '/:id',
+  requirePolicy('order:read'),
+  orderController.getOrderById
+);
+
+// GET /api/orders/:id/timeline
+router.get(
+  '/:id/timeline',
+  requirePolicy('order:read'),
+  orderController.getOrderTimeline
+);
+
+// --- Bidding & Ratings ---
+
+// POST /api/orders/:id/bids (Submit bid)
+router.post(
+  '/:id/bids',
+  requirePolicy('driver:bid'),
+  validateBody(submitBidSchema),
+  orderController.submitBid
+);
+
+// GET /api/orders/:id/bids
+router.get(
+  '/:id/bids',
+  requirePolicy('order:read'),
+  orderController.getOrderBids
+);
+
+// POST /api/orders/:id/accept-bid
+router.post(
+  '/:id/accept-bid',
+  requirePolicy('customer:update'),
+  orderController.acceptBid
+);
+
+// POST /api/orders/:id/ratings
+router.post(
+  '/:id/ratings',
+  requirePolicy('order:rate'),
+  validateBody(submitRatingSchema),
+  orderController.submitRating
+);
+
+// PUT /api/orders/:id/milestones
+router.put(
+  '/:id/milestones',
+  requirePolicy('driver:update'),
+  validateBody(updateMilestoneSchema),
+  orderController.updateMilestones
+);
+
+export default router;
 const router = express.Router();
 const MAX_GEOFENCE_RADIUS_M = 500;
 

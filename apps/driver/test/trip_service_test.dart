@@ -188,7 +188,7 @@ void main() {
       expect(requests.first.method, equals('PUT'));
       expect(
         requests.first.url.path,
-        equals('/api/trips/$tripDisplayId/stops/$stopId/complete'),
+        equals('/api/v1/trips/$tripDisplayId/stops/$stopId/complete'),
       );
     });
 
@@ -331,7 +331,7 @@ void main() {
 
       expect(requests, hasLength(1));
       expect(requests.first.method, equals('PUT'));
-      expect(requests.first.url.path, equals('/api/trips/$tripDisplayId/start'));
+      expect(requests.first.url.path, equals('/api/v1/trips/$tripDisplayId/start'));
     });
 
     test('Throws exception if startTrip finds no active stops', () async {

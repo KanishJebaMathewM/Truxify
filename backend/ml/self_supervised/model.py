@@ -6,6 +6,7 @@ from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from self_supervised.moco_transition import forward_candidate
 from self_supervised.training_transition import (
     check_adam,
     finite_registered_state,
@@ -165,43 +166,8 @@ class MoCo(nn.Module):
         self.queue_ptr[0] = (ptr + count) % self.queue_size
 
     def forward(self, x_q: torch.Tensor, x_k: torch.Tensor) -> torch.Tensor:
-        """Forward pass with contrastive loss"""
-        if (x_q.ndim != 2 or x_q.shape != x_k.shape or not len(x_q)
-                or x_q.shape[1] != self.input_dim):
-            raise ValueError("MoCo views require identical nonempty [batch, input_dim] shapes")
-        parameter = next(self.query_encoder.parameters())
-        if (x_q.dtype != parameter.dtype or x_k.dtype != parameter.dtype
-                or x_q.device != parameter.device or x_k.device != parameter.device
-                or not torch.isfinite(x_q).all() or not torch.isfinite(x_k).all()):
-            raise ValueError("MoCo views require finite tensors matching encoder dtype/device")
-        if not 0 <= int(self.queue_ptr.item()) < self.queue_size:
-            raise ValueError("queue pointer is outside capacity")
-        if (not isinstance(self.temperature, (int, float)) or not math.isfinite(self.temperature)
-                or self.temperature <= 0):
-            raise ValueError("temperature must be finite and positive")
-        # Query gradients belong only to the query encoder.
-        q = self.query_encoder(x_q)
-        q = F.normalize(q, dim=1)
-        
-        # The momentum dictionary is updated before encoding this training key.
-        with torch.no_grad():
-            if self.training:
-                self._momentum_update_key_encoder(self.momentum)
-            k = F.normalize(self.key_encoder(x_k), dim=1)
-        
-        # Contrastive loss
-        l_pos = torch.einsum('nc,nc->n', q, k).unsqueeze(-1) / self.temperature
-        l_neg = torch.einsum('nc,ck->nk', q, self.queue.clone().detach()) / self.temperature
-        
-        logits = torch.cat([l_pos, l_neg], dim=1)
-        labels = torch.zeros(logits.size(0), dtype=torch.long, device=logits.device)
-        
-        loss = F.cross_entropy(logits, labels)
-        
-        if self.training:
-            self._dequeue_and_enqueue(k)
-        
-        return loss
+        """Publish momentum/dictionary state only after an admitted native loss."""
+        return forward_candidate(self, x_q, x_k)
 
 class MaskedAutoencoder(nn.Module):
     """Masked Autoencoder for Self-Supervised Learning"""

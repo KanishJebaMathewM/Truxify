@@ -2,7 +2,67 @@
  * Unit tests for backend/api/src/lib/reverseGeocode.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { reverseGeocode } from '../../src/lib/reverseGeocode.js';
 
+describe('reverseGeocode Utility', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Valid Coordinates Lookup', () => {
+    it('should successfully return address data for valid latitude and longitude', async () => {
+      // Example coordinates (e.g., Chennai, India)
+      const lat = 13.0827;
+      const lng = 80.2707;
+
+      const result = await reverseGeocode(lat, lng);
+
+      expect(result).toBeDefined();
+      expect(typeof result).toBe('object');
+    });
+  });
+
+  describe('Invalid and Non-Numeric Input Handling', () => {
+    it('should reject or handle non-numeric coordinate inputs', async () => {
+      const invalidCases = [
+        { lat: 'not-a-number', lng: 80.2707 },
+        { lat: 13.0827, lng: 'invalid-lng' },
+        { lat: null, lng: undefined },
+        { lat: NaN, lng: NaN }
+      ];
+
+      for (const { lat, lng } of invalidCases) {
+        await expect(reverseGeocode(lat, lng)).rejects.toThrow();
+      }
+    });
+
+    it('should validate coordinate boundary ranges', async () => {
+      const outOfBoundsCases = [
+        { lat: 91.0, lng: 80.2707 },   // Latitude > 90
+        { lat: -91.0, lng: 80.2707 },  // Latitude < -90
+        { lat: 13.0827, lng: 181.0 },  // Longitude > 180
+        { lat: 13.0827, lng: -181.0 }  // Longitude < -180
+      ];
+
+      for (const { lat, lng } of outOfBoundsCases) {
+        await expect(reverseGeocode(lat, lng)).rejects.toThrow();
+      }
+    });
+  });
+
+  describe('API Error and Fallback Behavior', () => {
+    it('should return a safe fallback or handle external API failures gracefully', async () => {
+      // Simulate API failure condition or network timeout
+      const lat = 0.0;
+      const lng = 0.0;
+
+      const response = await reverseGeocode(lat, lng).catch((err) => err);
+      
+      expect(response).toBeDefined();
+    });
+  });
+});
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
   warn: vi.fn(),

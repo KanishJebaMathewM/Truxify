@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import logger from '../middleware/logger.js';
 import { mongoDb as mongoDbClient } from '../config/db.js';
+import { classifyTelemetryBulkOutcome } from './telemetryBulkOutcome.js';
 
 // ============================================================================
 // Shared buffered telemetry persistence pipeline.
@@ -52,6 +53,7 @@ let telemetryTotalFlushed = 0;
 let telemetryTotalDropped = 0;
 let telemetryRaceDropped = 0;
 let telemetryOverflowDropped = 0;
+let telemetryValidationDropped = 0;
 let telemetryFlushRetries = 0;
 let lastFlushAt = null;
 let lastFlushDurationMs = null;
@@ -163,8 +165,9 @@ function enqueue(record) {
  *   the happy path).
  * - Transient errors: all failed records are prepended back into the active
  *   buffer (oldest retries first) and the next flush backs off exponentially.
- * - Validation errors (code 121 / BulkWriteError): the offending documents are
- *   dropped permanently with a metric + log. Retrying them would loop forever.
+ * - Partial bulk outcomes: confirmed indexed validation failures are dropped;
+ *   complete acknowledged successes are excluded from retries. Other outcomes
+ *   remain recoverable, including write-concern and malformed-metadata cases.
  */
 function flush() {
   // Not async: an async function would wrap the in-flight promise in a fresh
@@ -214,50 +217,26 @@ function flush() {
       flushBackoffMs = FLUSH_RETRY_BASE_MS;
       lastFlushError = null;
     } catch (err) {
-      const isBulkWriteError =
-        err.code === 121 ||
-        err.name === 'BulkWriteError' ||
-        (err.message && err.message.includes('Document failed validation'));
-
-      if (isBulkWriteError) {
-        // Permanent failure — retrying the offending documents can never
-        // succeed, so drop them and report instead of looping forever.
-        const failedIndices = err.writeErrors
-          ? new Set(err.writeErrors.map((e) => e.index))
-          : null;
-
-        if (failedIndices) {
-          const sampleErrors = err.writeErrors.slice(0, 5).map((e) =>
-            `doc ${e.index}: ${e.err?.message || 'unknown'}`
-          ).join('; ');
-          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
-
-          const failed = recordsToFlush.filter((_, i) => failedIndices.has(i));
-          if (failed.length > 0) {
-            telemetryTotalDropped += failed.length;
-            telemetryOverflowDropped += failed.length;
-            logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${failed.length} permanently-invalid telemetry records.`);
-          }
-          // With ordered:false the remaining documents WERE inserted — count
-          // them so the metrics reflect reality and never double-write them.
-          telemetryTotalFlushed += recordsToFlush.length - failed.length;
-        } else {
-          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
-          telemetryTotalDropped += recordsToFlush.length;
-          telemetryOverflowDropped += recordsToFlush.length;
-          logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${recordsToFlush.length} permanently-invalid telemetry records.`);
-        }
-      } else {
-        // Transient — back off and retry the whole batch (oldest first).
+      const outcome = classifyTelemetryBulkOutcome(recordsToFlush, err);
+      telemetryTotalFlushed += outcome.inserted.length;
+      if (outcome.invalid.length > 0) {
+        telemetryTotalDropped += outcome.invalid.length;
+        telemetryValidationDropped += outcome.invalid.length;
+        logger.warn(`[TRUXIFY VALIDATION DROP] Dropped ${outcome.invalid.length} confirmed validation-rejected telemetry records.`);
+      }
+      if (outcome.retry.length > 0) {
         flushBackoffMs = Math.min(flushBackoffMs * 2, FLUSH_RETRY_MAX_MS);
         telemetryFlushRetries++;
-        lastFlushError = err.message;
-        const overflowDrop = buffer.prepend(recordsToFlush);
+        lastFlushError = err?.message || 'Uncertain telemetry bulk insert outcome';
+        const overflowDrop = buffer.prepend(outcome.retry);
         if (overflowDrop > 0) {
           telemetryTotalDropped += overflowDrop;
           telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
+          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest retry records due to capacity after flush failure.`);
         }
+      } else {
+        flushBackoffMs = FLUSH_RETRY_BASE_MS;
+        lastFlushError = null;
       }
     } finally {
       lastFlushDurationMs = Date.now() - flushStartedAt;
@@ -510,6 +489,7 @@ function getMetrics() {
     eventsFlushed: telemetryTotalFlushed,
     eventsDropped: telemetryTotalDropped,
     overflowDropped: telemetryOverflowDropped,
+    validationDropped: telemetryValidationDropped,
     raceDropped: telemetryRaceDropped,
     retryCount: telemetryFlushRetries,
     lastFlushAt,
@@ -588,6 +568,7 @@ const _test = {
     telemetryTotalDropped = 0;
     telemetryRaceDropped = 0;
     telemetryOverflowDropped = 0;
+    telemetryValidationDropped = 0;
     telemetryFlushRetries = 0;
     lastFlushAt = null;
     lastFlushDurationMs = null;

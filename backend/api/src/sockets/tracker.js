@@ -1626,10 +1626,36 @@ async function restoreSubscriptions(ws) {
       await redisClient.persist(`user:subscriptions:${subscriberId}`);
     }
 
-    // Additional message event routing goes here...
+    // Actually re-subscribe the socket — the read above is pointless if the
+    // targets never re-enter the tracking maps (restoration loop lost to a
+    // merge splice). Order targets are re-authorized before restoring, and
+    // stale entries for orders the user no longer belongs to are pruned from
+    // Redis so they stop reappearing on every reconnect.
+    for (const targetId of targets) {
+      const isSelfTarget = targetId === subscriberId;
+      if (!isSelfTarget) {
+        const { data: order } = await _orderRepository
+          ? await _orderRepository.findOrderByAnyId(targetId, 'id, customer_id, driver_id')
+          : { data: null };
+        const uid = ws.user?.id;
+        const allowed = order && (order.customer_id === uid || order.driver_id === uid);
+        if (!allowed) {
+          await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId).catch(() => {});
+          continue;
+        }
+      } else if (targetId !== subscriberId) {
+        // Driver targets are self-only.
+        await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId).catch(() => {});
+        continue;
+      }
+
+      if (!trackingSubscriptions.has(targetId)) {
+        trackingSubscriptions.set(targetId, new Set());
+      }
+      trackingSubscriptions.get(targetId).add(ws);
+      ws.subscriptionTargets.add(targetId);
+    }
   } catch (err) {
-    logger.error({ event: 'WS_MESSAGE_HANDLER_ERROR', socketId: ws.socketId, err }, 'Error handling incoming WebSocket message');
-    ws.send(JSON.stringify({ error: 'Invalid JSON payload' }));
     logger.error({ err }, 'Subscription restoration error');
   }
 }

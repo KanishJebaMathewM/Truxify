@@ -1851,4 +1851,3 @@ async function handleChatTyping(ws, data) {
   
   deliverToLocalSubscribers(orderId, payload);
 }
-};

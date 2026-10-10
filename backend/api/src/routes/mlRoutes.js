@@ -198,12 +198,16 @@ router.get(
   async (req, res) => {
     const { routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = req.query;
     try {
+      const parsedDistance = parseFloat(routeDistance);
+      const parsedTime = parseInt(timeOfDay, 10);
+      const parsedDay = parseInt(dayOfWeek, 10);
+      const parsedSpeed = parseFloat(historicalSpeed);
       const result = await predictEta({
-        routeDistance: parseFloat(routeDistance || '10'),
-        timeOfDay: parseInt(timeOfDay || '12', 10),
-        dayOfWeek: parseInt(dayOfWeek || '1', 10),
+        routeDistance: Number.isFinite(parsedDistance) ? parsedDistance : 10,
+        timeOfDay: Number.isFinite(parsedTime) ? parsedTime : 12,
+        dayOfWeek: Number.isFinite(parsedDay) ? parsedDay : 1,
         routeType: routeType || 'highway',
-        historicalSpeed: parseFloat(historicalSpeed || '60')
+        historicalSpeed: Number.isFinite(parsedSpeed) ? parsedSpeed : 60
       });
       return res.json(result);
     } catch (err) {

@@ -658,8 +658,11 @@ export class DeliveryVerificationService {
         // The confirmation guard only applies to escrow-backed orders — a
         // plain order (no escrow_status/amount) has nothing on-chain to
         // confirm.
+        // 'pending' = an escrow-backed order that was never funded — it must
+        // also block (the 503 retryable path), not fall through to the
+        // misleading status-change 409.
         const escrowExpected =
-          ["funded", "release_failed", "release_pending"].includes(order.escrow_status) ||
+          ["funded", "pending", "release_failed", "release_pending"].includes(order.escrow_status) ||
           order.escrow_amount_wei != null;
         const releaseConfirmed = Boolean(
           releaseTxHash ||

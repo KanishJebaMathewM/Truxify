@@ -117,8 +117,8 @@ async def evaluate_test(test_id: str):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/rollback/{test_id}")
-async def trigger_rollback(test_id: str):
-    """Trigger manual rollback"""
+def trigger_rollback(test_id: str):
+    """Run the owned native rollback on FastAPI's synchronous worker pool."""
     try:
         result = ab_service.trigger_rollback(test_id)
         return result

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
-from app.models.base import get_active_generation, restore_previous_model
+from app.models.base import get_active_generation
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.demand_forecast import reset_model_cache
 from services.ab_experiment_ledger import ExperimentLedger
@@ -102,138 +102,135 @@ class ABTestModel:
         return self.ledger.log(test_id, model_version, metrics, request_id)
 
     def evaluate_test(self, test_id: str) -> dict[str, Any]:
-        """Compare performance of production vs shadow model"""
-        test_state = self.ledger.read(test_id)
-        session = self.Session()
-        try:
-            metrics = (
-                session.query(ABTestMetrics)
-                .filter(ABTestMetrics.test_id == test_id)
-                .all()
-            )
+        """Compare one coherent native ledger identity/metric snapshot."""
+        with self.ledger.transaction() as session:
+            state = self.ledger._ensure(session, test_id)
+            metrics = session.query(ABTestMetrics).filter(
+                ABTestMetrics.test_id == test_id).all()
+            return self._evaluate_snapshot(
+                test_id, self.ledger.snapshot(state) if state else None, metrics)
 
-            df = pd.DataFrame(
-                [
-                    {
-                        "model_version": m.model_version,
-                        "metric_name": m.metric_name,
-                        "metric_value": m.metric_value,
-                    }
-                    for m in metrics
-                ]
-            )
-
-            if df.empty:
-                return {"error": "No metrics found"}
-
-            results = {}
-            logged_versions = df["model_version"].unique()
-            if not test_state or not test_state.get("production_version"):
-                return {
-                    "test_id": test_id,
-                    "results": {},
-                    "has_comparison": False,
-                    "shadow_better": False,
-                    "should_rollback": False,
-                    "error": "Legacy experiment identities are ambiguous",
+    def _evaluate_snapshot(self, test_id, test_state, metrics):
+        df = pd.DataFrame(
+            [
+                {
+                    "model_version": m.model_version,
+                    "metric_name": m.metric_name,
+                    "metric_value": m.metric_value,
                 }
-            prod_version = test_state["production_version"]
-            shadow_version = test_state.get("shadow_version")
-
-            # Keep evaluating legacy tests whose metrics used the old literal
-            # production label, while new tests compare real generations.
-            if prod_version not in logged_versions and "production" in logged_versions:
-                prod_version = "production"
-
-            for metric in df["metric_name"].unique():
-                metric_df = df[df["metric_name"] == metric]
-                avg_metrics = metric_df.groupby("model_version")["metric_value"].mean()
-
-                prod_val = avg_metrics.get(prod_version, None)
-                shadow_val = avg_metrics.get(shadow_version, None)
-
-                lower_is_better_keywords = {
-                    "rmse",
-                    "mae",
-                    "mse",
-                    "loss",
-                    "error_rate",
-                    "latency",
-                    "error",
-                }
-                higher_is_better = not any(
-                    k in metric.lower() for k in lower_is_better_keywords
-                )
-
-                results[metric] = {
-                    "production": prod_val,
-                    "shadow": shadow_val,
-                    "improvement": self.calculate_improvement(
-                        prod_val if prod_val is not None else 0.0,
-                        shadow_val if shadow_val is not None else 0.0,
-                        higher_is_better=higher_is_better,
-                    ),
-                }
-
-            comparable_metrics = [
-                values
-                for values in results.values()
-                if values.get("production") is not None
-                and values.get("shadow") is not None
-                and pd.notna(values.get("production"))
-                and pd.notna(values.get("shadow"))
-                and math.isfinite(values.get("production"))
-                and math.isfinite(values.get("shadow"))
+                for m in metrics
             ]
+        )
 
-            if not comparable_metrics:
-                has_shadow_data = any(
-                    values.get("shadow") is not None
-                    and pd.notna(values.get("shadow"))
-                    and math.isfinite(values.get("shadow"))
-                    for values in results.values()
-                )
-                if has_shadow_data:
-                    # Shadow metrics exist but none are comparable to production —
-                    # report a non-comparable evaluation rather than an error so
-                    # rollback handling can distinguish it from missing data.
-                    return {
-                        "test_id": test_id,
-                        "results": results,
-                        "shadow_better": False,
-                        "should_rollback": False,
-                        "has_comparison": False,
-                        "timestamp": datetime.now(timezone.utc)
-                        .replace(tzinfo=None)
-                        .isoformat(),
-                    }
+        if df.empty:
+            return {"error": "No metrics found"}
+
+        results = {}
+        logged_versions = df["model_version"].unique()
+        if not test_state or not test_state.get("production_version"):
+            return {
+                "test_id": test_id,
+                "results": {},
+                "has_comparison": False,
+                "shadow_better": False,
+                "should_rollback": False,
+                "error": "Legacy experiment identities are ambiguous",
+            }
+        prod_version = test_state["production_version"]
+        shadow_version = test_state.get("shadow_version")
+
+        # Keep evaluating legacy tests whose metrics used the old literal
+        # production label, while new tests compare real generations.
+        if prod_version not in logged_versions and "production" in logged_versions:
+            prod_version = "production"
+
+        for metric in df["metric_name"].unique():
+            metric_df = df[df["metric_name"] == metric]
+            avg_metrics = metric_df.groupby("model_version")["metric_value"].mean()
+
+            prod_val = avg_metrics.get(prod_version, None)
+            shadow_val = avg_metrics.get(shadow_version, None)
+
+            lower_is_better_keywords = {
+                "rmse",
+                "mae",
+                "mse",
+                "loss",
+                "error_rate",
+                "latency",
+                "error",
+            }
+            higher_is_better = not any(
+                k in metric.lower() for k in lower_is_better_keywords
+            )
+
+            results[metric] = {
+                "production": prod_val,
+                "shadow": shadow_val,
+                "improvement": self.calculate_improvement(
+                    prod_val if prod_val is not None else 0.0,
+                    shadow_val if shadow_val is not None else 0.0,
+                    higher_is_better=higher_is_better,
+                ),
+            }
+
+        comparable_metrics = [
+            values
+            for values in results.values()
+            if values.get("production") is not None
+            and values.get("shadow") is not None
+            and pd.notna(values.get("production"))
+            and pd.notna(values.get("shadow"))
+            and math.isfinite(values.get("production"))
+            and math.isfinite(values.get("shadow"))
+        ]
+
+        if not comparable_metrics:
+            has_shadow_data = any(
+                values.get("shadow") is not None
+                and pd.notna(values.get("shadow"))
+                and math.isfinite(values.get("shadow"))
+                for values in results.values()
+            )
+            if has_shadow_data:
+                # Shadow metrics exist but none are comparable to production —
+                # report a non-comparable evaluation rather than an error so
+                # rollback handling can distinguish it from missing data.
                 return {
                     "test_id": test_id,
                     "results": results,
                     "shadow_better": False,
                     "should_rollback": False,
-                    "error": "Insufficient metrics for production vs shadow comparison",
+                    "has_comparison": False,
                     "timestamp": datetime.now(timezone.utc)
                     .replace(tzinfo=None)
                     .isoformat(),
                 }
-
-            is_better = self.is_shadow_better(results)
-
-            has_comparison = len(comparable_metrics) > 0
-
             return {
                 "test_id": test_id,
                 "results": results,
-                "shadow_better": is_better,
-                "should_rollback": has_comparison and not is_better,
-                "has_comparison": has_comparison,
+                "shadow_better": False,
+                "should_rollback": False,
+                "error": "Insufficient metrics for production vs shadow comparison",
                 "timestamp": datetime.now(timezone.utc)
                 .replace(tzinfo=None)
                 .isoformat(),
             }
-        finally:
-            session.close()
+
+        is_better = self.is_shadow_better(results)
+
+        has_comparison = len(comparable_metrics) > 0
+
+        return {
+            "test_id": test_id,
+            "results": results,
+            "shadow_better": is_better,
+            "should_rollback": has_comparison and not is_better,
+            "has_comparison": has_comparison,
+            "timestamp": datetime.now(timezone.utc)
+            .replace(tzinfo=None)
+            .isoformat(),
+        }
 
     def calculate_improvement(
         self, prod_value: float, shadow_value: float, higher_is_better: bool = True
@@ -300,69 +297,10 @@ class ABTestModel:
         return self.ledger.terminal(test_id, status)
 
     def trigger_rollback(self, test_id: str) -> dict[str, Any]:
-        """Auto-rollback to previous version if shadow model underperforms"""
-        state = self.ledger.read(test_id)
-        if state and state["status"] in {"rolled_back", "rollback_failed"}:
-            return {
-                "action": "none",
-                "test_id": test_id,
-                "reason": "Experiment is terminal",
-                "status": state["status"],
-                "timestamp": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
-            }
-        evaluation = self.evaluate_test(test_id)
+        """Own native experiment/model rollback and its publication receipt."""
+        from services.ab_rollback import rollback_experiment
 
-        if evaluation.get("error"):
-            return {
-                "action": "none",
-                "test_id": test_id,
-                "reason": evaluation["error"],
-                "timestamp": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
-            }
-
-        if not evaluation.get("has_comparison", False):
-            return {
-                "action": "insufficient_metrics",
-                "test_id": test_id,
-                "reason": "Production and shadow metrics are not comparable",
-                "timestamp": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
-            }
-
-        if evaluation.get("should_rollback", False):
-            restored = restore_previous_model(DEMAND_MODEL_NAME)
-            if restored:
-                reset_model_cache()
-
-            self.mark_test_terminal(
-                test_id, "rolled_back" if restored else "rollback_failed"
-            )
-
-            logger.warning(
-                "Demand forecast rollback %s for test %s",
-                "completed" if restored else "failed",
-                test_id,
-            )
-
-            return {
-                "action": "rollback" if restored else "rollback_failed",
-                "test_id": test_id,
-                "reason": "Shadow model underperformed",
-                "rolled_back": restored,
-                "production_version": self.get_production_version(),
-                "timestamp": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
-            }
-
-        return {
-            "action": "promote",
-            "test_id": test_id,
-            "reason": "Shadow model performed well",
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        }
+        result = rollback_experiment(self, test_id, DEMAND_MODEL_NAME)
+        if result.get("rolled_back"):
+            reset_model_cache()
+        return result

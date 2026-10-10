@@ -4,7 +4,6 @@ import logging
 import os
 from datetime import datetime
 from functools import wraps
-from threading import RLock
 from typing import Annotated, List
 
 import numpy as np
@@ -28,7 +27,7 @@ trainer = NeRFTrainer(model)
 # FastAPI runs these synchronous endpoints in its worker pool. The native
 # lock belongs to the worker, so request cancellation cannot release it while
 # an already admitted operation still accesses the shared model/optimizer.
-_operation_lock = RLock()
+_operation_lock = trainer._operation_lock
 
 
 def serialized_native(function):

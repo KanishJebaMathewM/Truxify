@@ -428,5 +428,18 @@ class DigilockerService {
 
   }
 }
+// backend/api/src/services/digilockerService.js
+
+// Example axios configuration update for outbound DigiLocker calls:
+const response = await axios.get('https://api.digitallocker.gov.in/...', {
+  headers: { ... },
+  timeout: 10000 // 10-second timeout guard
+});
+
+// For POST requests:
+const tokenResponse = await axios.post('https://api.digitallocker.gov.in/oauth/token', payload, {
+  headers: { ... },
+  timeout: 10000 // 10-second timeout guard
+});
 
 export default new DigilockerService();

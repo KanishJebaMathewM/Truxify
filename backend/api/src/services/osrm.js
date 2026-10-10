@@ -9,7 +9,35 @@ import { measureExecution } from '../core/performanceMetrics.js';
  * distance matrices, and navigation summaries. Includes structured warning 
  * logging in catch blocks for robust production observability.
  */
+// backend/api/src/services/osrm.js
 
+import axios from 'axios';
+import logger from '../middleware/logger.js'; // Import structured logger
+
+export async function getRoute(coordinates, options = {}) {
+  try {
+    const url = `${process.env.OSRM_URL || 'http://router.project-osrm.org'}/route/v1/driving/${coordinates}`;
+    const response = await axios.get(url, { 
+      timeout: 5000, 
+      params: options 
+    });
+    return response.data;
+  } catch (error) {
+    // Structured warning log with error details and context
+    logger.warn(
+      { 
+        err: error.message, 
+        code: error.code, 
+        status: error.response?.status,
+        coordinates 
+      }, 
+      'OSRM routing service request failed; falling back or returning empty route.'
+    );
+    
+    // Fallback or rethrow depending on service contract
+    throw new Error(`OSRM Service Unavailable: ${error.message}`);
+  }
+}
 import axios from 'axios';
 import logger from '../middleware/logger.js';
 

@@ -1,5 +1,109 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+  import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// 1. Mock Logger with debug support
+vi.mock('../../../src/utils/logger.js', () => ({
+  default: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+// 2. Mock Profile Cache module
+vi.mock('../../../src/services/profileCache.js', () => ({
+  getCachedSupabaseProfile: vi.fn().mockResolvedValue({
+    id: 'usr_mock_12345',
+    role: 'customer',
+    status: 'active',
+  }),
+}));
+
+// 3. Mock Database / Supabase Admin module
+vi.mock('../../../src/config/db.js', () => ({
+  supabase: {
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: 'usr_mock_12345', email: 'joshua.miracle@truxify.com' } },
+        error: null,
+      }),
+    },
+  },
+  supabaseAdmin: {
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { id: 'usr_mock_12345', role: 'customer' },
+        error: null,
+      }),
+    })),
+  },
+  createUserClient: vi.fn(() => ({
+    auth: {
+      getUser: vi.fn().mockResolvedValue({
+        data: { user: { id: 'usr_mock_12345' } },
+        error: null,
+      }),
+    },
+  })),
+}));
+
+import { authenticate } from '../../../src/middleware/auth.js';
+
+describe('Auth Middleware (Unit Tests)', () => {
+  let req, res, next;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    req = {
+      headers: {},
+    };
+    res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    };
+    next = vi.fn();
+  });
+
+  it('rejects request with 401 when Authorization header is missing', async () => {
+    await authenticate(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.any(String) })
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('successfully authenticates request with valid local-JWT / fallback flow', async () => {
+    req.headers['authorization'] = 'Bearer valid-mock-jwt-token';
+
+    await authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(req.user).toBeDefined();
+    expect(req.user.id).toBe('usr_mock_12345');
+  });
+
+  it('handles invalid token format and responds with 401 unauthorized', async () => {
+    req.headers['authorization'] = 'Bearer invalid-token-string';
+
+    // Mock token verification failure
+    const db = await import('../../../src/config/db.js');
+    db.supabase.auth.getUser.mockResolvedValueOnce({
+      data: { user: null },
+      error: { message: 'Invalid token' },
+    });
+
+    await authenticate(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+});
 
 describe('authenticate middleware - non bypass flow', () => {
   beforeEach(() => {

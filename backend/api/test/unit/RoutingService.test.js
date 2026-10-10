@@ -258,10 +258,10 @@ describe('routingService - optimizeLtlRoute', () => {
 });
 
 describe('routingService - non-finite getHaversineDistance guard', () => {
-  it('should throw TypeError when non-finite coordinates are passed to getHaversineDistance', () => {
-    expect(() => getHaversineDistance(NaN, 77.2090, 27.1767, 78.0081)).toThrow(TypeError);
-    expect(() => getHaversineDistance(28.6139, Infinity, 27.1767, 78.0081)).toThrow(TypeError);
-    expect(() => getHaversineDistance(28.6139, 77.2090, undefined, 78.0081)).toThrow(TypeError);
+  it('should return null when non-finite coordinates are passed to getHaversineDistance', () => {
+    expect(getHaversineDistance(NaN, 77.2090, 27.1767, 78.0081)).toBeNull();
+    expect(getHaversineDistance(28.6139, Infinity, 27.1767, 78.0081)).toBeNull();
+    expect(getHaversineDistance(28.6139, 77.2090, undefined, 78.0081)).toBeNull();
   });
 });
 

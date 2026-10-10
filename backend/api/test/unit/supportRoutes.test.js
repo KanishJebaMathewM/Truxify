@@ -75,15 +75,17 @@ function makeQueryChain(data) {
   return chain;
 }
 
-const { supabase, supabaseAdmin, createUserClient } = vi.hoisted(() => {
+const { supabase, supabaseAdmin, createUserClient, getAdminClient } = vi.hoisted(() => {
   const fromFn = vi.fn();
   // Each call to from() returns a fresh chain that resolves to null by default;
   // tests can override supabaseAdmin.from via mockImplementation to inject data.
   fromFn.mockImplementation(() => makeQueryChain(null));
+  const admin = { from: fromFn };
   return {
     supabase: { from: fromFn },
-    supabaseAdmin: { from: fromFn },
+    supabaseAdmin: admin,
     createUserClient: vi.fn(() => ({ from: fromFn })),
+    getAdminClient: vi.fn(() => admin),
   };
 });
 
@@ -94,6 +96,7 @@ vi.mock('../../src/config/db.js', () => ({
   supabase,
   supabaseAdmin,
   createUserClient,
+  getAdminClient,
 }));
 
 import supportRoutes from '../../src/routes/supportRoutes.js';

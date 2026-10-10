@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { requireApiKey } from '../../../src/middleware/apiKey.js';
+import {
+  requireApiKey,
+  authConfig,
+  keyRepo,
+  keyCache,
+} from '../../../src/middleware/apiKey.js';
 
 const mockReq = (headers = {}) => ({
   headers,
@@ -32,6 +37,19 @@ describe('requireApiKey middleware', () => {
     delete process.env.VALID_API_KEYS;
   });
 
+  // The middleware reads its key set through module singletons built at
+  // import time, so each test refreshes them after pointing the env at
+  // the keys it needs. Without this every case sees an empty key set.
+  function useKeys(rawKeys) {
+    delete process.env.VALID_API_KEYS;
+    keyRepo.keyStore.clear();
+    keyCache.clear();
+    if (rawKeys !== undefined) {
+      process.env.VALID_API_KEYS = rawKeys;
+    }
+    authConfig.reload();
+  }
+
   it('returns 503 when VALID_API_KEYS is not configured', () => {
     const req = mockReq();
     const res = mockRes();
@@ -45,7 +63,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('returns 401 when API key is missing', () => {
-    process.env.VALID_API_KEYS = 'valid-key-1,valid-key-2';
+    useKeys('valid-key-1,valid-key-2');
     const req = mockReq({});
     const res = mockRes();
     const next = mockNext;
@@ -57,7 +75,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('returns 401 when API key is invalid', () => {
-    process.env.VALID_API_KEYS = 'valid-key-1,valid-key-2';
+    useKeys('valid-key-1,valid-key-2');
     const req = mockReq({ 'x-api-key': 'wrong-key' });
     const res = mockRes();
     const next = mockNext;
@@ -69,7 +87,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('calls next when API key is valid', () => {
-    process.env.VALID_API_KEYS = 'valid-key-1,valid-key-2';
+    useKeys('valid-key-1,valid-key-2');
     const req = mockReq({ 'x-api-key': 'valid-key-1' });
     const res = mockRes();
     const next = mockNext;
@@ -80,7 +98,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('accepts the second valid key from a comma-separated list', () => {
-    process.env.VALID_API_KEYS = 'key-one,key-two,key-three';
+    useKeys('key-one,key-two,key-three');
     const req = mockReq({ 'x-api-key': 'key-two' });
     const res = mockRes();
     const next = mockNext;
@@ -91,7 +109,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('trims whitespace from valid keys', () => {
-    process.env.VALID_API_KEYS = '  key-with-spaces  , another-key ';
+    useKeys('  key-with-spaces  , another-key ');
     const req = mockReq({ 'x-api-key': 'key-with-spaces' });
     const res = mockRes();
     const next = mockNext;
@@ -102,7 +120,7 @@ describe('requireApiKey middleware', () => {
   });
 
   it('returns 401 when API key is an empty string', () => {
-    process.env.VALID_API_KEYS = 'valid-key';
+    useKeys('valid-key');
     const req = mockReq({ 'x-api-key': '' });
     const res = mockRes();
     const next = mockNext;

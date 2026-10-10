@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
+import 'package:lottie/lottie.dart' hide Marker;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -12,6 +12,7 @@ import '../core/driver_session.dart';
 import '../core/supabase_config.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
+import '../models/truck_models.dart';
 import '../models/deadhead_recommendation.dart';
 import '../models/marketplace_models.dart';
 import '../theme/app_theme.dart';
@@ -1681,6 +1682,7 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
                 width: 12,
                 height: 12,
+                child: GestureDetector(
                 onTap: () {
                   final mapPoint = RouteMapPoint(
                     id: point['id']?.toString() ?? '',
@@ -1699,18 +1701,20 @@ class _TripsScreenState extends State<TripsScreen> {
                     arguments: mapPoint,
                   );
                 },
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: point['is_claimed'] == true
-                        ? TruxifyColors.success
-                        : TruxifyColors.accent,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: point['is_claimed'] == true
+                          ? TruxifyColors.success
+                          : TruxifyColors.accent,
+                    ),
                   ),
                 ),
               );
             }).toList(),
           ),
         ],
+      ),
       ),
     );
   }

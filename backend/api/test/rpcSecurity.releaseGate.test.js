@@ -41,6 +41,10 @@ function latestSecurityDefinerFunctions() {
       const headerEnd = block.indexOf('AS $');
       const header = headerEnd === -1 ? block : block.slice(0, headerEnd);
       if (!header.includes('SECURITY DEFINER')) continue;
+      // Trigger handlers (RETURNS TRIGGER) are not RPC-callable: Postgres only
+      // runs them via their trigger, so they cannot be invoked over PostgREST
+      // and need no caller gate. Only table-valued/scalar RPCs are vectors.
+      if (/RETURNS\s+TRIGGER/i.test(header)) continue;
       defs[match[1]] = { file, block };
     }
   }

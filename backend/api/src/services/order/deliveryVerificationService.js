@@ -9,6 +9,7 @@ import {
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
   verifyDeliveryOtpHash,
+  expireDeliveryOtps,
   sendPushNotification,
 } from "../notificationService.js";
 import {
@@ -64,11 +65,38 @@ export class DeliveryVerificationService {
       getActiveDeliveryOtp,
       verifyDeliveryOtp,
       verifyDeliveryOtpHash,
+      expireDeliveryOtps,
     };
     this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
     this.trackingTokenService = deps.trackingTokenService || null;
   }
+  // ... inside verifyDelivery / release handling ...
 
+    // 1. Resolve expected deposit amount (defense-in-depth)
+    let expectedAmountWei = null;
+    try {
+      const resolvedAmount = resolveExpectedDepositAmount(order);
+      if (resolvedAmount) {
+        expectedAmountWei = resolvedAmount;
+      }
+    } catch (err) {
+      logger.warn({ orderId: order.order_display_id, err: err.message }, 'Failed to resolve expected deposit amount');
+    }
+
+    // ... later in the release flow, the correct release call is executed:
+    const releaseResult = await this.escrowReleaseFn(order.order_display_id, expectedAmountWei);
+
+    // ... and for updating order status upon successful release:
+    if (releaseTxHash || escrowAlreadyReleased) {
+      const { error: persistReleaseErr } = await this._writeRepository.updateOrder(orderId, {
+        escrow_status: 'released',
+        updated_at: new Date().toISOString()
+      });
+
+      if (persistReleaseErr) {
+        logger.error({ orderId, err: persistReleaseErr.message }, 'Failed to persist escrow release state');
+      }
+    }
   /**
    * Repository used for release-path DB writes (escrow status, release hash,
    * guard updates, wallet description). Falls back to the read repository when
@@ -229,6 +257,11 @@ export class DeliveryVerificationService {
 
         const activeOtp =
           await this.notificationService.getActiveDeliveryOtp(orderId);
+        // A resend must not issue another usable code if invalidating the
+        // previous one failed. Keep the existing failure budget on resends.
+        if (!(await this.notificationService.expireDeliveryOtps(orderId))) {
+          throw new Error("Failed to invalidate previous delivery OTPs.");
+        }
         const otp = crypto.randomInt(100000, 1000000).toString();
         const stored = await this.notificationService.storeDeliveryOtp(
           orderId,
@@ -555,9 +588,12 @@ export class DeliveryVerificationService {
           }
 
           try {
+            const idempotencyKeyStr = crypto.createHash('sha256').update(`${orderId}-${otp}`).digest('hex');
+            const idempotencyKeyBytes32 = '0x' + idempotencyKeyStr;
             const releaseResult = await this.escrowReleaseFn(
               order.order_display_id,
               expectedAmountWei,
+              idempotencyKeyBytes32
             );
             if (releaseResult.txHash) {
               releaseTxHash = releaseResult.txHash;
@@ -645,12 +681,18 @@ export class DeliveryVerificationService {
         // already "released". If the release failed again, the driver is told
         // the retry failed instead of being notified that they are paid while
         // the funds remain stuck on-chain.
+        // The confirmation guard only applies to escrow-backed orders — a
+        // plain order (no escrow_status/amount) has nothing on-chain to
+        // confirm.
+        const escrowExpected =
+          ["funded", "release_failed", "release_pending"].includes(order.escrow_status) ||
+          order.escrow_amount_wei != null;
         const releaseConfirmed = Boolean(
           releaseTxHash ||
             escrowAlreadyReleased ||
             order.escrow_status === "released",
         );
-        if (!releaseConfirmed) {
+        if (escrowExpected && !releaseConfirmed) {
           logger.error(
             `[verify-delivery] On-chain escrow release not confirmed for order ${orderId} (escrow_status=${order.escrow_status}) — aborting before notification.`,
           );
@@ -862,7 +904,12 @@ export class DeliveryVerificationService {
           }
         }
 
-        return { escrowUpdateFailed };
+        return {
+          escrowUpdateFailed,
+          payment_released: true,
+          amount_inr: order.total_amount != null ? order.total_amount / 100 : null,
+          order_display_id: order.order_display_id,
+        };
       },
     );
   }

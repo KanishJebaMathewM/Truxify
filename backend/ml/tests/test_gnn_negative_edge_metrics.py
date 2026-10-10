@@ -55,7 +55,7 @@ def test_negative_edge_score_is_not_masked_by_clamp(sample_nodes, valid_edge):
     builder = GraphNetworkBuilder()
     builder.build_road_network(sample_nodes, [valid_edge])
     graph_data = builder.get_pytorch_data()
-    graph_data.graph["A"]["B"]["time"] = -1.0
+    graph_data.graph["A"]["B"][0]["time"] = -1.0
 
     optimizer = RouteOptimizer()
     embeddings = np.zeros((2, 1), dtype=float)

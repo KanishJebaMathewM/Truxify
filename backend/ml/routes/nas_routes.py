@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import json
-from datetime import datetime
 import logging
-from nas.model import NASSearchSpace, NASModel, NASSearcher
+from datetime import datetime
+from typing import Dict
+
+from fastapi import APIRouter, HTTPException
+from nas.model import NASModel, NASSearcher, NASSearchSpace
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nas", tags=["Neural Architecture Search"])
@@ -61,13 +61,15 @@ async def build_model(architecture: Dict):
         return {
             'success': True,
             'data': {
-                'architecture': architecture,
+                'architecture': model.architecture,
                 'parameters': model.get_params(),
                 'flops': model.get_flops(),
                 'layers': len(architecture['layers'])
             },
             'timestamp': datetime.now().isoformat()
         }
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as e:
         logger.error(f"Model building failed: {e}")
         logger.error(f"Internal error: {e}")

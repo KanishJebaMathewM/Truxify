@@ -61,9 +61,8 @@ async def update_eta_realtime(self, order_id, current_location, destination):
             if predicted_speed_mps is not None:
                 osrm_data = await self._fetch_osrm_data(current_location, destination)
                 route_distance_m = float(osrm_data.get("distance") or 0)
-                if route_distance_m > 0 and predicted_speed_mps > 0:
-                    eta_seconds = route_distance_m / predicted_speed_mps
-                else:
+                eta_seconds = _traffic_pipeline.eta_seconds_from_speed(route_distance_m, predicted_speed_mps)
+                if eta_seconds is None:
                     eta_seconds = float(osrm_data.get("duration") or 0)
 
                 eta_minutes = eta_seconds / 60

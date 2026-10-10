@@ -86,7 +86,8 @@ const chart2 = new LayoutNode({
 content.addChild(chart1);
 content.addChild(chart2);
 
-// Initial layout (Now works because processLayout() is implemented)
+
+// Initial layout
 layoutEngine.processLayout();
 
 // ============ Routes ============

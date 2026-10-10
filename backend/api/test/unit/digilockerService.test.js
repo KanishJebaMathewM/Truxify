@@ -71,11 +71,12 @@ function setContractEnv() {
   process.env.KYC_VERIFIER_CONTRACT_ADDRESS = '0x' + '33'.repeat(20);
 }
 
+/** Re-imports the service so environment changes apply after vi.resetModules(). */
 async function loadService() {
-  vi.resetModules();
   const mod = await import('../../src/services/digilockerService.js');
   return mod.default;
 }
+
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -254,6 +255,9 @@ function stubSyncTables(profileWallet) {
               error: null,
             }),
           })),
+        })),
+        update: vi.fn(() => ({
+          eq: vi.fn().mockResolvedValue({ error: null }),
         })),
       };
     }

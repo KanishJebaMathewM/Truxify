@@ -116,9 +116,6 @@ router.post('/documents/check', documentCheckLimiter, authenticate, validateBody
   try {
     const { driverId } = req.body;
 
-    // IDOR guard: a caller may only inspect their own document/KYC status
-    // unless they hold an admin role (mirrors the ownership check used on the
-    // order-scoped verification routes).
     try {
       policy.authorize(req.user, 'document:view', { driverId });
     } catch (error) {
@@ -166,15 +163,27 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken } = req.body;
-    const userId = req.user?.id;
-    if (!userId) {
+    const { accessToken, userId: bodyUserId } = req.body;
+    const authenticatedUserId = req.user?.id;
+
+    if (!authenticatedUserId) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
+
+    // Fixed #10259: Prevent IDOR / privilege escalation by rejecting bodyUserId mismatches 
+    // instead of falling back to client-supplied user identifiers.
+    if (bodyUserId && bodyUserId !== authenticatedUserId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Cannot verify documents for another user identity.',
+      });
+    }
+
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
     }
-    const verificationResult = await digilockerService.verifyDocuments(userId, accessToken);
+
+    const verificationResult = await digilockerService.verifyDocuments(authenticatedUserId, accessToken);
     res.status(200).json({
       success: true,
       data: verificationResult
@@ -189,10 +198,8 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
 
 const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
+const OCR_HTTP_TIMEOUT_MS = 15000;
 
-// Normalize/validate an identity document number extracted by OCR. Returns the
-// normalized value or `null` when the format is obviously invalid.
 function normalizeKycDocNumber(value) {
   if (typeof value !== 'string') return null;
   const cleaned = value.replace(/\s+/g, '').toUpperCase();
@@ -212,6 +219,7 @@ const upload = multer({
   },
 });
 
+// Fixed #10258: `authenticate` runs BEFORE `upload.single('image')` to prevent unauthenticated memory-exhaustion DoS
 router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;
@@ -219,8 +227,6 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
       return res.status(400).json({ success: false, error: 'No image uploaded' });
     }
 
-    // Validate magic bytes and malware-scan before the buffer is forwarded to
-    // the ML endpoint (same hardening as the PoD upload at orderRoutes).
     try {
       validateDocumentBuffer(req.file.buffer, req.file.mimetype);
       const scanResult = await scanDocument(req.file.buffer, req.file.originalname);
@@ -238,7 +244,6 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
       throw error;
     }
 
-    // Set status to pending
     const { error: updateError } = await supabaseAdmin
       .from('driver_details')
       .update({ kyc_status: 'Pending KYC' })
@@ -276,11 +281,6 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
 
     const ocrData = await mlResponse.json();
 
-    // OCR output is only a *hint*. A bare ML/OCR `verified` boolean from an
-    // internal endpoint must never, on its own, flip a driver to KYC=Verified.
-    // Approval additionally requires an explicit government-source attestation
-    // flag (e.g. DigiLocker/registry) returned by the verification pipeline,
-    // binding the document to the user's real identity.
     const governmentAttested =
       ocrData && ocrData.attested === true && ocrData.verified === true;
 

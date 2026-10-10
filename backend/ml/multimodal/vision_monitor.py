@@ -13,6 +13,8 @@ from datetime import datetime
 import base64
 from typing import Dict, List, Tuple, Any
 
+from multimodal.head_pose import estimate_head_pose
+
 logger = logging.getLogger(__name__)
 
 class VisionMonitor:
@@ -51,6 +53,8 @@ class VisionMonitor:
         # State tracking
         self.eye_closed_frames = 0
         self.distraction_frames = 0
+        self.head_pose_camera_matrix = None
+        self.head_pose_distortion = None
         self.safety_thresholds = {
             'eye_aspect_ratio': 0.25,
             'drowsiness_frames': 20,
@@ -149,14 +153,15 @@ class VisionMonitor:
             }
             
         except Exception as e:
+            self.eye_closed_frames = 0
             logger.error(f"Drowsiness detection failed: {e}")
             return {'status': 'UNKNOWN', 'confidence': 0}
     
-    def detect_distraction(self, face_landmarks) -> Dict:
+    def detect_distraction(self, face_landmarks, frame_size=None) -> Dict:
         """Detect driver distraction"""
         try:
             # Head pose estimation
-            head_pose = self._estimate_head_pose(face_landmarks)
+            head_pose = self._estimate_head_pose(face_landmarks, frame_size)
             
             # Check if driver is looking away
             is_distracted = (
@@ -186,38 +191,40 @@ class VisionMonitor:
             }
             
         except Exception as e:
+            self.distraction_frames = 0
             logger.error(f"Distraction detection failed: {e}")
             return {'status': 'UNKNOWN', 'confidence': 0}
     
-    def _estimate_head_pose(self, landmarks) -> Dict:
-        """Estimate head pose from facial landmarks"""
-        nose_tip = landmarks[1]  # nose tip
-        forehead = landmarks[10]  # forehead center
-        left_eye = landmarks[33]  # left eye inner corner
-        right_eye = landmarks[263]  # right eye inner corner
-        chin = landmarks[152]  # chin
+    def _estimate_head_pose(self, landmarks, frame_size=None) -> Dict:
+        """Estimate admitted degree-valued pose; unavailable geometry is unknown."""
+        return estimate_head_pose(
+            landmarks, frame_size,
+            camera_matrix=getattr(self, 'head_pose_camera_matrix', None),
+            distortion=getattr(self, 'head_pose_distortion', None),
+        )
 
-        eye_center_x = (left_eye[0] + right_eye[0]) / 2
-        eye_center_y = (left_eye[1] + right_eye[1]) / 2
+    def _unknown_frame(self, status, error=None) -> Dict:
+        self.eye_closed_frames = 0
+        self.distraction_frames = 0
+        report = {'status': status, 'overall_status': 'UNKNOWN',
+                  'drowsiness': {'status': 'UNKNOWN', 'confidence': 0},
+                  'distraction': {'status': 'UNKNOWN', 'confidence': 0},
+                  'timestamp': datetime.now().isoformat()}
+        if error is not None:
+            report['error'] = str(error)
+        try:
+            self.redis.setex('vision:latest', 60, json.dumps(report, allow_nan=False))
+        except redis.RedisError:
+            logger.warning('Unknown vision report could not be cached')
+        return report
 
-        dx = nose_tip[0] - eye_center_x
-        dy = nose_tip[1] - eye_center_y
-
-        face_height = chin[1] - forehead[1]
-        face_width = abs(right_eye[0] - left_eye[0])
-
-        yaw = max(-30, min(30, (dx / max(face_width, 1)) * 30))
-        pitch = max(-20, min(20, (dy / max(face_height, 1)) * 20))
-
-        eye_dx = right_eye[0] - left_eye[0]
-        eye_dy = right_eye[1] - left_eye[1]
-        roll = max(-10, min(10, (eye_dy / max(eye_dx, 1)) * 10))
-
-        return {'yaw': yaw, 'pitch': pitch, 'roll': roll}
-    
     def process_frame(self, frame) -> Dict:
         """Process single video frame"""
         try:
+            if (not isinstance(frame, np.ndarray) or frame.dtype != np.uint8
+                    or frame.ndim != 3 or frame.shape[2] != 3
+                    or not 1 <= frame.shape[0] <= 8192 or not 1 <= frame.shape[1] <= 8192):
+                raise ValueError('vision requires a bounded nonempty uint8 BGR frame')
             # Convert to RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
@@ -231,15 +238,15 @@ class VisionMonitor:
                 h, w = frame.shape[:2]
                 face_landmarks = []
                 for landmark in landmarks.landmark:
-                    x = int(landmark.x * w)
-                    y = int(landmark.y * h)
+                    x = float(landmark.x * w)
+                    y = float(landmark.y * h)
                     face_landmarks.append((x, y))
                 
                 # Detect drowsiness
                 drowsiness = self.detect_drowsiness(face_landmarks)
                 
                 # Detect distraction
-                distraction = self.detect_distraction(face_landmarks)
+                distraction = self.detect_distraction(face_landmarks, frame_size=(w, h))
                 
                 # Combine results
                 result = {
@@ -253,16 +260,16 @@ class VisionMonitor:
                 self.redis.setex(
                     'vision:latest',
                     60,
-                    json.dumps(result)
+                    json.dumps(result, allow_nan=False)
                 )
                 
                 return result
             
-            return {'status': 'NO_FACE_DETECTED'}
+            return self._unknown_frame('NO_FACE_DETECTED')
             
         except Exception as e:
             logger.error(f"Frame processing failed: {e}")
-            return {'status': 'ERROR', 'error': str(e)}
+            return self._unknown_frame('ERROR', e)
     
     def _determine_overall_status(self, drowsiness: Dict, distraction: Dict) -> str:
         """Determine overall safety status"""
@@ -277,6 +284,9 @@ class VisionMonitor:
     
     def get_alert(self, result: Dict) -> Dict:
         """Generate safety alert"""
+        if result.get('overall_status') not in ('SAFE', 'WARNING', 'CRITICAL'):
+            return {'level': 'UNKNOWN', 'message': 'Vision observations unavailable',
+                    'actions': ['Check vision input'], 'timestamp': datetime.now().isoformat()}
         if result['overall_status'] == 'CRITICAL':
             return {
                 'level': 'CRITICAL',

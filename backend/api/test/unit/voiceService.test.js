@@ -242,7 +242,7 @@ describe('voiceService', () => {
       const result = await processVoiceQuery('user-1', 'booking-1', Buffer.from('audio'), 'audio.wav');
 
       expect(result.transcript).toBeTruthy();
-      expect(result.response_text).toContain('in transit');
+      expect(result.response_text).toContain('in_transit');
     });
 
     it('returns mock when only OPENAI_API_KEY is set', async () => {

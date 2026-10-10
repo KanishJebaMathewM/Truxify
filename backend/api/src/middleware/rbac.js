@@ -57,7 +57,7 @@ const requireAuthorization = (resourceType, action, idParam = 'id') => {
             req.resource = resource;
             next();
         } catch (err) {
-            console.error('RBAC Middleware Error:', err.message);
+            logger.error({ err, requestId: req.id }, 'RBAC Middleware Error');
             return res.status(500).json({ error: 'Internal server error during authorization' });
         }
     };

@@ -52,7 +52,7 @@ export function requirePolicy(action, getResource) {
 
     if (policy.isOwnershipOnlyPolicy(action) && !getResource) {
       const message = `Misconfigured policy '${action}': ownership-only policies require a getResource resolver.`;
-      console.error(`[requirePolicy] ${message}`);
+      logger.error({ requestId: req.id, message }, '[requirePolicy] Policy enforcement error');
       return res.status(500).json({ error: message });
     }
 

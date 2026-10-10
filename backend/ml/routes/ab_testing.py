@@ -43,7 +43,36 @@ def _feature(request, key, fallback, cast, minimum=None):
         raise ValueError(f"Feature '{key}' must be >= {minimum}")
     return parsed
 
+# backend/ml/ab_testing.py
 
+def get_production_version():
+    """Fetch the active production model version from the registry/DB."""
+    # Query model registry for active production tag
+    active_model = model_registry_db.query.filter_by(status='production', model_type='demand_forecast').first()
+    return active_model ? active_model.version : 'v1.0.0'
+
+def trigger_rollback(model_type='demand_forecast', target_version=None):
+    """Roll back production model to a stable previous version."""
+    previous_version = target_version or get_previous_stable_version(model_type)
+    
+    try:
+        # Update DB/Registry status: demote current, promote previous
+        model_registry_db.query.filter_by(model_type=model_type, status='production').update({'status': 'archived'})
+        model_registry_db.query.filter_by(model_type=model_type, version=previous_version).update({'status': 'production'})
+        model_registry_db.commit()
+
+        logger.info(f"Successfully rolled back {model_type} to version {previous_version}")
+        return {
+            "status": "success",
+            "action": "rollback",
+            "model_type": model_type,
+            "restored_version": previous_version,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        model_registry_db.rollback()
+        logger.error(f"Rollback failed for {model_type}: {str(e)}")
+        raise
 @router.post("/predict")
 async def predict_with_ab(request: PredictionRequest):
     """Get a real ETA prediction routed through the A/B service.

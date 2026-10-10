@@ -5,7 +5,39 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const DIGILOCKER_TIMEOUT_MS = 10000;
+// Inside backend/api/src/services/digilockerService.js
 
+// --- BEFORE (Incorrect columns & swallowed errors):
+/*
+const { error } = await supabase
+  .from('driver_documents')
+  .upsert({
+    driver_id: driverId,
+    document_type: documentType,
+    document_hash: docHash,           // Phantom column
+    is_verified: isVerified,           // Phantom column
+    verification_source: 'DIGILOCKER' // Phantom column
+  });
+
+return { success: true };
+*/
+
+// --- AFTER (Correct columns & proper error handling):
+const { error } = await supabase
+  .from('driver_documents')
+  .upsert({
+    driver_id: driverId,
+    document_type: documentType,
+    is_govt_verified: isVerified,       // Correct actual column
+    blockchain_tx_hash: blockchainHash   // Correct actual column
+  });
+
+if (error) {
+  console.error('Failed to upsert driver document:', error.message);
+  return { success: false, error: error.message };
+}
+
+return { success: true };
 // Sentinel stored on profiles that have not linked a wallet yet. It is a
 // truthy string, so it must be compared explicitly before any on-chain write.
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';

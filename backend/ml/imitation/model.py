@@ -1,3 +1,6 @@
+from threading import RLock
+from foundation.optimizer_transition import operation_owned, optimizer_transition
+from .policy_transition import admit_policy_optimizer, native_parameter, own_batch, owned_numeric, own_trajectories, policy_owned
 import logging
 from numbers import Integral
 from typing import Dict, List, Tuple
@@ -154,6 +157,7 @@ class PolicyGradient:
         hidden_dim: int = 256,
         lr: float = 1e-3
     ):
+        self._operation_lock = RLock()
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
@@ -173,61 +177,67 @@ class PolicyGradient:
         
         logger.info(f"✅ Policy Gradient initialized")
     
-    def get_action(self, state: np.ndarray, explore: bool = True) -> np.ndarray:
-        """Get action from policy"""
-        self.policy.eval()
-        with torch.no_grad():
-            state_tensor = torch.tensor(state, dtype=torch.float32)
-            if len(state_tensor.shape) == 1:
-                state_tensor = state_tensor.unsqueeze(0)
-            action_probs = self.policy(state_tensor)
-            
-            if explore:
-                action = torch.multinomial(action_probs, 1).item()
-            else:
-                action = torch.argmax(action_probs).item()
-            
-            return action
-    
-    def _paired_batch(self, states, actions, rewards):
-        states_t = torch.as_tensor(states, dtype=torch.float32)
-        action_values = torch.as_tensor(actions, dtype=torch.float64)
-        rewards_t = torch.as_tensor(rewards, dtype=torch.float32)
-        if states_t.ndim != 2 or states_t.shape[1] != self.state_dim or not len(states_t):
-            raise ValueError("states must be nonempty rows with state_dim features")
-        count = len(states_t)
-        if rewards_t.shape == (count, 1):
-            rewards_t = rewards_t[:, 0]
-        if action_values.shape != (count,) or rewards_t.shape != (count,):
-            raise ValueError("actions and rewards must have one value per state row")
-        if not all(torch.isfinite(value).all() for value in (states_t, action_values, rewards_t)):
-            raise ValueError("policy batch values must be finite")
-        if not torch.equal(action_values, action_values.round()):
-            raise ValueError("actions must be integer indices")
-        if ((action_values < 0) | (action_values >= self.action_dim)).any():
-            raise ValueError("action index outside categorical policy")
-        return states_t, action_values.long(), rewards_t
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_operation_lock', None)
+        return state
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._operation_lock = RLock()
+
+    @operation_owned
+    def get_action(self, state: np.ndarray, explore: bool = True) -> int:
+        """Owned scalar categorical inference with previous modes restored."""
+        parameter = native_parameter(self)
+        state_t = owned_numeric(state, parameter, parameter.dtype)
+        if state_t.shape == (self.state_dim,):
+            state_t = state_t.unsqueeze(0)
+        if state_t.shape != (1, self.state_dim) or not isinstance(explore, bool):
+            raise ValueError("Policy inference requires one state and boolean explore")
+        modes = [(module, module.training) for module in self.policy.modules()]
+        try:
+            self.policy.eval()
+            with torch.no_grad():
+                probabilities = self.policy(state_t)
+                if (probabilities.shape != (1, self.action_dim)
+                        or not torch.isfinite(probabilities).all()
+                        or (probabilities < 0).any()
+                        or not torch.allclose(probabilities.sum(-1), probabilities.new_ones(1), rtol=1e-5, atol=1e-6)):
+                    raise ValueError("Policy probabilities must be a finite categorical row")
+                return int(torch.multinomial(probabilities, 1).item() if explore
+                           else probabilities.argmax(-1).item())
+        finally:
+            for module, mode in modes:
+                module.training = mode
+
+    def _paired_batch(self, states, actions, rewards):
+        return own_batch(self, states, actions, rewards)
+
+    @operation_owned
     def train_step(self, states: np.ndarray, actions: np.ndarray,
                    rewards: np.ndarray) -> float:
-        """Stable row-paired REINFORCE without log(underflowed probabilities)."""
+        """Stable row-paired REINFORCE with a verified native Adam transition."""
         states_t, actions_t, rewards_t = self._paired_batch(states, actions, rewards)
-        self.policy.train()
-        # Preserve the registered policy (including its public Softmax) and all
-        # checkpoint/optimizer keys; reuse its existing modules for logits.
-        logits = self.policy[:-1](states_t)
-        if not torch.isfinite(logits).all():
-            raise ValueError("policy logits must be finite")
-        log_probs = F.log_softmax(logits, dim=-1).gather(1, actions_t[:, None])[:, 0]
-        loss = -(log_probs * rewards_t).mean()
-        if not torch.isfinite(loss):
-            raise ValueError("policy objective cannot be represented finitely")
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0, error_if_nonfinite=True)
-        self.optimizer.step()
-        return loss.item()
+        admit_policy_optimizer(self)
+        with optimizer_transition(self.policy, self.optimizer):
+            self.policy.train()
+            # Keep public Softmax, registered topology and exact logit objective.
+            logits = self.policy[:-1](states_t)
+            if logits.shape != (len(states_t), self.action_dim) or not torch.isfinite(logits).all():
+                raise ValueError("policy logits must be finite compatible rows")
+            log_probs = F.log_softmax(logits, dim=-1).gather(1, actions_t[:, None])[:, 0]
+            loss = -(log_probs * rewards_t).mean()
+            if not torch.isfinite(loss):
+                raise ValueError("policy objective cannot be represented finitely")
+            self.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1.0, error_if_nonfinite=True)
+            self.optimizer.step()
+            value = float(loss.item())
+        return value
 
+    @operation_owned
     def train(
         self,
         trajectories: List[Dict],
@@ -237,19 +247,11 @@ class PolicyGradient:
         """Train policy using REINFORCE"""
         losses = []
         
-        if epochs < 1 or batch_size < 1 or not trajectories:
-            raise ValueError("epochs, batch_size and trajectories must be nonempty/positive")
-        # Validate every trajectory before flattening can conceal shifted rows
-        # and before the first optimizer update.
-        batches = [self._paired_batch(traj['states'], traj['actions'], traj['rewards'])
-                   for traj in trajectories]
-        states = torch.cat([batch[0] for batch in batches]).numpy()
-        actions = torch.cat([batch[1] for batch in batches]).numpy()
-        rewards = torch.cat([batch[2] for batch in batches]).numpy().astype(np.float64)
+        states, actions, rewards, epochs, batch_size = own_trajectories(
+            self, trajectories, epochs, batch_size
+        )
+        admit_policy_optimizer(self)
 
-        # Normalize rewards
-        rewards = (rewards - np.mean(rewards)) / (np.std(rewards) + 1e-8)
-        
         for epoch in range(epochs):
             # Shuffle data
             indices = np.random.permutation(len(states))
@@ -426,6 +428,7 @@ class ImitationLearningModel:
         
         return adjusted
     
+    @policy_owned
     def save(self, path: str = "models/imitation_model.pth"):
         """Save model"""
         torch.save({
@@ -436,6 +439,7 @@ class ImitationLearningModel:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @policy_owned
     def load(self, path: str = "models/imitation_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location='cpu')

@@ -13,6 +13,10 @@ jobs:
   native-mtl:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        torch: ['2.8.0', '2.13.0']
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -22,13 +26,13 @@ jobs:
           python-version: '3.12'
       - name: Native CPU dependencies
         run: |
-          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install torch==${{ matrix.torch }} --index-url https://download.pytorch.org/whl/cpu
           python -m pip install numpy==1.26.4 pytest==9.0.3 pytest-asyncio==1.4.0 ruff==0.16.9 fastapi==0.116.1 httpx==0.28.1
       - name: Native transition recovery and existing MTL consumers
         env:
           PYTHONPATH: backend/ml
           OMP_NUM_THREADS: '1'
-        run: python -m pytest -q backend/ml/tests/test_mtl_training_transition.py backend/ml/tests/test_pcgrad_parameter_layout.py backend/ml/tests/test_mtl_checkpoint_generation.py backend/ml/tests/test_mtl_classification_logits.py backend/ml/tests/test_mtl_target_pipeline.py backend/ml/tests/test_mtl.py -k 'not test_mtl_init'
+        run: python -m pytest -q backend/ml/tests/test_mtl_training_transition.py backend/ml/tests/test_pcgrad_parameter_layout.py backend/ml/tests/test_pcgrad_dynamic_range.py backend/ml/tests/test_mtl_checkpoint_generation.py backend/ml/tests/test_mtl_classification_logits.py backend/ml/tests/test_mtl_target_pipeline.py backend/ml/tests/test_mtl.py -k 'not test_mtl_init'
       - name: Source analysis
         run: |
           python -m ruff check backend/ml/mtl/training_transition.py backend/ml/tests/test_mtl_training_transition.py

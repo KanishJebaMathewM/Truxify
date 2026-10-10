@@ -48,7 +48,7 @@ export const connectRedis = async () => {
             redisClientInstance = createClient({ url: redisUrl });
             redisClientInstance.on('error', (err) => {
                 if (process.env.NODE_ENV !== 'test') {
-                    console.error('Redis Location Service Error', err);
+                    logger.error({ err }, 'Redis Location Service Error');
                 }
             });
         } catch {
@@ -170,7 +170,7 @@ export const ensureIndexes = async () => {
         }
     } catch (err) {
         if (process.env.NODE_ENV !== 'test') {
-            console.warn('Could not verify PostGIS indexes:', err.message);
+            logger.warn({ err }, 'Could not verify PostGIS indexes');
         }
     }
 };

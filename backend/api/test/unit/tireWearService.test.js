@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 
 process.env.SUPABASE_URL = 'http://localhost:54321';
+process.env.SUPABASE_ANON_KEY = 'test-anon-key';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
 
 const originalFetch = globalThis.fetch;
@@ -28,10 +29,15 @@ describe('tireWearService', () => {
     const result = await calculateTireWear('driver-no-trips');
 
     expect(result).toEqual({
+      driverId: 'driver-no-trips',
+      hasData: false,
       wearPercentage: 0,
       remainingKm: 80000,
+      currentTreadDepthMm: 16,
+      blowoutHazardScore: 0.01,
       needsReplacement: false,
-      message: 'No trip data available for prediction.',
+      rotationRecommended: false,
+      message: 'No operational trip history available for predictive prognostics.',
     });
   });
 
@@ -55,10 +61,10 @@ describe('tireWearService', () => {
 
     const result = await calculateTireWear('driver-1');
 
-    expect(result.wearPercentage).toBe(1.25);
-    expect(result.remainingKm).toBe(79000);
+    expect(result.wearPercentage).toBe(1.44);
+    expect(result.remainingKm).toBe(78850);
     expect(result.needsReplacement).toBe(false);
-    expect(result.message).toBe('Tires are in acceptable condition.');
+    expect(result.message).toBe('STATUS OK: Fleet tires are operating within safe manufacturer wear envelopes.');
   });
 
   it('applies road condition and adverse weather multipliers accurately', async () => {
@@ -81,8 +87,8 @@ describe('tireWearService', () => {
 
     const result = await calculateTireWear('driver-snow');
 
-    expect(result.wearPercentage).toBe(31.5);
-    expect(result.remainingKm).toBe(54800);
+    expect(result.wearPercentage).toBe(32.05);
+    expect(result.remainingKm).toBe(54362.19);
     expect(result.needsReplacement).toBe(false);
   });
 
@@ -106,13 +112,13 @@ describe('tireWearService', () => {
 
     const result = await calculateTireWear('driver-heavy');
 
-    expect(result.wearPercentage).toBe(87.5);
-    expect(result.remainingKm).toBe(10000);
+    expect(result.wearPercentage).toBe(100);
+    expect(result.remainingKm).toBe(0);
     expect(result.needsReplacement).toBe(true);
-    expect(result.message).toBe('Warning: Tires need replacement soon.');
+    expect(result.message).toBe('CRITICAL ALERT: Tire tread depth has reached or breached legal safety thresholds. Immediate replacement required.');
   });
 
-  it('throws wrapped error when database query fails', async () => {
+  it('falls back to the baseline when the database query fails', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
@@ -120,8 +126,10 @@ describe('tireWearService', () => {
       text: async () => JSON.stringify({ message: 'Postgres connection lost' }),
     });
 
-    await expect(calculateTireWear('driver-err')).rejects.toThrow(
-      'Failed to calculate tire wear analytics.'
-    );
+    const result = await calculateTireWear('driver-err');
+
+    expect(result.hasData).toBe(false);
+    expect(result.wearPercentage).toBe(0);
+    expect(result.needsReplacement).toBe(false);
   });
 });

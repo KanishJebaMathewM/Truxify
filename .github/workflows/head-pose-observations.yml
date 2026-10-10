@@ -1,0 +1,35 @@
+name: Native head pose and vision observations
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/multimodal/head_pose.py'
+      - 'backend/ml/multimodal/vision_monitor.py'
+      - 'backend/ml/tests/test_head_pose_observations.py'
+      - '.github/workflows/head-pose-observations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-pose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install scoped native geometry runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          python -m pip install numpy==1.26.4 scipy==1.11.3 opencv-python-headless==4.8.1.78 redis==5.0.0 pytest==9.0.3 ruff==0.16.9
+      - name: Exercise synthetic native projections and actual selected vision methods
+        env:
+          PYTHONPATH: backend/ml
+        run: python -m pytest backend/ml/tests/test_head_pose_observations.py -q
+      - name: Analyze geometry and scoped legacy integration
+        run: |
+          python -m ruff check backend/ml/multimodal/head_pose.py backend/ml/tests/test_head_pose_observations.py
+          python -m ruff check backend/ml/multimodal/vision_monitor.py --ignore I001,F401,UP006,UP035,BLE001,DTZ005

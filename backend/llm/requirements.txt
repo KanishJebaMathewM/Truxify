@@ -1,12 +1,12 @@
 torch==2.13.0
 transformers==5.16.1
-sentence-transformers==2.2.2
+sentence-transformers==5.6.0
 chromadb==1.5.9
 redis==5.0.0
 fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.31
-accelerate==0.24.0
+accelerate==1.15.0
 bitsandbytes==0.41.1
 peft==0.6.0
-python-jose==3.3.0
+python-jose==3.5.0

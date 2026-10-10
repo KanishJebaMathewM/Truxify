@@ -31,8 +31,8 @@ export const POD_CONFIG = {
     ],
     SIGNED_URL_TTL_SECONDS: 60 * 60 * 24 * 7, // 7 days
     FILENAME_PREFIX: {
-        SIGNATURE: 'pod_sig',
-        PHOTO: 'pod_photo'
+        signature: 'pod_sig',
+        photo: 'pod_photo'
     }
 };
 

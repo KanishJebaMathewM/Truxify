@@ -6,6 +6,61 @@ import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCac
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
+/**
+ * Authentication Middleware
+ * 
+ * Verifies JWT Bearer tokens on incoming requests and attaches user context.
+ * Implements structured warning logging for unauthenticated or missing token attempts.
+ */
+
+import jwt from 'jsonwebtoken';
+import logger from './logger.js';
+
+export const authenticate = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const clientIp = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress;
+    logger.warn(
+      {
+        event: 'AUTH_NO_TOKEN',
+        requestId: req.requestId || req.id,
+        clientIp,
+        path: req.originalUrl || req.url,
+        method: req.method,
+      },
+      'Missing or invalid authorization token format'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Access denied. No token provided.',
+    });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const secret = process.env.JWT_SECRET || 'default_secret';
+    const decoded = jwt.verify(token, secret);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    logger.warn(
+      {
+        event: 'AUTH_INVALID_TOKEN',
+        requestId: req.requestId || req.id,
+        error: err?.message,
+      },
+      'Invalid or expired token provided'
+    );
+    return res.status(401).json({
+      success: false,
+      error: 'Invalid or expired token.',
+    });
+  }
+};
+
+export default authenticate;
 export async function authenticate(req, res, next) {
   if (req.user) {
     return next();
@@ -308,17 +363,22 @@ export function requireRole(allowedRoles) {
     next();
   };
 }
-
-// Development-only fallback. This value is public (it is committed to an
-// open-source repo), so it must never protect a production deployment.
-// validateConfig() refuses to boot a production process without JWT_SECRET;
-// this warning makes the fallback obvious everywhere else.
-const DEFAULT_DEV_JWT_SECRET = "truxify-jwt-secret-key";
-if (!process.env.JWT_SECRET) {
-  logger.warn(
-    "[auth] JWT_SECRET is not set. Falling back to the built-in development secret — never use this in production.",
-  );
-}
+import { firebaseAdmin, supabase, createUserClient } from "../config/db.js";
+import jwt from "jsonwebtoken";
+import {
+  getCachedProfile,
+  setCachedProfile,
+  invalidateCachedProfile,
+  TOMBSTONE_TTL_SECONDS,
+  TTL_SECONDS,
+  isValidCachedProfile,
+  getCachedSupabaseProfile,
+  setCachedSupabaseProfile,
+  invalidateCachedSupabaseProfile,
+  isValidCachedSupabaseProfile,
+} from "../lib/profileCache.js";
+import logger from "./logger.js";
+import { getJwtSecret } from "../config/jwtSecret.js";
 
 /**
  * Verification helper for direct programmatic calls (e.g., WebSockets, gRPC, workers).
@@ -439,11 +499,6 @@ export async function verifyAuthToken(token) {
       }
     }
 
-    // Calculate token remaining lifetime to clamp cache TTL
-    const nowSec = Math.floor(Date.now() / 1000);
-    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
-    const tokenRemaining = tokenExp - nowSec;
-
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
       .from("profiles")
@@ -478,7 +533,7 @@ export async function verifyAuthToken(token) {
       isActive: true,
     };
 
-    await setCachedProfile(firebaseUid, userProfile).catch((err) =>
+    await cacheActiveFirebaseProfile(firebaseUid, userProfile, decodedToken.exp).catch((err) =>
       logger.error({ err }, "Cache set failed"),
     );
 
@@ -489,7 +544,285 @@ export async function verifyAuthToken(token) {
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */
-async function authenticateV2(req, res, next) {
+/**
+ * Paths that must be reachable WITHOUT a token. Registered ahead of the
+ * per-route `authenticate` guards, so login/register/health stay open while
+ * every other /api path is verified. Express strips the mount prefix (`/api`)
+ * from `req.path`, so these values are relative to `/api`.
+ */
+const PUBLIC_AUTH_PATHS = new Set([
+  '/',
+  '/health',
+  '/v1/health',
+  '/auth/login',
+  '/auth/register',
+]);
+
+/**
+ * Path prefixes restricted to a single account role. Prefixes not listed here
+ * are reachable by any authenticated role; an admin bypasses all gates.
+ */
+const ROLE_RESTRICTED_PREFIXES = [
+  { prefix: '/driver', role: 'driver', denied: 'Drivers only.' },
+  { prefix: '/orders', role: 'customer', denied: 'Customers only.' },
+  { prefix: '/payments', role: 'customer', denied: 'Customers only.' },
+];
+
+/**
+ * Global JWT verification middleware registered once on `/api` in src/index.js.
+ *
+ * It verifies the access token on every /api request before any router runs so
+ * that <code>req.user</code> is already populated (making the per-route
+ * `authenticate` calls cheap profile-cache hits), and it enforces coarse role
+ * scoping centrally: <code>/api/driver/...</code> for drivers,
+ * <code>/api/orders</code>/<code>/api/payments</code> for customers, while
+ * health checks and auth endpoints stay public.
+ *
+ * The token -> user resolution mirrors `authenticate` exactly (JWT secret,
+ * Supabase and Firebase verification, profile cache) but queries the profile
+ * with an explicit <code>is_active</code> filter.
+ */
+export async function verifyJWT(req, res, next) {
+  const path = (req.path || req.originalUrl).split('?')[0];
+  if (PUBLIC_AUTH_PATHS.has(path) || path.startsWith('/auth/')) {
+    return next();
+  }
+  if (req.user) {
+    return next();
+  }
+
+  // ── Local & Test Auth Bypass (dev only) ──────────────────────────────
+  const bypassAuth = process.env.BYPASS_AUTH === 'true';
+  if (bypassAuth) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({
+        error:
+          'BYPASS_AUTH is enabled in production. This is a misconfiguration and must be disabled before serving traffic.',
+      });
+    }
+    return next();
+  }
+
+  // ── Standard Token Authentication Flow ───────────────────────────────
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: 'Access Denied. No token provided.',
+      hint: 'Include a Bearer token in the Authorization header.',
+      docs: 'See /docs/auth.md for authentication flow.',
+    });
+  }
+
+  const token = authHeader.split(' ')[1];
+  req.token = token;
+
+  const gate = (user) => {
+    req.user = user;
+    if (req.user.role === 'admin') {
+      return next();
+    }
+    for (const { prefix, role, denied } of ROLE_RESTRICTED_PREFIXES) {
+      if (path.startsWith(prefix) && req.user.role !== role) {
+        logger.warn(
+          {
+            event: 'AUTH_DENIAL',
+            action: 'verifyJWT',
+            userId: req.user.id,
+            userRole: req.user.role,
+            requiredRole: role,
+            path,
+          },
+          `[Auth] verifyJWT role denied: ${req.user.id} role=${req.user.role} on ${prefix}`,
+        );
+        return res.status(403).json({ error: denied });
+      }
+    }
+    return next();
+  };
+
+  const secret = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+  try {
+    const verified = jwt.verify(token, secret);
+    if (verified && (verified.id || verified.uid)) {
+      return gate({
+        id: verified.id || verified.uid,
+        uid: verified.uid || verified.id,
+        role: verified.role || 'customer',
+        email: verified.email,
+        isActive: true,
+      });
+    }
+  } catch (_) {}
+
+  try {
+    let decoded;
+    try {
+      decoded = jwt.decode(token);
+    } catch (_) {}
+
+    const isSupabaseToken =
+      decoded &&
+      typeof decoded.iss === 'string' &&
+      (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
+
+    if (isSupabaseToken) {
+      if (!supabase) {
+        return res
+          .status(500)
+          .json({ error: 'Supabase client is not configured on this server.' });
+      }
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser(token);
+
+      if (authError || !user) {
+        return res.status(401).json({
+          error: 'Invalid or expired Supabase authentication token.',
+          details: authError?.message,
+        });
+      }
+
+      // Redis cache lookup
+      try {
+        const cachedProfile = await getCachedSupabaseProfile(user.id);
+        if (cachedProfile) {
+          if (!isValidCachedSupabaseProfile(user.id, cachedProfile)) {
+            await invalidateCachedSupabaseProfile(user.id).catch((err) =>
+              logger.error({ err }, 'Cache invalidation failed'),
+            );
+          } else if (cachedProfile.isActive === false) {
+            return res.status(403).json({
+              error: 'User profile is inactive.',
+              hint: 'Contact support to reactivate your account.',
+            });
+          } else {
+            return gate(cachedProfile);
+          }
+        }
+      } catch (err) {
+        logger.error({ err }, 'Supabase cache check failed');
+      }
+
+      const userClient = createUserClient?.(token) || supabase;
+      const { data: profile, error } = await userClient
+        .from('profiles')
+        .select('id, firebase_uid, role, full_name, phone, is_active')
+        .eq('id', user.id)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({
+          error: 'Database query failed verification',
+          details: error.message,
+        });
+      }
+
+      if (!profile) {
+        return res.status(403).json({
+          error: 'User profile not found or inactive.',
+          hint: 'Register user in profiles table first.',
+        });
+      }
+
+      const appUser = {
+        id: profile.id,
+        uid: profile.firebase_uid,
+        role: profile.role,
+        fullName: profile.full_name,
+        phone: profile.phone,
+        isActive: true,
+      };
+      await setCachedSupabaseProfile(user.id, appUser).catch((err) =>
+        logger.error({ err }, 'Cache set failed'),
+      );
+
+      return gate(appUser);
+    }
+
+    // Firebase Verification Flow
+    if (!firebaseAdmin) {
+      return res
+        .status(500)
+        .json({ error: 'Firebase Auth verification is not configured on this server.' });
+    }
+
+    const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
+    const firebaseUid = decodedToken.uid;
+
+    try {
+      const cachedProfile = await getCachedProfile(firebaseUid);
+      if (cachedProfile) {
+        if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
+          await invalidateCachedProfile(firebaseUid).catch((err) =>
+            logger.error({ err }, 'Cache invalidation failed'),
+          );
+        } else if (cachedProfile.isActive === false) {
+          return res.status(403).json({
+            error: 'User profile is inactive.',
+            hint: 'Contact support to reactivate your account.',
+          });
+        } else {
+          return gate(cachedProfile);
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Firebase cache check failed');
+    }
+
+    if (!supabase) {
+      return res
+        .status(500)
+        .json({ error: 'Supabase client is not configured on this server.' });
+    }
+
+    const userClient = createUserClient?.(token) || supabase;
+    const { data: profile, error } = await userClient
+      .from('profiles')
+      .select('id, firebase_uid, role, full_name, phone, is_active')
+      .eq('firebase_uid', firebaseUid)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Database query failed verification',
+        details: error.message,
+      });
+    }
+
+    if (!profile) {
+      return res.status(403).json({
+        error: 'User profile not found or inactive.',
+        hint: 'Register user in profiles table first.',
+      });
+    }
+
+    const appUser = {
+      id: profile.id,
+      uid: profile.firebase_uid,
+      role: profile.role,
+      fullName: profile.full_name,
+      phone: profile.phone,
+      isActive: true,
+    };
+    await cacheActiveFirebaseProfile(firebaseUid, appUser, decodedToken.exp).catch((err) =>
+      logger.error({ err }, 'Cache set failed'),
+    );
+
+    return gate(appUser);
+  } catch (error) {
+    logger.error(
+      { err: error, requestId: req.requestId },
+      'verifyJWT verification error',
+    );
+    return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+  }
+}
+
+export async function authenticate(req, res, next) {
   if (req.user) {
     return next();
   }
@@ -611,7 +944,7 @@ async function authenticateV2(req, res, next) {
   const token = authHeader.split(" ")[1];
   req.token = token;
 
-  const secret = process.env.JWT_SECRET || DEFAULT_DEV_JWT_SECRET;
+  const secret = getJwtSecret();
   try {
     const verified = jwt.verify(token, secret);
     if (verified && (verified.id || verified.uid)) {
@@ -841,7 +1174,7 @@ async function authenticateV2(req, res, next) {
         isActive: true,
       };
 
-      await setCachedProfile(firebaseUid, req.user).catch((err) =>
+      await cacheActiveFirebaseProfile(firebaseUid, req.user, decodedToken.exp).catch((err) =>
         logger.error({ err }, "Cache set failed"),
       );
 
@@ -860,7 +1193,7 @@ async function authenticateV2(req, res, next) {
  * Middleware to restrict route access to specific roles.
  * Must be used after authenticate middleware.
  */
-function requireRoleV2(allowedRoles) {
+export function requireRole(allowedRoles) {
   if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
     throw new Error(
       "requireRole middleware requires a non-empty array of allowed roles.",

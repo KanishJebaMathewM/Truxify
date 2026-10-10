@@ -48,6 +48,7 @@ ML_ROUTE_MODULES: list[tuple[str, str]] = [
     ("ssl_routes", "Self-Supervised Learning"),
     ("transformer_routes", "Time Series Transformers"),
     ("eta_routes", "Real-Time Traffic ETA"),
+    ("cold_chain_routes", "Cold-Chain Anomaly Detection"),
 ]
 
 

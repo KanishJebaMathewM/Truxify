@@ -18,6 +18,8 @@ let currentContract = null;
 let reconnectAttempt = 0;
 let reconnectTimer = null;
 const MAX_RECONNECT_DELAY_MS = 30000;
+// Tail of the serialized live-event chain (see enqueueLiveEvent).
+let liveEventQueue = Promise.resolve();
 
 function clearReconnectTimer() {
   if (reconnectTimer) {

@@ -170,7 +170,7 @@ This document lists configuration used by the Truxify backend API (`backend/api/
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PORT` | - | `3000` | HTTP server port |
+| `PORT` | - | `5000` | HTTP server port |
 | `NODE_ENV` | - | `development` | Environment (development, production) |
 | `ALLOWED_ORIGINS` | - | - | Comma-separated list of allowed CORS origins |
 | `HOSTNAME` | - | - | Server hostname |

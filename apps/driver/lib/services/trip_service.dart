@@ -151,7 +151,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops';
+    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/stops';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -167,7 +167,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/route-points';
+    final path = '/api/driver/trips/${_encodePathSegment(tripDisplayId)}/route-points';
     try {
       final body = await _apiClient.get(path);
       if (body is! List) {
@@ -185,7 +185,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
+    final path = '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -209,7 +209,7 @@ class TripService {
 
   Future<void> startTrip(String tripDisplayId) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/start';
+    final path = '/api/v1/trips/${_encodePathSegment(tripDisplayId)}/start';
     try {
       await _apiClient.put(path);
     } catch (e) {

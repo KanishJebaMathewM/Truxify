@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ValidationError } from '../../src/utils/errors.js';
 import request from 'supertest';
 import express from 'express';
 
@@ -184,7 +185,8 @@ describe('lumperEscrowRoutes', () => {
         .send(validPayload);
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Contract RPC timeout');
+      // Non-validation failures are masked with the route fallback message.
+      expect(res.body.error).toBe('Failed to deposit lumper fee into escrow');
     });
   });
 
@@ -285,17 +287,46 @@ describe('lumperEscrowRoutes', () => {
       expect(res.body.error).toMatch(/positive finite number/i);
     });
 
-    it('returns 404 when escrow contract is not found', async () => {
+    it('returns 400 when escrow contract is not found', async () => {
+      // The service signals not-found with a ValidationError, which the route
+      // surfaces as a 400 client error.
       lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
-        new Error('Lumper escrow not found for ID: LMP-999')
+        new ValidationError('Lumper fee escrow not found')
       );
 
       const res = await request(makeApp())
         .post('/api/lumper-escrow/release')
         .send(validReleasePayload);
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/not found/i);
+    });
+
+    it('returns 400 when claimedAmount exceeds estimated escrow amount', async () => {
+      lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
+        new ValidationError('claimedAmount cannot exceed the estimated escrow amount')
+      );
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/cannot exceed/i);
+    });
+
+    it('returns 400 when escrow has already been released', async () => {
+      // The service's already-released signal is a ValidationError (400).
+      lumperEscrowServiceMock.processReceiptAndRelease.mockRejectedValue(
+        new ValidationError('Lumper fee escrow has already been released')
+      );
+
+      const res = await request(makeApp())
+        .post('/api/lumper-escrow/release')
+        .send(validReleasePayload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/already been released/i);
     });
   });
 

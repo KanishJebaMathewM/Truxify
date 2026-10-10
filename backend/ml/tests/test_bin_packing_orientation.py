@@ -27,6 +27,7 @@ def test_packing_reports_selected_axis_orientation_for_all_six_permutations():
             [package.copy()],
             truck,
             [{"lat": 19.076, "lng": 72.877}],
+            {"lat": 19.0, "lng": 72.8},
         )
 
         arrangement = result["packing_arrangement"][0]
@@ -56,6 +57,7 @@ def test_unpacked_package_reports_no_selected_orientation():
             "max_weight": 100.0,
         },
         [{"lat": 19.076, "lng": 72.877}],
+        {"lat": 19.0, "lng": 72.8},
     )
 
     arrangement = result["packing_arrangement"][0]

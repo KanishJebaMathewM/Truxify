@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
+const { warnMock, errorMock } = vi.hoisted(() => ({
+  warnMock: vi.fn(),
+  errorMock: vi.fn(),
+}));
 
 vi.mock('../src/middleware/logger.js', () => ({
   default: {
     warn: warnMock,
-    error: vi.fn(),
+    error: errorMock,
     info: vi.fn(),
   },
 }));
@@ -16,7 +19,9 @@ import authFailureMonitor from '../src/middleware/authFailureMonitor.js';
 
 // The middleware keys its failure counters by IP in a module-level Map that
 // lives for the whole file, so every test needs its own IP to stay isolated.
-function createApp(statusCode = 401, ip = '127.0.0.1') {
+// Loopback is allowlisted by the middleware (127.0.0.1 / ::1), so the default
+// here has to be a routable address or every request would skip the monitor.
+function createApp(statusCode = 401, ip = '10.0.0.100') {
   const app = express();
 
   app.use((req, res, next) => {
@@ -64,7 +69,7 @@ describe('authFailureMonitor', () => {
   });
 
   it('warns after repeated authentication failures', async () => {
-    const app = createApp(401);
+    const app = createApp(401, '10.0.0.2');
 
     await request(app).get('/test');
     await request(app).get('/test');
@@ -73,7 +78,7 @@ describe('authFailureMonitor', () => {
     expect(warnMock).toHaveBeenCalledTimes(1);
 
     expect(warnMock.mock.calls[0][0]).toMatchObject({
-      ip: '127.0.0.1',
+      ip: '10.0.0.2',
       method: 'GET',
       path: '/test',
       statusCode: 401,
@@ -103,7 +108,8 @@ describe('authFailureMonitor', () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
-  it('does not run in production', async () => {
+  it('keeps monitoring in production', async () => {
+    // The monitor remains enabled when production traffic is served.
     process.env.NODE_ENV = 'production';
 
     const app = createApp(401, '10.0.0.5');
@@ -112,6 +118,7 @@ describe('authFailureMonitor', () => {
     await request(app).get('/test');
     await request(app).get('/test');
 
-    expect(warnMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledTimes(1);
+    expect(warnMock.mock.calls[0][0]).toMatchObject({ ip: '10.0.0.5', failureCount: 3 });
   });
 });

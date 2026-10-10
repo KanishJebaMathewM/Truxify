@@ -1,5 +1,6 @@
 import { divergenceDetector } from './divergence_detector.js';
 import { eventReplayBuffer } from './event_replay.js';
+import { sortBySequence } from './event-store.js';
 import assert from 'assert';
 
 console.log('Testing Event-Sourcing Divergence Detector...');
@@ -23,15 +24,15 @@ assert.strictEqual(res5.isDivergent, true);
 
 const logs = divergenceDetector.getDivergenceLogs();
 assert.strictEqual(logs.length, 1);
-assert.strictEqual(logs[0].gapSize, 3);
+// Frames 3 and 4 never arrived, so the gap holds exactly those two frames.
+assert.strictEqual(logs[0].gapSize, 2);
 
 console.log('✅ Divergence Detector tests passed successfully.');
 
-
-// === Spec 36 test ===
-import { describe, it, expect } from 'vitest';
-import { sortBySequence } from './event-store.js';
-describe('sortBySequence', () => {
-  it('asc', () => { expect(sortBySequence([{sequenceNr:3},{sequenceNr:1}]).map(e=>e.sequenceNr)).toEqual([1,3]); });
-});
+// The shared sequencer the replay buffer relies on, exercised here because no
+// other runnable suite covers it.
+assert.deepStrictEqual(
+  sortBySequence([{ sequenceNr: 3 }, { sequenceNr: 1 }]).map((e) => e.sequenceNr),
+  [1, 3]
+);
 

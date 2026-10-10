@@ -9,7 +9,7 @@ class HosService {
   static Future<bool> updateStatus(String status) async {
     try {
       // Use ApiClient to automatically handle token refresh and 401 retries (#14935)
-      final response = await ApiClient.put(
+      final response = await ApiClient().put(
         '/api/driver/hos/status',
         body: {'status': status},
       );

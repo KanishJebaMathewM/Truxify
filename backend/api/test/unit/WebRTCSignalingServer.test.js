@@ -140,6 +140,18 @@ describe('WebRTCSignalingServer', () => {
       server.normalizeLocation(location);
       expect(location.lat).toBe('12.97');
     });
+
+    it('throws TypeError for null location', () => {
+      expect(() => server.normalizeLocation(null)).toThrow(
+        'normalizeLocation: location must not be null or undefined',
+      );
+    });
+
+    it('throws TypeError for undefined location', () => {
+      expect(() => server.normalizeLocation(undefined)).toThrow(
+        'normalizeLocation: location must not be null or undefined',
+      );
+    });
   });
 
 

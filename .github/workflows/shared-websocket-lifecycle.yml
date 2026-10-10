@@ -1,0 +1,21 @@
+name: Shared WebSocket lifecycle
+on:
+  pull_request:
+    paths:
+      - 'packages/truxify_shared/lib/src/services/resilient_websocket.dart'
+      - 'packages/truxify_shared/test/*websocket*.dart'
+      - 'tools/shared-websocket-tests/**'
+      - '.github/workflows/shared-websocket-lifecycle.yml'
+permissions:
+  contents: read
+jobs:
+  attempt-ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+      - run: bash tools/shared-websocket-tests/run.sh

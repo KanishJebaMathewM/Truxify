@@ -1,12 +1,105 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import request from 'supertest';
+import app from '../../../src/app.js';
+import * as orderLifecycleService from '../../../src/services/orderLifecycleService.js';
+import * as orderValidationService from '../../../src/services/orderValidationService.js';
+
+// Mock the service layer boundaries
+vi.mock('../../../src/services/orderLifecycleService.js', () => ({
+  submitBid: vi.fn(),
+  acceptBid: vi.fn(),
+  rejectBid: vi.fn(),
+}));
+
+vi.mock('../../../src/services/orderValidationService.js', () => ({
+  validateBidPayload: vi.fn(),
+}));
+
+// Mock authentication middleware to inject a test carrier/shipper user
+vi.mock('../../../src/middleware/auth.js', () => ({
+  authenticate: (req, res, next) => {
+    req.user = { id: 'carrier_mock_123', role: 'carrier' };
+    next();
+  },
+}));
+
+describe('Bids Integration API (/api/bids)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('POST /api/bids', () => {
+    it('successfully submits a valid bid via orderLifecycleService', async () => {
+      const mockBidPayload = {
+        orderId: 'ord_12345',
+        amount: 14500,
+        vehicleType: 'Heavy Truck (Multi-Axle)',
+      };
+
+      vi.mocked(orderValidationService.validateBidPayload).mockReturnValueOnce({ isValid: true });
+      vi.mocked(orderLifecycleService.submitBid).mockResolvedValueOnce({
+        bidId: 'bid_998877',
+        status: 'pending',
+        ...mockBidPayload,
+      });
+
+      const response = await request(app)
+        .post('/api/bids')
+        .send(mockBidPayload);
+
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('success', true);
+      expect(response.body.data).toHaveProperty('bidId', 'bid_998877');
+      expect(orderLifecycleService.submitBid).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns 400 validation error when orderValidationService fails', async () => {
+      const invalidPayload = { orderId: 'ord_12345', amount: -500 };
+
+      vi.mocked(orderValidationService.validateBidPayload).mockReturnValueOnce({
+        isValid: false,
+        error: 'Bid amount must be greater than zero',
+      });
+
+      const response = await request(app)
+        .post('/api/bids')
+        .send(invalidPayload);
+
+      expect(response.status).toBe(400);
+      expect(response.body).toHaveProperty('error');
+      expect(orderLifecycleService.submitBid).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/bids/:id/accept', () => {
+    it('successfully delegates bid acceptance to orderLifecycleService', async () => {
+      const bidId = 'bid_998877';
+
+      vi.mocked(orderLifecycleService.acceptBid).mockResolvedValueOnce({
+        bidId,
+        status: 'accepted',
+      });
+
+      const response = await request(app)
+        .post(`/api/bids/${bidId}/accept`)
+        .send();
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('success', true);
+      expect(orderLifecycleService.acceptBid).toHaveBeenCalledWith(bidId, 'carrier_mock_123');
+    });
+  });
+});
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,

@@ -269,7 +269,7 @@ describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
 
     await svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {});
 
-    expect(releaseFn).toHaveBeenCalledWith('OD-1', EXPECTED_WEI);
+    expect(releaseFn).toHaveBeenCalledWith('OD-1', EXPECTED_WEI, expect.any(String));
   });
 
   it.skip('blocks the release when escrow_amount_wei is inconsistent with total_amount', async () => {
@@ -322,7 +322,7 @@ describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
 
     const result = await svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {});
 
-    expect(releaseFn).toHaveBeenCalledWith('OD-1', BigInt(legacyWei));
+    expect(releaseFn).toHaveBeenCalledWith('OD-1', BigInt(legacyWei), expect.any(String));
     expect(result).toEqual({ escrowUpdateFailed: false });
   });
 });

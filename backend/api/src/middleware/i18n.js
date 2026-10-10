@@ -9,7 +9,38 @@
 import fs from 'fs';
 import path from 'path';
 import logger from './logger.js';
+import logger from './logger.js'; // Adjust relative import path as needed
 
+// Inside backend/api/src/middleware/i18n.js
+
+let enTranslations = {};
+let esTranslations = {};
+
+try {
+  enTranslations = await import('../locales/en.json', { assert: { type: 'json' } });
+} catch (err) {
+  // Replace console.warn with structured logger.warn
+  logger.warn({ 
+    event: 'I18N_LOCALE_LOAD_FALLBACK',
+    locale: 'en',
+    error: err.message,
+    stack: err.stack 
+  }, '[i18n] Failed to load en.json locale, falling back to empty object');
+}
+
+try {
+  esTranslations = await import('../locales/es.json', { assert: { type: 'json' } });
+} catch (err) {
+  // Replace console.warn with structured logger.warn
+  logger.warn({ 
+    event: 'I18N_LOCALE_LOAD_FALLBACK',
+    locale: 'es',
+    error: err.message,
+    stack: err.stack 
+  }, '[i18n] Failed to load es.json locale, falling back to empty object');
+}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const DEFAULT_LOCALE = 'en';
 const SUPPORTED_LOCALES = ['en', 'ta', 'hi', 'es'];
 

@@ -82,7 +82,7 @@ async function logToRedisStream(eventData) {
       entityType: eventData.entityType || eventData.resourceType,
       entityId: eventData.entityId || eventData.resourceId,
       details: JSON.stringify(eventData.details || eventData.metadata || {}),
-      idempotencyKey: eventData.idempotencyKey || `${Date.now()}-${Math.random()}`,
+      idempotencyKey: eventData.idempotencyKey || crypto.randomUUID(),
     };
 
     await redisClient.xAdd(STREAM_NAME, '*', payload);

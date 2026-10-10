@@ -206,10 +206,12 @@ import {
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import {
+  POD_CONFIG,
   validatePodFile,
   generatePodStoragePath,
   uploadPodFile,
-  createPodSignedUrl
+  createPodSignedUrl,
+  verifyPodAccess
 } from '../lib/storage/podStorage.js';
 
 const router = express.Router();
@@ -1151,5 +1153,111 @@ router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:subm
   }
 });
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/pod — Proof of Delivery upload (photo + signature).
+// The route registration was lost to a splice; the storage helpers in
+// lib/storage/podStorage.js carry the upload logic.
+// ─────────────────────────────────────────────────────────────────────────────
+const podUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: POD_CONFIG.PHOTO_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    // Silently exclude non-image types — the route's no-valid-files guard
+    // then rejects the submission (the suite's contract).
+    const ok = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.mimetype);
+    cb(null, ok);
+  },
+});
+
+router.post(
+  '/:id/pod',
+  authenticate,
+  userLimiter,
+  podUploadLimiter,
+  validateParams(paramIdSchema),
+  podUpload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'signature', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const photo = req.files?.photo?.[0] ?? null;
+      const signature = req.files?.signature?.[0] ?? null;
+
+      if (!photo && !signature) {
+        return res.status(400).json({ error: 'At least one valid proof file (signature or photo) is required' });
+      }
+
+      // Only the assigned driver (or an admin) may UPLOAD PoD — customers can
+      // read but not write. verifyPodAccess is the read guard; uploads are
+      // stricter.
+      if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Access Denied' });
+      }
+      const access = await verifyPodAccess(req.user, orderId, orderRepository);
+      if (!access.authorized) {
+        const status = access.reason === 'Order not found' ? 404 : 403;
+        return res.status(status).json({ error: access.reason === 'Order not found' ? 'Order not found' : 'Access Denied' });
+      }
+
+      const uploadTimestamp = new Date().toISOString();
+      const result = { message: 'Proof of Delivery uploaded successfully', uploadTimestamp };
+
+      for (const [type, file] of [['photo', photo], ['signature', signature]]) {
+        if (!file) continue;
+        const validation = validatePodFile(file, type);
+        if (!validation.valid) {
+          return res.status(422).json({ error: validation.error });
+        }
+        // Magic-bytes check: a PDF renamed to .png must not reach storage.
+        try {
+          validateDocumentBuffer(file.buffer, file.mimetype);
+        } catch (docErr) {
+          return res.status(400).json({ error: `Invalid ${type} file: ${docErr.message}` });
+        }
+        const storagePath = generatePodStoragePath(req.user.id, orderId, type, file.originalname);
+        const upload = await uploadPodFile({
+          fileBuffer: file.buffer,
+          storagePath,
+          mimeType: file.mimetype,
+          userToken: req.token,
+        });
+        if (!upload.success) {
+          return res.status(500).json({ error: `PoD storage upload failed: ${upload.error || 'unknown'}` });
+        }
+        const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+        const signed = await createPodSignedUrl(storagePath, POD_CONFIG.SIGNED_URL_TTL_SECONDS, req.token);
+        if (type === 'photo') {
+          result.photoUrl = signed.url || null;
+          result.photoHash = hash;
+        } else {
+          result.signatureUrl = signed.url || null;
+          result.signatureHash = hash;
+        }
+      }
+
+      // Persist the PoD URLs on the order.
+      const orderUpdate = {
+        pod_photo_url: result.photoUrl ?? null,
+        pod_signature_url: result.signatureUrl ?? null,
+        pod_photo_hash: result.photoHash ?? null,
+        pod_signature_hash: result.signatureHash ?? null,
+        updated_at: uploadTimestamp,
+      };
+      await orderRepository.updateOrder(orderId, orderUpdate);
+
+      return res.status(200).json(result);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return res.status(err.status).json(err.payload);
+      }
+      logger.error({ err }, '[pod] Upload failed');
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
 
 export default router;

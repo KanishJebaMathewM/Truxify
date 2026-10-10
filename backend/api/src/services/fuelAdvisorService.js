@@ -15,6 +15,23 @@ export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
 
   const numDistance = Number(distance);
   const numFuel = Number(fuelAmount);
+// backend/api/src/services/fuelAdvisorService.js (around lines 89-95)
+
+// Before:
+// const { data, error } = await db
+//   .from('trip_events')
+//   .select('payload, occurred_at')
+//   .in('status', ['active', 'in_progress'])
+//   ...
+
+// After:
+const { data, error } = await db
+  .from('trip_events')
+  .select('metadata, event_timestamp, event_type')
+  .eq('trip_id', tripId)
+  .eq('event_type', 'gpsUpdate')
+  .order('event_timestamp', { ascending: false })
+  .limit(50);
   const { supabaseAdmin } = require('../config/db');
 
 class FuelAdvisorService {

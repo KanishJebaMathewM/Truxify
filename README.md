@@ -449,5 +449,3 @@ Thanks to all contributors ❤️
 
 </div>
 
-## Development
-Run the project's existing test suite before submitting changes.

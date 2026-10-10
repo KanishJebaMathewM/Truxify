@@ -446,13 +446,15 @@ export const reportGripDataSchema = z.object({
 }).strict();
 
 export const nearbyGripQuerySchema = z.object({
+  // zod v4: invalid_type_error was removed — the unified `error` param covers
+  // missing/undefined too.
   lat: coerceNumber(
-    z.number({ invalid_type_error: 'latitude must be a finite number' })
+    z.number({ error: 'latitude must be a finite number' })
       .min(-90, 'latitude must be >= -90')
       .max(90, 'latitude must be <= 90')
   ),
   lng: coerceNumber(
-    z.number({ invalid_type_error: 'longitude must be a finite number' })
+    z.number({ error: 'longitude must be a finite number' })
       .min(-180, 'longitude must be >= -180')
       .max(180, 'longitude must be <= 180')
   ),

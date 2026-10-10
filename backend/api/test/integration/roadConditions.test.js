@@ -8,6 +8,11 @@ import { generateTestToken } from '../helpers/auth.js';
 
 // Mock DB
 vi.mock('../../src/config/db.js', () => ({
+  // roadConditionRoutes' rate limiter reads redisClient via the rateLimiter
+  // middleware — the mock must export it.
+  redisClient: null,
+  // authenticate reads firebaseAdmin for token verification.
+  firebaseAdmin: null,
   supabaseAdmin: {
     from: vi.fn().mockReturnThis(),
     insert: vi.fn(),
@@ -53,6 +58,9 @@ app.use(errorHandler);
 // before any request is sent.)
 process.env.BYPASS_AUTH = 'false';
 process.env.ENABLE_TEST_AUTH = 'false';
+// Without a pinned secret, config/jwtSecret generates a random per-process
+// one — tokens signed by the test helper's fallback would never verify.
+process.env.JWT_SECRET = 'road-conditions-suite-secret-key-01';
 
 describe('Road Condition Routes Integration', () => {
   const driverToken = generateTestToken({ id: 'driver-123', role: 'driver' });
@@ -141,7 +149,9 @@ describe('Road Condition Routes Integration', () => {
         .query({ lat: 45.0 }); // Missing lng
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Latitude (lat) and longitude (lng) are required');
+      // The handler reports per-field errors (deliberate) — and zod v4
+      // dropped invalid_type_error, so the schema uses the `error` param.
+      expect(res.body.error).toBe('Invalid lng: longitude must be a finite number');
     });
   });
 });

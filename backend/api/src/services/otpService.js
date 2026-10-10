@@ -14,6 +14,11 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import twilio from 'twilio';
+
+const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
 
 /**
  * OTP configuration constants
@@ -278,13 +283,32 @@ async function deliverOtp(phone, otp, channel) {
     }, `[DEV] OTP Delivery - Channel: ${channel.toUpperCase()}`);
   }
 
-  // TODO: Integrate with actual SMS/Voice provider
-  // Example with Twilio:
-  // await twilioClient.messages.create({
-  //   body: `Your Truxify verification code is: ${otp}`,
-  //   to: phone,
-  //   from: process.env.TWILIO_PHONE_NUMBER
-  // });
+  if (!twilioClient) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('Twilio credentials not configured in production');
+    }
+    return;
+  }
+
+  try {
+    if (channel === 'sms') {
+      await twilioClient.messages.create({
+        body: `Your Truxify verification code is: ${otp}`,
+        to: phone,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+    } else if (channel === 'voice') {
+      await twilioClient.calls.create({
+        twiml: `<Response><Say>Your Truxify verification code is ${otp.split('').join(' ')}. I repeat, ${otp.split('').join(' ')}.</Say></Response>`,
+        to: phone,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+    }
+    logger.info({ phone: phone.replace(/(\+\d{2})\d+(\d{4})/, '$1***$2'), channel }, 'OTP successfully delivered via Twilio');
+  } catch (error) {
+    logger.error({ err: error, phone: phone.replace(/(\+\d{2})\d+(\d{4})/, '$1***$2'), channel }, 'Failed to deliver OTP via Twilio');
+    throw error;
+  }
 }
 
 /**

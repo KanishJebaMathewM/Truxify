@@ -1,3 +1,9 @@
+from threading import RLock
+from .training_transition import (
+    integer, observations, owned, policy, initialize_condition, transition, finite_tree,
+    batches as owned_batches,
+)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -20,6 +26,7 @@ class DiffusionTrainer:
         lr: float = 1e-4,
         batch_size: int = 32
     ):
+        self._operation_lock = RLock()
         self.model = model.to(device)
         self.device = device
         self.batch_size = batch_size
@@ -33,44 +40,34 @@ class DiffusionTrainer:
         
         logger.info(f"✅ Trainer initialized on {device}")
     
-    def train_step(
-        self,
-        x: torch.Tensor,
-        condition: Optional[torch.Tensor] = None
-    ) -> float:
-        """Single training step"""
-        self.model.train()
-        self.optimizer.zero_grad()
-        
-        # Move to device
-        x = x.to(self.device)
-        if condition is not None:
-            condition = condition.to(self.device)
-        
-        # Sample random timesteps
-        t = torch.randint(0, self.model.num_timesteps, (x.shape[0],), device=self.device)
-        
-        # Add noise
-        noise = torch.randn_like(x)
-        x_noisy = self.model.add_noise(x, t, noise)
-        
-        # Combine with condition
-        if condition is not None:
-            x_noisy = torch.cat([x_noisy, condition], dim=-1)
-        
-        # Predict noise
-        predicted_noise = self.model.denoise(x_noisy, t)
-        
-        # Loss
-        loss = nn.MSELoss()(predicted_noise, noise)
-        
-        # Backward
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.optimizer.step()
-        
-        return loss.item()
-    
+    @owned
+    def train_step(self, x: torch.Tensor, condition: Optional[torch.Tensor] = None) -> float:
+        """Own observations and verify an actual native denoising AdamW candidate."""
+        x, condition = observations(self.model, x, condition)
+        policy(self.optimizer)
+        finite_tree(self.model.state_dict())
+        initialize_condition(self.model, condition)
+        with transition(self.model, self.optimizer):
+            self.model.train()
+            self.optimizer.zero_grad(set_to_none=True)
+            t = torch.randint(0, self.model.num_timesteps, (x.shape[0],), device=self.device)
+            noise = torch.randn_like(x)
+            x_noisy = self.model.add_noise(x, t, noise)
+            if condition is not None:
+                x_noisy = torch.cat([x_noisy, condition], dim=-1)
+            predicted_noise = self.model.denoise(x_noisy, t)
+            if predicted_noise.shape != noise.shape or not torch.isfinite(predicted_noise).all():
+                raise ValueError("native noise predictions must have finite matching dimensions")
+            loss = nn.functional.mse_loss(predicted_noise, noise)
+            if not torch.isfinite(loss):
+                raise ValueError("native denoising objective is nonfinite")
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0, error_if_nonfinite=True)
+            if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in self.model.parameters()):
+                raise ValueError("native denoising gradients are nonfinite")
+            self.optimizer.step()
+        return float(loss.detach())
+
     @staticmethod
     def _dataset(data, condition=None):
         if not isinstance(data, torch.Tensor) or data.ndim < 2 or len(data) == 0:
@@ -125,24 +122,33 @@ class DiffusionTrainer:
             dataset = self._dataset(data, condition)
             yield dataset.tensors[0], dataset.tensors[1] if condition is not None else None
 
+    @owned
     def train_epoch(self, dataloader: DataLoader,
                     condition_loader: Optional[DataLoader] = None) -> float:
         """Train jointly owned examples; never cycle unrelated context."""
         total_loss = 0.0
         total_rows = 0
-        for data, condition in self._batches(dataloader, condition_loader):
+        batches = owned_batches(self.model, self._batches(dataloader, condition_loader))
+        for data, condition in batches:
             loss = self.train_step(data, condition)
             total_loss += loss * len(data)
             total_rows += len(data)
         return total_loss / total_rows
 
+    @owned
     def train(self, train_data: torch.Tensor, epochs: int = 100,
               val_data: Optional[torch.Tensor] = None,
               condition_data: Optional[torch.Tensor] = None,
               val_condition_data: Optional[torch.Tensor] = None) -> Dict:
         """Shuffle each sample with its own context, including held-out data."""
-        if epochs < 1 or self.batch_size < 1:
-            raise ValueError("epochs and batch_size must be positive")
+        epochs = integer(epochs, "epochs", 512)
+        integer(self.batch_size, "batch_size", 64)
+        train_data, condition_data = observations(self.model, train_data, condition_data, epochs)
+        if val_data is not None:
+            val_data, val_condition_data = observations(self.model, val_data, val_condition_data, epochs)
+        if (condition_data is not None and val_condition_data is not None
+                and condition_data.shape[-1] != val_condition_data.shape[-1]):
+            raise ValueError("train and held-out condition widths must share one projection")
         train_dataset = self._dataset(train_data, condition_data)
         if val_data is None and val_condition_data is not None:
             raise ValueError("validation conditions require validation data")
@@ -155,9 +161,11 @@ class DiffusionTrainer:
                       if val_dataset is not None else None)
         for epoch in range(epochs):
             train_loss = self.train_epoch(train_loader)
-            self.train_losses.append(train_loss)
+            val_loss = None
             if val_loader is not None:
                 val_loss = self.validate(val_loader, require_condition=condition_data is not None)
+            self.train_losses.append(train_loss)
+            if val_loss is not None:
                 self.val_losses.append(val_loss)
             if (epoch + 1) % 10 == 0:
                 logger.info("Epoch %s/%s - Train Loss: %.4f", epoch + 1, epochs, train_loss)
@@ -165,20 +173,24 @@ class DiffusionTrainer:
             'train_losses': self.train_losses,
             'val_losses': self.val_losses,
             'final_train_loss': self.train_losses[-1],
-            'final_val_loss': self.val_losses[-1] if self.val_losses else None
+            'final_val_loss': self.val_losses[-1] if val_loader is not None else None
         }
 
+    @owned
     def validate(self, dataloader: DataLoader,
                  condition_loader: Optional[DataLoader] = None,
                  require_condition: bool = False) -> float:
         """Measure the held-out paired objective without training-row recycling."""
         total_loss = 0.0
         total_rows = 0
-        prior_mode = self.model.training
+        batches = owned_batches(self.model, self._batches(dataloader, condition_loader))
+        if require_condition and any(condition is None for _, condition in batches):
+            raise ValueError("condition_loader or joint conditions required for validation")
+        prior_modes = [(module, module.training) for module in self.model.modules()]
         self.model.eval()
         try:
             with torch.no_grad():
-                for data, condition in self._batches(dataloader, condition_loader):
+                for data, condition in batches:
                     if require_condition and condition is None:
                         raise ValueError("condition_loader or joint conditions required for validation")
                     data = data.to(self.device)
@@ -188,11 +200,16 @@ class DiffusionTrainer:
                     if condition is not None:
                         x_noisy = torch.cat([x_noisy, condition.to(self.device)], dim=-1)
                     predicted_noise = self.model.denoise(x_noisy, t)
+                    if predicted_noise.shape != noise.shape or not torch.isfinite(predicted_noise).all():
+                        raise ValueError("validation predictions must be finite with matching dimensions")
                     loss = nn.MSELoss()(predicted_noise, noise)
+                    if not torch.isfinite(loss):
+                        raise ValueError("validation objective is nonfinite")
                     total_loss += loss.item() * len(data)
                     total_rows += len(data)
         finally:
-            self.model.train(prior_mode)
+            for module, mode in prior_modes:
+                module.training = mode
         return total_loss / total_rows
 
     def generate_routes(self, num_routes: int = 10, route_length: int = 50) -> torch.Tensor:

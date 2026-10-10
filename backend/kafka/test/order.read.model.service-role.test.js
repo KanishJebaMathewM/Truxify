@@ -1,7 +1,10 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
-const anonFrom = vi.fn(() => {
-  throw new Error('anon Supabase client must not access orders_read_model');
+const { anonFrom } = vi.hoisted(() => {
+  const anonFrom = vi.fn(() => {
+    throw new Error('anon Supabase client must not access orders_read_model');
+  });
+  return { anonFrom };
 });
 
 vi.mock('../../api/src/config/db.js', () => ({

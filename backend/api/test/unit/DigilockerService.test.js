@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { digilockerService } from '../../src/services/digilockerService.js';
+import digilockerService from '../../src/services/digilockerService.js';
 
 // Mock external HTTP client or axios dependencies
 vi.mock('axios', () => ({

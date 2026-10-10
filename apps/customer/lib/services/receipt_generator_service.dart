@@ -35,7 +35,7 @@ class ReceiptGeneratorService {
                           color: pw_pdf.PdfColors.blue800,
                         ),
                       ),
-                      const pw.SizedBox(height: 4),
+                      pw.SizedBox(height: 4),
                       pw.Text(
                         'Official Delivery Receipt & Waybill',
                         style: const pw.TextStyle(
@@ -70,15 +70,15 @@ class ReceiptGeneratorService {
                   ),
                 ],
               ),
-              const pw.SizedBox(height: 20),
+              pw.SizedBox(height: 20),
               pw.Divider(color: pw_pdf.PdfColors.grey400),
-              const pw.SizedBox(height: 20),
+              pw.SizedBox(height: 20),
 
               // Route & Shipment Parties
               pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  Expanded(
+                  pw.Expanded(
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
@@ -87,7 +87,7 @@ class ReceiptGeneratorService {
                                 fontWeight: pw.FontWeight.bold,
                                 fontSize: 11,
                                 color: pw_pdf.PdfColors.blueGrey800)),
-                        const pw.SizedBox(height: 4),
+                        pw.SizedBox(height: 4),
                         pw.Text(
                             orderData['pickupAddress'] ??
                                 'SIPCOT Industrial Park, Plot 42, Chennai, TN',
@@ -95,8 +95,8 @@ class ReceiptGeneratorService {
                       ],
                     ),
                   ),
-                  const pw.SizedBox(width: 16),
-                  Expanded(
+                  pw.SizedBox(width: 16),
+                  pw.Expanded(
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
@@ -105,7 +105,7 @@ class ReceiptGeneratorService {
                                 fontWeight: pw.FontWeight.bold,
                                 fontSize: 11,
                                 color: pw_pdf.PdfColors.blueGrey800)),
-                        const pw.SizedBox(height: 4),
+                        pw.SizedBox(height: 4),
                         pw.Text(
                             orderData['deliveryAddress'] ??
                                 'Logistics Hub Sector 5, Bangalore, KA',
@@ -115,7 +115,7 @@ class ReceiptGeneratorService {
                   ),
                 ],
               ),
-              const pw.SizedBox(height: 24),
+              pw.SizedBox(height: 24),
 
               // Freight Specifications Table
               pw.Text('FREIGHT MANIFEST & CHARGES',
@@ -123,7 +123,7 @@ class ReceiptGeneratorService {
                       fontWeight: pw.FontWeight.bold,
                       fontSize: 12,
                       color: pw_pdf.PdfColors.blue800)),
-              const pw.SizedBox(height: 8),
+              pw.SizedBox(height: 8),
               pw.Table.fromTextArray(
                 headerStyle: pw.TextStyle(
                     fontWeight: pw.FontWeight.bold,
@@ -143,7 +143,7 @@ class ReceiptGeneratorService {
                   ],
                 ],
               ),
-              const pw.SizedBox(height: 30),
+              pw.SizedBox(height: 30),
 
               // Verification QR Code & Signoff
               pw.Row(
@@ -165,8 +165,8 @@ class ReceiptGeneratorService {
                         height: 1,
                         color: pw_pdf.PdfColors.grey600,
                       ),
-                      const pw.SizedBox(height: 6),
-                      const pw.Text('Authorized Signatory',
+                      pw.SizedBox(height: 6),
+                      pw.Text('Authorized Signatory',
                           style: pw.TextStyle(
                               fontSize: 10, color: pw_pdf.PdfColors.grey700)),
                     ],

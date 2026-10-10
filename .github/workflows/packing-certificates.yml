@@ -1,0 +1,44 @@
+name: Native packing certificates
+on:
+  pull_request:
+    paths:
+      - 'services/vector-matcher-cpp/include/matcher.hpp'
+      - 'services/vector-matcher-cpp/src/matcher.cpp'
+      - 'services/vector-matcher-cpp/test/test_matcher.cpp'
+      - 'services/vector-matcher-cpp/tests/test_packing_certificates.cpp'
+      - 'services/vector-matcher-cpp/tests/test_packing_fraction.py'
+      - 'services/vector-matcher-cpp/PACKING_CERTIFICATES.md'
+      - 'services/vector-matcher-cpp/CMakeLists.txt'
+      - '.github/workflows/packing-certificates.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-packing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Configure native sanitized packing targets
+        env:
+          NATIVE_COMPILER: ${{ matrix.compiler }}
+        run: cmake -S services/vector-matcher-cpp -B /tmp/packing-build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER="$NATIVE_COMPILER" '-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer'
+      - name: Build the actual library and independent certificates
+        run: cmake --build /tmp/packing-build --target test_matcher test_packing_certificates --parallel 2
+      - name: Verify original and independent native geometry
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir /tmp/packing-build -R '^vector_matcher_packing' --output-on-failure --verbose
+      - name: Check actual public coordinates with exact binary32 rationals
+        env:
+          NATIVE_COMPILER: ${{ matrix.compiler }}
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: python3 services/vector-matcher-cpp/tests/test_packing_fraction.py --compiler "$NATIVE_COMPILER"

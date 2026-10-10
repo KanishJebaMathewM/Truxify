@@ -1,4 +1,4 @@
-import rateLimit, { MemoryStore } from "express-rate-limit";
+import rateLimit, { MemoryStore, ipKeyGenerator } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
@@ -279,6 +279,9 @@ export function normalizeIp(rawIp) {
  * as the most trustworthy source, falling back to the socket address only
  * when the forwarded header is suspicious or unavailable.
  */
+// express-rate-limit's IPv6-bypass validation requires custom key
+// generators to run the address through ipKeyGenerator() — do it here so
+// every caller is compliant by construction.
 export function safeIpKeyGenerator(req) {
   const forwarded = req.headers?.["x-forwarded-for"];
 
@@ -299,7 +302,7 @@ export function safeIpKeyGenerator(req) {
       req.connection?.remoteAddress ||
       "unknown";
 
-    return normalizeIp(socketIp);
+    return ipKeyGenerator(normalizeIp(socketIp));
   }
 
   // req.ips[0] is the client IP before any proxy hops (set by trust proxy).
@@ -312,7 +315,7 @@ export function safeIpKeyGenerator(req) {
     req.connection?.remoteAddress ||
     "unknown";
 
-  return normalizeIp(rawIp);
+  return ipKeyGenerator(normalizeIp(rawIp));
 }
 
 /**

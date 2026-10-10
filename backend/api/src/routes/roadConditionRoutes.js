@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { reportGripData, getNearbyGripData } from '../controllers/roadConditionController.js';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
@@ -11,7 +11,10 @@ const roadConditionLimiter = rateLimit({
   max: 100, // allow more frequent telemetry updates
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
+  // express-rate-limit requires custom key generators to run the IP through
+  // ipKeyGenerator() for IPv6 normalization (its load-time validation throws
+  // otherwise).
+  keyGenerator: (req) => ipKeyGenerator(safeIpKeyGenerator(req)),
   store: createStore('rl:road-conditions:'),
 });
 

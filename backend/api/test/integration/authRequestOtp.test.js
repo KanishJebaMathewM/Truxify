@@ -3,19 +3,37 @@
  * Resolves Issue #10471: Verifies the OTP producer flow without pre-seeding phone_otps.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
-import app from '../../src/app.js';
-import { supabaseAdmin } from '../../src/config/db.js';
-import {
+// Shared infra mock (issue #17628) — the full app otherwise hits the real
+// network (test.supabase.co DNS failures).
+// Static imports hoist ABOVE this line — the app must be imported
+// dynamically AFTER the mock is registered (the repo's bids.test.js pattern).
+const appInfra = (await import('../helpers/appInfraMock.js')).buildAppInfra();
+vi.mock('../../src/config/db.js', () => appInfra.dbModule);
+const { default: app } = await import('../../src/app.js');
+const supabaseAdmin = appInfra.supabase.supabase;
+// otpService transitively imports config/db.js — import it dynamically AFTER
+// the infra mock registers (a static import would evaluate the mock factory
+// before appInfra initializes).
+
+const {
     generateOtp,
     generateSalt,
     hashOtp,
     verifyOtpHash,
     OTP_CONFIG
-} from '../../src/services/otpService.js';
+} = await import('../../src/services/otpService.js');
 
 describe('POST /api/auth/request-otp (#10471)', () => {
+    // The in-memory store + rate window persist across tests in this file —
+    // reset per test so each starts from a clean slate (CI against a real DB
+    // cleaned up between runs).
+    beforeEach(() => {
+        appInfra.supabase.reset();
+        appInfra.redis.clearAll();
+    });
+
     const TEST_PHONE = '+919999999999';
     const TEST_PHONE_2 = '+918888888888';
     let cleanupOtpIds = [];
@@ -215,6 +233,7 @@ describe('POST /api/auth/request-otp (#10471)', () => {
                 .post('/api/auth/request-otp')
                 .send({ phone: TEST_PHONE });
 
+            if (![200, 201].includes(requestRes.status)) console.log('PROBE-OTP-429:', requestRes.status, JSON.stringify(requestRes.body));
             expect([200, 201]).toContain(requestRes.status);
 
             // Step 2: Retrieve the stored OTP hash/salt directly (simulating what the user would have received via SMS)

@@ -5,7 +5,10 @@
 
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { signLogBatch, generateLogId, getEventSeverity } from '../lib/logSigner.js';
+import { signLogBatch, generateLogId } from '../lib/logSigner.js';
+// getEventSeverity lives in auditEventTypes.js — the logSigner import was a
+// phantom (never existed there).
+import { getEventSeverity } from '../lib/auditEventTypes.js';
 
 const BATCH_SIZE = 50;
 const FLUSH_INTERVAL_MS = 2000;

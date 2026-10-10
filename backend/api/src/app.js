@@ -186,7 +186,10 @@ import {
 import './subscribers/reputationSubscriber.js'
 
 // --- AUDIT LOGGING IMPORTS ---
-import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
+import { auditErrors } from './middleware/auditLogger.js';
+// startAuditFlushTimer lives in services/auditService.js — the
+// middleware/auditLogger.js import was a phantom.
+import { startAuditFlushTimer } from './services/auditService.js';
 
 
 // Configuration load from root folder is handled in db.js

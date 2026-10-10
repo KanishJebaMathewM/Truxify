@@ -464,11 +464,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
  *         application/json:
  *           schema:
  *             type: object
- *             required: []
-         properties:
-        geofence_radius_m:
-    type: number
-    description: Override default 500m geofence radius
+ *             properties:
  *               geofence_radius_m:
  *                 type: number
  *                 description: Override default 500m geofence radius

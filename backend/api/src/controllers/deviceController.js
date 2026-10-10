@@ -2,7 +2,9 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
-import notificationService from '../services/notificationService.js';
+// The phantom default export was removed by a merge — the module only has
+// named exports (issue #17613).
+import { pruneStaleDevices } from '../services/notificationService.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
 
@@ -309,7 +311,7 @@ export async function pruneDevices(req, res, next) {
       });
     }
 
-    const result = await notificationService.pruneStaleDevices(days);
+    const result = await pruneStaleDevices(days);
     
     return res.status(200).json({ 
       success: true, 

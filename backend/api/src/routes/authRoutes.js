@@ -46,8 +46,7 @@ import rateLimit from "express-rate-limit";
 import { authenticate } from "../middleware/auth.js";
 import {
   userLimiter,
-  otpVerificationLimiter,
-} from "../middleware/rateLimiter.js";
+  otpVerificationLimiter, createStore } from '../middleware/rateLimiter.js';
 import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
@@ -290,6 +289,10 @@ router.post('/request-otp',
   rateLimit({ 
     windowMs: 15 * 60 * 1000, 
     max: 10,
+    // The default MemoryStore is unreachable from the test harness — use the
+    // shared createStore (Redis-backed / memory fallback) so suites can
+    // reset the window between tests.
+    store: createStore('rl:auth-request-otp:'),
     message: 'Too many OTP requests from this IP'
   }),
   async (req, res) => {

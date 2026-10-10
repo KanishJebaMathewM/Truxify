@@ -33,6 +33,9 @@ process.env.JWT_SECRET ??= 'test-jwt-secret-for-harness-0123456789abcdef';
 // Dummy Supabase config so validateConfig() passes in the harness — tests mock
 // the clients, so these never reach a real server. ??= keeps real env intact.
 process.env.SUPABASE_URL ??= 'https://test.supabase.co';
+// validateConfig() requires all three at app startup — pin the pair too.
+process.env.SUPABASE_ANON_KEY ??= 'test-anon-key-for-harness';
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-service-role-key-for-harness';
 process.env.SUPABASE_ANON_KEY ??= 'test-anon-key-for-harness';
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-service-role-key-for-harness';
 

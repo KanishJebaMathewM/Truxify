@@ -378,13 +378,21 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
             active_path = _active_ptr_path(model_name)
             previous_path = _previous_ptr_path(model_name)
             current = get_active_generation(model_name)
-            if current:
-                _atomic_write_json(previous_path, {"generation": current})
-            _atomic_write_json(active_path, {"generation": generation})
-            _deleted_reader_models.discard(model_name)
-            _mirror_to_flat(model_name, generation)
-            _sign_artifact(get_model_path(model_name))
-            _prune_generations(model_name, {generation, current} - {None})
+            from .generation_publication import recoverable_publication
+
+            with recoverable_publication(model_name):
+                if current:
+                    _atomic_write_json(previous_path, {"generation": current})
+                _atomic_write_json(active_path, {"generation": generation})
+                _deleted_reader_models.discard(model_name)
+                _mirror_to_flat(model_name, generation)
+                _sign_artifact(get_model_path(model_name))
+            # Publication is complete. Reclamation must not turn a committed
+            # model into an apparent failed training/save operation.
+            try:
+                _prune_generations(model_name, {generation, current} - {None})
+            except Exception:  # best-effort post-publication maintenance
+                logger.warning("Generation cleanup failed after publishing '%s'", model_name)
         finally:
             for temporary_path in (model_tmp, meta_tmp):
                 try:

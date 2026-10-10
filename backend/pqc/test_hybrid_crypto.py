@@ -105,7 +105,7 @@ def test_too_short_decrypted_payload_raises_error(hybrid, hybrid_key):
         'hybrid_id': hybrid_key.get('hybrid_id', 'unknown')
     }
     
-    with pytest.raises(ValueError, match="is shorter than quantum secret size"):
+    with pytest.raises(ValueError, match="shorter than the framing header \\+ quantum secret"):
         hybrid.hybrid_decrypt(malformed_ciphertext, hybrid_key)
 
 
@@ -115,8 +115,12 @@ def test_tampered_quantum_secret_suffix_raises_error(hybrid, hybrid_key):
     wrong_secret = b"X" * 32
     plaintext = b"Valid Payload"
     
+    # The decrypter's injective framing (4-byte big-endian length prefix) is
+    # checked before the suffix — frame the tampered payload so the suffix
+    # check is what fires.
+    framed = len(plaintext).to_bytes(4, 'big') + plaintext + wrong_secret
     encrypted_tampered = hybrid_key['classical']['public'].encrypt(
-        plaintext + wrong_secret,
+        framed,
         padding.OAEP(
             mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
@@ -132,7 +136,7 @@ def test_tampered_quantum_secret_suffix_raises_error(hybrid, hybrid_key):
         'hybrid_id': hybrid_key.get('hybrid_id', 'unknown')
     }
     
-    with pytest.raises(ValueError, match="Quantum secret suffix verification failed"):
+    with pytest.raises(ValueError, match="Quantum secret verification failed"):
         hybrid.hybrid_decrypt(tampered_ciphertext, hybrid_key)
 
 

@@ -23,7 +23,10 @@ import logger from '../../api/src/middleware/logger.js';
 async function verifySupabaseJwt(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access Denied. No token provided.' });
+    res.status(401).json({ error: 'Access Denied. No token provided.' });
+    // Always invoke the callback — the requireDaoAuth wrapper awaits it, and
+    // skipping it on rejection hangs the request (and the test suite).
+    return next(new Error('missing_authorization'));
   }
 
   const token = authHeader.split(' ')[1];
@@ -46,7 +49,8 @@ async function verifySupabaseJwt(req, res, next) {
     next();
   } catch (err) {
     logger.error({ err }, 'DAO JWT verification failed');
-    return res.status(401).json({ error: 'Invalid or expired token.' });
+    res.status(401).json({ error: 'Invalid or expired token.' });
+    return next(new Error('invalid_token'));
   }
 }
 
@@ -57,12 +61,16 @@ async function verifySupabaseJwt(req, res, next) {
 export function requireDaoAuth(actionType = 'vote') {
   return async (req, res, next) => {
     // Step 1: Verify JWT
-    await new Promise((resolve) => {
+    const rejected = await new Promise((resolve) => {
       verifySupabaseJwt(req, res, (err) => {
         if (err || res.headersSent) return resolve(true);
         resolve(false);
       });
     });
+
+    // A rejection already answered the request — stop here. (Real Express
+    // flips headersSent; the err arg covers mocks that don't.)
+    if (rejected) return;
 
     if (res.headersSent) return;
 

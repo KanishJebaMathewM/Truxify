@@ -92,20 +92,23 @@ describe('DAO Authentication Middleware (#13888)', () => {
 
   it('should allow impersonation if valid EIP-191 signature is provided', async () => {
     // Setup: User A is authenticated, but wants to vote on behalf of User B (hardware wallet)
-    const signer = new ethers.Wallet('0x' + '1'.repeat(64)); // Private key for OTHER_WALLET
+    const signer = new ethers.Wallet('0x' + '1'.repeat(64));
+    // The signature recovers the SIGNER'S address — the delegated wallet must
+    // be derived from the key (the previous constant never matched).
+    const delegatedWallet = signer.address;
     const message = `Truxify DAO Action: vote\nUser: ${USER_ID}\nNonce: 12345`;
     const signature = await signer.signMessage(message);
 
     req.headers.authorization = `Bearer ${generateToken(USER_WALLET)}`;
     req.headers['x-dao-signature'] = signature;
     req.headers['x-dao-message'] = message;
-    req.body.voterAddress = OTHER_WALLET; // The address the signature proves ownership of
+    req.body.voterAddress = delegatedWallet; // The address the signature proves ownership of
     
     const middleware = requireDaoAuth('vote');
     await middleware(req, res, next);
     
     expect(next).toHaveBeenCalled();
-    expect(req.verifiedSigner).toBe(OTHER_WALLET.toLowerCase());
+    expect(req.verifiedSigner).toBe(delegatedWallet.toLowerCase());
   });
 
   it('should reject if signature recovers to a different address than claimed', async () => {

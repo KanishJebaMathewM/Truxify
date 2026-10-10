@@ -10,6 +10,19 @@ const MAX_SURGE_MULTIPLIER = 2.5;
 const SURGE_PEAK_AMPLITUDE = 1.3;
 const CACHE_TTL = 300; // 5 minutes caching for live traffic
 
+function parseTomTomFlow(flow) {
+  // Flow Segment Data reports travel times in seconds, not percentage/delay fields.
+  const currentTime = flow?.currentTravelTime;
+  const freeFlowTime = flow?.freeFlowTravelTime;
+  if (!Number.isFinite(currentTime) || currentTime <= 0 || !Number.isFinite(freeFlowTime) || freeFlowTime <= 0) {
+    return { multiplier: 1.0, delayMinutes: 0 };
+  }
+  return {
+    multiplier: Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, currentTime / freeFlowTime)),
+    delayMinutes: Math.max(0, Math.round((currentTime - freeFlowTime) / 60)),
+  };
+}
+
 /**
  * Calculates a live traffic multiplier for a given pickup location.
  * Combines TOMTOM/Google Maps real-time traffic data with a sinusoidal rush-hour
@@ -41,12 +54,11 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
         const data = await response.json();
-        const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
-        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
+        multiplier = parseTomTomFlow(data.flowSegmentData).multiplier;
       } else {
         const origin = `${pickupLat},${pickupLng}`;
         const destination = `${pickupLat + 0.01},${pickupLng + 0.01}`;
-        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&mode=driving&departure_time=now&key=${process.env.GOOGLE_MAPS_API_KEY}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Google API error: ${response.status}`);
         const data = await response.json();
@@ -292,13 +304,11 @@ export async function getTrafficForRoute(route, options = {}) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`TomTom API error: ${response.status}`);
         const data = await response.json();
-        const speedDiff = data.flowSegmentData?.speedDiffPercent || 0;
-        multiplier = Math.min(MAX_SURGE_MULTIPLIER, Math.max(1.0, 1.0 + Math.max(0, -speedDiff / 100)));
-        delayMinutes = Math.max(0, Math.round((data.flowSegmentData?.currentDelaySec || 0) / 60));
+        ({ multiplier, delayMinutes } = parseTomTomFlow(data.flowSegmentData));
       } else {
         const origin = `${nOriginLat},${nOriginLng}`;
         const destination = `${nDestLat},${nDestLng}`;
-        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${destination}&mode=driving&departure_time=now&key=${process.env.GOOGLE_MAPS_API_KEY}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Google API error: ${response.status}`);
         const data = await response.json();

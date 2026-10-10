@@ -163,15 +163,27 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
 
 router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, res) => {
   try {
-    const { accessToken } = req.body;
-    const userId = req.user?.id;
-    if (!userId) {
+    const { accessToken, userId: bodyUserId } = req.body;
+    const authenticatedUserId = req.user?.id;
+
+    if (!authenticatedUserId) {
       return res.status(401).json({ success: false, error: 'Authentication required' });
     }
+
+    // Fixed #10259: Prevent IDOR / privilege escalation by rejecting bodyUserId mismatches 
+    // instead of falling back to client-supplied user identifiers.
+    if (bodyUserId && bodyUserId !== authenticatedUserId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Cannot verify documents for another user identity.',
+      });
+    }
+
     if (!accessToken) {
       return res.status(400).json({ success: false, error: 'Access token is required' });
     }
-    const verificationResult = await digilockerService.verifyDocuments(userId, accessToken);
+
+    const verificationResult = await digilockerService.verifyDocuments(authenticatedUserId, accessToken);
     res.status(200).json({
       success: true,
       data: verificationResult
@@ -207,6 +219,7 @@ const upload = multer({
   },
 });
 
+// Fixed #10258: `authenticate` runs BEFORE `upload.single('image')` to prevent unauthenticated memory-exhaustion DoS
 router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'), async (req, res) => {
   try {
     const userId = req.user.id;

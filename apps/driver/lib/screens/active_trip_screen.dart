@@ -356,6 +356,11 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                           backgroundColor: Colors.white,
                           foregroundColor: TruxifyColors.accentDark,
                           elevation: 0,
+                          // The theme's ElevatedButton minimumSize is
+                          // Size.fromHeight(52) (min width infinity, for
+                          // full-width buttons); inside this Row that forces
+                          // an infinite width and crashes layout. Opt out.
+                          minimumSize: const Size(0, 40),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -576,6 +581,9 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: TruxifyColors.accentDark,
                               foregroundColor: Colors.white,
+                              // Same theme minimumSize opt-out — this button
+                              // lives in a Row next to the OTP field.
+                              minimumSize: const Size(0, 40),
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),

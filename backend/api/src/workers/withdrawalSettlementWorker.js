@@ -76,6 +76,11 @@ export function isAmbiguousDispatchError(err) {
     /invalid withdrawal amount/,
     /no withdrawal payout provider configured/,
     /not supported yet/,
+    // Bank-side permanent rejections: the payout provably never left the
+    // platform, so funds must be restored rather than retried.
+    /invalid bank account/,
+    /insufficient platform balance/,
+    /bank rejected/,
   ];
   if (PROVED_NOT_DISPATCHED.some((pattern) => pattern.test(msg))) {
     return false;

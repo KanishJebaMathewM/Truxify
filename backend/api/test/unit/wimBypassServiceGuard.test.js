@@ -52,13 +52,13 @@ describe('wimBypass service', () => {
       expect(result.signature).toMatch(/^[a-f0-9]{64}$/);
     });
 
-    it('is deterministic for the same credential', () => {
+    it('is deterministic for the same payload within the same timestamp', () => {
       const credential = credentialFor('t1');
       const a = createSignedWimPacket(credential);
       const b = createSignedWimPacket(credential);
+
+      expect(a.packet).toEqual(b.packet);
       expect(a.signature).toBe(b.signature);
-      expect(a.packet.timestamp).toBeTypeOf('number');
-      expect(b.signature).toMatch(/^[a-f0-9]{64}$/);
     });
   });
 });

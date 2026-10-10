@@ -35,7 +35,7 @@
     "@upstash/redis": "^1.39.0",
     "axios": "^1.20.0",
     "circuit-breaker-js": "0.0.1",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dompurify": "^3.4.16",
     "dotenv": "^17.4.2",

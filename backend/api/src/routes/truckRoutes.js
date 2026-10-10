@@ -97,6 +97,7 @@ import { getTruckSearchVersion } from '../utils/cacheInvalidation.js';
 import logger from '../middleware/logger.js';
 import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
+import { validateCoordinate } from '../utils/coordinates.js';
 
 const weatherService = new WeatherService({ logger });
 const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
@@ -835,12 +836,14 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
  */
 router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const truckId = req.params.id;
-  const destinationLat = Number(req.query.destination_lat);
-  const destinationLng = Number(req.query.destination_lng);
+  const latitude = validateCoordinate(req.query.destination_lat, 'lat');
+  const longitude = validateCoordinate(req.query.destination_lng, 'lng');
 
-  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) {
+  if (!latitude.valid || !longitude.valid) {
     return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
   }
+  const destinationLat = latitude.value;
+  const destinationLng = longitude.value;
 
   if (req.user.role !== 'driver' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden: fuel advice is restricted to assigned drivers and admins' });

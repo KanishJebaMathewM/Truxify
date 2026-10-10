@@ -9,6 +9,8 @@ import GpsLog from '../models/GpsLog.js';
 import { scheduleEtaRecalculationOnLocationUpdate } from '../services/order/etaService.js';
 import DeliveryDelayService from '../services/order/deliveryDelayService.js';
 import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
+import { saveChatMessage, isChatRateLimited, verifyChatAccess, markMessagesAsRead } from '../services/chatService.js';
+import { enqueueOfflineMessage, drainOfflineQueue } from '../lib/messageQueue.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -559,6 +561,18 @@ export function initWebSocketServer(server, orderRepository) {
       return;
     }
 
+    // Drain offline chat messages upon successful authentication
+    if (ws.user?.id) {
+      const queuedMessages = await drainOfflineQueue(ws.user.id);
+      for (const msg of queuedMessages) {
+        ws.send(JSON.stringify({ event: 'chat_message', data: msg }));
+      }
+    }
+
+    // Tokens are never accepted from the URL query string (issue #5828).
+    // Authentication is deferred until the client sends a first-frame `auth`
+    // event so credentials never leak via query strings into proxies, logs or
+    // web analytics (issue #5739).
     ws.authenticated = false;
     ws.isAuthenticating = false;
     ws.pendingAuthQueue = [];
@@ -742,6 +756,18 @@ export async function handleTrackingMessage(ws, message, req) {
 
       case 'unsubscribe_tracking':
         await handleUnsubscribe(ws, data);
+        break;
+      
+      case 'chat_message':
+        await handleChatMessage(ws, data, req);
+        break;
+
+      case 'chat_read':
+        await handleChatRead(ws, data);
+        break;
+
+      case 'chat_typing':
+        await handleChatTyping(ws, data);
         break;
 
       default:
@@ -1664,4 +1690,165 @@ export const __testing = {
     return telemetryBuffer._test.flush();
   },
   removeClientFromAllSubscriptions,
+  getTelemetryWriteBuffer() {
+    return telemetryBuffer._test.getBuffer();
+  },
+  getTelemetryFlushBuffer() {
+    return telemetryBuffer._test.getRetryQueue();
+  },
+  async setTelemetryWriteBuffer(records) {
+    await telemetryBuffer._test.setBuffer(records);
+  },
+  setTelemetryFlushBuffer(records) {
+    telemetryBuffer._test.setRetryQueue(records);
+  },
+  async pushToTelemetryWriteBuffer(records) {
+    await telemetryBuffer._test.push(records);
+  },
+  async clearTelemetryWriteBuffer() {
+    await telemetryBuffer._test.clearBuffer();
+  },
+  clearTelemetryFlushBuffer() {
+    telemetryBuffer._test.setRetryQueue([]);
+  },
+  getTelemetryBufferMetrics() {
+    return telemetryBuffer.getMetrics();
+  },
+  getShutdownState() {
+    const state = {
+      isSchedulerActive,
+      hasTelemetryFlushInterval: Boolean(telemetryFlushTimeout),
+      hasWebSocketServer: Boolean(wsServer),
+      hasWsHeartbeatInterval: Boolean(wsHeartbeatInterval),
+    };
+    // Expose live (not snapshot) distributed fan-out state so the health check
+    // can report whether Redis Pub/Sub is operational.
+    Object.defineProperty(state, 'pubSub', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return locationEventBus ? locationEventBus.getState() : null;
+      },
+    });
+    return state;
+  },
+  setShutdownState({ telemetryInterval = null, heartbeatInterval = null, server = null } = {}) {
+    telemetryFlushTimeout = telemetryInterval;
+    wsHeartbeatInterval = heartbeatInterval;
+    wsServer = server;
+    isSchedulerActive = Boolean(telemetryInterval);
+  },
+  setMongoDbOverride(val) {
+    telemetryBuffer._test.setMongoDbOverride(val);
+  },
+  getConsecutiveDropCount(driverId) {
+    const entry = consecutiveDropCount.get(driverId);
+    return entry ? entry.count : 0;
+  },
+  clearConsecutiveDropCount() {
+    consecutiveDropCount.clear();
+  },
+  getConsecutiveDropCountSize() {
+    return consecutiveDropCount.size;
+  },
+  getConsecutiveDropCountEntry(driverId) {
+    return consecutiveDropCount.get(driverId) || null;
+  },
+  getDriverStateTtlMs() {
+    return TRACKER_DRIVER_STATE_TTL_MS;
+  },
+  sweepStaleDriverState,
+  setLastDriverStateSweep(val) {
+    lastDriverStateSweep = val;
+  },
+  get MAX_CONSECUTIVE_DROPS() {
+    return MAX_CONSECUTIVE_DROPS;
+  },
+  WS_MAX_PAYLOAD_BYTES,
+  // ── Driver order cache helpers (for testing) ──────────────────────
+  getCachedDriverOrder,
+  setCachedDriverOrder,
+  invalidateDriverOrderCache,
+  DRIVER_ORDER_CACHE_KEY_PREFIX,
+  DRIVER_ORDER_CACHE_TTL_SECONDS,
+};
+
+// Fix: implemented exponential backoff (retry count * 1000ms) for Supabase channel reconnects.
+
+// Resolves #2045: Cache channels per orderUUID
+
+async function handleChatMessage(ws, data, req) {
+  const { orderId, type, content } = data;
+  
+  if (!orderId || !type || !content) {
+    return ws.send(JSON.stringify({ error: 'Missing chat message fields', code: 4000 }));
+  }
+  
+  if (await isChatRateLimited(ws.user.id)) {
+    return ws.send(JSON.stringify({ error: 'Chat rate limit exceeded', code: 4290 }));
+  }
+  
+  const access = await verifyChatAccess(orderId, ws.user.id);
+  if (!access.authorized) {
+    return ws.send(JSON.stringify({ error: 'Not authorized for this chat', code: 4030 }));
+  }
+  
+  try {
+    const savedMsg = await saveChatMessage({
+      orderId,
+      senderId: ws.user.id,
+      senderRole: access.role,
+      type,
+      content
+    });
+    
+    const broadcastPayload = JSON.stringify({
+      event: 'chat_message',
+      data: savedMsg
+    });
+    
+    // Deliver to local subscribers of this order
+    deliverToLocalSubscribers(orderId, broadcastPayload);
+    
+    // Publish to Redis for multi-replica fan-out
+    if (locationEventBus) {
+      void locationEventBus.publish({
+        type: 'chat_message',
+        v: 1,
+        sourceInstanceId: locationEventBus.getInstanceId(),
+        orderId,
+        message: savedMsg
+      });
+    }
+  } catch (err) {
+    logger.error({ err, orderId }, 'Failed to process chat message');
+    ws.send(JSON.stringify({ error: 'Failed to send message', code: 5000 }));
+  }
+}
+
+async function handleChatRead(ws, data) {
+  const { orderId } = data;
+  if (!orderId) return;
+  
+  await markMessagesAsRead(orderId, ws.user.id);
+  
+  const payload = JSON.stringify({
+    event: 'chat_read',
+    data: { orderId, readBy: ws.user.id, timestamp: new Date().toISOString() }
+  });
+  
+  deliverToLocalSubscribers(orderId, payload);
+}
+
+async function handleChatTyping(ws, data) {
+  const { orderId } = data;
+  if (!orderId) return;
+  
+  const payload = JSON.stringify({
+    event: 'chat_typing',
+    data: { orderId, userId: ws.user.id, timestamp: Date.now() }
+  });
+  
+  deliverToLocalSubscribers(orderId, payload);
+}
 };

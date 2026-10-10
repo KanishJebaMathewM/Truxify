@@ -291,7 +291,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
 
     // Generate intelligent route recommendations and earnings potential based on ML predictions
     const baseEarningRate = demandConfig.baseEarningRate; // per km estimate
-    const multiplier = mlPrediction.predicted_demand || 0.5;
+    const multiplier = mlPrediction.predicted_demand ?? 0.5;
     const estimatedEarningPotential = Number((baseEarningRate * (1 + multiplier)).toFixed(2));
 
     const routeSuggestions = (filteredLoads || []).slice(0, 3).map((l, idx) => ({

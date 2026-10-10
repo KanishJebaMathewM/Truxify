@@ -4,7 +4,16 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// Before
+console.error('Error inserting notification:', error);
 
+// After
+logger.error({
+  event: 'NOTIFICATION_INSERT_ERROR',
+  error: error.message,
+  stack: error.stack,
+  requestId: req?.id || requestId,
+}, 'Failed to insert notification into database');
 /**
  * Notification Service
  * Handles FCM push notification fan-outs, device token deduplication,
@@ -591,7 +600,6 @@ export async function insertNotification(notificationData) {
   return data;
 }
 
-export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
 /**
  * Existing push entry point used by order lifecycle, payments, escrow and
  * document flows. Persists to the notifications table, then fans the push out
@@ -643,7 +651,6 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   const title = 'Delivery Verification OTP';
   const plaintextOtp = String(otp);
   const body = `Your delivery OTP for order ${orderDisplayId} is ${plaintextOtp}. Share this with the driver only after verifying your cargo has arrived safely.`;
-  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
 
   let dbSuccess = false;
   try {
@@ -660,10 +667,6 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
           order_display_id: orderDisplayId,
           otp: plaintextOtp 
         }
-        notif_type: 'delivery_otp',
-        // No OTP or OTP-derived value is persisted in metadata: an unsalted digest of
-        // a 6-digit code is offline-brute-forceable if the table leaks.
-        metadata: { order_display_id: orderDisplayId }
       });
 
       if (error) {
@@ -688,7 +691,6 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         deliveryOtp: plaintextOtp,
         otp: plaintextOtp 
       }
-      { orderDisplayId, notifType: 'delivery_otp', otp: String(otp) }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

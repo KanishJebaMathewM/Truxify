@@ -102,10 +102,12 @@ describe('paginated', () => {
     expect(firstPage.pagination.hasNextPage).toBe(true);
   });
 
-  it('computes hasNextPage for 0-based page', () => {
+  it('clamps a 0-based page input to page 1', () => {
     const result = paginated([], 0, 10, 10);
-    // page=0 < totalPages=1 under current logic
-    expect(result.pagination.hasNextPage).toBe(true);
+    // page 0 normalizes to page 1 (deliberate clamp, 21442ebf5); with a
+    // single page of results there is no next page.
+    expect(result.pagination.page).toBe(1);
+    expect(result.pagination.hasNextPage).toBe(false);
   });
   it('coerces page and limit to numbers', () => {
     const result = paginated([], '2', '10', '25');

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_driver/controllers/app_controller.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
+import 'package:truxify_driver/l10n/app_localizations.dart';
 import 'package:truxify_driver/widgets/earnings/withdraw_bottom_sheet.dart';
 
 Widget _buildTestApp({required double confirmedBalanceRupees}) {
@@ -10,6 +11,8 @@ Widget _buildTestApp({required double confirmedBalanceRupees}) {
   return TruxifyScope(
     controller: controller,
     child: MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: TruxifyTheme.light(),
       darkTheme: TruxifyTheme.dark(),
       home: Builder(
@@ -107,6 +110,8 @@ void main() {
     bool? result;
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: TruxifyTheme.light(),
         home: Builder(
           builder: (context) => Scaffold(

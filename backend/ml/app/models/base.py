@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
+from .generation_maintenance import remove_owned_temporaries
+
 logger = logging.getLogger(__name__)
 
 MODEL_STORAGE_DIR = os.environ.get(
@@ -33,7 +35,7 @@ MODEL_ARTIFACT_SIGNATURE_DIR = os.environ.get(
 # 1. _get_lock()/get_model_lock(): an ``asyncio.Lock`` per model used on the
 #    event loop to serialize whole training requests for the same model
 #    (see ensure_model_loaded() and the /train endpoints).
-# 2. _get_write_lock(): a ``threading.Lock`` per model held around every
+# 2. _get_write_lock(): a ``threading.RLock`` per model held around every
 #    synchronous artifact publication (publish_model() / restore_previous_model()).
 #    This is required because training actually executes on worker threads
 #    (executor), where an asyncio.Lock cannot be used, and multiple threads
@@ -46,7 +48,7 @@ MODEL_STORAGE_DIR = os.environ.get(
 )
 
 _model_locks: dict[str, asyncio.Lock] = {}
-_model_write_locks: dict[str, threading.Lock] = {}
+_model_write_locks: dict[str, threading.RLock] = {}
 _locks_guard = threading.Lock()
 # Counts are accessed only under the corresponding per-model writer lock.
 _generation_readers: dict[str, dict[str, int]] = {}
@@ -64,12 +66,12 @@ def get_model_lock(model_name: str) -> "asyncio.Lock":
     return _get_lock(model_name)
 
 
-def _get_write_lock(model_name: str) -> threading.Lock:
+def _get_write_lock(model_name: str) -> threading.RLock:
     """Return the thread-level lock serializing artifact writes for *model_name*."""
     with _locks_guard:
         lock = _model_write_locks.get(model_name)
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
             _model_write_locks[model_name] = lock
         return lock
 
@@ -394,8 +396,10 @@ def save_model(model: Any, model_name: str, metrics: Optional[dict] = None, trai
 
 def publish_model(model: Any, model_name: str, metrics: Optional[dict] = None) -> str:
     """Publish a model and return its active generation identifier."""
-    save_model(model, model_name, metrics)
-    return get_active_generation(model_name) or "production"
+    # Keep the result attached to this mutation, through nested writer calls.
+    with _get_write_lock(model_name):
+        save_model(model, model_name, metrics)
+        return get_active_generation(model_name) or "production"
 
 
 def delete_model(model_name: str) -> None:
@@ -431,6 +435,12 @@ def restore_previous_model(model_name: str) -> bool:
         previous = get_previous_generation(model_name)
         if previous is None or not _generation_exists(model_name, previous):
             logger.warning("No previous generation of model '%s' to restore", model_name)
+            return False
+        if not _verify_artifact(_generation_model_path(model_name, previous)):
+            logger.error(
+                "Refusing to restore tampered previous generation of model '%s'",
+                model_name,
+            )
             return False
         _atomic_write_json(active_path, {"generation": previous})
         if current and _generation_exists(model_name, current):
@@ -475,6 +485,7 @@ def backup_model(model_name: str) -> Optional[str]:
         if os.path.exists(source_meta):
             with open(source_meta, "r") as f:
                 meta = json.load(f)
+            meta["generation"] = backup_gen
             meta["backup_from_generation"] = current_gen
             meta["backup_timestamp"] = datetime.now().isoformat()
             with open(target_meta, "w") as f:
@@ -495,28 +506,29 @@ def rollback_model(model_name: str) -> dict:
     Returns a dict with 'rolled_back' (bool), 'active_generation', 'previous_generation',
     and the restored generation's metrics.
     """
-    restored = restore_previous_model(model_name)
-    active_gen = get_active_generation(model_name)
-    meta = get_model_meta(model_name) or {}
-    metrics = meta.get("metrics", {})
+    with _get_write_lock(model_name):
+        restored = restore_previous_model(model_name)
+        active_gen = get_active_generation(model_name)
+        meta = get_model_meta(model_name) or {}
+        metrics = meta.get("metrics", {})
 
-    if restored:
-        logger.warning("Model '%s' successfully rolled back to generation %s", model_name, active_gen)
+        if restored:
+            logger.warning("Model '%s' successfully rolled back to generation %s", model_name, active_gen)
+            return {
+                "rolled_back": True,
+                "model_name": model_name,
+                "active_generation": active_gen,
+                "metrics": metrics,
+                "message": f"Successfully rolled back {model_name} to generation {active_gen}",
+            }
+
         return {
-            "rolled_back": True,
+            "rolled_back": False,
             "model_name": model_name,
             "active_generation": active_gen,
             "metrics": metrics,
-            "message": f"Successfully rolled back {model_name} to generation {active_gen}",
+            "reason": f"No previous generation available to roll back to for model '{model_name}'.",
         }
-
-    return {
-        "rolled_back": False,
-        "model_name": model_name,
-        "active_generation": active_gen,
-        "metrics": metrics,
-        "reason": f"No previous generation available to roll back to for model '{model_name}'.",
-    }
 
 
 def validate_model_performance(new_metrics: dict, previous_metrics: Optional[dict] = None, r2_threshold: float = 0.05) -> dict:
@@ -745,30 +757,26 @@ def cleanup_stale_training_artifacts(model_name: Optional[str] = None) -> None:
         names = [n for n in names if os.path.isdir(os.path.join(root, n))]
 
     for name in names:
-        gen_root = _generations_root(name)
-        if os.path.isdir(gen_root):
-            for gen in os.listdir(gen_root):
-                _cleanup_generation_temps(name, gen)
-        for entry in os.listdir(MODEL_STORAGE_DIR):
-            if entry.endswith(".tmp") and (
-                entry.startswith(f"{name}_") or entry.startswith(f"{name}.")
-            ):
-                try:
-                    os.remove(os.path.join(MODEL_STORAGE_DIR, entry))
-                except OSError:
-                    pass
+        # Active native writers, rollback and reclamation share this owner.
+        with _get_write_lock(name):
+            gen_root = _generations_root(name)
+            if os.path.isdir(gen_root):
+                for gen in os.listdir(gen_root):
+                    _cleanup_generation_temps(name, gen)
+            destinations = (
+                get_model_path(name), get_meta_path(name),
+                get_previous_model_path(name), get_previous_meta_path(name),
+                _active_ptr_path(name), _previous_ptr_path(name),
+            )
+            remove_owned_temporaries(
+                MODEL_STORAGE_DIR, tuple(os.path.basename(path) for path in destinations),
+            )
 
 
 def _cleanup_generation_temps(model_name: str, generation: str) -> None:
     generation_dir = _generation_dir(model_name, generation)
-    if not os.path.isdir(generation_dir):
-        return
-    for entry in os.listdir(generation_dir):
-        if entry.endswith(".tmp"):
-            try:
-                os.remove(os.path.join(generation_dir, entry))
-            except OSError:
-                pass
+    if os.path.isdir(generation_dir):
+        remove_owned_temporaries(generation_dir, ('model.pkl', 'meta.json'))
 
 
 async def ensure_model_loaded(model_name: str, train_fn, *args, **kwargs) -> Optional[Any]:

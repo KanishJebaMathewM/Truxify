@@ -1,16 +1,23 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional
-from collections import OrderedDict
-import logging
 import copy
+import logging
 import math
 import os
 import tempfile
 import threading
 from functools import wraps
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+from meta.fewshot_admission import checked, classify_owned, predict_owned, support
+from meta.training_admission import (
+    MetaTrainingTransitionError,
+    admit_tasks,
+    checked_outer_step,
+    finite_tensor,
+    positive_count,
+)
 
 
 def _generation_operation(method):
@@ -159,6 +166,7 @@ class MAML:
 
         pred = _functional_call(model, adapted, (support_x,))
         loss = self.criterion(pred, self._paired_targets(pred, support_y))
+        finite_tensor(loss, "support objective")
 
         grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
 
@@ -172,15 +180,7 @@ class MAML:
     @_generation_operation
     def outer_update(self, meta_loss: torch.Tensor):
         """Perform outer loop update (meta-optimization)"""
-        # A loss built from a retired adapted generation must not silently step
-        # the newly published optimizer. Resolve gradients against this pair first.
-        parameters = tuple(self.model.parameters())
-        gradients = torch.autograd.grad(meta_loss, parameters)
-        self.outer_optimizer.zero_grad()
-        for parameter, gradient in zip(parameters, gradients):
-            parameter.grad = gradient
-        torch.nn.utils.clip_grad_norm_(parameters, 1.0)
-        self.outer_optimizer.step()
+        checked_outer_step(self.model, self.outer_optimizer, meta_loss)
     
     @_generation_operation
     def meta_train_step(
@@ -189,15 +189,22 @@ class MAML:
         k_shot: int = 5
     ) -> float:
         """Single meta-training step"""
+        positive_count(k_shot, "k_shot", 4096)
+        tasks = admit_tasks(tasks, self.model)
+        if not math.isfinite(self.inner_lr) or self.inner_lr < 0:
+            raise MetaTrainingTransitionError("inner learning rate must be finite and nonnegative")
         meta_loss = 0.0
-        
+
         for support_x, support_y, query_x, query_y in tasks:
             # Inner adaptation on support set
             adapted_model = self.inner_update(self.model, support_x, support_y)
 
+            for parameter in adapted_model.params.values():
+                finite_tensor(parameter, "adapted parameter")
             # Compute loss on query set (graph flows back into self.model)
-            pred = adapted_model(query_x)
+            pred = finite_tensor(adapted_model(query_x), "query predictions")
             task_loss = self.criterion(pred, self._paired_targets(pred, query_y))
+            finite_tensor(task_loss, "query objective")
             meta_loss += task_loss
         
         # Average loss across tasks
@@ -215,7 +222,10 @@ class MAML:
         tasks_per_epoch: int = 10,
         k_shot: int = 5
     ) -> Dict:
-        """Full meta-training loop"""
+        """Full meta-training loop; each batch is an independently checked transition."""
+        positive_count(num_epochs, "num_epochs", 10000)
+        positive_count(tasks_per_epoch, "tasks_per_epoch", 256)
+        positive_count(k_shot, "k_shot", 4096)
         losses = []
         
         for epoch in range(num_epochs):
@@ -238,21 +248,29 @@ class MAML:
     def adapt(self, support_x: torch.Tensor, support_y: torch.Tensor, steps: int = 5,
               *, training: Optional[bool] = None) -> _AdaptedModel:
         """Adapt with private module modes and graph-preserving parameters."""
+        if training is not None and type(training) is not bool:
+            raise ValueError("training must be a boolean or None")
+        support_x, support_y = support(self.model, support_x, support_y, steps, self.inner_lr)
         working_model = copy.deepcopy(self.model)
         if training is not None:
             working_model.train(training)
         adapted = {name: p.clone() for name, p in self.model.named_parameters()}
 
         for _ in range(steps):
-            pred = _functional_call(working_model, adapted, (support_x,))
-            loss = self.criterion(pred, self._paired_targets(pred, support_y))
+            pred = checked(_functional_call(working_model, adapted, (support_x,)), "native support predictions")
+            loss = checked(self.criterion(pred, self._paired_targets(pred, support_y)), "native support objective")
 
             grads = torch.autograd.grad(loss, list(adapted.values()), create_graph=True)
+            for gradient in grads:
+                checked(gradient, "native adaptation gradient")
 
             adapted = {
                 name: param - self.inner_lr * grad
                 for (name, param), grad in zip(adapted.items(), grads)
             }
+
+            for parameter in adapted.values():
+                checked(parameter, "native adapted parameter")
 
         return _AdaptedModel(working_model, adapted, copy_model=False)
     
@@ -405,18 +423,7 @@ class FewShotLearner:
         steps: int = 5
     ) -> np.ndarray:
         """Few-shot prediction"""
-        # Convert to tensors
-        support_x_t = torch.tensor(support_x, dtype=torch.float32)
-        support_y_t = torch.tensor(support_y, dtype=torch.float32)
-        query_x_t = torch.tensor(query_x, dtype=torch.float32)
-        
-        # Adapt to task
-        adapted_model = self.maml.adapt(support_x_t, support_y_t, steps, training=False)
-        
-        # Predict
-        predictions = self.maml.predict(adapted_model, query_x_t)
-        
-        return predictions.cpu().numpy()
+        return predict_owned(self, support_x, support_y, query_x, steps)
     
     def few_shot_classify(
         self,
@@ -425,30 +432,7 @@ class FewShotLearner:
         steps: int = 5
     ) -> np.ndarray:
         """Few-shot classification"""
-        # Prepare support data
-        support_x = []
-        support_y = []
-        
-        for label, data in support_set.items():
-            support_x.append(data)
-            support_y.append([int(label)] * len(data))
-        
-        support_x = np.concatenate(support_x, axis=0)
-        support_y = np.concatenate(support_y, axis=0)
-        
-        # Convert to tensors
-        support_x_t = torch.tensor(support_x, dtype=torch.float32)
-        support_y_t = torch.tensor(support_y, dtype=torch.long)
-        query_x_t = torch.tensor(query_x, dtype=torch.float32)
-        
-        # Adapt
-        adapted_model = self.maml.adapt(support_x_t, support_y_t.float().unsqueeze(1), steps, training=False)
-        
-        # Predict
-        predictions = self.maml.predict(adapted_model, query_x_t)
-        classes = torch.round(predictions).squeeze().int()
-        
-        return classes.cpu().numpy()
+        return classify_owned(self, support_set, query_x, steps)
 
 class TaskGenerationUnavailable(ValueError):
     """The selected task cannot yield finite truth-aligned binary samples."""

@@ -80,6 +80,9 @@ export function evaluateBypassEligibility(truckData = {}) {
   if (typeof maxWeightLimit !== 'number' || !Number.isFinite(maxWeightLimit)) {
     return false;
   }
+  if (safetyScore < MIN_SAFETY_SCORE) {
+    return false;
+  }
 
     // Reject non-numeric, non-finite and non-positive weights. `typeof` alone
     // is not enough: a caller that coerces its database value with Number()

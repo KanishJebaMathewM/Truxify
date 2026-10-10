@@ -119,6 +119,27 @@ router.get('/webrtc/nearby', authenticate, userLimiter, nearbyLimiter, requirePo
  *         synced:
  *           type: boolean
  *           description: Whether the row has already been synchronized
+ *     WebRTCOfflineSyncRequest:
+ *       type: object
+ *       required:
+ *         - ackedIds
+ *       properties:
+ *         ackedIds:
+ *           type: array
+ *           minItems: 1
+ *           items:
+ *             type: string
+ *           description: Offline GPS row ids the client received and acknowledges
+ *     WebRTCOfflineSyncResponse:
+ *       type: object
+ *       required:
+ *         - success
+ *         - message
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
  *     WebRTCOfflineGPSResponse:
  *       type: object
  *       required:
@@ -296,6 +317,43 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
 });
 
 // Sync offline data
+/**
+ * @openapi
+ * /webrtc/sync/{peerId}:
+ *   post:
+ *     tags: [WebRTC]
+ *     summary: Acknowledge and sync offline data for a peer
+ *     description: Marks the offline GPS rows the client received as acknowledged so they are not replayed, after verifying the authenticated user may access the peer.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: peerId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/WebRTCOfflineSyncRequest'
+ *     responses:
+ *       200:
+ *         description: Offline data synced
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/WebRTCOfflineSyncResponse'
+ *       400:
+ *         description: ackedIds missing or not a non-empty array
+ *       403:
+ *         description: Authenticated user may not access the requested peer
+ *       500:
+ *         description: Internal server error
+ *       503:
+ *         description: WebRTC signaling server not initialized
+ */
 router.post('/webrtc/sync/:peerId', authenticate, userLimiter, requirePolicy('webrtc:sync-offline'), async (req, res) => {
   try {
     const { peerId } = req.params;

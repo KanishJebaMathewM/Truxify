@@ -89,8 +89,9 @@ void main() {
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
 
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Office'), findsOneWidget);
+      // Addresses render as chips in BOTH the pickup and drop rows.
+      expect(find.text('Home'), findsNWidgets(2));
+      expect(find.text('Office'), findsNWidgets(2));
     });
 
     testWidgets('does not show chips when saved addresses is empty', (tester) async {
@@ -116,6 +117,10 @@ void main() {
 
       // Screen should render without error while loading
       expect(find.byType(FindTrucksScreen), findsOneWidget);
+
+      // Flush the mock's pending 5s delay in fake time so no timer is left
+      // pending at teardown.
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('handles error gracefully without crashing', (tester) async {
@@ -141,8 +146,9 @@ void main() {
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
 
-      // Tap the Home chip (under pickup section)
-      await tester.tap(find.text('Home'));
+      // Tap the Home chip (under pickup section) — addresses render as chips
+      // in BOTH the pickup and drop rows; the pickup row comes first.
+      await tester.tap(find.text('Home').first);
       await tester.pumpAndSettle();
 
       // Pickup field should be populated with full address
@@ -232,13 +238,13 @@ void main() {
     });
 
     testWidgets('bottom sheet shows error state with retry button', (tester) async {
-      when(() => mockRepo.fetchAll()).thenAnswer((_) async => []);
+      // The sheet renders the screen's CACHED address state (loaded at init)
+      // with an explicit Retry — so the error state requires the initial load
+      // to fail, not a later flip.
+      when(() => mockRepo.fetchAll()).thenThrow(Exception('DB error'));
 
       await tester.pumpWidget(createTestWidget(tester));
       await tester.pumpAndSettle();
-
-      // Now make fetchAll fail
-      when(() => mockRepo.fetchAll()).thenThrow(Exception('DB error'));
 
       await tester.tap(find.byIcon(Icons.bookmark_rounded).first);
       await tester.pumpAndSettle();
@@ -372,7 +378,9 @@ void main() {
       // Form should render
       expect(find.byType(FindTrucksScreen), findsOneWidget);
       expect(find.byType(PrimaryButton), findsOneWidget);
-      expect(find.text('Find Trucks'), findsOneWidget);
+      // 'Find Trucks' is both the section header and the submit button label
+      // — scope to the button.
+      expect(find.widgetWithText(PrimaryButton, 'Find Trucks'), findsOneWidget);
     });
 
     testWidgets('RouteDraft populated from pending draft still works', (tester) async {

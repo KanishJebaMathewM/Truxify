@@ -136,8 +136,10 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
  */
 router.get('/withdrawals/stuck', authenticate, userLimiter, requirePolicy('admin:manage-finances'), auditLog({ action: 'admin:view-stuck-withdrawals' }), async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
-    const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
+    const rawLimit = parseInt(req.query.limit, 10);
+    const rawOffset = parseInt(req.query.offset, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(1, rawLimit), 100) : 50;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, rawOffset) : 0;
 
     const { data: withdrawals, error, count } = await dashboardDb
       .from('wallet_transactions')

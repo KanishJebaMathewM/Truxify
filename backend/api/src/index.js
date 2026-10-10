@@ -579,7 +579,18 @@ app.use('/api/ml', mlRoutes)
 app.use('/api/tire-analytics', tireAnalyticsRoutes)
 app.use('/api/ar-loading', arLoadingRoutes)
 
-// ============================================================================
+// ===================// --- API Route Registrations ---
+// (Other existing routes...)
+app.use('/api/auth', authRouter);
+app.use('/api/users', userRouter);
+
+// ADD the WIM bypass router here, before the notFound handler
+app.use('/api/wim', wimBypassRouter);
+
+// --- Error Handlers & 404 Catch-All ---
+app.use(notFound);
+app.use(sentryErrorHandler);
+app.use(errorHandler);2=========================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES
 // Attach the monitoring services and the service-role client per request so
 // the handlers never fall back to the anon-key client (RLS would hide all

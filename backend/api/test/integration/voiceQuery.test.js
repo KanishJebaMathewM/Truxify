@@ -62,6 +62,8 @@ vi.mock('../../src/config/db.js', () => {
       },
       from: mockFrom
     },
+    // The service-role migration (#9202) — routes read via supabaseAdmin.
+    supabaseAdmin: { from: mockFrom },
     createUserClient: () => ({
       from: mockFrom
     }),

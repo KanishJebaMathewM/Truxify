@@ -106,6 +106,45 @@ function detectQueryIntent(transcript) {
   return LOGISTICS_VOICE_INTENTS.GENERAL_INQUIRY;
 }
 
+// Customer-facing vocabulary for the /query endpoint (the suite's contract):
+// 'location' / 'eta' / 'escrow' / 'general'. The driver dispatch path keeps
+// the LOGISTICS_VOICE_INTENTS enum untouched.
+const CUSTOMER_QUERY_INTENTS = {
+  LOCATION: 'location',
+  ETA: 'eta',
+  ESCROW: 'escrow',
+  GENERAL: 'general',
+};
+
+function detectCustomerQueryIntent(transcript) {
+  const text = (transcript || '').toLowerCase();
+  if (text.includes('where') || text.includes('package') || text.includes('track') || text.includes('location') || text.includes('kahan')) {
+    return CUSTOMER_QUERY_INTENTS.LOCATION;
+  }
+  if (text.includes('when') || text.includes('arrive') || text.includes('eta') || text.includes('pahunch')) {
+    return CUSTOMER_QUERY_INTENTS.ETA;
+  }
+  if (text.includes('payment') || text.includes('escrow') || text.includes('release') || text.includes('paid')) {
+    return CUSTOMER_QUERY_INTENTS.ESCROW;
+  }
+  return CUSTOMER_QUERY_INTENTS.GENERAL;
+}
+
+function buildCustomerQueryResponse(intent, bookingData) {
+  const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
+  const status = (bookingData?.status || bookingData?.current_status || 'in transit').replace(/_/g, ' ');
+  switch (intent) {
+    case CUSTOMER_QUERY_INTENTS.LOCATION:
+      return `Your shipment ${orderRef} is currently ${status}.`;
+    case CUSTOMER_QUERY_INTENTS.ETA:
+      return `Your shipment ${orderRef} is currently ${status}, with an estimated arrival of ${bookingData?.eta || 'soon'}.`;
+    case CUSTOMER_QUERY_INTENTS.ESCROW:
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}. Your shipment is currently ${status}.`;
+    default:
+      return `Your shipment ${orderRef} is currently ${status}.`;
+  }
+}
+
 function buildResponseForIntent(intent, bookingData, transcript) {
   const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
   const status = bookingData?.status || bookingData?.current_status || 'in transit';
@@ -137,8 +176,9 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
       transcript = querySamples[byteSum % querySamples.length];
     }
 
-    const intent = detectQueryIntent(transcript);
-    const responseText = buildResponseForIntent(intent, bookingData, transcript);
+    // The /query endpoint is customer-facing — use the customer vocabulary.
+    const intent = detectCustomerQueryIntent(transcript);
+    const responseText = buildCustomerQueryResponse(intent, bookingData);
 
     const mockAudio = Buffer.alloc(1000);
     const audioId = crypto.randomUUID();

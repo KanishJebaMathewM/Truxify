@@ -5,7 +5,7 @@ import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
 // Before
-console.error('Error inserting notification:', error);
+logger.error({ err: error }, 'Error inserting notification');
 
 // After
 logger.error({

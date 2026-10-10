@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from quantum_circuit import QUBOFormatter  # noqa: E402
 
 from qiskit_optimization.algorithms import ScipyMilpOptimizer  # noqa: E402
+from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # noqa: E402
 
 
 def _selected_edges(formatter, result):

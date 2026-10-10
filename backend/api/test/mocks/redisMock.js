@@ -9,15 +9,26 @@ class RedisMock {
         this.expirations = new Map();
     }
 
-    async set(key, value, options) {
-        this.store.set(key, value);
-        if (options && options.EX) {
-            this.expirations.set(key, Date.now() + options.EX * 1000);
-        } else if (options && options.PX) {
-            this.expirations.set(key, Date.now() + options.PX);
-        } else if (options && options.NX && this.store.has(key)) {
-            return null;
+    // Supports both object options ({EX, PX, NX}) and ioredis positional
+    // args: set(key, value, 'NX', 'EX', seconds). NX is checked BEFORE the
+    // write — a set-then-check always reports "exists".
+    async set(key, value, ...rest) {
+        let ex, px, nx = false;
+        for (let i = 0; i < rest.length; i++) {
+            const r = rest[i];
+            if (r && typeof r === 'object') {
+                ex = r.EX; px = r.PX; nx = !!r.NX;
+            } else if (typeof r === 'string') {
+                const up = r.toUpperCase();
+                if (up === 'NX') nx = true;
+                else if (up === 'EX') ex = Number(rest[i + 1]);
+                else if (up === 'PX') px = Number(rest[i + 1]);
+            }
         }
+        if (nx && this.store.has(key)) return null;
+        this.store.set(key, String(value));
+        if (ex) this.expirations.set(key, Date.now() + ex * 1000);
+        else if (px) this.expirations.set(key, Date.now() + px);
         return 'OK';
     }
 

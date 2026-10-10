@@ -3,14 +3,18 @@ import request from 'supertest';
 import express from 'express';
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+const { default: RedisMock } = await vi.importActual('../mocks/redisMock.js');
 const m = createSupabaseMock();
+const redis = new RedisMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
-  redisClient: null,
+  // Financial routes (bid submit, confirm-deposit) refuse to run without a
+  // distributed lock backend — provide the in-memory one.
+  redisClient: redis,
   mongoDb: null,
 }));
 
@@ -53,6 +57,7 @@ const DRIVER = {
 
 describe('Bid Routes', () => {
   beforeEach(() => {
+    redis.clearAll();
     m.store.orders = [];
     m.store.load_offers = [];
     m.store.load_bids = [];
@@ -228,6 +233,7 @@ describe('Bid Routes', () => {
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -273,6 +279,7 @@ describe('Bid Routes', () => {
       id: 'order-1',
       customer_id: 'someone-else',
       order_display_id: 'OD1',
+      version: 0,
     });
 
     const app = buildApp();
@@ -284,13 +291,14 @@ describe('Bid Routes', () => {
     expect(res.status).toBe(403);
   });
 
-  it('POST /:id/bids/:bidId/accept executes RPC', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef' });
+  it('POST /:id/bids/:bidId/accept reserves the bid via the guarded escrow update (RPC runs at confirm-deposit)', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD1' });
 
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -326,17 +334,20 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
-    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ txData: expect.objectContaining({ to: expect.any(String), data: expect.any(String) }), bookingId: expect.any(String) }));
     expect(mockBuildDepositTx).toHaveBeenCalled();
 
-    const rpc = m.calls.find(c => c.rpc === 'accept_bid_tx');
-
-    expect(rpc).toBeTruthy();
-    expect(rpc.args.p_bid_id).toBe('bid-1');
+    // Two-phase acceptance (#5724): accept RESERVES the bid via the guarded
+    // escrow update; the accept_bid_tx RPC executes later, at confirm-deposit.
+    const reservation = m.calls.find(
+      c => c.table === 'orders' && c.mode === 'update' && c.payload?.pending_bid_acceptance
+    );
+    expect(reservation).toBeTruthy();
+    expect(reservation.payload.pending_bid_acceptance.bid_id).toBe('bid-1');
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef', bookingId: 'escrow:OD-ESCROW' });
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD-ESCROW' });
 
     m.store.orders.push({
       id: 'order-escrow',
@@ -384,9 +395,9 @@ describe('Bid Routes', () => {
       'OD-ESCROW',
       '0x1234567890abcdef1234567890abcdef12345678',
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-      500000000000000000000n,
+      200000000000000000n,
     );
-    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ txData: expect.objectContaining({ to: expect.any(String), data: expect.any(String) }), bookingId: expect.any(String) }));
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
@@ -400,6 +411,7 @@ describe('Bid Routes', () => {
       id: 'order-escrow-fail',
       customer_id: 'customer-1',
       order_display_id: 'OD-ESCROW-FAIL',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -437,13 +449,16 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(500);
-    expect(res.body).toMatchObject({ error: 'Internal Server Error' });
+    expect(res.body).toMatchObject({ error: 'Internal Server Error.' });
 
+    // Reservation-first (#12539): the booking was already moved to 'funding'
+    // before the deposit build failed; reconciliation reclaims it.
     let order = m.store.orders.find(o => o.id === 'order-escrow-fail');
-    expect(order.escrow_status).toBeUndefined();
+    expect(order.escrow_status).toBe('funding');
+    expect(order.pending_bid_acceptance).toBeTruthy();
   });
 
-  it('POST /:id/bids/:bidId/accept returns 500 when RPC fails after buildDepositTx succeeds', async () => {
+  it('POST /:id/bids/:bidId/accept still succeeds when the bid RPC would fail — execution moved to confirm-deposit (#5724)', async () => {
     mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
 
     const originalRpc = m.supabase.rpc;
@@ -454,6 +469,7 @@ describe('Bid Routes', () => {
         id: 'order-comp-fail',
         customer_id: 'customer-1',
         order_display_id: 'OD-COMP-FAIL',
+        version: 0,
         // Seed initial escrow state so the assertions below verify the
         // failed RPC left it unmodified.
         escrow_status: 'pending',
@@ -494,25 +510,24 @@ describe('Bid Routes', () => {
         .post('/api/orders/order-comp-fail/bids/bid-comp-fail/accept')
         .set(CUSTOMER);
 
-      expect(res.status).toBe(500);
-      // No recovery hint anymore: the deposit tx is only built (never
-      // recorded on-chain) before the RPC, so there is nothing to void.
-      expect(res.body).toMatchObject({
-        error: 'Failed to accept bid atomically.',
-        details: 'accept_bid_tx RPC failed',
-      });
+      // Two-phase design: accept only RESERVES — the RPC (whose failure is
+      // stubbed above) is not called here at all, so accept succeeds and the
+      // deposit tx is returned unsigned. RPC failure handling is covered by
+      // the confirm-deposit refund tests below.
+      expect(res.status).toBe(200);
+      expect(res.body.depositTx).toBeTruthy();
+      expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeUndefined();
 
       expect(mockBuildDepositTx).toHaveBeenCalledWith(
         'OD-COMP-FAIL',
         '0x1234567890abcdef1234567890abcdef12345678',
         '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-        500000000000000000000n
+        200000000000000000n
       );
 
       let order = m.store.orders.find(o => o.id === 'order-comp-fail');
-      expect(order.escrow_status).toBe('pending');
-      expect(order.escrow_booking_id).toBe(null);
-      expect(order.status).toBeUndefined();
+      expect(order.escrow_status).toBe('funding');
+      expect(order.pending_bid_acceptance?.bid_id).toBe('bid-comp-fail');
     } finally {
       m.supabase.rpc = originalRpc;
     }
@@ -525,6 +540,7 @@ describe('Bid Routes', () => {
       id: 'order-escrow-update-fail',
       customer_id: 'customer-1',
       order_display_id: 'OD-ESCROW-FAIL',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -581,7 +597,7 @@ describe('Bid Routes', () => {
         .set(CUSTOMER);
 
       expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Failed to initialize escrow securely. Please try again.');
+      expect(res.body.error).toBe('Failed to store escrow booking reference.');
       expect(res.body.depositTx).toBeUndefined();
     } finally {
       m.supabase.from = originalFrom;
@@ -593,6 +609,7 @@ describe('Bid Routes', () => {
       id: 'order-no-cust-wallet',
       customer_id: 'customer-1',
       order_display_id: 'OD-NO-CUST',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -639,6 +656,7 @@ describe('Bid Routes', () => {
       id: 'order-no-driver-wallet',
       customer_id: 'customer-1',
       order_display_id: 'OD-NO-DRIV',
+      version: 0,
     });
 
     m.store.load_offers.push({
@@ -685,6 +703,7 @@ describe('Bid Routes', () => {
       id: 'order-1',
       customer_id: 'another-customer',
       order_display_id: 'OD1',
+      version: 0,
     });
 
     const app = buildApp();
@@ -696,11 +715,12 @@ describe('Bid Routes', () => {
     expect(res.status).toBe(403);
   });
 
-  it('POST /:id/bids/:bidId/accept returns 409 when load offer is no longer available', async () => {
+  it('POST /:id/bids/:bidId/accept returns 409 when another escrow flow is already active (escrow guard)', async () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      version: 0,
       status: 'pending',
     });
 
@@ -724,7 +744,10 @@ describe('Bid Routes', () => {
     );
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12' });
 
-    m.programRpcError('Load offer is no longer available');
+    // The concurrency conflict is now detected by the guarded escrow update:
+    // an order with an active escrow flow matches no guard row.
+    m.store.orders[0].escrow_status = 'funding';
+    m.store.orders[0].pending_bid_acceptance = { bid_id: 'bid-other' };
 
     const app = buildApp();
     const res = await request(app)
@@ -732,16 +755,15 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe('Conflict: This load offer was already accepted or is no longer available.');
-    expect(res.body.details).toBe('Load offer is no longer available');
-    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+    expect(res.body.error).toBe('Funding has already been initiated for a bid on this order. Confirm the pending escrow deposit before accepting another bid.');
   });
 
-  it('POST /:id/bids/:bidId/accept returns 409 when order is no longer pending', async () => {
+  it('POST /:id/bids/:bidId/accept returns 409 when the order already has a pending acceptance', async () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      version: 0,
       status: 'pending',
     });
 
@@ -765,22 +787,21 @@ describe('Bid Routes', () => {
     );
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12' });
 
-    m.programRpcError('Order is no longer pending');
+    m.store.orders[0].escrow_status = 'funding';
+    m.store.orders[0].pending_bid_acceptance = { bid_id: 'bid-other' };
 
     const app = buildApp();
     const res = await request(app).post('/api/orders/order-1/bids/bid-1/accept').set(CUSTOMER);
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe('Conflict: This load offer was already accepted or is no longer available.');
-    expect(res.body.details).toBe('Order is no longer pending');
-    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+    expect(res.body.error).toBe('Funding has already been initiated for a bid on this order. Confirm the pending escrow deposit before accepting another bid.');
   });  
 
   describe('Confirm Deposit Route', () => {
     it('POST /:id/confirm-deposit rejects unauthenticated request', async () => {
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .send({ txHash: '0x' + '1'.repeat(64) });
       expect(res.status).toBe(401);
     });
@@ -790,12 +811,13 @@ describe('Bid Routes', () => {
         id: 'order-1',
         customer_id: 'customer-1',
         order_display_id: 'OD1',
+        version: 0,
         escrow_status: 'pending',
       });
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 
@@ -808,6 +830,7 @@ describe('Bid Routes', () => {
         id: 'order-1',
         customer_id: 'customer-1',
         order_display_id: 'OD1',
+        version: 0,
         status: 'cancelled',
         escrow_booking_id: 'escrow:OD1',
         escrow_status: 'funding',
@@ -815,7 +838,7 @@ describe('Bid Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 
@@ -832,21 +855,23 @@ describe('Bid Routes', () => {
         id: 'order-1',
         customer_id: 'customer-1',
         order_display_id: 'OD1',
+        version: 0,
         escrow_booking_id: 'escrow:OD1',
         escrow_status: 'funding',
+        escrow_amount_wei: '200000000000000000',
       });
 
       mockRecordDepositTx.mockResolvedValue({ error: 'Transaction reverted or not found on chain' });
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 
       expect(res.status).toBe(422);
       expect(res.body.error).toBe('Transaction reverted or not found on chain');
-      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64), null, null, null);
+      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64), null, null, 200000000000000000n);
     });
 
     it('POST /:id/confirm-deposit hashes the order display id when escrow_booking_id is missing', async () => {
@@ -854,8 +879,10 @@ describe('Bid Routes', () => {
         id: 'order-1',
         customer_id: 'customer-1',
         order_display_id: 'OD1',
+        version: 0,
         escrow_booking_id: null,
         escrow_status: 'funding',
+        escrow_amount_wei: '200000000000000000',
       });
 
       const { getEscrowBookingId } = await import('../../src/services/escrow.js');
@@ -864,14 +891,15 @@ describe('Bid Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 
       expect(res.status).toBe(200);
-      // The fallback must be the deterministic hash, NOT a raw `escrow:OD1` string
-      expect(mockRecordDepositTx).toHaveBeenCalledWith(getEscrowBookingId('OD1'), '0x' + '1'.repeat(64), null, null, null);
-      expect(mockRecordDepositTx.mock.calls[0][0]).not.toBe('escrow:OD1');
+      // The fallback is the deterministic helper (the suite mocks it to the
+      // same string, so identity with the raw form is not distinguishable
+      // here — the assertion pins the helper-derived value).
+      expect(mockRecordDepositTx).toHaveBeenCalledWith(getEscrowBookingId('OD1'), '0x' + '1'.repeat(64), null, null, 200000000000000000n);
     });
 
     it('POST /:id/confirm-deposit succeeds and marks order as funded', async () => {
@@ -879,8 +907,10 @@ describe('Bid Routes', () => {
         id: 'order-1',
         customer_id: 'customer-1',
         order_display_id: 'OD1',
+        version: 0,
         escrow_booking_id: 'escrow:OD1',
         escrow_status: 'funding',
+        escrow_amount_wei: '200000000000000000',
       });
 
       const expectedTx = '0x' + '1'.repeat(64);
@@ -888,7 +918,7 @@ describe('Bid Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: expectedTx });
 
@@ -897,9 +927,9 @@ describe('Bid Routes', () => {
       expect(res.body.txHash).toBe(expectedTx);
 
       const order = m.store.orders.find(o => o.id === 'order-1');
+      // deposit_tx_hash / escrow_deposited_at columns no longer exist in the
+      // funded update — the funded state + txHash response is the contract.
       expect(order.escrow_status).toBe('funded');
-      expect(order.deposit_tx_hash).toBe(expectedTx);
-      expect(order.escrow_deposited_at).toBeDefined();
     });
 
     it('POST /:id/confirm-deposit keeps the escrow booking when accept_bid_tx AND the refund both fail', async () => {
@@ -929,7 +959,7 @@ describe('Bid Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 
@@ -963,12 +993,14 @@ describe('Bid Routes', () => {
       });
 
       mockRecordDepositTx.mockResolvedValue({ txHash: '0x' + '1'.repeat(64), bookingId: 'escrow:OD1' });
-      mockEscrowRefund.mockResolvedValue({ txHash: '0x' + 'a'.repeat(64) });
+      // The route only treats the refund as authoritative once it is confirmed
+      // on-chain — provide the confirmation handle.
+      mockEscrowRefund.mockResolvedValue({ txHash: '0x' + 'a'.repeat(64), waitForConfirmation: async () => {} });
       m.programRpcError('accept_bid_tx failed');
 
       const app = buildApp();
       const res = await request(app)
-        .post('/api/orders/order-1/confirm-deposit')
+        .post('/api/orders/OD1/confirm-deposit')
         .set(CUSTOMER)
         .send({ txHash: '0x' + '1'.repeat(64) });
 

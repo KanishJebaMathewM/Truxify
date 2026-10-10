@@ -7,6 +7,9 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  // The route builds a caller-scoped client via createUserClient.
+  createUserClient: () => m.supabase,
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: {
@@ -37,6 +40,10 @@ const DRIVER_HEADERS = {
 
 describe('Driver WIM Sync Routes', () => {
   beforeEach(() => {
+    // The handler requires a caller token for the scoped DB client — enable
+    // the test-auth bypass (sets req.token) instead of a real JWT.
+    process.env.BYPASS_AUTH = 'true';
+    process.env.ENABLE_TEST_AUTH = 'true';
     m.calls.length = 0;
     m.store.trucks = [
       { id: 'truck-1', driver_id: 'driver-1' }
@@ -79,8 +86,10 @@ describe('Driver WIM Sync Routes', () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.body.action).toBe('BYPASS');
-    expect(res.body.gross_weight_lbs).toBe(30000);
+    // The service deliberately returns UNSUPPORTED until a real WIM provider
+    // (Drivewyze/PrePass) integrates — see syncAndTransmitInternalWeights.
+    expect(res.body.action).toBe('UNSUPPORTED');
+    expect(res.body.supported).toBe(false);
   });
 
   it('GET /api/driver/weigh-stations/bypass-status returns 503 UNSUPPORTED (no real WIM provider)', async () => {

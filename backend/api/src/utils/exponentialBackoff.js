@@ -16,7 +16,7 @@ class ExponentialBackoff {
         return await fn();
       } catch (error) {
         lastError = error;
-        console.warn(`Attempt ${attempt}/${this.maxRetries} failed: ${error.message}`);
+        logger.warn({ attempt, maxRetries: this.maxRetries, err: error.message }, 'Retry attempt failed');
 
         if (attempt === this.maxRetries) {
           break;
@@ -28,7 +28,7 @@ class ExponentialBackoff {
           currentDelay += randomJitter;
         }
 
-        console.log(`Retrying in ${Math.round(currentDelay)}ms...`);
+        logger.debug({ delayMs: Math.round(currentDelay) }, 'Retrying operation with backoff');
         await this.sleep(currentDelay);
         
         delay = Math.min(delay * this.factor, this.maxDelay);

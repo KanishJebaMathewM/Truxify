@@ -15,8 +15,13 @@ from torch_geometric.data import Data
 from torch_geometric.nn import GATConv
 
 from .training_transition import (
-    admit_tuple, recover_step, finite_objective, finite_gradients,
-    evaluation_mode, require_state, TrainingAdmissionError,
+    TrainingAdmissionError,
+    admit_tuple,
+    evaluation_mode,
+    finite_gradients,
+    finite_objective,
+    recover_step,
+    require_state,
 )
 
 logger = logging.getLogger(__name__)

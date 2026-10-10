@@ -1,8 +1,8 @@
 import logging
 from datetime import datetime
+from threading import RLock
 from typing import Literal, Optional
 
-import torch
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from foundation.data import LogisticsDataProcessor, LogisticsDatasetGenerator
 from foundation.finetuning import FinetuningAdmissionError
@@ -11,12 +11,15 @@ from foundation.model import (
     FoundationModelTrainer,
     LogisticsFoundationModel,
 )
+from foundation.prediction_contract import PredictionAdmissionError, predict_text
 from pydantic import BaseModel, Field
 from routes.foundation_validation import (
     UploadTooLarge,
     read_training_json,
     safe_model_path,
 )
+
+_prediction_lock = RLock()
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/foundation", tags=["Foundation Model"])
@@ -169,48 +172,23 @@ async def finetune_model(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
-async def predict(
+def predict(
     text: str = Query(..., min_length=1, max_length=10000),
     task: Literal['classification', 'regression'] = 'classification',
 ):
     """Make prediction using foundation model"""
     try:
-        # Tokenize input
-        tokens = processor.prepare_sequence(text)
-        
-        # Pad to max length
-        if len(tokens) < config.max_len:
-            tokens = tokens + [0] * (config.max_len - len(tokens))
-        else:
-            tokens = tokens[:config.max_len]
-        
-        # Convert to tensor
-        input_ids = torch.tensor([tokens], dtype=torch.long)
-        
-        # Predict
-        trainer.model.eval()
-        with torch.no_grad():
-            outputs = trainer.model(input_ids, task=task)
-            logits = outputs['output']
-            
-            if task == 'classification':
-                prediction = torch.softmax(logits, dim=-1).cpu().numpy()
-                result = {
-                    'class': int(prediction.argmax()),
-                    'probabilities': prediction.tolist()[0]
-                }
-            elif task == 'regression':
-                prediction = logits.cpu().numpy()
-                result = {'value': float(prediction[0][0])}
-            else:
-                result = {'hidden': outputs['hidden'].cpu().numpy().tolist()}
-        
+        with _prediction_lock:
+            result = predict_text(trainer.model, processor, text, task, config.max_len)
+
         return {
             'success': True,
             'data': result,
             'task': task,
             'timestamp': datetime.now().isoformat()
         }
+    except PredictionAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
 

@@ -109,42 +109,7 @@ router.post(
             return res.status(500).json({ error: 'Failed to verify driver registration.' });
         }
 
-        const rawTruckCapacity = truck.max_capacity_tons;
-        const rawLoadWeight = order.weight_tonnes;
-
-        const maxWeightLimit = Number(rawTruckCapacity) * LBS_PER_TONNE;
-        const axleWeight = Number(rawLoadWeight) * LBS_PER_TONNE;
-        // There is no safety-score column in the schema; derive the safety
-        // signal from the driver's verified registration (fail closed to 0).
-        const safetyScore = isVerified ? 100 : 0;
-
-
-        // Number(null) and Number('') are both 0, so a load with no registered
-        // weight used to coerce to the lightest possible axle weight and be
-        // granted a bypass. The service's own typeof check cannot catch this
-        // because by the time it runs the value is already the number 0.
-        // Validate the raw column values and fail closed on anything missing,
-        // non-numeric or non-positive.
-        if (!Number.isFinite(axleWeight) || axleWeight <= 0
-            || !Number.isFinite(maxWeightLimit) || maxWeightLimit <= 0) {
-            logger.warn('[WIM] Truck/load records missing or invalid weight data, failing closed:', {
-                truckId,
-                bolId,
-                rawTruckCapacity,
-                rawLoadWeight,
-            });
-            return res.json({
-                signal: 'PULL_IN',
-                message: 'Truck must pull into weigh station.',
-            });
-        }
-
-        const isEligible = evaluateBypassEligibility({
-            safetyScore,
-            axleWeight,
-            maxWeightLimit,
-        });
-      }
+      const measurement = buildTrustedMeasurement({ truck, order, driverProfile: profile });
 
       // Server-side freshness + vehicle/load correlation of the trusted measurement.
       const measurementCheck = validateTrustedMeasurement(measurement, {

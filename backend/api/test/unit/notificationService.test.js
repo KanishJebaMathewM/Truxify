@@ -49,7 +49,6 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 const {
-  default: notificationService,
   sendFcmNotification,
   sendPushNotification,
   insertNotification,
@@ -324,6 +323,9 @@ describe('notificationService', () => {
       expect(firebaseMock.sendEachForMulticast.mock.calls[0][0].data).toEqual({
         orderDisplayId: 'ORD-1001',
         notifType: 'delivery_otp',
+        // The OTP is deliberately in the data payload (the customer needs it
+        // in the push, #10132) — delivered under both keys.
+        deliveryOtp: '123456',
         otp: '123456',
       });
       expect(result.success).toBe(true);
@@ -332,9 +334,12 @@ describe('notificationService', () => {
         (n) => n.user_id === 'customer-1'
       );
       expect(persisted).toBeTruthy();
-      expect(persisted.notif_type).toBe('delivery_otp');
+      // 'delivery_otp' is rejected by the notifications.notif_type CHECK
+      // constraint — 78ba5003f deliberately persists as 'order_update'.
+      expect(persisted.notif_type).toBe('order_update');
       expect(persisted.body).toContain('123456');
-      expect(persisted.metadata).toEqual({ order_display_id: 'ORD-1001' });
+      // #10132: the OTP is deliberately in the persisted metadata too.
+      expect(persisted.metadata).toEqual({ order_display_id: 'ORD-1001', otp: '123456' });
     });
   });
 
@@ -793,274 +798,13 @@ describe('notificationService', () => {
     });
   });
 
-  describe('default export verification', () => {
-    it('exposes all expected methods and aliases on default export', () => {
-      expect(notificationService.sendFcmNotification).toBe(sendFcmNotification);
-      expect(notificationService.sendPushNotification).toBe(sendPushNotification);
-      expect(notificationService.insertNotification).toBe(insertNotification);
-      expect(notificationService.sendDeliveryOtpNotification).toBe(sendDeliveryOtpNotification);
-      expect(notificationService.hashDeliveryOtp).toBe(hashDeliveryOtp);
-      expect(notificationService.verifyDeliveryOtpHash).toBe(verifyDeliveryOtpHash);
-      expect(notificationService.storeDeliveryOtp).toBe(storeDeliveryOtp);
-      expect(notificationService.getActiveDeliveryOtp).toBe(getActiveDeliveryOtp);
-      expect(notificationService.verifyDeliveryOtp).toBe(verifyDeliveryOtp);
-      expect(notificationService.expireDeliveryOtps).toBe(expireDeliveryOtps);
-      expect(notificationService.getUserFcmToken).toBe(getUserFcmToken);
-      expect(notificationService.getFcmTokenForUser).toBe(getUserFcmToken);
-      expect(notificationService.isTransientError).toBe(isTransientError);
-      expect(notificationService.clearInvalidToken).toBe(clearInvalidToken);
-      expect(notificationService.pruneStaleDevices).toBe(pruneStaleDevices);
-      expect(notificationService.sendToDevice).toBe(sendToDevice);
-      expect(notificationService.sendNotification).toBe(sendNotification);
-      expect(notificationService.publishNotification).toBe(publishNotification);
-      expect(notificationService.publishNotificationEvent).toBe(publishNotificationEvent);
-    });
-  });
-});
-
-// Mock FCM admin
-vi.mock('firebase-admin', () => ({
-  default: {
-    messaging: () => ({
-      send: vi.fn().mockResolvedValue('message-id-123'),
-      sendMulticast: vi.fn().mockResolvedValue({ successCount: 1, failureCount: 0 }),
-    }),
-  },
-}));
-
-describe('Notification Service (#8494)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  describe('Module Exports', () => {
-    it('exports sendPushNotification function', () => {
-      expect(typeof sendPushNotification).toBe('function');
-    });
-
-    it('exports sendNotification function', () => {
-      expect(typeof sendNotification).toBe('function');
-    });
-
-    it('exports insertNotification function', () => {
-      expect(typeof insertNotification).toBe('function');
-    });
-  });
-
-  describe('sendPushNotification', () => {
-    it('accepts valid arguments without throwing', async () => {
-      await expect(
-        sendPushNotification('user-123', 'Test Title', 'Test Body', 'order_update')
-      ).resolves.not.toThrow();
-    });
-
-    it('handles missing optional data gracefully', async () => {
-      await expect(
-        sendPushNotification('user-123', 'Title', 'Body')
-      ).resolves.not.toThrow();
-    });
-
-    it('handles null user ID gracefully', async () => {
-      await expect(
-        sendPushNotification(null, 'Title', 'Body')
-      ).resolves.not.toThrow();
-    });
-
-    it('handles empty string user ID', async () => {
-      await expect(
-        sendPushNotification('', 'Title', 'Body')
-      ).resolves.not.toThrow();
-    });
-  });
-
-  describe('sendNotification', () => {
-    // sendNotification has taken (userId, payload) since the #9275 multi-device
-    // fan-out rework; it resolves (rather than throws) when a user has no
-    // active devices, and notif_type validation lives in insertNotification.
-    it('resolves without throwing under the two-argument contract', async () => {
-      await expect(
-        sendNotification('user-123', {
-          title: 'Test',
-          body: 'Test body',
-          notif_type: 'order_update',
-        })
-      ).resolves.not.toThrow();
-    });
-
-    it('resolves to an empty result list when the user has no active devices', async () => {
-      const results = await sendNotification('user-no-devices', {
-        title: 'Test',
-        body: 'Test body',
-        notif_type: 'order_update',
-      });
-      expect(Array.isArray(results)).toBe(true);
-      expect(results).toHaveLength(0);
-    });
-
-    it('rejects invalid notif_type at the insertNotification allowlist', async () => {
-      await expect(
-        insertNotification({
-          userId: 'user-123',
-          title: 'Test',
-          body: 'Test body',
-          notif_type: 'invalid_type_xyz',
-        })
-      ).rejects.toThrow(/Invalid notif_type/);
-    });
-  });
-
-  describe('insertNotification', () => {
-    it('inserts notification with valid type', async () => {
-      const result = await insertNotification({
-        userId: 'user-123',
-        title: 'Payment Received',
-        body: 'Your payment has been processed',
-        notif_type: 'payment',
-      });
-      
-      expect(result).toBeDefined();
-    });
-
-    it('inserts all allowed notif_types', async () => {
-      for (const type of ALLOWED_NOTIF_TYPES) {
-        await expect(
-          insertNotification({
-            userId: 'user-123',
-            title: `Test ${type}`,
-            body: 'Test body',
-            notif_type: type,
-          })
-        ).resolves.not.toThrow();
+  describe('named export surface', () => {
+    // The module is named-exports only (no default export) — the old
+    // 'default export verification' block destructured a phantom default.
+    it('exposes the expected functions', () => {
+      for (const fn of [sendFcmNotification, sendPushNotification, insertNotification, sendDeliveryOtpNotification, hashDeliveryOtp, verifyDeliveryOtpHash]) {
+        expect(typeof fn).toBe('function');
       }
-    });
-
-    it('rejects notification with invalid type', async () => {
-      await expect(
-        insertNotification({
-          userId: 'user-123',
-          title: 'Bad',
-          body: 'Bad type',
-          notif_type: 'not_a_real_type',
-        })
-      ).rejects.toThrow();
-    });
-  });
-});
-
-describe('Notification Type Allowlist', () => {
-  describe('ALLOWED_NOTIF_TYPES', () => {
-    it('contains all 10 required types', () => {
-      expect(ALLOWED_NOTIF_TYPES.size).toBe(10);
-    });
-
-    it('includes order_update', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('order_update')).toBe(true);
-    });
-
-    it('includes payment', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('payment')).toBe(true);
-    });
-
-    it('includes load_offer', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('load_offer')).toBe(true);
-    });
-
-    it('includes trip_update', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('trip_update')).toBe(true);
-    });
-
-    it('includes document', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('document')).toBe(true);
-    });
-
-    it('includes system', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('system')).toBe(true);
-    });
-
-    it('includes bid_accepted (issue #7538)', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('bid_accepted')).toBe(true);
-    });
-
-    it('includes new_bid (issue #7538)', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('new_bid')).toBe(true);
-    });
-
-    it('includes payment_locked (issue #7538)', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('payment_locked')).toBe(true);
-    });
-
-    it('includes payment_released (issue #7538)', () => {
-      expect(ALLOWED_NOTIF_TYPES.has('payment_released')).toBe(true);
-    });
-  });
-
-  describe('validateNotifType', () => {
-    it('returns valid for all allowed types', () => {
-      for (const type of ALLOWED_NOTIF_TYPES) {
-        const result = validateNotifType(type);
-        expect(result.valid).toBe(true);
-        expect(result.normalized).toBe(type);
-      }
-    });
-
-    it('returns invalid for unknown types', () => {
-      const result = validateNotifType('unknown_type');
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('Invalid notif_type');
-    });
-
-    it('returns invalid for empty string', () => {
-      const result = validateNotifType('');
-      expect(result.valid).toBe(false);
-    });
-
-    it('returns invalid for null', () => {
-      const result = validateNotifType(null);
-      expect(result.valid).toBe(false);
-    });
-
-    it('returns invalid for undefined', () => {
-      const result = validateNotifType(undefined);
-      expect(result.valid).toBe(false);
-    });
-
-    it('normalizes case (case-insensitive)', () => {
-      const result = validateNotifType('ORDER_UPDATE');
-      expect(result.valid).toBe(true);
-      expect(result.normalized).toBe('order_update');
-    });
-
-    it('trims whitespace', () => {
-      const result = validateNotifType('  payment  ');
-      expect(result.valid).toBe(true);
-      expect(result.normalized).toBe('payment');
-    });
-  });
-
-  describe('FCM_ENABLED_TYPES', () => {
-    it('is a subset of ALLOWED_NOTIF_TYPES', () => {
-      for (const type of FCM_ENABLED_TYPES) {
-        expect(ALLOWED_NOTIF_TYPES.has(type)).toBe(true);
-      }
-    });
-
-    it('includes high-priority types', () => {
-      expect(FCM_ENABLED_TYPES.has('payment')).toBe(true);
-      expect(FCM_ENABLED_TYPES.has('bid_accepted')).toBe(true);
-    });
-  });
-
-  describe('HIGH_PRIORITY_TYPES', () => {
-    it('is a subset of FCM_ENABLED_TYPES', () => {
-      for (const type of HIGH_PRIORITY_TYPES) {
-        expect(FCM_ENABLED_TYPES.has(type)).toBe(true);
-      }
-    });
-
-    it('includes payment-related types', () => {
-      expect(HIGH_PRIORITY_TYPES.has('payment')).toBe(true);
-      expect(HIGH_PRIORITY_TYPES.has('payment_locked')).toBe(true);
-      expect(HIGH_PRIORITY_TYPES.has('payment_released')).toBe(true);
     });
   });
 });

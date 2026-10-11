@@ -1,4 +1,5 @@
 const escrowService = require('../services/escrowService');
+const logger = require('../middleware/logger.js');
 
 const depositEscrow = async (req, res) => {
     try {
@@ -32,7 +33,7 @@ const depositEscrow = async (req, res) => {
         return res.status(403).json({ error: error.message });
     }
 
-    console.error('Escrow deposit controller error:', error.message);
+    logger.error('Escrow deposit controller error:', error.message);
     return res.status(500).json({
         error: 'Failed to process escrow deposit',
         details: error.message
@@ -64,7 +65,7 @@ const releaseEscrow = async (req, res) => {
             return res.status(403).json({ error: error.message });
         }
 
-        console.error('Escrow release controller error:', error.message);
+        logger.error('Escrow release controller error:', error.message);
         return res.status(500).json({
             error: 'Failed to release escrow funds',
             details: error.message

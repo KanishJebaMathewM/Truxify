@@ -91,7 +91,7 @@ export class Eip712Signer {
       return ethers.getAddress(recovered);
     } catch (err) {
       logger.error({ err }, '[Eip712Signer] Failed recovering EIP-712 signer');
-      throw new Error(`Invalid EIP-712 signature: ${err.message}`);
+      throw new Error(`Invalid EIP-712 signature: ${err.message}`, { cause: err });
     }
   }
 }

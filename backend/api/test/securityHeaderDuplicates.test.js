@@ -79,7 +79,10 @@ describe('securityHeaderDuplicates', () => {
     expect(warnMock).not.toHaveBeenCalled();
   });
 
-  it('does not warn in production', async () => {
+  // 9d893fa77 deliberately keeps duplicate-header monitoring active in
+  // production; fbaf14388 added warn-once-per-header. The pinned contract is
+  // now: one warning per duplicated header, production included.
+  it('warns once per duplicated header in production', async () => {
     process.env.NODE_ENV = 'production';
 
     const app = createApp((req, res) => {
@@ -90,6 +93,6 @@ describe('securityHeaderDuplicates', () => {
 
     await request(app).get('/test');
 
-    expect(warnMock).not.toHaveBeenCalled();
+    expect(warnMock).toHaveBeenCalledTimes(1);
   });
 });

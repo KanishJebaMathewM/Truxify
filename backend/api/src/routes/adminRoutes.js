@@ -133,6 +133,31 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
  *     description: Returns a list of driver withdrawals that are in DLQ, terminal settlement_failed status, or stuck pending retries.
  *     security:
  *       - BearerAuth: []
+ *     parameters:
+ *       - name: limit
+ *         in: query
+ *         required: false
+ *         description: Page size (capped at 100).
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *           maximum: 100
+ *       - name: offset
+ *         in: query
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *           minimum: 0
+ *     responses:
+ *       200:
+ *         description: Page of stuck withdrawals with total, limit and offset
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Forbidden - admin:manage-finances policy required
+ *       500:
+ *         description: Failed to fetch stuck withdrawals
  */
 router.get('/withdrawals/stuck', authenticate, userLimiter, requirePolicy('admin:manage-finances'), auditLog({ action: 'admin:view-stuck-withdrawals' }), async (req, res) => {
   try {
@@ -166,10 +191,27 @@ router.get('/withdrawals/stuck', authenticate, userLimiter, requirePolicy('admin
 
 /**
  * @openapi
- * /api/v1/admin/withdrawals/:id/retry:
+ * /api/v1/admin/withdrawals/{id}/retry:
  *   post:
  *     tags: [Admin]
  *     summary: Manually retry a stuck/DLQ withdrawal
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/AdminWithdrawalId'
+ *     requestBody:
+ *       $ref: '#/components/requestBodies/AdminWithdrawalNotes'
+ *     responses:
+ *       200:
+ *         description: Withdrawal retry scheduled
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Forbidden - admin:manage-finances policy required
+ *       409:
+ *         description: Withdrawal is not in a retryable state
+ *       500:
+ *         description: Retry could not be scheduled
  */
 router.post('/withdrawals/:id/retry', authenticate, userLimiter, requirePolicy('admin:manage-finances'), auditLog({ action: 'admin:retry-withdrawal' }), async (req, res) => {
   try {
@@ -200,10 +242,49 @@ router.post('/withdrawals/:id/retry', authenticate, userLimiter, requirePolicy('
 
 /**
  * @openapi
- * /api/v1/admin/withdrawals/:id/refund:
+ * /api/v1/admin/withdrawals/{id}/refund:
  *   post:
  *     tags: [Admin]
  *     summary: Force-refund reserved funds for a stuck withdrawal back to the driver
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/AdminWithdrawalId'
+ *     requestBody:
+ *       $ref: '#/components/requestBodies/AdminWithdrawalNotes'
+ *     responses:
+ *       200:
+ *         description: Reserved funds refunded to the driver wallet
+ *       400:
+ *         description: Withdrawal cannot be refunded in its current state
+ *       401:
+ *         description: Authentication required
+ *       403:
+ *         description: Forbidden - admin:manage-finances policy required
+ *       500:
+ *         description: Refund could not be applied
+ *
+ * components:
+ *   parameters:
+ *     AdminWithdrawalId:
+ *       name: id
+ *       in: path
+ *       required: true
+ *       description: wallet_transactions id of the withdrawal.
+ *       schema:
+ *         type: string
+ *         format: uuid
+ *   requestBodies:
+ *     AdminWithdrawalNotes:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               notes:
+ *                 type: string
+ *                 description: Optional admin note recorded with the resolution.
  */
 router.post('/withdrawals/:id/refund', authenticate, userLimiter, requirePolicy('admin:manage-finances'), auditLog({ action: 'admin:refund-withdrawal' }), async (req, res) => {
   try {

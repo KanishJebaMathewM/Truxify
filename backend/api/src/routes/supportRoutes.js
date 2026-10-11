@@ -107,7 +107,6 @@ import { formatPaginationMeta } from '../utils/pagination.js';
 const router = express.Router();
 router.use(userLimiter);
 
-const adminDb = supabaseAdmin || supabase;
 // support_tickets / support_ticket_comments are authenticated/service-role
 // only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
 // anon-key client resolves every read to empty and every write to a denial.

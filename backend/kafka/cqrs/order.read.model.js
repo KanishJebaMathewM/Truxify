@@ -298,10 +298,6 @@ class OrderReadModel {
       }
       if (filters.driverId) {
         query = query.eq('payload->>driver_id', filters.driverId);
-        query = query.eq('payload->customer_id', filters.customerId);
-      }
-      if (filters.driverId) {
-        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);
@@ -345,24 +341,6 @@ class OrderReadModel {
    */
   async getOrderStats() {
     const statuses = ORDER_STATUSES;
-   * Per-status order counts from the canonical `status` column of the single
-   * authoritative read model (the same column getOrderList filters on).
-   */
-    async getOrderStats() {
-    const statuses = [
-      'pending',
-      'created',
-      'truck_assigned',
-      'assigned',
-      'en_route_pickup',
-      'arrived_pickup',
-      'picked_up',
-      'in_transit',
-      'arriving',
-      'delivered',
-      'payment_released',
-      'cancelled',
-    ];
 
     const stats = {};
 

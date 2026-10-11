@@ -2,9 +2,7 @@ name: Event cache publication
 on:
   pull_request:
     paths:
-      - 'backend/eventsourcing/event-sourcing-core.js'
-      - 'backend/eventsourcing/errors.js'
-      - 'backend/eventsourcing/test/**'
+      - 'backend/eventsourcing/**'
       - '.github/workflows/event-cache-publication.yml'
   workflow_dispatch:
 permissions:
@@ -19,8 +17,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: '22'
-      - name: Check syntax and run dependency-free cache and replay tests
+      - name: Check syntax and run the dependency-free event-sourcing suites
         run: |
           node --check backend/eventsourcing/event-sourcing-core.js
-          node --check backend/eventsourcing/test/cache-publication.test.js
-          node --test backend/eventsourcing/test/cache-publication.test.js backend/eventsourcing/test/event-sourcing-core.test.js
+          node --check backend/eventsourcing/event-store.js
+          node --test backend/eventsourcing/test/*.test.js

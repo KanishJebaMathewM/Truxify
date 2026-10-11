@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: vi.fn() },
+  supabaseAdmin: { from: vi.fn() },
   mongoDb: {},
 }));
 
@@ -32,6 +33,7 @@ vi.mock('../../src/services/escrow.js', () => ({
   buildDepositTx: vi.fn(),
   recordDepositTx: vi.fn(),
   submitEscrowRefund: vi.fn(),
+  escrowRelease: vi.fn(),
   escrowRefund: vi.fn(),
 }));
 

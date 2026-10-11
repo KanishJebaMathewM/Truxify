@@ -21,7 +21,8 @@ vi.mock('../../src/services/order/orderTimelineService.js', () => ({ OrderTimeli
 vi.mock('../../src/services/order/orderLifecycleService.js', () => ({ OrderLifecycleService: class {} }));
 vi.mock('../../src/services/order/orderValidationService.js', () => ({ OrderValidationService: class {} }));
 vi.mock('../../src/services/escrow.js', () => ({
-  buildDepositTx: vi.fn(), recordDepositTx: vi.fn(), submitEscrowRefund: vi.fn()
+  buildDepositTx: vi.fn(), recordDepositTx: vi.fn(), submitEscrowRefund: vi.fn(),
+  escrowRelease: vi.fn(),
 }));
 vi.mock('../../src/services/ml.js', () => ({ predictDemand: vi.fn() }));
 vi.mock('../../src/services/osrm.js', () => ({ buildStraightLineGeometry: vi.fn(), getRouteGeometry: vi.fn() }));

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
@@ -95,7 +96,7 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
 
       // Phase 2: request is within limit — record it now.
       await redisClient.pipeline()
-        .zadd(key, now, `${now}-${Math.random()}`)
+        .zadd(key, now, `${now}-${crypto.randomBytes(8).toString('hex')}`)
         .pexpire(key, windowMs)
         .exec();
 

@@ -6,6 +6,8 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: {},
   firebaseAdmin: null,
   createUserClient: null,
+  redisClient: null,
+  mongoDb: null,
 }));
 
 afterEach(() => {

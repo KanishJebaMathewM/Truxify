@@ -8,6 +8,7 @@ import { generateTestToken } from '../helpers/auth.js';
 
 // Mock DB
 vi.mock('../../src/config/db.js', () => ({
+  redisClient: null,
   supabaseAdmin: {
     from: vi.fn().mockReturnThis(),
     insert: vi.fn(),
@@ -141,7 +142,9 @@ describe('Road Condition Routes Integration', () => {
         .query({ lat: 45.0 }); // Missing lng
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Latitude (lat) and longitude (lng) are required');
+      // Zod validateQuery emits field-prefixed messages now (deliberate;
+      // roadConditionRoutes.test.js pins the same style).
+      expect(res.body.error).toContain('Invalid lng');
     });
   });
 });

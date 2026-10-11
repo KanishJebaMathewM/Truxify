@@ -43,6 +43,7 @@ vi.mock('../../src/controllers/orderController.js', () => ({
   getActiveOrders: vi.fn(),
   getLoadOffers: vi.fn(),
   getOrderHistory: vi.fn(),
+  getOrderTimeline: vi.fn(),
   getOrderDetails: vi.fn(),
   verifyDeliveryController: vi.fn(),
   resendOtp: vi.fn(),

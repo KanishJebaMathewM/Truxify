@@ -123,6 +123,8 @@ describe('authenticate middleware - non bypass flow', () => {
         warn: mockLoggerWarn,
         error: vi.fn(),
         info: vi.fn(),
+        // The restored auth middleware logs ID-token fallthrough at debug.
+        debug: vi.fn(),
       },
     }));
 

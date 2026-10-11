@@ -16,10 +16,14 @@ vi.mock('../../../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+// The services import { ethers } (ethers v6 named-export shape) — the mock
+// must expose the classes under an `ethers` key, not at the top level.
 vi.mock('ethers', () => ({
-  JsonRpcProvider: class {},
-  Contract: class {},
-  Wallet: class {},
+  ethers: {
+    JsonRpcProvider: class {},
+    Contract: class {},
+    Wallet: class {},
+  },
 }));
 
 vi.mock('../../../../src/config/db.js', () => ({

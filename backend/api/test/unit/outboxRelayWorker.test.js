@@ -64,8 +64,12 @@ beforeEach(() => {
     worker.stopOutboxRelayWorker();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     worker.stopOutboxRelayWorker();
+    // Let any in-flight relay tick settle before the next test starts the
+    // worker — a still-running tick holds the worker's _running guard and the
+    // next test's first relay would be skipped.
+    for (let i = 0; i < 25; i++) await Promise.resolve();
   });
 
   it("starts and stops the worker without throwing", () => {
@@ -115,7 +119,8 @@ beforeEach(() => {
         created_at: "2026-08-11T00:00:00.000Z",
       },
     ]);
-    mockEventBus.publishAndReport.mockImplementation(() => {
+    // One-shot: a permanent throwing implementation leaks into later tests.
+    mockEventBus.publishAndReport.mockImplementationOnce(() => {
       throw new Error("bus down");
     });
 
@@ -147,7 +152,7 @@ beforeEach(() => {
     ]);
     // Simulate the case where the kafka adapter is not registered / no consumer
     // handled the event: adapterAttempted as 0 and no failures.
-    mockEventBus.publishAndReport.mockResolvedValue({
+    mockEventBus.publishAndReport.mockResolvedValueOnce({
       published: true,
       deduplicated: false,
       consumed: false,
@@ -182,7 +187,7 @@ beforeEach(() => {
         payload: {},
       },
     ]);
-    mockEventBus.publishAndReport.mockResolvedValue({
+    mockEventBus.publishAndReport.mockResolvedValueOnce({
       published: true,
       deduplicated: false,
       consumed: true,
@@ -217,7 +222,7 @@ beforeEach(() => {
         payload: {},
       },
     ]);
-    mockEventBus.publishAndReport.mockResolvedValue({
+    mockEventBus.publishAndReport.mockResolvedValueOnce({
       published: "true",
       deduplicated: false,
       consumed: true,
@@ -236,6 +241,7 @@ beforeEach(() => {
       "evt-5",
       expect.any(String),
       expect.stringContaining("unsuccessful"),
+      1,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -250,7 +256,7 @@ beforeEach(() => {
         payload: {},
       },
     ]);
-    mockEventBus.publishAndReport.mockResolvedValue({
+    mockEventBus.publishAndReport.mockResolvedValueOnce({
       published: false,
       deduplicated: false,
       consumed: false,
@@ -269,6 +275,7 @@ beforeEach(() => {
       "evt-6",
       expect.any(String),
       expect.stringContaining("unsuccessful"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -283,7 +290,7 @@ beforeEach(() => {
         payload: {},
       },
     ]);
-    mockEventBus.publishAndReport.mockResolvedValue({
+    mockEventBus.publishAndReport.mockResolvedValueOnce({
       published: false,
       deduplicated: true,
       consumed: false,
@@ -302,6 +309,7 @@ beforeEach(() => {
       "evt-7",
       expect.any(String),
       expect.stringContaining("deduplicated"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -320,10 +328,11 @@ beforeEach(() => {
 
     worker.startOutboxRelayWorker();
     await vi.waitFor(() => {
-      expect(mockEventBus.publishAndReport).toHaveBeenCalled();
+      expect(mockOutboxService.markPublished).toHaveBeenCalled();
     });
 
-    expect(mockOutboxService.markPublished).toHaveBeenCalledWith("evt-8");
+    // Claim-era signature: markPublished(eventId, claimAttempt).
+    expect(mockOutboxService.markPublished.mock.calls[0][0]).toBe("evt-8");
     worker.stopOutboxRelayWorker();
   });
 
@@ -349,10 +358,10 @@ beforeEach(() => {
       "evt-9",
       expect.any(String),
       expect.stringContaining("No outcome"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });
-});
 
 
 describe("outbox relay polling generations", () => {

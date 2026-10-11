@@ -137,7 +137,7 @@ router.get('/driver/statement', authenticate, requirePolicy('driver:read'), asyn
     while (true) {
       let pageQuery = supabase
         .from('orders')
-        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, bid_amount, total_amount, base_freight, toll_estimate, platform_fee, created_at')
         .eq('driver_id', userId)
         .in('status', ['delivered', 'payment_released'])
         .order('pickup_date', { ascending: true })
@@ -183,11 +183,50 @@ router.get('/driver/statement', authenticate, requirePolicy('driver:read'), asyn
       'Driver statement generated successfully.'
     );
 
+    // Per-row negotiated payout (the documented total_net_earnings contract):
+    // enrichment was lost when the pagination rewrite returned raw trips.
+    const enrichedTrips = trips.map((trip) => ({
+      ...trip,
+      net_earnings: getStatementPayout(trip),
+    }));
+    // sort_by=net_earnings orders by the negotiated payout, highest first
+    // (d5eebfcb0d's statement sorting — lost with the enrichment).
+    if (req.query.sort_by === 'net_earnings') {
+      enrichedTrips.sort((a, b) => b.net_earnings - a.net_earnings);
+    }
+    const totalNetEarnings = enrichedTrips.reduce((acc, t) => acc + t.net_earnings, 0);
+
+    // CSV export (83820959b6 — lost with the enrichment): same sanitizer and
+    // column set as the earnings report so both exports agree.
+    if (req.query.format === 'csv') {
+      const sanitizeCsvValue = (val) => {
+        if (val === null || val === undefined) return '""';
+        let str = String(val).replace(/[\r\n]+/g, ' ');
+        if (/^[=+\-@\t\r]/.test(str)) {
+          str = `'` + str;
+        }
+        return `"${str.replace(/"/g, '""')}"`;
+      };
+      const headers = ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'];
+      let csvString = headers.map((val) => sanitizeCsvValue(val)).join(',') + '\n';
+      for (const t of enrichedTrips) {
+        const row = [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status];
+        csvString += row.map((val) => sanitizeCsvValue(val)).join(',') + '\n';
+      }
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="driver_statement.csv"');
+      return res.send(csvString.trimEnd());
+    }
+
     return res.status(200).json({
       success: true,
-      count: trips.length,
+      count: enrichedTrips.length,
       totals,
-      trips,
+      summary: {
+        total_net_earnings: totalNetEarnings,
+        total_platform_fees: totals.total_platform_fee,
+      },
+      trips: enrichedTrips,
     });
   } catch (err) {
     logger.error(

@@ -2165,5 +2165,3 @@ router.get('/:driverId/trips', validateDriverId, authenticate, driverController.
 router.put('/:driverId', validateDriverId, authenticate, driverController.updateDriver);
 
 export default router;
-
-// Resolves #2051: Composite indexes added for 2dsphere queries

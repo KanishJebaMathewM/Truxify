@@ -57,7 +57,7 @@ describe('payment lock order projection', () => {
       id text PRIMARY KEY, order_display_id text, customer_id text, driver_id text,
       total_amount bigint, escrow_status text, escrow_booking_id text,
       escrow_driver_wallet text, escrow_amount_wei numeric, pending_bid_acceptance jsonb
-    ); INSERT INTO orders VALUES ('order', 'TX-1', 'customer', 'driver', 10000,
+    ); INSERT INTO orders VALUES ('order', 'OD-1', 'customer', 'driver', 10000,
       'funded', 'booking', NULL, 100, NULL);`);
   });
   afterAll(async () => { await state.db?.close(); });
@@ -66,7 +66,9 @@ describe('payment lock order projection', () => {
     await state.db.exec("UPDATE orders SET escrow_status = 'funded'");
   });
 
-  async function request(customerId = 'customer', orderId = 'order') {
+  // findOrderByIdOrDisplayId resolves non-UUID params against
+  // order_display_id only — request by the seeded display id.
+  async function request(customerId = 'customer', orderId = 'OD-1') {
     const res = { status: vi.fn(), json: vi.fn() };
     res.status.mockReturnValue(res);
     await handler({ body: { order_id: orderId, tx_hash: 'tx' }, user: { id: customerId } }, res);
@@ -79,7 +81,7 @@ describe('payment lock order projection', () => {
     const res = await request();
     expect(res.status).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({ message: 'Payment already locked in escrow.',
-      escrow_status: 'funded', order_display_id: 'TX-1' });
+      escrow_status: 'funded', order_display_id: 'OD-1' });
   });
   it('still denies another customer access to the order', async () => {
     expect((await request('other')).status).toHaveBeenCalledWith(403);

@@ -476,9 +476,10 @@ const JWT_SECRET = getJwtSecret();
  *   post:
  *     tags: [Authentication]
  *     summary: Exchange Firebase/Supabase ID Token for Backend JWT
- *   description: Verifies a Firebase ID token and returns a signed backend JWT token.
- *     Identity and role are derived exclusively from the verified token and the
- *     stored profile; caller-supplied identity or role fields are ignored.
+ *     description: >-
+ *       Verifies a Firebase ID token and returns a signed backend JWT token.
+ *       Identity and role are derived exclusively from the verified token and
+ *       the stored profile; caller-supplied identity or role fields are ignored.
  *     responses:
  *       200:
  *         description: JWT exchanged successfully

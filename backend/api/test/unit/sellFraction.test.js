@@ -58,6 +58,8 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }))
 
 process.env.PRIVATE_KEY = '0x0000000000000000000000000000000000000000000000000000000000000001'
+// The service disables itself unless all three are set (deliberate config hardening).
+process.env.POLYGON_RPC_URL = 'http://localhost:8545'
 process.env.ASSET_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000002'
 
 const { default: tokenService } = await import('../../../tokenization/token.service.js')
@@ -74,23 +76,15 @@ beforeEach(() => {
 })
 
 describe('TokenizationService.sellFraction', () => {
-  it('falls back to the server wallet when no signer is provided', async () => {
-    const result = await tokenService.sellFraction(7, 2, signer.address)
-
-    expect(mocks.contractArgs[2]).toBe(mocks.wallet)
-    expect(mocks.contract.sellFraction).toHaveBeenCalledWith(
-      7,
-      2000000000000000000n,
-      { gasLimit: 150000 },
+  it('requires a verified user signer — the server-wallet fallback was removed', async () => {
+    // The 8a1021fe04 fallback (signer || this.wallet) let the platform's
+    // wallet sell users' fractions — deliberately reverted; missing signer
+    // now fails closed.
+    await expect(tokenService.sellFraction(7, 2, signer.address)).rejects.toThrow(
+      'A verified user signer is required to sell fractions.',
     )
-    expect(tokenService.storeTransaction).toHaveBeenCalledWith({
-      assetId: 7,
-      userAddress: signer.address,
-      amount: 2,
-      type: 'sell',
-      txHash: receipt.hash,
-    })
-    expect(result.success).toBe(true)
+    expect(mocks.contract.sellFraction).not.toHaveBeenCalled()
+    expect(tokenService.storeTransaction).not.toHaveBeenCalled()
   })
 
   it('submits the sell transaction with the caller signer and gas limit', async () => {

@@ -35,12 +35,21 @@ describe('Tokenization service chain configuration', () => {
     await expect(import('../../../tokenization/token.service.js')).resolves.toBeDefined();
   });
 
-  it('reports the missing configuration only when the chain is actually used', async () => {
+  it('returns null clients while unconfigured, and reports only when the chain is actually used', async () => {
     const service = await freshService();
 
-    expect(() => service.wallet).toThrow('Tokenization chain access is not configured: set PRIVATE_KEY');
+    // Fail-soft redesign: unconfigured service yields null clients instead of
+    // throwing at access time.
+    expect(service.wallet).toBeNull();
+    expect(service.token).toBeNull();
+
+    // The defensive use-time guard: construct configured, then lose the key.
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
     process.env.PRIVATE_KEY = ethers.Wallet.createRandom().privateKey;
-    expect(() => service.token).toThrow('set ASSET_TOKEN_ADDRESS');
+    process.env.ASSET_TOKEN_ADDRESS = ethers.Wallet.createRandom().address;
+    const configured = await freshService();
+    delete process.env.PRIVATE_KEY;
+    expect(() => configured.wallet).toThrow('Tokenization chain access is not configured: set PRIVATE_KEY');
   });
 
   it('builds the signer and contract on first use once configured, and reuses them', async () => {
@@ -57,6 +66,10 @@ describe('Tokenization service chain configuration', () => {
   });
 
   it('still lets tests inject a contract double', async () => {
+    // The getter consults _token only when the service is configured.
+    process.env.PRIVATE_KEY = ethers.Wallet.createRandom().privateKey;
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
+    process.env.ASSET_TOKEN_ADDRESS = ethers.Wallet.createRandom().address;
     const service = await freshService();
     const fake = { createAsset: vi.fn() };
     service.token = fake;

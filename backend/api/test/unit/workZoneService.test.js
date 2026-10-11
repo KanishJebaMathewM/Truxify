@@ -1,13 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 /**
  * Unit Tests for WorkZone Service
- * 
- * Tests delay prediction logic, fail-open error handling, 
+ *
+ * Tests delay prediction logic, fail-open error handling,
  * and bypass waypoint generation.
  */
 
-import { describe, it, expect } from 'vitest';
-import { predictWorkZoneDelays, generateBypassWaypoint } from '../../src/services/workZoneService.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import workZoneService, {
+  WorkZoneService,
+  predictWorkZoneDelays,
+  generateBypassWaypoint,
+  queryWorkZones,
+  getWorkZonesInBounds,
+  filterWorkZones,
+  filterWorkZonesByType,
+  generateWorkZoneAlert,
+  generateWorkZoneAlerts,
+  getActiveWorkZoneAlerts,
+  registerWorkZone,
+  unregisterWorkZone,
+  resetWorkZones,
+  clearWorkZoneCache,
+  normalizeBounds,
+  WORK_ZONE_TYPES,
+  WORK_ZONE_SEVERITY,
+  WORK_ZONE_STATUS,
+} from '../../src/services/workZoneService.js';
 
 describe('WorkZone Service Unit Tests', () => {
   describe('predictWorkZoneDelays', () => {
@@ -56,26 +74,6 @@ describe('WorkZone Service Unit Tests', () => {
     });
   });
 });
-import workZoneService, {
-  WorkZoneService,
-  predictWorkZoneDelays,
-  generateBypassWaypoint,
-  queryWorkZones,
-  getWorkZonesInBounds,
-  filterWorkZones,
-  filterWorkZonesByType,
-  generateWorkZoneAlert,
-  generateWorkZoneAlerts,
-  getActiveWorkZoneAlerts,
-  registerWorkZone,
-  unregisterWorkZone,
-  resetWorkZones,
-  clearWorkZoneCache,
-  normalizeBounds,
-  WORK_ZONE_TYPES,
-  WORK_ZONE_SEVERITY,
-  WORK_ZONE_STATUS,
-} from '../../src/services/workZoneService.js';
 import logger from '../../src/middleware/logger.js';
 import { redisClient } from '../../src/config/db.js';
 

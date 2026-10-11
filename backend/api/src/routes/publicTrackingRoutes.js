@@ -20,10 +20,6 @@ const trackingTokenService = new TrackingTokenService({
   logger,
 });
 
-router.get('/tracking/:token', async (req, res) => {
-  try {
-    const { token } = req.params;
-    const result = await trackingTokenService.validateAndGetPublicTrackingData(token);
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/public/tracking/:token
 // Public — no authentication required. Returns safe order subset.
@@ -97,8 +93,10 @@ router.get(
           }
         : null;
 
-    if (!result.valid) {
-      return res.status(404).json({ error: 'Tracking link not found or invalid', reason: result.reason });
+      return res.json({ order: publicOrder, timeline: publicTimeline, driverLocation: publicDriverLocation });
+    } catch (error) {
+      logger.error({ err: error }, 'Error processing public tracking request');
+      return res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
@@ -143,7 +141,6 @@ router.get(
       const dropLat = parseFiniteCoordinate(order.drop_lat);
       const dropLng = parseFiniteCoordinate(order.drop_lng);
 
-    return res.json(result.data);
   } catch (error) {
     logger.error({ err: error }, 'Error processing public tracking request');
     return res.status(500).json({ error: 'Internal server error' });

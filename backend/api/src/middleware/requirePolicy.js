@@ -16,6 +16,7 @@
  */
 
 import { policy, PolicyError } from '../security/policyEngine.js';
+import logger from './logger.js';
 
 /**
  * Maps a thrown authorization error to the correct HTTP response.
@@ -52,7 +53,7 @@ export function requirePolicy(action, getResource) {
 
     if (policy.isOwnershipOnlyPolicy(action) && !getResource) {
       const message = `Misconfigured policy '${action}': ownership-only policies require a getResource resolver.`;
-      console.error(`[requirePolicy] ${message}`);
+      logger.error(`[requirePolicy] ${message}`);
       return res.status(500).json({ error: message });
     }
 

@@ -57,6 +57,20 @@ vi.mock('../../src/config/db.js', () => {
             }),
           };
         }
+        if (table === 'orders') {
+          // canViewTruckNumber: from → select → eq → or → limit → maybeSingle.
+          return {
+            select: () => ({
+              eq: () => ({
+                or: () => ({
+                  limit: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
         return {};
       },
   };
@@ -67,12 +81,15 @@ vi.mock('../../src/config/db.js', () => {
     supabase,
     mongoDb: {
       collection: () => ({
+        // The route chains .find(...).limit(200).toArray().
         find: () => ({
-          toArray: () => Promise.resolve([
-            { driver_id: 'drv-1' },
-            { driver_id: 'drv-2' },
-            { driver_id: 'drv-3' },
-          ]),
+          limit: () => ({
+            toArray: () => Promise.resolve([
+              { driver_id: 'drv-1' },
+              { driver_id: 'drv-2' },
+              { driver_id: 'drv-3' },
+            ]),
+          }),
         }),
       }),
     },
@@ -98,7 +115,9 @@ vi.mock('../../src/config/db.js', () => {
       },
       status: 'ready',
     },
-    supabaseAdmin: null,
+    // The search handler queries driver_details/trucks/profiles via
+    // supabaseAdmin — share the same mock client.
+    supabaseAdmin: supabase,
     firebaseAdmin: null,
   };
 });
@@ -126,6 +145,8 @@ describe('Find Trucks Search Filter by Truck Type & Cargo Category', () => {
         weight_tonnes: 5,
       });
 
+    if (res.status !== 200) { console.log('PROBE-TSF:', res.text.match(/Error: ([^<]+)/)?.[1], res.text.match(/at [^<]+/)?.[0]); }
+    if (res.status !== 200) { console.log('PROBE-TSF-FULL:', JSON.stringify(res.body), res.text.slice(0, 500)); }
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBe(3);

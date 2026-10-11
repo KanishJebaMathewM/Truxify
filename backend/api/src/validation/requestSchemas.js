@@ -49,16 +49,14 @@ export const createOrderSchema = z.object({
   pickup_date: isoDateStringSchema.refine(val => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
     const parts = val.split('T')[0].split('-');
     if (parts.length === 3) {
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
-      // The date part of an ISO timestamp is a UTC calendar day, so judge it
-      // against the UTC day boundary. Reading it as a local day rejects
-      // same-day bookings whenever the UTC date still shows yesterday.
-      return Date.UTC(year, month, day) >= todayUtc;
+      // Compare as LOCAL calendar days: the UTC-hybrid boundary accepted
+      // yesterday's date whenever local time runs ahead of UTC (IST evenings).
+      return new Date(year, month, day).getTime() >= today.getTime();
     }
     return new Date(val) >= today;
   }, {

@@ -24,8 +24,7 @@ const mockProfiles = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const supabase = {
       from: (table) => {
         if (table === 'driver_details') {
           return {
@@ -60,7 +59,12 @@ vi.mock('../../src/config/db.js', () => {
         }
         return {};
       },
-    },
+  };
+
+  return {
+    // truckRoutes imports createUserClient — return the shared mock client.
+    createUserClient: () => supabase,
+    supabase,
     mongoDb: {
       collection: () => ({
         find: () => ({

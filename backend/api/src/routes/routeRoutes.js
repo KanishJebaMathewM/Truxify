@@ -7,7 +7,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { requirePolicy } from '../middleware/policy.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import logger from '../middleware/logger.js';
 import { getRoute } from '../services/osrm.js';
 
@@ -49,6 +49,8 @@ router.post('/plan', authenticate, requirePolicy('route:write'), async (req, res
         success: false,
         error: 'Both origin and destination are required for route planning.',
       });
+    }
+
     const isBlank = (str) =>
       str === undefined ||
       str === null ||

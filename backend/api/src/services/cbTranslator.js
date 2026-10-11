@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * Supported spoken languages for multi-lingual dispatch.
  */
@@ -56,7 +58,7 @@ export function translateVoiceTransmission(transmissionParams) {
         translatedText = `[Translated to ${SUPPORTED_LANGUAGES[tgtLangKey] || tgtLangKey}]: ${transcriptText}`;
     }
 
-    const messageId = `cb-msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const messageId = `cb-msg-${Date.now()}-${crypto.randomInt(0, 10 ** 9)}`;
 
     return {
         messageId,

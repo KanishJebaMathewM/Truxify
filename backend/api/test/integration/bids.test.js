@@ -2,10 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
-const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
-const { default: RedisMock } = await vi.importActual('../mocks/redisMock.js');
-const m = createSupabaseMock();
-const redis = new RedisMock();
+// vi.mock factories hoist ABOVE top-level awaits — the mock objects must be
+// built inside vi.hoisted so they exist when the factories run.
+const { m, redis } = await vi.hoisted(async () => {
+  const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+  const { default: RedisMock } = await vi.importActual('../mocks/redisMock.js');
+  return { m: createSupabaseMock(), redis: new RedisMock() };
+});
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,

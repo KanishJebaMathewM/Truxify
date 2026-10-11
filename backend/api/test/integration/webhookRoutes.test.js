@@ -44,6 +44,11 @@ describe('Webhook Routes', () => {
 
   describe('POST /api/webhooks/escrow (no WEBHOOK_SECRET)', () => {
     const app = buildApp(webhookRoutes);
+    // test/setup.js pins WEBHOOK_SECRET for the harness — this describe must
+    // actually unset it to exercise the fail-closed path.
+    let savedSecret;
+    beforeEach(() => { savedSecret = process.env.WEBHOOK_SECRET; delete process.env.WEBHOOK_SECRET; });
+    afterEach(() => { if (savedSecret !== undefined) process.env.WEBHOOK_SECRET = savedSecret; });
 
     it('rejects requests when WEBHOOK_SECRET is unset', async () => {
       const enqueueSpy = vi.spyOn(dlqService, 'enqueueFailure').mockResolvedValue(true);

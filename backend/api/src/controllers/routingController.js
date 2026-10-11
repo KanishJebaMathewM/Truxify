@@ -1,4 +1,5 @@
 import osrmService from '../services/osrmService.js';
+import logger from '../middleware/logger.js';
 
 /**
  * Calculates a point-to-point driving route with exponential backoff and Haversine straight-line resilience.
@@ -89,7 +90,7 @@ export const getRoute = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Routing controller route calculation error:', error.message);
+        logger.error('Routing controller route calculation error:', error.message);
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate route',
@@ -202,7 +203,7 @@ export const getDistanceMatrix = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Distance matrix controller execution error:', error.message);
+        logger.error('Distance matrix controller execution error:', error.message);
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate distance matrix',

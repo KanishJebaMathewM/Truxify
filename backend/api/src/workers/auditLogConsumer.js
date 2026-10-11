@@ -1,5 +1,6 @@
 const { createClient } = require('redis');
 const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
+const logger = require('../middleware/logger.js');
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const redisClient = createClient({ url: redisUrl });
@@ -18,7 +19,7 @@ const initConsumerGroup = async () => {
     await redisClient.xGroupCreate(STREAM_NAME, CONSUMER_GROUP, '0', { MKSTREAM: true });
   } catch (err) {
     if (!err.message.includes('BUSYGROUP')) {
-      console.error('Error creating consumer group:', err.message);
+      logger.error('Error creating consumer group:', err.message);
     }
   }
 };
@@ -50,16 +51,16 @@ const processBatch = async (events) => {
     await redisClient.xAck(STREAM_NAME, CONSUMER_GROUP, messageIds);
     await redisClient.xDel(STREAM_NAME, messageIds);
     
-    console.log(`Successfully processed and acknowledged ${events.length} audit events.`);
+    logger.info(`Successfully processed and acknowledged ${events.length} audit events.`);
   } catch (err) {
-    console.error('Failed to write audit batch to DB:', err.message);
+    logger.error('Failed to write audit batch to DB:', err.message);
   }
 };
 
 const startConsumer = async () => {
   await redisClient.connect();
   await initConsumerGroup();
-  console.log(`Audit Log Consumer ${CONSUMER_NAME} started...`);
+  logger.info(`Audit Log Consumer ${CONSUMER_NAME} started...`);
 
   while (true) {
     try {
@@ -75,14 +76,14 @@ const startConsumer = async () => {
         await processBatch(messages);
       }
     } catch (err) {
-      console.error('Consumer loop error:', err.message);
+      logger.error('Consumer loop error:', err.message);
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }
 };
 
 if (require.main === module) {
-  startConsumer().catch(console.error);
+  startConsumer().catch((err) => logger.error(err));
 }
 
 module.exports = { startConsumer, processBatch };

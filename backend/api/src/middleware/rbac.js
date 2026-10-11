@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { can } = require('../policies/roles');
+const logger = require('../middleware/logger.js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -57,7 +58,7 @@ const requireAuthorization = (resourceType, action, idParam = 'id') => {
             req.resource = resource;
             next();
         } catch (err) {
-            console.error('RBAC Middleware Error:', err.message);
+            logger.error('RBAC Middleware Error:', err.message);
             return res.status(500).json({ error: 'Internal server error during authorization' });
         }
     };

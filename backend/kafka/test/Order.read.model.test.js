@@ -374,7 +374,9 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(state.eqCalls).toEqual(
       expect.arrayContaining([
         [ORDER_READ_MODEL_TABLE, 'status', 'created'],
-        [ORDER_READ_MODEL_TABLE, 'payload->>status', 'created'],
+        // The canonical status column is the documented filter target ("the
+        // same column getOrderList filters on"); the payload->>status mirror
+        // eq was splice-duplicated legacy and is gone.
         [ORDER_READ_MODEL_TABLE, 'payload->>customer_id', 'c1'],
       ])
     );
@@ -406,5 +408,4 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(row.payload.customer_id).toBe('c1');
     expect(row.data).toBeUndefined();
   });
-});
 });

@@ -1,3 +1,4 @@
+import { ORDER_STATUSES } from '../../api/src/core/orders/read-model-schema.js';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 const { anonFrom } = vi.hoisted(() => {
@@ -53,7 +54,10 @@ describe('OrderReadModel service-role access (issue #9202)', () => {
     const stats = await model.getOrderStats();
 
     expect(stats.pending).toBe(1);
-    expect(serviceClient.from).toHaveBeenCalledTimes(10);
+    // One query per canonical status — derive the count from the shared
+    // constant rather than pinning a number that goes stale when a status is
+    // added (the suite pinned 10; ORDER_STATUSES currently has 15).
+    expect(serviceClient.from).toHaveBeenCalledTimes(ORDER_STATUSES.length);
     expect(serviceClient.from).toHaveBeenCalledWith('orders_read_model');
     expect(anonFrom).not.toHaveBeenCalled();
   });

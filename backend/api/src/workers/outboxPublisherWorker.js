@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import logger from '../middleware/logger.js';
 import { supabaseAdmin } from '../config/db.js';
 
@@ -11,7 +12,7 @@ export class OutboxPublisherWorker {
   constructor(options = {}) {
     this.pollIntervalMs = options.pollIntervalMs || 1000;
     this.batchSize = options.batchSize || 50;
-    this.workerId = options.workerId || `worker-${process.pid}-${Math.random().toString(36).substring(2, 7)}`;
+    this.workerId = options.workerId || `worker-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     this.supabase = options.supabase || supabaseAdmin;
 
     this.subscribers = new Map(); // eventType -> Array<Function>

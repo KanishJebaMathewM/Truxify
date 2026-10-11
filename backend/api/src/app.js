@@ -148,7 +148,7 @@ import logger from './middleware/logger.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
-import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
+import { requestCache } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler, sentryRequestHandler, captureException } from './middleware/sentry.js'
 import {
@@ -545,7 +545,7 @@ app.use('/api/', globalLimiter)
 // REQUEST-SCOPED CACHE — created per-request, destroyed after response.
 // Registers before all routes so every request handler benefits.
 // ============================================================================
-app.use('/api', requestCacheMiddleware)
+app.use('/api', requestCache())
 
 app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
 app.use('/api/trips', tripRoutes)

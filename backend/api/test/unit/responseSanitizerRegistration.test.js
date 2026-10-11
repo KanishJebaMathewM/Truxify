@@ -21,7 +21,7 @@ function application() {
     ['app.use(responseSanitizer)', responseSanitizer],
     ['app.use(headerSizeMonitor)', (req, res, next) => req.path === '/early-error' ? res.status(431).json(payload) : next()],
     ["app.use('/api', verifyJWT)", (req, res, next) => req.path === '/auth-error' ? res.status(401).json(payload) : next()],
-    ["app.use('/api', requestCacheMiddleware)", (req, res, next) => req.path === '/cached' ? res.json(payload) : next()],
+    ["app.use('/api', requestCache())", (req, res, next) => req.path === '/cached' ? res.json(payload) : next()],
     ["app.use('/api/driver', driverRoutes)", (req, res, next) => req.path === '/route' ? res.json(payload) : next()],
     ['app.use(notFound)', (_req, res) => res.status(404).json(payload)],
   ];

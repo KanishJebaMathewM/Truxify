@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { appendFile } from 'fs/promises';
@@ -82,7 +83,7 @@ async function logToRedisStream(eventData) {
       entityType: eventData.entityType || eventData.resourceType,
       entityId: eventData.entityId || eventData.resourceId,
       details: JSON.stringify(eventData.details || eventData.metadata || {}),
-      idempotencyKey: eventData.idempotencyKey || `${Date.now()}-${Math.random()}`,
+      idempotencyKey: eventData.idempotencyKey || `${Date.now()}-${crypto.randomBytes(8).toString('hex')}`,
     };
 
     await redisClient.xAdd(STREAM_NAME, '*', payload);

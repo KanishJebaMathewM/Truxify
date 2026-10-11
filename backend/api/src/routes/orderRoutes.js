@@ -195,6 +195,7 @@ import {
   getActiveOrders,
   getLoadOffers,
   getOrderHistory,
+  getOrderTimeline,
   getOrderDetails,
   verifyDeliveryController,
   resendOtp,
@@ -596,6 +597,10 @@ router.post(
 
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), getOrderHistory);
+
+// 6b. FETCH ORDER TIMELINE (CUSTOMER OR ASSIGNED DRIVER) — registration lost
+// in the orderRoutes restoration; controller and contract suite intact (3f05d622b).
+router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), getOrderTimeline);
 
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), getOrderDetails);

@@ -1,5 +1,6 @@
 const voiceAiService = require('../services/voiceAiService');
 const { createClient } = require('@supabase/supabase-js');
+const logger = require('../middleware/logger.js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -37,7 +38,7 @@ const handleVoiceQuery = async (req, res) => {
             audio_url: audioUrl,
         });
     } catch (err) {
-        console.error('Voice query error:', err.message);
+        logger.error('Voice query error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 };

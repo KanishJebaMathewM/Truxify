@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import logger from '../middleware/logger.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const supabaseUrl = process.env.SUPABASE_URL || 'https://mock.supabase.co';
@@ -48,7 +49,7 @@ export const connectRedis = async () => {
             redisClientInstance = createClient({ url: redisUrl });
             redisClientInstance.on('error', (err) => {
                 if (process.env.NODE_ENV !== 'test') {
-                    console.error('Redis Location Service Error', err);
+                    logger.error('Redis Location Service Error', err);
                 }
             });
         } catch {
@@ -170,7 +171,7 @@ export const ensureIndexes = async () => {
         }
     } catch (err) {
         if (process.env.NODE_ENV !== 'test') {
-            console.warn('Could not verify PostGIS indexes:', err.message);
+            logger.warn('Could not verify PostGIS indexes:', err.message);
         }
     }
 };

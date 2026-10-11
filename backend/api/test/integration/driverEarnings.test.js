@@ -42,8 +42,7 @@ const mockTrips = [
 ];
 
 vi.mock('../../src/config/db.js', () => {
-  return {
-    supabase: {
+  const clientMock = {
       from: (table) => {
         if (table === 'trips') {
           return {
@@ -62,7 +61,10 @@ vi.mock('../../src/config/db.js', () => {
           }),
         };
       },
-    },
+  };
+
+  return {
+    supabase: clientMock,
     mongoDb: null,
     redisClient: {
       get: () => Promise.resolve(null),
@@ -77,6 +79,9 @@ vi.mock('../../src/config/db.js', () => {
     },
     upstashRedisClient: null,
     supabaseAdmin: null,
+    // driverRoutes' earnings handler builds a user-scoped client per request
+    // via createUserClient(req.token) — return the shared mock client.
+    createUserClient: () => clientMock,
     firebaseAdmin: null,
   };
 });

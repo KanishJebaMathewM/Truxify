@@ -190,7 +190,10 @@ describe('blockchainMonitoringRoutes', () => {
     const ROUTES_PATH = path.resolve(__dirname, '../../src/routes/blockchainMonitoringRoutes.js');
     const src = fs.readFileSync(ROUTES_PATH, 'utf8');
 
-    expect(src).toMatch(/resolveSupabaseClient\(\s*req\s*\)\s*\.from\('blockchain_monitoring_events'\)/);
-    expect(src).toMatch(/resolveSupabaseClient\(\s*req\s*\)\s*\.from\('blockchain_escalations'\)/);
+    // The resolved client is assigned to a local with an explicit fallback
+    // chain, then queried — assert both the resolution and the table access.
+    expect(src).toMatch(/const db = resolveSupabaseClient\(\s*req\s*\)[^;]*;/);
+    expect(src).toMatch(/db\s*\n?\s*\.from\('blockchain_monitoring_events'\)/);
+    expect(src).toMatch(/db\s*\n?\s*\.from\('blockchain_escalations'\)/);
   });
 });

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const logger = require('../middleware/logger.js');
 
 class EvidenceLockerService {
     constructor() {
@@ -53,7 +54,7 @@ class EvidenceLockerService {
             };
             
         } catch (error) {
-            console.error(`[EvidenceLocker] Failed to store evidence for dispute ${disputeId}:`, error.message);
+            logger.error(`[EvidenceLocker] Failed to store evidence for dispute ${disputeId}:`, error.message);
             throw new Error('Failed to push evidence to IPFS/Arweave storage.');
         }
     }

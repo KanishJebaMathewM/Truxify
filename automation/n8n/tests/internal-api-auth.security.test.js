@@ -19,6 +19,7 @@
  */
 
 const assert = require("assert");
+const { describe, test } = require("node:test");
 const fs = require("fs");
 const path = require("path");
 

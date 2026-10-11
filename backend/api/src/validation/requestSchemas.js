@@ -49,13 +49,20 @@ export const createOrderSchema = z.object({
   pickup_date: isoDateStringSchema.refine(val => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const parts = val.split('T')[0].split('-');
+    if (val.includes('T')) {
+      // A full timestamp is an instant — compare it against local midnight
+      // directly. Splitting off the UTC date label breaks near local midnight
+      // (the UTC date lags local time in IST evenings).
+      return new Date(val).getTime() >= today.getTime();
+    }
+    const parts = val.split('-');
     if (parts.length === 3) {
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
-      // Compare as LOCAL calendar days: the UTC-hybrid boundary accepted
-      // yesterday's date whenever local time runs ahead of UTC (IST evenings).
+      // Date-only labels compare as LOCAL calendar days: the UTC-hybrid
+      // boundary accepted yesterday's date whenever local time runs ahead of
+      // UTC (IST evenings).
       return new Date(year, month, day).getTime() >= today.getTime();
     }
     return new Date(val) >= today;

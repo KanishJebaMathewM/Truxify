@@ -4,6 +4,7 @@ vi.mock('../../src/config/db.js', () => ({
   pgPool: null,
   supabase: null,
   supabaseAdmin: null,
+  redisClient: null,
 }));
 
 async function loadRedisHealth() {

@@ -31,7 +31,7 @@ vi.mock('../../src/middleware/rateLimiter.js', () => ({ userLimiter: noop }));
 vi.mock('../../src/middleware/validate.js', () => ({ validateBody: () => noop, validateQuery: () => noop, validateParams: () => noop }));
 vi.mock('../../src/middleware/auditLog.js', () => ({ auditLog: () => noop }));
 vi.mock('../../src/middleware/idempotency.js', () => ({ requireIdempotency: () => noop }));
-vi.mock('../../src/middleware/logger.js', () => ({ default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
+vi.mock('../../src/middleware/logger.js', () => ({ default: { error: (...a) => console.log('LOG-ERR:', a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' | ')), warn: vi.fn(), info: vi.fn() } }));
 vi.mock('express-rate-limit', () => ({ default: () => noop }));
 vi.mock('../../src/services/reputation.js', () => ({ getDriverReputation: vi.fn() }));
 vi.mock('../../src/services/ml.js', () => ({ predictDriverProfit: vi.fn() }));
@@ -57,8 +57,9 @@ describe('statement payout basis', () => {
     const handler = route.stack.at(-1).handle;
     const res = { json: vi.fn(), status: vi.fn(), send: vi.fn(), setHeader: vi.fn() };
     res.status.mockReturnValue(res);
-    await handler({ user: { id: 'driver' }, query }, res);
-    expect(res.status).not.toHaveBeenCalled();
+    await handler({ user: { id: 'driver' }, token: 'test-token', query }, res);
+    // Handlers may set 200 explicitly — only an error status is a failure.
+    for (const call of res.status.mock.calls) expect(call[0]).toBe(200);
     return res;
   }
   for (const [name, router, path] of endpoints) {

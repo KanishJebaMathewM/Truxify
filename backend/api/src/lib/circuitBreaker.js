@@ -143,7 +143,9 @@ export class CircuitBreaker {
   }
 
   onSuccess() {
-    this.successCount += 1;
+    // The HALF_OPEN reset path assigns successCount = 1; the else branch
+    // increments. Incrementing before the branch double-counted CLOSED-state
+    // successes.
     if (this.state === CircuitState.HALF_OPEN) {
       this.reset();
       this.successCount = 1;

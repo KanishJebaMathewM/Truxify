@@ -383,6 +383,22 @@ describe('OrderReadModel queries use ORDER_READ_MODEL_TABLE', () => {
     expect(list.map((r) => r.order_id)).toEqual(['order_a']);
   });
 
+  it('getAllOrdersReadModel filters by driverId (payload mirror)', async () => {
+    await seed('order_d1', 'in_transit', { customer_id: 'c1', driver_id: 'd9' });
+    await seed('order_d2', 'in_transit', { customer_id: 'c1', driver_id: 'd7' });
+
+    const list = await orderReadModel.getAllOrdersReadModel({
+      driverId: 'd9',
+      limit: 10,
+      offset: 0,
+    });
+
+    expect(state.eqCalls).toEqual(
+      expect.arrayContaining([[ORDER_READ_MODEL_TABLE, 'payload->>driver_id', 'd9']])
+    );
+    expect(list.map((r) => r.order_id)).toEqual(['order_d1']);
+  });
+
   it('getOrderStats counts by lowercase status on the canonical table', async () => {
     await seed('order_s1', 'created', {});
     await seed('order_s2', 'created', {});

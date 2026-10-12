@@ -49,6 +49,46 @@ function errorMessage(err, fallback) {
 }
 
 /**
+ * @openapi
+ * /api/carbon-credits/mint:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Calculate carbon savings from telematics and mint cross-chain carbon tokens
+ *     description: Restricted to carriers, drivers, fleet owners, and admins.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [truck_id, trip_id, fuel_saved_liters]
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *               trip_id:
+ *                 type: string
+ *               distance_km:
+ *                 type: number
+ *               fuel_saved_liters:
+ *                 type: number
+ *               load_weight_kg:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Carbon credits calculated and minted successfully
+ *       400:
+ *         description: Missing or invalid parameters
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       403:
+ *         description: Caller role may not mint
+ *       500:
+ *         description: Minting failed
+ */
+
+/**
  * POST /api/carbon-credits/mint
  * Calculates carbon savings from telematics & mints cross-chain carbon tokens.
  * Restricted to carriers, drivers, fleet owners, and admins.

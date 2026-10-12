@@ -6,10 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
-import 'package:truxify/l10n/app_localizations.dart';
 import 'app.dart';
-import 'constants/firebase_config.dart';
-import 'constants/supabase_config.dart';
 import 'providers/language_provider.dart';
 
 void main() async {
@@ -77,4 +74,4 @@ void main() async {
       mechanism: 'runZonedGuarded',
     );
   });
-}
+}

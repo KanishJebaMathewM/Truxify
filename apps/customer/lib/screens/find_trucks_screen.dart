@@ -13,7 +13,6 @@ import '../widgets/app_page_route.dart';
 import '../widgets/common_widgets.dart';
 import 'location_picker_screen.dart';
 import 'truck_results_screen.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
 import '../services/order_service.dart';
 
 class FindTrucksScreen extends StatefulWidget {

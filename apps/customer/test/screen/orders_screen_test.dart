@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/controllers/app_controller.dart';
 import 'package:truxify/l10n/app_localizations.dart';
-import 'package:truxify/models/app_models.dart';
 import 'package:truxify/screens/orders_screen.dart';
 import 'package:truxify/screens/order_detail_screen.dart';
 import 'package:truxify/screens/live_tracking_screen.dart';

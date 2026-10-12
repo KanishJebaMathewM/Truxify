@@ -7,7 +7,6 @@
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 
 import '../controllers/app_controller.dart';

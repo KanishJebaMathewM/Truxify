@@ -59,8 +59,6 @@ router.post(
     const { truckId, bolId } = req.body;
 
     try {
-        const { truckId, bolId } = req.body;
-
         if (!truckId || !bolId) {
             return res.status(400).json({ error: 'Missing required truck/load parameters' });
         }

@@ -922,7 +922,7 @@ class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
                         onPressed: () async {
                           setState(() => _isProcessing = true);
                           await Future.delayed(const Duration(milliseconds: 1500));
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           // Generate simulated 10-digit UPI reference ID
                           final random = math.Random();
                           final randomVal = 1000000000 + random.nextInt(900000000);

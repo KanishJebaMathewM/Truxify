@@ -46,6 +46,7 @@ class BiometricAuthService {
     }
 
     // Fallback for Desktop Web or when biometrics fail/are unavailable
+    if (!context.mounted) return false;
     return await _showPinFallbackDialog(context);
   }
 

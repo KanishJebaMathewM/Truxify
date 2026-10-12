@@ -1261,7 +1261,7 @@ describe('removeClientFromAllSubscriptions', () => {
     __testing.resetTrackingSubscriptions();
   });
 
-  it.skip('removes a disconnected client from all subscriptions', async () => {
+  it('removes a disconnected client from all subscriptions', async () => {
     const sentMessages = [];
     const ws = {
       user: { id: 'driver-1', role: 'driver' },
@@ -1464,7 +1464,7 @@ describe('flushTelemetryBuffer - direct', () => {
     __testing.clearTelemetryWriteBuffer();
   });
 
-  it.skip('does nothing when buffer is empty', async () => {
+  it('does nothing when buffer is empty', async () => {
     await __testing.flushTelemetryBuffer();
   });
 

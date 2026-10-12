@@ -51,13 +51,15 @@ describe('PriceRounding Comprehensive Enterprise Suite (Issue #14102)', () => {
       expect(toPaisa(-Infinity)).toBeNull();
     });
 
-    it.skip('applies banker\'s rounding / standard rounding correctly on fractional paisa', () => {
-      expect(toPaisa(10.555)).toBe(1056);
+    // toPaisa deliberately FLOORS (Math.floor) — 'Rounds down to nearest
+    // paisa' in its docblock. The previously skipped copies pinned rounding.
+    it('floors fractional paisa (the deliberate contract)', () => {
+      expect(toPaisa(10.555)).toBe(1055); // 1055.49… → 1055, not rounded up
       expect(toPaisa(10.554)).toBe(1055);
     });
 
-    it.skip('handles precision stress tests for floating-point boundaries', () => {
-      expect(toPaisa(0.005)).toBe(1);
+    it('floors floating-point boundaries', () => {
+      expect(toPaisa(0.005)).toBe(0); // 0.5 paisa floors to 0
       expect(toPaisa(123456.78)).toBe(12345678);
     });
   });

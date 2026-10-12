@@ -866,7 +866,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       const SizedBox(height: 6),
                       GestureDetector(
                         onTap: () async {
-                          final uri = Uri.parse(receiptLink.toString());
                           _showSnackBar('Receipt link: $receiptLink', TruxifyColors.accent);
                         },
                         child: Row(

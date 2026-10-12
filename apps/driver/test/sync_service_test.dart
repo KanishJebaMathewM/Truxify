@@ -149,7 +149,6 @@ class FakeSupabaseClient implements SupabaseClient {
 void main() {
   group('SyncService', () {
     late SyncService syncService;
-    late TripService tripService;
     late Directory tempDir;
 
     setUpAll(() async {
@@ -168,10 +167,6 @@ void main() {
     });
 
     setUp(() async {
-      tripService = TripService(
-        client: FakeSupabaseClient(),
-        apiClient: ApiClient(baseUrl: 'http://localhost:5000'),
-      );
       syncService = SyncService.instance;
     });
 

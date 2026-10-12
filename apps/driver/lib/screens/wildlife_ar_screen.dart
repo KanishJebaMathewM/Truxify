@@ -275,11 +275,6 @@ class RoadPerspectivePainter extends CustomPainter {
     path.lineTo(size.width * 0.9, size.height); // Bottom right
 
     // Center dash
-    final dashPaint = Paint()
-      ..color = Colors.green.withOpacity(0.5)
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-      
     path.moveTo(size.width * 0.5, size.height * 0.4);
     path.lineTo(size.width * 0.5, size.height);
 

@@ -93,7 +93,6 @@ class _BlindSpotArScreenState extends State<BlindSpotArScreen> {
 
   Widget _buildAROverheadView(BlindSpotSession s, bool isCritical) {
     bool hasRightHazard = s.detectedVehicles.any((v) => v.isHazard && v.locationZone.contains('Right'));
-    bool hasLeftHazard = s.detectedVehicles.any((v) => v.isHazard && v.locationZone.contains('Left'));
 
     return Container(
       decoration: BoxDecoration(

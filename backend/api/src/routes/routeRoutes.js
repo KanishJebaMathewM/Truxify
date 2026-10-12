@@ -1,31 +1,32 @@
 import express from 'express';
 import { getRouteEstimate, validateCoordinates } from '../services/osrm.js';
 import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
 // ============================================================================
-// GET /api/routes/estimate
+// POST /api/routes/plan
 // ============================================================================
-router.get('/estimate', authenticate, userLimiter, async (req, res) => {
+router.post('/plan', authenticate, userLimiter, requirePolicy('route:plan'), async (req, res, next) => {
   try {
-    const { pickup_lat, pickup_lng, drop_lat, drop_lng, routeId } = req.query;
+    const { origin, destination, routeId } = req.body;
 
     const isBlank = (str) => !str || String(str).trim() === '';
     if (routeId !== undefined && (typeof routeId !== 'string' || routeId.trim() === '')) {
       return res.status(400).json({ error: 'Invalid routeId provided.' });
     }
 
-    if (isBlank(pickup_lat) || isBlank(pickup_lng) || isBlank(drop_lat) || isBlank(drop_lng)) {
-      return res.status(400).json({ error: 'Invalid coordinates provided.' });
+    if (!origin || !destination || isBlank(origin.lat) || isBlank(origin.lng) || isBlank(destination.lat) || isBlank(destination.lng)) {
+      return res.status(400).json({ error: 'Invalid origin or destination coordinates provided.' });
     }
 
-    const pickupLat = Number(pickup_lat);
-    const pickupLng = Number(pickup_lng);
-    const dropLat = Number(drop_lat);
-    const dropLng = Number(drop_lng);
+    const pickupLat = Number(origin.lat);
+    const pickupLng = Number(origin.lng);
+    const dropLat = Number(destination.lat);
+    const dropLng = Number(destination.lng);
 
     const validationError = validateCoordinates(pickupLat, pickupLng, dropLat, dropLng);
     if (validationError) {
@@ -44,13 +45,16 @@ router.get('/estimate', authenticate, userLimiter, async (req, res) => {
     }
 
     return res.json({
-      distance_km: estimate.distanceKm,
-      duration_hours: estimate.durationSeconds ? Number((estimate.durationSeconds / 3600).toFixed(2)) : null
+      success: true,
+      data: {
+        distance_km: estimate.distanceKm,
+        duration_hours: estimate.durationSeconds ? Number((estimate.durationSeconds / 3600).toFixed(2)) : null
+      }
     });
   } catch (err) {
     logger.error(
-      { event: 'ROUTE_ESTIMATE_ERROR', requestId: req.requestId || req.id, error: err && err.message },
-      'Error calculating route estimate',
+      { event: 'ROUTE_PLAN_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      'Error planning route',
     );
     return res.status(500).json({ error: 'Internal server error.' });
   }

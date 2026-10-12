@@ -88,13 +88,13 @@ export const isValidMissionId = (missionId) => {
  *       properties:
  *         trip_id:
  *           type: string
- *           pattern: '^[a-zA-Z0-9_\-:.]{1,64}$'
+ *           pattern: '^[a-zA-Z0-9_-:.]{1,64}$'
  *           minLength: 1
  *           maxLength: 64
  *           description: Trip identifier accepted by the drone launch service.
  *         parcel_id:
  *           type: string
- *           pattern: '^[a-zA-Z0-9_\-:.]{1,64}$'
+ *           pattern: '^[a-zA-Z0-9_-:.]{1,64}$'
  *           minLength: 1
  *           maxLength: 64
  *           description: Parcel identifier accepted by the drone launch service.

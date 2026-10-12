@@ -59,6 +59,12 @@ vi.mock('../../src/lib/redisLock.js', () => ({
   acquireLock: mockAcquireLock,
   releaseLock: mockReleaseLock,
   renewLock: mockRenewLock,
+  // Reconciliation runs under a renewing lock — execute inline with the
+  // mocked acquire/release pair.
+  withLockRenewal: async (key, _val, _ttl, fn) => {
+    await mockAcquireLock(key);
+    try { return await fn(); } finally { await mockReleaseLock(key); }
+  },
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 

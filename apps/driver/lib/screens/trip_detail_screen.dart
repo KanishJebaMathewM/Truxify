@@ -34,7 +34,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   // ── GPS tracking for active trips ──────────────────────────────────
   final GpsTrackingService _gpsTracking = GpsTrackingService();
-  WsConnectionStatus _wsStatus = WsConnectionStatus.disconnected;
 
   /// Statuses that require live GPS emission.
   static const _activeStatuses = {
@@ -65,10 +64,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   /// Start GPS emission only if this trip is in an active status.
   void _maybeStartGpsTracking() {
     if (!_activeStatuses.contains(widget.trip.status)) return;
-
-    _gpsTracking.connectionStatus.listen((status) {
-      if (mounted) setState(() => _wsStatus = status);
-    });
 
     // Fire-and-forget; errors surface via debugPrint inside the service.
     _gpsTracking.startForTrip(tripDisplayId: widget.trip.tripId).catchError(

@@ -13,7 +13,6 @@ class _BorderPreclearanceScreenState extends State<BorderPreclearanceScreen> {
   final CustomsApiService _customsService = CustomsApiService();
   CustomsManifest? _manifest;
   bool _isLoading = true;
-  bool _isPolling = false;
 
   @override
   void initState() {
@@ -35,13 +34,11 @@ class _BorderPreclearanceScreenState extends State<BorderPreclearanceScreen> {
   void _startPollingForApproval(CustomsManifest currentManifest) async {
     if (currentManifest.status == 'Accepted - Pre-cleared') return;
     
-    setState(() => _isPolling = true);
     final approvedManifest = await _customsService.pollForPreclearance(currentManifest);
     
     if (mounted) {
       setState(() {
         _manifest = approvedManifest;
-        _isPolling = false;
       });
     }
   }

@@ -30,7 +30,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
   final Map<String, String?> _otpErrors = {};
   final Map<String, bool> _loadingStops = {};
   bool _isTripCompleted = false;
-  bool _isPaymentReleased = false;
 
   @override
   void initState() {
@@ -89,7 +88,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     if (allDone && !_isTripCompleted) {
       setState(() {
         _isTripCompleted = true;
-        _isPaymentReleased = true;
       });
     }
   }
@@ -159,7 +157,6 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         if (allCompleted || paymentReleased) {
           setState(() {
             _isTripCompleted = true;
-            _isPaymentReleased = true;
           });
         }
       }

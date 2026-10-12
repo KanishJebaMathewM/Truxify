@@ -3,7 +3,6 @@ import '../models/pwa_dispatch_model.dart';
 
 class PwaDispatchService {
   final _sessionController = StreamController<PwaDispatchSession>.broadcast();
-  bool _isInstalled = false;
   bool _isOffline = false;
 
   Stream<PwaDispatchSession> get pwaStream => _sessionController.stream;
@@ -13,7 +12,6 @@ class PwaDispatchService {
   }
 
   void installPwa() async {
-    _isInstalled = true;
     _emitState('Installed');
     
     // Simulate caching assets

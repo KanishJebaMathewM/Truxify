@@ -93,7 +93,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<List<ll.LatLng>>? _routeFuture;
   DestinationPickResult? _destination;
-  bool _isSearchExpanded = false;
   Map<String, dynamic>? _heatmapData;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
@@ -170,9 +169,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _activeTruckLabel = '';
   String _activeTripDistance = '';
   String _activeTripDuration = '';
-  String _activeTripEta = '';
-  double _activeTripProgress = 0.0;
-  String _activeTripStatus = '';
   String _activeTripPayout = '';
   /// Number of stops not yet completed on the active trip.
   int _activeTripStopsRemaining = 0;
@@ -195,7 +191,6 @@ class _HomeScreenState extends State<HomeScreen> {
   late final DriverEarningsService _earningsService;
   EarningsDailyModel? _todayEarnings;
   double? _driverRating;
-  List<TripRecord> _tripHistory = [];
   bool _isLoadingMetrics = true;
   String? _metricsError;
   String? _networkError;
@@ -479,7 +474,6 @@ class _HomeScreenState extends State<HomeScreen> {
         final stats =
             results[1] as Map<String, dynamic>? ?? <String, dynamic>{};
         _driverRating = (stats['rating'] as num?)?.toDouble();
-        _tripHistory = historyList;
         _isLoadingMetrics = false;
       });
     } catch (e) {
@@ -817,9 +811,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _isTripStarted = false;
             _destination = null;
             _routeFuture = null;
-            _activeTripEta = '';
-            _activeTripProgress = 0.0;
-            _activeTripStatus = '';
           });
         }
       }
@@ -847,7 +838,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _activeTripDuration = cachedDuration;
           _activeTripPayout = cachedPayout;
           _isTripStarted = cachedIsStarted;
-          _activeTripStatus = cachedIsStarted ? 'EN-ROUTE' : 'ASSIGNED LOAD';
         });
 
         final address = await SecureStorage.read('cached_address');
@@ -885,9 +875,6 @@ class _HomeScreenState extends State<HomeScreen> {
             _isTripStarted = false;
             _destination = null;
             _routeFuture = null;
-            _activeTripEta = '';
-            _activeTripProgress = 0.0;
-            _activeTripStatus = '';
           });
         }
       }
@@ -949,7 +936,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _destination = result;
         _searchController.text = result.address;
-        _isSearchExpanded = false;
         final routePoints = <ll.LatLng>[
           if (_currentLocation != null) _currentLocation!,
           result.point,
@@ -964,7 +950,6 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _destination = null;
       _routeFuture = null;
-      _isSearchExpanded = false;
       _isTripStarted = false;
       _searchController.clear();
     });
@@ -1011,9 +996,6 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeTripId = null;
       _activeOrderId = null;
       _isTripStarted = false;
-      _activeTripEta = '';
-      _activeTripProgress = 0.0;
-      _activeTripStatus = '';
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1206,7 +1188,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 if (mounted) {
                                   setState(() {
                                     _isTripStarted = true;
-                                    _activeTripStatus = 'EN-ROUTE';
                                   });
                                 }
                               } catch (e) {
@@ -1440,7 +1421,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 if (mounted) {
                                   setState(() {
                                     _isTripStarted = true;
-                                    _activeTripStatus = 'EN-ROUTE';
                                   });
                                 }
                               } catch (e) {
@@ -2250,7 +2230,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (mounted) {
                     setState(() {
                       _isTripStarted = true;
-                      _activeTripStatus = 'EN-ROUTE';
                     });
                   }
                 } catch (e) {

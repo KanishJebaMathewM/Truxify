@@ -59,7 +59,6 @@ class LocationService {
   String? _activeOrderId;
   String? _activeOrderDisplayId;
   int? _lastCloseCode;
-  String? _authToken;
 
   /// Whether the current WebSocket completed the first-frame `auth` handshake
   /// (issue #5739). Location pings are only delivered over a socket once this
@@ -602,7 +601,6 @@ class LocationService {
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken;
     if (token != null && token.isNotEmpty) {
-      _authToken = token;
       unawaited(AuthTokenStore.persist(token));
     }
     final driverId = Supabase.instance.client.auth.currentUser?.id ?? '';

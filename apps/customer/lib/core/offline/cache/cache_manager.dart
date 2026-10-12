@@ -152,60 +152,6 @@ class CacheManager {
     return _database!;
   }
 
-  Future<void> _createTables(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS orders (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL,
-        status TEXT,
-        payload TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS profile (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS documents (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS last_location (
-        id TEXT PRIMARY KEY,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS milestones (
-        id TEXT PRIMARY KEY,
-        order_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        completed INTEGER NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-  }
-
   Future<void> cacheOrders(List<Map<String, dynamic>> orders) async {
     final db = await open();
     final batch = db.batch();

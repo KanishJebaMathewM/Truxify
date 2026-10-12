@@ -42,7 +42,7 @@ async function geocodeAddress(address) {
  */
 router.post('/plan', authenticate, requirePolicy('route:write'), async (req, res) => {
   try {
-    const { origin, destination } = req.body;
+    const { origin, destination, routeId } = req.body;
 
     if (!origin || !destination) {
       return res.status(400).json({

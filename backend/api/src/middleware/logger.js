@@ -1,7 +1,10 @@
 import pino from 'pino';
 import { correlationContext } from './correlationId.js';
 
-const isDev = process.env.NODE_ENV !== 'production';
+// Pretty transport is for local development only — in test runs the worker
+// thread can't resolve pino-pretty relative to this package and crashes
+// requests ('packet' errors).
+const isDev = process.env.NODE_ENV === 'development';
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'];
 

@@ -174,6 +174,6 @@ Potential enhancements for future PRs:
 - [ ] Currency conversion tests (paisa ↔ INR ↔ wei)
 
 ## Related Documentation
-- [Pricing Architecture](../architecture/pricing-engine.md)
-- [Rate Card Configuration](../configuration/rate-card.md)
-- [Financial Precision Guide](../architecture/financial-precision.md)
+- Pricing Architecture *(planned — document not yet written)*
+- Rate Card Configuration *(planned — document not yet written)*
+- Financial Precision Guide *(planned — document not yet written)*

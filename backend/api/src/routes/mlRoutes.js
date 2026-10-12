@@ -193,7 +193,10 @@ router.get(
     const dayOfWeek = req.query.dayOfWeek || '1';
     const routeType = req.query.routeType || 'highway';
     const historicalSpeed = req.query.historicalSpeed || '60';
-    return `${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
+    // The ownership/role check runs AFTER a cache hit — the caller identity
+    // must be part of the key or a non-owner gets the owner's cached ETA.
+    const caller = req.user?.id || 'anon';
+    return `${caller}:${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
   }),
   async (req, res) => {
   try {
@@ -298,7 +301,9 @@ router.get(
       });
     } catch (mlErr) {
       logger.warn('[MlEta] ML ETA prediction failed:', mlErr.message);
-      return res.status(503).json({ error: mlErr.message });
+      // The upstream error text can carry the internal ML service URL or
+      // upstream detail — the client gets a generic message.
+      return res.status(503).json({ error: 'ETA prediction is temporarily unavailable. Please try again shortly.' });
     }
   } catch (err) {
     logger.error('Internal Server Error in GET /api/ml/eta:', err);

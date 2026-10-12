@@ -76,8 +76,8 @@ To set up the 27 database tables and required RPC functions:
 
 1. Ensure the PostgreSQL container is active.
 2. Open your preferred SQL client (e.g., pgAdmin, DBeaver) or run the SQL script using your client, pointing to `postgresql://postgres:postgres@localhost:5432/postgres`.
-3. Execute the contents of [`docs/supabase_setup.sql`](file:///c:/Users/Admin/Desktop/Truxify/docs/supabase_setup.sql) to set up all tables, indices, and functions.
-4. Execute any outstanding migrations located in [`docs/migrations/`](file:///c:/Users/Admin/Desktop/Truxify/docs/migrations/) if you are catching up to the latest features.
+3. Execute the contents of [`docs/supabase_setup.sql`](../../supabase_setup.sql) to set up all tables, indices, and functions.
+4. Execute any outstanding migrations located in [`docs/migrations/`](../../supabase/migrations/) if you are catching up to the latest features.
 
 ---
 

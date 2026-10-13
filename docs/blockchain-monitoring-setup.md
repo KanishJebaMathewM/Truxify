@@ -249,4 +249,4 @@ Access the dashboard at `/api/blockchain/metrics`:
 
 - [Polygon JSON-RPC](https://wiki.polygon.technology/docs/develop/ethereum-polygon/getting-started)
 - [ethers.js Documentation](https://docs.ethers.org/)
-- [Escrow Contract ABI](./ESCROW_CONTRACT_ABI.md)
+- [Escrow contract source (ABI is compiled from this)](../blockchain/contracts/TruxifyEscrow.sol)

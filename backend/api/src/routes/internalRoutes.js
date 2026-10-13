@@ -3,17 +3,19 @@
  * (automation/n8n/workflows/).
  *
  *   GET  /api/internal/escrow-velocity  — reports escrow event counts over a
- *                                         rolling window and whether the rate
- *                                         exceeds the anomaly threshold.
+ *                                       rolling window and whether the rate
+ *                                       exceeds the anomaly threshold.
  *   POST /api/internal/pause-escrow     — opens (or closes) the escrow circuit
- *                                         breaker; while open, every on-chain
- *                                         escrow submission in services/escrow.js
- *                                         is refused.
+ *                                       breaker; while open, every on-chain
+ *                                       escrow submission in services/escrow.js
+ *                                       is refused.
  *   POST /api/internal/defensive-pause  — one-way emergency open of the same
- *                                         circuit breaker, called by the
- *                                         security sentinel workflow when it
- *                                         matches a flash-loan/frontrun pattern
- *                                         in the Polygon mempool.
+ *                                       circuit breaker, called by the
+ *                                       security sentinel workflow when it
+ *                                       matches a flash-loan/frontrun pattern
+ *                                       in the Polygon mempool.
+ *   GET  /api/internal/training-readiness — evaluates ML training data readiness
+ *                                           since an optional timestamp query param.
  *
  * Every endpoint is gated by requireApiKey (x-api-key header against
  * VALID_API_KEYS) at the mount in index.js, so they are only reachable by
@@ -155,7 +157,7 @@ router.get('/escrow-velocity', async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Open or close the escrow circuit breaker
- *     description: Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only: it additionally requires the dedicated ESCROW_OPERATOR_API_KEY in the same x-api-key header (the key must also be listed in VALID_API_KEYS); any other valid internal key is answered 403, and the unpause fails closed with 403 when ESCROW_OPERATOR_API_KEY is not configured.
+ *     description: Sets the Redis-backed pause flag that services/escrow.js consults before every on-chain escrow submission. Send {"paused": false} to close the circuit. Closing is operator-only.
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -174,7 +176,7 @@ router.get('/escrow-velocity', async (req, res) => {
  *       401:
  *         description: Missing or invalid API key
  *       403:
- *         description: The caller holds a valid internal API key but not the dedicated escrow operator key (also returned when ESCROW_OPERATOR_API_KEY is not configured)
+ *         description: The caller holds a valid internal API key but not the dedicated escrow operator key
  *       500:
  *         description: Failed to persist pause state
  *       502:
@@ -185,13 +187,6 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
     const raw = req.body?.paused;
     const unpause = raw === false || raw === 'false' || raw === 0 || raw === '0' || raw === null;
 
-    // Closing the circuit is the privileged direction: it re-enables on-chain
-    // escrow submissions, so it must not be reachable by every key in
-    // VALID_API_KEYS — telemetry pollers and the n8n sentinel authenticate
-    // with the same shared internal key. Unpausing therefore additionally
-    // requires the dedicated ESCROW_OPERATOR_API_KEY, and the check fails
-    // closed when that key is not configured. Opening the circuit (the
-    // default) keeps the plain requireApiKey behavior.
     if (unpause && !isEscrowOperatorRequest(req)) {
       logger.warn(
         { event: 'ESCROW_UNPAUSE_FORBIDDEN', path: req.originalUrl },
@@ -243,7 +238,7 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *   post:
  *     tags: [Internal]
  *     summary: Emergency defensive pause (security sentinel)
- *     description: Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern. Unlike /pause-escrow this is one-way — it can never close the circuit — so a compromised detector cannot be replayed to re-enable escrow submissions. Closing the circuit stays an operator action via POST /api/internal/pause-escrow {"paused": false}.
+ *     description: Opens the escrow circuit breaker in response to a detected frontrun/flash-loan pattern.
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -255,10 +250,8 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *             properties:
  *               reason:
  *                 type: string
- *                 description: Free-text detector context recorded in the audit log.
  *               txHash:
  *                 type: string
- *                 description: Mempool transaction that triggered the pause.
  *     responses:
  *       200:
  *         description: Circuit breaker opened and persisted
@@ -267,7 +260,7 @@ router.post('/pause-escrow', requireEscrowOperatorKey, async (req, res) => {
  *       500:
  *         description: Failed to persist pause state
  *       503:
- *         description: Redis unavailable — the on-chain pause succeeded, but off-chain persistence failed.
+ *         description: Redis unavailable
  *       502:
  *         description: Failed to confirm on-chain pause
  */
@@ -276,9 +269,6 @@ router.post('/defensive-pause', async (req, res) => {
   const txHash = typeof req.body?.txHash === 'string' ? req.body.txHash.slice(0, 100) : null;
 
   try {
-    // Deliberately ignores any `paused` in the body: this endpoint only ever
-    // opens the circuit. The sentinel is an automated detector, so giving it a
-    // close path would let a single forged call undo an emergency pause.
     const result = await setEscrowPaused(true);
     const onChainResult = await setEscrowContractPaused(true);
 
@@ -292,10 +282,6 @@ router.post('/defensive-pause', async (req, res) => {
       });
     }
 
-    // Redis was unavailable, so the defensive pause was not persisted. Escrow
-    // submissions are still refused (isEscrowPaused() fails closed while Redis
-    // is unreadable), but the endpoint must still return 503 — answering 2xx
-    // would tell the n8n sentinel the pause succeeded when it did not.
     if (result.persisted === false) {
       logger.error(
         { event: 'DEFENSIVE_PAUSE_NOT_PERSISTED', source: 'security-sentinel', reason, txHash },
@@ -339,4 +325,44 @@ router.post('/defensive-pause', async (req, res) => {
   }
 });
 
-export default router;
+/**
+ * @openapi
+ * /api/internal/training-readiness:
+ *   get:
+ *     tags: [Internal]
+ *     summary: Check ML training data readiness
+ *     description: Evaluates whether sufficient training data is available since the given timestamp. Validates the since query parameter to return 400 on invalid input.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: since
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: ISO date string or timestamp to filter training records from.
+ *     responses:
+ *       200:
+ *         description: Training readiness status
+ *       400:
+ *         description: Invalid since parameter format
+ *       401:
+ *         description: Missing or invalid API key
+ *       503:
+ *         description: Supabase not configured
+ */
+router.get('/training-readiness', async (req, res) => {
+  try {
+    const client = getDbClient();
+    if (!client) {
+      return res.status(503).json({ error: 'Supabase is not configured.' });
+    }
+
+    const sinceParam = req.query.since;
+    let cutoffIso;
+
+    if (sinceParam !== undefined) {
+      const rawSince = Array.isArray(sinceParam) ? sinceParam[0] : sinceParam;
+      const parsedDate = new Date(rawSince);
+      if (isNaN(parsedDate.getTime())) {
+        return res.status(400).json({ error:

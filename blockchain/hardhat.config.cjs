@@ -9,7 +9,9 @@ const path = require("path");
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomicfoundation/hardhat-network-helpers");
-require("@nomicfoundation/hardhat-verify");
+try {
+  require("@nomicfoundation/hardhat-verify");
+} catch (_) {}
 require("@openzeppelin/hardhat-upgrades");
 
 const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";
@@ -51,6 +53,11 @@ function collectSolidityFiles(directory) {
     } else if (entry.isFile() && entry.name.endsWith(".sol")) {
       files.push(entryPath);
     }
+  }
+
+  if (process.env.CONTRACTS) {
+    const allowed = process.env.CONTRACTS.split(",").map(s => s.trim());
+    return files.filter(f => allowed.some(a => f.includes(a)));
   }
 
   return files;

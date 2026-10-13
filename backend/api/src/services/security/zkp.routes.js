@@ -77,6 +77,23 @@ router.post('/verify', zkpVerifyLimiter, async (req, res) => {
       });
     }
 
+    if (result.code === 'MALFORMED_INPUT') {
+      return res.status(400).json({ success: false, error: result.error, code: 'MALFORMED_INPUT' });
+    }
+    if (result.code === 'KYC_NOT_SERVER_VERIFIED') {
+      return res.status(400).json({ success: false, error: result.error, code: 'KYC_NOT_SERVER_VERIFIED' });
+    }
+    if (result.code === 'KYC_NOT_AUTHORITY_APPROVED') {
+      return res.status(400).json({ success: false, error: result.error, code: 'KYC_NOT_AUTHORITY_APPROVED' });
+    }
+    if (result.code === 'MOCK_PROOF_NOT_RECORDED') {
+      return res.status(400).json({ success: false, error: result.error, code: 'MOCK_PROOF_NOT_RECORDED' });
+    }
+
+    if (result.success === false) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
     return res.status(200).json(result);
   } catch (error) {
     // Redis unavailable — the lock could not be acquired at all

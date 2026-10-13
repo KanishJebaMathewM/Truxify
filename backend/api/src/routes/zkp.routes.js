@@ -86,11 +86,21 @@ router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
       });
     }
 
-    // Server-side verification gate (issue #8887)
+    // Validation and security error handling (issues #8887 & #11247)
+    if (result.code === 'MALFORMED_INPUT') {
+      return res.status(400).json({ success: false, error: result.error, code: 'MALFORMED_INPUT' });
+    }
     if (result.code === 'KYC_NOT_SERVER_VERIFIED') {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: result.error, code: 'KYC_NOT_SERVER_VERIFIED' });
+    }
+    if (result.code === 'KYC_NOT_AUTHORITY_APPROVED') {
+      return res.status(400).json({ success: false, error: result.error, code: 'KYC_NOT_AUTHORITY_APPROVED' });
     }
     if (result.code === 'MOCK_PROOF_NOT_RECORDED') {
+      return res.status(400).json({ success: false, error: result.error, code: 'MOCK_PROOF_NOT_RECORDED' });
+    }
+
+    if (result.success === false) {
       return res.status(400).json({ success: false, error: result.error });
     }
 

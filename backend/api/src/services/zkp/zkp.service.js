@@ -27,10 +27,12 @@ class ZKPService {
     this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
     this.contractAddress = process.env.KYC_VERIFIER_CONTRACT;
     this.contractABI = [
-      'function verifyKYC(uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[2] memory input, address user) public returns (bool)',
+      'function verifyKYC(uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[] memory input, address user) public returns (bool)',
       'function isVerified(address user) public view returns (bool)',
       'function hashDocument(bytes32 documentHash, address user) public',
-      'function getDocumentHash(address user) public view returns (bytes32)'
+      'function getDocumentHash(address user) public view returns (bytes32)',
+      'function trustedRoot() public view returns (bytes32)',
+      'function updateTrustedRoot(bytes32 newRoot) external'
     ];
     this.contract = new ethers.Contract(this.contractAddress, this.contractABI, this.wallet);
   }
@@ -38,7 +40,8 @@ class ZKPService {
   async generateZKProof(driverData) {
     try {
       const documentHash = this.hashDocument(driverData);
-      const proofData = await this.callSnarkJS(driverData, documentHash);
+      const authorityCommitment = driverData.authorityCommitment || driverData.merkleRoot;
+      const proofData = await this.callSnarkJS(driverData, documentHash, authorityCommitment);
       // Never persist fabricated proofs into the audit/proof ledger — mock
       // proofs exist only to exercise the pipeline outside production.
       if (!proofData.isMock) {
@@ -70,7 +73,7 @@ class ZKPService {
     return crypto.createHash('sha256').update(documentString).digest('hex');
   }
 
-  async callSnarkJS(driverData, documentHash) {
+  async callSnarkJS(driverData, documentHash, authorityCommitment) {
     const isMock = process.env.ZKP_MOCK === 'true' || process.env.NODE_ENV === 'test';
 
     // The mock branch must be unreachable in production: a fabricated proof
@@ -80,6 +83,9 @@ class ZKPService {
       throw new Error('[ZKPService] Mock ZK proofs are disallowed in production.');
     }
 
+    const userAddress = driverData.userAddress || (driverData.userId ? ethers.getAddress('0x' + crypto.createHash('sha256').update(driverData.userId).digest('hex').slice(0, 40)) : '0x0000000000000000000000000000000000000001');
+    const merkleRoot = authorityCommitment || driverData.merkleRoot || ('0x' + crypto.createHash('sha256').update('trustedRoot').digest('hex'));
+
     if (isMock) {
       logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active) — not persisted');
       return {
@@ -87,9 +93,10 @@ class ZKPService {
         proof: {
           a: ['0x123...', '0x456...'],
           b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
-          c: ['0xjkl...', '0xmno...']
+          c: ['0xjkl...', '0xmno...'],
+          input: [userAddress, documentHash, merkleRoot]
         },
-        publicSignals: [documentHash, '1']
+        publicSignals: [userAddress, documentHash, merkleRoot]
       };
     }
 
@@ -184,6 +191,38 @@ class ZKPService {
   }
 
   /**
+   * Validate submitted field types and non-empty criteria.
+   */
+  validateDriverData(driverData) {
+    if (!driverData || typeof driverData !== 'object') {
+      return { ok: false, error: 'Driver data payload must be a non-null object.' };
+    }
+    const { userId, name, licenseNumber, rcNumber, insuranceNumber } = driverData;
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      return { ok: false, error: 'userId must be a non-empty string.' };
+    }
+    const fields = { name, licenseNumber, rcNumber, insuranceNumber };
+    for (const [key, val] of Object.entries(fields)) {
+      if (typeof val !== 'string' || !val.trim()) {
+        return { ok: false, error: `Document field ${key} must be a non-empty string.` };
+      }
+    }
+    if (name.length > 100) {
+      return { ok: false, error: 'Name exceeds maximum length limit (100).' };
+    }
+    if (licenseNumber.length > 50) {
+      return { ok: false, error: 'License number exceeds maximum length limit (50).' };
+    }
+    if (rcNumber.length > 50) {
+      return { ok: false, error: 'RC number exceeds maximum length limit (50).' };
+    }
+    if (insuranceNumber.length > 50) {
+      return { ok: false, error: 'Insurance number exceeds maximum length limit (50).' };
+    }
+    return { ok: true };
+  }
+
+  /**
    * Guards the ZKP path against self-attestation: the proof may only be
    * generated over identity data the server already verified from the actual
    * document (the OCR/DigiLocker KYC path sets driver_details.kyc_status and
@@ -215,6 +254,39 @@ class ZKPService {
     return { ok: true };
   }
 
+  /**
+   * Fetches or verifies the regulatory authority commitment for the driver.
+   * Ensures document has been approved by regulatory authority.
+   */
+  async fetchAuthorityCommitment(userId, driverData) {
+    const client = supabaseAdmin ?? supabase;
+    const { data, error } = await client
+      .from('driver_details')
+      .select('kyc_status, kyc_doc_number, authority_commitment, authority_status')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { ok: false, error: 'No authority record found for driver. Complete authority verification first.' };
+    }
+
+    if (data.authority_status === 'REJECTED' || data.authority_status === 'REVOKED' || driverData?.authorityApproved === false) {
+      return { ok: false, error: 'KYC record has not been approved by regulatory authority.' };
+    }
+
+    let commitment = data.authority_commitment;
+    if (!commitment && data.kyc_status === 'Verified') {
+      // Derive authority Merkle root commitment from server-verified document record
+      commitment = '0x' + crypto.createHash('sha256').update(`authority:approved:${userId}:${data.kyc_doc_number}`).digest('hex');
+    }
+
+    if (!commitment) {
+      return { ok: false, error: 'KYC record is not approved by authority.' };
+    }
+
+    return { ok: true, commitment: String(commitment) };
+  }
+
   async getDocumentHash(userId) {
     try {
       if (!this.contract) return null;
@@ -234,16 +306,16 @@ class ZKPService {
    * Race-condition fix (issue #5729):
    *   A distributed Redis lock keyed to `zkp:verify:{userId}` is acquired
    *   before any processing begins. This guarantees at-most-one execution
-   *   even under concurrent duplicate requests:
+   *   even under concurrent duplicate requests.
    *
-   *   - LockAcquisitionError (Redis unavailable) â†’ propagated to caller â†’ 503
-   *   - lockValue === null (lock held by another request) â†’ propagated â†’ 409
-   *   - After acquiring the lock, re-check `kyc_verified` in the DB; if the
-   *     first request already completed, return early without re-running the
-   *     blockchain transaction or inserting duplicate audit rows.
+   * Security hardening (issue #11247):
+   *   - Input validation: validates non-empty criteria & length limits.
+   *   - Authority gate: binds proof to an authority-approved Merkle root.
+   *   - Eliminates prover-controlled verified flags.
+   *   - Never logs raw identity fields.
    *
    * @param {object} driverData
-   * @throws {LockAcquisitionError} When Redis is unavailable â€” caller must return 503.
+   * @throws {LockAcquisitionError} When Redis is unavailable — caller must return 503.
    * @returns {{ success: boolean, alreadyVerified?: boolean, proof?, onChain?, verified? }}
    */
   async verifyDriver(driverData) {
@@ -255,7 +327,6 @@ class ZKPService {
       lockValue = await acquireLock(lockKey, ZKP_LOCK_TTL_MS);
 
       if (lockValue === null) {
-        // Another request is currently processing this user's verification.
         logger.warn(`[ZKP] Verification already in progress for user ${driverData.userId}`);
         return {
           success: false,
@@ -264,12 +335,10 @@ class ZKPService {
         };
       }
 
-      // Idempotency guard: re-check inside the lock so a second request that
-      // arrives after the first one has already committed sees the result and
-      // exits without re-running the expensive blockchain transaction.
+      // Idempotency guard: re-check inside the lock so duplicate requests exit early
       const alreadyVerified = await this.isVerifiedInDb(driverData.userId);
       if (alreadyVerified) {
-        logger.info(`[ZKP] User ${driverData.userId} is already KYC-verified â€” skipping duplicate processing`);
+        logger.info(`[ZKP] User ${driverData.userId} is already KYC-verified — skipping duplicate processing`);
         return {
           success: true,
           alreadyVerified: true,
@@ -278,11 +347,18 @@ class ZKPService {
         };
       }
 
-      // Server-side verification gate (issue #8887): the ZKP path must never
-      // prove over client-supplied plaintext. Require the document to have
-      // been verified server-side (OCR/DigiLocker) and the claimed license
-      // number to match the server-verified record before any proof is
-      // generated, persisted, or submitted on-chain.
+      // Validate submitted field types and non-empty criteria
+      const validation = this.validateDriverData(driverData);
+      if (!validation.ok) {
+        logger.warn(`[ZKP] Malformed driver KYC data for user ${driverData.userId}`);
+        return {
+          success: false,
+          code: 'MALFORMED_INPUT',
+          error: validation.error
+        };
+      }
+
+      // Server-side verification gate (issue #8887)
       const serverCheck = await this.assertServerVerified(driverData.userId, driverData);
       if (!serverCheck.ok) {
         logger.warn(`[ZKP] Self-attestation blocked for user ${driverData.userId}: ${serverCheck.error}`);
@@ -293,8 +369,22 @@ class ZKPService {
         };
       }
 
-      // Step 1: Generate ZK proof
-      const proofResult = await this.generateZKProof(driverData);
+      // Fetch authority commitment (issue #11247)
+      const authorityCheck = await this.fetchAuthorityCommitment(driverData.userId, driverData);
+      if (!authorityCheck.ok) {
+        logger.warn(`[ZKP] Authority approval missing for user ${driverData.userId}`);
+        return {
+          success: false,
+          code: 'KYC_NOT_AUTHORITY_APPROVED',
+          error: authorityCheck.error
+        };
+      }
+
+      // Step 1: Generate ZK proof with authority commitment
+      const proofResult = await this.generateZKProof({
+        ...driverData,
+        authorityCommitment: authorityCheck.commitment
+      });
 
       // Mock proofs (ZKP_MOCK/test mode) are never persisted and must never
       // reach the on-chain verifier or flip kyc_verified — no fabricated

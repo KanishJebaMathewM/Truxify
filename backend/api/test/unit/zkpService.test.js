@@ -169,6 +169,46 @@ describe('ZKPService self-attestation guard (issue #8887)', () => {
     expect(dbMock.writes.filter((w) => w.table === 'zk_proofs')).toHaveLength(0);
   });
 
+  it('rejects malformed driver data with MALFORMED_INPUT', async () => {
+    dbMock.tableResults['users'] = NOT_KYC_VERIFIED_USER;
+    dbMock.tableResults['driver_details'] = VERIFIED_DETAILS;
+
+    const result = await zkpService.verifyDriver({ ...validDriverData(), name: '' });
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('MALFORMED_INPUT');
+    expect(result.error).toMatch(/must be a non-empty string/i);
+  });
+
+  it('blocks proof generation when authority approval is rejected with KYC_NOT_AUTHORITY_APPROVED', async () => {
+    dbMock.tableResults['users'] = NOT_KYC_VERIFIED_USER;
+    dbMock.tableResults['driver_details'] = {
+      data: {
+        kyc_status: 'Verified',
+        kyc_doc_number: 'DL-1420110012345',
+        authority_status: 'REJECTED'
+      },
+      error: null
+    };
+
+    const result = await zkpService.verifyDriver(validDriverData());
+
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('KYC_NOT_AUTHORITY_APPROVED');
+    expect(result.error).toMatch(/regulatory authority/i);
+  });
+
+  it('generates public signals containing [userAddress, documentHash, merkleRoot] and no verified=1 flag', async () => {
+    process.env.NODE_ENV = 'test';
+
+    const result = await zkpService.generateZKProof(validDriverData());
+
+    expect(result.isMock).toBe(true);
+    expect(result.publicSignals).toHaveLength(3);
+    expect(result.publicSignals).not.toContain('1');
+    expect(result.publicSignals[1]).toBe(result.documentHash);
+  });
+
   it('rejects mock proofs in production even when ZKP_MOCK is set', async () => {
     process.env.NODE_ENV = 'production';
     process.env.ZKP_MOCK = 'true';

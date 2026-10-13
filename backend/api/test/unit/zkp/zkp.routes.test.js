@@ -4,6 +4,7 @@ import request from 'supertest';
 
 vi.mock('../../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => { req.user = { id: 'user-123' }; next(); },
+  requireRole: () => (_req, _res, next) => next(),
 }));
 
 vi.mock('../../../src/middleware/redisRateLimiter.js', () => ({

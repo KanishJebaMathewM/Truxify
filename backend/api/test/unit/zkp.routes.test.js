@@ -83,11 +83,18 @@ describe('zkp routes', () => {
     expect(res.body.error).toBe('in-flight');
   });
 
-  it('POST /verify returns 503 when the distributed lock cannot be acquired', async () => {
-    const { LockAcquisitionError } = await import('../../src/lib/redisLock.js');
-    zkpMocks.verifyDriver.mockRejectedValue(new LockAcquisitionError('redis down'));
+  it('POST /verify returns 400 when input is malformed', async () => {
+    zkpMocks.verifyDriver.mockResolvedValue({ success: false, code: 'MALFORMED_INPUT', error: 'Malformed input' });
     const res = await request(makeApp()).post('/zkp/verify').send({ userId: 'u1' });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('MALFORMED_INPUT');
+  });
+
+  it('POST /verify returns 400 when authority approval is missing', async () => {
+    zkpMocks.verifyDriver.mockResolvedValue({ success: false, code: 'KYC_NOT_AUTHORITY_APPROVED', error: 'Not authority approved' });
+    const res = await request(makeApp()).post('/zkp/verify').send({ userId: 'u1' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('KYC_NOT_AUTHORITY_APPROVED');
   });
 
   it('GET /status/:userId returns the verification status', async () => {

@@ -16,9 +16,6 @@ contract Verifier {
         uint[2] memory c,
         uint[2] memory input
     ) public view returns (bool r) {
-        // No real circuit / verification key exists yet, so no proof can be
-        // accepted. Replace this with the snarkjs pairing verifier once the
-        // kyc circuit and trusted setup have been generated.
         return false;
     }
 }

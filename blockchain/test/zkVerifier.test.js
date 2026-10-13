@@ -52,7 +52,7 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with an empty proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assertRejectsWith(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), "0x"),
       "Empty proof"
@@ -61,7 +61,7 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with a malformed proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     await assert.rejects(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), "0xdeadbeef")
     );
@@ -69,7 +69,7 @@ describe("ZK proof verification", function () {
 
   it("rejects a withdrawal with an all-zero proof", async function () {
     const { zkEVM, user } = await deployZkEVM();
-    await zkEVM.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await zkEVM.connect(user)["depositToL2()"]({ value: ethers.parseEther("1") });
     const zeroProof = encodeProof([0, 0], [[0, 0], [0, 0]], [0, 0], [1, 1]);
     await assertRejectsWith(
       zkEVM.connect(user).withdrawFromL2(ethers.parseEther("0.5"), zeroProof),

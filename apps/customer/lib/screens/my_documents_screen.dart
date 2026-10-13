@@ -63,15 +63,11 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
           .eq('user_id', userId)
           .order('updated_at', ascending: false);
 
-      if (response is! List) {
-        throw StateError('Unexpected document response type');
-      }
-
-      final documents = response.map((item) {
-        if (item is Map<String, dynamic>) return item;
-        if (item is Map) return Map<String, dynamic>.from(item);
-        throw StateError('Unexpected document item type');
-      }).toList(growable: false);
+      // postgrest returns List<Map<String, dynamic>>; the copy keeps a
+      // runtime safety net without dead type checks.
+      final documents = response
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList(growable: false);
           
       if (!mounted) return;
 

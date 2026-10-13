@@ -16,7 +16,181 @@
  *         full_name:
  *           type: string
  *     UpdateWalletRequest:
+ *       type: object/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     ProfileResponse:
  *       type: object
+ *       properties:
+ *         profile:
+ *           type: object
+ *         extra:
+ *           type: object
+ *           nullable: true
+ *     ProfileNameResponse:
+ *       type: object
+ *       properties:
+ *         full_name:
+ *           type: string
+ *     UpdateWalletRequest:
+ *       type: object
+ *       required:
+ *         - wallet_address
+ *       properties:
+ *         wallet_address:
+ *           type: string
+ *           pattern: '^0x[a-fA-F0-9]{40}$'
+ *     UpdateWalletResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         walletAddress:
+ *           type: string
+ *     UpdateProfileRequest:
+ *       type: object
+ *       properties:
+ *         full_name:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         email:
+ *           type: string
+ *         number_plate:
+ *           type: string
+ *         language:
+ *           type: string
+ *         dark_mode:
+ *           type: boolean
+ *         is_online:
+ *           type: boolean
+ *     UpdateProfileResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         profile:
+ *           type: object
+ *     UpdateFcmTokenRequest:
+ *       type: object
+ *       required:
+ *         - fcmToken
+ *       properties:
+ *         fcmToken:
+ *           type: string
+ *           nullable: true
+ *     DriverStatementResponse:
+ *       type: object
+ *       properties:
+ *         summary:
+ *           type: object
+ *           properties:
+ *             total_trips:
+ *               type: integer
+ *             total_base_freight:
+ *               type: number
+ *             total_platform_fees:
+ *               type: number
+ *             total_toll_estimate:
+ *               type: number
+ *             total_net_earnings:
+ *               type: number
+ *         trips:
+ *           type: array
+ *           items:
+ *             type: object
+ *     CacheInvalidateResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
+ */
+
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
+import { z } from 'zod';
+import { requirePolicy } from '../middleware/requirePolicy.js';
+import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
+import { updateProfileSchema, updateWalletSchema, driverStatementSchema, uuidParamSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
+import {
+  getProfile,
+  getCustomerStats,
+  getDriverDetails
+} from '../services/profileService.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
+import { ProfileModel } from '../models/ProfileModel.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfileAll, invalidateProfileCache } from '../lib/profileCache.js';
+import { auditLog } from '../middleware/auditLog.js';
+
+const router = express.Router();
+
+function sanitizeNumberPlate(plate) {
+  if (!plate || typeof plate !== 'string') return '';
+  return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/**
+ * @openapi
+ * /api/profile:
+ *   get:
+ *     tags: [Profile]
+ *     summary: Get authenticated user's profile
+ *     description: Returns the full profile including role-specific data (customer stats or driver details). Cached for 30 seconds.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Profile data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProfileResponse'
+ *       404:
+ *         description: Profile not found
+ */
+router.get('/', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    const profile = await getProfile(userId);
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    let extra = null;
+
+    if (role === 'customer') {
+      const stats = await getCustomerStats(userId);
+      extra = ProfileModel.fromCustomerStats(stats);
+    }
+
+    if (role === 'driver') {
+      const details = await getDriverDetails(userId);
+      extra = ProfileModel.fromDriverDetails(details);
+    }
+
+    return res.json({
+      profile: ProfileModel.fromProfile(profile),
+      extra
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch profile',
+      details: err.message
+    });
+  }
+});
+
+// GET CUSTOMER STATS
+router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.
  *       required:
  *         - wallet_address
  *       properties:

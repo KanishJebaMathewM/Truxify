@@ -10,12 +10,12 @@ Truxify is built to disrupt India's ₹14 lakh crore freight industry by elimina
 
 Use the quick links below to navigate through the technical docs:
 
-* **[Architecture & Tech Stack](Architecture-&-Tech-Stack)**: High-level system design, service communication, and production tools.
-* **[Getting Started & Local Setup](Getting-Started-&-Local-Setup)**: Run the Flutter apps, start the Express API, run the FastAPI ML engine, and launch the database stack locally.
-* **[Database Schema & Flows](Database-Schema)**: Supabase PostgreSQL, MongoDB event streams, and Redis cache strategies.
-* **[Machine Learning Engine](Machine-Learning-Layer)**: Deep dive into the 10 models (matching, dynamic pricing, profit prediction, VRP, demand heatmaps, etc.) running on FastAPI.
-* **[Blockchain & Trust Layer](Blockchain-&-Trust-Layer)**: Trustless escrow, document hash integrity, decentralized ratings, and Polygon/Solidity smart contracts.
-* **[Automation & Voice AI](Automation-&-Voice-AI)**: n8n automation pipelines, dispute resolutions, and WebRTC-based Voice AI assistant.
+* **[Architecture & Tech Stack](Architecture-&-Tech-Stack.md)**: High-level system design, service communication, and production tools.
+* **[Getting Started & Local Setup](Getting-Started-&-Local-Setup.md)**: Run the Flutter apps, start the Express API, run the FastAPI ML engine, and launch the database stack locally.
+* **[Database Schema & Flows](Database-Schema.md)**: Supabase PostgreSQL, MongoDB event streams, and Redis cache strategies.
+* **[Machine Learning Engine](Machine-Learning-Layer.md)**: Deep dive into the 10 models (matching, dynamic pricing, profit prediction, VRP, demand heatmaps, etc.) running on FastAPI.
+* **[Blockchain & Trust Layer](Blockchain-&-Trust-Layer.md)**: Trustless escrow, document hash integrity, decentralized ratings, and Polygon/Solidity smart contracts.
+* **[Automation & Voice AI](Automation-&-Voice-AI.md)**: n8n automation pipelines, dispute resolutions, and WebRTC-based Voice AI assistant.
 
 ---
 

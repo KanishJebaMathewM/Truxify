@@ -1,4 +1,5 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import { validateWimConfig } from './config/wim.js';
 import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'

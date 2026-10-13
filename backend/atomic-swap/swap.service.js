@@ -1,5 +1,4 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
@@ -54,34 +53,31 @@ class AtomicSwapService {
 
     async createSwap(counterparty, tokenAddress, amount, secret, initiator) {
         try {
-        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
-        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+            const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
+            const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
 
-        // `initiator` is the server-verified signer (the funding wallet owner),
-        // never the server wallet. Reject attempts to fund from the server
-        // wallet, which would let a caller drain server funds.
-        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
-            throw new Error('Invalid initiator: funding wallet must be user-owned');
-        }
+            if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+                throw new Error('Invalid initiator: funding wallet must be user-owned');
+            }
 
-        const amountValidation = atomicSwapRelayer.validateAmount(amount);
-        if (!amountValidation.valid) {
-            throw new Error(amountValidation.error);
-        }
+            const amountValidation = atomicSwapRelayer.validateAmount(amount);
+            if (!amountValidation.valid) {
+                throw new Error(amountValidation.error);
+            }
 
-        const hashLock = this.generateHashLock(secret);
-        if (await this.swap.usedHashLocks(hashLock)) {
-            throw new Error('Hash lock already used');
-        }
-        const parsedAmount = ethers.parseEther(amount.toString());
-        const swapId = this.generateSwapId();
+            const hashLock = this.generateHashLock(secret);
+            if (await this.swap.usedHashLocks(hashLock)) {
+                throw new Error('Hash lock already used');
+            }
+            const parsedAmount = ethers.parseEther(amount.toString());
+            const swapId = this.generateSwapId();
 
-        const token = tokenAddress || ethers.ZeroAddress;
-        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+            const token = tokenAddress || ethers.ZeroAddress;
+            const value = token === ethers.ZeroAddress ? parsedAmount : 0;
 
-        const tx = await this.swap.openSwap(
+            const tx = await this.swap.openSwap(
                 swapId,
-                counterparty,
+                validCounterparty,
                 hashLock,
                 this.lockDuration,
                 {
@@ -93,8 +89,8 @@ class AtomicSwapService {
 
             await this.storeSwap({
                 swapId,
-                initiator,
-                counterparty,
+                initiator: validInitiator,
+                counterparty: validCounterparty,
                 tokenAddress,
                 amount,
                 hashLock,
@@ -115,10 +111,10 @@ class AtomicSwapService {
     }
 
     async executeSwap(swapId, secret) {
-    try {
-        const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
-            gasLimit: 150000
-        });
+        try {
+            const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
+                gasLimit: 150000
+            });
             const receipt = await tx.wait();
 
             await this.updateSwapStatus(swapId, 'executed', receipt.hash);
@@ -160,47 +156,47 @@ class AtomicSwapService {
 
     async createCrossChainSwap(destChainId, counterparty, tokenAddress, amount, secret, initiator) {
         try {
-        const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
-        const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
+            const validInitiator = atomicSwapRelayer.validateParticipantAddress(initiator, 'Initiator');
+            const validCounterparty = atomicSwapRelayer.validateParticipantAddress(counterparty, 'Counterparty');
 
-        if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
-            throw new Error('Invalid initiator: funding wallet must be user-owned');
-        }
-
-        const amountValidation = atomicSwapRelayer.validateAmount(amount);
-        if (!amountValidation.valid) {
-            throw new Error(amountValidation.error);
-        }
-
-        const hashLock = this.generateHashLock(secret);
-        if (await this.swap.usedHashLocks(hashLock)) {
-            throw new Error('Hash lock already used');
-        }
-        const parsedAmount = ethers.parseEther(amount.toString());
-        const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${counterparty}:${tokenAddress}:${amount}`));
-        const swapId = this.generateSwapId();
-
-        const token = tokenAddress || ethers.ZeroAddress;
-        const value = token === ethers.ZeroAddress ? parsedAmount : 0;
-
-        const tx = await this.swap.openSwap(
-            swapId,
-            counterparty,
-            hashLock,
-            this.lockDuration,
-            {
-                value,
-                gasLimit: 350000
+            if (this.wallet && validInitiator.toLowerCase() === this.wallet.address.toLowerCase()) {
+                throw new Error('Invalid initiator: funding wallet must be user-owned');
             }
-        );
-        const receipt = await tx.wait();
+
+            const amountValidation = atomicSwapRelayer.validateAmount(amount);
+            if (!amountValidation.valid) {
+                throw new Error(amountValidation.error);
+            }
+
+            const hashLock = this.generateHashLock(secret);
+            if (await this.swap.usedHashLocks(hashLock)) {
+                throw new Error('Hash lock already used');
+            }
+            const parsedAmount = ethers.parseEther(amount.toString());
+            const proof = ethers.keccak256(ethers.toUtf8Bytes(`${destChainId}:${validCounterparty}:${tokenAddress}:${amount}`));
+            const swapId = this.generateSwapId();
+
+            const token = tokenAddress || ethers.ZeroAddress;
+            const value = token === ethers.ZeroAddress ? parsedAmount : 0;
+
+            const tx = await this.swap.openSwap(
+                swapId,
+                validCounterparty,
+                hashLock,
+                this.lockDuration,
+                {
+                    value,
+                    gasLimit: 350000
+                }
+            );
+            const receipt = await tx.wait();
 
             await this.storeCrossChainSwap({
                 swapId,
-                sourceChainId: 137, // Polygon
+                sourceChainId: 137,
                 destChainId,
-                initiator,
-                counterparty,
+                initiator: validInitiator,
+                counterparty: validCounterparty,
                 tokenAddress,
                 amount,
                 hashLock,
@@ -223,10 +219,10 @@ class AtomicSwapService {
     }
 
     async executeCrossChainSwap(swapId, secret, proof) {
-    try {
-        const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
-            gasLimit: 200000
-        });
+        try {
+            const tx = await this.swap.claimSwap(swapId, ethers.toUtf8Bytes(secret), {
+                gasLimit: 200000
+            });
             const receipt = await tx.wait();
 
             await this.updateCrossChainSwapStatus(swapId, 'executed', receipt.hash);

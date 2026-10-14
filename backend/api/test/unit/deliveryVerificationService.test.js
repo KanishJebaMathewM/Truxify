@@ -154,7 +154,9 @@ describe('deliveryVerificationService', () => {
         expect.objectContaining({ p_order_id: 'order-1' }),
         expect.anything(),
       );
-      expect(result).toEqual({ escrowUpdateFailed: false });
+      // #17632-era richer return: the row fields (amount_inr,
+      // order_display_id, payment_released) accompany the flag.
+      expect(result).toMatchObject({ escrowUpdateFailed: false });
     });
 
     it('throws when order is not in a delivery-ready status', async () => {

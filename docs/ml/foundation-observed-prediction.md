@@ -1,0 +1,11 @@
+# Prepared-vocabulary observed-text prediction
+
+The foundation prediction endpoint reads the prepared vocabulary without assigning new IDs. Unknown words return422: no trained UNK contract exists, so explicitly prepare/train the vocabulary first. Whitespace-only inputs and invalid mapping/count/work policies also return422. The entire request, including a truncated tail, is validated before selecting its existing max_len prefix.
+
+Native token tensors contain only observed positions, with explicit keep masks; genuine ID0 remains observed. Classification and regression use existing native heads. Classification normalization uses float64 stable softmax of finite native logits; regression retains its existing target scale. Results must have finite task-specific dimensions before strict serialization. Previous synthetic padding predictions intentionally change. Model architecture/parameters/checkpoints and training algorithms remain unchanged.
+
+Inference runs in a worker with a prediction-local reentrant fence retained through cancellation. Every prior module mode is restored on success/failure, and no gradients/parameters/vocabulary are changed. This fence serializes predictions only. Open17867 provides broader preparation/training/checkpoint ownership; preserve that outer fence when combining both route edits. Direct library callers must own their model operation; external writers/custom hooks/crossprocess/RNG recovery are excluded. Open17799 task-aware finetuning remains separate.
+
+Bounds:1..10000characters,1..4096words, contiguous unique integer vocabulary IDs within embedding capacity, valid max_len within registered positional capacity, estimated2billion dense/attention projection visits before tensor allocation. Work policy is not a measured latency/memory guarantee. CPUfloat32/64 tested; CUDA admitted untested. Full default bootstrap, physical quality/calibration/providers and new UNK training/batch/generation APIs are not claimed.
+
+Native tests compare a genuinely trained Transformer with observed unpadded head outputs and independent stable normalization; verify ID0/prefix identity, full-tail/unknown/capacity rejection before native forward, exact weights/gradients/mixed-mode preservation, finite failure and actual ASGI worker/cancellation ownership. Existing native attention/MLM/upload consumers remain in the gate.

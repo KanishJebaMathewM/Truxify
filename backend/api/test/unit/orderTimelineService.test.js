@@ -1,69 +1,57 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OrderTimelineService } from '../../src/services/order/orderTimelineService.js';
 
-const mockSupabase = { from: vi.fn() };
-const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+// vi.hoisted: the vi.mock factory below is hoisted above this line.
+const mockLogger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 
-vi.mock('../../src/config/db.js', () => ({ 
+vi.mock('../../src/config/db.js', () => ({
   redisClient: global.mockRedis,
   upstashRedisClient: global.mockRedis,
-  supabase: mockSupabase }));
+  supabase: { from: vi.fn() },
+}));
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
 describe('orderTimelineService', () => {
   let orderTimelineService;
+  let orderRepository;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    orderTimelineService = new OrderTimelineService({ supabase: mockSupabase, logger: mockLogger });
+    // The real constructor takes the repository positionally; timeline reads
+    // go through orderRepository.getTimeline.
+    orderRepository = { getTimeline: vi.fn() };
+    orderTimelineService = new OrderTimelineService(orderRepository);
   });
 
-  describe('addTimelineEvent', () => {
-    it('adds a timeline event with actor info', async () => {
-      const selectMock = vi.fn().mockResolvedValue({ data: [{ id: 'e1' }], error: null });
-      const insertMock = vi.fn().mockReturnValue({ select: selectMock });
-      mockSupabase.from.mockReturnValue({ insert: insertMock });
-
-      await orderTimelineService.addTimelineEvent('order-1', {
-        type: 'status_change', actor: 'driver-1', description: 'Order started',
-      });
-      expect(mockSupabase.from).toHaveBeenCalledWith('order_timeline');
-    });
-
-    it('throws when database insert fails', async () => {
-      const selectMock = vi.fn().mockResolvedValue({ data: null, error: { message: 'DB insert failed' } });
-      const insertMock = vi.fn().mockReturnValue({ select: selectMock });
-      mockSupabase.from.mockReturnValue({ insert: insertMock });
-
-      await expect(
-        orderTimelineService.addTimelineEvent('order-1', { type: 'status_change' }),
-      ).rejects.toThrow();
-    });
-  });
+  // NOTE: the previous 'addTimelineEvent' describe pinned a phantom API —
+  // no such method ever existed on OrderTimelineService (git history: the
+  // name only ever appeared in this test file). Timeline events are written
+  // via createOrderTimeline / completeMilestone / insertDropChangedEvent.
 
   describe('getOrderTimeline', () => {
-    it('returns events in chronological order', async () => {
+    it('returns events from the repository in order', async () => {
       const events = [
         { id: 'e1', created_at: '2026-08-01T10:00:00Z', type: 'created' },
         { id: 'e2', created_at: '2026-08-01T11:00:00Z', type: 'status_change' },
       ];
-      const orderMock = vi.fn().mockResolvedValue({ data: events, error: null });
-      const eqMock = vi.fn().mockReturnValue({ order: orderMock });
-      const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
-      mockSupabase.from.mockReturnValue({ select: selectMock });
+      orderRepository.getTimeline.mockResolvedValue({ data: events, error: null });
 
-      const result = await orderTimelineService.getOrderTimeline('order-1');
+      const result = await orderTimelineService.getOrderTimeline('OD-1');
+      expect(orderRepository.getTimeline).toHaveBeenCalledWith('OD-1');
       expect(result).toHaveLength(2);
     });
 
     it('returns empty array when no events', async () => {
-      const orderMock = vi.fn().mockResolvedValue({ data: [], error: null });
-      const eqMock = vi.fn().mockReturnValue({ order: orderMock });
-      const selectMock = vi.fn().mockReturnValue({ eq: eqMock });
-      mockSupabase.from.mockReturnValue({ select: selectMock });
+      orderRepository.getTimeline.mockResolvedValue({ data: [], error: null });
 
-      const result = await orderTimelineService.getOrderTimeline('order-1');
+      const result = await orderTimelineService.getOrderTimeline('OD-1');
       expect(result).toEqual([]);
+    });
+
+    it('throws a 500 DomainError when the repository read fails', async () => {
+      orderRepository.getTimeline.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
+
+      await expect(orderTimelineService.getOrderTimeline('OD-1')).rejects.toThrow('Failed to fetch order timeline.');
     });
   });
 });

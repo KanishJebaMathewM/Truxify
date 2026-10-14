@@ -129,7 +129,13 @@ class _TrailerRepositioningScreenState extends State<TrailerRepositioningScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(zone.locationName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Row(
+                  children: [
+                    Icon(icon, color: statusColor, size: 20),
+                    const SizedBox(width: 6),
+                    Text(zone.locationName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ],
+                ),
                 Chip(
                   label: Text(zone.status.toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
                   backgroundColor: statusColor,

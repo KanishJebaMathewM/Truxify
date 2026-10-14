@@ -17,7 +17,6 @@ void main() {
 
       final distanceKm = result['distance_km'] as double;
       final durationMins = result['estimated_duration_mins'] as int;
-      final fuelLiters = result['estimated_fuel_liters'] as double;
 
       // Recompute the naive formula the old code used (haversine*1.25/55).
       const double earthRadiusKm = 6371.0;

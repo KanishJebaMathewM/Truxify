@@ -67,7 +67,7 @@ class EdgeTpmsService {
   void simulateHighFrequencyData() {
     // Simulate normal readings
     int timestamp = DateTime.now().millisecondsSinceEpoch;
-    final timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+    Timer.periodic(const Duration(milliseconds: 100), (timer) {
       timestamp += 100;
       processReading('Drive Axle 2 - Outer Right', 100.0, timestamp);
       

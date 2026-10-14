@@ -464,7 +464,10 @@ class _TripsScreenState extends State<TripsScreen> {
 
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
-        _marketplaceRepository.fetchEnRouteLoads(),
+        _marketplaceRepository.fetchEnRouteLoads(
+          currentLat: currentLat,
+          currentLng: currentLng,
+        ),
         _marketplaceRepository.fetchDriverBids(),
       ]);
 

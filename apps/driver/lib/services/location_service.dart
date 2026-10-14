@@ -605,7 +605,6 @@ class LocationService {
       _authToken = token;
       unawaited(AuthTokenStore.persist(token));
     }
-    final driverId = Supabase.instance.client.auth.currentUser?.id ?? '';
 
     final baseUri = Uri.parse(defaultApiBaseUrl);
     final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';

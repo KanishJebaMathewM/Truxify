@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:truxify/l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
-import 'l10n/app_localizations.dart' as app_loc;
 import 'providers/language_provider.dart';
 import 'screens/public_tracking_screen.dart';
 import 'screens/splash_screen.dart';

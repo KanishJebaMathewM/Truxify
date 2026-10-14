@@ -1,4 +1,3 @@
-import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../models/app_models.dart';

@@ -87,7 +87,7 @@ class OrderReadModel {
     if (error) throw error;
     if (data && data.applied === false) return false;
 
-    this.clearCache(orderId);
+    this._cacheDelete(orderId);
     return true;
   }
 
@@ -105,41 +105,6 @@ class OrderReadModel {
       throw new Error(`${field} must be at least ${min}`);
     }
     return Math.min(parsed, max);
-  }
-
-  /**
-   * Atomically applies a consumed Kafka event to the read model.
-   *
-   * The `apply_order_event` RPC inserts the kafka_processed_events idempotency
-   * record and upserts `orders_read_model` in a single transaction, returning
-   * whether this event was newly applied. A duplicate, replayed or retried
-   * message returns false and is skipped — it can never double-apply.
-   *
-   * @param {{topic: string, eventId: string, orderId: string,
-   *          eventType: string, payload: object, version: number|null}} event
-   * @returns {Promise<boolean>} true when newly applied, false when duplicate
-   */
-  async applyEvent({ topic, eventId, orderId, eventType, payload, version }) {
-    if (!orderId) {
-      throw new Error('applyEvent requires an orderId (aggregate id)');
-    }
-    if (!eventId) {
-      throw new Error('applyEvent requires an eventId');
-    }
-    const { data, error } = await this.client.rpc('apply_order_event', {
-      p_order_id: String(orderId),
-      p_payload: payload || {},
-      p_event_type: eventType || 'ORDER_UPDATED',
-      p_version: version != null ? Number(version) : null,
-      p_topic: topic,
-      p_event_id: eventId,
-    });
-    if (error) throw error;
-    const applied = Boolean(data && data.applied === true);
-    if (applied) {
-      this._cacheDelete(orderId);
-    }
-    return applied;
   }
 
   /**
@@ -265,7 +230,7 @@ class OrderReadModel {
     }
 
     try {
-  const { data, error } = await this.client
+      const { data, error } = await this.client
         .from(ORDER_READ_MODEL_TABLE)
         .select('*')
         .eq('order_id', key)
@@ -298,10 +263,6 @@ class OrderReadModel {
       }
       if (filters.driverId) {
         query = query.eq('payload->>driver_id', filters.driverId);
-        query = query.eq('payload->customer_id', filters.customerId);
-      }
-      if (filters.driverId) {
-        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);
@@ -345,25 +306,6 @@ class OrderReadModel {
    */
   async getOrderStats() {
     const statuses = ORDER_STATUSES;
-   * Per-status order counts from the canonical `status` column of the single
-   * authoritative read model (the same column getOrderList filters on).
-   */
-    async getOrderStats() {
-    const statuses = [
-      'pending',
-      'created',
-      'truck_assigned',
-      'assigned',
-      'en_route_pickup',
-      'arrived_pickup',
-      'picked_up',
-      'in_transit',
-      'arriving',
-      'delivered',
-      'payment_released',
-      'cancelled',
-    ];
-
     const stats = {};
 
     for (const status of statuses) {
@@ -378,6 +320,7 @@ class OrderReadModel {
 
     return stats;
   }
+
   async clearCache() {
     this.cache.clear();
     logger.info('Read model cache cleared');

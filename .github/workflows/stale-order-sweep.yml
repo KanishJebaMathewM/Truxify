@@ -1,0 +1,26 @@
+name: Stale order sweep lease
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/workers/staleOrderWorker.js'
+      - 'backend/api/test/unit/staleOrderWorker*.test.js'
+      - 'backend/api/eslint.config.js'
+      - 'tools/stale-sweep-tests/**'
+      - '.github/workflows/stale-order-sweep.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stale-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: npm ci --prefix tools/stale-sweep-tests --ignore-scripts
+      - run: bash tools/stale-sweep-tests/run.sh

@@ -8,7 +8,25 @@ import db from '../db/index.js';
 import logger from '../middleware/logger.js';
 
 const router = Router();
+// backend/api/src/services/ml.js
 
+const ML_API_KEY = process.env.ML_API_KEY || '';
+
+/**
+ * Constructs standard headers for outbound ML service requests.
+ * @returns {Object} Headers object containing Content-Type and optional X-API-Key.
+ */
+function getHeaders() {
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  if (ML_API_KEY) {
+    headers['X-API-Key'] = ML_API_KEY;
+  }
+
+  return headers;
+}
 /**
  * GET /api/orders/load-offers
  * Returns all available load offers for the driver marketplace.

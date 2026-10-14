@@ -1,0 +1,1 @@
+{"name":"truxify-shard-query-tests","private":true,"type":"module","devDependencies":{"pg":"8.22.0","vitest":"4.1.11","eslint":"9.39.5","@eslint/js":"9.39.5","globals":"17.12.0"}}

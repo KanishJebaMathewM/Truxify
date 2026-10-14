@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const { describe, test } = require("node:test");
 const fs = require("fs");
 const path = require("path");
 const workflow = require(path.join(__dirname, "..", "dispute-resolution.json"));

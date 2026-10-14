@@ -31,7 +31,7 @@ dependencies:
 
   google_fonts: ^8.1.0
   fl_chart: ^1.2.0
-  flutter_riverpod: ^2.5.1
+  flutter_riverpod: ^3.4.3
   provider: ^6.1.2
   flutter_map: ^8.1.1
   latlong2: ^0.10.1

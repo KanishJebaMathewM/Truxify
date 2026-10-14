@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
 // Verified single import for predictEta to prevent SyntaxError (#14873)
 import { predictDemand, predictPrice, predictEta, matchEnRouteLoads, getAbTestingStatus, rollbackAbTest } from '../services/ml.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
@@ -193,27 +193,122 @@ router.get(
     const dayOfWeek = req.query.dayOfWeek || '1';
     const routeType = req.query.routeType || 'highway';
     const historicalSpeed = req.query.historicalSpeed || '60';
-    return `${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
+    // The ownership/role check runs AFTER a cache hit — the caller identity
+    // must be part of the key or a non-owner gets the owner's cached ETA.
+    const caller = req.user?.id || 'anon';
+    return `${caller}:${tripId}:${gpsBucket}:${routeDistance}:${timeOfDay}:${dayOfWeek}:${routeType}:${historicalSpeed}`;
   }),
   async (req, res) => {
-    const { routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = req.query;
-    try {
-      const result = await predictEta({
-        routeDistance: parseFloat(routeDistance || '10'),
-        timeOfDay: parseInt(timeOfDay || '12', 10),
-        dayOfWeek: parseInt(dayOfWeek || '1', 10),
-        routeType: routeType || 'highway',
-        historicalSpeed: parseFloat(historicalSpeed || '60')
-      });
-      return res.json(result);
-    } catch (err) {
-      logger.warn({ err: err.message }, '[ML] ETA fallback');
-      // Fallback
-      return res.json({
-        eta_minutes: 25.5,
-        confidence_interval: { lower: 20, upper: 30 }
-      });
+  try {
+    const { tripId, lat, lng } = req.query;
+    if (!tripId || typeof tripId !== 'string' || tripId.trim() === '') {
+      return res.status(400).json({ error: 'tripId is required.' });
     }
+    // PostgREST guard: the tripId lands inside an .or() filter string —
+    // reject characters that would break or rewrite the filter.
+    if (/[(),.'"]/.test(tripId)) {
+      return res.status(400).json({ error: 'tripId contains invalid characters.' });
+    }
+
+    // Resolve the trip by primary key or display id, then its linked order for
+    // the drop coordinates that define the remaining route.
+    const { data: trip, error: tripErr } = await supabaseAdmin
+      .from('trips')
+      .select('id, trip_display_id, order_id')
+      .or(`id.eq.${tripId},trip_display_id.eq.${tripId}`)
+      .maybeSingle();
+
+    if (tripErr) {
+      logger.error('[MlEta] Failed to resolve trip:', tripErr);
+      return res.status(500).json({ error: 'Failed to resolve trip.' });
+    }
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found.' });
+    }
+
+    let order = null;
+    if (trip.order_id) {
+      const { data: orderRes, error: orderErr } = await supabaseAdmin
+        .from('orders')
+        .select('pickup_lat, pickup_lng, drop_lat, drop_lng, customer_id, driver_id')
+        .eq('id', trip.order_id)
+        .maybeSingle();
+
+      if (orderErr) {
+        logger.error('[MlEta] Failed to resolve order for trip:', orderErr);
+        return res.status(500).json({ error: 'Failed to resolve order.' });
+      }
+      order = orderRes;
+    }
+
+    if (!order || !order.drop_lat || !order.drop_lng) {
+      return res.status(422).json({ error: 'Trip has no destination coordinates for ETA.' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const isOwner =
+        order.customer_id === req.user.id || order.driver_id === req.user.id;
+      if (!isOwner) {
+        return res.status(404).json({ error: 'Trip not found.' });
+      }
+    }
+
+    const currentLat = parseCoord(lat, -90, 90);
+    const currentLng = parseCoord(lng, -180, 180);
+
+    const latProvided = lat !== undefined && lat !== null && lat !== '';
+    const lngProvided = lng !== undefined && lng !== null && lng !== '';
+
+    if (latProvided !== lngProvided) {
+      return res.status(400).json({ error: 'Both lat and lng must be provided together.' });
+    }
+
+    let positionSource = 'pickup';
+    let distanceKm;
+    if (latProvided) {
+      if (currentLat === null || currentLng === null) {
+        return res.status(400).json({ error: 'Invalid lat/lng: lat must be within [-90, 90] and lng within [-180, 180].' });
+      }
+      if (currentLat === 0 && currentLng === 0) {
+        return res.status(422).json({ error: 'lat/lng at (0,0) is not a valid live position.' });
+      }
+      positionSource = 'live';
+      distanceKm = haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng));
+    } else {
+      distanceKm = haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    }
+
+    const now = new Date();
+    const routeType = distanceKm > 20 ? 'highway' : 'city';
+
+    try {
+      const prediction = await predictEta({
+        routeDistance: distanceKm,
+        timeOfDay: now.getHours(),
+        dayOfWeek: now.getDay(),
+        routeType,
+        historicalSpeed: routeType === 'highway' ? 55 : 40,
+      });
+
+      return res.json({
+        tripId: trip.trip_display_id || trip.id,
+        eta_minutes: prediction.eta_minutes,
+        confidence_interval: prediction.confidence_interval,
+        distance_km: Math.round(distanceKm * 100) / 100,
+        route_type: routeType,
+        source: 'ml',
+        position_source: positionSource,
+      });
+    } catch (mlErr) {
+      logger.warn('[MlEta] ML ETA prediction failed:', mlErr.message);
+      // The upstream error text can carry the internal ML service URL or
+      // upstream detail — the client gets a generic message.
+      return res.status(503).json({ error: 'ETA prediction is temporarily unavailable. Please try again shortly.' });
+    }
+  } catch (err) {
+    logger.error('Internal Server Error in GET /api/ml/eta:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
   }
 );
 

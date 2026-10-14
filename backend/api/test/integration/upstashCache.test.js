@@ -43,10 +43,31 @@ vi.mock('../../src/config/db.js', () => {
         })
       };
     }
+    // The trip-aware /api/ml/eta route (#18300) resolves trip → order.
+    if (table === 'trips') {
+      return {
+        select: () => ({
+          or: () => ({
+            maybeSingle: () => Promise.resolve({ data: { id: 'trip-123', trip_display_id: 'TRIP-123', order_id: 'order-123' }, error: null })
+          })
+        })
+      };
+    }
+    if (table === 'orders') {
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () => Promise.resolve({ data: { drop_lat: 28.6139, drop_lng: 77.2090, customer_id: 'user-123', driver_id: 'driver-1' }, error: null })
+          })
+        })
+      };
+    }
     return {};
   };
 
   return {
+    // /api/ml/eta resolves trip + order through supabaseAdmin.
+    supabaseAdmin: { from: mockFrom },
     supabase: {
       auth: {
         getUser: (...args) => mockGetUser(...args)

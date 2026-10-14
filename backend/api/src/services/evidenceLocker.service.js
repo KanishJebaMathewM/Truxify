@@ -54,7 +54,7 @@ class EvidenceLockerService {
             
         } catch (error) {
             console.error(`[EvidenceLocker] Failed to store evidence for dispute ${disputeId}:`, error.message);
-            throw new Error('Failed to push evidence to IPFS/Arweave storage.');
+            throw new Error('Failed to push evidence to IPFS/Arweave storage.', { cause: error });
         }
     }
 }

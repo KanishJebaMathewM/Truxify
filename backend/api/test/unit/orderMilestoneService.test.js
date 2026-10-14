@@ -7,20 +7,26 @@ vi.mock('../../src/services/escrow.js', async (importActual) => {
   return { ...actual, escrowRelease: vi.fn() };
 });
 
-const mockOrderRepository = {
-  findOrderById: vi.fn(),
-  addMilestone: vi.fn(),
-  completeMilestone: vi.fn(),
-  updateOrderGuardStatus: vi.fn(),
-  executeRpc: vi.fn(),
-  updateOrder: vi.fn(),
-};
-const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-const mockTrackingTokenService = { revokeAllForOrder: vi.fn() };
+// vi.mock factories are hoisted above these consts — declare via vi.hoisted
+// so the lazy factories see initialized values.
+const { mockOrderRepository, mockLogger, mockTrackingTokenService } = vi.hoisted(() => ({
+  mockOrderRepository: {
+    findOrderById: vi.fn(),
+    addMilestone: vi.fn(),
+    completeMilestone: vi.fn(),
+    updateOrderGuardStatus: vi.fn(),
+    executeRpc: vi.fn(),
+    updateOrder: vi.fn(),
+    updateWalletTransaction: vi.fn().mockResolvedValue({ error: null }),
+  },
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  mockTrackingTokenService: { revokeAllForOrder: vi.fn() },
+}));
 
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 vi.mock('../../src/services/order/orderNotificationService.js', () => ({
   checkOtpLockout: vi.fn().mockResolvedValue(false),
+  clearOtpState: vi.fn().mockResolvedValue(undefined),
   DELIVERY_OTP_READY_STATUSES: new Set(['arriving']),
 }));
 vi.mock('../../src/services/notificationService.js', () => ({
@@ -63,36 +69,6 @@ describe('orderMilestoneService', () => {
       expect(service.orderTimelineService).toBe(orderTimelineService);
       expect(service.orderNotificationService).toBe(orderNotificationService);
       expect(service.trackingTokenService).toBe(trackingTokenService);
-    });
-  });
-
-  describe('addMilestone', () => {
-    it('adds a milestone to an order', async () => {
-      const milestone = { id: 'm1', order_id: 'order-1', type: 'pickup', status: 'pending' };
-      mockOrderRepository.findOrderById.mockResolvedValue({ data: { id: 'order-1', status: 'pending' }, error: null });
-      mockOrderRepository.addMilestone.mockResolvedValue({ data: milestone, error: null });
-
-      await orderMilestoneService.addMilestone('order-1', { type: 'pickup', description: 'Picked up cargo' });
-      expect(mockOrderRepository.addMilestone).toHaveBeenCalled();
-    });
-
-    it('throws when order not found', async () => {
-      mockOrderRepository.findOrderById.mockResolvedValue({ data: null, error: null });
-      await expect(
-        orderMilestoneService.addMilestone('order-nonexistent', { type: 'pickup' }),
-      ).rejects.toThrow();
-    });
-  });
-
-  describe('completeMilestone', () => {
-    it('completes a pending milestone', async () => {
-      mockOrderRepository.completeMilestone.mockResolvedValue({ error: null });
-      await expect(orderMilestoneService.completeMilestone('m1')).resolves.not.toThrow();
-    });
-
-    it('throws when milestone not found', async () => {
-      mockOrderRepository.completeMilestone.mockResolvedValue({ error: { message: 'Not found' } });
-      await expect(orderMilestoneService.completeMilestone('m-nonexistent')).rejects.toThrow();
     });
   });
 

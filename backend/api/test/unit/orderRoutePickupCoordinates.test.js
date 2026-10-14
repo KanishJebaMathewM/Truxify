@@ -9,7 +9,7 @@ const { validation, straightLine } = vi.hoisted(() => {
     straightLine: vi.fn(),
   };
 });
-vi.mock('../../src/config/db.js', () => ({ supabase: {}, mongoDb: null }));
+vi.mock('../../src/config/db.js', () => ({ supabase: {}, supabaseAdmin: {}, mongoDb: null }));
 vi.mock('../../src/repositories/orderRepository.js', () => ({ OrderRepository: class {} }));
 vi.mock('../../src/services/order/bidAcceptanceService.js', () => ({
   BidAcceptanceService: class {}, DomainError: class extends Error {},
@@ -21,6 +21,7 @@ vi.mock('../../src/services/order/orderValidationService.js', () => ({
 }));
 vi.mock('../../src/services/escrow.js', () => ({
   buildDepositTx: vi.fn(), recordDepositTx: vi.fn(), submitEscrowRefund: vi.fn(),
+  escrowRelease: vi.fn(),
 }));
 vi.mock('../../src/services/ml.js', () => ({ predictDemand: vi.fn() }));
 vi.mock('../../src/services/osrm.js', () => ({

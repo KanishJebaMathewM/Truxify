@@ -45,7 +45,7 @@ const createMockQueryBuilder = (withdrawals = mockWithdrawals) => {
     // Reset state helpers if needed between calls
   };
   return query;
-};.
+};
 const admin = {
   from: vi.fn(),
   rpc: vi.fn(),

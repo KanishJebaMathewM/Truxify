@@ -4,16 +4,7 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
-// Before
-console.error('Error inserting notification:', error);
 
-// After
-logger.error({
-  event: 'NOTIFICATION_INSERT_ERROR',
-  error: error.message,
-  stack: error.stack,
-  requestId: req?.id || requestId,
-}, 'Failed to insert notification into database');
 /**
  * Notification Service
  * Handles FCM push notification fan-outs, device token deduplication,
@@ -286,20 +277,6 @@ async function sendBatchWithRetry(chunkTokens, message, userId, chunkIndex) {
 
 /**
  * Fan out one push notification to every ACTIVE device belonging to the user.
- *
- *   Notification Request
- *        ↓
- *   Load Active Devices (user_devices)
- *        ↓
- *   Deduplicate FCM Tokens
- *        ↓
- *   Chunk → sendEachForMulticast
- *        ↓
- *   Per-Device Result → Success / Failure
- *        ↓
- *   Deactivate Permanent Invalid Tokens
- *
- * A failure on one device NEVER prevents delivery to the user's other devices.
  */
 export async function sendFcmNotification(userId, notification, data = {}) {
   return measureExecution('NotificationService.sendFcmNotification', async () => {
@@ -323,9 +300,6 @@ export async function sendFcmNotification(userId, notification, data = {}) {
     const tokenMap = dedupeTokens(activeDevices);
     const tokens = [...tokenMap.keys()];
 
-    // Controlled backward-compat fallback: only when the user has NO active
-    // device records. Deduplication (Map) prevents double-sending if the same
-    // token exists both in user_devices and profiles.
     if (tokens.length === 0) {
       const profileToken = await getProfileFcmToken(userId);
       if (profileToken) {
@@ -600,11 +574,6 @@ export async function insertNotification(notificationData) {
   return data;
 }
 
-/**
- * Existing push entry point used by order lifecycle, payments, escrow and
- * document flows. Persists to the notifications table, then fans the push out
- * to every active device via sendFcmNotification.
- */
 export async function sendPushNotification(userId, title, body, notifType, metadata = {}, data = {}) {
   return measureExecution('NotificationService.sendPushNotification', async () => {
     if (notifType && !ALLOWED_NOTIF_TYPES.has(notifType)) {
@@ -640,11 +609,6 @@ export async function sendPushNotification(userId, title, body, notifType, metad
   });
 }
 
-/**
- * Sends the delivery verification OTP to the customer with plaintext OTP included 
- * in the notification body, database metadata, and FCM data payload.
- * Fixes: #10132 (Regression of #5633)
- */
 export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 

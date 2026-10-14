@@ -1,4 +1,5 @@
 import wimBypassRouter from './routes/wimBypass.js';
+import { validateWimConfig } from './config/wim.js';
 import iftaTaxRouter from './routes/iftaTax.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
@@ -185,7 +186,8 @@ import {
 import './subscribers/reputationSubscriber.js'
 
 // --- AUDIT LOGGING IMPORTS ---
-import { auditErrors, startAuditFlushTimer } from './middleware/auditLogger.js';
+import { auditErrors } from './middleware/auditLogger.js';
+import { startAuditFlushTimer } from './services/auditService.js';
 
 
 // Configuration load from root folder is handled in db.js
@@ -678,40 +680,6 @@ app.get('/api/tracing/health', (req, res) => {
 app.get('/', getRoot)
 app.use(notFound)
 
-// Sentry Error Handler
-app.use(sentryErrorHandler)
-
-// Global Error Handler
-app.use(errorHandler)
-
-const PORT = process.env.PORT || 4000
-
-server.listen(PORT, async () => {
-  logger.info(`Server running on port ${PORT}`)
-  
-  // Start background workers
-  startOutboxRelayWorker()
-  startEscrowReleaseReconciliation()
-  startEscrowRefundReconciliation()
-  startEscrowFundingReconciliation()
-  startReputationReconciliation()
-  startDocumentExpiryWorker()
-  startDlqWorker()
-  startStaleOrderWorker()
-  startDevicePruningWorker()
-  startWithdrawalSettlementWorker()
-
-  // Initialize WebSockets and servers
-  initWebSocketServer(server)
-  initLocationServer(server)
-  initWebRTCSignaling(server)
-
-  // Start blockchain monitoring divergence detector explicitly
-  stateDivergenceDetector.start?.()
-})
-
-export default app
-
 // ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
 // ============================================================================
@@ -1081,3 +1049,5 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
+
+export default app

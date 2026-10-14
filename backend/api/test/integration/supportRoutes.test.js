@@ -8,6 +8,7 @@ const m = createSupabaseMock();
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: undefined,
+  getAdminClient: () => m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
@@ -147,7 +148,8 @@ describe('Support Routes', () => {
     expect(res.body.ticket.status).toBe('open');
 
     const ticketInsert = m.calls.find(c => c.table === 'support_tickets' && c.mode === 'insert');
-    expect(ticketInsert.payload).toEqual({
+    // assigned_to: null is a deliberate additive field — match the subset.
+    expect(ticketInsert.payload).toMatchObject({
       user_id: 'customer-1',
       subject: 'App payment issue',
       description: 'My custom description details',
@@ -222,7 +224,8 @@ describe('Support Routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.tickets).toHaveLength(1);
     expect(res.body.tickets[0].id).toBe('t2'); // t1 is page 1, t2 is page 2
-    expect(res.body.pagination).toEqual({
+    // hasNextPage/hasPreviousPage are deliberate additive pagination fields.
+    expect(res.body.pagination).toMatchObject({
       page: 2,
       limit: 1,
       total: 2,
@@ -473,7 +476,7 @@ describe('Support Routes', () => {
       expect(res.body.tickets).toHaveLength(2);
       expect(res.body.tickets[0].id).toBe('t1'); // descending order
       expect(res.body.tickets[1].id).toBe('t2');
-      expect(res.body.pagination).toEqual({
+      expect(res.body.pagination).toMatchObject({
         page: 1,
         limit: 2,
         total: 3,

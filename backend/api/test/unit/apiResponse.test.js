@@ -60,9 +60,11 @@ describe('apiResponse helpers', () => {
       expect(result.pagination.hasPrevPage).toBe(false);
     });
 
-    it('clamps negative page values to 0', () => {
+    it('clamps negative page values to 1', () => {
+      // 21442ebf57 normalizes page/limit/total — 1-based pagination never
+      // emits page 0.
       const result = paginated([], -5, 10, 0);
-      expect(result.pagination.page).toBe(0);
+      expect(result.pagination.page).toBe(1);
       expect(result.pagination.hasNextPage).toBe(false);
       expect(result.pagination.hasPrevPage).toBe(false);
     });

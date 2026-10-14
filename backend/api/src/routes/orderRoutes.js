@@ -207,10 +207,12 @@ import {
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import {
+  POD_CONFIG,
   validatePodFile,
   generatePodStoragePath,
   uploadPodFile,
-  createPodSignedUrl
+  createPodSignedUrl,
+  verifyPodAccess
 } from '../lib/storage/podStorage.js';
 
 const router = express.Router();
@@ -769,47 +771,6 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
     }
   }
 }); 
-// Path 1: Already funded or confirmation path handling
-if (alreadyFunded) {
-  const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
-    orderId, 
-    {
-      escrow_status: 'funded',
-      escrow_funding_error: null,
-      version: order.version + 1,
-      updated_at: new Date().toISOString(),
-    }, 
-    [
-      { op: 'eq', column: 'escrow_status', value: 'funding' },
-      { op: 'eq', column: 'version', value: order.version }
-    ], 
-    'id'
-  );
-
-  if (updateErr) {
-    return res.status(500).json({ success: false, error: updateErr.message });
-  }
-} else {
-  // Path 2: Standard confirm deposit success path
-  const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(
-    orderId, 
-    {
-      escrow_status: 'funded',
-      escrow_funding_error: null,
-      version: order.version + 1,
-      updated_at: new Date().toISOString(),
-    }, 
-    [
-      { op: 'eq', column: 'escrow_status', value: 'funding' },
-      { op: 'eq', column: 'version', value: order.version }
-    ], 
-    'id'
-  );
-
-  if (updateErr) {
-    return res.status(500).json({ success: false, error: updateErr.message });
-  }
-}
 router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
      const orderId = req.params.id;
      
@@ -882,11 +843,6 @@ router.post('/:id/confirm-deposit', authenticate, async (req, res, next) => {
    });
 
 
-//  ============================================================================
-//  18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
-//  18b. VIEW BIDS FOR AN ORDER (CUSTOMER) — GET /api/orders/:id/bids
-//  18c. ACCEPT A BID (CUSTOMER) — POST /api/orders/:id/bids/:bidId/accept
-});
 
 //  ============================================================================
 //  18a. SUBMIT BID FOR A LOAD (DRIVER) — POST /api/orders/:id/bids
@@ -1180,5 +1136,242 @@ router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:subm
   }
 });
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/orders/:id/pod — Proof of Delivery upload (photo + signature).
+// The route registration was lost to a splice; the storage helpers in
+// lib/storage/podStorage.js carry the upload logic.
+// ─────────────────────────────────────────────────────────────────────────────
+const podUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: POD_CONFIG.PHOTO_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    // Silently exclude non-image types — the route's no-valid-files guard
+    // then rejects the submission (the suite's contract).
+    const ok = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.mimetype);
+    cb(null, ok);
+  },
+});
+
+router.post(
+  '/:id/pod',
+  authenticate,
+  userLimiter,
+  podUploadLimiter,
+  validateParams(paramIdSchema),
+  podUpload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'signature', maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const photo = req.files?.photo?.[0] ?? null;
+      const signature = req.files?.signature?.[0] ?? null;
+
+      if (!photo && !signature) {
+        return res.status(400).json({ error: 'At least one valid proof file (signature or photo) is required' });
+      }
+
+      // Only the assigned driver (or an admin) may UPLOAD PoD — customers can
+      // read but not write. verifyPodAccess is the read guard; uploads are
+      // stricter.
+      if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Access Denied' });
+      }
+      const access = await verifyPodAccess(req.user, orderId, orderRepository);
+      if (!access.authorized) {
+        const status = access.reason === 'Order not found' ? 404 : 403;
+        return res.status(status).json({ error: access.reason === 'Order not found' ? 'Order not found' : 'Access Denied' });
+      }
+
+      const uploadTimestamp = new Date().toISOString();
+      const result = { message: 'Proof of Delivery uploaded successfully', uploadTimestamp };
+
+      for (const [type, file] of [['photo', photo], ['signature', signature]]) {
+        if (!file) continue;
+        const validation = validatePodFile(file, type);
+        if (!validation.valid) {
+          return res.status(422).json({ error: validation.error });
+        }
+        // Magic-bytes check: a PDF renamed to .png must not reach storage.
+        try {
+          validateDocumentBuffer(file.buffer, file.mimetype);
+        } catch (docErr) {
+          return res.status(400).json({ error: `Invalid ${type} file: ${docErr.message}` });
+        }
+        const storagePath = generatePodStoragePath(req.user.id, orderId, type, file.originalname);
+        const upload = await uploadPodFile({
+          fileBuffer: file.buffer,
+          storagePath,
+          mimeType: file.mimetype,
+          userToken: req.token,
+        });
+        if (!upload.success) {
+          return res.status(500).json({ error: `PoD storage upload failed: ${upload.error || 'unknown'}` });
+        }
+        const hash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+        const signed = await createPodSignedUrl(storagePath, POD_CONFIG.SIGNED_URL_TTL_SECONDS, req.token);
+        if (type === 'photo') {
+          result.photoUrl = signed.url || null;
+          result.photoHash = hash;
+        } else {
+          result.signatureUrl = signed.url || null;
+          result.signatureHash = hash;
+        }
+      }
+
+      // Persist the PoD URLs on the order.
+      const orderUpdate = {
+        pod_photo_url: result.photoUrl ?? null,
+        pod_signature_url: result.signatureUrl ?? null,
+        pod_photo_hash: result.photoHash ?? null,
+        pod_signature_hash: result.signatureHash ?? null,
+        updated_at: uploadTimestamp,
+      };
+      await orderRepository.updateOrder(orderId, orderUpdate);
+
+      return res.status(200).json(result);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        return res.status(err.status).json(err.payload);
+      }
+      logger.error({ err }, '[pod] Upload failed');
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+);
+
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status');
+    orderValidationService.assertOrderFound(order);
+
+    if (!order.driver_id) {
+      return res.status(404).json({ error: 'No driver assigned to this order.' });
+    }
+
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id, order_id: order.id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const telemetry = latestTelemetry[0];
+    return res.json({
+      driverId: telemetry.driver_id,
+      orderId: telemetry.order_id || order.id,
+      lat: telemetry.lat,
+      lng: telemetry.lng,
+      timestamp: telemetry.timestamp,
+    });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error({ err }, 'Fetch driver location exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
+router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status, pickup_lat, pickup_lng, drop_lat, drop_lng');
+    orderValidationService.assertOrderFound(order);
+
+    if (order.drop_lat == null || order.drop_lng == null) {
+      return res.status(500).json({ error: 'Order is missing destination coordinates.' });
+    }
+
+    if (!order.driver_id) {
+      const originLat = Number(order.pickup_lat);
+      const originLng = Number(order.pickup_lng);
+      const destLat = Number(order.drop_lat);
+      const destLng = Number(order.drop_lng);
+
+      if (!Number.isFinite(originLat) || !Number.isFinite(originLng) ||
+        !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+        return res.status(500).json({ error: 'Order has invalid coordinates.' });
+      }
+
+      const feature = buildStraightLineGeometry({ originLat, originLng, destLat, destLng });
+      if (!feature) {
+        return res.status(500).json({ error: 'Failed to compute route.' });
+      }
+      return res.json({ ...feature, fallback: true });
+    }
+
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id, order_id: order.id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const originLat = Number(latestTelemetry[0].lat);
+    const originLng = Number(latestTelemetry[0].lng);
+
+    if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
+      return res.status(404).json({ error: 'Latest telemetry record is missing valid coordinates.' });
+    }
+
+    const destLat = Number(order.drop_lat);
+    const destLng = Number(order.drop_lng);
+
+    if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+      logger.error(`[route] Order ${order.id} has non-numeric destination coordinates.`);
+      return res.status(500).json({ error: 'Order has invalid destination coordinates.' });
+    }
+
+    let feature = await getRouteGeometry({ originLat, originLng, destLat, destLng });
+    let usedFallback = false;
+
+    if (!feature) {
+      logger.warn(`[route] OSRM unavailable for order ${order.id}, falling back to straight line.`);
+      feature = buildStraightLineGeometry({ originLat, originLng, destLat, destLng });
+      usedFallback = true;
+    }
+
+    if (!feature) {
+      return res.status(502).json({ error: 'Failed to compute route.' });
+    }
+
+    return res.json({ ...feature, fallback: usedFallback });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error({ err }, 'Fetch order route exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 export default router;

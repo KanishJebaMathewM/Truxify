@@ -1,22 +1,34 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import { RequestCache } from './requestCache.js';
 
-export const requestContext = new AsyncLocalStorage();
+const asyncLocalStorage = new AsyncLocalStorage();
 
+/**
+ * Retrieves the current request-scoped cache (Map), creating one if it doesn't exist.
+ * Falls back to a global map if called outside an active request context.
+ */
 export function getRequestCache() {
-  const store = requestContext.getStore();
-  return store?.requestCache ?? null;
+  const store = asyncLocalStorage.getStore();
+  if (!store) {
+    return global.__fallbackRequestCache || (global.__fallbackRequestCache = new Map());
+  }
+  if (!store.cache) {
+    store.cache = new Map();
+  }
+  return store.cache;
 }
 
-
-// === Spec 1: ===
-// === Spec 1: safe JSON parsing fallback ===
-export function safeJsonParseWithFallback(raw, fallback) {
-  if (raw == null) return fallback;
+/**
+ * Safely parses a JSON string, returning the fallback value if parsing fails or input is invalid.
+ */
+export function safeJsonParseWithFallback(str, fallback) {
+  if (typeof str !== 'string') {
+    return fallback;
+  }
   try {
-    const v = JSON.parse(raw);
-    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
-  } catch (_) {}
-  return fallback;
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
 }
 
+export { asyncLocalStorage };

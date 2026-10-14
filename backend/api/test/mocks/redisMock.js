@@ -25,6 +25,18 @@ class RedisMock {
         return this.store.get(key) || null;
     }
 
+    async expire(key, seconds) {
+        if (!this.store.has(key)) return 0;
+        this.expirations.set(key, Date.now() + seconds * 1000);
+        return 1;
+    }
+
+    async incr(key) {
+        const current = Number(this.store.get(key) ?? 0) + 1;
+        this.store.set(key, String(current));
+        return current;
+    }
+
     async del(key) {
         this.store.delete(key);
         this.expirations.delete(key);

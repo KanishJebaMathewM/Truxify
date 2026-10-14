@@ -1,3 +1,6 @@
+from threading import RLock
+from foundation.optimizer_transition import operation_owned
+from .checkpoint_restore import restore_pair
 import logging
 import math
 from typing import Dict, List, Optional, Tuple
@@ -132,7 +135,7 @@ class NeRFRenderer:
                     num_samples: Optional[int] = None, *, differentiable: bool = False) -> Dict:
         """Opt into the actual native render graph; ordinary inference stays detached."""
         if not isinstance(differentiable, bool):
-            raise ValueError('differentiable must be a boolean')
+            raise ValueError('differentiable must be a boolean')  # noqa: TRY004 - uniform native admission
         with torch.set_grad_enabled(differentiable and torch.is_grad_enabled()):
             return self._render_rays(ray_origins, ray_directions, num_samples)
 
@@ -250,12 +253,14 @@ class NeRFTrainer:
         lr: float = 5e-4,
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
     ):
+        self._operation_lock = RLock()
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         
         logger.info(f"✅ NeRF Trainer initialized on {device}")
     
+    @operation_owned
     def train_step(
         self,
         points: torch.Tensor,
@@ -267,7 +272,7 @@ class NeRFTrainer:
         self.optimizer.zero_grad()
         
         # Forward pass
-        densities, colors = self.model(points, directions)
+        _densities, colors = self.model(points, directions)
         
         # Compute loss
         loss = F.mse_loss(colors, target_rgb)
@@ -278,6 +283,7 @@ class NeRFTrainer:
         
         return loss.item()
     
+    @operation_owned
     def train(
         self,
         train_data: Dict,
@@ -318,11 +324,13 @@ class NeRFTrainer:
         return {'losses': losses, 'final_loss': losses[-1], 'objective': 'pointwise_rgb',
                 'density_gradient_path': False}
     
+    @operation_owned
     def train_rays(self, ray_data: Dict, epochs: int = 100, batch_size: int = 256,
                    num_samples: int = 64, near: float = 0.1, far: float = 10.0) -> Dict:
         """Fit explicit pixel/ray observations through density-sensitive rendering."""
         return fit_rays(self, ray_data, epochs, batch_size, num_samples, near, far, NeRFRenderer)
 
+    @operation_owned
     def save(self, path: str = "models/nerf.pth"):
         """Save model"""
         torch.save({
@@ -331,9 +339,9 @@ class NeRFTrainer:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @operation_owned
     def load(self, path: str = "models/nerf.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        restore_pair(self.model, self.optimizer, checkpoint)
         logger.info(f"✅ Model loaded from {path}")

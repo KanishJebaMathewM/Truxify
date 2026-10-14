@@ -177,7 +177,6 @@ class AboutScreen extends StatelessWidget {
 
 class _ContactRow extends StatelessWidget {
   const _ContactRow({
-    super.key,
     required this.icon,
     required this.label,
     required this.value,
@@ -229,7 +228,7 @@ class _ContactRow extends StatelessWidget {
 }
 
 class _SocialIcon extends StatelessWidget {
-  const _SocialIcon({super.key, required this.icon});
+  const _SocialIcon({required this.icon});
 
   final IconData icon;
 

@@ -874,43 +874,31 @@ class FraudDetectionService {
   }
 
   async getFraudStats() {
-    if (!supabaseAdmin) return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
+    const empty = { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
+    if (!supabaseAdmin) return empty;
 
-    // PostgREST caps a single response at 1000 rows, so page through the whole
-    // table instead of letting the stats silently reflect only the latest slice.
-    const pageSize = 1000;
-    const scores = [];
-    while (true) {
-      const from = scores.length;
-      const { data: page, error } = await supabaseAdmin
-        .from('fraud_risk_scores')
-        .select('risk_score, created_at')
-        .order('created_at', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) {
-        logger.error('Failed to load fraud stats:', error);
-        return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
-      }
-
-      scores.push(...(page || []));
-      if (!page || page.length < pageSize) {
-        break;
-      }
+    // Aggregate in one PostgreSQL snapshot instead of transferring the history.
+    // Deploy the matching migration before this API version (no row-scan fallback).
+    const { data, error } = await supabaseAdmin.rpc('get_fraud_stats_aggregate');
+    if (error) {
+      logger.error('Failed to load fraud stats:', error);
+      return empty;
     }
 
-    const safe = scores;
-
-    const highRisk = safe.filter(s => s.risk_score > 0.7).length;
-    const mediumRisk = safe.filter(s => s.risk_score > 0.4 && s.risk_score <= 0.7).length;
-    const lowRisk = safe.filter(s => s.risk_score <= 0.4).length;
+    const counts = ['total', 'highRisk', 'mediumRisk', 'lowRisk'];
+    if (!data || counts.some(key => !Number.isSafeInteger(data[key]) || data[key] < 0) ||
+        !Number.isFinite(data.avgScore) ||
+        data.highRisk + data.mediumRisk + data.lowRisk !== data.total) {
+      logger.error('Invalid fraud stats aggregate response');
+      return empty;
+    }
 
     return {
-      total: safe.length,
-      highRisk,
-      mediumRisk,
-      lowRisk,
-      avgScore: safe.reduce((sum, s) => sum + s.risk_score, 0) / safe.length || 0
+      total: data.total,
+      highRisk: data.highRisk,
+      mediumRisk: data.mediumRisk,
+      lowRisk: data.lowRisk,
+      avgScore: data.avgScore
     };
   }
 

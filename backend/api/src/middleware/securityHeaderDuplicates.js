@@ -10,7 +10,10 @@ const MONITORED_HEADERS = new Set([
 ]);
 
 export default function securityHeaderDuplicates(req, res, next) {
-  const seen = new Set();
+  // header -> last assigned value: identical re-writes are silent no-ops
+  // (never forwarded downstream), conflicting re-writes warn once per header.
+  const lastValues = new Map();
+  const warned = new Set();
   const seenCookies = new Set();
   const originalSetHeader = res.setHeader.bind(res);
 
@@ -24,6 +27,8 @@ export default function securityHeaderDuplicates(req, res, next) {
 
     if (MONITORED_HEADERS.has(header)) {
       const warnDuplicate = () => {
+        if (warned.has(header)) return;
+        warned.add(header);
         logger.warn(
           {
             method: req.method,
@@ -45,10 +50,15 @@ export default function securityHeaderDuplicates(req, res, next) {
           }
           seenCookies.add(normalized);
         }
-      } else if (seen.has(header)) {
+      } else if (lastValues.has(header)) {
+        if (lastValues.get(header) === value) {
+          // Identical re-write — nothing changes downstream; don't forward.
+          return res;
+        }
         warnDuplicate();
+        lastValues.set(header, value);
       } else {
-        seen.add(header);
+        lastValues.set(header, value);
       }
     }
 

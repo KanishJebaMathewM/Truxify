@@ -7,7 +7,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { requirePolicy } from '../middleware/policy.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import logger from '../middleware/logger.js';
 import { getRoute } from '../services/osrm.js';
 
@@ -42,13 +42,15 @@ async function geocodeAddress(address) {
  */
 router.post('/plan', authenticate, requirePolicy('route:write'), async (req, res) => {
   try {
-    const { origin, destination } = req.body;
+    const { origin, destination, routeId } = req.body;
 
     if (!origin || !destination) {
       return res.status(400).json({
         success: false,
         error: 'Both origin and destination are required for route planning.',
       });
+    }
+
     const isBlank = (str) =>
       str === undefined ||
       str === null ||

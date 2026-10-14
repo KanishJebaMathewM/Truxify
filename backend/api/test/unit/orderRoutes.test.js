@@ -300,7 +300,10 @@ describe('orderRoutes implementation wiring', () => {
     const start = source.indexOf("'/:id/geofence-confirm'");
     const end = source.indexOf('// 5. FETCH MY ORDER HISTORY', start);
     const section = source.slice(start, end);
-    expect(section).toContain('driver_lat and driver_lng are required');
+    // The geofence endpoint was deliberately rewritten fail-closed around
+    // server-side telemetry — client-supplied driver_lat/lng are no longer
+    // trusted (or accepted).
+    expect(section).toContain('Telemetry database not available');
     expect(section).toContain('Number.isFinite');
     expect(section).toContain('geofenceAutoConfirm');
     expect(section).toContain('Internal Server Error');

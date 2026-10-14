@@ -49,9 +49,23 @@ function errorMessage(err, fallback) {
 }
 
 /**
- * POST /api/carbon-credits/mint
- * Calculates carbon savings from telematics & mints cross-chain carbon tokens.
- * Restricted to carriers, drivers, fleet owners, and admins.
+ * @openapi
+ * /api/carbon-credits/mint:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Mint cross-chain carbon credit tokens from telematics savings
+ *     description: Restricted to carriers, drivers, fleet owners, and admins.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Carbon credit tokens minted successfully
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       403:
+ *         description: Caller role may not mint carbon credit tokens
+ *       500:
+ *         description: Carbon credit minting failed
  */
 router.post('/mint', authenticate, userLimiter, async (req, res) => {
   try {

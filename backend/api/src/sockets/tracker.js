@@ -1,4 +1,5 @@
 import { WebSocketServer } from 'ws';
+import { fanoutTrackingPayload } from './trackingFanout.js';
 import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
@@ -81,12 +82,7 @@ const TRACKER_CHANNELS = {
 
 function deliverToLocalSubscribers(targetId, payload) {
   if (!targetId || !trackingSubscriptions.has(targetId)) return;
-  const clients = trackingSubscriptions.get(targetId);
-  clients.forEach((client) => {
-    if (client.readyState === 1) {
-      client.send(payload);
-    }
-  });
+  fanoutTrackingPayload(trackingSubscriptions.get(targetId), payload);
 }
 
 function initRedisTrackerPubSub() {
@@ -419,30 +415,31 @@ function buildClientPayloadFromInternalEvent(event) {
   });
 }
 
+/**
+ * Deliver a location payload to a subscription map's local subscribers.
+ *
+ * Semantics preserved from the original implementation:
+ *   - clients subscribed to the order (`orderDisplayId`) receive it
+ *   - clients subscribed to the driver (`driverId`) receive it
+ *   - only open sockets (readyState 1) receive it
+ *
+ * A client subscribed to both the order and the driver receives the payload
+ * exactly ONCE (the previous code could send it twice for such a client).
+ *
+ * @param {Map} subscriptionMap - this replica's local subscription registry.
+ * @param {string} payload - serialized client-facing payload.
+ * @param {string|null} orderDisplayId - order routing key.
+ * @param {string|null} driverId - driver routing key.
+ * @param {object} [metricsBus] - location event bus used to record delivery metrics.
+ * @returns {number} admitted sends; not a peer-receipt guarantee.
+ */
 function deliverLocationToLocalSubscribers(subscriptionMap, payload, orderDisplayId, driverId, metricsBus) {
   const bus = metricsBus || locationEventBus;
-  const deliveredSockets = new Set();
-  let delivered = 0;
-
-  if (orderDisplayId && subscriptionMap.has(orderDisplayId)) {
-    for (const client of subscriptionMap.get(orderDisplayId)) {
-      if (client.readyState === 1 && !deliveredSockets.has(client)) {
-        deliveredSockets.add(client);
-        client.send(payload);
-        delivered++;
-      }
-    }
-  }
-
-  if (driverId && subscriptionMap.has(driverId)) {
-    for (const client of subscriptionMap.get(driverId)) {
-      if (client.readyState === 1 && !deliveredSockets.has(client)) {
-        deliveredSockets.add(client);
-        client.send(payload);
-        delivered++;
-      }
-    }
-  }
+  const clients = [
+    ...(orderDisplayId ? subscriptionMap.get(orderDisplayId) || [] : []),
+    ...(driverId ? subscriptionMap.get(driverId) || [] : []),
+  ];
+  const delivered = fanoutTrackingPayload(clients, payload);
 
   bus?.recordDelivery(delivered);
   return delivered;

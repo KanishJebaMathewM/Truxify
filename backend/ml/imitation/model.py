@@ -1,3 +1,6 @@
+from threading import RLock
+from foundation.optimizer_transition import operation_owned, optimizer_transition
+from .cloning_transition import admit_optimizer, cloning_owned, demonstrations, states
 import logging
 from numbers import Integral
 from typing import Dict, List, Tuple
@@ -26,6 +29,7 @@ class BehavioralCloning(nn.Module):
         hidden_dim: int = 256
     ):
         super().__init__()
+        self._operation_lock = RLock()
         
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -48,15 +52,30 @@ class BehavioralCloning(nn.Module):
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.policy(state)
     
+    def __getstate__(self):
+        state = super().__getstate__()
+        state.pop('_operation_lock', None)
+        return state
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self._operation_lock = RLock()
+
+    @operation_owned
     def predict_action(self, state: np.ndarray) -> np.ndarray:
-        """Predict action from state"""
-        self.eval()
-        with torch.no_grad():
-            state_tensor = torch.tensor(state, dtype=torch.float32)
-            if len(state_tensor.shape) == 1:
-                state_tensor = state_tensor.unsqueeze(0)
-            action = self(state_tensor)
-        return action.cpu().numpy()
+        """Owned continuous vector inference, preserving prior module modes."""
+        observation = states(self, state)
+        modes = [(module, module.training) for module in self.modules()]
+        try:
+            self.eval()
+            with torch.no_grad():
+                action = self(observation)
+                if action.shape != (len(observation), self.action_dim) or not torch.isfinite(action).all():
+                    raise ValueError("Cloning predictions require finite paired action vectors")
+                return action.detach().cpu().clone().numpy()
+        finally:
+            for module, mode in modes:
+                module.training = mode
 
 class InverseRL:
     """Inverse Reinforcement Learning for reward inference"""
@@ -335,47 +354,40 @@ class ImitationLearningModel:
         
         logger.info(f"✅ Imitation Learning Model initialized")
     
+    @cloning_owned
     def train_behavioral_cloning(
-        self,
-        expert_states: np.ndarray,
-        expert_actions: np.ndarray,
-        epochs: int = 100,
-        batch_size: int = 32
+        self, expert_states: np.ndarray, expert_actions: np.ndarray,
+        epochs: int = 100, batch_size: int = 32
     ) -> Dict:
-        """Train behavioral cloning"""
-        for name, value in (('epochs', epochs), ('batch_size', batch_size)):
-            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        parameter = next(self.behavioral_cloning.parameters())
-        # Own and admit the entire dataset before shuffle, mode or Adam changes.
-        states = torch.as_tensor(expert_states, dtype=parameter.dtype, device=parameter.device).detach().clone()
-        actions = torch.as_tensor(expert_actions, dtype=parameter.dtype, device=parameter.device).detach().clone()
-        if states.ndim != 2 or not len(states) or states.shape[1] != self.state_dim:
-            raise ValueError("states must be nonempty rows with state_dim features")
-        if actions.shape != (len(states), self.action_dim):
-            raise ValueError("actions must have one action_dim vector per state row")
-        if not torch.isfinite(states).all() or not torch.isfinite(actions).all():
-            raise ValueError("expert demonstrations must be finite")
-
+        """Checked native continuous MSE batches; retain earlier accepted work."""
+        observations, targets, epochs, batch_size = demonstrations(
+            self, expert_states, expert_actions, epochs, batch_size
+        )
+        admit_optimizer(self)
         losses = []
-        self.behavioral_cloning.train()
-        for epoch in range(epochs):
-            indices = np.random.permutation(len(states))
+        for _ in range(epochs):
+            indices = np.random.permutation(len(observations))
             total_loss = 0.0
-            for start in range(0, len(states), batch_size):
-                rows = torch.as_tensor(indices[start:start + batch_size], device=parameter.device)
-                prediction = self.behavioral_cloning(states[rows])
-                loss = F.mse_loss(prediction, actions[rows])
-                if not torch.isfinite(loss):
-                    raise ValueError("cloning objective cannot be represented finitely")
-                self.bc_optimizer.zero_grad()
-                loss.backward()
-                # Infinite max_norm preserves finite gradients without clipping bias.
-                torch.nn.utils.clip_grad_norm_(self.behavioral_cloning.parameters(),
-                                               float('inf'), error_if_nonfinite=True)
-                self.bc_optimizer.step()
-                total_loss += loss.item() * len(rows)
-            losses.append(total_loss / len(states))
+            for start in range(0, len(observations), batch_size):
+                rows = torch.as_tensor(indices[start:start + batch_size], device=observations.device)
+                with optimizer_transition(self.behavioral_cloning, self.bc_optimizer):
+                    self.behavioral_cloning.train()
+                    prediction = self.behavioral_cloning(observations[rows])
+                    if prediction.shape != targets[rows].shape or not torch.isfinite(prediction).all():
+                        raise ValueError("Cloning outputs require finite paired action vectors")
+                    loss = F.mse_loss(prediction, targets[rows])
+                    if not torch.isfinite(loss):
+                        raise ValueError("cloning objective cannot be represented finitely")
+                    self.bc_optimizer.zero_grad()
+                    loss.backward()
+                    # Keep original finite-gradient admission without clipping bias.
+                    torch.nn.utils.clip_grad_norm_(self.behavioral_cloning.parameters(),
+                                                   float('inf'), error_if_nonfinite=True)
+                    self.bc_optimizer.step()
+                    admit_optimizer(self)
+                    batch_loss = float(loss.item())
+                total_loss += batch_loss * len(rows)
+            losses.append(total_loss / len(observations))
         return {'losses': losses, 'final_loss': losses[-1]}
 
     def train_irl(
@@ -426,6 +438,7 @@ class ImitationLearningModel:
         
         return adjusted
     
+    @cloning_owned
     def save(self, path: str = "models/imitation_model.pth"):
         """Save model"""
         torch.save({
@@ -436,6 +449,7 @@ class ImitationLearningModel:
         }, path)
         logger.info(f"✅ Model saved to {path}")
     
+    @cloning_owned
     def load(self, path: str = "models/imitation_model.pth"):
         """Load model"""
         checkpoint = torch.load(path, map_location='cpu')

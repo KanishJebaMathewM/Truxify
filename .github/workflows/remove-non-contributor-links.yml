@@ -35,7 +35,8 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
           script: |
-            const cleaner = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/remove-non-contributor-links.js`);
+            const cleaner = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/remove-non-contributor-links.cjs`);
+  
             if (context.eventName === 'workflow_dispatch' || context.inputs?.scan_all) {
               await cleaner.scanAll({ github, context, core });
             } else {

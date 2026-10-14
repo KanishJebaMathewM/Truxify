@@ -1,9 +1,8 @@
-  import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 1. Mock Logger with debug support
-vi.mock('../../../src/utils/logger.js', () => ({
+vi.mock('../../src/utils/logger.js', () => ({
   default: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -13,7 +12,7 @@ vi.mock('../../../src/utils/logger.js', () => ({
 }));
 
 // 2. Mock Profile Cache module
-vi.mock('../../../src/services/profileCache.js', () => ({
+vi.mock('../../src/services/profileCache.js', () => ({
   getCachedSupabaseProfile: vi.fn().mockResolvedValue({
     id: 'usr_mock_12345',
     role: 'customer',
@@ -22,7 +21,7 @@ vi.mock('../../../src/services/profileCache.js', () => ({
 }));
 
 // 3. Mock Database / Supabase Admin module
-vi.mock('../../../src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: {
     auth: {
       getUser: vi.fn().mockResolvedValue({
@@ -51,7 +50,7 @@ vi.mock('../../../src/config/db.js', () => ({
   })),
 }));
 
-import { authenticate } from '../../../src/middleware/auth.js';
+import { authenticate } from '../../src/middleware/auth.js';
 
 describe('Auth Middleware (Unit Tests)', () => {
   let req, res, next;
@@ -92,7 +91,7 @@ describe('Auth Middleware (Unit Tests)', () => {
     req.headers['authorization'] = 'Bearer invalid-token-string';
 
     // Mock token verification failure
-    const db = await import('../../../src/config/db.js');
+    const db = await import('../../src/config/db.js');
     db.supabase.auth.getUser.mockResolvedValueOnce({
       data: { user: null },
       error: { message: 'Invalid token' },
@@ -124,6 +123,8 @@ describe('authenticate middleware - non bypass flow', () => {
         warn: mockLoggerWarn,
         error: vi.fn(),
         info: vi.fn(),
+        // The restored auth middleware logs ID-token fallthrough at debug.
+        debug: vi.fn(),
       },
     }));
 

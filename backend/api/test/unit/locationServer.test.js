@@ -64,6 +64,11 @@ describe('locationServer', () => {
   })
 
   it('increments active driver count on connection and resets on close', async () => {
+    // The global setup.js afterEach vi.clearAllMocks() wipes the .on call
+    // history recorded by the previous test's init — re-init from scratch so
+    // this test does not depend on ordering side-effects.
+    await closeLocationServer();
+    initLocationServer({});
     const handler = getDriverConnectionHandler()
     expect(handler).toBeInstanceOf(Function)
 

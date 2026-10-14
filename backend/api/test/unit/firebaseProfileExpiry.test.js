@@ -22,7 +22,8 @@ async function call(path) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(now * 1000);
-  vi.stubEnv('BYPASS_AUTH', 'false'); vi.stubEnv('JWT_SECRET', 'local-test-secret');
+  vi.stubEnv('BYPASS_AUTH', 'false'); // The hardened JWT config rejects secrets < 32 chars.
+  vi.stubEnv('JWT_SECRET', 'local-test-secret-padded-to-32-chars');
   state.decoded = { uid: 'firebase-user', exp: now + 15 };
   state.verify.mockImplementation(async () => state.decoded);
   state.read.mockResolvedValue(null); state.write.mockResolvedValue(undefined);

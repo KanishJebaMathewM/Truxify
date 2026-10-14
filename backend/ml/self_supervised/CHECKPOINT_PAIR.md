@@ -1,0 +1,19 @@
+# Owned native SSL checkpoint pair
+
+SSLPreTrainer save/load preserves the existing model_state_dict and optimizer_state_dict fields and native SimCLR/MoCo/MAE registered keys. New saves add ssl_config version1 with model family, geometry and objective configuration (temperature, MoCo momentum/capacity, MAE mask ratio). The receiving configuration must match; it is not silently rewritten. Legacy two-field files are accepted after complete native conformance checks, but their absent objective metadata cannot prove historical configuration or training provenance. Old readers ignore the extra metadata and retain their old unchecked behavior.
+
+Complete registered keys/source geometry/finite values are admitted before native casts; native float32/64 CPU or CUDA targets are supported. MoCo pointer must be native int64 shape[1] within capacity, key parameters frozen, and dictionary magnitudes within native normalized-key semantics (including zero and epsilon-normalized tiny observations). No repair/renormalization of invalid stored keys is performed. Model count<=8m values and moment count<=24m values are admission policies, not complete allocation/time/file-deserialization limits.
+
+The ordinary single canonical ordered native AdamW group requires coherent finite policy, positive epsilon and complete initialized moments with matching geometry/dtype/device, nonnegative variances, nonnegative integral native float step and AMSGrad maxima. Unsupported custom metadata/multiple/reordered groups, fused/capturable/differentiable policies reject. A private owned copy is loaded using genuine native model/AdamW and checked again after casts. No tensors become live until the entire pair is ready.
+
+Publication retains existing model/optimizer/parameter/buffer objects and modes/gradients. An ordinary publication exception directly restores previous registered values, group/state contents, gradients and mixed modes; valid incoming numeric state can repair corrupt old numeric values. Identity of moment/gradient tensor aliases is not guaranteed. Successful load restores weights/moments, not prior gradients, mixed modes, RNG, shuffle state or a whole-epoch receipt.
+
+One process-local reentrant trainer lock serializes public pretraining/save/load. When composing existing17806 training, its training lock must alias this same lock; both methods and copy hooks preserve that ownership. Native copies receive independent locks. Direct model.forward/external optimizers/readers/writers remain outside the fence. Existing17803 finite MoCo forward and17806 training algorithms are separately composed and verified, not duplicated by this PR.
+
+Private model/optimizer/input snapshots increase memory use. CPUfloat32/64 tested on Torch2.8 and the exact repository2.13 pin; CUDA admitted untested. No custom module/hooks/topology mutation, asynchronous cancellation/fatal-device/crossprocess recovery, atomic file replacement/powerloss durability, signed/path security, historical provenance, provider/hardware/vehicle/physical-quality or future numerical stability guarantee. Save validates a coherent tuple but storage errors can still leave an incomplete file; use separate storage lifecycle policy if needed.
+
+```sh
+OMP_NUM_THREADS=1 PYTHONPATH=backend/ml python -m pytest backend/ml/tests/test_ssl_checkpoint_pair.py backend/ml/tests/test_moco_key_queue_protocol.py backend/ml/tests/test_simclr_pair_objective.py backend/ml/tests/test_mae_observation_objective.py -q
+```
+
+Actual trained roundtrip and next native update, native AMSGrad/cross-dtype references, source/postcast/moment/dictionary/configuration rejection, ordinary partial-publication recovery/retry, caller ownership and concurrent native pretraining/checkpoint consumers verify the contract. All previous contrastive/masked objective and checkpoint continuation suites stay included.

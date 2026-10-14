@@ -8,8 +8,7 @@ class TripService {
     ApiClient? apiClient,
     String? apiBaseUrl,
   })  : _providedClient = client,
-        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl),
-        _apiBaseUrl = _normalizeBaseUrl(apiBaseUrl ?? defaultApiBaseUrl);
+        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl);
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
@@ -17,12 +16,10 @@ class TripService {
 
   final SupabaseClient? _providedClient;
   final ApiClient _apiClient;
-  final String _apiBaseUrl;
 
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
   String? _lastErrorMessage;
-  bool _isDisposed = false;
 
   String _requireNonEmpty(String value, String name) {
     if (value.isEmpty) throw ArgumentError('$name must not be empty');
@@ -256,7 +253,6 @@ class TripService {
   }
 
   void dispose() {
-    _isDisposed = true;
     _apiClient.dispose();
   }
 }

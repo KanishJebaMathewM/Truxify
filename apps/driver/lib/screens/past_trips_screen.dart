@@ -34,7 +34,6 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
   int? _onChainScore;
   String _walletAddress = '';
   int _totalTripsCount = 0;
-  bool _reputationUnavailable = false;
 
   final Set<String> _expandedTripIds = {};
 
@@ -131,7 +130,6 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
     if (!mounted) return;
     setState(() {
       _isLoadingReputation = true;
-      _reputationUnavailable = false;
     });
 
     try {
@@ -179,7 +177,6 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
           });
         } else {
           setState(() {
-            _reputationUnavailable = true;
             _isLoadingReputation = false;
           });
         }
@@ -190,7 +187,6 @@ class _PastTripsScreenState extends State<PastTripsScreen> {
       debugPrint('Failed to fetch driver reputation: $e');
       if (mounted) {
         setState(() {
-          _reputationUnavailable = true;
           _isLoadingReputation = false;
         });
       }

@@ -21,7 +21,6 @@ class _VoiceAssistantSheetState extends State<VoiceAssistantSheet> {
   bool _isRecording = false;
   bool _isLoading = false;
   String _selectedLanguage = 'en'; // 'en', 'hi', 'ta'
-  String? _recordedFilePath;
 
   @override
   void dispose() {
@@ -43,7 +42,6 @@ class _VoiceAssistantSheetState extends State<VoiceAssistantSheet> {
         if (mounted) {
           setState(() {
             _isRecording = true;
-            _recordedFilePath = path;
           });
         }
       }

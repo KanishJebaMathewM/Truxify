@@ -125,6 +125,6 @@ describe('POST /api/orders/:id/bids/:bidId/accept', () => {
     svcMock.acceptBid.mockRejectedValue(new Error('boom'));
     const res = await request(app).post('/order-accept-5/bids/bid-accept-5/accept');
     expect(res.status).toBe(500);
-    expect(res.body.error).toBe('Internal Server Error');
+    expect(res.body.error).toBe('Internal Server Error.');
   });
 });

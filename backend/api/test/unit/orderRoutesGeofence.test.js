@@ -24,6 +24,29 @@ vi.mock('../../src/core/container.js', () => ({
   confirmEscrowRefund: vi.fn(),
 }));
 
+// The geofence handler reads server-side telemetry from mongoDb (fail-closed
+// without it) — provide a fresh record within the age window.
+const mockTelemetry = vi.hoisted(() => ({
+  collection: vi.fn(() => ({
+    find: vi.fn(() => ({
+      sort: vi.fn(() => ({
+        limit: vi.fn(() => ({
+          toArray: vi.fn(async () => [{ lat: 12.9716, lng: 77.5946, timestamp: new Date().toISOString() }]),
+        })),
+      })),
+    })),
+  })),
+}));
+
+vi.mock('../../src/config/db.js', () => ({
+  mongoDb: mockTelemetry,
+  supabase: null,
+  supabaseAdmin: null,
+  redisClient: null,
+  firebaseAdmin: null,
+  createUserClient: vi.fn(() => null),
+}));
+
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, res, next) => next(),
   requireRole: () => (req, res, next) => next(),

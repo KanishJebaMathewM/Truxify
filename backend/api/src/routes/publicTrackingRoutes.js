@@ -4,12 +4,47 @@ import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabaseAdmin, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
+import rateLimit from 'express-rate-limit';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 import GpsLog from '../models/GpsLog.js';
 import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 import { trackingTokenInvalidResponse } from '../utils/trackingTokenStatus.js';
 
 const router = express.Router();
+
+// Parse a finite coordinate or return null (missing/NaN/out-of-range).
+function parseFiniteCoordinate(value) {
+  const n = typeof value === 'string' ? Number.parseFloat(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  if (Math.abs(n) > 180) return null;
+  return n;
+}
+
+// HTML-encode user-controlled strings before serving them on public
+// (unauthenticated) tracking pages — issue #14364 XSS guard.
+function encodeHtml(value) {
+  if (value === null || value === undefined) return value;
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Public unauthenticated tracking links — a dedicated limiter (the shared
+// publicTrackingLimiter lands with #17627; defined locally here so this file
+// stands alone).
+const publicLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore('rl:public-tracking:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
 
 // 🔒 CRITICAL FIX (#10131 / #8954): Public tracking share-links are unauthenticated.
 // Passing supabaseAdmin ensures RLS-protected tables (tracking_tokens, orders, order_timeline)
@@ -20,10 +55,6 @@ const trackingTokenService = new TrackingTokenService({
   logger,
 });
 
-router.get('/tracking/:token', async (req, res) => {
-  try {
-    const { token } = req.params;
-    const result = await trackingTokenService.validateAndGetPublicTrackingData(token);
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/public/tracking/:token
 // Public — no authentication required. Returns safe order subset.
@@ -97,8 +128,15 @@ router.get(
           }
         : null;
 
-    if (!result.valid) {
-      return res.status(404).json({ error: 'Tracking link not found or invalid', reason: result.reason });
+      // Success — only the vetted public fields, HTML-encoded (issue #14364).
+      return res.json({
+        order: publicOrder,
+        timeline: publicTimeline,
+        driver_location: publicDriverLocation,
+      });
+    } catch (err) {
+      logger.error({ err }, 'Public tracking fetch failed');
+      return res.status(500).json({ error: 'Failed to load tracking details' });
     }
   }
 );
@@ -143,11 +181,97 @@ router.get(
       const dropLat = parseFiniteCoordinate(order.drop_lat);
       const dropLng = parseFiniteCoordinate(order.drop_lng);
 
-    return res.json(result.data);
-  } catch (error) {
-    logger.error({ err: error }, 'Error processing public tracking request');
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+      if ([pickupLat, pickupLng, dropLat, dropLng].some((v) => v === null)) {
+        return res.status(422).json({ error: 'Route coordinates are not available for this order' });
+      }
 
+      // Straight-line fallback geometry between the vetted endpoints.
+      return res.json({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [pickupLng, pickupLat],
+            [dropLng, dropLat],
+          ],
+        },
+        properties: { fallback: true },
+      });
+    } catch (error) {
+      logger.error({ err: error }, 'Error processing public tracking request');
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+function parseHistoryQuery(query) {
+  const limit = query.limit === undefined ? 100 : Number(query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) return null;
+
+  const filter = {};
+  if (query.from !== undefined) {
+    const from = new Date(query.from);
+    if (Number.isNaN(from.getTime())) return null;
+    filter.timestamp = { ...filter.timestamp, $gte: from };
+  }
+  if (query.to !== undefined) {
+    const to = new Date(query.to);
+    if (Number.isNaN(to.getTime())) return null;
+    filter.timestamp = { ...filter.timestamp, $lte: to };
+  }
+
+  return { limit, filter };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// GET /api/public/tracking/:token/history
+// Public — returns bounded GPS history for a valid tracking link.
+// ──────────────────────────────────────────────────────────────────────────
+router.get(
+  '/tracking/:token/history',
+  publicLimiter,
+  validateParams(publicTrackingTokenSchema),
+  async (req, res) => {
+    try {
+      const query = parseHistoryQuery(req.query);
+      if (!query) {
+        return res.status(422).json({ error: 'limit must be 1-500 and from/to must be valid dates' });
+      }
+
+      const validation = await trackingTokenService.validateToken(req.params.token);
+      if (validation.reason === 'validation_error') {
+        return res.status(400).json({ error: 'Invalid tracking token' });
+      }
+      if (!validation.valid) {
+        const statusMessages = {
+          not_found: { status: 404, message: 'Tracking link not found or invalid' },
+          revoked: { status: 410, message: 'This tracking link has been revoked' },
+          expired: { status: 410, message: 'This tracking link has expired' },
+        };
+        const { status, message } = statusMessages[validation.reason] || statusMessages.not_found;
+        return res.status(status).json({ error: message });
+      }
+
+      const logs = await GpsLog.find({ bookingId: validation.orderDisplayId, ...query.filter })
+        .sort({ timestamp: -1 })
+        .limit(query.limit)
+        .lean();
+
+      return res.json({
+        points: logs.map((log) => ({
+          latitude: log.lat,
+          longitude: log.lng,
+          speed: log.speed,
+          heading: log.heading,
+          timestamp: log.timestamp,
+        })),
+        count: logs.length,
+        limit: query.limit,
+      });
+    } catch (err) {
+      logger.error({ err }, 'Error fetching public tracking history');
+      return res.status(500).json({ error: 'Failed to load tracking history' });
+    }
+  }
+);
 export default router;

@@ -289,11 +289,13 @@ export const earningsSummarySchema = z.object({
 
 
 
+// The wire contract is snake_case (the handler, OpenAPI doc, and suite all
+// read truck_id; axle position is a label like 'steer'/'drive'). A previous
+// camelCase+strict schema made the endpoint unusable.
 export const syncWeightSchema = z.object({
-  vehicleId: z.string().min(1, 'vehicleId is required'),
-  truckId: z.string().min(1, 'truckId is required'),
+  truck_id: z.string().min(1, 'truck_id is required'),
   axles: z.array(z.object({
-    position: z.number().int().min(0),
+    position: z.string().min(1, 'position is required'),
     pressure_psi: z.number().positive('pressure_psi must be a positive number'),
   })).min(1, 'At least one axle is required'),
   timestamp: z.string().datetime({ message: 'timestamp must be ISO 8601' }).optional(),

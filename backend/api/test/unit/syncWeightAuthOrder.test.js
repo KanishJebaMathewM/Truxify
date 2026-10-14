@@ -68,7 +68,8 @@ describe('weight sync authentication before validation', () => {
   });
   it('lets an authorized valid request through after exactly one validation', async () => {
     const { res, passed } = await gates({ id: 'driver', role: 'driver' }, {
-      vehicleId: 'vehicle', truckId: 'truck', axles: [{ position: 0, pressure_psi: 80 }],
+      // Wire contract is snake_case truck_id + label axle positions.
+      truck_id: 'truck', axles: [{ position: 'steer', pressure_psi: 80 }],
     });
     expect(res.status).not.toHaveBeenCalled();
     expect(validationCalls).toHaveBeenCalledTimes(1);

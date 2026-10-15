@@ -64,6 +64,45 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js
+
+import { Router } from 'express';
+import logger from '../lib/logger.js'; // Adjust relative path per module structure
+
+const router = Router();
+
+router.get('/health', (req, res) => {
+  try {
+    const healthStatus = {
+      status: 'UP',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString()
+    };
+
+    // Replace console.log with structured logger call
+    logger.info('Health check executed successfully', {
+      route: '/health',
+      uptime: healthStatus.uptime,
+      status: healthStatus.status
+    });
+
+    res.status(200).json(healthStatus);
+  } catch (err) {
+    // Replace console.error with structured error logger call
+    logger.error('Health check probe failed', {
+      route: '/health',
+      error: err,
+      message: err.message,
+      stack: err.stack
+    });
+
+    res.status(500).json({
+      status: 'DOWN',
+      error: 'Internal health check failure'
+    });
+  }
+});
+
 import express from 'express';
 import * as Sentry from '@sentry/node';
 import logger from '../middleware/logger.js';

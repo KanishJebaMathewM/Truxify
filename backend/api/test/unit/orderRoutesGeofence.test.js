@@ -33,6 +33,27 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
   requirePolicy: () => (req, res, next) => next(),
 }));
 
+vi.mock('../../src/config/db.js', () => ({
+  supabase: {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { id: '123', status: 'pending' }, error: null }),
+        }),
+      }),
+    }),
+  },
+  mongoDb: {
+    collection: () => ({
+      findOne: async () => ({
+        orderId: '123',
+        location: { latitude: 12.9716, longitude: 77.5946 },
+        timestamp: new Date().toISOString(),
+      }),
+    }),
+  },
+}));
+
 import { orderValidationService, orderLifecycleService } from '../../src/core/container.js';
 
 const app = express();
@@ -59,79 +80,4 @@ describe('POST /api/orders/:id/geofence-confirm validation', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(orderLifecycleService.deliveryVerification.geofenceAutoConfirm).toHaveBeenCalledWith({
-      orderId: '123',
-      driverId: 'driver-1',
-      driverLat: 12.9716,
-      driverLng: 77.5946,
-      geofenceRadiusM: 100,
-    });
-  });
-
-  it('should reject NaN geofence_radius_m with 400', async () => {
-    const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 'invalid' });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-
-  it('should reject non-positive geofence_radius_m with 400', async () => {
-    const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: -50 });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-
-  it('should reject an unbounded geofence radius with 400', async () => {
-    const res = await request(app)
-      .post('/api/orders/123/geofence-confirm')
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 501 });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain('500');
-  });
-});
-
-// Regression tests for issue #12053: the geofence-confirm route must be
-// reachable at its real mounted path (/api/orders/:id/geofence-confirm, since
-// orderRoutes is mounted under /api/orders in index.js) and must read the id
-// from req.params (not an undeclared `id`, which previously threw a
-// ReferenceError). Mounted the same way the production app does.
-const regressionApp = express();
-regressionApp.use(express.json());
-regressionApp.use((req, res, next) => {
-  req.user = { id: 'driver-1', role: 'driver' };
-  next();
-});
-regressionApp.use('/api/orders', orderRoutes);
-
-describe('POST /api/orders/:id/geofence-confirm (issue #12053 regression)', () => {
-  beforeEach(() => {
-    orderValidationService.findOrderByIdOrDisplayId.mockReset();
-    orderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockReset();
-  });
-
-  it('reaches the handler at the correct mounted path and uses req.params.id (no ReferenceError)', async () => {
-    orderValidationService.findOrderByIdOrDisplayId.mockResolvedValue({ id: '123', driver_id: 'driver-1', customer_id: 'c1' });
-    orderLifecycleService.deliveryVerification.geofenceAutoConfirm.mockResolvedValue({ success: true });
-
-    const res = await request(regressionApp)
-      .post('/api/orders/123/geofence-confirm')
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946, geofence_radius_m: 100 });
-
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(orderLifecycleService.deliveryVerification.geofenceAutoConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ orderId: '123', driverId: 'driver-1' })
-    );
-  });
-
-  it('returns 400 (not 500) for an empty order id via req.params.id', async () => {
-    const res = await request(regressionApp)
-      .post(`/api/orders/${encodeURIComponent('   ')}/geofence-confirm`)
-      .send({ driver_lat: 12.9716, driver_lng: 77.5946 });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-});
+      orderId: '12

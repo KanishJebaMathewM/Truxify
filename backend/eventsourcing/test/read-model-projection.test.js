@@ -74,7 +74,9 @@ function createMockClient() {
           then(resolve) {
             let rows = [...orders.values()];
             for (const [col, val] of this.filters) {
-              if (col === 'payload->>status') {
+              if (col === 'status') {
+                rows = rows.filter((r) => r.status === val);
+              } else if (col === 'payload->>status') {
                 rows = rows.filter((r) => r.payload?.status === val);
               } else if (col === 'payload->>customerId') {
                 rows = rows.filter((r) => r.payload?.customerId === val);

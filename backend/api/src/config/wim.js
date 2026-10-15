@@ -28,6 +28,14 @@ const MIN_SIGNING_SECRET_LENGTH = 32;
  * @returns {string} The trimmed signing secret.
  * @throws {Error} If the secret is missing, empty or too short.
  */
+/**
+ * Whether WIM bypass is enabled. Disabled unless explicitly configured via
+ * WIM_ENABLED=true — fail-closed like the rest of this module.
+ */
+export function isWimEnabled() {
+  return process.env.WIM_ENABLED === 'true';
+}
+
 export function getWimSigningSecret() {
   const raw = process.env.WIM_SIGNING_SECRET;
   const secret = typeof raw === 'string' ? raw.trim() : '';

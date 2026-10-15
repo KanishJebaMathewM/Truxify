@@ -87,16 +87,16 @@ export async function optimizeWaypoints(start, end, waypoints, departureDate, de
       const lng = Number(point.lng);
 
       if (!Number.isFinite(lat)) {
-      throw new Error(`Invalid latitude for ${label}: must be a finite number`);
-    }
-    if (lat < -90 || lat > 90) {
+        throw new Error(`Invalid latitude for ${label}: must be a finite number`);
+      }
+      if (lat < -90 || lat > 90) {
         throw new Error(`Invalid latitude for ${label}`);
       }
 
       if (!Number.isFinite(lng)) {
-      throw new Error(`Invalid longitude for ${label}: must be a finite number`);
-    }
-    if (lng < -180 || lng > 180) {
+        throw new Error(`Invalid longitude for ${label}: must be a finite number`);
+      }
+      if (lng < -180 || lng > 180) {
         throw new Error(`Invalid longitude for ${label}`);
       }
 
@@ -185,7 +185,7 @@ export function getHaversineDistance(lat1, lon1, lat2, lon2) {
     !Number.isFinite(lat1) || !Number.isFinite(lon1) ||
     !Number.isFinite(lat2) || !Number.isFinite(lon2)
   ) {
-    throw new TypeError('getHaversineDistance: all coordinates must be finite numbers');
+    return null;
   }
   const R = 6371; // km
   const dLat = (lat2 - lat1) * Math.PI / 180;

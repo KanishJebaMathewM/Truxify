@@ -15,6 +15,16 @@ class RouteDraft {
     this.pickupLng,
     this.dropLat,
     this.dropLng,
+    this.truckType,
+    this.minCapacity,
+    this.maxCapacity,
+    this.materialType,
+    this.selectedTruckTypes,
+    this.selectedCargoCategories,
+    this.pickupDate,
+    this.requiresRefrigeration = false,
+    this.targetTemperatureMin,
+    this.targetTemperatureMax,
   });
 
   final String pickup;
@@ -30,6 +40,16 @@ class RouteDraft {
   final double? pickupLng;
   final double? dropLat;
   final double? dropLng;
+  final String? truckType;
+  final double? minCapacity;
+  final double? maxCapacity;
+  final String? materialType;
+  final List<String>? selectedTruckTypes;
+  final List<String>? selectedCargoCategories;
+  final DateTime? pickupDate;
+  final bool requiresRefrigeration;
+  final double? targetTemperatureMin;
+  final double? targetTemperatureMax;
 }
 
 class ShipmentCardData {
@@ -57,11 +77,23 @@ class RouteCardData {
     required this.route,
     required this.pickup,
     required this.drop,
+    this.tripCount,
+    this.lastUsedDate,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String route;
   final String pickup;
   final String drop;
+  final int? tripCount;
+  final String? lastUsedDate;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class StatCardData {
@@ -87,6 +119,15 @@ class TruckResultData {
     required this.eta,
     this.badge,
     this.badgeColor = Colors.black,
+    this.isDigilockerVerified = false,
+    this.baseFreight,
+    this.tollEstimate,
+    this.platformFee,
+    this.truckNumber,
+    this.driverId,
+    this.truckId,
+    this.isAiEstimate = false,
+    this.profitBreakdown,
   });
 
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
@@ -98,7 +139,7 @@ class TruckResultData {
     final etaMinutes = json['etaMinutes'];
     final etaStr = etaMinutes != null
         ? (etaMinutes < 60
-            ? '${etaMinutes} mins'
+            ? '$etaMinutes mins'
             : '${(etaMinutes / 60).toStringAsFixed(1)} hrs')
         : '—';
 
@@ -121,6 +162,18 @@ class TruckResultData {
   final String eta;
   final String? badge;
   final Color badgeColor;
+  final bool isDigilockerVerified;
+  final String? baseFreight;
+  final String? tollEstimate;
+  final String? platformFee;
+  final String? truckNumber;
+  final String? driverId;
+  final String? truckId;
+  final bool isAiEstimate;
+
+  /// Optional estimated net profit breakdown. `null` means not yet fetched
+  /// or unavailable (e.g. distance data missing for this load offer).
+  final NetProfitBreakdown? profitBreakdown;
 }
 
 class ActiveOrderData {
@@ -151,6 +204,23 @@ class HistoryOrderData {
     required this.driver,
     required this.truckNumber,
     required this.timeline,
+    this.blockchainTxHash,
+    this.baseFare,
+    this.distanceCharge,
+    this.tollCharge,
+    this.platformFee,
+    this.driverPhone,
+    this.goodsType,
+    this.weightTonnes,
+    this.dimensions,
+    this.isStackable,
+    this.isFragile,
+    this.ratingGiven,
+    this.specialRequirements,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String orderId;
@@ -161,6 +231,23 @@ class HistoryOrderData {
   final String driver;
   final String truckNumber;
   final List<TimelineStepData> timeline;
+  final String? blockchainTxHash;
+  final String? baseFare;
+  final String? distanceCharge;
+  final String? tollCharge;
+  final String? platformFee;
+  final String? driverPhone;
+  final String? goodsType;
+  final String? weightTonnes;
+  final String? dimensions;
+  final bool? isStackable;
+  final bool? isFragile;
+  final double? ratingGiven;
+  final String? specialRequirements;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class TimelineStepData {
@@ -199,6 +286,60 @@ class ProfileMenuData {
   final String title;
   final String? subtitle;
   final bool isDanger;
+}
+
+/// Estimated net profit breakdown for a load offer.
+///
+/// All monetary fields are in ₹. [isEstimate] is always `true` and must be
+/// displayed to the driver so they understand these are not guaranteed values.
+class NetProfitBreakdown {
+  const NetProfitBreakdown({
+    required this.freightAmount,
+    required this.estimatedFuelCost,
+    required this.estimatedTollCost,
+    required this.otherCosts,
+    required this.estimatedNetProfit,
+    required this.profitPerKm,
+    required this.distanceKm,
+    this.isEstimate = true,
+  });
+
+  factory NetProfitBreakdown.fromJson(Map<String, dynamic> json) {
+    return NetProfitBreakdown(
+      freightAmount:      (json['freightAmount'] as num?)?.toDouble() ?? 0.0,
+      estimatedFuelCost:  (json['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0,
+      estimatedTollCost:  (json['estimatedTollCost'] as num?)?.toDouble() ?? 0.0,
+      otherCosts:         (json['otherCosts'] as num?)?.toDouble() ?? 0.0,
+      estimatedNetProfit: (json['estimatedNetProfit'] as num?)?.toDouble() ?? 0.0,
+      profitPerKm:        (json['profitPerKm'] as num?)?.toDouble() ?? 0.0,
+      distanceKm:         (json['distanceKm'] as num?)?.toDouble() ?? 0.0,
+      isEstimate:         json['isEstimate'] as bool? ?? true,
+    );
+  }
+
+  /// Total freight amount in ₹.
+  final double freightAmount;
+
+  /// Estimated diesel/fuel cost in ₹.
+  final double estimatedFuelCost;
+
+  /// Estimated toll cost in ₹.
+  final double estimatedTollCost;
+
+  /// Other estimated trip expenses (allowances, loading help, etc.) in ₹.
+  final double otherCosts;
+
+  /// Estimated net profit (freight − all costs) in ₹.
+  final double estimatedNetProfit;
+
+  /// Estimated profit per kilometre in ₹/km.
+  final double profitPerKm;
+
+  /// Estimated trip distance in km.
+  final double distanceKm;
+
+  /// Always `true`. UI must display an "Estimated" label when rendering this.
+  final bool isEstimate;
 }
 
 class LiveTruckTabData {

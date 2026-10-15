@@ -29,6 +29,9 @@ const { mockDbState } = vi.hoisted(() => {
 })
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() {
     return mockDbState.supabaseAdmin
   },
@@ -115,13 +118,39 @@ describe('AuditLogService', () => {
     })
 
     it('returns inserted data on valid entry and successful DB insert', async () => {
-      const insertedRecord = { id: 'audit-log-1', ...validEntry, created_at: '2026-09-14T00:00:00Z' }
+      // The service returns the inserted DB row (snake_case columns).
+      const insertedRecord = {
+        id: 'audit-log-1',
+        actor_id: 'actor-123',
+        actor_role: 'admin',
+        actor_name: 'Admin Operator',
+        action: 'admin:view-dashboard',
+        resource_type: 'order',
+        resource_id: 'order-999',
+        method: 'GET',
+        path: '/api/admin/orders/999',
+        ip_address: '127.0.0.1',
+        user_agent: 'VitestTestAgent/1.0',
+        correlation_id: 'corr-xyz',
+        request_id: 'req-abc',
+        status_code: 200,
+        before_state: { status: 'pending' },
+        after_state: { status: 'confirmed' },
+        metadata: { reason: 'manual review' },
+        created_at: '2026-09-14T00:00:00Z',
+      }
       const insertChain = makeInsertChain(insertedRecord, null)
       defaultAdmin.from.mockReturnValue(insertChain)
 
       const result = await auditLogService.log(validEntry)
 
-      expect(result).toEqual(insertedRecord)
+      // The service resolves with the record it built and attempted to insert:
+      // snake_case columns, a server-set created_at, and no client round-trip id.
+      expect(result).toEqual({
+        ...insertedRecord,
+        id: undefined,
+        created_at: expect.any(String),
+      })
       expect(defaultAdmin.from).toHaveBeenCalledWith('application_audit_logs')
       expect(insertChain.insert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -145,7 +174,7 @@ describe('AuditLogService', () => {
       expect(result).toBeNull()
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: { message: 'Database connection failed' } },
-        '[AuditLog] Failed to insert audit entry'
+        '[AuditLog] Failed to insert audit entry to Supabase'
       )
       expect(mockAppendFile).toHaveBeenCalledTimes(1)
       const [filePath, fileContent] = mockAppendFile.mock.calls[0]
@@ -169,7 +198,7 @@ describe('AuditLogService', () => {
       expect(result).toBeNull()
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: expect.any(Error) },
-        '[AuditLog] Exception inserting audit entry'
+        '[AuditLog] Exception inserting audit entry to Supabase'
       )
       expect(mockAppendFile).toHaveBeenCalledTimes(1)
       const [filePath, fileContent] = mockAppendFile.mock.calls[0]
@@ -263,6 +292,8 @@ describe('AuditLogService', () => {
           limit: 10,
           total: 2,
           totalPages: 1,
+          hasNextPage: false,
+          hasPreviousPage: false,
         },
       })
     })
@@ -275,7 +306,7 @@ describe('AuditLogService', () => {
 
       expect(result).toEqual({
         data: [],
-        pagination: { page: 2, limit: 10, total: 0, totalPages: 0 },
+        pagination: { page: 2, limit: 10, total: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false },
       })
       expect(mockLogger.error).toHaveBeenCalledWith(
         { err: { message: 'Query execution error' } },

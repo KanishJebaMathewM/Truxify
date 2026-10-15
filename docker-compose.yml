@@ -252,16 +252,19 @@ services:
   #   restart: unless-stopped
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: n8nio/n8n:latest
     container_name: truxify-n8n
     ports:
       - "5678:5678"
     environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - WEBHOOK_URL=http://n8n:5678/
       - N8N_HOST=${N8N_HOST:-localhost}
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=development
-      - WEBHOOK_URL=http://localhost:5678/
       - INTERNAL_RELAYER_KEY=${INTERNAL_RELAYER_KEY:-local_relayer_secret}
       - ML_API_KEY=${ML_API_KEY:-local_ml_secret}
       - ML_ENGINE_URL=http://ml-engine:8000
@@ -270,6 +273,8 @@ services:
       - ADMIN_ALERT_EMAIL=${ADMIN_ALERT_EMAIL:-admin@localhost}
     volumes:
       - n8n_data:/home/node/.n8n
+    depends_on:
+      - api
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:5678/healthz || exit 1"]
       interval: 30s

@@ -169,7 +169,9 @@ describe('orderRoutes endpoint contract', () => {
     for (const route of idRoutes) {
       const start = source.indexOf(route);
       expect(start).toBeGreaterThanOrEqual(0);
-      const declaration = source.slice(start, source.indexOf('\n', start));
+      // Some declarations wrap the policy callback over several lines, so
+      // scan a bounded window instead of only the first line.
+      const declaration = source.slice(start, start + 1500);
       expect(declaration).toContain('validateParams(paramIdSchema)');
     }
   });
@@ -208,8 +210,8 @@ describe('orderRoutes request schema contract', () => {
     expect(cancelOrderSchema.safeParse({ reason: 'Changed plans' }).success).toBe(true);
   });
 
-  it('preserves the current optional cancellation reason contract', () => {
-    expect(cancelOrderSchema.safeParse({ reason: '   ' }).success).toBe(true);
+  it('rejects blank and overlong cancellation reasons while keeping them optional', () => {
+    expect(cancelOrderSchema.safeParse({ reason: '   ' }).success).toBe(false);
     expect(cancelOrderSchema.safeParse({ reason: 'x'.repeat(501) }).success).toBe(false);
   });
 
@@ -258,6 +260,9 @@ describe('orderRoutes request schema contract', () => {
 
 describe('orderRoutes implementation wiring', () => {
   it('delegates order lifecycle work to controllers rather than duplicating persistence', () => {
+    // The deposit, driver-location and route endpoints are wired inline to
+    // the repository, validation service and OSRM helper since #15189, so
+    // the tail of the list names those delegates instead of controllers.
     const expectedControllers = [
       'createOrder',
       'getActiveOrders',
@@ -273,9 +278,9 @@ describe('orderRoutes implementation wiring', () => {
       'resendOtp',
       'changeDrop',
       'cancelOrder',
-      'confirmDeposit',
-      'getDriverLocation',
-      'getLiveRouteGeometry',
+      'orderRepository',
+      'orderValidationService',
+      'getRouteGeometry',
     ];
 
     for (const controller of expectedControllers) {

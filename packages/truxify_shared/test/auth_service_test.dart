@@ -51,12 +51,9 @@ void main() {
     });
 
     test('clears the flag even when sign-in fails', () async {
-      final auth = MockFirebaseAuth();
-      whenCalling(Invocation.method(#signInWithCredential, null))
-          .on(auth)
-          .thenThrow(
-            FirebaseAuthException(code: 'invalid-verification-code'),
-          );
+      // whenCalling() was a mockito<=4 API (removed in 5.x) — a hand-rolled
+      // subclass does the same job with no extra dependency.
+      final auth = _FailingCredentialAuth();
       final service = AuthService(auth: auth);
 
       expect(
@@ -66,4 +63,11 @@ void main() {
       expect(service.isAuthenticating, isFalse);
     });
   });
+}
+
+class _FailingCredentialAuth extends MockFirebaseAuth {
+  @override
+  Future<UserCredential> signInWithCredential(AuthCredential? credential) {
+    throw FirebaseAuthException(code: 'invalid-verification-code');
+  }
 }

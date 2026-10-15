@@ -39,6 +39,9 @@ on:
         type: choice
         options: ['false', 'true']
 
+permissions:
+  contents: read
+
 concurrency:
   group: truxify-analysis
   cancel-in-progress: false

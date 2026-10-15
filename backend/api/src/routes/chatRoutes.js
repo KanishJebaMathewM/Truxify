@@ -23,19 +23,26 @@ const upload = multer({
 router.get('/:orderId/history', authenticate, async (req, res) => {
     try {
         const { orderId } = req.params;
-        const { limit = 50, before } = req.query;
+        const { limit: rawLimit = 50, before } = req.query;
+        const parsedLimit = Number(rawLimit);
+        if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+            return res.status(400).json({ error: 'limit must be an integer between 1 and 100.' });
+        }
+        if (before !== undefined && before !== null && Number.isNaN(Date.parse(before))) {
+            return res.status(400).json({ error: 'before must be a valid ISO date string.' });
+        }
 
         const access = await verifyChatAccess(orderId, req.user.id);
         if (!access.authorized && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Not authorized to view this chat' });
         }
 
-        const messages = await getChatHistory(orderId, parseInt(limit, 10), before);
+        const messages = await getChatHistory(orderId, parsedLimit, before);
 
         res.json({
             success: true,
             messages,
-            hasMore: messages.length === parseInt(limit, 10)
+            hasMore: messages.length === parsedLimit
         });
     } catch (err) {
         logger.error({ err }, 'GET /chat/:orderId/history error');

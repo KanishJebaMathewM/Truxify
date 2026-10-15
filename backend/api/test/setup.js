@@ -7,6 +7,8 @@
  * the bypassed state too.)
  */
 
+import { vi, beforeEach, afterAll } from 'vitest';
+
 // Required by auth.js middleware to read x-user-id/x-user-role headers
 // directly from the request instead of verifying a Firebase token.
 process.env.BYPASS_AUTH = 'true';
@@ -38,20 +40,25 @@ console.error = (...args) => {
   originalError(...args);
 };
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-
 const { default: RedisMock } = await import('./mocks/redisMock.js');
 
 global.mockRedis = new RedisMock();
 
 beforeEach(() => {
-  global.mockRedis.clear();
+  if (typeof global.mockRedis.clear === 'function') {
+    global.mockRedis.clear();
+  } else if (typeof global.mockRedis.clearAll === 'function') {
+    global.mockRedis.clearAll();
+  }
   vi.clearAllMocks();
 });
 
 afterAll(() => {
-  global.mockRedis.clear();
+  if (typeof global.mockRedis.clear === 'function') {
+    global.mockRedis.clear();
+  } else if (typeof global.mockRedis.clearAll === 'function') {
+    global.mockRedis.clearAll();
+  }
 });
 
 vi.mock('mongoose', () => ({
@@ -71,6 +78,13 @@ vi.mock('mongodb', () => ({
       return {
         collection: () => ({
           createIndex: vi.fn().mockResolvedValue('index_name'),
+          findOne: vi.fn().mockResolvedValue(null),
+          find: vi.fn().mockReturnValue({
+            sort: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            toArray: vi.fn().mockResolvedValue([]),
+          }),
+          insertOne: vi.fn().mockResolvedValue({ insertedId: 'mock-id' }),
         }),
       };
     }

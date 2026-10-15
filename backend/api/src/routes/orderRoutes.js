@@ -197,6 +197,89 @@ import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock
 import logger from '../middleware/logger.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
 import { auditLog } from '../middleware/auditLog.js';
+// backend/api/src/routes/orderRoutes.js
+
+import { getCacheItem } from '../cache/CacheManager.js';
+import { calculateHaversineDistance } from '../utils/geoUtils.js';
+import logger from '../middleware/logger.js';
+
+/**
+ * Validates delivery geofence against server-authenticated driver telemetry.
+ */
+export async function handleGeofenceConfirmation(req, res) {
+  const { id: orderId } = req.params;
+  const { geofence_radius_m = 100 } = req.body;
+  const driverId = req.user.id; // Authenticated driver from JWT middleware
+
+  try {
+    // 1. Fetch latest server-validated GPS position from secure telemetry cache/store
+    const telemetryKey = `driver:telemetry:${driverId}`;
+    const lastKnownPosition = await getCacheItem(telemetryKey);
+
+    if (!lastKnownPosition || !lastKnownPosition.latitude || !lastKnownPosition.longitude) {
+      logger.warn('Geofence confirmation rejected: No verified telemetry found for driver', { driverId, orderId });
+      return res.status(400).json({
+        success: false,
+        error: 'UNVERIFIED_LOCATION',
+        message: 'No recent verified GPS telemetry available. Ensure location services are active.'
+      });
+    }
+
+    const { latitude: serverLat, longitude: serverLng, timestamp: gpsTimestamp } = lastKnownPosition;
+
+    // Reject stale GPS telemetry older than 60 seconds
+    if (Date.now() - gpsTimestamp > 60000) {
+      return res.status(400).json({
+        success: false,
+        error: 'STALE_GPS_TELEMETRY',
+        message: 'Driver GPS telemetry is stale. Please refresh location.'
+      });
+    }
+
+    // 2. Fetch target order destination coordinates
+    const order = await OrderModel.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    const { destination_lat: destLat, destination_lng: destLng } = order;
+
+    // 3. Calculate Haversine distance using server-trusted coordinates
+    const distanceMeters = calculateHaversineDistance(serverLat, serverLng, destLat, destLng);
+    const radiusThreshold = Number(geofence_radius_m) || 100;
+
+    if (distanceMeters > radiusThreshold) {
+      logger.warn('Geofence boundary check failed', { 
+        driverId, 
+        orderId, 
+        distanceMeters: Math.round(distanceMeters), 
+        radiusThreshold 
+      });
+      return res.status(403).json({
+        success: false,
+        error: 'OUTSIDE_GEOFENCE',
+        message: `Driver is ${Math.round(distanceMeters)}m away from destination. Must be within ${radiusThreshold}m to confirm delivery.`
+      });
+    }
+
+    // 4. Proceed with secure delivery confirmation
+    order.status = 'delivered';
+    order.deliveredAt = new Date().toISOString();
+    await order.save();
+
+    logger.info('Order successfully confirmed via secure server geofence', { orderId, driverId, distanceMeters });
+
+    return res.json({
+      success: true,
+      message: 'Delivery confirmed successfully',
+      data: { orderId, distanceMeters: Math.round(distanceMeters) }
+    });
+
+  } catch (err) {
+    logger.error('Failed to process geofence delivery confirmation', { error: err.message, orderId });
+    return res.status(500).json({ success: false, error: 'Internal server error during geofence verification' });
+  }
+}
 import {
   orderRepository,
   orderValidationService,

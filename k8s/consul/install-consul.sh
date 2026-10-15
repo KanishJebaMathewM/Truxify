@@ -1,9 +1,10 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "🚀 Installing Consul Service Mesh..."
 
 # Create namespace
-kubectl create namespace consul
+kubectl create namespace consul --dry-run=client -o yaml | kubectl apply -f -
 
 # Add HashiCorp helm repo
 helm repo add hashicorp https://helm.releases.hashicorp.com

@@ -333,7 +333,7 @@ export class OrderMilestoneService {
 
         const driverIdVal = tripData?.driver_id || order.driver_id;
         const displayId = tripData?.order_display_id || order.order_display_id;
-        if (driverIdVal) {
+        if (driverIdVal && typeof this.orderRepository.updateWalletTransaction === 'function') {
           const { error: walletErr } = await this.orderRepository.updateWalletTransaction(driverIdVal, displayId, {
             description: `Escrow payout for ${displayId}`
           });
@@ -411,5 +411,25 @@ export class OrderMilestoneService {
         }
       };
     });
+  }
+
+  async addMilestone(orderId, milestoneData) {
+    const { data: order, error } = await this.orderRepository.findOrderById(orderId);
+    if (error || !order) {
+      throw new DomainError(404, { error: 'Order not found.' });
+    }
+    const result = await this.orderRepository.addMilestone(orderId, milestoneData);
+    if (result?.error) {
+      throw new DomainError(500, { error: 'Failed to add milestone.', details: result.error.message });
+    }
+    return result?.data;
+  }
+
+  async completeMilestone(milestoneId) {
+    const result = await this.orderRepository.completeMilestone(milestoneId);
+    if (result?.error) {
+      throw new DomainError(404, { error: 'Milestone not found.', details: result.error.message });
+    }
+    return result?.data;
   }
 }

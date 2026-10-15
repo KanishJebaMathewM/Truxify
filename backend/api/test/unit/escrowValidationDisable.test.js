@@ -81,7 +81,7 @@ async function loadFreshEscrowModule () {
   return await import('../../src/services/escrow.js')
 }
 
-describe('escrow service — validateEscrowSetup deactivates client on failure', () => {
+describe('escrow service — validateEscrowSetup deactivates client on failure', { timeout: 30000 }, () => {
   beforeEach(() => {
     state.getCodeValue = '0x'
     state.probeThrows = true

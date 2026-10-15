@@ -57,7 +57,7 @@ export async function handleFastagWebhook(req, res, next) {
     if (process.env.NODE_ENV === 'production' && !signatureHeader) {
       return res.status(401).json({
         success: false,
-        error: 'Missing FASTag webhook signature',
+        error: 'Missing required FASTag webhook signature header',
       });
     }
 

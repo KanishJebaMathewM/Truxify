@@ -136,7 +136,7 @@ describe('middleware/rateLimiter.js Unit Tests', () => {
     it('resets the rate limit counter after the window expires', async () => {
       const app = express();
       const testLimiter = rateLimit({
-        windowMs: 50, // 50ms window
+        windowMs: 250, // 250ms window to be robust against CPU scheduling delay
         max: 1,
         standardHeaders: true,
         legacyHeaders: false,
@@ -153,7 +153,7 @@ describe('middleware/rateLimiter.js Unit Tests', () => {
       expect(res2.status).toBe(429);
 
       // Wait for window to expire
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       // Request 3 after window reset: OK
       const res3 = await request(app).get('/reset-test');

@@ -1,7 +1,9 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { supabase, supabaseAdmin } from '../config/db.js';
-const voiceDb = (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
+function getVoiceDb() {
+  return (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
+}
 import logger from '../middleware/logger.js';
 
 const MAX_CACHE_SIZE = 100;
@@ -53,7 +55,11 @@ async function getBookingContext(bookingId, userId) {
 
   // Orders table is the real order model (there is no bookings table).
   try {
-    let orderQuery = voiceDb.from('orders').select('*');
+    const db = getVoiceDb();
+    if (!db || typeof db.from !== 'function') {
+      return null;
+    }
+    let orderQuery = db.from('orders').select('*');
     if (isUuid) {
       orderQuery = orderQuery
         .eq('id', bookingId)
@@ -255,8 +261,9 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
   const targetLang = langNames[language] || 'English';
 
   try {
+    const db = getVoiceDb();
     if (intent === LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS) {
-      const { data: profile } = await voiceDb
+      const { data: profile } = await db
         .from('profiles')
         .select('wallet_balance, total_earnings')
         .eq('id', userId)
@@ -271,7 +278,7 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
       voiceResult.response_text = `Your available wallet balance is ₹${balance.toFixed(2)}.`;
     } else if (intent === LOGISTICS_VOICE_INTENTS.REPORT_DELAY) {
       // Find driver's active in-transit order
-      const { data: activeOrder } = await voiceDb
+      const { data: activeOrder } = await db
         .from('orders')
         .select('id, order_display_id')
         .eq('driver_id', userId)
@@ -281,7 +288,7 @@ export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQ
         .maybeSingle();
 
       if (activeOrder) {
-        await voiceDb.from('orders').update({
+        await db.from('orders').update({
           delay_reported: true,
           delay_reported_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

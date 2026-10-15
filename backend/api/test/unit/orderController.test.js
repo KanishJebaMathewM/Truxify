@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: { from: vi.fn() },
+  supabaseAdmin: null,
+  redisClient: null,
   mongoDb: {},
+  firebaseAdmin: null,
 }));
 
 vi.mock('../../src/repositories/orderRepository.js', () => ({
@@ -33,6 +36,7 @@ vi.mock('../../src/services/escrow.js', () => ({
   recordDepositTx: vi.fn(),
   submitEscrowRefund: vi.fn(),
   escrowRefund: vi.fn(),
+  escrowRelease: vi.fn(),
 }));
 
 vi.mock('../../src/services/ml.js', () => ({

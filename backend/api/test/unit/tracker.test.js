@@ -16,7 +16,9 @@ const dbMock = vi.hoisted(() => ({
 vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
   redisClient: null,
+  upstashRedisClient: null,
   firebaseAdmin: null,
+  supabaseAdmin: null,
   supabase: {
     auth: {
       async getUser() {
@@ -698,6 +700,11 @@ describe('handleLocationPing - main telemetry flow', () => {
   });
 
   it('buffers telemetry and broadcasts to subscribed order clients', async () => {
+    dbMock.store.orders.push({
+      order_display_id: 'ORDER-ABC',
+      customer_id: 'customer-1',
+      driver_id: 'driver-1',
+    });
     const subscriberMessages = [];
     const subscriber = {
       readyState: 1,

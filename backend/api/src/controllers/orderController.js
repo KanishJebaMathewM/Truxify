@@ -183,11 +183,14 @@ export const verifyDeliveryController = async (req, res, next) => {
         payment_released: true,
       });
     }
+    const order = (result?.amount_inr == null || result?.order_display_id == null)
+      ? await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'total_amount, order_display_id')
+      : null;
     res.json({
       message: 'Delivery verified successfully! Payment released to driver.',
       payment_released: result?.payment_released ?? true,
-      amount_inr: result?.amount_inr ?? null,
-      order_display_id: result?.order_display_id ?? null,
+      amount_inr: result?.amount_inr ?? (order?.total_amount != null ? order.total_amount / 100 : null),
+      order_display_id: result?.order_display_id ?? order?.order_display_id ?? null,
     });
   } catch (err) {
     if (err instanceof DomainError) return next(new AppError(err.message, err.status, "DOMAIN_ERROR", err.payload));

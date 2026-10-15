@@ -43,7 +43,7 @@ export class TelematicsIngestionService {
 
       return rawPayload;
     } catch (err) {
-      throw new Error(`Failed to parse IoT telemetry payload: ${err.message}`);
+      throw new Error(`Failed to parse IoT telemetry payload: ${err.message}`, { cause: err });
     }
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TransactionMonitor } from '../../../src/services/blockchain/transactionMonitor.js';
+import { TransactionMonitor } from '../../src/services/blockchain/transactionMonitor.js';
 
 describe('TransactionMonitor', () => {
   let monitor;

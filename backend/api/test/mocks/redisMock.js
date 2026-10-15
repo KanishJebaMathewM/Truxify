@@ -142,6 +142,10 @@ class RedisMock {
         this.store.clear();
         this.expirations.clear();
     }
+
+    clearAll() {
+        this.clear();
+    }
 }
 
 export { RedisMock };

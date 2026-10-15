@@ -64,6 +64,8 @@ describe('locationServer', () => {
   })
 
   it('increments active driver count on connection and resets on close', async () => {
+    await closeLocationServer()
+    initLocationServer({})
     const handler = getDriverConnectionHandler()
     expect(handler).toBeInstanceOf(Function)
 

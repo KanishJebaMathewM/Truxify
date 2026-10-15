@@ -1,4 +1,5 @@
 import osrmService from '../services/osrmService.js';
+import logger from '../middleware/logger.js';
 
 /**
  * Calculates a point-to-point driving route with exponential backoff and Haversine straight-line resilience.

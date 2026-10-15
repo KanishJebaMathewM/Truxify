@@ -5,7 +5,45 @@ import logger from './logger.js';
 export const correlationContext = new AsyncLocalStorage();
 
 const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// backend/api/src/middleware/correlationId.js
 
+import { AsyncLocalStorage } from 'async_hooks';
+import { v4 as uuidv4 } from 'uuid';
+
+const correlationStorage = new AsyncLocalStorage();
+
+/**
+ * Retrieves the current correlation store context.
+ * @returns {Object|undefined} Current store containing correlationId.
+ */
+export function getCorrelationStore() {
+  return correlationStorage.getStore();
+}
+
+/**
+ * Runs a callback function within an asynchronous correlation ID context.
+ * @param {string} correlationId - Unique request tracing ID.
+ * @param {Function} callback - Function to execute within context.
+ * @returns {any} Result of the callback execution.
+ */
+export function runWithCorrelationId(correlationId, callback) {
+  const store = { correlationId: correlationId || uuidv4() };
+  return correlationStorage.run(store, callback);
+}
+
+/**
+ * Express middleware to attach or generate a correlation ID for request tracing.
+ */
+export function correlationIdMiddleware(req, res, next) {
+  const incomingId = req.headers['x-correlation-id'] || req.headers['x-request-id'] || uuidv4();
+  
+  req.correlationId = incomingId;
+  res.setHeader('X-Correlation-ID', incomingId);
+
+  runWithCorrelationId(incomingId, () => {
+    next();
+  });
+}
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
   const rawHeader =

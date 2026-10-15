@@ -194,7 +194,8 @@ class LocationService {
         // 409 = milestone already completed server-side: idempotent success.
         return response.statusCode >= 200 && response.statusCode < 300 ||
             response.statusCode == 409;
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[LocationService] milestone sync failed: $e');
         return false;
       }
     };
@@ -211,7 +212,8 @@ class LocationService {
           body: jsonEncode({'locations': locations}),
         );
         return response.statusCode >= 200 && response.statusCode < 300;
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[LocationService] location sync failed: $e');
         return false;
       }
     };

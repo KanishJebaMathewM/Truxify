@@ -234,6 +234,7 @@ beforeEach(() => {
       "evt-5",
       expect.any(String),
       expect.stringContaining("unsuccessful"),
+      1,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -267,6 +268,7 @@ beforeEach(() => {
       "evt-6",
       expect.any(String),
       expect.stringContaining("unsuccessful"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -300,6 +302,7 @@ beforeEach(() => {
       "evt-7",
       expect.any(String),
       expect.stringContaining("deduplicated"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });
@@ -321,7 +324,7 @@ beforeEach(() => {
       expect(mockEventBus.publishAndReport).toHaveBeenCalled();
     });
 
-    expect(mockOutboxService.markPublished).toHaveBeenCalledWith("evt-8");
+    expect(mockOutboxService.markPublished).toHaveBeenCalledWith("evt-8", undefined);
     worker.stopOutboxRelayWorker();
   });
 
@@ -347,6 +350,7 @@ beforeEach(() => {
       "evt-9",
       expect.any(String),
       expect.stringContaining("No outcome"),
+      undefined,
     );
     worker.stopOutboxRelayWorker();
   });

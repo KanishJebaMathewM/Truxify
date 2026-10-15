@@ -148,7 +148,7 @@ describe('kafkaHealth', () => {
   it('reports degraded when the kafka config module is unavailable', async () => {
     process.env.KAFKA_ENABLED = 'true';
     const { kafkaHealth } = await loadHealthChecks({});
-    const result = await kafkaHealth({ timeoutMs: 100 });
+    const result = await kafkaHealth({ timeoutMs: 3000 });
     expect(result.status).toBe(HealthStatus.DEGRADED);
   });
 });

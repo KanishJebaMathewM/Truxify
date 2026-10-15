@@ -150,6 +150,7 @@ describe('request validation middleware', () => {
   });
 
   it('passes through valid payloads without stripping unrelated route fields', () => {
+    const futureDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
     const { req, res, next } = runValidation(createOrderSchema, {
       pickup_lat: 19.076,
       pickup_lng: 72.8777,
@@ -157,7 +158,7 @@ describe('request validation middleware', () => {
       drop_address: "New Delhi",
       drop_lng: 77.1025,
       weight_tonnes: 10,
-      pickup_date: '2026-10-10',
+      pickup_date: futureDate,
       pickup_address: 'Mumbai',
       drop_address: 'Delhi',
       goods_type: 'electronics',

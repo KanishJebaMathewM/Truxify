@@ -146,7 +146,8 @@ class SupabaseQueryBuilder {
   }
 
   _matches(row, f) {
-    const v = row[f.col];
+    let v = row[f.col];
+    if (v === undefined && f.col === 'version') v = 1;
     let op = f.op;
     let negate = false;
     if (op.startsWith('not:')) {

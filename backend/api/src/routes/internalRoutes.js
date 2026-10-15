@@ -362,24 +362,6 @@ router.post('/defensive-pause', async (req, res) => {
  *   get:
  *     tags: [Internal]
  *     summary: Retrieve complete dispute evidence package for an unconfirmed or disputed order
- *     parameters:
- *       - name: orderId
- *         in: path
- *         required: true
- *         description: Order identifier (UUID or display id) to retrieve dispute evidence for.
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Dispute evidence package.
- *       400:
- *         description: orderId parameter is required.
- *       404:
- *         description: Order not found.
- *       500:
- *         description: Failed to retrieve order metadata.
- *       503:
- *         description: Database client is not available.
  *     security:
  *       - ApiKeyAuth: []
  *     parameters:

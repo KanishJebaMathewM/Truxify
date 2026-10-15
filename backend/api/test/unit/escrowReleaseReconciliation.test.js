@@ -59,6 +59,8 @@ vi.mock('../../src/lib/redisLock.js', () => ({
   acquireLock: mockAcquireLock,
   releaseLock: mockReleaseLock,
   renewLock: mockRenewLock,
+  withLockRenewal: vi.fn((key, val, ttl, asyncFn) => (typeof asyncFn === 'function' ? asyncFn() : typeof val === 'function' ? val() : undefined)),
+  DEFAULT_LOCK_RENEWAL_INTERVAL_MS: 10_000,
   LockAcquisitionError: class LockAcquisitionError extends Error {},
 }));
 

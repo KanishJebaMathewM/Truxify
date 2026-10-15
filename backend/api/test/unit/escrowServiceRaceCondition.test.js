@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
+import escrowService from '../../src/services/escrowService.js';
 
 // Mock @supabase/supabase-js
 let mockSupabaseStore = {};
@@ -24,24 +22,33 @@ vi.mock('@supabase/supabase-js', () => {
             },
           }),
         }),
-        update: (updates) => ({
-          eq: (col1, val1) => ({
-            eq: (col2, val2) => ({
-              select: () => ({
-                maybeSingle: async () => {
-                  const row = mockSupabaseStore[val1];
-                  if (!row) return { data: null, error: null };
-                  // Check conditional match (e.g. escrow_status === 'deposited')
-                  if (row[col2] !== val2) {
-                    return { data: null, error: null }; // Condition failed (atomic lock rejected)
-                  }
-                  Object.assign(row, updates);
-                  return { data: row, error: null };
-                },
-              }),
-            }),
-          }),
-        }),
+        update: (updates) => {
+          const conditions = {};
+          const applyUpdate = () => {
+            const id = conditions['id'];
+            const row = mockSupabaseStore[id];
+            if (!row) return { data: null, error: null };
+            for (const [col, val] of Object.entries(conditions)) {
+              if (row[col] !== val) {
+                return { data: null, error: null };
+              }
+            }
+            Object.assign(row, updates);
+            return { data: row, error: null };
+          };
+
+          const builder = {
+            eq: (col, val) => {
+              conditions[col] = val;
+              return builder;
+            },
+            select: () => builder,
+            maybeSingle: async () => applyUpdate(),
+            single: async () => applyUpdate(),
+            then: (resolve, reject) => Promise.resolve(applyUpdate()).then(resolve, reject),
+          };
+          return builder;
+        },
       }),
     }),
   };
@@ -54,19 +61,20 @@ vi.mock('ethers', () => {
       id: vi.fn((str) => `0x${Buffer.from(str).toString('hex').padStart(64, '0')}`),
       getAddress: vi.fn((addr) => addr),
       parseEther: vi.fn((amt) => BigInt(amt) * 10n ** 18n),
-      JsonRpcProvider: vi.fn().mockImplementation(() => ({})),
-      Wallet: vi.fn().mockImplementation(() => ({})),
-      Contract: vi.fn().mockImplementation(() => ({
-        releaseEscrow: vi.fn().mockImplementation(async () => ({
-          wait: mockBlockchainTxWait,
-          hash: '0xmockreleasetxhash123',
-        })),
-      })),
+      JsonRpcProvider: vi.fn().mockImplementation(function() { return {}; }),
+      Wallet: vi.fn().mockImplementation(function() { return {}; }),
+      Contract: vi.fn().mockImplementation(function() {
+        return {
+          releaseEscrow: vi.fn().mockImplementation(async () => ({
+            wait: mockBlockchainTxWait,
+            hash: '0xmockreleasetxhash123',
+          })),
+        };
+      }),
     },
   };
 });
 
-const escrowService = require('../../../backend/api/src/services/escrowService');
 
 describe('EscrowService - Concurrent Release Race Condition Prevention', () => {
   beforeEach(() => {

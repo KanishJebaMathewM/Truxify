@@ -20,6 +20,7 @@ vi.mock('../../src/config/db.js', () => ({
   supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   get redisClient() { return mockRedis; },
+  upstashRedisClient: null,
   mongoDb: null,
   // Production createUserClient builds a per-request user-scoped client; in
   // the harness the shared in-memory mock plays that role.

@@ -41,17 +41,52 @@ export const isValidIdentifier = (id) => {
  * Validation failures are client errors (400), not server faults (500).
  */
 function statusForError(err) {
-  return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+  if (Number.isInteger(err?.statusCode)) return err.statusCode;
+  if (/not found/i.test(err?.message)) return 404;
+  return 500;
 }
 
 function errorMessage(err, fallback) {
-  return err.statusCode === 400 ? err.message : fallback;
+  return err?.message || fallback;
 }
 
 /**
- * POST /api/carbon-credits/mint
- * Calculates carbon savings from telematics & mints cross-chain carbon tokens.
- * Restricted to carriers, drivers, fleet owners, and admins.
+ * @openapi
+ * /api/carbon-credits/mint:
+ *   post:
+ *     tags: [Carbon Credits]
+ *     summary: Calculates carbon savings from telematics & mints cross-chain carbon tokens
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [truck_id, trip_id, fuel_saved_liters]
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *               trip_id:
+ *                 type: string
+ *               fuel_saved_liters:
+ *                 type: number
+ *               distance_km:
+ *                 type: number
+ *               load_weight_kg:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Freight carbon credits calculated and minted successfully
+ *       400:
+ *         description: Missing or invalid parameters
+ *       401:
+ *         description: Missing or invalid authentication token
+ *       403:
+ *         description: Access Denied for role
+ *       500:
+ *         description: Failed to mint carbon credit tokens
  */
 router.post('/mint', authenticate, userLimiter, async (req, res) => {
   try {
@@ -65,6 +100,22 @@ router.post('/mint', authenticate, userLimiter, async (req, res) => {
 
     if (!truck_id || !trip_id || fuel_saved_liters === undefined || fuel_saved_liters === null) {
       return res.status(400).json({ error: 'Missing required parameters: truck_id, trip_id, fuel_saved_liters' });
+    }
+
+    if (!isValidIdentifier(truck_id) || !isValidIdentifier(trip_id)) {
+      return res.status(400).json({ error: 'truck_id and trip_id must be valid alphanumeric identifiers' });
+    }
+
+    if (fuel_saved_liters !== undefined && Number(fuel_saved_liters) <= 0) {
+      return res.status(400).json({ error: 'fuel_saved_liters must be greater than zero' });
+    }
+
+    if (distance_km !== undefined && Number(distance_km) > MAX_DISTANCE_KM) {
+      return res.status(400).json({ error: 'distance_km exceeds maximum threshold' });
+    }
+
+    if (fuel_saved_liters !== undefined && Number(fuel_saved_liters) > MAX_FUEL_SAVED_LITERS) {
+      return res.status(400).json({ error: 'fuel_saved_liters exceeds maximum single-trip threshold' });
     }
 
     // Pass the raw values through: the service owns the numeric contract, so

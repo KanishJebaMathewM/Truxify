@@ -54,6 +54,10 @@ export function pagination(defaultLimit = 20, maxLimit = 100) {
         );
       }
 
+      if (hasError) {
+        return res.status(400).json({ error: errorMessage });
+      }
+
       const skip = (page - 1) * limit;
 
       req.pagination = {

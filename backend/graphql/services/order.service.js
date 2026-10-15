@@ -40,36 +40,6 @@ function toDbStatus(status) {
 // backend/graphql/services/order.service.js
 
 /**
- * Maps raw database row columns to the GraphQL Order type schema.
- */
-export function mapOrder(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    customerId: row.customer_id,
-    driverId: row.driver_id,
-    status: row.status,
-    cargoType: row.cargo_type,
-    // Map canonical database columns to GraphQL non-null Location objects
-    pickup: {
-      address: row.pickup_address,
-      latitude: row.pickup_lat,
-      longitude: row.pickup_lng
-    },
-    dropoff: {
-      address: row.dropoff_address,
-      latitude: row.dropoff_lat,
-      longitude: row.dropoff_lng
-    },
-    amount: row.total_amount,
-    distance: row.distance_km,
-    weight: row.weight_tonnes,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-
-/**
  * Inserts a new order using canonical table columns.
  */
 export async function createOrder(input) {
@@ -100,7 +70,6 @@ export async function createOrder(input) {
 
   return mapOrder(data);
 }
-const typeDefs = gql`
 export const typeDefs = gql`
     extend type Query {
         order(id: ID!): Order

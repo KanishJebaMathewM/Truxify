@@ -4,6 +4,50 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// backend/api/src/services/notificationService.js
+
+import logger from '../middleware/logger.js';
+import messaging from '../config/firebase.js'; // Adjust per module structure
+
+/**
+ * Sends a delivery verification OTP push notification to a driver or customer.
+ * @param {string} fcmToken - Recipient FCM device token.
+ * @param {string|number} otpCode - Generated verification OTP.
+ */
+export async function sendDeliveryOtpNotification(fcmToken, otpCode) {
+  if (!fcmToken) {
+    throw new Error('FCM token is required for sending OTP push notification');
+  }
+
+  const message = {
+    token: fcmToken,
+    notification: {
+      title: 'Delivery Verification Code',
+      body: `Your delivery verification OTP is ${otpCode}. Valid for 10 minutes.`
+    },
+    data: {
+      type: 'DELIVERY_OTP',
+      otp: String(otpCode),
+      timestamp: new Date().toISOString()
+    }
+  };
+
+  try {
+    const response = await messaging.send(message);
+    logger.info('Delivery OTP push notification dispatched successfully', { 
+      messageId: response,
+      hasOtp: Boolean(otpCode) 
+    });
+    return response;
+  } catch (err) {
+    logger.error('Failed to send delivery OTP push notification', { 
+      error: err,
+      message: err.message,
+      stack: err.stack 
+    });
+    throw new Error('Failed to dispatch delivery verification notification', { cause: err });
+  }
+}
 // Before
 logger.error({ err: error }, 'Error inserting notification');
 

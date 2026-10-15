@@ -221,6 +221,82 @@ import {
   cancelOrder,
   predictRideDemand,
 } from '../controllers/orderController.js';
+// backend/api/src/routes/orderRoutes.js
+
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+import { matchEnRouteLoads, getAvailableLoadOffers } from '../services/orderService.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/orders/load-offers
+ * Retrieves available load offers for drivers browsing the marketplace.
+ * Added per issue #9851 to align with apps/driver/lib/services/marketplace_repository.dart.
+ */
+router.get('/orders/load-offers', authenticateToken, async (req, res) => {
+  try {
+    logger.info('Fetching available load offers for driver marketplace', { driverId: req.user?.id });
+
+    const offers = await getAvailableLoadOffers(req.query);
+
+    return res.status(200).json({
+      success: true,
+      data: offers
+    });
+  } catch (err) {
+    logger.error('Failed to fetch available load offers', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching load offers'
+    });
+  }
+});
+
+/**
+ * GET /api/orders/load-offers/en-route
+ * Retrieves en-route load suggestions based on current coordinates and max detour distance.
+ * Added per issues #9851 and #13304.
+ */
+router.get('/orders/load-offers/en-route', authenticateToken, async (req, res) => {
+  try {
+    const { current_lat, current_lng, max_detour_km = 50 } = req.query;
+
+    if (!current_lat || !current_lng) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing current_lat or current_lng coordinate parameters'
+      });
+    }
+
+    logger.info('Fetching en-route load offers with detour matching', {
+      driverId: req.user?.id,
+      currentLat: current_lat,
+      currentLng: current_lng,
+      maxDetourKm: max_detour_km
+    });
+
+    const enRouteLoads = await matchEnRouteLoads({
+      lat: parseFloat(current_lat),
+      lng: parseFloat(current_lng),
+      maxDetourKm: parseFloat(max_detour_km)
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: enRouteLoads
+    });
+  } catch (err) {
+    logger.error('Failed to retrieve en-route load offers', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching en-route loads'
+    });
+  }
+});
+
+export default router;
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { escrowLockManager } from '../lib/escrow/escrowLockManager.js';

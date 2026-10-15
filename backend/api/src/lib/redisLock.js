@@ -53,13 +53,14 @@ export async function acquireDistributedLock(key, ttlSeconds = 5) {
   }
 
   try {
-    const lock = await redisClient.set(key, '1', 'NX', 'EX', ttlSeconds);
+    const token = crypto.randomUUID();
+    const lock = await redisClient.set(key, token, 'NX', 'EX', ttlSeconds);
     if (lock === 'OK') {
       return {
         acquired: true,
         release: async () => {
           try {
-            await redisClient.del(key);
+            await redisClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, key, token);
           } catch (err) {
             logger.error({ err, key }, 'Failed to release distributed lock');
           }

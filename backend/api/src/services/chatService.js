@@ -3,6 +3,7 @@
  * and thread management for driver-customer communication.
  */
 
+import crypto from 'crypto';
 import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { encryptMessage, decryptMessage } from '../lib/chatEncryption.js';
@@ -11,7 +12,18 @@ import { enqueueOfflineMessage } from '../lib/messageQueue.js';
 const CHAT_RATE_LIMIT_PREFIX = 'chat:rate:';
 const RATE_LIMIT_WINDOW_SEC = 60;
 const MAX_MESSAGES_PER_WINDOW = 60;
-const ENCRYPTION_SECRET = process.env.CHAT_ENCRYPTION_SECRET || 'truxify-default-chat-secret-change-me';
+function getChatEncryptionSecret() {
+  const secret = process.env.CHAT_ENCRYPTION_SECRET;
+  if (secret && secret.length >= 32) return secret;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('CHAT_ENCRYPTION_SECRET must be set to a value of at least 32 characters in production.');
+  }
+  const fallback = crypto.randomBytes(32).toString('hex');
+  logger.warn('[chatService] CHAT_ENCRYPTION_SECRET is not set. Generated a random per-process secret.');
+  return fallback;
+}
+
+const ENCRYPTION_SECRET = getChatEncryptionSecret();
 
 function parseAttachmentContent(raw) {
     try {

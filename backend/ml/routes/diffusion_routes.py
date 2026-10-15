@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
@@ -27,14 +27,14 @@ generator = DiffusionRouteGenerator(model)
 trainer = DiffusionTrainer(model)
 
 class GenerateRequest(BaseModel):
-    batch_size: int = 1
-    route_length: int = 50
+    batch_size: int = Field(default=1, ge=1, le=64)
+    route_length: int = Field(default=50, ge=1, le=1000)
     condition: Optional[List[List[float]]] = None
 
 class TrainRequest(BaseModel):
-    epochs: int = 100
-    batch_size: int = 32
-    learning_rate: float = 1e-4
+    epochs: int = Field(default=100, ge=1, le=1000)
+    batch_size: int = Field(default=32, ge=1, le=256)
+    learning_rate: float = Field(default=1e-4, ge=0, le=1, allow_inf_nan=False)
 
 @router.post("/generate")
 async def generate_routes(request: GenerateRequest):

@@ -238,9 +238,6 @@ export class DeliveryVerificationService {
         if (!stored) {
           throw new Error("Failed to generate delivery OTP.");
         }
-        // Only a fresh issuance after the previous OTP expired may reset the
-        // failure counter; an active-OTP resend keeps it so repeated resends
-        // cannot zero out the brute-force budget.
         if (!activeOtp) {
           await clearOtpState(orderId);
         }
@@ -294,34 +291,10 @@ export class DeliveryVerificationService {
     );
   }
 
-  /**
-   * GPS Geofence Confirm
-   *
-   * Confirms that the assigned driver's *server-ingested* telemetry places
-   * them within the geofence of the drop location. Driver-supplied
-   * coordinates are never treated as authoritative for this check — the gate
-   * runs entirely on telemetry that was authenticated at ingestion and bound
-   * to the driver's verified identity.
-   *
-   * This does NOT release escrow. Releasing payment requires a
-   * customer-confirmed handover signal (the customer-entered OTP issued
-   * server-side) via verifyDelivery(). Self-reported GPS alone must never
-   * satisfy the release gate.
-   *
-   * @param {object} params
-   * @param {string} params.orderId    - Order UUID
-   * @param {string} params.driverId   - Driver's Supabase user ID
-   * @param {number} params.driverLat  - Driver's claimed latitude (audit only)
-   * @param {number} params.driverLng  - Driver's claimed longitude (audit only)
-   * @param {number} [params.geofenceRadiusM] - Per-request geofence radius in
-   *   meters, overriding the env default when provided.
-   * @returns {Promise<{autoConfirmed: boolean, message: string}>}
-   */
   async geofenceAutoConfirm({ orderId, driverId, driverLat, driverLng, geofenceRadiusM }) {
     return measureExecution(
       "DeliveryVerificationService.geofenceAutoConfirm",
       async () => {
-        // Fetch order including drop coords and current status
         const { data: order, error: orderErr } =
           await this.orderRepository.findOrderById(
             orderId,
@@ -345,9 +318,6 @@ export class DeliveryVerificationService {
           });
         }
 
-        // The release gate must never be satisfied by self-reported coordinates.
-        // assertDriverAtDropoff() proves physical presence using only telemetry
-        // that was authenticated at ingestion and bound to this driver/order.
         if (geofenceRadiusM !== undefined && geofenceRadiusM !== null) {
           if (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0) {
             throw new DomainError(400, {
@@ -356,8 +326,6 @@ export class DeliveryVerificationService {
           }
         }
 
-        // The radius is clamped to the server default so a client-supplied
-        // oversized value can never bypass the distance check.
         const maxRadiusM = DELIVERY_GEOFENCE_RADIUS_KM * 1000;
         const radiusM =
           geofenceRadiusM != null
@@ -365,8 +333,6 @@ export class DeliveryVerificationService {
             : maxRadiusM;
         await this.assertDriverAtDropoff(order, radiusM);
 
-        // Record the geofence confirmation and the (non-authoritative) claimed
-        // position for audit. This is a flag only — escrow is not released here.
         await this.orderRepository
           .updateOrder(orderId, {
             updated_at: new Date().toISOString(),
@@ -387,22 +353,6 @@ export class DeliveryVerificationService {
     );
   }
 
-  /**
-   * Asserts that the assigned driver's latest telemetry point is fresh and
-   * inside the geofence around the order's drop-off location.
-   *
-   * Only telemetry records that reference BOTH the order and the order's
-   * assigned driver are considered. `driver_id` is stamped server-side from
-   * the authenticated tracker/telemetry connection, so filtering on it — and
-   * rejecting any point that does not belong to the assigned driver — stops
-   * callers from substituting another driver's (or a fabricated) location.
-   *
-   * @param {object} order - Order row with id/driver_id/drop_lat/drop_lng.
-   * @param {number} [radiusM] - Optional geofence radius in meters; falls back
-   *   to the env default (DELIVERY_GEOFENCE_RADIUS_KM) when not provided.
-   * @throws {DomainError} 400 missing drop coords, 503 store unavailable,
-   *                       409 no/invalid/stale/out-of-range telemetry.
-   */
   async assertDriverAtDropoff(order, radiusM) {
     if (order.drop_lat == null || order.drop_lng == null) {
       throw new DomainError(400, {
@@ -417,10 +367,6 @@ export class DeliveryVerificationService {
       });
     }
 
-    // Ownership + provenance: only telemetry for THIS driver on THIS order.
-    // driver_id is stamped server-side from the authenticated connection.
-    // order_display_id is cross-verified to prevent stale telemetry from a
-    // previous order for the same driver being used to satisfy the geofence.
     const latestTelemetry = await mongoDb
       .collection("telemetry")
       .find({
@@ -487,32 +433,40 @@ export class DeliveryVerificationService {
           otp,
         });
 
+        // Bug fix #18104: 'pending' (never-funded escrow) must be treated as escrow-expected
+        // and blocked with a retryable 503 instead of falling through to a generic 409 error.
+        const escrowExpectedStates = ["pending", "funded", "release_failed", "release_pending"];
+        if (order.escrow_status && escrowExpectedStates.includes(order.escrow_status)) {
+          if (order.escrow_status === "pending") {
+            await this._writeRepository
+              .updateOrder(orderId, {
+                escrow_release_error: "ESCROW_NOT_RELEASED: Escrow was never funded.",
+                updated_at: new Date().toISOString(),
+              })
+              .catch((err) =>
+                logger.warn("[escrow] Failed to record unfunded escrow error:", err.message),
+              );
+            throw new DomainError(503, {
+              error: "Escrow deposit has not been funded yet. Please complete funding before verifying delivery.",
+              code: "ESCROW_NOT_RELEASED",
+              retryable: true,
+            });
+          }
+        }
+
         const isRetryForStuckEscrow =
           order.status === "payment_released" &&
           ["funded", "release_failed"].includes(order.escrow_status);
 
-        // Geofence must still apply on the stuck-escrow retry path. The retry
-        // flag only relaxes OTP-readiness and the Postgres RPC guard below; it
-        // must never bypass the driver-at-dropoff control, which would let a
-        // release be re-attempted without physical presence at the drop-off
-        // location (issue #11670).
         await this.assertDriverAtDropoff(order);
 
         let releaseTxHash = null;
         let escrowAlreadyReleased = false;
 
-        // 1. Execute Blockchain Release FIRST to fail-safe if network errors occur
         if (
           order.escrow_status === "funded" ||
           order.escrow_status === "release_failed"
         ) {
-          // Payout defense-in-depth: resolve the authoritative escrow amount
-          // (the value deposited at bid acceptance, escrow_amount_wei) and use
-          // it directly for the on-chain release. The actual on-chain booking
-          // amount is then enforced by escrowReleaseFn against this same figure,
-          // so the driver is always paid out exactly what was escrowed. We must
-          // NOT compare against total_amount here, since that includes the
-          // platform fee + toll and differs from the escrowed bid amount.
           let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
@@ -610,10 +564,6 @@ export class DeliveryVerificationService {
             });
           }
 
-          // Persist the confirmed release outcome immediately so a later
-          // complete_trip_tx failure is recoverable: escrow_status becomes
-          // 'released' before the RPC runs, so the SQL gate no longer blocks
-          // retries with a NULL release hash.
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
               await this._writeRepository.updateOrder(orderId, {
@@ -631,17 +581,9 @@ export class DeliveryVerificationService {
             }
           }
         } else if (order.escrow_status === "released") {
-          // Release was confirmed in a previous attempt — reuse the persisted hash.
           releaseTxHash = order.release_tx_hash || null;
         }
 
-        // Re-check that the escrow actually released after this attempt. This
-        // is what makes the stuck-escrow retry safe: token revocation and the
-        // "Payment Released" push below only run once releaseTxHash /
-        // escrowAlreadyReleased confirm the on-chain release, or the order was
-        // already "released". If the release failed again, the driver is told
-        // the retry failed instead of being notified that they are paid while
-        // the funds remain stuck on-chain.
         const releaseConfirmed = Boolean(
           releaseTxHash ||
             escrowAlreadyReleased ||
@@ -669,7 +611,6 @@ export class DeliveryVerificationService {
           });
         }
 
-        // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
         let verifiedOrder;
         let tripData;
 
@@ -706,161 +647,4 @@ export class DeliveryVerificationService {
 
           if (rpcResult.error) {
             logger.error(
-              "complete_trip_tx RPC failed:",
-              rpcResult.error.message,
-            );
-            throw new DomainError(500, {
-              error: "Failed to complete trip.",
-              details: rpcResult.error.message,
-            });
-          }
-
-          const verifyResult = await this.orderRepository.findOrderById(
-            orderId,
-            "status, escrow_status, escrow_release_attempts",
-          );
-          verifiedOrder = verifyResult.data;
-
-          if (verifyResult.error || !verifiedOrder) {
-            logger.error(
-              `[verify-delivery] Failed to verify order status after RPC for order ${orderId}`,
-            );
-            throw new DomainError(500, {
-              error: "Failed to verify order status after payment release.",
-            });
-          }
-
-          if (verifiedOrder.status !== "payment_released") {
-            logger.warn(
-              `[verify-delivery] Order ${orderId} status changed to "${verifiedOrder.status}" — payment was not released.`,
-            );
-            throw new DomainError(409, {
-              error:
-                "Order status changed during processing. Payment was not released.",
-            });
-          }
-
-          await this.completeDeliveryOtp({
-            otpRecordId: otpRecord.id,
-            orderId,
-          });
-        } else {
-          logger.info(
-            `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
-          );
-
-          // The order is already `payment_released` (that is what defines a
-          // stuck-escrow retry), but `complete_trip_tx` may never have run —
-          // e.g. the original call failed after the on-chain release landed —
-          // leaving the driver's wallet uncredited. Call `complete_trip_tx`
-          // (service_role, no OTP) now: it is idempotent on
-          // `status = 'payment_released'`, so an already-finalized order
-          // short-circuits without double-crediting the wallet, while a
-          // never-finalized order gets its wallet credited exactly once
-          // (issue #11188).
-          const retryRpcResult = await this.orderRepository.executeRpc(
-            "complete_trip_tx",
-            {
-              p_order_id: orderId,
-              p_otp_id: null,
-              p_release_tx_hash: releaseTxHash,
-            },
-            supabaseAdmin,
-          );
-          if (retryRpcResult.error) {
-            logger.error(
-              "[verify-delivery] complete_trip_tx failed on stuck-escrow retry for order",
-              orderId,
-              ":",
-              retryRpcResult.error.message,
-            );
-            throw new DomainError(503, {
-              error:
-                "Failed to finalize trip and credit wallet. Please retry.",
-              details: retryRpcResult.error.message,
-              retryable: true,
-            });
-          }
-          tripData = retryRpcResult.data;
-
-          // The verified OTP is consumed on the retry path too so it cannot be
-          // replayed by a later attempt. It is only consumed after the release
-          // is confirmed, so a failed release leaves the OTP intact for the
-          // next retry instead of force-rotating it.
-          await this.completeDeliveryOtp({
-            otpRecordId: otpRecord.id,
-            orderId,
-          });
-        }
-
-        // The trip is complete (payment_released) — kill any active public
-        // tracking tokens so a shared link can no longer broadcast the driver's
-        // live location. Best-effort: revokeAllForOrder never throws.
-        await this.trackingTokenService?.revokeAllForOrder(
-          order.order_display_id,
-        );
-
-        // --- Fire FCM push to driver: "Payment Released ✓" ---
-        const resolvedDriverIdForPush = tripData?.driver_id || order.driver_id;
-        if (resolvedDriverIdForPush) {
-          const amountInr = order.total_amount
-            ? `₹${(order.total_amount / 100).toFixed(0)}`
-            : "your amount";
-          sendPushNotification(
-            resolvedDriverIdForPush,
-            "✅ Payment Released",
-            `Payment Released ✓ ${amountInr} credited for order ${order.order_display_id}`,
-            "payment",
-            {
-              order_display_id: order.order_display_id,
-              release_tx_hash: releaseTxHash || "",
-              amount_paisa: String(order.total_amount || 0),
-            },
-          ).catch((err) =>
-            logger.warn("[FCM] Payment release push failed:", err.message),
-          );
-        }
-
-        let escrowUpdateFailed = false;
-        if (releaseTxHash || escrowAlreadyReleased) {
-          const { error: releaseUpdateErr } =
-            await this._writeRepository.updateOrder(orderId, {
-              escrow_status: "released",
-              escrow_release_error: null,
-              escrow_released_at: new Date().toISOString(),
-              release_tx_hash: releaseTxHash,
-            });
-
-          if (releaseUpdateErr) {
-            logger.error(
-              "[escrow] Release confirmed but persistence failed:",
-              releaseUpdateErr.message,
-            );
-            escrowUpdateFailed = true;
-          } else {
-            const resolvedDriverId = tripData?.driver_id || order.driver_id;
-            const resolvedDisplayId =
-              tripData?.order_display_id || order.order_display_id;
-            if (resolvedDriverId) {
-              const { error: walletErr } =
-                await this._writeRepository.updateWalletTransaction(
-                  resolvedDriverId,
-                  resolvedDisplayId,
-                  { description: `Escrow payout for ${resolvedDisplayId}` },
-                );
-
-              if (walletErr) {
-                logger.error(
-                  "[wallet] Failed to persist escrow payout:",
-                  walletErr.message,
-                );
-              }
-            }
-          }
-        }
-
-        return { escrowUpdateFailed };
-      },
-    );
-  }
-}
+              "complete

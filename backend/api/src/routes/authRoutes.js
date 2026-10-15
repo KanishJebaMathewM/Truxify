@@ -64,18 +64,13 @@ import { getJwtSecret } from "../config/jwtSecret.js";
 
 const router = express.Router();
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-  message: {
-    success: false,
-    message: "Too many requests from this IP, please try again later.",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-router.use(authLimiter);
+// Router-wide rate limiting for /api/auth is applied once, where the router is
+// mounted in src/index.js (`app.use('/api/auth', authLimiter, authRoutes)`),
+// using the shared Redis-backed authLimiter from middleware/rateLimiter.js.
+// Do not add a second router-level limiter here: it double-counts every auth
+// request, keeps per-process in-memory counts that are not shared across
+// replicas, and ignores the AUTH_RATE_LIMIT_* settings (see #2273, #10200).
+// Per-route limiters such as the ones on /request-otp and /verify-otp are fine.
 
 /**
  * Exchange a valid rotating refresh token for a backend JWT and a new refresh token.

@@ -1,3 +1,70 @@
+// backend/api/src/services/escrow.js
+
+import logger from '../middleware/logger.js';
+
+/**
+ * Verifies an escrow deposit transaction.
+ * Restructured per issue #13485 to ensure all guards run in full sequence.
+ * 
+ * @param {Object} depositPayload - Transaction payload containing driver, amount, booking, and value data.
+ * @returns {Object} Verification result with success status and validation messages.
+ */
+export async function verifyEscrowDepositTransaction(depositPayload) {
+  if (!depositPayload) {
+    return { success: false, error: 'Missing deposit transaction payload' };
+  }
+
+  const { driverId, amount, bookingId, depositValue } = depositPayload;
+  const validationErrors = [];
+
+  // 1. Validate Driver Identity Guard
+  if (!driverId || typeof driverId !== 'string' || driverId.trim() === '') {
+    validationErrors.push('Invalid or missing driver identifier');
+  }
+
+  // 2. Validate Amount Guard
+  const parsedAmount = Number(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    validationErrors.push('Invalid deposit amount: must be a positive finite number');
+  }
+
+  // 3. Validate Booking Association Guard
+  if (!bookingId || typeof bookingId !== 'string' || bookingId.trim() === '') {
+    validationErrors.push('Invalid or missing booking reference identifier');
+  }
+
+  // 4. Validate Transaction Value & Threshold Guard
+  const parsedValue = Number(depositValue);
+  if (!Number.isFinite(parsedValue) || parsedValue < parsedAmount) {
+    validationErrors.push('Deposit value guard failed: transaction value mismatch or below threshold');
+  }
+
+  // If any guard failed, reject the transaction and log validation failure
+  if (validationErrors.length > 0) {
+    logger.warn('Escrow deposit transaction verification failed validation guards', {
+      driverId,
+      bookingId,
+      errors: validationErrors
+    });
+
+    return {
+      success: false,
+      error: 'Deposit transaction failed safety validations',
+      details: validationErrors
+    };
+  }
+
+  logger.info('Escrow deposit transaction passed all verification guards successfully', {
+    driverId,
+    bookingId,
+    amount: parsedAmount
+  });
+
+  return {
+    success: true,
+    verifiedAmount: parsedAmount
+  };
+}
 class EscrowAmountMismatchError extends Error {
   constructor(expectedWei, actualWei) {
     super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);

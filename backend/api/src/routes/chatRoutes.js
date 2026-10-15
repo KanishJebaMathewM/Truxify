@@ -96,6 +96,24 @@ router.post('/:orderId/image', authenticate, upload.single('image'), async (req,
 router.post('/messages/:messageId/read', authenticate, async (req, res) => {
     try {
         const { messageId } = req.params;
+        if (typeof messageId !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(messageId)) {
+            return res.status(400).json({ error: 'Invalid message id.' });
+        }
+
+        const { data: message, error: lookupError } = await supabaseAdmin
+            .from('chat_messages')
+            .select('order_id')
+            .eq('id', messageId)
+            .single();
+
+        if (lookupError || !message) {
+            return res.status(404).json({ error: 'Message not found.' });
+        }
+
+        const readAccess = await verifyChatAccess(message.order_id, req.user.id);
+        if (!readAccess.authorized && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Not authorized to mark this message as read.' });
+        }
 
         await supabaseAdmin
             .from('chat_messages')

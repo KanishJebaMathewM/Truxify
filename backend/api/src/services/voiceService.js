@@ -119,7 +119,7 @@ function buildResponseForIntent(intent, bookingData, transcript) {
   const eta = bookingData?.eta;
   switch (intent) {
     case LOGISTICS_VOICE_INTENTS.PAYMENT_STATUS:
-      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}.`;
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}. Your shipment is currently ${status}.`;
     case LOGISTICS_VOICE_INTENTS.ETA:
       return eta
         ? `Your shipment for ${orderRef} is ${status} with an estimated arrival of ${eta}.`

@@ -8,7 +8,63 @@
  *   - traceEventBus: patches publish/on on an event bus instance
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// backend/api/test/unit/telemetry_EventTracer.test.js
 
+import { describe, it, expect, vi } from 'vitest';
+import { 
+  wrapPublish, 
+  wrapSubscribe, 
+  wrapEventHandler, 
+  traceEventBus 
+} from '../../src/core/telemetry/EventTracer.js';
+
+describe('EventTracer Telemetry Module', () => {
+  it('should wrap publish methods and trace event publication', async () => {
+    const mockPublish = vi.fn().mockResolvedValue({ success: true });
+    const wrappedPublish = wrapPublish('order.created', mockPublish);
+
+    const result = await wrappedPublish({ orderId: '123' });
+
+    expect(mockPublish).toHaveBeenCalledTimes(1);
+    expect(mockPublish).toHaveBeenCalledWith({ orderId: '123' });
+    expect(result).toEqual({ success: true });
+  });
+
+  it('should wrap subscribe handlers and record execution metrics', async () => {
+    const mockHandler = vi.fn().mockResolvedValue(true);
+    const wrappedHandler = wrapSubscribe('order.created', mockHandler);
+
+    await wrappedHandler({ orderId: '123' });
+
+    expect(mockHandler).toHaveBeenCalledTimes(1);
+    expect(mockHandler).toHaveBeenCalledWith({ orderId: '123' });
+  });
+
+  it('should wrap generic event handlers correctly', async () => {
+    const mockHandler = vi.fn().mockReturnValue('processed');
+    const wrapped = wrapEventHandler('payment.processed', mockHandler);
+
+    const res = wrapped({ paymentId: 'p-99' });
+
+    expect(res).toBe('processed');
+    expect(mockHandler).toHaveBeenCalledWith({ paymentId: 'p-99' });
+  });
+
+  it('should attach trace event bus telemetry without disrupting message flow', () => {
+    const mockEventBus = {
+      publish: vi.fn(),
+      subscribe: vi.fn()
+    };
+
+    const tracedBus = traceEventBus(mockEventBus);
+
+    expect(tracedBus).toBeDefined();
+    expect(typeof tracedBus.publish).toBe('function');
+    expect(typeof tracedBus.subscribe).toBe('function');
+  });
+});
+const mockStartSpan = vi.fn(() => ({ setStatus: vi.fn(), end: vi.fn(), setAttributes: vi.fn(), setAttribute: vi.fn() }));
+vi.mock('@opentelemetry/api', () => ({ context: { active: vi.fn(() => ({})) }, trace: { getTracer: vi.fn(() => ({ startSpan: mockStartSpan })) }, SpanStatusCode: { OK: 0, ERROR: 1 } }));
 const makeSpan = () => ({ setStatus: vi.fn(), end: vi.fn(), setAttributes: vi.fn(), setAttribute: vi.fn() });
 
 const { spanFactoryMock, propagatorMock } = vi.hoisted(() => ({

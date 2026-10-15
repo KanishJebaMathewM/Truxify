@@ -4,7 +4,70 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// backend/api/src/services/notificationService.js
 
+import logger from '../middleware/logger.js';
+import messaging from '../config/firebase.js';
+import db from '../config/db.js'; // Adjust per module structure
+
+/**
+ * Sends and persists a delivery verification OTP notification.
+ * @param {string} userId - Recipient user ID.
+ * @param {string} fcmToken - Recipient FCM device token.
+ * @param {string|number} otpCode - Generated verification OTP.
+ */
+export async function sendDeliveryOtpNotification(userId, fcmToken, otpCode) {
+  if (!fcmToken || !userId) {
+    throw new Error('UserId and FCM token are required for delivery OTP notification');
+  }
+
+  const notificationType = 'delivery_otp'; // Standardized category identifier
+
+  // 1. Persist notification record in database with standardized notif_type
+  try {
+    await db.query(
+      `INSERT INTO notifications (user_id, notif_type, title, body, payload, created_at) 
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [
+        userId,
+        notificationType,
+        'Delivery Verification Code',
+        `Your delivery verification OTP is ${otpCode}. Valid for 10 minutes.`,
+        JSON.stringify({ otp: String(otpCode) })
+      ]
+    );
+  } catch (dbErr) {
+    logger.error('Failed to persist delivery OTP notification record', { userId, error: dbErr });
+    throw new Error('Database persistence failed for notification');
+  }
+
+  // 2. Construct and dispatch FCM push payload using the identical type identifier
+  const message = {
+    token: fcmToken,
+    notification: {
+      title: 'Delivery Verification Code',
+      body: `Your delivery verification OTP is ${otpCode}. Valid for 10 minutes.`
+    },
+    data: {
+      type: notificationType,
+      otp: String(otpCode),
+      timestamp: new Date().toISOString()
+    }
+  };
+
+  try {
+    const response = await messaging.send(message);
+    logger.info('Delivery OTP push notification dispatched successfully', { 
+      userId, 
+      messageId: response,
+      notifType: notificationType 
+    });
+    return response;
+  } catch (fcmErr) {
+    logger.error('Failed to dispatch delivery OTP push notification', { userId, error: fcmErr });
+    throw new Error('Failed to send push notification', { cause: fcmErr });
+  }
+}
 /**
  * Notification Service
  * Handles FCM push notification fan-outs, device token deduplication,

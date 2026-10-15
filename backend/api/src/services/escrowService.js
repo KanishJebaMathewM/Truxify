@@ -1,10 +1,10 @@
-const { createClient } = require('@supabase/supabase-js');
-const { ethers } = require('ethers');
-const {
+import { createClient } from '@supabase/supabase-js';
+import { ethers } from 'ethers';
+import {
     validateEscrowAmount,
     validateBlockchainAddress,
     validateBookingId
-} = require('../utils/escrowValidator');
+} from '../utils/escrowValidator.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -24,7 +24,7 @@ const getEscrowContract = (provider) => {
     return new ethers.Contract(escrowContractAddress, ESCROW_ABI, wallet);
 };
 
-const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddress) => {
+export const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddress) => {
     try {
         const validAmount = validateEscrowAmount(amount);
         const validBookingId = validateBookingId(bookingId);
@@ -97,7 +97,7 @@ const initiateEscrowDeposit = async (userId, bookingId, amount, driverWalletAddr
     }
 };
 
-const releaseEscrowFunds = async (userId, bookingId) => {
+export const releaseEscrowFunds = async (userId, bookingId) => {
     try {
         const validBookingId = validateBookingId(bookingId);
 
@@ -162,9 +162,4 @@ const releaseEscrowFunds = async (userId, bookingId) => {
         console.error('Escrow release service error:', error.message);
         throw error;
     }
-};
-
-module.exports = {
-    initiateEscrowDeposit,
-    releaseEscrowFunds,
 };

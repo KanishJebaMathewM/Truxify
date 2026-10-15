@@ -58,7 +58,6 @@ export class CircuitBreaker {
     this.reset();
   }
 
-  // Timer is declared at function scope so the finally block can safely clear it even if fn() throws synchronously.
   async execute(fn, ...args) {
     if (typeof fn !== 'function') {
       throw new TypeError('circuitBreaker execute: fn must be a function');
@@ -74,9 +73,6 @@ export class CircuitBreaker {
     }
 
     if (currentState === CircuitState.HALF_OPEN) {
-      // Only a single (or small bounded number of) trial request is admitted
-      // during the recovery probe window; the rest are short-circuited like
-      // OPEN so we don't hammer the struggling dependency (retry-storm risk).
       if (this._halfOpenProbeInFlight) {
         logger.warn(`[CircuitBreaker:${this.name}] Probe already in flight, rejecting extra HALF_OPEN request`);
         if (typeof this.fallback === 'function') {
@@ -109,6 +105,7 @@ export class CircuitBreaker {
   }
 
   onSuccess() {
+    this.successCount++;
     if (this.state === CircuitState.HALF_OPEN) {
       this.reset();
       this._halfOpenProbeInFlight = false;
@@ -120,6 +117,7 @@ export class CircuitBreaker {
 
   onFailure(err, args) {
     this.failureCount += 1;
+    this.successCount = 0;
     const errMessage = err instanceof Error ? err.message : String(err);
     logger.error({ err: errMessage, failures: this.failureCount }, `[CircuitBreaker:${this.name}] Execution failure`);
 
@@ -133,7 +131,3 @@ export class CircuitBreaker {
 
     if (typeof this.fallback === 'function') {
       return this.fallback(...args);
-    }
-    throw err;
-  }
-}

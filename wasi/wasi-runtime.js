@@ -4,7 +4,48 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
+// wasi/wasi-runtime.js
 
+import logger from '../backend/api/src/middleware/logger.js';
+
+/**
+ * Safely extracts and parses the final valid JSON payload from WASM stdout,
+ * handling extraneous runtime logs, warnings, or non-JSON output lines.
+ * Fixed per issue #12756.
+ */
+function parseWasmStdout(rawStdout) {
+  if (!rawStdout || typeof rawStdout !== 'string') {
+    throw new Error('WASM stdout is empty or not a valid string');
+  }
+
+  const lines = rawStdout.trim().split(/\r?\n/);
+
+  // Iterate backwards from the last line to find the first valid JSON payload
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if ((line.startsWith('{') && line.endsWith('}')) || (line.startsWith('[') && line.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(line);
+        return parsed;
+      } catch (err) {
+        // Continue searching upward if this candidate line failed to parse
+      }
+    }
+  }
+
+  // Fallback: try parsing the entire raw output if no single line matched
+  try {
+    return JSON.parse(rawStdout.trim());
+  } catch (err) {
+    logger.error('Failed to parse WASM stdout as JSON', {
+      rawOutput: rawStdout,
+      error: err.message
+    });
+    throw new Error(`Uncaught JSON.parse error in WASM runtime output: ${err.message}. Raw output: ${rawStdout}`);
+  }
+}
+
+export { parseWasmStdout };
 class WASIRuntime {
     constructor() {
         this.instances = new Map();

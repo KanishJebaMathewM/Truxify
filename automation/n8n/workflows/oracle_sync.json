@@ -38,6 +38,45 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 1,
       "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.valid}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Gas Result Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO gas_prices (idempotency_key, gas_gwei, recorded_at)\nVALUES ('={{$json.idempotencyKey}}', {{$json.gasGwei}}, to_timestamp({{$json.timestamp}} / 1000.0))\nON CONFLICT (idempotency_key) DO NOTHING;"
+      },
+      "name": "Sync Gas Price",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "toEmail": "ops-alerts@truxify.org",
+        "subject": "Oracle Sync Alert: Invalid Gas Result Received",
+        "htmlFormat": true,
+        "message": "<h3 style=\"color:#c0392b;\">Gas Oracle Sync — Invalid Result Detected</h3><p>The oracle sync pipeline received an invalid or null gas price result from the JSON-RPC endpoint.</p><p><strong>Error:</strong> {{$json.error}}</p><p><strong>Raw value:</strong> <code>{{$json.raw}}</code></p><p><strong>Idempotency Key:</strong> {{$json.idempotencyKey}}</p><p><strong>Timestamp:</strong> {{$json.timestamp}}</p><p>The database record was NOT written. Investigate the RPC endpoint health.</p>",
+        "options": {}
+      },
+      "name": "Alert: Invalid Gas Result",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [1050, 400]
     }
   ],
   "connections": {
@@ -57,6 +96,35 @@
         [
           {
             "node": "Compute Idempotency & Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Idempotency & Format": {
+      "main": [
+        [
+          {
+            "node": "Gas Result Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gas Result Valid?": {
+      "main": [
+        [
+          {
+            "node": "Sync Gas Price",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Invalid Gas Result",
             "type": "main",
             "index": 0
           }

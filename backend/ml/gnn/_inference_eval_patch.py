@@ -14,8 +14,9 @@ class RouteOptimizer(_BaseRouteOptimizer):
         objectives=['time', 'cost', 'fuel'],
         constraints=None,
     ):
-        was_training = self.model.training
-        self.model.eval()
+        model, _, _ = self._serving_snapshot()
+        was_training = model.training
+        model.eval()
         try:
             return super().optimize_route(
                 start_node,
@@ -25,7 +26,7 @@ class RouteOptimizer(_BaseRouteOptimizer):
                 constraints,
             )
         finally:
-            self.model.train(was_training)
+            model.train(was_training)
 
 
 _models.RouteOptimizer = RouteOptimizer

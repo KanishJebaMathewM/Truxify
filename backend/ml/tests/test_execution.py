@@ -2,12 +2,11 @@ import asyncio
 import time
 
 import pytest
-
 from app import execution
 from app.execution import (
-    run_inference,
-    inference_capacity,
     close_inference_executor,
+    inference_capacity,
+    run_inference,
 )
 
 
@@ -63,21 +62,20 @@ class TestRunInference:
             raise RuntimeError("boom")
 
         async def scenario():
-            semaphore = execution._get_semaphore()
             with pytest.raises(RuntimeError):
                 await run_inference(boom)
             # A second call must be able to acquire immediately; otherwise the
             # leaked slot would have wedged the pipeline.
             result = await run_inference(lambda: "ok")
-            return semaphore, result
+            return result
 
-        semaphore, result = asyncio.run(scenario())
+        result = asyncio.run(scenario())
         assert result == "ok"
-        assert semaphore.locked() is False
+        assert execution._active_inference == 0
 
     def test_works_across_separate_event_loops(self):
         """pytest / TestClient run the app on a fresh loop per module; the
-        per-loop semaphore must never raise 'bound to a different event loop'."""
+        process admission must never raise 'bound to a different event loop'."""
         async def one():
             return await run_inference(lambda: "a")
 

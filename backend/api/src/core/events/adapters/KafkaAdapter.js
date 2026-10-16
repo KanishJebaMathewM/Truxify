@@ -1,6 +1,6 @@
 import { EventPublisher } from '../EventPublisher.js';
 import logger from '../../../middleware/logger.js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'node:crypto';
 import { ContextPropagator } from '../../telemetry/ContextPropagator.js';
 
 export class KafkaAdapter extends EventPublisher {

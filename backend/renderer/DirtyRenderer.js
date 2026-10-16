@@ -64,11 +64,15 @@ class DirtyRenderer {
     }
     
     markDirty(x, y, width, height) {
-        // Ensure coordinates are within bounds
-        x = Math.max(0, x);
-        y = Math.max(0, y);
-        width = Math.min(width, this.width - x);
-        height = Math.min(height, this.height - y);
+        // Intersect the rect with the buffer: clamping only the origin while
+        // keeping width/height would teleport fully out-of-bounds rects into
+        // the visible area (e.g. (-5,-5,3,3) would become (0,0,3,3)).
+        const nx = Math.max(0, x);
+        const ny = Math.max(0, y);
+        width = Math.min(x + width, this.width) - nx;
+        height = Math.min(y + height, this.height) - ny;
+        x = nx;
+        y = ny;
         
         if (width <= 0 || height <= 0) return;
         

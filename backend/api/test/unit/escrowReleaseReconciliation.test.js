@@ -47,6 +47,9 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabaseAdmin() {
     return mockSupabaseAdmin.available ? mockSupabaseAdmin : null;
   },
@@ -61,7 +64,7 @@ vi.mock('../../src/lib/redisLock.js', () => ({
 
 vi.mock('../../src/services/escrow.js', () => ({
   escrowRelease: mockEscrowRelease,
-  getEscrowBooking: mockGetEscrowBooking,
+  getOnChainEscrowBooking: mockGetEscrowBooking,
   getEscrowBookingId: (displayId) => displayId,
   resolveExpectedDepositAmount: mockResolveExpectedDepositAmount,
 }));

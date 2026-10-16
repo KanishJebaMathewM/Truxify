@@ -7,6 +7,13 @@ pytest.importorskip("torch_geometric")
 from routes import gnn_routes
 
 
+@pytest.fixture(autouse=True)
+def _allow_untrained_optimizer(monkeypatch):
+    """These tests exercise objective forwarding, not the untrained-serving
+    guard (4f9113d7f); opt the module-global optimizer into dev mode."""
+    monkeypatch.setattr(gnn_routes.optimizer, "allow_untrained", True)
+
+
 def _request(objectives):
     return gnn_routes.RouteRequest(
         start_node="A",

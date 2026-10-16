@@ -18,6 +18,7 @@ const tokenServiceMock = vi.hoisted(() => ({
   getOrderForPublicTracking: vi.fn(),
   getOrderTimeline: vi.fn(),
   getDriverLocation: vi.fn(),
+  getOrderRouteCoords: vi.fn(),
 }));
 
 vi.mock('../../src/services/trackingTokenService.js', () => ({
@@ -27,6 +28,7 @@ vi.mock('../../src/services/trackingTokenService.js', () => ({
     getOrderForPublicTracking = tokenServiceMock.getOrderForPublicTracking;
     getOrderTimeline = tokenServiceMock.getOrderTimeline;
     getDriverLocation = tokenServiceMock.getDriverLocation;
+    getOrderRouteCoords = tokenServiceMock.getOrderRouteCoords;
   },
 }));
 
@@ -43,6 +45,9 @@ const supabaseMock = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabase: supabaseMock,
   supabaseAdmin: null,
 }));
@@ -108,16 +113,8 @@ describe('publicTrackingRoutes', () => {
 
   it('GET /tracking/:token/route returns a LineString for valid coordinates', async () => {
     tokenServiceMock.validateToken.mockResolvedValue({ valid: true, orderDisplayId: 'FF20260811ABC123456789' });
-    supabaseMock.from.mockReturnValue({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () =>
-            Promise.resolve({
-              data: { pickup_lat: 18.5, pickup_lng: 73.8, drop_lat: 19.0, drop_lng: 72.8, driver_id: 'd1' },
-              error: null,
-            }),
-        }),
-      }),
+    tokenServiceMock.getOrderRouteCoords.mockResolvedValue({
+      pickup_lat: 18.5, pickup_lng: 73.8, drop_lat: 19.0, drop_lng: 72.8, driver_id: 'd1',
     });
 
     const res = await request(makeApp()).get('/api/public/tracking/valid-token/route');
@@ -130,13 +127,7 @@ describe('publicTrackingRoutes', () => {
 
   it('GET /tracking/:token/route returns 422 when coordinates are missing', async () => {
     tokenServiceMock.validateToken.mockResolvedValue({ valid: true, orderDisplayId: 'FF20260811ABC123456789' });
-    supabaseMock.from.mockReturnValue({
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () => Promise.resolve({ data: { pickup_lat: null }, error: null }),
-        }),
-      }),
-    });
+    tokenServiceMock.getOrderRouteCoords.mockResolvedValue({ pickup_lat: null });
 
     const res = await request(makeApp()).get('/api/public/tracking/valid-token/route');
     expect(res.status).toBe(422);

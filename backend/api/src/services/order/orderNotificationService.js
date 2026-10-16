@@ -7,7 +7,10 @@ import {
   getActiveDeliveryOtp,
 } from '../notificationService.js';
 
-export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
+const parsedOtpTtlMinutes = parseInt(process.env.OTP_TTL_MINUTES, 10);
+export const OTP_TTL_MINUTES = Number.isFinite(parsedOtpTtlMinutes) && parsedOtpTtlMinutes > 0
+  ? parsedOtpTtlMinutes
+  : 15;
 export const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
 export const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
 const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
@@ -97,7 +100,8 @@ export async function recordOtpFailure(orderId) {
     }
   }
 
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
+  // Updating an existing attempt counter does not require another map slot.
+  if (!inMemoryOtpFailedAttempts.has(orderId) && inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
     const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
     inMemoryOtpFailedAttempts.delete(oldestKey);
   }

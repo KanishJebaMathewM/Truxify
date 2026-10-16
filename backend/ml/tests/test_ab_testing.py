@@ -58,7 +58,7 @@ def test_ab_pipeline():
     response = requests.post(f"{BASE_URL}/ab-testing/predict", json={
         "order_id": "test_001",
         "features": {"distance": 100, "weight": 500, "route": "Mumbai-Delhi"}
-    })
+    }, timeout=30)
     print("Prediction:", response.json())
     
     # 2. Log metrics
@@ -66,15 +66,15 @@ def test_ab_pipeline():
         "test_id": "test_001",
         "model_version": "shadow",
         "metrics": {"rmse": 2.1, "mae": 1.5, "accuracy": 0.89}
-    })
+    }, timeout=30)
     print("Metrics logged:", response.json())
     
     # 3. Evaluate test
-    response = requests.get(f"{BASE_URL}/ab-testing/evaluate/test_001")
+    response = requests.get(f"{BASE_URL}/ab-testing/evaluate/test_001", timeout=30)
     print("Evaluation:", response.json())
     
     # 4. Trigger rollback
-    response = requests.post(f"{BASE_URL}/ab-testing/rollback/test_001")
+    response = requests.post(f"{BASE_URL}/ab-testing/rollback/test_001", timeout=30)
     print("Rollback:", response.json())
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from self_supervised.model import SimCLR, MoCo, MaskedAutoencoder, SSLPreTrainer
+from datetime import datetime
+from typing import Literal
+
+import torch
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from self_supervised.model import MaskedAutoencoder, MoCo, SimCLR, SSLPreTrainer
+from self_supervised.training_transition import SSLAdmissionError, counts
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ssl", tags=["Self-Supervised Learning"])
@@ -24,109 +25,61 @@ moco_trainer = SSLPreTrainer(moco_model)
 mae_trainer = SSLPreTrainer(mae_model)
 
 class PretrainRequest(BaseModel):
-    method: str = 'simclr'  # simclr, moco, mae
-    epochs: int = 50
-    batch_size: int = 32
-    data_size: int = 1000
+    method: Literal['simclr', 'moco', 'mae'] = 'simclr'
+    epochs: int = Field(default=50, strict=True, ge=1, le=100)
+    batch_size: int = Field(default=32, strict=True, ge=1, le=8192)
+    data_size: int = Field(default=1000, strict=True, ge=1, le=10000)
 
-@router.post("/pretrain")
+
+def _run_pretraining(request, method):
+    """Admit selected observation geometry/work before native allocation."""
+    selected = {'simclr': simclr_trainer, 'moco': moco_trainer, 'mae': mae_trainer}[method]
+    width = selected.model.input_dim * (50 if method == 'mae' else 1)
+    try:
+        counts(request.data_size, request.epochs, request.batch_size, width, method,
+               getattr(selected.model, 'queue_size', 0))
+        shape = ((request.data_size, 50, selected.model.input_dim) if method == 'mae'
+                 else (request.data_size, selected.model.input_dim))
+        parameter = next(selected.model.parameters())
+        data = torch.randn(shape, device=parameter.device, dtype=parameter.dtype)
+        return getattr(selected, 'pretrain_' + method)(data, request.epochs, request.batch_size)
+    except SSLAdmissionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error('Native SSL pretraining failed: %s', exc)
+        raise HTTPException(status_code=500, detail='Internal server error') from exc
+
+
+@router.post('/pretrain')
 async def pretrain_model(request: PretrainRequest):
-    """Pre-train model using self-supervised learning"""
-    try:
-        # Generate synthetic data
-        data = torch.randn(request.data_size, 50, input_dim)
-        
-        # Choose method
-        if request.method == 'simclr':
-            results = simclr_trainer.pretrain_simclr(
-                data, request.epochs, request.batch_size
-            )
-            model_name = 'SimCLR'
-        elif request.method == 'moco':
-            results = moco_trainer.pretrain_moco(
-                data, request.epochs, request.batch_size
-            )
-            model_name = 'MoCo'
-        elif request.method == 'mae':
-            results = mae_trainer.pretrain_mae(
-                data, request.epochs, request.batch_size
-            )
-            model_name = 'MAE'
-        else:
-            return {
-                'success': False,
-                'error': 'Invalid method. Choose simclr, moco, or mae'
-            }
-        
-        return {
-            'success': True,
-            'data': {
-                'method': request.method,
-                'model': model_name,
-                'results': results,
-                'epochs': request.epochs
-            },
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Pre-training failed: {e}")
-        logger.error(f"Internal error: {e}")
+    results = _run_pretraining(request, request.method)
+    return {
+        'success': True,
+        'data': {'method': request.method,
+                 'model': {'simclr': 'SimCLR', 'moco': 'MoCo', 'mae': 'MAE'}[request.method],
+                 'results': results, 'epochs': request.epochs},
+        'timestamp': datetime.now().isoformat(),
+    }
 
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/pretrain/simclr")
+def _method_response(request, method):
+    return {'success': True, 'data': _run_pretraining(request, method),
+            'timestamp': datetime.now().isoformat()}
+
+
+@router.post('/pretrain/simclr')
 async def pretrain_simclr(request: PretrainRequest):
-    """Pre-train using SimCLR"""
-    try:
-        data = torch.randn(request.data_size, 50, input_dim)
-        results = simclr_trainer.pretrain_simclr(data, request.epochs, request.batch_size)
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"SimCLR pre-training failed: {e}")
-        logger.error(f"Internal error: {e}")
+    return _method_response(request, 'simclr')
 
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/pretrain/moco")
+@router.post('/pretrain/moco')
 async def pretrain_moco(request: PretrainRequest):
-    """Pre-train using MoCo"""
-    try:
-        data = torch.randn(request.data_size, 50, input_dim)
-        results = moco_trainer.pretrain_moco(data, request.epochs, request.batch_size)
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"MoCo pre-training failed: {e}")
-        logger.error(f"Internal error: {e}")
+    return _method_response(request, 'moco')
 
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/pretrain/mae")
+@router.post('/pretrain/mae')
 async def pretrain_mae(request: PretrainRequest):
-    """Pre-train using Masked Autoencoder"""
-    try:
-        data = torch.randn(request.data_size, 50, input_dim)
-        results = mae_trainer.pretrain_mae(data, request.epochs, request.batch_size)
-        
-        return {
-            'success': True,
-            'data': results,
-            'timestamp': datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"MAE pre-training failed: {e}")
-        logger.error(f"Internal error: {e}")
-
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return _method_response(request, 'mae')
 
 @router.get("/model-info")
 async def get_model_info():

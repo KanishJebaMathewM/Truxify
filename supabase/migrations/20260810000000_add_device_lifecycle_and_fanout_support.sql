@@ -129,6 +129,7 @@ CREATE OR REPLACE FUNCTION unregister_device_token(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_now         timestamptz := now();

@@ -64,6 +64,7 @@ void main() {
           markTestSkipped(
             'Requires an initialized Supabase client with a signed-in user.',
           );
+          return; // markTestSkipped does not abort execution.
         }
 
         final fake = FakeApiClient();
@@ -94,6 +95,7 @@ void main() {
           markTestSkipped(
             'Requires an initialized Supabase client to evaluate auth state.',
           );
+          return; // markTestSkipped does not abort execution.
         }
 
         final fake = FakeApiClient();

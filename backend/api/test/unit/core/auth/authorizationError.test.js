@@ -3,10 +3,14 @@ import { AuthorizationError } from '../../../../src/core/auth/AuthorizationError
 
 describe('AuthorizationError', () => {
   it('should create an error with a message', () => {
-    const error = new AuthorizationError('Not authorized');
+    // Current contract: (status, message, errorCode?) with errorCode +
+    // status properties and _inferCode defaulting.
+    const error = new AuthorizationError(403, 'Not authorized');
     expect(error).toBeInstanceOf(Error);
     expect(error).toBeInstanceOf(AuthorizationError);
     expect(error.message).toBe('Not authorized');
+    expect(error.status).toBe(403);
+    expect(error.errorCode).toBe('FORBIDDEN');
   });
 
   it('should have AuthorizationError as name', () => {
@@ -15,8 +19,8 @@ describe('AuthorizationError', () => {
   });
 
   it('should have the code property set when provided', () => {
-    const error = new AuthorizationError('Access denied', 'ERR_ACCESS_DENIED');
-    expect(error.code).toBe('ERR_ACCESS_DENIED');
+    const error = new AuthorizationError(403, 'Access denied', 'ERR_ACCESS_DENIED');
+    expect(error.errorCode).toBe('ERR_ACCESS_DENIED');
   });
 
   it('should default code to undefined when not provided', () => {

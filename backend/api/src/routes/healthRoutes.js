@@ -64,7 +64,35 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js
 
+import express from 'express';
+import { authenticate, requireRole } from '../middleware/auth.js';
+import healthLimiter from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/health/sentry-debug
+ * Endpoint for testing Sentry integration.
+ * Fixed per issue #9846 to prevent public exploitation and log flooding.
+ */
+router.get('/sentry-debug', healthLimiter, (req, res, next) => {
+  // FIX: Restrict to non-production environments or require admin authorization
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('Unauthorized attempt to trigger Sentry debug test in production', { ip: req.ip });
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Sentry debug endpoint is disabled in production'
+    });
+  }
+
+  logger.warn('Triggering intentional Sentry test error in non-production environment');
+  throw new Error('Sentry Test Error from Node.js Backend');
+});
+
+export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;

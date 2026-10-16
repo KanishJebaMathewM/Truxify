@@ -158,6 +158,71 @@ router.post('/:id/geofence-confirm', authenticate, userLimiter, async (req, res,
 });
 
 import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+import db from '../config/database.js';
+
+const router = express.Router();
+
+const DEFAULT_ORDER_LIMIT = 20;
+const MAX_ORDER_LIMIT = 100;
+
+/**
+ * GET /api/orders/history
+ * Retrieves paginated order history for the authenticated user with clamped limits.
+ * Fixed per issue #10262 to prevent full-table scan abuse.
+ */
+router.get('/orders/history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { cursor } = req.query;
+
+    // FIX: Parse and clamp limit between 1 and MAX_ORDER_LIMIT (100)
+    let limit = parseInt(req.query.limit, 10);
+    if (isNaN(limit) || limit <= 0) {
+      limit = DEFAULT_ORDER_LIMIT;
+    } else {
+      limit = Math.min(limit, MAX_ORDER_LIMIT);
+    }
+
+    logger.info('Fetching order history with pagination', { userId, limit, cursor });
+
+    let query = db('orders')
+      .where({ user_id: userId })
+      .orderBy('created_at', 'desc')
+      .limit(limit + 1); // Fetch one extra to determine if there's a next page
+
+    if (cursor) {
+      query = query.where('created_at', '<', cursor);
+    }
+
+    const orders = await query;
+
+    let nextCursor = null;
+    if (orders.length > limit) {
+      orders.pop(); // Remove the extra record
+      nextCursor = orders[orders.length - 1].created_at;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: orders,
+      pagination: {
+        limit,
+        nextCursor
+      }
+    });
+  } catch (err) {
+    logger.error('Failed to fetch order history', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching order history'
+    });
+  }
+});
+
+export default router;
+import express from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';

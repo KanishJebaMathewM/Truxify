@@ -9,7 +9,59 @@
 // can be unit-tested without wiring up the Apollo gateway or a real DB client.
 
 import DataLoader from 'dataloader';
+// backend/graphql/gateway/authContext.js
 
+import supabaseAdmin from '../config/supabase.js';
+import logger from '../middleware/logger.js';
+
+const DEFAULT_ROLE = 'CUSTOMER';
+
+/**
+ * Resolves user context from Supabase Bearer token for GraphQL gateway.
+ * Fixed per issue #8977 to query profiles by firebase_uid instead of profiles.id.
+ */
+export async function resolveUserContext(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { role: DEFAULT_ROLE, userId: null, isAuthenticated: false };
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+      logger.warn('Failed to authenticate token in GraphQL gateway', { error: authError?.message });
+      return { role: DEFAULT_ROLE, userId: null, isAuthenticated: false };
+    }
+
+    // FIX: Query profiles table by firebase_uid instead of internal profiles.id
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role, firebase_uid')
+      .eq('firebase_uid', user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      logger.error('Database error while fetching profile role in gateway', { error: profileError.message });
+    }
+
+    const role = profile?.role || DEFAULT_ROLE;
+    const userId = profile?.id || user.id;
+
+    logger.info('Resolved GraphQL user context successfully', { userId, role });
+
+    return {
+      role,
+      userId,
+      isAuthenticated: true,
+      token
+    };
+  } catch (err) {
+    logger.error('Exception in resolveUserContext', { error: err.message, stack: err.stack });
+    return { role: DEFAULT_ROLE, userId: null, isAuthenticated: false };
+  }
+}
 export function createLoaders(supabaseClient) {
   return {
     paymentLoader: new DataLoader(async (orderIds) => {

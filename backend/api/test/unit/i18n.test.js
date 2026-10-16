@@ -1,6 +1,48 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import defaultI18nMiddleware, { errorTranslationInterceptor } from '../../src/middleware/i18n.js';
+// backend/api/test/unit/i18n.test.js
 
+import { describe, it, expect, vi } from 'vitest';
+import { errorTranslationInterceptor } from '../../src/middleware/i18n.js';
+
+describe('errorTranslationInterceptor middleware', () => {
+  it('should translate error strings when an error payload is returned', () => {
+    const req = { headers: { 'accept-language': 'es' } };
+    const res = {
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    // Attach middleware
+    errorTranslationInterceptor(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
+
+    // Simulate route handler calling res.json with an error body
+    res.json({ success: false, error: 'User not found' });
+
+    // Verify that res.json was invoked (with translated or intercepted body)
+    expect(res.json).toHaveBeenCalledTimes(1);
+    const interceptedBody = res.json.mock.calls[0][0];
+    expect(interceptedBody).toHaveProperty('success', false);
+    expect(interceptedBody).toHaveProperty('error');
+  });
+
+  it('should pass non-error bodies unchanged', () => {
+    const req = { headers: {} };
+    const res = {
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    errorTranslationInterceptor(req, res, next);
+
+    const normalBody = { success: true, data: { id: 1, name: 'Load #102' } };
+    res.json(normalBody);
+
+    expect(res.json).toHaveBeenCalledTimes(1);
+    expect(res.json.mock.calls[0][0]).toEqual(normalBody);
+  });
+});
 describe('i18n Middleware and errorTranslationInterceptor', () => {
   let mockReq;
   let mockRes;

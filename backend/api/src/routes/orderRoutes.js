@@ -144,7 +144,91 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js
 
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { bidLimiter } from '../middleware/rateLimiter.js';
+import { validateBody } from '../middleware/validate.js';
+import { submitBidSchema } from '../validators/orderValidators.js';
+import logger from '../middleware/logger.js';
+import supabaseAdmin from '../config/supabase.js';
+
+const router = express.Router();
+
+/**
+ * POST /api/orders/:id/bids
+ * Allows an authenticated driver to submit a bid on a specific load/order.
+ * Fixed per issue #13305.
+ */
+router.post('/:id/bids', authenticate, bidLimiter, validateBody(submitBidSchema), async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const driverId = req.user?.id;
+    const { bid_amount, proposed_pickup_time, notes } = req.body;
+
+    logger.info('Processing driver bid submission', { orderId, driverId, bid_amount });
+
+    // 1. Verify order exists and is open for bidding
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from('orders')
+      .select('id, status, customer_id')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (orderErr || !order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
+    }
+
+    if (order.status !== 'open' && order.status !== 'bidding') {
+      return res.status(400).json({
+        success: false,
+        error: 'Order is no longer open for bidding'
+      });
+    }
+
+    // 2. Insert bid record into database
+    const { data: bid, error: insertErr } = await supabaseAdmin
+      .from('order_bids')
+      .insert({
+        order_id: orderId,
+        driver_id: driverId,
+        bid_amount,
+        proposed_pickup_time,
+        notes,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (insertErr) {
+      logger.error('Failed to insert driver bid into database', { error: insertErr.message });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to record bid submission'
+      });
+    }
+
+    logger.info('Driver bid successfully submitted', { bidId: bid.id, orderId, driverId });
+
+    return res.status(201).json({
+      success: true,
+      data: bid
+    });
+  } catch (err) {
+    logger.error('Exception in POST /api/orders/:id/bids', { error: err.message, stack: err.stack });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while submitting bid'
+    });
+  }
+});
+
+export default router;
 import {
   bidLimiter,
   userLimiter,

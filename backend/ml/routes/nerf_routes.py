@@ -9,7 +9,7 @@ from typing import Annotated, List
 import numpy as np
 import torch
 import torch.nn.functional as F
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from nerf.camera import create_orbital_poses, create_spiral_poses
 from nerf.image_rendering import ImageAdmissionError, scene_policy
 from nerf.model import NeRFNetwork, NeRFRenderer, NeRFTrainer
@@ -191,9 +191,9 @@ def train_observed_rays(request: RayTrainingRequest):
 @router.post("/train")
 @serialized_native
 def train_nerf(
-    epochs: int = 100,
-    batch_size: int = 4096,
-    learning_rate: float = 5e-4
+    epochs: int = Query(100, ge=1, le=100),
+    batch_size: int = Query(4096, ge=1, le=100000),
+    learning_rate: float = Query(5e-4, gt=0, lt=1)
 ):
     """Train NeRF model"""
     try:

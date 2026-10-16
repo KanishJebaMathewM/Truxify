@@ -29,6 +29,7 @@
           "boolean": [
             {
               "value1": "={{ $json.params !== undefined }}",
+              "operation": "equal",
               "value2": true
             }
           ]
@@ -45,6 +46,7 @@
           "boolean": [
             {
               "value1": "={{ $json.gasPrice > 500000000000 }}",
+              "operation": "equal",
               "value2": true
             }
           ]

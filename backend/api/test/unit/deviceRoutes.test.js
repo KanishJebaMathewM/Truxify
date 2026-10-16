@@ -44,6 +44,9 @@ vi.mock('../../src/controllers/deviceController.js', () => ({
   pruneDevices: vi.fn((req, res) =>
     res.status(200).json({ success: true, pruned: 0 })
   ),
+  syncLocations: vi.fn((req, res) =>
+    res.status(200).json({ success: true, message: 'synced' })
+  ),
 }));
 
 import deviceRoutes from '../../src/routes/deviceRoutes.js';

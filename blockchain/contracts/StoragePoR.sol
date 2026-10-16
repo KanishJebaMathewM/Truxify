@@ -107,10 +107,12 @@ contract StoragePoR is Ownable {
             node.lockedCollateral = 0;
 
             if (penalty > 0) {
-                payable(owner()).transfer(penalty); // Bounded penalty
+                (bool penaltySent, ) = payable(owner()).call{value: penalty}("");
+                require(penaltySent, "Penalty transfer failed"); // Bounded penalty
             }
             if (returned > 0) {
-                payable(_provider).transfer(returned); // Restitution
+                (bool returnedSent, ) = payable(_provider).call{value: returned}("");
+                require(returnedSent, "Restitution transfer failed"); // Restitution
             }
 
             emit ProviderSlashed(_provider, penalty);

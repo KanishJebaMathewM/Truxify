@@ -1,0 +1,33 @@
+name: ML driver-profit lifecycle
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/driver_profit.py'
+      - 'backend/ml/tests/test_driver_profit_lifecycle.py'
+      - 'backend/ml/tests/test_driver_profit_predictor.py'
+      - 'backend/ml/requirements.txt'
+      - '.github/workflows/ml-driver-profit-lifecycle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  driver-profit-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused service-compatible dependencies
+        run: python -m pip install pytest==9.0.3 numpy==1.26.4 scipy==1.11.3 scikit-learn==1.9.0 fastapi==0.116.1 pydantic==2.11.1 requests==2.33.0 ruff==0.16.9
+      - name: Verify concurrent serving and existing predictor behavior
+        run: python -m pytest backend/ml/tests/test_driver_profit_lifecycle.py backend/ml/tests/test_driver_profit_predictor.py -q
+      - name: Analyze predictor and regressions
+        run: |
+          ruff check backend/ml/app/models/driver_profit.py backend/ml/tests/test_driver_profit_lifecycle.py
+          python -m py_compile backend/ml/app/models/driver_profit.py

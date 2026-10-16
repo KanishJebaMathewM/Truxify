@@ -5,8 +5,15 @@ import orderConsumer from './consumers/order.consumer.js';
 import orderReadModel from './cqrs/order.read.model.js';
 import logger from '../api/src/middleware/logger.js';
 import { startOutboxRelay, stopOutboxRelay } from './relay/outboxRelay.js';
+import { OutboxRelay } from './relay/outbox.relay.js';
+import outboxRepository from './repositories/outbox.repository.js';
 
 dotenv.config();
+
+const OUTBOX_RELAY_INTERVAL_MS = Number.parseInt(process.env.OUTBOX_RELAY_INTERVAL_MS, 10) || 5000;
+
+// The event_outbox relay started in main(); kept so the signal handlers can stop it.
+let eventOutboxRelay = null;
 
 async function main() {
   try {
@@ -50,14 +57,14 @@ async function main() {
     // event_outbox row; this relay publishes those events to Kafka and marks
     // them published only after a successful send. A Kafka outage never loses
     // committed events — rows stay pending and are retried.
-    const outboxRelay = new OutboxRelay({
+    eventOutboxRelay = new OutboxRelay({
       repository: outboxRepository,
       publisher: async ({ topic, key, envelope }) => {
         await kafka.publishEvent(topic, envelope, key);
       },
       loggerAdapter: logger,
     });
-    outboxRelay.run({ intervalMs: OUTBOX_RELAY_INTERVAL_MS }).catch((error) => {
+    eventOutboxRelay.run({ intervalMs: OUTBOX_RELAY_INTERVAL_MS }).catch((error) => {
       logger.error('❌ Outbox relay stopped unexpectedly:', error);
     });
 
@@ -72,6 +79,7 @@ async function main() {
 process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down...');
   stopOutboxRelay();
+  eventOutboxRelay?.stop();
   await kafka.disconnect();
   process.exit(0);
 });
@@ -79,6 +87,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   logger.info('SIGINT received, shutting down...');
   stopOutboxRelay();
+  eventOutboxRelay?.stop();
   await kafka.disconnect();
   process.exit(0);
 });

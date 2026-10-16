@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { orderValidationService } from '../core/container.js';
-import { getEscrowBookingId, getEscrowBooking } from '../services/escrow.js';
+import { getEscrowBookingId, getOnChainEscrowBooking } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -29,7 +29,7 @@ router.get('/receipt/:tripId', authenticate, async (req, res) => {
     }
 
     const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id || order.id);
-    const onChainBooking = await getEscrowBooking(bookingId);
+    const onChainBooking = await getOnChainEscrowBooking(bookingId);
 
     res.json({
       orderId: order.order_display_id || order.id,

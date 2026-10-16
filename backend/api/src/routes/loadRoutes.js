@@ -60,9 +60,152 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import { invalidateBookingCaches } from '../utils/cacheInvalidation.js';
+// backend/api/src/routes/loadRoutes.js
 import { formatPaginationMeta } from '../utils/pagination.js';
 import { estimateTripProfit } from '../services/tripProfitEstimator.js';
 
+import express from 'express';
+import { authenticate } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+import supabaseAdmin from '../config/supabase.js';
+
+const router = express.Router();
+
+/**
+ * Helper to validate latitude and longitude ranges.
+ */
+function isValidCoordinate(lat, lng) {
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  return (
+    Number.isFinite(numLat) &&
+    Number.isFinite(numLng) &&
+    numLat >= -90 && numLat <= 90 &&
+    numLng >= -180 && numLng <= 180
+  );
+}
+
+/**
+ * GET /api/loads
+ * Retrieves available loads with strict validation on query filters.
+ * Fixed per issue #9833.
+ */
+router.get('/loads', authenticate, async (req, res) => {
+  try {
+    const { min_price, max_price, distance, page = '1', limit = '20' } = req.query;
+
+    // FIX: Validate and parse pagination
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    if (isNaN(pageNum) || pageNum < 1 || isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+      return res.status(400).json({ success: false, error: 'Invalid pagination parameters' });
+    }
+
+    let query = supabaseAdmin.from('loads').select('*');
+
+    // FIX: Validate min_price and max_price
+    if (min_price !== undefined) {
+      const minPriceNum = parseFloat(min_price);
+      if (!Number.isFinite(minPriceNum) || minPriceNum < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid min_price parameter' });
+      }
+      query = query.gte('freight_value', Math.round(minPriceNum * 100));
+    }
+
+    if (max_price !== undefined) {
+      const maxPriceNum = parseFloat(max_price);
+      if (!Number.isFinite(maxPriceNum) || maxPriceNum < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid max_price parameter' });
+      }
+      query = query.lte('freight_value', Math.round(maxPriceNum * 100));
+    }
+
+    // FIX: Validate distance filter
+    if (distance !== undefined) {
+      const distanceNum = parseFloat(distance);
+      if (!Number.isFinite(distanceNum) || distanceNum < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid distance parameter' });
+      }
+      query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${distanceNum}`);
+    }
+
+    const from = (pageNum - 1) * limitNum;
+    const to = from + limitNum - 1;
+    const { data: loads, error: loadErr } = await query.range(from, to);
+
+    if (loadErr) {
+      logger.error('Database error fetching loads', { error: loadErr.message });
+      return res.status(500).json({ success: false, error: 'Internal server error while fetching loads' });
+    }
+
+    return res.status(200).json({ success: true, data: loads });
+  } catch (err) {
+    logger.error('Exception in GET /api/loads', { error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/loads
+ * Creates a new load offer with rigorous coordinate and pricing validation.
+ * Fixed per issue #9833.
+ */
+router.post('/loads', authenticate, async (req, res) => {
+  try {
+    const { origin, destination, weight_tons, expected_price } = req.body;
+
+    // FIX: Validate origin and destination coordinates
+    if (!origin || !isValidCoordinate(origin.lat, origin.lng)) {
+      return res.status(400).json({ success: false, error: 'Invalid or missing origin coordinates (lat [-90,90], lng [-180,180])' });
+    }
+    if (!destination || !isValidCoordinate(destination.lat, destination.lng)) {
+      return res.status(400).json({ success: false, error: 'Invalid or missing destination coordinates' });
+    }
+
+    // FIX: Validate weight_tons (> 0)
+    const weightNum = parseFloat(weight_tons);
+    if (!Number.isFinite(weightNum) || weightNum <= 0) {
+      return res.status(400).json({ success: false, error: 'Weight must be a positive number greater than 0' });
+    }
+
+    // FIX: Validate expected_price (> 0)
+    const priceNum = parseFloat(expected_price);
+    if (!Number.isFinite(priceNum) || priceNum <= 0) {
+      return res.status(400).json({ success: false, error: 'Expected price must be a positive number greater than 0' });
+    }
+
+    const freightValuePaisa = Math.round(priceNum * 100);
+
+    const { data: newLoad, error: insertErr } = await supabaseAdmin
+      .from('loads')
+      .insert({
+        customer_id: req.user.id,
+        pickup_lat: origin.lat,
+        pickup_lng: origin.lng,
+        drop_lat: destination.lat,
+        drop_lng: destination.lng,
+        weight_tons: weightNum,
+        freight_value: freightValuePaisa,
+        status: 'open',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (insertErr) {
+      logger.error('Failed to insert new load offer', { error: insertErr.message });
+      return res.status(500).json({ success: false, error: 'Failed to create load offer' });
+    }
+
+    logger.info('Load offer created successfully', { loadId: newLoad.id });
+    return res.status(201).json({ success: true, data: newLoad });
+  } catch (err) {
+    logger.error('Exception in POST /api/loads', { error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, error: 'Internal server error while creating load' });
+  }
+});
+
+export default router;
 
 const router = express.Router();
 

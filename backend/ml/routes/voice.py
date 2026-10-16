@@ -188,6 +188,20 @@ async def text_to_speech(request: TextVoiceRequest):
     """
     Convert the assistant response into regional-language audio.
     """
+    text = (request.text or "").strip()
+
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Text cannot be empty.",
+        )
+
+    if len(text) > 5000:
+        raise HTTPException(
+            status_code=400,
+            detail="Text is too long.",
+        )
+
     elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
     if elevenlabs_key:
         voice_id = "21m00Tcm4TlvDq8ikWAM"  # Default realistic voice

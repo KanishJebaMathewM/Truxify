@@ -4,7 +4,71 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
+// backend/api/src/services/notificationService.js
 
+import logger from '../middleware/logger.js';
+import supabaseAdmin from '../config/supabase.js';
+import { sendFcmNotification } from './fcmService.js';
+
+/**
+ * Sends delivery verification OTP to the customer via notification and FCM push.
+ * Fixed per issue #10132 to restore plaintext delivery OTP inclusion.
+ */
+export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
+  try {
+    if (!otp) {
+      throw new Error('Plaintext delivery OTP is required for notification delivery');
+    }
+
+    const title = 'Delivery Verification OTP';
+    const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
+
+    logger.info('Dispatching delivery OTP notification to customer', {
+      customerId,
+      orderDisplayId
+    });
+
+    // 1. Insert notification record into database with OTP metadata
+    const { error: dbError } = await supabaseAdmin.from('notifications').insert({
+      user_id: customerId,
+      title,
+      body,
+      notif_type: 'order_update',
+      metadata: {
+        order_display_id: orderDisplayId,
+        delivery_otp: String(otp)
+      }
+    });
+
+    if (dbError) {
+      logger.error('Failed to insert delivery OTP notification into database', { error: dbError.message });
+    }
+
+    // 2. Dispatch FCM push notification with secure data payload
+    const fcmResult = await sendFcmNotification(
+      customerId,
+      { title, body },
+      {
+        orderDisplayId,
+        notifType: 'delivery_otp',
+        deliveryOtp: String(otp)
+      }
+    );
+
+    return {
+      success: true,
+      fcmResult
+    };
+  } catch (err) {
+    logger.error('Failed to send delivery OTP notification', {
+      error: err.message,
+      stack: err.stack,
+      customerId,
+      orderDisplayId
+    });
+    throw err;
+  }
+}
 /**
  * Notification Service
  * Handles FCM push notification fan-outs, device token deduplication,

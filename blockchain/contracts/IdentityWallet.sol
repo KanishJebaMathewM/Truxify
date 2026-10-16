@@ -67,7 +67,7 @@ contract IdentityWallet is Ownable {
         require(hasWallet[msg.sender], "Wallet not found");
         require(!credentialInWallet[credentialId][msg.sender], "Credential already in wallet");
 
-        bytes32 messageHash = keccak256(abi.encodePacked(credentialId, msg.sender));
+        bytes32 messageHash = keccak256(abi.encodePacked(block.chainid, address(this), credentialId, msg.sender));
         bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
         address recoveredIssuer = ethSignedMessageHash.recover(issuerSig);
 

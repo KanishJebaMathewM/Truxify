@@ -17,7 +17,29 @@ import { supabaseAdmin, supabase } from '../../config/db.js';
  */
 
 const DEFAULT_PAYOUT_TIMEOUT_MS = 15000;
+// backend/api/src/services/wallet/payoutProvider.js
+try {
+  const response = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
 
+  if (!response.ok) {
+    throw new Error(`Payout provider returned status ${response.status}`);
+  }
+
+  return await response.json();
+} catch (err) {
+  if (err.name === 'AbortError' || err.name === 'TimeoutError' || err.code === 'UND_ERR_CONNECT_TIMEOUT') {
+    const timeoutErr = new Error(`Payout webhook dispatch timed out after ${timeoutMs}ms: ${err.message}`);
+    timeoutErr.code = 'PAYOUT_TIMEOUT';
+    timeoutErr.isTimeout = true;
+    throw timeoutErr;
+  }
+  throw err;
+}
 function payoutTimeoutMs() {
   const configured = Number(process.env.WITHDRAWAL_PAYOUT_TIMEOUT_MS);
   return Number.isFinite(configured) && configured > 0
@@ -119,7 +141,7 @@ export async function dispatchPayout({ driverId, withdrawal }) {
     };
   }
 
-  logger.error(`[PayoutProvider] Provider "${provider}" is not wired up. Configure WITHDRAWAL_PAYOUT_WEBHOOK_URL.`);
+  logger.error({ event: 'PAYOUT_PROVIDER_NOT_CONFIGURED', provider }, 'Provider is not wired up. Configure WITHDRAWAL_PAYOUT_WEBHOOK_URL.');
   throw new Error(`Withdrawal payout provider "${provider}" is not supported yet.`);
 }
 

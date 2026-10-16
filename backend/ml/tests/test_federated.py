@@ -1,9 +1,12 @@
 import json
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from test_federated_model_admission import native_redis as _native_redis_fixture
+
+native_redis = _native_redis_fixture
 
 # Mock TensorFlow if not available in current runtime
 if "tensorflow" not in sys.modules:
@@ -37,14 +40,18 @@ class TestFederated:
         assert client.client_id == "client-101"
         client.stop_subscription()
 
-    @patch("redis.Redis.from_url")
-    def test_round_with_three_clients_aggregates(self, mock_redis):
+    def test_round_with_three_clients_aggregates(self, native_redis, monkeypatch, tmp_path):
         """A round with only 3 (fewer than clients_per_round=5) clients must
         still aggregate once all selected clients respond."""
         from federated.federated_server import FederatedServer
-        server = FederatedServer()
-        # Three available/registered clients; the round selects all three.
-        server.redis.smembers.return_value = {b"c1", b"c2", b"c3"}
+        connection, url = native_redis
+        connection.flushdb()
+        connection.sadd('federated:clients', 'c1', 'c2', 'c3')
+        monkeypatch.delenv('FEDERATED_ENCRYPTION_KEY', raising=False)
+        monkeypatch.chdir(tmp_path)
+        server = FederatedServer(url)
+        # The legacy model/round assertions now use the real atomic store.
+        monkeypatch.setattr(server, 'start_update_consumer', lambda: None)
         round_info = server.start_round()
         assert round_info is not None
         assert set(server.selected_clients) == {"c1", "c2", "c3"}
@@ -80,4 +87,5 @@ class TestFederated:
         assert server.round == 1
         assert server.round_completed is True
         server.stop_update_consumer()
+        server.redis.close()
 

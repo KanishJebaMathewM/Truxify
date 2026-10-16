@@ -408,7 +408,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       }
 
       final statement = EarningsStatementModel.fromJson(
-        json as Map<String, dynamic>,
+        json,
       );
 
       await _exportService.sharePdf(statement);
@@ -589,7 +589,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 maxY: maxVal * 1.1,
                 barTouchData: BarTouchData(
                   touchTooltipData: BarTouchTooltipData(
-                    tooltipBgColor: TruxifyColors.accentDark,
+                    getTooltipColor: (group) => TruxifyColors.accentDark,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
                       final item = chartData[group.x] as Map?;
                       if (item == null) return null;

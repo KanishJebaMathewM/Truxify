@@ -122,14 +122,14 @@ class _TspOptimizationScreenState extends State<TspOptimizationScreen> {
               children: [
                 Column(
                   children: [
-                    Text('${milesSaved.toStringAsFixed(1)}', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
+                    Text(milesSaved.toStringAsFixed(1), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
                     const Text('Miles Saved', style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 Container(width: 2, height: 40, color: Colors.green[200]),
                 Column(
                   children: [
-                    Text('${s.estimatedFuelSavedGallons.toStringAsFixed(1)}', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
+                    Text(s.estimatedFuelSavedGallons.toStringAsFixed(1), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green)),
                     const Text('Gallons Fuel', style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold)),
                   ],
                 )

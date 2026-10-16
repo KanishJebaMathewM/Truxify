@@ -54,7 +54,8 @@ export function constantTimeEqualHex(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') {
     return false
   }
-  if (!/^[0-9a-fA-F]*$/.test(a) || !/^[0-9a-fA-F]*$/.test(b)) {
+  // Buffer.from(hex) silently discards a trailing nibble; require whole bytes.
+  if (!/^(?:[0-9a-fA-F]{2})*$/.test(a) || !/^(?:[0-9a-fA-F]{2})*$/.test(b)) {
     return false
   }
 

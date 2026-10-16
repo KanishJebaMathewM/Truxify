@@ -1,0 +1,15 @@
+-- supabase/migrations/20260807000001_durable_idempotency_order_tx.sql (or a new patch migration)
+
+-- 1. Enable Row Level Security
+ALTER TABLE order_idempotency_records ENABLE ROW LEVEL SECURITY;
+
+-- 2. Revoke all default public/anon/authenticated access
+REVOKE ALL ON order_idempotency_records FROM anon, authenticated;
+
+-- 3. Create a strict service-role only policy for backend orchestration
+CREATE POLICY "service role only access on order_idempotency_records" 
+ON order_idempotency_records
+  FOR ALL 
+  TO service_role 
+  USING (true) 
+  WITH CHECK (true);

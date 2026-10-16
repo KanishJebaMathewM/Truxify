@@ -71,7 +71,7 @@ class _VoiceDispatchScreenState extends State<VoiceDispatchScreen> {
                     color: _isListening ? Colors.redAccent : Colors.blueAccent,
                     shape: BoxShape.circle,
                     boxShadow: _isListening 
-                      ? [BoxShadow(color: Colors.redAccent.withOpacity(0.5), blurRadius: 30, spreadRadius: 10)]
+                      ? [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.5), blurRadius: 30, spreadRadius: 10)]
                       : [],
                   ),
                   child: Icon(

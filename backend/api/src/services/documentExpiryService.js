@@ -85,6 +85,7 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
 export async function processDocumentExpiryBatch() {
   let lockAcquired = false;
   let leaseExtender = null;
+  let leaseLost = false;
   const lockToken = `${process.pid}:${crypto.randomUUID()}`;
 
   if (redisClient) {
@@ -96,12 +97,17 @@ export async function processDocumentExpiryBatch() {
       }
       lockAcquired = true;
       leaseExtender = setInterval(async () => {
+        if (leaseLost) return;
         try {
           const extended = await redisClient.eval(EXTEND_LOCK_SCRIPT, 1, LOCK_KEY, lockToken, LOCK_TTL_SECONDS);
           if (!extended) {
+            leaseLost = true;
+            clearInterval(leaseExtender);
             logger.warn('[document-expiry] Lock lease was not extended because ownership changed.');
           }
         } catch (err) {
+          leaseLost = true;
+          clearInterval(leaseExtender);
           logger.warn('[document-expiry] Failed to extend lock lease:', err.message);
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
@@ -123,6 +129,7 @@ export async function processDocumentExpiryBatch() {
 
   try {
     for (const window of REMINDER_WINDOWS) {
+      if (leaseLost) return;
       const windowStart = startOfDay(new Date(now.getTime() + window.days * 24 * 60 * 60 * 1000));
       const windowEnd = endOfDay(new Date(now.getTime() + window.days * 24 * 60 * 60 * 1000));
 
@@ -131,6 +138,7 @@ export async function processDocumentExpiryBatch() {
         let offset = 0;
         let page = [];
         do {
+          if (leaseLost) return;
           const { data, error } = await supabaseAdmin
             .from('driver_documents')
             .select('id, driver_id, document_type, valid_until')
@@ -140,6 +148,8 @@ export async function processDocumentExpiryBatch() {
             .order('valid_until', { ascending: true })
             .order('id', { ascending: true })
             .range(offset, offset + DOCS_PAGE_SIZE - 1);
+
+          if (leaseLost) return;
 
           if (error) {
             throw new Error(error.message);
@@ -162,12 +172,16 @@ export async function processDocumentExpiryBatch() {
       logger.info(`[document-expiry] Found ${documents.length} document(s) expiring in ${window.label} window.`);
 
       for (const doc of documents) {
+        if (leaseLost) return;
         if (!doc.driver_id || !doc.id) {
           logger.warn('[document-expiry] Skipping document with missing driver_id or id:', doc.id);
           continue;
         }
 
         const alreadyNotified = await hasExistingNotification(doc.driver_id, doc.id, window.days);
+        // A renewal can fail while a query is in flight. Never dispatch the
+        // next reminder after ownership loss; an already sent push cannot be recalled.
+        if (leaseLost) return;
         if (alreadyNotified) {
           logger.info(`[document-expiry] Document ${doc.id} already notified for ${window.label} window, skipping.`);
           continue;

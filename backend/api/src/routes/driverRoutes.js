@@ -449,6 +449,13 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
   } catch (err) {
     logger.error({ event: 'DRIVER_ONLINE_STATUS_UPDATE_ERROR', requestId: req.requestId || req.id, error: err?.message ?? String(err) }, 'Driver online status update error');
     res.status(500).json({ error: 'Internal Server Error' });
+    // backend/api/src/routes/driverRoutes.js (Excerpt from earnings report handler)
+
+// BEFORE:
+// const avg_earning_per_km = totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0;
+
+// FIXED (Per issue #8818 - keeping units consistent in paisa):
+const avg_earning_per_km = totalKm > 0 ? totalNetEarnings / totalKm : 0;
   }
 });
 

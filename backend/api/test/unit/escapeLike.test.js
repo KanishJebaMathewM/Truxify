@@ -1,6 +1,47 @@
 ﻿import { describe, it, expect } from 'vitest';
 import { escapeLike, escapeSqlLike } from '../../src/lib/escapeLike.js';
+// backend/api/test/unit/escapeLike.test.js
 
+import { describe, it, expect } from 'vitest';
+import { escapeLike } from '../../src/utils/escapeLike.js'; // Adjust path based on actual utility location
+
+describe('escapeLike utility function', () => {
+  it('should escape percent (%) wildcard character', () => {
+    const input = '50% off';
+    const result = escapeLike(input);
+    expect(result).toBe('50\\% off');
+  });
+
+  it('should escape underscore (_) wildcard character', () => {
+    const input = 'user_name';
+    const result = escapeLike(input);
+    expect(result).toBe('user\\_name');
+  });
+
+  it('should escape backslash character', () => {
+    const input = 'path\\to\\file';
+    const result = escapeLike(input);
+    expect(result).toBe('path\\\\to\\\\file');
+  });
+
+  it('should handle empty string correctly', () => {
+    const input = '';
+    const result = escapeLike(input);
+    expect(result).toBe('');
+  });
+
+  it('should return input unchanged if no special characters are present', () => {
+    const input = 'StandardSearchTerm123';
+    const result = escapeLike(input);
+    expect(result).toBe('StandardSearchTerm123');
+  });
+
+  it('should escape multiple mixed special characters simultaneously', () => {
+    const input = '100%_matched\\secured';
+    const result = escapeLike(input);
+    expect(result).toBe('100\\%\\_matched\\\\secured');
+  });
+});
 describe('escapeLike', () => {
   it('escapes % wildcard', () => {
     expect(escapeLike('100%')).toBe('100\\%');

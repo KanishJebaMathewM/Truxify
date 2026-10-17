@@ -162,7 +162,17 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt around geofence-confirm)
 
+const rawRadius = req.body.geofence_radius_m;
+let geofenceRadius = 500; // default fallback
+
+if (rawRadius !== undefined && rawRadius !== null) {
+  geofenceRadius = parseFloat(rawRadius);
+  if (!Number.isFinite(geofenceRadius) || geofenceRadius <= 0) {
+    return res.status(400).json({ error: 'Invalid geofence_radius_m: must be a positive number' });
+  }
+}
 import {
   bidLimiter,
   userLimiter,

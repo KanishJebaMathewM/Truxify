@@ -9,7 +9,21 @@ import {
 
 let _publishFn = null;
 let _pubSubChecked = false;
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(cachedProfile) {
+  // FIX: Explicit null guard before typeof check per issue #8340
+  if (cachedProfile === null || typeof cachedProfile !== 'object') {
+    return false;
+  }
+
+  // Proceed with existing validation checks on properties (e.g. isActive, etc.)
+  if (typeof cachedProfile.isActive !== 'boolean') {
+    return false;
+  }
+
+  return true;
+}
 async function _publishProfileInvalidation(eventOpts) {
   if (!_pubSubChecked) {
     _pubSubChecked = true;

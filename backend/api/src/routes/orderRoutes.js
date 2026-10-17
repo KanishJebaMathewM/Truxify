@@ -1227,8 +1227,28 @@ router.post(
       }
     }
   }
+});
+// backend/api/src/routes/orderRoutes.js (Excerpt around line 1656-1662)
 );
 
+// BEFORE (with unbalanced parenthesis):
+// router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
+//   const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id, status');
+//   orderValidationService.assertOrderFound(order);
+//   return { order };})), validateParams(paramIdSchema), async (req, res) => { ...
+
+// FIXED: Use two closing parens )) to match line 1733 pattern
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id, status');
+  orderValidationService.assertOrderFound(order);
+  return { order };}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    // ... handler logic ...
+  } catch (err) {
+    logger.error({ err }, '[orderRoutes] Failed to fetch driver location');
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 // POST /api/orders/:id/ratings
 router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating', async (req) => {
   const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');

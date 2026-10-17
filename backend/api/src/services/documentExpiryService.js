@@ -8,7 +8,23 @@ const REMINDER_WINDOWS = [
   { days: 14, label: '14 days' },
   { days: 7, label: '7 days' },
 ];
+// backend/api/src/services/documentExpiryService.js (Excerpt)
 
+// BEFORE:
+// await sendPushNotification({
+//   userId,
+//   notif_type: 'document_expiry',
+//   title: 'Document Expiring Soon',
+//   body: 'Your uploaded document is about to expire.'
+// });
+
+// FIXED: Use valid 'document' notif_type per issue #6964
+await sendPushNotification({
+  userId,
+  notif_type: 'document',
+  title: 'Document Expiring Soon',
+  body: 'Your uploaded document is about to expire.',
+});
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DOCS_PAGE_SIZE = 1000;
 const LOCK_KEY = 'document:expiry:worker:lock';

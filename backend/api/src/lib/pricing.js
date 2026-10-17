@@ -19,13 +19,13 @@ import logger from '../middleware/logger.js';
 
 // Floor and ceiling for a single freight price in paisa (1 INR = 100 paisa).
 // Negative/NaN/Infinity clamp to the floor (0); the ceiling is ₹10,00,000.
-const MIN_FREIGHT_PAISa = 0;
-const MAX_FREIGHT_PAISa = 100_000_000;
+const MIN_FREIGHT_PAISA = 0;
+const MAX_FREIGHT_PAISA = 100_000_000;
 
 export function sanitizePrice(value) {
   const num = Number(value);
-  if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISa;
-  return Math.round(Math.min(MAX_FREIGHT_PAISa, num));
+  if (!Number.isFinite(num) || num < 0) return MIN_FREIGHT_PAISA;
+  return Math.round(Math.min(MAX_FREIGHT_PAISA, num));
 }
 
 const EARTH_RADIUS_KM = 6371.0088;
@@ -35,7 +35,7 @@ const TOLL_ESCALATION_HOURS = 6;
 const DEFAULT_RATE_PER_TONNE_KM = 50; // paisa per tonne-km
 
 const DEFAULTS = Object.freeze({
-  RATE_PER_TONNE_KM: 50,    // paisa per tonne-km, base rate
+  RATE_PER_TONNE_KM: 50,     // paisa per tonne-km, base rate
   FRAGILE_MULTIPLIER: 1.5,  // multiplier on the base rate
   STACKABLE_DISCOUNT: 0.9,  // multiplier < 1 to discount stackable cargo
   HANDLING_FEE: 30000,      // paisa (₹300) flat handling fee
@@ -117,10 +117,10 @@ export function safePaisa(value) {
  * Compute the canonical pricing for an order.
  *
  * @param {object} input
- * @param {number} input.pickupLat   - decimal degrees
- * @param {number} input.pickupLng   - decimal degrees
- * @param {number} input.dropLat     - decimal degrees
- * @param {number} input.dropLng     - decimal degrees
+ * @param {number} input.pickupLat    - decimal degrees
+ * @param {number} input.pickupLng    - decimal degrees
+ * @param {number} input.dropLat      - decimal degrees
+ * @param {number} input.dropLng      - decimal degrees
  * @param {number} input.weightTonnes - cargo weight in tonnes (> 0)
  * @param {number} [input.roadDistanceKm] - routed road distance in kilometres
  * @param {boolean} [input.isFragile] - fragile cargo multiplier
@@ -144,87 +144,4 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 
   const {
     pickupLat, pickupLng, dropLat, dropLng,
-    weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,
-    tollFactor = 1,
-  } = input;
-
-  // Guard tollFactor against NaN/undefined: treat invalid values as 1 (no extra toll).
-  const safeTollFactor = Number.isFinite(tollFactor) && tollFactor >= 0 ? tollFactor : 1;
-
-  if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
-    throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
-  }
-
-  if (pickupLat == null || pickupLng == null || dropLat == null || dropLng == null) {
-    throw new TypeError('computeOrderPricing: pickupLat, pickupLng, dropLat, and dropLng are required and cannot be null');
-  }
-
-  const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
-  const distanceKm = Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
-    ? roadDistanceKm
-    : fallbackDistanceKm;
-  const safeDistanceKm = Number.isFinite(distanceKm) && distanceKm >= 0 ? distanceKm : 0;
-
-  // Base rate scaled by goods class.
-  let rate = rateCard.ratePerTonneKm;
-  if (isFragile) rate *= (Number.isFinite(rateCard.fragileMultiplier) ? rateCard.fragileMultiplier : 1);
-  if (isStackable) rate *= (Number.isFinite(rateCard.stackableDiscount) ? rateCard.stackableDiscount : 1);
-  if (!Number.isFinite(rate) || rate <= 0) {
-    throw new RangeError(`Computed rate-per-tonne-km must be > 0, got ${rate}`);
-  }
-
-  const handlingFee = Number.isFinite(rateCard.handlingFee) && rateCard.handlingFee >= 0 ? rateCard.handlingFee : 0;
-  const tollPerKm = Number.isFinite(rateCard.tollPerKm) && rateCard.tollPerKm >= 0 ? rateCard.tollPerKm : 0;
-  const platformFeePct = Number.isFinite(rateCard.platformFeePct) && rateCard.platformFeePct >= 0 ? rateCard.platformFeePct : 0;
-  const fuelCostPct = Number.isFinite(rateCard.fuelCostPct) && rateCard.fuelCostPct >= 0 ? rateCard.fuelCostPct : 0;
-
-  const baseFreight = safePaisa(rate * weightTonnes * safeDistanceKm + handlingFee);
-  const tollEstimate = safePaisa(tollPerKm * safeDistanceKm * safeTollFactor);
-  const platformFee = safePaisa((baseFreight * platformFeePct) / 100);
-  const totalAmount = safePaisa(baseFreight + tollEstimate + platformFee);
-
-  // Driver-side cost / margin hints persisted on load_offers.
-  // The toll is a pass-through cost recovered from the customer on the revenue
-  // side (totalAmount includes tollEstimate), so it must not be subtracted a
-  // second time as a driver expense.
-  const fuelCost = safePaisa((baseFreight * fuelCostPct) / 100);
-  const netProfitRaw = baseFreight - fuelCost;
-  const netProfit = Number.isFinite(netProfitRaw) ? Math.round(netProfitRaw) : 0;
-
-  // Final isFinite validation guards on all computed price outputs
-  return {
-    distanceKm: Number.isFinite(distanceKm) ? Math.round(distanceKm * 100 + Number.EPSILON) / 100 : 0,
-    baseFreight: Number.isFinite(baseFreight) ? baseFreight : 0,
-    tollEstimate: Number.isFinite(tollEstimate) ? tollEstimate : 0,
-    platformFee: Number.isFinite(platformFee) ? platformFee : 0,
-    totalAmount: Number.isFinite(totalAmount) ? totalAmount : 0,
-    fuelCost: Number.isFinite(fuelCost) ? fuelCost : 0,
-    netProfit: Number.isFinite(netProfit) ? netProfit : 0,
-  };
-}
-
-export function convertKmToMiles(km) {
-  if (typeof km !== 'number' || Number.isNaN(km) || !Number.isFinite(km)) {
-    throw new TypeError('km must be a finite number');
-  }
-  if (km < 0) {
-    throw new RangeError('km must be non-negative');
-  }
-  return km * 0.621371;
-}
-
-export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM, parsePositiveFloat, safePaisa };
-
-
-// === Spec 10: non-negative validation ===
-export function guardNonNegative(value, label = 'value') {
-  if (!Number.isFinite(value)) throw new TypeError(`${label} must be finite, got ${value}`);
-  if (value < 0) return 0;
-  return value;
-}
-
-
-// === Issue #1513: Export version info for test verification ===
-export const PRICING_MODULE_VERSION = '1.0.0';
-export const PRICING_MODULE_TESTS_ADDED = true;
-
+    weightTonnes, road

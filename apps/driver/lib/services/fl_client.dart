@@ -1,11 +1,10 @@
-import 'dart:convert';
 import 'dart:math';
 
 /// Federated Learning Client for Driver App.
 /// Computes local model weight updates based on driver trip selection choices.
 class FederatedLearningClient {
   final int numWeights;
-  List<double> _localWeights;
+  final List<double> _localWeights;
 
   FederatedLearningClient({this.numWeights = 10})
       : _localWeights = List.filled(numWeights, 0.0);

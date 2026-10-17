@@ -39,6 +39,9 @@ const fromMock = vi.fn((table) => chainable(table));
 const rpcMock = vi.fn((name, args) => chainable('rpc:' + name));
 
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: { from: fromMock, rpc: rpcMock },
   isSupabaseConnected: () => true,
 }));
@@ -109,7 +112,22 @@ describe('crossDockService', () => {
       ).rejects.toMatchObject({ status: 400 });
     });
 
+    it('400 when the proposed handoff driver does not exist', async () => {
+      supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'in_transit', customer_id: 'c1' }, error: null } };
+      await expect(
+        svc.createTransferRequest({ orderId: 'o1', fromDriverId: 'd1', toDriverId: 'nobody', crossDockLat: 1, crossDockLng: 1 }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('400 when the proposed handoff driver is not a driver role', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'customer' }, error: null } };
+      await expect(
+        svc.createTransferRequest({ orderId: 'o1', fromDriverId: 'd1', toDriverId: 'd2', crossDockLat: 1, crossDockLng: 1 }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
     it('404 when load does not exist', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: null, error: null } };
       await expect(
         svc.createTransferRequest({ orderId: 'o1', fromDriverId: 'd1', toDriverId: 'd2', crossDockLat: 1, crossDockLng: 1 }),
@@ -117,6 +135,7 @@ describe('crossDockService', () => {
     });
 
     it('409 when load is not in transit', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'delivered', customer_id: 'c1' }, error: null } };
       await expect(
         svc.createTransferRequest({ orderId: 'o1', fromDriverId: 'd1', toDriverId: 'd2', crossDockLat: 1, crossDockLng: 1 }),
@@ -124,6 +143,7 @@ describe('crossDockService', () => {
     });
 
     it('403 when from_driver does not own the active trip', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'in_transit', customer_id: 'c1' }, error: null } };
       supabaseState.trips = { maybeSingle: { data: { id: 't1', driver_id: 'dOther', status: 'in_progress' }, error: null } };
       await expect(
@@ -132,6 +152,7 @@ describe('crossDockService', () => {
     });
 
     it('409 when an active transfer already exists', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'in_transit', customer_id: 'c1' }, error: null } };
       supabaseState.trips = { maybeSingle: { data: { id: 't1', driver_id: 'd1', status: 'in_progress' }, error: null } };
       supabaseState.cross_dock_transfers = { maybeSingle: { data: { id: 'x1', status: 'requested' }, error: null } };
@@ -141,6 +162,7 @@ describe('crossDockService', () => {
     });
 
     it('creates a transfer and returns a handoff code', async () => {
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'in_transit', customer_id: 'c1' }, error: null } };
       supabaseState.trips = { maybeSingle: { data: { id: 't1', driver_id: 'd1', status: 'in_progress' }, error: null } };
       // The "existing active transfer" lookup returns null; the insert uses .single()
@@ -161,6 +183,7 @@ describe('crossDockService', () => {
 
     it('still succeeds if the push notification throws', async () => {
       sendPushNotification.mockRejectedValueOnce(new Error('push down'));
+      supabaseState.profiles = { maybeSingle: { data: { id: 'd2', role: 'driver' }, error: null } };
       supabaseState.orders = { maybeSingle: { data: { id: 'o1', status: 'in_transit', customer_id: 'c1' }, error: null } };
       supabaseState.trips = { maybeSingle: { data: { id: 't1', driver_id: 'd1', status: 'in_progress' }, error: null } };
       supabaseState.cross_dock_transfers = {

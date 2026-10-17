@@ -124,7 +124,7 @@ class _CargoShiftDetectionScreenState extends State<CargoShiftDetectionScreen> {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: isShifted ? Colors.redAccent.withOpacity(0.5) : Colors.green.withOpacity(0.5),
+                  color: isShifted ? Colors.redAccent.withValues(alpha: 0.5) : Colors.green.withValues(alpha: 0.5),
                   border: Border.all(color: isShifted ? Colors.red : Colors.green, width: 2),
                 ),
                 child: const Center(child: Icon(Icons.inventory_2, color: Colors.white)),

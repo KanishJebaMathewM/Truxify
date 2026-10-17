@@ -13,6 +13,9 @@ describe("ZKIdentity nullifier lifecycle", function () {
         return identity;
     }
 
+    // registerDID enforces the canonical DID URI did:truxify:polygon:0x<addr>
+    const canonicalDid = (address) => `did:truxify:polygon:${address.toLowerCase()}`;
+
     const proof = ethers.toUtf8Bytes("valid-proof");
     const invalidProof = ethers.toUtf8Bytes("wrong-proof");
 
@@ -22,7 +25,7 @@ describe("ZKIdentity nullifier lifecycle", function () {
         const credentialRoot = ethers.keccak256(ethers.toUtf8Bytes("credential-root"));
         const nullifier = ethers.keccak256(ethers.toUtf8Bytes("one-time-nullifier"));
 
-        await identity.connect(user).registerDID("did:truxify:test", credentialRoot);
+        await identity.connect(user).registerDID(canonicalDid(user.address), credentialRoot);
         expect(await identity.verifyZkProof(user.address, proof, [], nullifier)).to.equal(true);
         expect(await identity.usedNullifiers(nullifier)).to.equal(false);
 
@@ -39,7 +42,7 @@ describe("ZKIdentity nullifier lifecycle", function () {
         const credentialRoot = ethers.keccak256(ethers.toUtf8Bytes("credential-root"));
         const nullifier = ethers.keccak256(ethers.toUtf8Bytes("one-time-nullifier"));
 
-        await identity.connect(user).registerDID("did:truxify:test", credentialRoot);
+        await identity.connect(user).registerDID(canonicalDid(user.address), credentialRoot);
         expect(await identity.verifyZkProof(user.address, proof, [], nullifier)).to.equal(true);
         expect(await identity.usedNullifiers(nullifier)).to.equal(false);
         expect(await identity.spentNullifiers(nullifier)).to.equal(false);
@@ -63,7 +66,7 @@ describe("ZKIdentity nullifier lifecycle", function () {
         const credentialRoot = ethers.keccak256(ethers.toUtf8Bytes("credential-root"));
         const nullifier = ethers.keccak256(ethers.toUtf8Bytes("one-time-nullifier"));
 
-        await identity.connect(user).registerDID("did:truxify:test", credentialRoot);
+        await identity.connect(user).registerDID(canonicalDid(user.address), credentialRoot);
 
         await expect(
             identity.connect(user).verifyAndConsumeZkProof(user.address, invalidProof, [], nullifier)

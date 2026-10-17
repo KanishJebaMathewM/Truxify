@@ -1,90 +1,77 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { requestCacheMiddleware } from "../../src/middleware/requestCacheMiddleware.js";
-import {
-  getRequestCache,
-  requestContext,
-} from "../../src/lib/requestContext.js";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-describe("requestCacheMiddleware", () => {
-  let finishCallback;
+// The session-id/ALS middleware this suite targeted was renamed away
+// (0ef1600a60) — the file now exports requestCache (redis response cache).
+// Rewritten against the real export.
 
-  const mockRes = () => ({
-    once: vi.fn((event, cb) => {
-      if (event === "finish") finishCallback = cb;
-    }),
+const redis = vi.hoisted(() => ({
+  get: vi.fn(),
+  setEx: vi.fn().mockResolvedValue('OK'),
+}));
+
+vi.mock('../../src/config/db.js', () => ({
+  redisClient: redis,
+  supabase: null,
+  supabaseAdmin: null,
+  firebaseAdmin: null,
+  mongoDb: null,
+}));
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+}));
+
+const { requestCache } = await import('../../src/middleware/requestCacheMiddleware.js');
+
+const mockRes = () => {
+  const res = {
+    statusCode: 200,
+    json: vi.fn(function (b) { return res; }),
+    status: vi.fn(function (c) { res.statusCode = c; return res; }),
+  };
+  return res;
+};
+
+describe('requestCache middleware', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('skips caching for non-GET requests', async () => {
+    const mw = requestCache(60);
+    const next = vi.fn();
+    await mw({ method: 'POST', originalUrl: '/x' }, mockRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(redis.get).not.toHaveBeenCalled();
   });
 
-  beforeEach(() => {
-    finishCallback = undefined;
-  });
-
-  it("calls next immediately", () => {
+  it('serves a cached GET response without calling next', async () => {
+    redis.get.mockResolvedValue(JSON.stringify({ status: 200, body: { cached: true } }));
     const res = mockRes();
     const next = vi.fn();
-    requestCacheMiddleware({}, res, next);
-    expect(next).toHaveBeenCalledTimes(1);
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ cached: true });
   });
 
-  it("generates and stores a sessionId when it is missing", () => {
-    const req = {};
-    let capturedSessionId;
-
-    requestCacheMiddleware(req, mockRes(), () => {
-      capturedSessionId = requestContext.getStore().sessionId;
-    });
-
-    expect(req.sessionId).toEqual(expect.any(String));
-    expect(req.sessionId).not.toBe("");
-    expect(capturedSessionId).toBe(req.sessionId);
-  });
-
-  it("replaces a blank sessionId and preserves a non-empty sessionId", () => {
-    const blankRequest = { sessionId: "   " };
-    const existingRequest = { sessionId: "session-123" };
-
-    requestCacheMiddleware(blankRequest, mockRes(), vi.fn());
-    requestCacheMiddleware(existingRequest, mockRes(), vi.fn());
-
-    expect(blankRequest.sessionId).toEqual(expect.any(String));
-    expect(blankRequest.sessionId).not.toBe("   ");
-    expect(existingRequest.sessionId).toBe("session-123");
-  });
-
-  it("attaches finish listener to response", () => {
+  it('caches a successful GET response via res.json interception', async () => {
+    redis.get.mockResolvedValue(null);
     const res = mockRes();
-    requestCacheMiddleware({}, res, vi.fn());
-    expect(res.once).toHaveBeenCalledWith("finish", expect.any(Function));
-    expect(typeof finishCallback).toBe("function");
+    const next = vi.fn(() => res.json({ fresh: true }));
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(redis.setEx).toHaveBeenCalledWith('cache:/api/orders', 60, expect.stringContaining('"fresh":true'));
   });
 
-  it("sets a requestCache in the requestContext store accessible via getRequestCache", () => {
-    let capturedCache;
+  it('does not cache error responses', async () => {
+    redis.get.mockResolvedValue(null);
     const res = mockRes();
-
-    requestCacheMiddleware({}, res, () => {
-      capturedCache = getRequestCache();
-    });
-
-    expect(capturedCache).toBeDefined();
-    expect(capturedCache).not.toBeNull();
-    expect(typeof capturedCache.set).toBe("function");
-    expect(typeof capturedCache.get).toBe("function");
-    expect(typeof capturedCache.clear).toBe("function");
+    res.statusCode = 500;
+    await requestCache(60)({ method: 'GET', originalUrl: '/api/orders' }, res, vi.fn(() => res.json({ error: 'x' })));
+    expect(redis.setEx).not.toHaveBeenCalled();
   });
 
-  it("clears the cache when response finishes", () => {
-    const res = mockRes();
-    let cacheRef;
-
-    requestCacheMiddleware({}, res, () => {
-      cacheRef = getRequestCache();
-    });
-
-    expect(finishCallback).toBeDefined();
-    expect(typeof cacheRef.clear).toBe("function");
-    // Simulate finish event - cache should be cleared
-    finishCallback();
-    // getRequestCache returns null after clear since the store is gone
-    expect(getRequestCache()).toBeNull();
+  it('falls through when redis read throws', async () => {
+    redis.get.mockRejectedValue(new Error('redis down'));
+    const next = vi.fn();
+    await requestCache(60)({ method: 'GET', originalUrl: '/x' }, mockRes(), next);
+    expect(next).toHaveBeenCalledOnce();
   });
 });

@@ -67,12 +67,15 @@ export function validateDocumentBuffer(buffer, declaredMimeType) {
     );
   }
 
-  if (declaredMimeType && detected !== declaredMimeType) {
-    throw new DocumentValidationError(
-      `File content (${detected}) does not match declared type (${declaredMimeType}).`
-    );
-  }
+  const normalizedDeclared = declaredMimeType && declaredMimeType.trim().toLowerCase()
+  ? declaredMimeType.trim().toLowerCase()
+  : null;
 
+if (normalizedDeclared && detected !== normalizedDeclared) {
+  throw new DocumentValidationError(
+    `File content (${detected}) does not match declared type (${normalizedDeclared}).`
+  );
+}
   return detected;
 }
 

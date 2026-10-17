@@ -35,6 +35,12 @@ typedef int socklen_t;
 // Applies read/write idle timeouts so a slow or idle client cannot stall a
 // handler thread forever: recv returns after the timeout instead of blocking
 // indefinitely.
+// services/vector-matcher-cpp/main.cpp (Excerpt)
+
+// BEFORE:
+// ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
+// ss << "      "driver_id": "" << results[i].driver_id << "",
+
 void set_socket_timeouts(SOCKET client) {
 #if defined(_WIN32)
     unsigned long timeout_ms = 30000;
@@ -112,24 +118,27 @@ std::string search_top_k(const std::vector<DriverEmbedding>& pool, const std::ve
     double micros = std::chrono::duration<double, std::micro>(elapsed).count();
 
     std::stringstream ss;
-    ss << "{\n";
-    ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
-    ss << "  \"total_scanned\": " << pool.size() << ",\n";
-    ss << "  \"latency_micros\": " << micros << ",\n";
-    ss << "  \"top_matches\": [\n";
+ // services/vector-matcher-cpp/main.cpp (Excerpt)
 
-    int limit = std::min<int>(k, static_cast<int>(results.size()));
-    for (int i = 0; i < limit; ++i) {
-        ss << "    {\n";
-        ss << "      \"rank\": " << (i + 1) << ",\n";
-        ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
-        ss << "      \"match_score\": " << results[i].score << ",\n";
-        ss << "      \"latitude\": " << results[i].lat << ",\n";
-        ss << "      \"longitude\": " << results[i].lng << "\n";
-        ss << "    }" << (i < limit - 1 ? "," : "") << "\n";
-    }
-    ss << "  ]\n";
-    ss << "}";
+// BEFORE:
+// ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
+// ss << "      "driver_id": "" << results[i].driver_id << "",
+
+// FIXED: Escape inner quotes with \"
+ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
+ss << "  \"total_scanned\": " << pool.size() << ",\n";
+ss << "  \"latency_micros\": " << micros << ",\n";
+ss << "  \"top_matches\": [\n";
+for (size_t i = 0; i < results.size(); ++i) {
+    ss << "    {\n";
+    ss << "      \"rank\": " << (i + 1) << ",\n";
+    ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
+    ss << "      \"match_score\": " << results[i].score << ",\n";
+    ss << "      \"latitude\": " << results[i].lat << ",\n";
+    ss << "      \"longitude\": " << results[i].lng << "\n";
+    ss << "    }" << (i + 1 < results.size() ? "," : "") << "\n";
+}
+ss << "  ]\n";
 
     return ss.str();
 }

@@ -56,7 +56,26 @@ export function getCacheStats() {
     hitRate: total > 0 ? ((hits / total) * 100).toFixed(1) + '%' : '0%',
   };
 }
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(firebaseUid, cachedProfile) {
+  // FIX: Ensure firebaseUid is a valid non-empty trimmed string per issue #6939
+  if (typeof firebaseUid !== 'string' || firebaseUid.trim() === '') {
+    return false;
+  }
+
+  // FIX: Ensure cachedProfile is a non-null plain object before property access
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+
+  // Validate expected primitive/string properties safely
+  if (typeof cachedProfile.id !== 'string' || typeof cachedProfile.role !== 'string') {
+    return false;
+  }
+
+  return true;
+}
 export function resetCacheStats() {
   cacheHits = 0;
   cacheMisses = 0;

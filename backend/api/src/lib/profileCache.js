@@ -6,7 +6,21 @@ import {
   customerStatsKey,
   driverDetailsKey,
 } from "../cache/profileCacheKeys.js";
+// backend/api/src/lib/profileCache.js (Excerpt)
 
+export function isValidCachedProfile(uid, profile) {
+  // FIX: Add strict type guards per issue #6982
+  if (typeof uid !== 'string' || uid.trim() === '') {
+    return false;
+  }
+
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+    return false;
+  }
+
+  // Additional cache validation logic...
+  return true;
+}
 let _publishFn = null;
 let _pubSubChecked = false;
 

@@ -6,6 +6,22 @@ class ExponentialBackoff {
     this.factor = options.factor || 2;
     this.jitter = options.jitter !== undefined ? options.jitter : true;
   }
+  // backend/api/src/utils/exponentialBackoff.js
+import logger from '../middleware/logger.js';
+
+export async function exponentialBackoff(fn, retries = 3, delay = 1000) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (retries <= 0) {
+      logger.error('Exponential backoff exhausted all retries', { error: err.message });
+      throw err;
+    }
+    logger.warn('Operation failed, retrying with backoff', { delay, error: err.message });
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    return exponentialBackoff(fn, retries - 1, delay * 2);
+  }
+}
 
   async execute(fn) {
     let lastError;

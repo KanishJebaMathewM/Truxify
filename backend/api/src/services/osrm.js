@@ -2,7 +2,26 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+// backend/api/src/services/osrm.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function getRoute(coordinates, options = {}) {
+  try {
+    // ... OSRM API fetch logic ...
+  } catch (err) {
+    // FIX: Add structured logging in catch block per issue #9460
+    logger.warn('OSRM routing service request failed', {
+      error: err.message,
+      stack: err.stack,
+      coordinatesCount: coordinates?.length,
+      options
+    });
+    
+    // Fallback behavior or rethrow depending on service design
+    return null;
+  }
+}
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {

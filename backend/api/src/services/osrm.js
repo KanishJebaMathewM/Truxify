@@ -2,7 +2,30 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+// backend/api/src/services/osrm.js (Excerpt)
 
+export async function getRouteEstimate(waypoints, options = {}) {
+  try {
+    // ... OSRM fetch and parse logic ...
+    const distance = parseFloat(route.distance);
+    const duration = parseFloat(route.duration);
+
+    // FIX: Guard against NaN or non-finite results per issue #7231
+    if (!Number.isFinite(distance) || !Number.isFinite(duration) || Number.isNaN(distance) || Number.isNaN(duration)) {
+      logger.warn({ route }, '[osrm] Received invalid non-finite distance or duration from OSRM response');
+      return null;
+    }
+
+    return {
+      distance,
+      duration,
+      simulated: false
+    };
+  } catch (err) {
+    logger.error({ err }, '[osrm] Failed to calculate route estimate');
+    return null;
+  }
+}
 const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {

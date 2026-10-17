@@ -2,6 +2,23 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import CircuitBreaker from 'opossum';
 import { measureExecution } from '../core/performanceMetrics.js';
+// backend/api/src/services/osrm.js (Excerpt inside getRouteEstimate)
+
+import logger from '../middleware/logger.js';
+
+export async function getRouteEstimate(waypoints, options = {}) {
+  try {
+    // ... OSRM request and distance estimation logic ...
+  } catch (err) {
+    // FIX: Add structured error logging per issue #7764
+    logger.error({
+      err,
+      url: options.osrmUrl || process.env.OSRM_URL,
+      waypointsCount: waypoints?.length
+    }, '[osrm] getRouteEstimate failed to fetch route estimate from OSRM server');
+
+    // Preserve existing null fallback behavior
+    return null;
 import logger from '../middleware/logger.js';
 import { validateCoordinate } from '../utils/coordinates.js';
 

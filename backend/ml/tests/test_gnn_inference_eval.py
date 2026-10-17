@@ -18,7 +18,7 @@ def test_route_inference_uses_eval_mode_without_mutating_batchnorm_state():
     )
     graph_data = builder.get_pytorch_data()
 
-    optimizer = RouteOptimizer()
+    optimizer = RouteOptimizer(allow_untrained=True)
     optimizer.model.train()
     captured_embeddings = []
 

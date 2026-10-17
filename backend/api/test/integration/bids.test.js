@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
+
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,

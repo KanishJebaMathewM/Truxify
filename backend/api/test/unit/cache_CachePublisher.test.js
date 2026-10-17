@@ -1,76 +1,157 @@
 /**
  * Unit tests for backend/api/src/cache/CachePublisher.js
  *
- * Coverage:
- *   - constructor: accepts eventBus and publisher
- *   - constructor: works without eventBus
- *   - publish: sends cache event with correct type
- *   - publish: sends cache event with key
- *   - publish: uses eventBus when available
- *   - publish: does not throw when eventBus missing
+ * Coverage of the current module API (the class API was retired):
+ *   - initCachePublisher: no-op without a client; disabled without REDIS_URL
+ *   - publishInvalidation: publishes a serialized CacheEvent to the namespace
+ *     channel; no-op for unregistered or PubSub-disabled namespaces
+ *   - subscribeToInvalidation: registers a handler and returns an unsubscribe
+ *     that removes it (and unsubscribes the channel when empty)
+ *   - setupMessageHandler: ignores malformed payloads and self-originated
+ *     events, dispatches to namespace listeners and the invalidator
+ *   - instance id accessors
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
-const mockLogger = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
-vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
-vi.mock('../../src/cache/CacheEvent.js', () => ({
-  CacheEvent: class MockCacheEvent {
-    constructor(type, key, meta, ts) {
-      this.type = type; this.key = key; this.metadata = meta || {}; this.timestamp = ts || Date.now();
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+
+// Fake the ioredis constructor so no real connection is attempted.
+const fakeSubscribers = [];
+vi.mock('ioredis', () => ({
+  default: class FakeRedis {
+    constructor() {
+      this.handlers = {};
+      this.subscribed = [];
+      this.unsubscribed = [];
+      fakeSubscribers.push(this);
     }
-    static createInvalidate(key, meta) { return new MockCacheEvent('INVALIDATE', key, meta); }
-    static createRefresh(key, meta) { return new MockCacheEvent('REFRESH', key, meta); }
-    toJSON() { return { type: this.type, key: this.key, metadata: this.metadata, timestamp: this.timestamp }; }
+    on(event, handler) { this.handlers[event] = handler; }
+    subscribe(channel, cb) { this.subscribed.push(channel); if (cb) cb(null); }
+    unsubscribe(channel) { this.unsubscribed.push(channel); return Promise.resolve(); }
   },
 }));
-vi.mock('../../src/core/events/EventBus.js', () => ({ EventBus: vi.fn() }));
 
-const CachePublisher = (await import('../../src/cache/CachePublisher.js')).CachePublisher;
+process.env.REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
-describe('CachePublisher', () => {
-  let mockEventBus;
-  let mockPublisher;
+const Publisher = await import('../../src/cache/CachePublisher.js');
+const { CacheNamespace } = await import('../../src/cache/CacheNamespace.js');
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    mockEventBus = { publish: vi.fn().mockResolvedValue(undefined) };
-    mockPublisher = { publish: vi.fn().mockResolvedValue(undefined) };
+const pubClient = { publish: vi.fn().mockResolvedValue(1) };
+
+beforeAll(() => {
+  CacheNamespace.register('publisher_test', { enablePubSub: true });
+  CacheNamespace.register('publisher_quiet', { enablePubSub: false });
+  Publisher.initCachePublisher(pubClient);
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  Publisher.setInstanceId('instance-self');
+});
+
+describe('CachePublisher (module contract)', () => {
+  it('isInitialized is true after init with a client', () => {
+    expect(Publisher.isInitialized()).toBe(true);
   });
 
-  describe('constructor', () => {
-    it('accepts eventBus and publisher', () => {
-      const pub = new CachePublisher({ eventBus: mockEventBus, publisher: mockPublisher });
-      expect(pub.eventBus).toBe(mockEventBus);
-      expect(pub.publisher).toBe(mockPublisher);
+  it('publishes a serialized invalidation event to the namespace channel', async () => {
+    await Publisher.publishInvalidation('publisher_test', {
+      type: 'INVALIDATE_KEY',
+      key: 'user:profile:1',
+      entityId: 'u1',
     });
 
-    it('works without eventBus', () => {
-      expect(() => new CachePublisher({ publisher: mockPublisher })).not.toThrow();
-    });
+    expect(pubClient.publish).toHaveBeenCalledTimes(1);
+    const [channel, payload] = pubClient.publish.mock.calls[0];
+    expect(channel).toBe('cache:invalidate:publisher_test');
+    const event = JSON.parse(payload);
+    expect(event.type).toBe('INVALIDATE_KEY');
+    expect(event.namespace).toBe('publisher_test');
+    expect(event.key).toBe('user:profile:1');
+    expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  describe('publish', () => {
-    it('sends cache event with REFRESH type', async () => {
-      const pub = new CachePublisher({ eventBus: mockEventBus });
-      await pub.publish('REFRESH', 'user:123');
-      expect(mockEventBus.publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'REFRESH', key: 'user:123' }));
-    });
+  it('does not publish for unregistered or PubSub-disabled namespaces', async () => {
+    await Publisher.publishInvalidation('missing_namespace', { key: 'k' });
+    await Publisher.publishInvalidation('publisher_quiet', { type: 'INVALIDATE_KEY', key: 'k' });
+    expect(pubClient.publish).not.toHaveBeenCalled();
+  });
 
-    it('sends cache event with key', async () => {
-      const pub = new CachePublisher({ eventBus: mockEventBus });
-      await pub.publish('REFRESH', 'order:456', { reason: 'update' });
-      expect(mockEventBus.publish).toHaveBeenCalledWith(expect.objectContaining({ key: 'order:456' }));
-    });
+  it('registers a listener, dispatches namespace events to it, and ignores self-originated events', () => {
+    const subscriber = fakeSubscribers[fakeSubscribers.length - 1];
+    expect(subscriber).toBeDefined();
+    Publisher.setupMessageHandler(null);
 
-    it('uses eventBus when available', async () => {
-      const pub = new CachePublisher({ eventBus: mockEventBus });
-      await pub.publish('INVALIDATE', 'session:abc');
-      expect(mockEventBus.publish).toHaveBeenCalled();
-    });
+    const handler = vi.fn();
+    Publisher.subscribeToInvalidation('publisher_test', handler);
+    expect(subscriber.subscribed).toContain('cache:invalidate:publisher_test');
 
-    it('does not throw when eventBus missing', async () => {
-      const pub = new CachePublisher({});
-      await expect(pub.publish('INVALIDATE', 'key:xyz')).resolves.not.toThrow();
+    const foreign = JSON.stringify({
+      id: 'evt-1',
+      type: 'INVALIDATE_KEY',
+      namespace: 'publisher_test',
+      key: 'k',
+      originInstanceId: 'instance-other',
     });
+    subscriber.handlers.message('cache:invalidate:publisher_test', foreign);
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0].originInstanceId).toBe('instance-other');
+
+    // Self-originated events must not loop back into invalidation.
+    const own = JSON.stringify({
+      id: 'evt-2',
+      type: 'INVALIDATE_KEY',
+      namespace: 'publisher_test',
+      key: 'k',
+      originInstanceId: 'instance-self',
+    });
+    subscriber.handlers.message('cache:invalidate:publisher_test', own);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores malformed payloads without calling listeners', () => {
+    const subscriber = fakeSubscribers[fakeSubscribers.length - 1];
+    const handler = vi.fn();
+    Publisher.subscribeToInvalidation('publisher_test', handler);
+    subscriber.handlers.message('cache:invalidate:publisher_test', '{not json');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribe removes the handler and leaves the channel when empty', () => {
+    const subscriber = fakeSubscribers[fakeSubscribers.length - 1];
+    const handler = vi.fn();
+    const unsubscribe = Publisher.subscribeToInvalidation('publisher_test', handler);
+    unsubscribe();
+    const own = JSON.stringify({
+      id: 'evt-3',
+      type: 'INVALIDATE_KEY',
+      namespace: 'publisher_test',
+      key: 'k',
+      originInstanceId: 'instance-other',
+    });
+    subscriber.handlers.message('cache:invalidate:publisher_test', own);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('forwards foreign events to the cache invalidator when one is installed', () => {
+    const invalidator = { handleRemoteEvent: vi.fn().mockResolvedValue(undefined) };
+    Publisher.setupMessageHandler(invalidator);
+    const subscriber = fakeSubscribers[fakeSubscribers.length - 1];
+    const foreign = JSON.stringify({
+      id: 'evt-4',
+      type: 'INVALIDATE_NAMESPACE',
+      namespace: 'publisher_test',
+      originInstanceId: 'instance-other',
+    });
+    subscriber.handlers.message('cache:invalidate:publisher_test', foreign);
+    expect(invalidator.handleRemoteEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes the instance id for testing', () => {
+    Publisher.setInstanceId('instance-x');
+    expect(Publisher.getInstanceId()).toBe('instance-x');
+    Publisher.setInstanceId('instance-self');
   });
 });

@@ -48,6 +48,7 @@ ML_ROUTE_MODULES: list[tuple[str, str]] = [
     ("ssl_routes", "Self-Supervised Learning"),
     ("transformer_routes", "Time Series Transformers"),
     ("eta_routes", "Real-Time Traffic ETA"),
+    ("cold_chain_routes", "Cold-Chain Anomaly Detection"),
 ]
 
 
@@ -106,3 +107,5 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
         logger.info("Registered ML router: %s [%s]", description, module_name)
 
     return registered
+
+from . import _gnn_event_loop_isolation_patch

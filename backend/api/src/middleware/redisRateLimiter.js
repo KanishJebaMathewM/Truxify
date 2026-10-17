@@ -95,7 +95,7 @@ export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false
 
       // Phase 2: request is within limit — record it now.
       await redisClient.pipeline()
-        .zadd(key, now, `${now}-${Math.random()}`)
+        .zadd(key, now, `${now}-${crypto.randomBytes(4).toString('hex')}`)
         .pexpire(key, windowMs)
         .exec();
 

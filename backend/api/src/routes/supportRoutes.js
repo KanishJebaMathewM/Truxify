@@ -502,11 +502,12 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       }
 
       const normalizedStatus = statusResult.value;
-      const USER_ALLOWED_STATUSES = ['closed'];
+      // Statuses that only admins may set. Non-admins are restricted to 'resolved'.
+      const ADMIN_ONLY_STATUSES = ['closed', 'in_progress'];
       if (!isAdmin && normalizedStatus !== ticket.status) {
-        if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
+        if (ADMIN_ONLY_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({
-            error: 'Access Denied: Only admins can change ticket status.',
+            error: 'Access Denied: Only admins can change tickets to this status.',
           });
         }
       }

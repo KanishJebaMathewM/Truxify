@@ -7,7 +7,31 @@ import logger from '../../api/src/middleware/logger.js';
 import { resolveUserFromTrustedHeaders } from '../shared/trustedIdentity.js';
 import { generateOrderDisplayId } from '../../api/src/lib/orderDisplayId.js';
 import { createLoaders } from '../gateway/authContext.js';
+// backend/graphql/services/order.service.js (Excerpt)
 
+const { url } = await startStandaloneServer(server, {
+  listen: { port: 4001 },
+  context: async ({ req }) => {
+    const userId = req.headers['x-user-id'] || null;
+    const userRole = req.headers['x-user-role'] || null;
+    const authHeader = req.headers['authorization'] || null;
+
+    const supabaseClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: authHeader ? { Authorization: authHeader } : {},
+        },
+      }
+    );
+
+    return {
+      user: userId ? { id: userId, role: userRole } : null,
+      supabase: supabaseClient,
+    };
+  },
+});
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
 function requireUser(user) {

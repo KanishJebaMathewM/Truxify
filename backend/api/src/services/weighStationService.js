@@ -47,8 +47,25 @@ export const FHWA_LIMITS = {
     MIN_TANDEM_SPACING_INCHES: 40,
     MAX_TANDEM_SPACING_INCHES: 96,
 };
+// backend/api/src/services/weighStationService.js
 
 /**
+ * Checks bypass eligibility for a weigh station.
+ * NOTE: This is currently a deterministic mock service. It must be replaced
+ * with a real regulatory API integration before production deployment.
+ * Fixed per issue #8955 / #8956.
+ */
+export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
+  // Deterministic mock response instead of Math.random() coin-flip
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Deterministic mock compliance check passed',
+    vehicleId,
+    stationId,
+    timestamp: new Date().toISOString()
+  };
+}
  * Calculates the maximum allowable gross weight for a group of two or more consecutive axles
  * using the Federal Bridge Gross Weight Formula:
  * W = 500 * [ (L * N) / (N - 1) + 12N + 36 ]

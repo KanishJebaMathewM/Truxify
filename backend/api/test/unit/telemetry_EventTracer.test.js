@@ -9,7 +9,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const makeSpan = () => ({ setStatus: vi.fn(), end: vi.fn(), setAttributes: vi.fn(), setAttribute: vi.fn() });
+const makeSpan = () => ({
+  setStatus: vi.fn(),
+  end: vi.fn(),
+  setAttributes: vi.fn(),
+  setAttribute: vi.fn(),
+});
 
 const { spanFactoryMock, propagatorMock } = vi.hoisted(() => ({
   spanFactoryMock: {
@@ -28,11 +33,15 @@ vi.mock('@opentelemetry/api', () => ({
   trace: { setSpan: vi.fn(() => ({})) },
   SpanStatusCode: { OK: 1, ERROR: 2 },
 }));
+
 vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
   default: spanFactoryMock,
   STANDARD_ATTRIBUTES: { EVENT_TYPE: 'event.type' },
 }));
-vi.mock('../../src/core/telemetry/ContextPropagator.js', () => ({ ContextPropagator: propagatorMock }));
+
+vi.mock('../../src/core/telemetry/ContextPropagator.js', () => ({
+  ContextPropagator: propagatorMock,
+}));
 
 const { EventTracer } = await import('../../src/core/telemetry/EventTracer.js');
 

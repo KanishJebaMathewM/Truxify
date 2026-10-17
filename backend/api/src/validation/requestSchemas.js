@@ -54,10 +54,13 @@ export const createOrderSchema = z.object({
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
-      const localDate = new Date(year, month, day);
-      return localDate >= today;
+      const inputDate = new Date(year, month, day);
+      inputDate.setHours(0, 0, 0, 0);
+      return inputDate >= today;
     }
-    return new Date(val) >= today;
+    const inputDate = new Date(val);
+    inputDate.setHours(0, 0, 0, 0);
+    return inputDate >= today;
   }, {
     message: "Pickup date cannot be in the past",
   }),
@@ -81,9 +84,7 @@ export const createOrderSchema = z.object({
     lat: latitudeSchema,
     lng: longitudeSchema,
   })).optional(),
-  // Server-computed fields — reject any client-supplied value to prevent price manipulation.
   base_freight: z.never().optional(),
-
   toll_estimate: z.never().optional(),
   platform_fee: z.never().optional(),
   total_amount: z.never().optional(),
@@ -94,7 +95,6 @@ export const paramIdSchema = z.object({
   id: z.string().min(1, "ID is required")
 });
 
-// Used to be UUID-only, but tests use string IDs like 'ticket-123', 'driver-1'
 export const uuidParamSchema = z.object({
   id: z.string().min(1, "ID is required").optional(),
   driverId: z.string().min(1, "Driver ID is required").optional()
@@ -104,7 +104,6 @@ export const driverIdParamSchema = z.object({
   driverId: uuidSchema
 });
 
-// Cross-docking synchronization engine (#6181)
 export const crossDockParamSchema = z.object({
   id: uuidSchema,
 });
@@ -159,6 +158,7 @@ export const submitRatingSchema = z.object({
     .max(5, { message: 'Stars must be between 1 and 5' }),
   comment: z.string().trim().max(1000, { message: 'Comment must be 1000 characters or fewer' }).optional().nullable(),
 }).strict();
+
 export const predictDemandSchema = z.object({
   hour: z.number().min(0).max(23, { message: 'Hour must be between 0 and 23' }),
   day_of_week: z.number().min(0).max(6, { message: 'Day of week must be between 0 and 6' }),
@@ -211,10 +211,13 @@ export const updateWalletSchema = z.object({
   ),
 }).strict();
 
+export const fcmTokenSchema = z.string()
+  .min(10, { message: 'fcmToken must be at least 10 characters' })
+  .max(4096, { message: 'fcmToken is too long' })
+  .regex(/^[a-zA-Z0-9\-_:.%/+=]+$/, { message: 'fcmToken contains invalid characters' });
+
 export const registerDeviceSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
+  fcmToken: fcmTokenSchema,
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
@@ -227,17 +230,11 @@ export const registerDeviceSchema = z.object({
 }).strict();
 
 export const unregisterDeviceSchema = z.object({
-  fcmToken: z.string({ required_error: 'fcmToken is required', invalid_type_error: 'fcmToken must be a string' })
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' }),
-  userId: z.string().optional(),
+  fcmToken: fcmTokenSchema,
 }).strict();
 
 export const updateFcmTokenSchema = z.object({
-  fcmToken: z.string()
-    .min(10, { message: 'fcmToken must be at least 10 characters' })
-    .max(4096, { message: 'fcmToken is too long' })
-    .nullable(),
+  fcmToken: fcmTokenSchema.nullable(),
 }).strict();
 
 export const createTicketSchema = z.object({
@@ -274,17 +271,9 @@ export const driverStatementSchema = z.object({
   sort_by: z.enum(['pickup_date', 'net_earnings', 'base_freight']).optional(),
 }).strict();
 
-/**
- * Reporting window for the driver earnings summary.
- *
- * `.strict()` rejects unknown query keys so a typo surfaces as a 400 rather
- * than silently falling back to the default period.
- */
 export const earningsSummarySchema = z.object({
   period: z.enum(['weekly', 'monthly']).optional(),
 }).strict();
-
-
 
 export const syncWeightSchema = z.object({
   vehicleId: z.string().min(1, 'vehicleId is required'),
@@ -296,11 +285,7 @@ export const syncWeightSchema = z.object({
   timestamp: z.string().datetime({ message: 'timestamp must be ISO 8601' }).optional(),
 }).strict();
 
-// Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
-// e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
-
-
 
 export const registerTruckSchema = z.object({
   name: z.string()
@@ -330,8 +315,6 @@ export const updateProfileSchema = z.object({
   is_online: z.boolean().optional(),
 }).strict();
 
-// ── Oracle & Verification schemas ───────────────────────────────────────
-
 export const oracleConfirmSchema = z.object({
   orderId: uuidSchema,
   otp: z.string().regex(/^\d{6}$/, { message: 'OTP must be exactly 6 digits' }),
@@ -356,8 +339,6 @@ export const verifyOrderParamsSchema = z.object({
 export const documentCheckSchema = z.object({
   driverId: uuidSchema,
 }).strict();
-
-// ── Deadhead matching schemas ──────────────────────────────────────────
 
 const locationPointSchema = z.object({
   lat: latitudeSchema,
@@ -391,9 +372,6 @@ export const matchDeadheadSchema = z.object({
   arrival_time: isoDateStringSchema,
   available_loads: z.array(availableLoadSchema).min(1, 'At least one available load is required').max(50, 'Too many loads'),
 }).strict();
-// ── Public Order Tracking schemas ─────────────────────────────────────────
-
-// ── Driver profit prediction schema ──────────────────────────────────────
 
 export const predictDriverProfitSchema = z.object({
   route_distance_km: coerceNumber(
@@ -442,8 +420,36 @@ export const reportGripDataSchema = z.object({
   ).optional().default(0),
 }).strict();
 
-/**
- * Schema for POST /api/driver/weigh-stations/sync-weight.
- * NOTE: defined once above (truck_id + string axle position); the driver
- * route reads truck_id/axles from req.body, so keep this single export.
- */
+export const nearbyGripQuerySchema = z.object({
+  // zod v4: invalid_type_error was removed — the unified `error` param covers
+  // missing/undefined too.
+  lat: coerceNumber(
+    z.number({ error: 'latitude must be a finite number' })
+      .min(-90, 'latitude must be >= -90')
+      .max(90, 'latitude must be <= 90')
+  ),
+  lng: coerceNumber(
+    z.number({ error: 'longitude must be a finite number' })
+      .min(-180, 'longitude must be >= -180')
+      .max(180, 'longitude must be <= 180')
+  ),
+  radius_miles: coerceNumber(
+    z.number({ invalid_type_error: 'radius_miles must be a number' })
+      .min(0.01, 'radius_miles must be greater than 0')
+      .max(1000, 'radius_miles must be at most 1000')
+  ).default(50),
+}).strict();
+
+export const kedaNamespaceQuerySchema = z.object({
+  namespace: z.string({ required_error: 'namespace is required' })
+    .min(1, 'namespace is required'),
+  deployment: z.string({ required_error: 'deployment is required' })
+    .min(1, 'deployment is required'),
+}).strict();
+
+export const kedaKafkaLagQuerySchema = z.object({
+  topic: z.string({ required_error: 'topic is required' })
+    .min(1, 'topic is required'),
+  consumerGroup: z.string({ required_error: 'consumerGroup is required' })
+    .min(1, 'consumerGroup is required'),
+}).strict();

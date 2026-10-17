@@ -9,8 +9,10 @@ describe('cursorPagination', () => {
       expect(result.length).toBeGreaterThan(0);
     });
 
-    it('encodes null input to base64url string', () => {
-      expect(encodeCursor(null)).toBe('bnVsbA');
+    it('round-trips null through encode/decode', () => {
+      const encoded = encodeCursor(null);
+      expect(encoded).toBe(Buffer.from('null').toString('base64url'));
+      expect(decodeCursor(encoded)).toBeNull();
     });
   });
 

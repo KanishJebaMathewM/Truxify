@@ -122,7 +122,7 @@ class _BiometricFatigueScreenState extends State<BiometricFatigueScreen> {
                 const SizedBox(height: 16),
                 _buildMetricRow('Head Nods', '${s.headNodCount.toInt()} detected', Icons.face),
                 const SizedBox(height: 16),
-                _buildMetricRow('HOS Remaining', '${_currentHosRemaining} min', Icons.timer),
+                _buildMetricRow('HOS Remaining', '$_currentHosRemaining min', Icons.timer),
                 
                 if (_emergencyRoute != null) ...[
                   const SizedBox(height: 32),

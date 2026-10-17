@@ -65,11 +65,6 @@ class _MultiCurrencyWalletScreenState extends State<MultiCurrencyWalletScreen> {
     );
   }
 
-  CurrencyWallet _walletOrZero(String currencyCode) => _wallets.firstWhere(
-        (w) => w.currencyCode == currencyCode,
-        orElse: () => CurrencyWallet(currencyCode: currencyCode, balance: 0, flagAsset: ''),
-      );
-
   Widget _buildTotalBalance() {
     // Mock calculation of total balance in USD for display
     // Null-safe lookup: a missing currency wallet contributes 0.0 instead of

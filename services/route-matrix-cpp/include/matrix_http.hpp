@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cctype>
+#include <optional>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -42,6 +44,7 @@ std::string compute_matrix_json(const std::vector<Location>& locs);
 struct ParseLocationsResult {
     std::vector<Location> locs;
     bool limit_hit = false; // true when the body contained more objects past the cap
+    bool invalid_coordinates = false;
 };
 
 ParseLocationsResult parse_locations(const std::string& body);
@@ -136,18 +139,27 @@ inline std::string extract_string_field(const std::string& obj, const std::strin
 }
 
 // Extracts a numeric value for a quoted key, e.g. "lat" : 19.0760.
-inline double extract_number_field(const std::string& obj, const std::string& key) {
+inline std::optional<double> extract_number_field(const std::string& obj, const std::string& key) {
     std::string quoted = "\"" + key + "\"";
-    size_t pos = obj.find(quoted);
-    if (pos == std::string::npos) return 0.0;
-    pos = obj.find(':', pos);
-    if (pos == std::string::npos) return 0.0;
+    size_t pos = 0;
+    while (true) {
+        pos = obj.find(quoted, pos);
+        if (pos == std::string::npos) return std::nullopt;
+        pos += quoted.size();
+        while (pos < obj.size() && std::isspace(static_cast<unsigned char>(obj[pos]))) ++pos;
+        // A quoted value such as id:"lat" must not impersonate a field name.
+        if (pos < obj.size() && obj[pos] == ':') break;
+    }
     pos++;
     while (pos < obj.size() && (obj[pos] == ' ' || obj[pos] == '\t')) pos++;
     const char* begin = obj.c_str() + pos;
     char* end = nullptr;
     double val = std::strtod(begin, &end);
-    return end == begin ? 0.0 : val;
+    if (end == begin) return std::nullopt;
+    while (*end && std::isspace(static_cast<unsigned char>(*end))) ++end;
+    // A numeric prefix of a malformed field (e.g. 12oops) is not a coordinate.
+    if (*end != ',' && *end != '}') return std::nullopt;
+    return val;
 }
 
 inline ParseLocationsResult parse_locations(const std::string& body) {
@@ -170,8 +182,14 @@ inline ParseLocationsResult parse_locations(const std::string& body) {
         std::string obj = body.substr(open, close - open + 1);
         Location loc;
         loc.id = extract_string_field(obj, "id");
-        loc.lat = extract_number_field(obj, "lat");
-        loc.lng = extract_number_field(obj, "lng");
+        const auto lat = extract_number_field(obj, "lat");
+        const auto lng = extract_number_field(obj, "lng");
+        if (!lat || !lng) {
+            result.invalid_coordinates = true;
+            return result;
+        }
+        loc.lat = *lat;
+        loc.lng = *lng;
         result.locs.push_back(loc);
 
         pos = close + 1;
@@ -185,6 +203,14 @@ inline MatrixHttpDecision decide_matrix_request(const ParseLocationsResult& pars
     if (parsed.limit_hit || parsed.locs.size() > MAX_LOCATIONS) {
         return {false, "413 Payload Too Large",
                 "{\"success\":false,\"error\":\"too many locations\"}"};
+    }
+    if (parsed.invalid_coordinates ||
+        !std::all_of(parsed.locs.begin(), parsed.locs.end(), [](const Location& loc) {
+            return std::isfinite(loc.lat) && std::isfinite(loc.lng) &&
+                loc.lat >= -90 && loc.lat <= 90 && loc.lng >= -180 && loc.lng <= 180;
+        })) {
+        return {false, "400 Bad Request",
+                "{\"success\":false,\"error\":\"locations require finite latitude [-90,90] and longitude [-180,180]\"}"};
     }
     if (parsed.locs.empty()) {
         return {false, "400 Bad Request",

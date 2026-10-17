@@ -1,6 +1,17 @@
 import cors from "cors";
 import logger from "./logger.js";
+// backend/api/src/middleware/cors.js (Excerpt)
 
+import logger from './logger.js';
+
+// Inside CORS origin validation logic:
+try {
+  // ... origin parsing / regex matching logic ...
+} catch (err) {
+  // FIX: Bind error variable and add structured warning per issue #8342
+  logger.warn({ err }, '[CORS] Failed to parse or validate request origin; falling back to deny/default');
+  return false;
+}
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())

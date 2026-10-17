@@ -296,7 +296,7 @@ const validOrderBody = {
   drop_address: '456 Drop Ave, Delhi',
   drop_lat: 28.7041,
   drop_lng: 77.1025,
-  pickup_date: '2026-10-10',
+  pickup_date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), // tomorrow — past dates rejected (#18567)
   pickup_time: '09:00',
   goods_type: 'electronics',
   weight_tonnes: 10,

@@ -92,8 +92,9 @@ class _PredictiveTireWearScreenState extends State<PredictiveTireWearScreen> {
 
   Widget _buildTireCard(TireTelemetry tire) {
     Color statusColor;
-    if (tire.isCritical) statusColor = Colors.red[700]!;
-    else if (tire.isWarning) statusColor = Colors.orange[700]!;
+    if (tire.isCritical) {
+      statusColor = Colors.red[700]!;
+    } else if (tire.isWarning) statusColor = Colors.orange[700]!;
     else statusColor = Colors.green[700]!;
 
     return Card(

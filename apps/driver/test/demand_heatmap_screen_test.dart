@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'setup/test_setup.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,6 +11,10 @@ import 'package:truxify_driver/screens/demand_heatmap_screen.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
 void main() {
+  setUpAll(() async {
+    await setupTestEnvironment();
+  });
+
   testWidgets('loads demand heatmap through the shared ApiClient', (tester) async {
     Uri? requestedUri;
 
@@ -43,6 +49,10 @@ void main() {
       supabaseClient: SupabaseClient(
         'https://example.supabase.co',
         'test-anon-key',
+        // The ApiClient's token-refresh path calls auth.refreshSession(); with
+        // autoRefresh enabled gotrue schedules a retry timer against the dead
+        // mock URL that self-reschedules forever ('Timer is still pending').
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
       ),
     );
 

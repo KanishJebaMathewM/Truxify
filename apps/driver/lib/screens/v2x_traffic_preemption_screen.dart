@@ -120,9 +120,9 @@ class _V2XTrafficPreemptionScreenState extends State<V2XTrafficPreemptionScreen>
       height: 64,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: isActive ? color : color.withOpacity(0.2),
+        color: isActive ? color : color.withValues(alpha: 0.2),
         boxShadow: isActive && glow
-            ? [BoxShadow(color: color.withOpacity(0.8), blurRadius: 20, spreadRadius: 5)]
+            ? [BoxShadow(color: color.withValues(alpha: 0.8), blurRadius: 20, spreadRadius: 5)]
             : null,
       ),
     );

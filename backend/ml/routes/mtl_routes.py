@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import torch
-import numpy as np
-from datetime import datetime
 import logging
-from mtl.model import MultiTaskModel, MTLLoss, MultiTaskTrainer
 import os
+from datetime import datetime
+from typing import List
+
+import torch
+from fastapi import APIRouter, HTTPException
+from mtl.model import MTLLoss, MultiTaskModel, MultiTaskTrainer
+from mtl.training_transition import TrainingAdmissionError
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/mtl", tags=["Multi-Task Learning"])
@@ -37,9 +38,15 @@ mtl_loss = MTLLoss(task_losses)
 trainer = MultiTaskTrainer(model, mtl_loss)
 
 class TrainRequest(BaseModel):
-    epochs: int = 50
-    batch_size: int = 32
-    data_size: int = 1000
+    epochs: int = Field(default=50, strict=True, ge=1, le=100)
+    batch_size: int = Field(default=32, strict=True, ge=1, le=8192)
+    data_size: int = Field(default=1000, strict=True, ge=1, le=50000)
+
+    @model_validator(mode="after")
+    def bounded_work(self):
+        if self.epochs * self.data_size > 1_000_000:
+            raise ValueError("MTL synthetic training work exceeds one million sample epochs")
+        return self
 
 @router.post("/train")
 async def train_mtl(request: TrainRequest):
@@ -76,6 +83,8 @@ async def train_mtl(request: TrainRequest):
             'data': results,
             'timestamp': datetime.now().isoformat()
         }
+    except TrainingAdmissionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as e:
         logger.error(f"Training failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -109,7 +118,7 @@ async def predict_single_task(data: List[List[float]], task_name: str):
     """Make prediction for single task"""
     try:
         X = torch.tensor(data, dtype=torch.float32)
-        prediction = trainer.model.forward_single_task(X, task_name)
+        prediction = trainer.predict(X, task_name=task_name)
         
         return {
             'success': True,

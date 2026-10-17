@@ -20,7 +20,25 @@ const checkBypassEligibility = async (driverId, lat, lng) => {
     timestamp: new Date().toISOString(),
   };
 };
+// backend/api/src/services/weighStationService.js
 
+/**
+ * Checks bypass eligibility for a weigh station.
+ * NOTE: This is currently a deterministic mock service. It must be replaced
+ * with a real regulatory API integration before production deployment.
+ * Fixed per issue #8955 / #8956.
+ */
+export async function checkBypassEligibility(vehicleId, stationId, metadata = {}) {
+  // Deterministic mock response instead of Math.random() coin-flip
+  return {
+    action: 'BYPASS',
+    simulated: true,
+    reason: 'Deterministic mock compliance check passed',
+    vehicleId,
+    stationId,
+    timestamp: new Date().toISOString()
+  };
+}
 
 /**
  * Syncs highly accurate internal air suspension weights with DOT enforcement software.

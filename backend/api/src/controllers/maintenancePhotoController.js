@@ -91,7 +91,8 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Validate, scan, and upload files in parallel
-    const uploadResults = await Promise.all(
+    // Wait for every started write before rollback can remove successful uploads.
+    const uploadSettlements = await Promise.allSettled(
       uploadedFiles.map(async (file, i) => {
         let verifiedMimeType;
         try {
@@ -153,6 +154,10 @@ export async function uploadMaintenancePhotos(req, res) {
       })
     );
 
+    const failedUpload = uploadSettlements.find(result => result.status === 'rejected');
+    if (failedUpload) throw failedUpload.reason;
+    const uploadResults = uploadSettlements.map(result => result.value);
+
     // Generate signed URLs for the uploaded files in parallel
     const photoUrls = await Promise.all(
       uploadResults.map(async (path) => {
@@ -162,6 +167,24 @@ export async function uploadMaintenancePhotos(req, res) {
 
         if (urlError) {
           logger.error('[MaintenancePhotoController] Failed to create signed URL:', urlError.message);
+          const errObj = new Error('Failed to generate photo URL');
+          errObj.statusCode = 500;
+          throw errObj;
+        }
+
+        return urlData.signedUrl;
+      })
+    );
+
+    // Generate signed URLs for existing stored photo paths as well
+    const existingPhotoUrls = await Promise.all(
+      existingUrls.map(async (path) => {
+        const { data: urlData, error: urlError } = await supabase.storage
+          .from('maintenance-photos')
+          .createSignedUrl(path, 60 * 60 * 24 * 7); // 7-day expiry
+
+        if (urlError) {
+          logger.error('[MaintenancePhotoController] Failed to create signed URL for existing photo:', urlError.message);
           const errObj = new Error('Failed to generate photo URL');
           errObj.statusCode = 500;
           throw errObj;
@@ -193,7 +216,7 @@ export async function uploadMaintenancePhotos(req, res) {
 
     return res.status(200).json({
       success: true,
-      photo_urls: [...existingUrls, ...photoUrls],
+      photo_urls: [...existingPhotoUrls, ...photoUrls],
       uploaded_count: photoUrls.length,
     });
   } catch (err) {

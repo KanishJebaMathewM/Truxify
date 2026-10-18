@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import express from 'express';
 import { requireIdempotency } from '../../src/middleware/idempotency.js';
 
 const mockRedisRef = vi.hoisted(() => {
@@ -313,5 +314,197 @@ describe('requireIdempotency middleware', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('error handling and res.json cleanup (issue #6685)', () => {
+    it('propagates downstream synchronous error via next(err) and restores res.json', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'err-key' } });
+      const res = makeRes();
+      const originalJson = res.json;
+      const expectedError = new Error('Downstream processing failed');
+      const next = vi.fn().mockImplementationOnce(() => {
+        throw expectedError;
+      });
+
+      await middleware(req, res, next);
+
+      expect(next).toHaveBeenCalledTimes(2);
+      expect(next).toHaveBeenNthCalledWith(2, expectedError);
+      expect(res.json).toBe(originalJson);
+    });
+
+    it('safely restores original res.json after response is sent via res.json', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'restore-key' } });
+      const res = makeRes({ statusCode: 200 });
+      const originalJson = res.json;
+      const next = makeNext();
+
+      await middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.json).not.toBe(originalJson);
+
+      const responseBody = { success: true };
+      res.json(responseBody);
+
+      expect(res.json).toBe(originalJson);
+      expect(originalJson).toHaveBeenCalledWith(responseBody);
+    });
+
+    it('ensures repeated calls to res.json do not trigger duplicate cache attempts', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'multi-json-key' } });
+      const res = makeRes({ statusCode: 200 });
+      const originalJson = res.json;
+      const next = makeNext();
+
+      await middleware(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      res.json({ attempt: 1 });
+      res.json({ attempt: 2 });
+
+      expect(res.json).toBe(originalJson);
+      expect(originalJson).toHaveBeenCalledTimes(2);
+
+      const cacheWrites = mockRedisRef.mock.set.mock.calls.filter(([k]) => !k.endsWith(':lock'));
+      expect(cacheWrites).toHaveLength(1);
+      const parsed = JSON.parse(cacheWrites[0][1]);
+      expect(parsed.body).toEqual({ attempt: 1 });
+    });
+
+    it('ensures repeated invocations of the wrapped res.json do not trigger duplicate cache attempts', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'wrapped-repeat-key' } });
+      const res = makeRes({ statusCode: 200 });
+      const originalJson = res.json;
+      const next = makeNext();
+
+      await middleware(req, res, next);
+      expect(next).toHaveBeenCalled();
+
+      const interceptedJson = res.json;
+      interceptedJson({ run: 1 });
+      interceptedJson({ run: 2 });
+
+      expect(res.json).toBe(originalJson);
+      expect(originalJson).toHaveBeenCalledTimes(2);
+
+      const cacheWrites = mockRedisRef.mock.set.mock.calls.filter(([k]) => !k.endsWith(':lock'));
+      expect(cacheWrites).toHaveLength(1);
+      const parsed = JSON.parse(cacheWrites[0][1]);
+      expect(parsed.body).toEqual({ run: 1 });
+    });
+
+    it('restores original res.json on finish event when res.json was never called', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const finishCallbacks = [];
+      const res = makeRes({
+        once: vi.fn((event, fn) => {
+          if (event === 'finish') finishCallbacks.push(fn);
+        }),
+      });
+      const originalJson = res.json;
+      const req = makeReq({ headers: { 'x-idempotency-key': 'finish-key' } });
+      const next = makeNext();
+
+      await middleware(req, res, next);
+      expect(res.json).not.toBe(originalJson);
+
+      expect(finishCallbacks.length).toBeGreaterThan(0);
+      finishCallbacks.forEach((cb) => cb());
+
+      expect(res.json).toBe(originalJson);
+    });
+
+    it('restores original res.json on close event when res.json was never called', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const closeCallbacks = [];
+      const res = makeRes({
+        once: vi.fn((event, fn) => {
+          if (event === 'close') closeCallbacks.push(fn);
+        }),
+      });
+      const originalJson = res.json;
+      const req = makeReq({ headers: { 'x-idempotency-key': 'close-key' } });
+      const next = makeNext();
+
+      await middleware(req, res, next);
+      expect(res.json).not.toBe(originalJson);
+
+      expect(closeCallbacks.length).toBeGreaterThan(0);
+      closeCallbacks.forEach((cb) => cb());
+
+      expect(res.json).toBe(originalJson);
+    });
+
+    it('restores res.json and propagates error when circular response fails serialization in Express', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const app = express();
+      const res = Object.create(express.response);
+      res.app = app;
+      res.statusCode = 200;
+      res.once = vi.fn();
+      res.removeListener = vi.fn();
+
+      const originalJson = res.json;
+      const req = makeReq({ headers: { 'x-idempotency-key': 'circular-key' } });
+      const next = makeNext();
+
+      await middleware(req, res, next);
+
+      const circular = {};
+      circular.self = circular;
+
+      expect(() => res.json(circular)).toThrow(TypeError);
+      expect(res.json).toBe(originalJson);
+
+      const cacheWrites = mockRedisRef.mock.set.mock.calls.filter(([k]) => !k.endsWith(':lock'));
+      expect(cacheWrites).toHaveLength(0);
+    });
+
+    it('restores res.json and does not cache when downstream error handler responds with non-2xx', async () => {
+      const middleware = requireIdempotency();
+      mockRedisRef.mock.get.mockResolvedValue(null);
+      mockRedisRef.mock.set.mockResolvedValue('OK');
+
+      const req = makeReq({ headers: { 'x-idempotency-key': 'err-response-key' } });
+      const res = makeRes({ statusCode: 200 });
+      const originalJson = res.json;
+      const next = vi.fn().mockImplementationOnce(() => {
+        res.status(500);
+        res.json({ error: 'Internal server error' });
+      });
+
+      await middleware(req, res, next);
+
+      expect(res.json).toBe(originalJson);
+      expect(originalJson).toHaveBeenCalledWith({ error: 'Internal server error' });
+      const cacheWrites = mockRedisRef.mock.set.mock.calls.filter(([k]) => !k.endsWith(':lock'));
+      expect(cacheWrites).toHaveLength(0);
+    });
   });
 });

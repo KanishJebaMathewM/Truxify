@@ -132,7 +132,7 @@ class _FreightNegotiatorScreenState extends State<FreightNegotiatorScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
               child: Text(
                 data.isLowball 
                   ? 'LOWBALL ALERT: Offer is \$${data.variance.toStringAsFixed(2)} below market average.'

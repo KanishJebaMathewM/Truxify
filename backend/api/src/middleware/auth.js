@@ -2,7 +2,22 @@ import jwt from 'jsonwebtoken';
 import logger from './logger.js';
 import { firebaseAdmin, supabase, createUserClient } from '../config/db.js';
 import { getCachedProfile, setCachedProfile, invalidateCachedProfile, isValidCachedProfile, getCachedSupabaseProfile, setCachedSupabaseProfile, invalidateCachedSupabaseProfile, isValidCachedSupabaseProfile, TOMBSTONE_TTL_SECONDS, TTL_SECONDS } from '../lib/profileCache.js';
+// backend/api/src/middleware/auth.js (Excerpt)
 
+export function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    // FIX: Add null guard for req.user per issue #6672
+    if (!req.user || typeof req.user.role !== 'string') {
+      return res.status(401).json({ error: 'Unauthorized: Authentication required' });
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+    }
+
+    next();
+  };
+}
 /**
  * Express Middleware to authenticate API requests using Firebase or Supabase JWT tokens.
  */

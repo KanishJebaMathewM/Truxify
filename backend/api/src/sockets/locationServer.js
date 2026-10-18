@@ -4,7 +4,26 @@ import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase, redisClient } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
 import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
+// backend/api/src/sockets/locationServer.js (Excerpt)
 
+export async function closeLocationServer() {
+  // FIX: Clear the heartbeat interval timer to prevent memory leaks per issue #6684
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+
+  // Close active WebSocket server connections and clean up
+  return new Promise((resolve, reject) => {
+    if (!wServer) {
+      return resolve();
+    }
+    wServer.close((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
 let io = null;
 let _orderRepository = null;
 

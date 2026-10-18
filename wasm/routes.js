@@ -109,6 +109,14 @@ router.post('/wasm/eta', async (req, res) => {
         }
         
         const result = await edgeRuntime.calculateETA(numericDistance, numericSpeed, numericTrafficFactor);
+        // The runtime returns null on execution failure; never present that
+        // sentinel or an overflowing calculation as a successful ETA.
+        if (result == null) {
+            return res.status(503).json({ success: false, error: 'ETA calculation unavailable' });
+        }
+        if (!Number.isFinite(result) || result < 0) {
+            return res.status(502).json({ success: false, error: 'ETA calculation returned an invalid result' });
+        }
         res.json({
             success: true,
             data: result,

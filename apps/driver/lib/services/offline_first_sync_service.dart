@@ -10,6 +10,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/offline_sync_event_model.dart';
 
+/// Outcome of a single sync attempt.
+/// - [success]: delivered (2xx / idempotent 409 / 208) — drop the row.
+/// - [retriable]: transient (401/429/5xx/network) — retry, dead-letter only
+///   after [OfflineFirstSyncService.maxRetries].
+/// - [permanent]: non-retryable 4xx (validation/404) — dead-letter now.
+/// - [unauthorized]: internal marker for a 401, handled by token refresh.
+enum _SyncOutcome { success, retriable, permanent, unauthorized }
+
 class OfflineFirstSyncService {
   Database? _db;
   bool _isConnected = false;
@@ -33,13 +41,6 @@ class OfflineFirstSyncService {
   static const String statePending = 'pending';
   static const String stateDeadLetter = 'dead_letter';
 
-  /// Outcome of a single sync attempt.
-  /// - [success]: delivered (2xx / idempotent 409 / 208) — drop the row.
-  /// - [retriable]: transient (401/429/5xx/network) — retry, dead-letter only
-  ///   after [maxRetries].
-  /// - [permanent]: non-retryable 4xx (validation/404) — dead-letter now.
-  /// - [unauthorized]: internal marker for a 401, handled by token refresh.
-  enum _SyncOutcome { success, retriable, permanent, unauthorized }
 
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<List<OfflineSyncEvent>> get databaseStream => _dbController.stream;

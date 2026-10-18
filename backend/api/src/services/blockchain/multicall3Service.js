@@ -17,7 +17,8 @@ class Multicall3Service {
     this.provider = deps.provider;
     this.multicallContract = null;
     this.callCache = new Map();
-    this.cacheTimeout = parseInt(process.env.MULTICALL_CACHE_TIMEOUT_MS || '5000', 10);
+    const configuredCacheTimeout = parseInt(process.env.MULTICALL_CACHE_TIMEOUT_MS, 10);
+    this.cacheTimeout = Number.isFinite(configuredCacheTimeout) ? configuredCacheTimeout : 5000;
     this.initializeMulticall();
   }
 

@@ -1,0 +1,28 @@
+name: Native conformal coverage
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/uncertainty/**'
+      - '.github/workflows/conformal-coverage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-conformal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Native dependencies
+        run: python -m pip install numpy==1.26.4 pytest==9.0.3 ruff==0.16.9
+      - name: Independent coverage and original regression controls
+        env:
+          PYTHONPATH: backend/ml/uncertainty
+        run: python -m pytest -q backend/ml/uncertainty/test_conformal.py backend/ml/uncertainty/test_conformal_coverage.py
+      - name: Changed-file lint
+        run: python -m ruff check backend/ml/uncertainty/conformal_eta.py backend/ml/uncertainty/test_conformal.py backend/ml/uncertainty/test_conformal_coverage.py

@@ -19,7 +19,7 @@ echo "🚀 Running Liquibase Migrations against database '${LIQUIBASE_DB}'..."
 if ! command -v liquibase &> /dev/null; then
     echo "Installing Liquibase..."
     curl -L https://github.com/liquibase/liquibase/releases/download/v4.23.0/liquibase-4.23.0.tar.gz | tar xz
-    export PATH=$PWD/liquibase:$PATH
+    export PATH="$PWD/liquibase:$PATH"
 fi
 
 # Create the dedicated database if it does not exist yet

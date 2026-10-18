@@ -20,6 +20,8 @@
 // ⚠️ NEVER run `flutter run` without --dart-define=ENV=dev
 //    Running without flags connects to PRODUCTION services.
 
+import 'package:flutter/foundation.dart';
+
 class Env {
   // ── Core Environment ──────────────────────────────────────────────────────
   static const String environment = String.fromEnvironment(
@@ -102,8 +104,7 @@ class Env {
 
     // In dev mode, warn if accidentally pointed at production URLs
     if (isDev && supabaseUrl.contains('supabase.co') && !supabaseUrl.contains('staging')) {
-      // ignore: avoid_print
-      print(
+      debugPrint(
         '\n⚠️  WARNING: You are in DEV mode but SUPABASE_URL points to a '
         'non-local Supabase instance. This may be production!\n',
       );

@@ -1,0 +1,40 @@
+name: Native audio observation contract
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/multimodal/audio_contract.py'
+      - 'backend/ml/multimodal/audio_monitor.py'
+      - 'backend/ml/routes/safety_routes.py'
+      - 'backend/ml/tests/test_audio_contract.py'
+      - '.github/workflows/audio-observation-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-audio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install scoped native audio runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server libportaudio2 libsndfile1
+          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install setuptools==75.6.0 tensorflow-cpu==2.16.1 numpy==1.26.4 scipy==1.14.1 scikit-learn==1.5.2 matplotlib==3.9.4 numba==0.61.2 librosa==0.10.0 noisereduce==3.0.0 sounddevice==0.4.6 soundfile==0.12.1 redis==5.0.0 fastapi==0.116.1 pytest==9.0.3 ruff==0.16.9
+      - name: Exercise real DSP, Keras and private Redis with synthetic WAVs
+        env:
+          PYTHONPATH: backend/ml
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TF_NUM_INTRAOP_THREADS: '1'
+          TF_NUM_INTEROP_THREADS: '1'
+        run: python -m pytest backend/ml/tests/test_audio_contract.py -q
+      - name: Analyze new contract and scoped legacy integration
+        run: |
+          python -m ruff check backend/ml/multimodal/audio_contract.py backend/ml/tests/test_audio_contract.py
+          python -m ruff check backend/ml/multimodal/audio_monitor.py backend/ml/routes/safety_routes.py --ignore I001,F401,UP035,UP006,UP045,BLE001,DTZ005,RUF013,B008

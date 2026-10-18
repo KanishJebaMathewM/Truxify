@@ -131,7 +131,7 @@ class _DefContaminationScreenState extends State<DefContaminationScreen> {
   Widget _buildEngineKillWarning() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.red[900]!.withOpacity(0.3), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.redAccent)),
+      decoration: BoxDecoration(color: Colors.red[900]!.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.redAccent)),
       child: Row(
         children: [
           Icon(Icons.power_settings_new, color: Colors.redAccent, size: 48),

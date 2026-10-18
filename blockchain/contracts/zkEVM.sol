@@ -169,7 +169,14 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             txHashes[i] = txHash;
         }
 
-        require(currentState.root == newStateRoot, "Batch state root mismatch");
+        // Sanity-check that the per-tx folds in _applyTx reproduce the root the
+        // proof committed to: _calculateBatchStateRoot wraps the fold with the
+        // batch timestamp and id, so re-wrap the on-chain fold and compare.
+        require(
+            keccak256(abi.encodePacked(currentState.root, batchTimestamp, batchId)) == newStateRoot,
+            "Batch state root mismatch"
+        );
+        currentState.root = newStateRoot;
 
         // Submit batch
         batchCounter = batchId;

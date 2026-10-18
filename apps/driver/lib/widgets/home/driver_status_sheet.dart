@@ -4,6 +4,7 @@ import '../../models/earnings_daily_model.dart';
 import '../../theme/app_theme.dart';
 import '../earnings_shimmer.dart';
 import 'metrics_error_card.dart';
+import 'shift_metrics_row.dart';
 
 /// Bottom sheet shown on the Home screen when no active trip is selected.
 /// Displays the driver online/offline toggle and today's earnings summary
@@ -49,11 +50,14 @@ class DriverStatusSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final gross = todayEarnings != null
+    final payValue = todayEarnings != null
         ? '₹${todayEarnings!.amount.toStringAsFixed(0)}'
         : '—';
-    final net = todayEarnings != null
-        ? '₹${todayEarnings!.netAmount.toStringAsFixed(0)}'
+    final hoursValue = todayEarnings != null
+        ? '${todayEarnings!.hoursDriven.toStringAsFixed(1)} hrs'
+        : '—';
+    final ratingValue = driverRating != null
+        ? driverRating!.toStringAsFixed(2)
         : '—';
     final tripCountValue = todayEarnings != null
         ? '${todayEarnings!.tripCount}'
@@ -249,53 +253,3 @@ class DriverStatusSheet extends StatelessWidget {
 }
 
 // ── Private metric card widget ────────────────────────────────────────────────
-
-class _EarningsMetricCard extends StatelessWidget {
-  const _EarningsMetricCard({
-    required this.icon,
-    required this.value,
-    required this.label,
-    this.valueKey,
-  });
-
-  final IconData icon;
-  final String value;
-  final String label;
-  final Key? valueKey;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : TruxifyColors.background,
-        border: Border.all(color: TruxifyColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, size: 16, color: TruxifyColors.accent),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            key: valueKey,
-            style: GoogleFonts.dmSans(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          Text(
-            label,
-            style: GoogleFonts.dmSans(
-              fontSize: 9,
-              color: TruxifyColors.adaptiveSecondaryText(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

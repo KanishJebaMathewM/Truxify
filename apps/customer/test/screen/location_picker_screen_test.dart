@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:truxify_customer/screens/location_picker_screen.dart';
-import 'package:truxify_customer/theme/app_theme.dart';
+import 'package:truxify/screens/location_picker_screen.dart';
+import 'package:truxify/theme/app_theme.dart';
 
 void main() {
   group('LocationPickerScreen & LocationPickResult Unit Tests', () {
@@ -20,7 +20,7 @@ void main() {
     testWidgets('LocationPickerScreen renders title, search input, and address card', (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: TruxifyTheme.lightTheme,
+          theme: TruxifyTheme.light(),
           home: const LocationPickerScreen(
             title: 'Set Pickup Location',
             initialQuery: 'Mumbai APMC Market',
@@ -35,6 +35,11 @@ void main() {
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('Selected Address'), findsOneWidget);
       expect(find.text('Confirm Location'), findsOneWidget);
+
+      // The reverse-geocode Dio request fails against the harness-blocked
+      // network; its internal timer would otherwise be pending at teardown.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
     });
   });
 }

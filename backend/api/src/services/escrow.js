@@ -1,4 +1,25 @@
+// backend/api/src/services/escrow.js (Excerpt)
 
+/**
+ * Marks an escrow booking as started on-chain.
+ * @param {string|number} orderDisplayId - The display ID or booking ID for the order
+ * @returns {Promise<Object>} Transaction receipt or result
+ */
+export async function markEscrowBookingStarted(orderDisplayId) {
+  try {
+    // FIX: Add missing wrapper calling the smart contract ABI per issue #6172
+    const tx = await escrowContract.markBookingStarted(orderDisplayId);
+    const receipt = await tx.wait();
+    
+    return {
+      success: true,
+      transactionHash: receipt.transactionHash,
+    };
+  } catch (err) {
+    logger.error({ err, orderDisplayId }, '[escrowService] Failed to mark escrow booking started on-chain');
+    throw new Error(`Failed to mark escrow booking started: ${err.message}`);
+  }
+}
 class EscrowAmountMismatchError extends Error {
   constructor(expectedWei, actualWei) {
     super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);

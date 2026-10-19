@@ -288,10 +288,10 @@ export function initLocationServer(httpServer) {
      *
      * Expected payload:
      * {
-     *   lat: number,        // -90 to 90
-     *   lng: number,        // -180 to 180
-     *   speed: number,      // km/h
-     *   heading: number,    // 0–360 degrees
+     *   lat: number,       // -90 to 90
+     *   lng: number,       // -180 to 180
+     *   speed: number,     // km/h
+     *   heading: number,   // 0–360 degrees
      *   timestamp: string   // ISO 8601
      * }
      *
@@ -623,7 +623,11 @@ export function emitEtaUpdateToBooking(bookingId, eta) {
 export async function closeLocationServer() {
   stopHeartbeatSweep();
   if (io) {
-    io.close();
+    await new Promise((resolve) => {
+      io.close(() => {
+        resolve();
+      });
+    });
     io = null;
   }
 }

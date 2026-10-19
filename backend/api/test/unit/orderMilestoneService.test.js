@@ -1,28 +1,72 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrderMilestoneService } from '../../src/services/order/orderMilestoneService.js';
-import { paisaToMaticWei } from '../../src/services/escrow.js';
+
+// Fix TDZ Hoisting Violation: Wrap all mock functions and objects in vi.hoisted()
+// so they are fully initialized before top-level vi.mock factories execute.
+const {
+  mockOrderRepository,
+  mockOrderValidationService,
+  mockOrderTimelineService,
+  mockOrderNotificationService,
+  mockTrackingTokenService,
+  mockLogger,
+} = vi.hoisted(() => {
+  return {
+    mockOrderRepository: {
+      findOrderById: vi.fn(),
+      addMilestone: vi.fn(),
+      completeMilestone: vi.fn(),
+      updateOrderGuardStatus: vi.fn(),
+      executeRpc: vi.fn(),
+      updateOrder: vi.fn(),
+      updateWalletTransaction: vi.fn().mockResolvedValue({ success: true }),
+    },
+    mockOrderValidationService: {
+      findOrderByIdOrDisplayId: vi.fn(),
+      assertOrderFound: vi.fn(),
+      assertDriverAssignment: vi.fn(),
+    },
+    mockOrderTimelineService: {
+      recordEvent: vi.fn().mockResolvedValue({ success: true }),
+    },
+    mockOrderNotificationService: {
+      checkOtpLockout: vi.fn().mockResolvedValue(false),
+      DELIVERY_OTP_READY_STATUSES: new Set(['arriving']),
+      sendPushNotification: vi.fn().mockResolvedValue({ success: true }),
+      clearOtpState: vi.fn().mockResolvedValue({}),
+    },
+    mockTrackingTokenService: {
+      revokeAllForOrder: vi.fn(),
+      revokeToken: vi.fn().mockResolvedValue({ success: true }),
+    },
+    mockLogger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+  };
+});
 
 vi.mock('../../src/services/escrow.js', async (importActual) => {
   const actual = await importActual();
   return { ...actual, escrowRelease: vi.fn() };
 });
 
-const mockOrderRepository = {
-  findOrderById: vi.fn(),
-  addMilestone: vi.fn(),
-  completeMilestone: vi.fn(),
-  updateOrderGuardStatus: vi.fn(),
-  executeRpc: vi.fn(),
-  updateOrder: vi.fn(),
-};
-const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-const mockTrackingTokenService = { revokeAllForOrder: vi.fn() };
-
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
+
+vi.mock('../../src/services/order/orderValidationService.js', () => ({
+  OrderValidationService: vi.fn().mockImplementation(() => mockOrderValidationService),
+}));
+
+vi.mock('../../src/services/order/orderTimelineService.js', () => ({
+  OrderTimelineService: vi.fn().mockImplementation(() => mockOrderTimelineService),
+}));
+
 vi.mock('../../src/services/order/orderNotificationService.js', () => ({
+  OrderNotificationService: vi.fn().mockImplementation(() => mockOrderNotificationService),
   checkOtpLockout: vi.fn().mockResolvedValue(false),
   DELIVERY_OTP_READY_STATUSES: new Set(['arriving']),
 }));
+
 vi.mock('../../src/services/notificationService.js', () => ({
   getActiveDeliveryOtp: vi.fn().mockResolvedValue({ id: 'otp-1' }),
   verifyDeliveryOtpHash: vi.fn().mockReturnValue(true),
@@ -30,15 +74,25 @@ vi.mock('../../src/services/notificationService.js', () => ({
   clearOtpState: vi.fn().mockResolvedValue({}),
 }));
 
+import { OrderMilestoneService } from '../../src/services/order/orderMilestoneService.js';
+import { paisaToMaticWei } from '../../src/services/escrow.js';
+
 describe('orderMilestoneService', () => {
   let orderMilestoneService;
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mockOrderRepository.updateWalletTransaction.mockResolvedValue({ success: true });
+    mockOrderNotificationService.clearOtpState.mockResolvedValue({});
+
     orderMilestoneService = new OrderMilestoneService({
       orderRepository: mockOrderRepository,
-      logger: mockLogger,
+      orderValidationService: mockOrderValidationService,
+      orderTimelineService: mockOrderTimelineService,
+      orderNotificationService: mockOrderNotificationService,
       trackingTokenService: mockTrackingTokenService,
+      logger: mockLogger,
     });
   });
 

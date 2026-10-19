@@ -1,114 +1,37 @@
-/**
- * @openapi
- * components:
- *   schemas:
- *     DocumentUploadResponse:
- *       type: object
- *       properties:
- *         success:
- *           type: boolean
- *         document_id:
- *           type: string
- *           format: uuid
- *         message:
- *           type: string
- */
-
 import express from 'express';
-import multer from 'multer';
-import { uploadDriverDocument } from '../controllers/documentController.js';
-import { authenticate } from '../middleware/auth.js';
-import { requirePolicy } from '../middleware/requirePolicy.js';
+import { verifyAndStoreDocument } from '../services/digilockerService.js';
 import logger from '../middleware/logger.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
-import digilockerService from '../services/digilockerService.js';
 
 const router = express.Router();
 
-// Buffer the upload in memory so the content can be inspected (magic
-// bytes) before anything is written to storage. 8MB covers a typical
-// phone-camera photo of an ID document; PDFs are usually much smaller.
-const uploadFileLimit =
-  Number(process.env.MULTIPART_FILE_LIMIT_BYTES) ||
-  8 * 1024 * 1024;
+router.post('/verify-digilocker', async (req, res) => {
+  const { code, docType, driverWalletAddress } = req.body;
+  const driverId = req.user?.id || req.body.driverId;
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: uploadFileLimit,
-  },
-});
+  if (!code || !docType) {
+    return res.status(400).json({
+      error: 'Missing required fields: code and docType are required.',
+    });
+  }
 
-/**
- * @openapi
- * /api/driver/documents:
- *   post:
- *     tags: [Documents]
- *     summary: Upload a driver document
- *     description: Uploads a driver verification document (photo or PDF). File is validated by magic bytes before storage. Max file size is 8MB.
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               document:
- *                 type: string
- *                 format: binary
- *                 description: Document file (photo or PDF, max 8MB)
- *     responses:
- *       201:
- *         description: Document uploaded successfully
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/DocumentUploadResponse'
- *       400:
- *         description: Invalid file or file too large
- *       413:
- *         description: File size exceeds limit
- */
-// POST /api/driver/documents
-// Multer errors fire before the controller runs, so handle them here with a
-// structured log; success passes through to the controller unchanged.
-function handleDocumentUpload(req, res, next) {
-  upload.single('document')(req, res, (err) => {
-    if (err) {
-      logger.error(
-        {
-          event: 'DOCUMENT_UPLOAD_ERROR',
-          requestId: req.requestId || req.id,
-          userId: req.user && req.user.id,
-          code: err.code,
-          error: err.message,
-        },
-        'Document upload failed',
-      );
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json({ error: 'File size exceeds limit' });
-      }
-      return res.status(400).json({ error: err.message || 'Document upload failed' });
-    }
-    return uploadDriverDocument(req, res, next);
-  });
-}
-router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), handleDocumentUpload);
-
-// POST /api/documents/verify-digilocker
-router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) => {
   try {
-    const code = req.body?.code;
-    const result = await digilockerService.verifyAndSyncDocuments(req.user.id, code);
-    res.json(result);
+    const result = await verifyAndStoreDocument({
+      driverId,
+      code,
+      docType,
+      driverWalletAddress,
+    });
+
+    return res.status(200).json({
+      message: 'Document successfully verified via DigiLocker and registered on-chain.',
+      data: result,
+    });
   } catch (err) {
-    logger.error(
-      { event: 'DOCUMENT_DIGILOCKER_SYNC_ERROR', requestId: req.requestId || req.id, userId: req.user && req.user.id, error: err && err.message },
-      '[DocumentRoutes] Digilocker sync failed',
-    );
-    res.status(500).json({ error: err?.message || 'Internal Server Error' });
+    logger.error({ err, driverId, docType }, '[Route] DigiLocker verification failed');
+    return res.status(500).json({
+      error: 'DigiLocker document verification failed.',
+      details: err.message,
+    });
   }
 });
 

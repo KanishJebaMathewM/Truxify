@@ -43,3 +43,60 @@ graph TD
     API --> Supabase
     API --> ML
     API --> Blockchain
+
+    Manufacturer ──────────────────────────── Driver
+                    TRUXIFY
+         ML Matching · Blockchain Escrow
+         Voice AI · Live Tracking · n8n
+
+         ┌─────────────────────────────────────────────────────────┐
+│                    FLUTTER APPS                         │
+│         Customer App          Driver App                │
+└──────────────────┬──────────────────────────────────────┘
+                   │ REST + WebSockets
+┌──────────────────▼──────────────────────────────────────┐
+│              NODE.JS + EXPRESS (Main API)                │
+│       Auth · Bookings · Payments · WebSocket Server         │
+└────┬──────────────┬──────────────────────┬──────────────┘
+     │              │                      │
+┌────▼────┐  ┌──────▼──────┐  ┌───────────▼────────────┐
+│ FASTAPI │  │  SUPABASE   │  │  POLYGON SMART CONTRACT │
+│   ML    │  │  PostgreSQL │  │  Escrow · Docs · Repute │
+│ Models  │  │  + PostGIS  │  └────────────────────────┘
+└────┬────┘  └──────┬──────┘
+     │              │
+┌────▼────┐  ┌──────▼──────┐
+│  OSRM   │  │  MONGODB    │
+│ Routing │  │  GPS Logs   │
+└─────────┘  └─────────────┘
+git clone [https://github.com/KanishJebaMathewM/Truxify.git](https://github.com/KanishJebaMathewM/Truxify.git)
+cd Truxify/apps/customer  # or Truxify/apps/driver
+flutter pub get
+flutter run
+cp .env.example .env
+docker compose up --build
+MONGODB_URI=mongodb://mongo:27017
+MONGODB_DB_NAME=truxify_telemetry
+REDIS_URL=redis://redis:6379
+cd backend/api
+npm install
+cp .env.example .env
+npm run dev
+cd backend/api
+npm test
+cd apps/customer
+flutter pub get
+flutter analyze
+flutter test
+cd apps/driver
+flutter pub get
+flutter analyze
+flutter test
+cd backend/ml
+pip install -r requirements.txt
+python -m pytest tests/ -v
+cd blockchain
+npm ci
+npx hardhat compile
+npx hardhat test
+docker compose up --build

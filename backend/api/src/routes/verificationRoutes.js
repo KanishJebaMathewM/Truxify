@@ -104,7 +104,7 @@ router.get('/order/:orderId', orderVerificationLimiter, authenticate, validatePa
         error: error.message,
       });
     }
-    logger.error({ event: 'VERIFICATION_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'Verification upload error');
+    logger.error({ event: 'VERIFICATION_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error?.message }, 'Verification upload error');
     res.status(500).json({
       success: false,
       error: error.message
@@ -216,7 +216,7 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
   try {
     const userId = req.user.id;
     if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No image uploaded' });
+      return res.status(400).json({ success: false, error: 'No image uploaded or invalid file type' });
     }
 
     // Validate magic bytes and malware-scan before the buffer is forwarded to
@@ -252,131 +252,4 @@ router.post('/kyc/upload', kycUploadLimiter, authenticate, upload.single('image'
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
     formData.append('file', blob, req.file.originalname);
 
-    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '').trim();
-    const mlApiKey = (process.env.ML_API_KEY || '').trim();
-
-    if (!mlBaseUrl || !mlApiKey) {
-      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED', ip: req.ip }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
-      return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
-    }
-
-    const mlResponse = await fetch(`${mlBaseUrl}/verify/kyc`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        'X-API-Key': mlApiKey,
-      },
-      signal: AbortSignal.timeout(OCR_HTTP_TIMEOUT_MS),
-    });
-
-    if (!mlResponse.ok) {
-      const text = await mlResponse.text();
-      return res.status(500).json({ success: false, error: 'OCR verification failed: ' + text });
-    }
-
-    const ocrData = await mlResponse.json();
-
-    // OCR output is only a *hint*. A bare ML/OCR `verified` boolean from an
-    // internal endpoint must never, on its own, flip a driver to KYC=Verified.
-    // Approval additionally requires an explicit government-source attestation
-    // flag (e.g. DigiLocker/registry) returned by the verification pipeline,
-    // binding the document to the user's real identity.
-    const governmentAttested =
-      ocrData && ocrData.attested === true && ocrData.verified === true;
-
-    if (governmentAttested) {
-      const docNumber = normalizeKycDocNumber(ocrData.extracted_number);
-      const { error: verifyError } = await supabaseAdmin
-        .from('driver_details')
-        .update({
-          kyc_status: 'Verified',
-          kyc_doc_number: docNumber,
-        })
-        .eq('user_id', userId);
-
-      if (verifyError) throw verifyError;
-    } else {
-       const { error: rejectError } = await supabaseAdmin
-        .from('driver_details')
-        .update({ kyc_status: 'Rejected' })
-        .eq('user_id', userId);
-
-      if (rejectError) throw rejectError;
-    }
-
-    res.status(200).json({
-      success: true,
-      data: ocrData
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
-    }
-    logger.error({ event: 'KYC_UPLOAD_ERROR', requestId: req.requestId || req.id, userId: req.user?.id, error: error?.message || error, stack: error?.stack }, 'KYC upload error');
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-const zkVerifyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore('rl:zk-verify:'),
-  message: { error: 'Rate limit exceeded', retryAfter: 900 },
-});
-
-/**
- * POST /api/verification/zk-verify-credential
- * Verifies Groth16 ZKP driver credentials, ensures unexpired timestamp & unspent nullifier,
- * and issues a signed session authorization token for bidding.
- */
-router.post('/zk-verify-credential', zkVerifyLimiter, authenticate, async (req, res) => {
-  try {
-    const { proof, publicSignals } = req.body || {};
-    const userId = req.user?.id;
-
-    if (!proof || !publicSignals) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: proof and publicSignals must be provided',
-      });
-    }
-
-    const result = await zkpService.verifyCredentialProof({
-      proof,
-      publicSignals,
-      userId,
-    });
-
-    if (!result.success) {
-      const statusCode = result.code === 'NULLIFIER_ALREADY_SPENT' ? 409 : 400;
-      return res.status(statusCode).json({
-        success: false,
-        code: result.code,
-        error: result.error,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      verified: true,
-      token: result.sessionToken,
-      expiresAt: result.expiresAt,
-      nullifierHash: result.nullifierHash,
-    });
-  } catch (error) {
-    logger.error({ err: error, userId: req.user?.id }, '[ZKP] Error in zk-verify-credential route');
-    return res.status(500).json({
-      success: false,
-      error: 'Internal server error during credential verification',
-    });
-  }
-});
-
-export default router;
+    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env

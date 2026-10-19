@@ -91,6 +91,7 @@ class AtomicSwapService {
             );
             const receipt = await tx.wait();
 
+            // SECURITY FIX: Persist ONLY hashLock; never store plaintext secret in database or logs
             await this.storeSwap({
                 swapId,
                 initiator,
@@ -107,6 +108,7 @@ class AtomicSwapService {
                 swapId: swapId.toString(),
                 hashLock,
                 txHash: receipt.hash
+                // SECURITY FIX: Omit plaintext secret from API responses to prevent compromise
             };
         } catch (error) {
             logger.error('Swap creation failed:', error);
@@ -195,6 +197,7 @@ class AtomicSwapService {
         );
         const receipt = await tx.wait();
 
+            // SECURITY FIX: Store only hashLock and proof; never store plaintext secret
             await this.storeCrossChainSwap({
                 swapId,
                 sourceChainId: 137, // Polygon
@@ -215,6 +218,7 @@ class AtomicSwapService {
                 hashLock,
                 proof,
                 txHash: receipt.hash
+                // SECURITY FIX: Omit plaintext secret from API response payload
             };
         } catch (error) {
             logger.error('Cross-chain swap creation failed:', error);

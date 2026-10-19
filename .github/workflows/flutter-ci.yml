@@ -4,43 +4,50 @@ on:
   pull_request:
     paths:
       - 'apps/**'
-      - 'packages/**'
+      - '.github/workflows/flutter-ci.yml'
   push:
-    branches: [main]
-    paths:
-      - 'apps/**'
-      - 'packages/**'
+    branches:
+      - main
 
 jobs:
-  test:
-    name: Flutter Widget Tests
+  analyze-and-test:
+    name: Analyze & Test Flutter Apps
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [customer, driver]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java Development Kit (JDK)
+        uses: actions/setup-java@v4
         with:
-          persist-credentials: false
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.x'
           channel: 'stable'
+          cache: true
 
-      - name: Install dependencies (customer app)
-        run: cd apps/customer && flutter pub get
+      - name: Install Dependencies
+        working-directory: apps/${{ matrix.app }}
+        run: flutter pub get
 
-      - name: Run widget tests (customer app)
-        run: cd apps/customer && flutter test --coverage
+      - name: Run Static Analysis
+        working-directory: apps/${{ matrix.app }}
+        run: flutter analyze --fatal-infos
 
-      - name: Install dependencies (driver app)
-        run: cd apps/driver && flutter pub get
+      - name: Run Unit & Widget Tests
+        working-directory: apps/${{ matrix.app }}
+        run: flutter test
 
-      - name: Run widget tests (driver app)
-        run: cd apps/driver && flutter test
-
-      - name: Analyze (no errors)
-        run: flutter analyze apps/ packages/
+      - name: Build Debug APK
+        working-directory: apps/${{ matrix.app }}
+        run: flutter build apk --debug

@@ -70,7 +70,11 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
       .eq('notif_type', 'document')
       .gte('created_at', cutoff);
 
-    if (error || !data || data.length === 0) return false;
+    if (error) {
+      throw new Error(`Database lookup failed: ${error.message}`, { cause: error });
+    }
+
+    if (!data || data.length === 0) return false;
 
     return data.some(
       (n) => n.metadata?.documentId === documentId &&
@@ -136,128 +140,3 @@ export async function processDocumentExpiryBatch() {
             .select('id, driver_id, document_type, valid_until')
             .not('valid_until', 'is', null)
             .gte('valid_until', windowStart.toISOString())
-            .lte('valid_until', windowEnd.toISOString())
-            .order('valid_until', { ascending: true })
-            .order('id', { ascending: true })
-            .range(offset, offset + DOCS_PAGE_SIZE - 1);
-
-          if (error) {
-            throw new Error(error.message);
-          }
-
-          page = data || [];
-          documents.push(...page);
-          offset += page.length;
-        } while (page.length === DOCS_PAGE_SIZE);
-      } catch (err) {
-        logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, err.message);
-        continue;
-      }
-
-      if (documents.length === 0) {
-        logger.info(`[document-expiry] No documents expiring in ${window.label} window.`);
-        continue;
-      }
-
-      logger.info(`[document-expiry] Found ${documents.length} document(s) expiring in ${window.label} window.`);
-
-      for (const doc of documents) {
-        if (!doc.driver_id || !doc.id) {
-          logger.warn('[document-expiry] Skipping document with missing driver_id or id:', doc.id);
-          continue;
-        }
-
-        const alreadyNotified = await hasExistingNotification(doc.driver_id, doc.id, window.days);
-        if (alreadyNotified) {
-          logger.info(`[document-expiry] Document ${doc.id} already notified for ${window.label} window, skipping.`);
-          continue;
-        }
-
-        const docLabel = getDocTypeLabel(doc.document_type);
-        const expiryDate = new Date(doc.valid_until).toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        });
-
-        const title = 'Document Expiry Alert';
-        const body = `Your ${docLabel} expires in ${window.label}. Please renew before ${expiryDate} to avoid compliance issues.`;
-
-        const metadata = {
-          type: 'document_expiry',
-          documentId: doc.id,
-          documentType: doc.document_type,
-          daysRemaining: window.days,
-          expiryDate: doc.valid_until,
-        };
-
-        try {
-          await sendPushNotification(doc.driver_id, title, body, 'document', metadata);
-          totalNotificationsSent++;
-          logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.driver_id}`);
-        } catch (err) {
-          logger.error(`[document-expiry] Failed to send notification for document ${doc.id}:`, err.message);
-        }
-      }
-    }
-  } finally {
-    if (leaseExtender) {
-      clearInterval(leaseExtender);
-    }
-
-    if (lockAcquired && redisClient) {
-
-try {
-  const released = await redisClient.eval(
-    RELEASE_LOCK_SCRIPT,
-    1,
-    LOCK_KEY,
-    lockToken
-  );
-
-  if (!released) {
-    logger.warn(
-      { lockKey: LOCK_KEY, lockToken },
-      'Document expiry lock release returned 0 - lock may have been released by another process'
-    );
-  }
-} catch (err) {
-  logger.error(
-    { err, lockKey: LOCK_KEY, lockToken },
-    'Failed to release document expiry worker lock'
-  );
-}    }
-
-    if (!lockAcquired) {
-      workerRunning = false;
-    }
-  }
-  logger.info(
-    `[document-expiry] Batch complete. Total notifications sent: ${totalNotificationsSent}`
-  );
-}
-
-export function startDocumentExpiryWorker() {
-  if (workerTimer) return;
-
-  const configuredInterval = Number(process.env.DOCUMENT_EXPIRY_WORKER_INTERVAL_MS);
-  const intervalMs = Number.isFinite(configuredInterval) && configuredInterval > 0
-    ? configuredInterval
-    : DEFAULT_INTERVAL_MS;
-
-  void processDocumentExpiryBatch();
-
-  workerTimer = setInterval(() => {
-    void processDocumentExpiryBatch();
-  }, intervalMs);
-  workerTimer.unref?.();
-
-  logger.info(`[document-expiry] Worker started (interval: ${intervalMs}ms).`);
-}
-
-export function stopDocumentExpiryWorker() {
-  if (!workerTimer) return;
-  clearInterval(workerTimer);
-  workerTimer = null;
-  logger.info('[document-expiry] Worker stopped.');
-}

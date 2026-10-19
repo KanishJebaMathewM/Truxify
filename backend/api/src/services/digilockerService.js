@@ -141,8 +141,6 @@ class DigilockerService {
     }
     logger.info(`[DigilockerService] Verifying documents for user ${userId} with token ${accessToken}`);
 
-
-
     const dlData = {
       doc_type: 'driving_licence',
       licence_no: 'DL-12345678901',
@@ -333,11 +331,6 @@ class DigilockerService {
         continue;
       }
 
-      // driver_documents has no document_hash/is_verified/verification_source
-      // columns and no unique constraint on (driver_id, document_type), so
-      // upsert with onConflict is not possible. Use select-then-insert/update
-      // and map to the real schema (storage_path, mime_type, status,
-      // is_govt_verified, blockchain_tx_hash).
       const docPayload = {
         driver_id: driverId,
         document_type: doc.type,
@@ -412,7 +405,6 @@ class DigilockerService {
       isMock,
       is_digilocker_verified: syncResults.length > 0,
     };
-
   }
 }
 

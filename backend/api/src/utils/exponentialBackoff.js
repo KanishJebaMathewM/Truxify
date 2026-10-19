@@ -1,3 +1,5 @@
+import logger from '../middleware/logger.js';
+
 class ExponentialBackoff {
   constructor(options = {}) {
     this.maxRetries = options.maxRetries || 5;
@@ -16,7 +18,10 @@ class ExponentialBackoff {
         return await fn();
       } catch (error) {
         lastError = error;
-        console.warn(`Attempt ${attempt}/${this.maxRetries} failed: ${error.message}`);
+        logger.warn(
+          { err: error.message, attempt, maxRetries: this.maxRetries },
+          `Attempt ${attempt}/${this.maxRetries} failed: ${error.message}`
+        );
 
         if (attempt === this.maxRetries) {
           break;
@@ -28,14 +33,17 @@ class ExponentialBackoff {
           currentDelay += randomJitter;
         }
 
-        console.log(`Retrying in ${Math.round(currentDelay)}ms...`);
+        logger.info(
+          { nextDelayMs: Math.round(currentDelay), attempt },
+          `Retrying in ${Math.round(currentDelay)}ms...`
+        );
         await this.sleep(currentDelay);
         
         delay = Math.min(delay * this.factor, this.maxDelay);
       }
     }
 
-    throw new Error(`Operation failed after ${this.maxRetries} attempts. Last error: ${lastError.message}`);
+    throw new Error(`Operation failed after ${this.maxRetries} attempts. Last error: ${lastError.message}`, { cause: lastError });
   }
 
   sleep(ms) {

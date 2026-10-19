@@ -208,8 +208,6 @@ class OrderService {
     }
   }
 
-
-
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
     try {
       final body = await _apiClient.get(
@@ -265,8 +263,10 @@ class OrderService {
       if (body is! List) {
         throw StateError('Unexpected truck search response type');
       }
-      final listBody = body;
-      return listBody.cast<Map<String, dynamic>>();
+      return body
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

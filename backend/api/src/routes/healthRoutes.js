@@ -298,8 +298,8 @@ const aggregator = createDefaultAggregator();
  *     responses:
  *       200:
  *         description: All critical services healthy
- *       503:
- *         description: One or more critical services degraded
+ *         503:
+ *           description: One or more critical services degraded
  */
 router.get('/full', healthLimiter, async (req, res) => {
   try {

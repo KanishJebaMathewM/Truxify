@@ -503,6 +503,123 @@ export function createSupabaseMock(initialStore = {}) {
           };
         }
       }
+      if (fnName === 'update_order_status_tx' && args?.p_order_id) {
+        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
+        if (idx === undefined || idx === -1 || !store.orders) {
+          return Promise.resolve({ data: [], error: null });
+        }
+        const current = store.orders[idx];
+        // Mirrors the PL/pgSQL guards in update_order_status_tx
+        // (supabase/migrations/20260812000000_order_outbox.sql): the function
+        // returns ZERO ROWS when a guard rejects the transition, which callers
+        // translate into 409 conflicts.
+        if (args.p_not_statuses && args.p_not_statuses.includes(current.status)) {
+          return Promise.resolve({ data: [], error: null });
+        }
+        if (args.p_escrow_in_statuses &&
+            (current.escrow_status == null || !args.p_escrow_in_statuses.includes(current.escrow_status))) {
+          return Promise.resolve({ data: [], error: null });
+        }
+        store.orders[idx] = {
+          ...current,
+          status: args.p_status,
+          updated_at: new Date().toISOString(),
+          version: (current.version ?? 0) + 1,
+          // coalesce(param, column) semantics for the optional fields
+          ...(args.p_cancellation_reason != null && { cancellation_reason: args.p_cancellation_reason }),
+          ...(args.p_cancellation_fee != null && { cancellation_fee: args.p_cancellation_fee }),
+          ...(args.p_escrow_status != null && { escrow_status: args.p_escrow_status }),
+          ...(args.p_escrow_refund_attempts != null && { escrow_refund_attempts: args.p_escrow_refund_attempts }),
+          ...(args.p_refund_tx_hash != null && { refund_tx_hash: args.p_refund_tx_hash }),
+          ...(args.p_escrow_refund_last_attempt_at != null && { escrow_refund_last_attempt_at: args.p_escrow_refund_last_attempt_at }),
+          ...(args.p_escrow_refunded_at != null && { escrow_refunded_at: args.p_escrow_refunded_at }),
+          ...(args.p_escrow_refund_submitted_at != null && { escrow_refund_submitted_at: args.p_escrow_refund_submitted_at }),
+          escrow_refund_error: args.p_clear_escrow_refund_error
+            ? null
+            : (args.p_escrow_refund_error ?? current.escrow_refund_error ?? null),
+        };
+        return Promise.resolve({ data: [store.orders[idx]], error: null });
+      }
+      // Simulate create_order_tx: the real PL/pgSQL function inserts the order
+      // (plus its default timeline and load offer) in ONE transaction and
+      // returns the order row as JSON (migrations/20260723000003_create_order_tx.sql).
+      if (fnName === 'create_order_tx' && args?.p_order_display_id) {
+        store.orders = store.orders || [];
+        const order = {
+          id: `mock-order-${store.orders.length + 1}`,
+          order_display_id: args.p_order_display_id,
+          customer_id: args.p_customer_id,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          pickup_address: args.p_pickup_address,
+          pickup_lat: args.p_pickup_lat,
+          pickup_lng: args.p_pickup_lng,
+          drop_address: args.p_drop_address,
+          drop_lat: args.p_drop_lat,
+          drop_lng: args.p_drop_lng,
+          pickup_date: args.p_pickup_date,
+          pickup_time: args.p_pickup_time,
+          goods_type: args.p_goods_type,
+          weight_tonnes: args.p_weight_tonnes,
+          is_stackable: args.p_is_stackable,
+          is_fragile: args.p_is_fragile,
+          special_requirements: args.p_special_requirements,
+          base_freight: args.p_base_freight,
+          toll_estimate: args.p_toll_estimate,
+          platform_fee: args.p_platform_fee,
+          total_amount: args.p_total_amount,
+          estimated_price: args.p_estimated_price,
+        };
+        store.orders.push(order);
+        // The real RPC also inserts the default 8-milestone timeline and the
+        // marketplace load_offers row in the same transaction
+        // (20260723000003_create_order_tx.sql).
+        store.order_timeline = store.order_timeline || [];
+        const now = new Date().toISOString();
+        const DEFAULTS = [
+          ['Order Placed', true, 10], ['Truck Assigned', false, 20],
+          ['En Route to Pickup', false, 30], ['Arrived at Pickup', false, 35],
+          ['Goods Loaded', false, 40], ['In Transit', false, 50],
+          ['Arriving', false, 55], ['Delivered', false, 60],
+        ];
+        for (const [milestone, completed, sort_order] of DEFAULTS) {
+          store.order_timeline.push({
+            order_display_id: args.p_order_display_id,
+            milestone,
+            milestone_time: completed ? now : null,
+            completed,
+            sort_order,
+          });
+        }
+        store.load_offers = store.load_offers || [];
+        store.load_offers.push({
+          order_display_id: args.p_order_display_id,
+          customer_id: args.p_customer_id,
+          customer_name: args.p_customer_name,
+          pickup_address: args.p_pickup_address,
+          drop_address: args.p_drop_address,
+          goods_type: args.p_goods_type,
+          freight_value: args.p_total_amount,
+          status: 'available',
+        });
+        return Promise.resolve({ data: order, error: null });
+      }
+      // Simulate update_order_and_load_offer: applies the change-drop update
+      // sets to the order and its load offer atomically and returns the
+      // updated order row (migrations/20260802000000_secure_update_order_and_load_offer.sql).
+      if (fnName === 'update_order_and_load_offer' && args?.p_order_id) {
+        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
+        if (idx === undefined || idx === -1) {
+          return Promise.resolve({ data: null, error: { message: 'Order not found' } });
+        }
+        store.orders[idx] = { ...store.orders[idx], ...(args.p_order_updates || {}) };
+        const offerIdx = store.load_offers?.findIndex(o => o.order_display_id === args.p_order_display_id);
+        if (offerIdx !== undefined && offerIdx !== -1) {
+          store.load_offers[offerIdx] = { ...store.load_offers[offerIdx], ...(args.p_offer_updates || {}) };
+        }
+        return Promise.resolve({ data: store.orders[idx], error: null });
+      }
       return Promise.resolve({ data: null, error: null });
     },
     storage: {

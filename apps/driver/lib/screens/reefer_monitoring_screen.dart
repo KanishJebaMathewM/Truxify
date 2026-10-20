@@ -39,7 +39,7 @@ class _ReeferMonitoringScreenState extends State<ReeferMonitoringScreen> {
   void _triggerPredictionAlert(ReeferZone zone) {
     showDialog(
       context: context,
-      barrierColor: Colors.orange.withOpacity(0.8),
+      barrierColor: Colors.orange.withValues(alpha: 0.8),
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.white,
@@ -90,8 +90,9 @@ class _ReeferMonitoringScreenState extends State<ReeferMonitoringScreen> {
     final isCritical = zone.anomalyProbability > 0.90;
 
     Color headerColor = Colors.blue[800]!;
-    if (isCritical) headerColor = Colors.red[800]!;
-    else if (isWarning) headerColor = Colors.orange[800]!;
+    if (isCritical) {
+      headerColor = Colors.red[800]!;
+    } else if (isWarning) headerColor = Colors.orange[800]!;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),

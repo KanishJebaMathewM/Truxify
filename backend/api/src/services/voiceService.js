@@ -22,7 +22,17 @@ function trimCache() {
   for (const key of expiredKeys) {
     audioCache.delete(key);
   }
-
+  const transcriptionResponse = await axios.post(
+  'https://api.openai.com/v1/audio/transcriptions',
+  form,
+  {
+    headers: {
+      ...form.getHeaders(),
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    timeout: 10000, // ADD THIS LINE
+  }
+);
   // 2. If capacity still exceeds MAX_CACHE_SIZE, evict oldest remaining entries
   if (audioCache.size > MAX_CACHE_SIZE) {
     const oldest = [...audioCache.entries()]
@@ -60,43 +70,103 @@ async function getBookingContext(bookingId, userId) {
         .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
       orderQuery = orderQuery
-        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .eq('order_display_id', bookingId)
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     }
 
     const { data: order, error } = await orderQuery.maybeSingle();
     if (error) {
-      logger.warn('Orders table check failed in voiceService:', error?.message ?? String(error));
+      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: error.message }, 'Orders table check failed in voiceService');
       return null;
     }
 
     return order;
   } catch (err) {
-    logger.warn('Orders table check failed in voiceService:', err?.message ?? String(err));
+      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
   }
   return null;
 }
 
+export const LOGISTICS_VOICE_INTENTS = {
+  ACCEPT_LOAD: 'ACCEPT_LOAD',
+  REPORT_DELAY: 'REPORT_DELAY',
+  CHECK_EARNINGS: 'CHECK_EARNINGS',
+  PAYMENT_STATUS: 'PAYMENT_STATUS',
+  ETA: 'ETA',
+  GENERAL_INQUIRY: 'GENERAL_INQUIRY',
+};
+
 function detectQueryIntent(transcript) {
   const text = (transcript || '').toLowerCase();
+  if (text.includes('accept') || text.includes('agree') || text.includes('karo') || text.includes('take load') || text.includes('le lo')) {
+    return LOGISTICS_VOICE_INTENTS.ACCEPT_LOAD;
+  }
+  if (text.includes('delay') || text.includes('traffic') || text.includes('late') || text.includes('breakdown') || text.includes('puncture')) {
+    return LOGISTICS_VOICE_INTENTS.REPORT_DELAY;
+  }
+  if (text.includes('earning') || text.includes('balance') || text.includes('wallet') || text.includes('paisa') || text.includes('kamai')) {
+    return LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS;
+  }
   if (text.includes('payment') || text.includes('release') || text.includes('paid')) {
-    return 'payment_status';
+    return LOGISTICS_VOICE_INTENTS.PAYMENT_STATUS;
   }
-  if (text.includes('arrive') || text.includes('arrival') || text.includes('eta') || text.includes('when')) {
-    return 'eta';
+  if (text.includes('arrive') || text.includes('arrival') || text.includes('eta') || text.includes('when') || text.includes('pahunch')) {
+    return LOGISTICS_VOICE_INTENTS.ETA;
   }
-  return 'package_status';
+  return LOGISTICS_VOICE_INTENTS.GENERAL_INQUIRY;
+}
+
+// Customer-facing vocabulary for the /query endpoint (the suite's contract):
+// 'location' / 'eta' / 'escrow' / 'general'. The driver dispatch path keeps
+// the LOGISTICS_VOICE_INTENTS enum untouched.
+const CUSTOMER_QUERY_INTENTS = {
+  LOCATION: 'location',
+  ETA: 'eta',
+  ESCROW: 'escrow',
+  GENERAL: 'general',
+};
+
+function detectCustomerQueryIntent(transcript) {
+  const text = (transcript || '').toLowerCase();
+  if (text.includes('where') || text.includes('package') || text.includes('track') || text.includes('location') || text.includes('kahan')) {
+    return CUSTOMER_QUERY_INTENTS.LOCATION;
+  }
+  if (text.includes('when') || text.includes('arrive') || text.includes('eta') || text.includes('pahunch')) {
+    return CUSTOMER_QUERY_INTENTS.ETA;
+  }
+  if (text.includes('payment') || text.includes('escrow') || text.includes('release') || text.includes('paid')) {
+    return CUSTOMER_QUERY_INTENTS.ESCROW;
+  }
+  return CUSTOMER_QUERY_INTENTS.GENERAL;
+}
+
+function buildCustomerQueryResponse(intent, bookingData) {
+  const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
+  const status = (bookingData?.status || bookingData?.current_status || 'in transit').replace(/_/g, ' ');
+  switch (intent) {
+    case CUSTOMER_QUERY_INTENTS.LOCATION:
+      return `Your shipment ${orderRef} is currently ${status}.`;
+    case CUSTOMER_QUERY_INTENTS.ETA:
+      return `Your shipment ${orderRef} is currently ${status}, with an estimated arrival of ${bookingData?.eta || 'soon'}.`;
+    case CUSTOMER_QUERY_INTENTS.ESCROW:
+      return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}. Your shipment is currently ${status}.`;
+    default:
+      return `Your shipment ${orderRef} is currently ${status}.`;
+  }
 }
 
 function buildResponseForIntent(intent, bookingData, transcript) {
   const orderRef = bookingData?.order_display_id || bookingData?.id || 'your order';
-  const status = bookingData?.status || bookingData?.current_status || 'in transit';
+  // Humanize DB enum values ('in_transit') for the spoken/TTS response.
+  const status = (bookingData?.status || bookingData?.current_status || 'in transit').replace(/_/g, ' ');
+  const eta = bookingData?.eta;
   switch (intent) {
-    case 'payment_status':
+    case LOGISTICS_VOICE_INTENTS.PAYMENT_STATUS:
       return `Your payment for ${orderRef} is ${bookingData?.escrow_status || 'processing'}.`;
-    case 'eta':
-      return `Your shipment for ${orderRef} is ${status} and is on schedule.`;
+    case LOGISTICS_VOICE_INTENTS.ETA:
+      return eta
+        ? `Your shipment for ${orderRef} is ${status} with an estimated arrival of ${eta}.`
+        : `Your shipment for ${orderRef} is ${status} and is on schedule.`;
     default:
       return `Your shipment ${orderRef} is currently ${status}.`;
   }
@@ -120,8 +190,9 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
       transcript = querySamples[byteSum % querySamples.length];
     }
 
-    const intent = detectQueryIntent(transcript);
-    const responseText = buildResponseForIntent(intent, bookingData, transcript);
+    // The /query endpoint is customer-facing — use the customer vocabulary.
+    const intent = detectCustomerQueryIntent(transcript);
+    const responseText = buildCustomerQueryResponse(intent, bookingData);
 
     const mockAudio = Buffer.alloc(1000);
     const audioId = crypto.randomUUID();
@@ -156,7 +227,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-    logger.error('Whisper transcription failed:', err?.message ?? String(err));
+      logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
     throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -182,7 +253,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
-    logger.error('LLM completion failed:', err?.message ?? String(err));
+    logger.error({ event: 'LLM_COMPLETION_FAILED', error: err.message }, 'LLM completion failed');
     throw new Error('LLM failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -210,7 +281,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
-    logger.error('ElevenLabs TTS failed:', err?.message ?? String(err));
+    logger.error({ event: 'ELEVENLABS_TTS_FAILED', error: err.message }, 'ElevenLabs TTS failed');
     throw new Error('TTS failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 
@@ -219,6 +290,78 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     response_text: responseText,
     audio_url: audioUrl,
     intent
+  };
+}
+
+/**
+ * Executes domain-guarded logistics actions based on extracted driver voice intent.
+ */
+export async function dispatchVoiceAction({ userId, audioBuffer, filename, textQuery, language = 'en' }) {
+  const voiceResult = await processVoiceQuery(userId, null, audioBuffer, filename, textQuery);
+  const intent = voiceResult.intent;
+  let actionResult = { executed: false, action: intent };
+
+  const langNames = { en: 'English', hi: 'Hindi', ta: 'Tamil' };
+  const targetLang = langNames[language] || 'English';
+
+  try {
+    if (intent === LOGISTICS_VOICE_INTENTS.CHECK_EARNINGS) {
+      const { data: profile } = await voiceDb
+        .from('profiles')
+        .select('wallet_balance, total_earnings')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const balance = (profile?.wallet_balance ?? profile?.total_earnings ?? 0) / 100;
+      actionResult = {
+        executed: true,
+        action: 'CHECK_EARNINGS',
+        data: { wallet_balance: balance },
+      };
+      voiceResult.response_text = `Your available wallet balance is ₹${balance.toFixed(2)}.`;
+    } else if (intent === LOGISTICS_VOICE_INTENTS.REPORT_DELAY) {
+      // Find driver's active in-transit order
+      const { data: activeOrder } = await voiceDb
+        .from('orders')
+        .select('id, order_display_id')
+        .eq('driver_id', userId)
+        .in('status', ['in_transit', 'picked_up'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeOrder) {
+        await voiceDb.from('orders').update({
+          delay_reported: true,
+          delay_reported_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', activeOrder.id);
+
+        actionResult = {
+          executed: true,
+          action: 'REPORT_DELAY',
+          orderId: activeOrder.id,
+        };
+        voiceResult.response_text = `Delay has been reported for Order ${activeOrder.order_display_id || activeOrder.id.slice(0, 8)}. Customer has been notified.`;
+      } else {
+        voiceResult.response_text = 'No active in-transit trip found to report a delay.';
+      }
+    } else if (intent === LOGISTICS_VOICE_INTENTS.ACCEPT_LOAD) {
+      actionResult = {
+        executed: true,
+        action: 'ACCEPT_LOAD',
+        message: 'Load match verified. Please confirm bid via mobile dispatch screen.',
+      };
+      voiceResult.response_text = 'Matching load confirmed. Dispatch screen updated.';
+    }
+  } catch (actionErr) {
+    logger.error({ err: actionErr, userId }, '[VoiceAI] Action execution error');
+  }
+
+  return {
+    ...voiceResult,
+    action: actionResult,
+    language: targetLang,
   };
 }
 

@@ -39,4 +39,38 @@ void main() {
 
     service.dispose();
   });
+
+  test('fetchTripStops uses the mounted driver stops endpoint', () async {
+    final client = RecordingApiClient([
+      {'id': 'stop-1', 'status': 'pending'},
+    ]);
+    final service = TripService(
+      apiClient: client,
+      apiBaseUrl: 'https://example.test',
+    );
+
+    final stops = await service.fetchTripStops('TRIP/123');
+
+    expect(client.lastGetPath, '/api/driver/trips/TRIP%2F123/stops');
+    expect(stops, hasLength(1));
+
+    service.dispose();
+  });
+
+  test('fetchRouteMapPoints uses the mounted driver route-points endpoint', () async {
+    final client = RecordingApiClient([
+      {'latitude': 12.34, 'longitude': 56.78},
+    ]);
+    final service = TripService(
+      apiClient: client,
+      apiBaseUrl: 'https://example.test',
+    );
+
+    final points = await service.fetchRouteMapPoints('TRIP/123');
+
+    expect(client.lastGetPath, '/api/driver/trips/TRIP%2F123/route-points');
+    expect(points, hasLength(1));
+
+    service.dispose();
+  });
 }

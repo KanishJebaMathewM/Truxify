@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import '../l10n/app_localizations.dart';
 
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
@@ -77,31 +80,74 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _authenticateWithBiometrics() async {
     try {
-      final bool authenticated = await _localAuth.authenticate(
-        localizedReason: 'Authenticate to access your freight account',
-        options: const AuthenticationOptions(stickyAuth: true, biometricOnly: true),
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate to log in',
+        biometricOnly: true,
+        persistAcrossBackgrounding: true,
       );
 
-      if (authenticated) {
-        if (!mounted) return;
+      if (!authenticated || !mounted) return;
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('is_authenticated', true);
-        if (!mounted) return;
-        _navigateToShell();
+      // Restore the existing Firebase authentication session.
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No saved login session found. Please log in using OTP.',
+            ),
+          ),
+        );
+        return;
       }
-    } catch (_) {
-      // Gracefully fall back to standard OTP form if biometrics are cancelled/fail
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context)!.biometricAuthSuccessful,
+          ),
+        ),
+      );
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const TruxifyShellScreen(),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Biometric login failed. Please log in using OTP.',
+          ),
+        ),
+      );
     }
   }
-
   void _sendOtp() {
     FocusScope.of(context).unfocus();
-    final String? cleanedPhone = _validateAndGetCleanedPhone(_phoneController);
-    if (cleanedPhone == null) {
+    final phone = _phoneController.text.replaceAll(' ', '').trim();
+
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter phone number')),
+      );
       return;
     }
-    handleOtpRequest(_phoneController);
+
+    if (phone.length != 10 || int.tryParse(phone) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid 10-digit phone number')),
+      );
+      return;
+    }
+
     setState(() => _showOtp = true);
   }
 
@@ -283,9 +329,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value.isNotEmpty && index < 3) {
                       _otpFocusNodes[index + 1].requestFocus();
                     }
-                    if (value.isEmpty && index > 0) {
-                      _otpFocusNodes[index - 1].requestFocus();
-                    }
                   },
                 ),
               ),
@@ -301,42 +344,5 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ],
     );
-  }
-
-  // Validates phone number, manages SnackBar alerts, and extracts clean 10-digit format
-  String? _validateAndGetCleanedPhone(TextEditingController controller) {
-    String raw = controller.text.trim();
-    String cleaned = raw.replaceAll(RegExp(r'\\D'), '');
-
-    if (cleaned.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a phone number'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return null;
-    }
-
-    if (cleaned.length != 10 || !RegExp(r'^[0-9]{10}$').hasMatch(cleaned)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a valid 10-digit phone number'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return null;
-    }
-
-    return cleaned;
-  }
-
-  // Primary OTP request trigger bound to UI action
-  void handleOtpRequest(TextEditingController controller) {
-    final String? cleanedPhone = _validateAndGetCleanedPhone(controller);
-    if (cleanedPhone == null) {
-      return;
-    }
-    debugPrint('[LoginScreen] Phone validation passed.');
   }
 }

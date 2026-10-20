@@ -7,11 +7,6 @@ import logger from '../middleware/logger.js';
 
 import crypto from 'crypto';
 import { logger } from '../utils/logger.js';
-
-/**
- * MOCK IMPLEMENTATION: Pending integration with real compliance provider (Drivewyze / PrePass).
- * Evaluates whether a driver is eligible to bypass a weigh station based on location coordinates.
- */
 export async function checkBypassEligibility({ lat, lng, vehicleId }) {
   try {
     if (lat === undefined || lng === undefined) {

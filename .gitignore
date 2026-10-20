@@ -74,6 +74,18 @@ dart_defines/*.env
 !dart_defines/*.env.example
 
 .git_corrupted/
+# ==========================================
+# Flutter / Dart Generated Files & Artifacts
+# ==========================================
+.metadata
+.dart_tool/
+build/
+*.g.dart
+*.freezed.dart
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-plugins-dependencies
 
 # Local VC status-list allocation state
 **/.truxify-vc-status-index.json

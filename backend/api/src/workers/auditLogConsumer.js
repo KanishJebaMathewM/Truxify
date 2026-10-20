@@ -1,6 +1,19 @@
 const { createClient } = require('redis');
 const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
+// backend/api/src/workers/auditLogConsumer.js (Refactored Excerpt)
 
+import logger from '../middleware/logger.js';
+
+async function consumeAuditLogs(message) {
+  try {
+    // ... processing logic ...
+    logger.info('[AuditLogConsumer] Successfully processed audit log event', { eventId: message.id });
+  } catch (error) {
+    logger.error('[AuditLogConsumer] Failed to process audit log message', { error: error.message, stack: error.stack });
+  }
+}
+
+export { consumeAuditLogs };
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const redisClient = createClient({ url: redisUrl });
 

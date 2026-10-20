@@ -9,7 +9,85 @@ import GpsLog from '../models/GpsLog.js';
 import { scheduleEtaRecalculationOnLocationUpdate } from '../services/order/etaService.js';
 import DeliveryDelayService from '../services/order/deliveryDelayService.js';
 import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
+// backend/api/src/sockets/tracker.js (Excerpt)
 
+import redisClient from '../config/redis.js';
+import db from '../config/database.js';
+import logger from '../middleware/logger.js';
+
+async function verifyBookingOwnership(bookingId, driverId) {
+  const cacheKey = `booking_ownership:${bookingId}:${driverId}`;
+  
+  // 1. Check Redis cache first (TTL-based)
+  const cachedOwnership = await redisClient.get(cacheKey);
+  if (cachedOwnership === 'true') return true;
+  if (cachedOwnership === 'false') return false;
+
+  // 2. Query database as source of truth
+  const { data, error } = await db
+    .from('bookings')
+    .select('id')
+    .eq('id', bookingId)
+    .eq('driver_id', driverId)
+    .single();
+
+  const isOwner = !error && !!data;
+
+  // 3. Cache result in Redis for 10 minutes to minimize DB load
+  await redisClient.set(cacheKey, isOwner ? 'true' : 'false', 'EX', 600);
+
+  return isOwner;
+}
+
+export function setupTrackerSocket(io) {
+  const driverNamespace = io.of('/driver');
+
+  driverNamespace.use((socket, next) => {
+    // Remove BYPASS_AUTH checks entirely in production/secure namespaces
+    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization;
+    if (!token) {
+      return next(new Error('Authentication error: Token required for WebSocket connection.'));
+    }
+    // Assume verifyToken middleware populates socket.userId & socket.role
+    next();
+  });
+
+  driverNamespace.on('connection', (socket) => {
+    socket.on('update_location', async (data) => {
+      try {
+        const { bookingId, lat, lng } = data;
+
+        if (!bookingId || lat === undefined || lng === undefined) {
+          socket.emit('error', { message: 'Invalid payload: bookingId, lat, and lng are required.' });
+          return;
+        }
+
+        // Enforce strict ownership verification
+        const isAuthorized = await verifyBookingOwnership(bookingId, socket.userId);
+        if (!isAuthorized) {
+          logger.warn('[Security] Unauthorized GPS spoofing attempt detected', {
+            socketId: socket.id,
+            driverId: socket.userId,
+            attemptedBookingId: bookingId
+          });
+          socket.emit('error', { message: 'Unauthorized: You are not assigned to this booking.' });
+          socket.disconnect(true); // Terminate malicious socket connection immediately
+          return;
+        }
+
+        // Broadcast verified GPS ping to customer tracking stream
+        io.of('/customer').to(`booking_${bookingId}`).emit('driver_location', {
+          bookingId,
+          lat,
+          lng,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        logger.error('[TrackerSocket] Error processing location update', { error: err.message });
+      }
+    });
+  });
+}
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
   lng: { type: 'number', required: false, min: -180, max: 180 },

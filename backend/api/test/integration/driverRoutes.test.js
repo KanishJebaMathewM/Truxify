@@ -7,12 +7,27 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
+  // The driver routes build a caller-scoped client per request.
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
 }));
 
 const getDriverReputationMock = vi.fn().mockResolvedValue(92);
+vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
+  // Mirror the real gate: configured only when a provider env var is set,
+  // so the fail-closed case keeps working.
+  isPayoutProviderConfigured: () => Boolean(process.env.WITHDRAWAL_PAYOUT_PROVIDER || process.env.WITHDRAWAL_PAYOUT_WEBHOOK_URL),
+  dispatchPayout: vi.fn().mockResolvedValue({ payoutId: 'payout-1', status: 'submitted' }),
+  getPayoutRecord: vi.fn().mockResolvedValue(null),
+  getPayoutStatus: vi.fn().mockResolvedValue(null),
+  getPayoutById: vi.fn().mockResolvedValue(null),
+  isValidSettlementRef: vi.fn().mockReturnValue(true),
+  recoverSettlementRef: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('../../src/services/reputation.js', () => ({
   reputationContract: {},
   awardReputationPoints: vi.fn(),
@@ -366,6 +381,7 @@ describe('Driver Routes', () => {
   });
 
   it('POST /wallet/withdraw rejects insufficient balance', async () => {
+    process.env.WITHDRAWAL_PAYOUT_PROVIDER = 'test';
     m.store.driver_details.push({
       user_id: 'driver-1',
       wallet_confirmed: 1000,
@@ -380,6 +396,7 @@ describe('Driver Routes', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Insufficient');
+    delete process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   });
 
   it('POST /wallet/withdraw succeeds and calls RPC', async () => {
@@ -485,6 +502,7 @@ describe('Driver Routes', () => {
   });
 
   it('POST /wallet/withdraw returns 404 when driver profile not found', async () => {
+    process.env.WITHDRAWAL_PAYOUT_PROVIDER = 'test';
     const app = buildApp();
 
     const res = await request(app)
@@ -493,9 +511,11 @@ describe('Driver Routes', () => {
       .send({ amount: 1000 });
 
     expect(res.status).toBe(404);
+    delete process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   });
 
   it('POST /wallet/withdraw returns 400 when RPC fails', async () => {
+    process.env.WITHDRAWAL_PAYOUT_PROVIDER = 'test';
     m.store.driver_details.push({
       user_id: 'driver-1',
       wallet_confirmed: 10000,
@@ -517,6 +537,7 @@ describe('Driver Routes', () => {
     m.supabase.rpc = originalRpc;
 
     expect(res.status).toBe(400);
+    delete process.env.WITHDRAWAL_PAYOUT_PROVIDER;
   });
 
   describe('GET /:driverId/reputation', () => {
@@ -724,7 +745,7 @@ describe('Driver Routes', () => {
         total_base_freight: 20000,
         total_platform_fees: 1000,
         total_toll_estimate: 2000,
-        total_net_earnings: 19000
+        total_net_earnings: 23000 // getStatementPayout: legacy base + toll + fee when no bid/total
       });
       expect(res.body.trips).toHaveLength(1);
       expect(res.body.trips[0].id).toBe('order-2');
@@ -767,7 +788,7 @@ describe('Driver Routes', () => {
         total_base_freight: 20000,
         total_platform_fees: 1000,
         total_toll_estimate: 2000,
-        total_net_earnings: 19000
+        total_net_earnings: 23000 // getStatementPayout: legacy base + toll + fee when no bid/total
       });
       expect(res.body.trips).toHaveLength(1);
       expect(res.body.trips[0].id).toBe('order-2');

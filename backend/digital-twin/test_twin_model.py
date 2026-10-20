@@ -1,88 +1,177 @@
-import unittest
-from datetime import datetime, timedelta
+"""Suite for twin_model.py — the 1,046-line core had only simulator-level tests."""
+import math
+from datetime import datetime
 
-from twin_model import DigitalTwin, LogisticsEvent, SimulationEngine
+import pytest
+
+from twin_model import (
+    DigitalTwin,
+    LogisticsAsset,
+    LogisticsEvent,
+    _clamp,
+    _distance_km,
+    _validate_location,
+)
 
 
-class TestSimulationMetrics(unittest.TestCase):
-    def setUp(self):
-        self.engine = SimulationEngine(DigitalTwin())
-        self.base = datetime(2026, 1, 1, 12, 0, 0)
+def make_asset(asset_id="TRUCK-1", **kw):
+    params = dict(
+        id=asset_id,
+        type="truck",
+        location={"lat": 28.6139, "lng": 77.2090},  # Delhi
+        status="active",
+    )
+    params.update(kw)
+    return LogisticsAsset(**params)
 
-    def _event(self, event_type, timestamp, asset_id="TRUCK_1"):
-        return LogisticsEvent(
-            id=f"{event_type}_{int(timestamp.timestamp())}",
-            type=event_type,
-            timestamp=timestamp,
-            asset_id=asset_id,
-            location={"lat": 25.0, "lng": 75.0},
+
+class TestValidateLocation:
+    def test_normalizes_to_float(self):
+        assert _validate_location({"lat": "28.5", "lng": 77}) == {"lat": 28.5, "lng": 77.0}
+
+    @pytest.mark.parametrize("bad", [
+        None, "28,77", {}, {"lat": 28.5}, {"lng": 77},
+        {"lat": "abc", "lng": 77}, {"lat": float("nan"), "lng": 77},
+        {"lat": 91, "lng": 77}, {"lat": -91, "lng": 77},
+        {"lat": 28, "lng": 181}, {"lat": 28, "lng": -181},
+    ])
+    def test_rejects_invalid(self, bad):
+        with pytest.raises(ValueError):
+            _validate_location(bad)
+
+    def test_boundary_values_accepted(self):
+        assert _validate_location({"lat": 90, "lng": 180}) == {"lat": 90.0, "lng": 180.0}
+        assert _validate_location({"lat": -90, "lng": -180}) == {"lat": -90.0, "lng": -180.0}
+
+
+class TestClamp:
+    def test_inside_below_above(self):
+        assert _clamp(5, 0, 10) == 5
+        assert _clamp(-3, 0, 10) == 0
+        assert _clamp(99, 0, 10) == 10
+
+
+class TestDistanceKm:
+    def test_zero_distance(self):
+        p = {"lat": 28.6139, "lng": 77.2090}
+        assert _distance_km(p, p) == pytest.approx(0.0, abs=1e-9)
+
+    def test_known_route(self):
+        delhi = {"lat": 28.6139, "lng": 77.2090}
+        mumbai = {"lat": 19.0760, "lng": 72.8777}
+        # ~1150 km great-circle — allow 2% tolerance for the approximation
+        d = _distance_km(delhi, mumbai)
+        assert 1100 < d < 1200
+
+    def test_symmetric(self):
+        a = {"lat": 12.9716, "lng": 77.5946}
+        b = {"lat": 13.0827, "lng": 80.2707}
+        assert _distance_km(a, b) == pytest.approx(_distance_km(b, a), rel=1e-9)
+
+    def test_antimeridian_crossing(self):
+        a = {"lat": 0, "lng": 179.9}
+        b = {"lat": 0, "lng": -179.9}
+        d = _distance_km(a, b)
+        assert d < 50, "should cross the antimeridian, not go the long way"
+
+    def test_invalid_points_raise(self):
+        with pytest.raises(ValueError):
+            _distance_km({"lat": 95, "lng": 0}, {"lat": 0, "lng": 0})
+
+
+class TestLogisticsAsset:
+    def test_rejects_empty_id_and_type(self):
+        with pytest.raises(ValueError):
+            make_asset(id="")
+        with pytest.raises(ValueError):
+            make_asset(type="")
+
+    def test_validates_location_at_construction(self):
+        with pytest.raises(ValueError):
+            make_asset(location={"lat": 999, "lng": 0})
+
+    def test_to_dict_round_shape(self):
+        d = make_asset().to_dict()
+        assert d["id"] == "TRUCK-1"
+        assert d["location"] == {"lat": 28.6139, "lng": 77.2090}
+        datetime.fromisoformat(d["created_at"])  # must not raise
+
+
+class TestDigitalTwinCRUD:
+    def test_add_get_update_remove(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        assert twin.get_asset_state("TRUCK-1")["status"] == "active"
+
+        assert twin.update_asset("TRUCK-1", {"status": "maintenance"}) is True
+        assert twin.get_asset_state("TRUCK-1")["status"] == "maintenance"
+
+        assert twin.remove_asset("TRUCK-1") is True
+        assert twin.get_asset_state("TRUCK-1") is None
+        assert twin.remove_asset("TRUCK-1") is False
+
+    def test_duplicate_add_rejected(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        with pytest.raises(ValueError, match="already exists"):
+            twin.add_asset(make_asset())
+
+    def test_update_missing_asset_returns_false(self):
+        assert DigitalTwin().update_asset("GHOST", {"status": "x"}) is False
+
+    def test_update_rejects_unknown_fields(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        with pytest.raises(ValueError, match="Unsupported asset field"):
+            twin.update_asset("TRUCK-1", {"created_at": datetime.now()})
+
+    def test_update_validates_location(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        with pytest.raises(ValueError):
+            twin.update_asset("TRUCK-1", {"location": {"lat": 200, "lng": 0}})
+
+    def test_update_bumps_updated_at(self):
+        twin = DigitalTwin()
+        asset = twin.add_asset(make_asset())
+        before = asset.updated_at
+        twin.update_asset("TRUCK-1", {"status": "idle"})
+        assert twin.assets["TRUCK-1"].updated_at >= before
+
+    def test_get_all_assets(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset("A"))
+        twin.add_asset(make_asset("B"))
+        assert {a["id"] for a in twin.get_all_assets()} == {"A", "B"}
+
+
+class TestEvents:
+    def test_add_and_filter_events(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        ev = LogisticsEvent(
+            id="EV-1", type="location_update", timestamp=datetime.now(),
+            asset_id="TRUCK-1", location={"lat": 28.6, "lng": 77.2},
         )
+        twin.add_event(ev)
+        events = twin.get_events(asset_id="TRUCK-1")
+        assert len(events) == 1
+        assert events[0]["type"] == "location_update"
 
-    def test_utilization_is_zero_to_one_fraction(self):
-        # One asset busy for the full 60s window -> utilization 1.0
-        events = [
-            self._event("pickup", self.base),
-            self._event("dropoff", self.base + timedelta(seconds=60)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertAlmostEqual(metrics["utilization"], 1.0, places=4)
+    def test_event_rejects_unknown_asset(self):
+        twin = DigitalTwin()
+        ev = LogisticsEvent(
+            id="EV-9", type="x", timestamp=datetime.now(),
+            asset_id="GHOST", location={"lat": 0, "lng": 0},
+        )
+        with pytest.raises(ValueError, match="does not exist"):
+            twin.add_event(ev)
 
-    def test_utilization_scales_down_with_idle_time(self):
-        # Two assets, each busy 10s within a 110s window -> utilization ~0.09
-        events = [
-            self._event("pickup", self.base, "TRUCK_1"),
-            self._event("dropoff", self.base + timedelta(seconds=10), "TRUCK_1"),
-            self._event("pickup", self.base + timedelta(seconds=100), "TRUCK_2"),
-            self._event("dropoff", self.base + timedelta(seconds=110), "TRUCK_2"),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertGreaterEqual(metrics["utilization"], 0.0)
-        self.assertLessEqual(metrics["utilization"], 1.0)
-        self.assertAlmostEqual(metrics["utilization"], 20.0 / 220.0, places=4)
-
-    def test_utilization_bounds_for_short_window(self):
-        # Single instantaneous event has no measurable window -> 0.0
-        metrics = self.engine._calculate_metrics([self._event("pickup", self.base)], {})
-        self.assertEqual(metrics["utilization"], 0.0)
-
-    def test_utilization_zero_for_no_events(self):
-        metrics = self.engine._calculate_metrics([], {})
-        self.assertEqual(metrics["utilization"], 0.0)
-        self.assertEqual(metrics["efficiency"], 0.0)
-
-    def test_efficiency_reflects_delays(self):
-        # 3 events, 1 delay -> efficiency 2/3
-        events = [
-            self._event("pickup", self.base),
-            self._event("delay", self.base + timedelta(seconds=10)),
-            self._event("dropoff", self.base + timedelta(seconds=20)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertAlmostEqual(metrics["efficiency"], 2.0 / 3.0, places=4)
-
-    def test_efficiency_is_perfect_without_delays(self):
-        events = [
-            self._event("pickup", self.base),
-            self._event("dropoff", self.base + timedelta(seconds=10)),
-        ]
-        metrics = self.engine._calculate_metrics(events, {})
-        self.assertEqual(metrics["efficiency"], 1.0)
-
-    def test_recommendations_fire_on_low_utilization(self):
-        metrics = {"utilization": 0.1, "efficiency": 0.9, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertIn("Increase asset utilization by optimizing routes", recs)
-
-    def test_recommendations_fire_on_low_efficiency(self):
-        metrics = {"utilization": 0.9, "efficiency": 0.4, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertIn("Improve operational efficiency by reducing delays", recs)
-
-    def test_recommendations_smooth_when_metrics_healthy(self):
-        metrics = {"utilization": 0.9, "efficiency": 0.9, "event_types": {}}
-        recs = self.engine._generate_recommendations(metrics)
-        self.assertEqual(recs, ["Current operations are running smoothly"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_event_limit_zero_returns_empty(self):
+        twin = DigitalTwin()
+        twin.add_asset(make_asset())
+        twin.add_event(LogisticsEvent(
+            id="EV-1", type="ping", timestamp=datetime.now(),
+            asset_id="TRUCK-1", location={"lat": 28.6, "lng": 77.2},
+        ))
+        assert twin.get_events(limit=0) == []

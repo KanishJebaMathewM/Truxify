@@ -24,20 +24,28 @@ vi.mock('../../src/config/db.js', () => ({
   redisClient,
   supabaseAdmin: {
     from: vi.fn((table) => {
+      const filters = [];
+      let didUpdate = false;
       const query = {
-        select: vi.fn(function () { return this; }),
-        eq: vi.fn(function () { return this; }),
+        select: vi.fn(function () {
+          if (didUpdate) {
+            return Promise.resolve({ data: [{}], error: null });
+          }
+          return this;
+        }),
+        eq: vi.fn(function (col, val) { filters.push([col, val]); return this; }),
         neq: vi.fn(function () { return this; }),
         in: vi.fn(function () { return this; }),
         update: vi.fn(function (payload) {
           dbState.updates.push({ table, payload });
+          didUpdate = true;
           return this;
         }),
         maybeSingle: vi.fn(() => {
           if (table === 'wallet_transactions') return Promise.resolve(dbState.walletResult);
           if (table === 'orders') {
             dbState.orderLookupCalls += 1;
-            if (dbState.replayResult?.data && dbState.orderLookupCalls >= 2) {
+            if (filters.some(([col]) => col === 'release_tx_hash' || col === 'refund_tx_hash')) {
               return Promise.resolve(dbState.replayResult);
             }
             return Promise.resolve(dbState.orderResult);
@@ -105,14 +113,26 @@ async function loadWebhookRoutes() {
 
 function makeSignedRequest(app, payload, secret = 'test-secret-12345') {
   const rawBody = JSON.stringify(payload);
-  const signature = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const timestamp = String(Date.now());
+  const nonce = `nonce-${Math.random().toString(16).slice(2)}`;
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(`${timestamp}.${nonce}.${rawBody}`)
+    .digest('hex');
   return request(app)
     .post('/api/webhooks/escrow')
     .set('x-webhook-signature', signature)
-    .set('x-escrow-timestamp', String(Date.now()))
-    .set('x-escrow-nonce', `nonce-${Math.random().toString(16).slice(2)}`)
+    .set('x-escrow-timestamp', timestamp)
+    .set('x-escrow-nonce', nonce)
     .set('Content-Type', 'application/json')
     .send(payload);
+}
+
+function signTriple(secret, timestamp, nonce, rawBody) {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`${timestamp}.${nonce}.${rawBody}`)
+    .digest('hex');
 }
 
 function resetDbState() {
@@ -190,12 +210,13 @@ describe('webhookRoutes request validation & comprehensive security suite', () =
   it('rejects stale escrow timestamps outside the accepted tolerance window', async () => {
     const payload = { eventType: 'PaymentReleased', orderId: '#OD1', txHash: TX };
     const raw = JSON.stringify(payload);
-    const signature = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET).update(raw).digest('hex');
+    const timestamp = String(Date.now() - 10 * 60 * 1000);
+    const signature = signTriple(process.env.WEBHOOK_SECRET, timestamp, 'nonce-3', raw);
 
     const res = await request(app)
       .post('/api/webhooks/escrow')
       .set('x-webhook-signature', signature)
-      .set('x-escrow-timestamp', String(Date.now() - 10 * 60 * 1000))
+      .set('x-escrow-timestamp', timestamp)
       .set('x-escrow-nonce', 'nonce-3')
       .set('Content-Type', 'application/json')
       .send(payload);
@@ -207,14 +228,15 @@ describe('webhookRoutes request validation & comprehensive security suite', () =
   it('rejects a replayed nonce even when the signature is valid', async () => {
     const payload = { eventType: 'PaymentReleased', orderId: '#OD1', txHash: TX };
     const raw = JSON.stringify(payload);
-    const signature = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET).update(raw).digest('hex');
+    const timestamp = String(Date.now());
+    const signature = signTriple(process.env.WEBHOOK_SECRET, timestamp, 'nonce-4', raw);
     redisClient.set.mockResolvedValueOnce('OK');
     redisClient.set.mockResolvedValueOnce('NX');
 
     await request(app)
       .post('/api/webhooks/escrow')
       .set('x-webhook-signature', signature)
-      .set('x-escrow-timestamp', String(Date.now()))
+      .set('x-escrow-timestamp', timestamp)
       .set('x-escrow-nonce', 'nonce-4')
       .set('Content-Type', 'application/json')
       .send(payload);
@@ -222,7 +244,7 @@ describe('webhookRoutes request validation & comprehensive security suite', () =
     const second = await request(app)
       .post('/api/webhooks/escrow')
       .set('x-webhook-signature', signature)
-      .set('x-escrow-timestamp', String(Date.now()))
+      .set('x-escrow-timestamp', timestamp)
       .set('x-escrow-nonce', 'nonce-4')
       .set('Content-Type', 'application/json')
       .send(payload);
@@ -232,6 +254,7 @@ describe('webhookRoutes request validation & comprehensive security suite', () =
   });
 
   it('accepts a valid request and forwards it to the escrow processor', async () => {
+    dbState.orderResult = { data: makeOrder(), error: null };
     const payload = { eventType: 'PaymentReleased', orderId: '#OD1', txHash: TX };
     const res = await makeSignedRequest(app, payload);
 
@@ -246,13 +269,14 @@ describe('webhookRoutes request validation & comprehensive security suite', () =
     app2.use('/api/webhooks', webhookRoutes);
 
     const raw = JSON.stringify(payload);
-    const signature = crypto.createHmac('sha256', process.env.WEBHOOK_SECRET).update(raw).digest('hex');
+    const timestamp = String(Date.now());
+    const signature = signTriple(process.env.WEBHOOK_SECRET, timestamp, 'nonce-5', raw);
     dlqService.enqueueFailure.mockResolvedValueOnce(true);
 
     const res = await request(app2)
       .post('/api/webhooks/escrow')
       .set('x-webhook-signature', signature)
-      .set('x-escrow-timestamp', String(Date.now()))
+      .set('x-escrow-timestamp', timestamp)
       .set('x-escrow-nonce', 'nonce-5')
       .set('Content-Type', 'application/json')
       .send(payload);
@@ -281,7 +305,7 @@ describe('processEscrowWebhookEvent advanced scenarios', () => {
   });
 
   it('fails fast when the payload is missing an orderId', async () => {
-    await expect(processEscrowWebhookEvent('PaymentReleased', {})).rejects.toThrow('Missing orderId in escrow webhook payload');
+    await expect(processEscrowWebhookEvent('PaymentReleased', { txHash: TX })).rejects.toThrow('Missing orderId in escrow webhook payload');
   });
 
   it('requires a valid 32-byte transaction hash before verification', async () => {

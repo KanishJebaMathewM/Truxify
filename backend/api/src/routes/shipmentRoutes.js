@@ -20,16 +20,28 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { getShipmentDetails } from '../controllers/shipmentController.js';
 import { globalLimiter } from '../middleware/rateLimiter.js';
+import { validateQuery } from '../middleware/validate.js';
 
 const router = express.Router();
+
+const shipmentDetailsQuerySchema = z.object({
+  shipmentId: z.string().trim().min(1).max(100).optional(),
+}).strict();
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v1/shipment/details
 // Authenticated — fetches shipment details, ensuring user is authorized.
 // ──────────────────────────────────────────────────────────────────────────
-router.get('/details', authenticate, globalLimiter, getShipmentDetails);
+router.get(
+  '/details',
+  authenticate,
+  globalLimiter,
+  validateQuery(shipmentDetailsQuerySchema),
+  getShipmentDetails,
+);
 
 export default router;

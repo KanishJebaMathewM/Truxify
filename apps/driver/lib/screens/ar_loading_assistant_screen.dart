@@ -148,7 +148,7 @@ class _ArLoadingAssistantScreenState extends State<ArLoadingAssistantScreen> {
                   width: 4,
                   style: BorderStyle.solid, // Dash usually requires custom painter, solid is fine for mock
                 ),
-                color: (_focusedPallet!.colorCode == 'BLUE' ? Colors.blueAccent : Colors.orangeAccent).withOpacity(0.2),
+                color: (_focusedPallet!.colorCode == 'BLUE' ? Colors.blueAccent : Colors.orangeAccent).withValues(alpha: 0.2),
               ),
               child: const Center(
                 child: Text('PLACE HERE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24)),

@@ -4,14 +4,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 describe('wimBypass service', () => {
-  let evaluateBypassEligibility, createSignedWimPacket;
+  let evaluateBypassEligibility, createSignedWimPacket, buildCredential;
 
   beforeEach(async () => {
     vi.resetModules();
     const mod = await import('../../src/services/wimBypass.js');
     evaluateBypassEligibility = mod.evaluateBypassEligibility;
     createSignedWimPacket = mod.createSignedWimPacket;
+    buildCredential = mod.buildCredential;
   });
+
+  // createSignedWimPacket signs a credential from buildCredential(), which
+  // carries the server-derived measurement and the issue time.
+  const credentialFor = (measurement = {}) =>
+    buildCredential({
+      measurement: {
+        id: 'measurement-1',
+        truckId: 'truck-123',
+        orderDisplayId: 'BOL-456',
+        driverId: 'driver-1',
+        safetyScore: 90,
+        weightLbs: 15000,
+        capacityLbs: 20000,
+        ...measurement,
+      },
+      eligibility: true,
+    });
 
   describe('evaluateBypassEligibility', () => {
     it('returns true for eligible truck with sufficient safety score and valid axle weight', () => {
@@ -92,13 +110,7 @@ describe('wimBypass service', () => {
     });
 
     it('packet includes all original payload fields', () => {
-      const payload = {
-        truckId: 'truck-123',
-        safetyScore: 90,
-        bolId: 'BOL-456',
-        axleWeight: 15000,
-      };
-      const result = createSignedWimPacket(payload);
+      const result = createSignedWimPacket(credentialFor());
       expect(result.packet.truckId).toBe('truck-123');
       expect(result.packet.safetyScore).toBe(90);
       expect(result.packet.bolId).toBe('BOL-456');
@@ -107,7 +119,7 @@ describe('wimBypass service', () => {
 
     it('packet includes a timestamp', () => {
       const before = Date.now();
-      const result = createSignedWimPacket({ truckId: 'truck-123' });
+      const result = createSignedWimPacket(credentialFor());
       const after = Date.now();
       expect(result.packet.timestamp).toBeGreaterThanOrEqual(before);
       expect(result.packet.timestamp).toBeLessThanOrEqual(after);

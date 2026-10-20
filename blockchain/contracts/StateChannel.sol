@@ -88,8 +88,14 @@ contract StateChannel is ReentrancyGuard {
         channel.sequence = sequence;
         channel.balanceA = balanceA;
         channel.balanceB = balanceB;
-        channel.isDisputed = true;
-        channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        // Start the challenge only once. A later newer state may update the
+        // balances but must NOT reset the already-running expiry, so
+        // finalizeExit is always reachable within one CHALLENGE_PERIOD of the
+        // first valid challenge (issue #10792 / #11255).
+        if (!channel.isDisputed) {
+            channel.isDisputed = true;
+            channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        }
 
         emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
     }

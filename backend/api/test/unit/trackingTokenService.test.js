@@ -72,7 +72,7 @@ function createMockSupabase(store = {}) {
                 }
                 const deleted = initialLen - remaining.length
                 store[this._table] = remaining
-                return resolve({ data: Array(deleted).fill({ id: 'deleted' }), error: null })
+                return resolve({ data: Array.from({ length: deleted }, () => ({ id: 'deleted' })), error: null })
               }
 
               // select

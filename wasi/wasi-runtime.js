@@ -1,9 +1,24 @@
-import { WASI } from '@wasmer/wasi';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
+
+// @wasmer/wasi is a dependency of this wasi/ package only. The API image
+// (Dockerfile.api) installs backend/api/package.json, so a static import made
+// the whole API fail to start. Load it on first use instead; a missing package
+// then fails just the WASM request that needs it.
+let wasiClassPromise = null;
+function loadWasiClass() {
+    wasiClassPromise ??= import('@wasmer/wasi').then(
+        (mod) => mod.WASI,
+        (err) => {
+            wasiClassPromise = null; // allow a retry once the package is installed
+            throw err;
+        },
+    );
+    return wasiClassPromise;
+}
 
 class WASIRuntime {
     constructor() {
@@ -75,6 +90,7 @@ class WASIRuntime {
             // Create WASI instance with capabilities. Never expose
             // process.env to untrusted WASM, and do not preopen the working
             // directory — the sandbox gets no host filesystem access by default.
+            const WASI = await loadWasiClass();
             const wasi = new WASI({
                 args: [],
                 env: {},
@@ -366,5 +382,30 @@ class WASIRuntime {
         logger.info('✅ WASI instances cleaned up');
     }
 }
+function parseWasiJsonOutput(stdout) {
+    const lines = String(stdout)
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
 
+    // Start from the end so runtime/logging noise before the
+    // actual JSON payload is ignored.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+            return JSON.parse(lines[i]);
+        } catch {
+            // Ignore non-JSON runtime/logging lines.
+        }
+    }
+
+    throw new Error(
+        `WASI execution returned no valid JSON. Raw stdout: ${stdout}`
+    );
+}
+
+// Replace:
+// const result = JSON.parse(stdout);
+//
+// With:
+const result = parseWasiJsonOutput(stdout);
 export default new WASIRuntime();

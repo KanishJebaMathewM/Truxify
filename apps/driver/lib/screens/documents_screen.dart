@@ -5,7 +5,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/core/driver_session.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:truxify_shared/truxify_shared.dart';
@@ -342,7 +341,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               final apiClient = ApiClient();
                               final tokenRes = await apiClient.post(
                                 '/api/verify/digilocker/token',
-                                {'code': 'mock_auth_code_from_oauth'},
+                                body: {'code': 'mock_auth_code_from_oauth'},
                               );
                               final accessToken =
                                   tokenRes['data']?['access_token'];
@@ -352,7 +351,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 );
                               }
                               final verifyRes = await apiClient
-                                  .post('/api/verify/digilocker/verify', {
+                                  .post('/api/verify/digilocker/verify', body: {
                                     'accessToken': accessToken,
                                     'userId': Supabase
                                         .instance
@@ -362,8 +361,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                         ?.id,
                                   });
                               if (verifyRes['success'] == true) {
-                                if (dialogContext.mounted)
+                                if (dialogContext.mounted) {
                                   Navigator.pop(dialogContext);
+                                }
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -384,8 +384,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 throw Exception('Verification failed');
                               }
                             } catch (e) {
-                              if (dialogContext.mounted)
+                              if (dialogContext.mounted) {
                                 Navigator.pop(dialogContext);
+                              }
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(

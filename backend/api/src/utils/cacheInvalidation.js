@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { upstashRedisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
@@ -23,7 +24,8 @@ export async function getTruckSearchVersion() {
  */
 export async function invalidateBookingCaches() {
   try {
-    const nextVersion = Date.now().toString();
+    // Each invalidation needs a fresh namespace, even within one clock tick.
+    const nextVersion = randomUUID();
     await upstashRedisClient.set('version:truck_search', nextVersion);
     logger.info({ nextVersion }, '[Cache] Booking-related caches invalidated successfully.');
   } catch (err) {

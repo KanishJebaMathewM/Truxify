@@ -4,9 +4,11 @@ import sys
 
 import networkx as nx
 import pytest
+import qiskit
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from quantum_circuit import QUBOFormatter  # noqa: E402
+import quantum_circuit  # noqa: E402
+from quantum_circuit import QUBOFormatter, QuantumCircuitDesigner  # noqa: E402
 
 from qiskit_algorithms.minimum_eigensolvers import NumPyMinimumEigensolver  # noqa: E402
 
@@ -20,7 +22,9 @@ CONFLICT_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
 def _selected_edges(formatter, result):
     """Map a solver result back to the set of selected graph edges."""
     selected = set()
-    for var_name, value in zip(formatter.variables, result.x):
+    # solve_qubo returns a dict ({'variables', 'solution', ...}) — the
+    # formatter.variables / result.x access predates that contract.
+    for var_name, value in zip(result['variables'], result['solution']):
         if value is not None and abs(value - 1) < 1e-6:
             _, u, v = var_name.split('_')
             selected.add((u, v))
@@ -79,10 +83,14 @@ def test_module_parses_and_has_single_solve_qubo():
     module = ast.parse(source)
 
     # Exactly one solve_qubo definition (no duplicate-merge signatures).
+    # It is a QUBOFormatter method — scan class bodies, not just the module
+    # top level.
     solve_defs = [
         n
-        for n in module.body
-        if isinstance(n, ast.FunctionDef) and n.name == "solve_qubo"
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef)
+        for n in node.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "solve_qubo"
     ]
     assert len(solve_defs) == 1, (
         f"expected exactly one solve_qubo definition, found {len(solve_defs)}"
@@ -119,3 +127,38 @@ def test_route_optimization_triangle():
     assert len(selected) >= 1
     degrees = _node_degrees(selected, list(graph.nodes()))
     assert all(d == 2 for d in degrees.values())
+
+
+def test_qaoa_circuit_binds_parameters_and_measures_all_qubits():
+    circuit = QuantumCircuitDesigner().create_qaoa_circuit()
+
+    assert not circuit.parameters
+    assert circuit.num_clbits == circuit.num_qubits
+    assert circuit.count_ops().get('measure') == circuit.num_qubits
+
+
+def test_run_circuit_returns_a_clear_error_when_counts_are_empty(monkeypatch):
+    class EmptyResult:
+        def get_counts(self):
+            return {}
+
+    class EmptyJob:
+        def result(self):
+            return EmptyResult()
+
+    class EmptyCountsSimulator:
+        def run(self, circuit, shots):
+            return EmptyJob()
+
+    monkeypatch.setattr(quantum_circuit, 'AerSimulator', EmptyCountsSimulator)
+    monkeypatch.setattr(qiskit, 'transpile', lambda circuit, simulator: circuit)
+
+    result = QuantumCircuitDesigner().run_circuit(object())
+
+    assert result == {
+        'success': False,
+        'counts': {},
+        'shots': 1024,
+        'most_frequent': None,
+        'error': 'Circuit produced no measurement counts',
+    }

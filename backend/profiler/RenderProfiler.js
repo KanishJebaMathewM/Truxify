@@ -351,6 +351,10 @@ class RenderProfiler extends EventEmitter {
         this.samplingInterval = setInterval(() => {
             this.captureMemorySample();
         }, 5000);
+        // unref: sampling is observability housekeeping — it must never pin a
+        // host process open (createProfile() calls this, so merely profiling a
+        // widget would hang any CLI/script/test that imports the profiler).
+        this.samplingInterval.unref?.();
         
         logger.debug('Memory monitoring started');
     }

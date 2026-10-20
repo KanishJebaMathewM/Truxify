@@ -1,9 +1,7 @@
 /**
  * Vitest configuration for the backend API.
  *
- * Picks up:
- *   - test/unit/**\/*.test.js
- *   - test/integration/**\/*.test.js
+ * Picks up all test suites below the test directory.
  *
  * The integration tests use `vi.mock('../../src/config/db.js', ...)` to
  * swap supabase out for the in-memory mock — no live DB required.
@@ -44,6 +42,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     testTimeout: 15000,
+    passWithNoTests: true,
     include: ['test/**/*.test.js'],
     setupFiles: ['test/setup.js'],
     coverage: {

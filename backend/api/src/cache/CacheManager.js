@@ -16,13 +16,18 @@ import logger from '../middleware/logger.js';
 let redisClient = null;
 let initialized = false;
 
+const inFlight = new Map();
+
 const stats = {
   hits: 0,
   misses: 0,
   sets: 0,
   deletes: 0,
   errors: 0,
+  coalesced: 0,
 };
+
+const inFlightSingleflightGroup = new Map();
 
 export function init(client) {
   if (initialized) return;
@@ -51,7 +56,6 @@ export async function get(namespace, entityId, subKey) {
     return null;
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] GET error');
     return null;
   }
@@ -73,10 +77,38 @@ export async function set(namespace, entityId, value, opts = {}) {
     return true;
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, key }, '[CacheManager] SET error');
     return false;
   }
+}
+
+export async function getOrSetSingleflight(namespace, entityId, fetcher, opts = {}) {
+  const key = CacheKeyBuilder.build(namespace, entityId, opts.subKey);
+
+  const cached = await get(namespace, entityId, opts.subKey);
+  if (cached !== null) {
+    return cached;
+  }
+
+  if (inFlight.has(key)) {
+    stats.coalesced++;
+    return inFlight.get(key);
+  }
+
+  const promise = Promise.resolve()
+    .then(fetcher)
+    .then(async (data) => {
+      if (data !== undefined && data !== null) {
+        await set(namespace, entityId, data, opts);
+      }
+      return data;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+
+  inFlight.set(key, promise);
+  return promise;
 }
 
 export async function invalidate(namespace, entityId, opts = {}) {
@@ -104,7 +136,6 @@ export async function invalidateBatch(namespace, entityIds, opts = {}) {
     }
   } catch (err) {
     stats.errors++;
-    // Structured logging: pass err as a named field for log aggregation
     logger.error({ err, namespace }, '[CacheManager] Batch invalidation error');
   }
 }
@@ -155,6 +186,7 @@ export function resetStats() {
   stats.sets = 0;
   stats.deletes = 0;
   stats.errors = 0;
+  stats.coalesced = 0;
 }
 
 export function isInitialized() {
@@ -172,6 +204,7 @@ export default {
   init,
   get,
   set,
+  getOrSetSingleflight,
   invalidate,
   invalidateBatch,
   invalidateAll,

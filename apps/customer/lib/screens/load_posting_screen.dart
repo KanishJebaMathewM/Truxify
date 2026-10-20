@@ -173,7 +173,7 @@ class _LoadPostingScreenState extends State<LoadPostingScreen> {
                     prefixIcon: Icon(Icons.local_shipping),
                     border: OutlineInputBorder(),
                   ),
-                  value: _selectedTruckType,
+                  initialValue: _selectedTruckType,
                   items: _truckTypes.map((type) {
                     return DropdownMenuItem(
                       value: type,

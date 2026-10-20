@@ -36,7 +36,6 @@ BEGIN
       p_vehicle_type IS NULL
       OR p_vehicle_type = ''
       OR vehicle_type ILIKE p_vehicle_type
-      OR p_vehicle_type ILIKE 'truck'
     );
 
   -- Count nearby active loads (within 50 km)
@@ -48,7 +47,6 @@ BEGIN
       p_vehicle_type IS NULL
       OR p_vehicle_type = ''
       OR vehicle_type ILIKE p_vehicle_type
-      OR p_vehicle_type ILIKE 'truck'
     )
     AND (extra_distance_km IS NULL OR extra_distance_km <= 50);
 

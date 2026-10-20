@@ -4,6 +4,7 @@ import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import 'app_page_route.dart';
 import 'common_widgets.dart';
+import 'net_profit_breakdown_card.dart';
 import '../screens/booking_confirmation_screen.dart';
 
 class TruckCard extends StatelessWidget {
@@ -137,6 +138,10 @@ class TruckCard extends StatelessWidget {
               ),
             ],
           ),
+          if (truck.profitBreakdown != null) ...[
+            const SizedBox(height: 14),
+            NetProfitBreakdownCard(breakdown: truck.profitBreakdown!),
+          ],
         ],
       ),
     );

@@ -3,9 +3,12 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract IdentityWallet is Ownable {
     using ECDSA for bytes32;
+    // OpenZeppelin v5: toEthSignedMessageHash moved out of ECDSA.
+    using MessageHashUtils for bytes32;
 
     mapping(address => bool) public trustedIssuers;
     event TrustedIssuerUpdated(address indexed issuer, bool status);

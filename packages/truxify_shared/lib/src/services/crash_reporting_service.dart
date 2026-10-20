@@ -179,7 +179,7 @@ class CrashReportingService {
         'mechanism': 'FlutterError.onError',
         'library': details.library ?? '',
         'context': details.context?.toString() ?? '',
-        if (details.summary != null) 'summary': details.summary.toString(),
+        'summary': details.summary.toString(),
       }),
     );
   }
@@ -201,7 +201,7 @@ class CrashReportingService {
       scope.setUser(SentryUser(
         id: id,
         email: email,
-        extras: {
+        data: {
           if (role != null) 'role': role,
         },
       ));

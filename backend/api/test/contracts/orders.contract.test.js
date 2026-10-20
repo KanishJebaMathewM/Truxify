@@ -3,6 +3,7 @@ import request from 'supertest';
 import express from 'express';
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+const { RedisMock } = await vi.importActual('../mocks/redisMock.js');
 const m = createSupabaseMock();
 
 const routeEstimateMock = vi.fn().mockResolvedValue(null);
@@ -10,6 +11,7 @@ const awardReputationPointsMock = vi.fn().mockResolvedValue(undefined);
 const escrowReleaseMock = vi.fn();
 const submitEscrowRefundMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
+const recordDepositTxMock = vi.fn();
 const predictDemandMock = vi.fn();
 let mockRedis = null;
 
@@ -19,6 +21,9 @@ vi.mock('../../src/config/db.js', () => ({
   firebaseAdmin: null,
   get redisClient() { return mockRedis; },
   mongoDb: null,
+  // Production createUserClient builds a per-request user-scoped client; in
+  // the harness the shared in-memory mock plays that role.
+  createUserClient: () => m.supabase,
 }));
 
 vi.mock('../../src/sockets/tracker.js', () => ({
@@ -41,6 +46,7 @@ vi.mock('../../src/services/escrow.js', async () => {
     escrowRelease: escrowReleaseMock,
     submitEscrowRefund: submitEscrowRefundMock,
     confirmEscrowRefund: confirmEscrowRefundMock,
+    recordDepositTx: recordDepositTxMock,
   };
 });
 
@@ -56,10 +62,17 @@ import {
   expectOrderShape, expectPricingShape,
 } from './helpers/responseMatchers.js';
 
+import { errorHandler } from '../../src/middleware/errorHandler.js';
+
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use('/api/orders', orderRouter);
+  // Production mounts a JSON 404 + the shared errorHandler — without them
+  // express answers with its HTML defaults and the JSON contract assertions
+  // fail on content-type alone.
+  app.use((req, res) => res.status(404).json({ success: false, error: 'Not found' }));
+  app.use(errorHandler);
   return app;
 }
 
@@ -82,7 +95,7 @@ const validOrder = {
   drop_address: '456 Drop Ave, Delhi',
   drop_lat: 28.7041,
   drop_lng: 77.1025,
-  pickup_date: '2026-10-10',
+  pickup_date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), // tomorrow — past dates are rejected (#18567)
   pickup_time: '09:00',
   goods_type: 'electronics',
   weight_tonnes: 10,
@@ -133,7 +146,10 @@ describe('POST /api/orders — create order contract', () => {
     const res = await request(buildApp())
       .post('/api/orders')
       .set(CUSTOMER)
-      .send({ ...validOrder, base_freight: 1, total_amount: 1 });
+      // createOrderSchema marks every server-computed monetary field as
+      // z.never() (requestSchemas.js) — the schema rejects whichever subset is
+      // supplied, so the probe must send all four to see all four flagged.
+      .send({ ...validOrder, base_freight: 1, toll_estimate: 1, platform_fee: 1, total_amount: 1 });
 
     expectValidationError(res);
     const fields = res.body.details.map(d => d.field);
@@ -163,7 +179,9 @@ describe('POST /api/orders — create order contract', () => {
       .send(validOrder);
 
     expectServerError(res);
-    expect(res.body).toHaveProperty('details');
+    // errorHandler emits the structured shape { error: { code, message,
+    // details } } — details live under error.details, not at the body root.
+    expect(res.body.error).toHaveProperty('details');
   });
 });
 
@@ -180,7 +198,11 @@ describe('GET /api/orders/:id — order details contract', () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-DETAILS',
+      // findOrderByAnyId resolves non-UUID path ids by order_display_id, so
+      // the seed's display id must equal the URL id.
+      order_display_id: 'order-1',
+      status: 'pending',
+      created_at: '2026-06-01T00:00:00Z',
     });
 
     const res = await request(buildApp())
@@ -202,7 +224,10 @@ describe('GET /api/orders/:id — order details contract', () => {
       id: 'order-2',
       customer_id: CUSTOMER['x-user-id'],
       driver_id: 'driver-1',
-      order_display_id: 'OD-DRIVER',
+      // Looked up by order_display_id (non-UUID path id) — see above.
+      order_display_id: 'order-2',
+      status: 'active',
+      created_at: '2026-06-01T00:00:00Z',
     });
     m.store.profiles.push({
       id: 'driver-1',
@@ -241,7 +266,10 @@ describe('GET /api/orders/:id — order details contract', () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'someone-else',
-      order_display_id: 'OD-OTHER',
+      // Looked up by order_display_id (non-UUID path id) — see above.
+      order_display_id: 'order-1',
+      status: 'pending',
+      created_at: '2026-06-01T00:00:00Z',
     });
 
     const res = await request(buildApp())
@@ -326,7 +354,8 @@ describe('POST /api/orders/:id/cancel — cancel order contract', () => {
     m.store.orders.push({
       id: 'order-cancel-1',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-CANCEL',
+      // Non-UUID path ids resolve via order_display_id (findOrderByAnyId).
+      order_display_id: 'order-cancel-1',
       status: 'pending',
       cancellation_fee: 500,
     });
@@ -359,7 +388,7 @@ describe('POST /api/orders/:id/cancel — cancel order contract', () => {
     m.store.orders.push({
       id: 'order-cancel-2',
       customer_id: 'someone-else',
-      order_display_id: 'OD-OTHER',
+      order_display_id: 'order-cancel-2',
       status: 'pending',
     });
 
@@ -376,7 +405,7 @@ describe('POST /api/orders/:id/cancel — cancel order contract', () => {
     m.store.orders.push({
       id: 'order-cancel-3',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-DELIVERED',
+      order_display_id: 'order-cancel-3',
       status: 'delivered',
     });
 
@@ -395,7 +424,7 @@ describe('POST /api/orders/:id/cancel — cancel order contract', () => {
     m.store.orders.push({
       id: 'order-cancel-4',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-REFUND-FAIL',
+      order_display_id: 'order-cancel-4',
       status: 'assigned',
       escrow_status: 'funded',
       cancellation_fee: 500,
@@ -427,7 +456,8 @@ describe('PUT /api/orders/:id/change-drop — change drop contract', () => {
     m.store.orders.push({
       id: 'order-change-1',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-CHANGE',
+      // Non-UUID path ids resolve via order_display_id (findOrderByAnyId).
+      order_display_id: 'order-change-1',
       pickup_lat: 19.0760,
       pickup_lng: 72.8777,
       drop_lat: 28.7041,
@@ -455,7 +485,7 @@ describe('PUT /api/orders/:id/change-drop — change drop contract', () => {
     m.store.orders.push({
       id: 'order-change-2',
       customer_id: 'someone-else',
-      order_display_id: 'OD-OTHER',
+      order_display_id: 'order-change-2',
       pickup_lat: 19.0760,
       pickup_lng: 72.8777,
       drop_lat: 28.7041,
@@ -478,7 +508,7 @@ describe('PUT /api/orders/:id/change-drop — change drop contract', () => {
     m.store.orders.push({
       id: 'order-change-3',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-FUNDED',
+      order_display_id: 'order-change-3',
       pickup_lat: 19.0760,
       pickup_lng: 72.8777,
       drop_lat: 28.7041,
@@ -496,8 +526,11 @@ describe('PUT /api/orders/:id/change-drop — change drop contract', () => {
       .send({ drop_address: 'New Drop', drop_lat: 22.22, drop_lng: 88.88 });
 
     expectErrorContract(res, 409);
-    expect(res.body).toHaveProperty('recovery');
-    expect(typeof res.body.recovery).toBe('string');
+    // changeDrop goes through the controller → errorHandler, which nests the
+    // DomainError payload under error.details — recovery is not a body-root
+    // field on this route (it is on routes that catch DomainError inline).
+    expect(res.body.error.details).toHaveProperty('recovery');
+    expect(typeof res.body.error.details.recovery).toBe('string');
   });
 
   it('404: not found for non-existent order', async () => {
@@ -514,20 +547,27 @@ describe('POST /api/orders/:id/confirm-deposit — confirm deposit contract', ()
   beforeEach(() => {
     m.store.orders = [];
     m.calls.length = 0;
-    mockRedis = null;
+    // confirm-deposit fails closed with 503 when Redis is down (redisLock.js,
+    // deliberate); these tests exercise the post-lock paths, so provide a
+    // working in-memory Redis.
+    mockRedis = new RedisMock();
   });
 
   it('200: returns message and txHash', async () => {
     m.store.orders.push({
       id: 'order-deposit-1',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-DEPOSIT',
-      escrow_booking_id: 'escrow:OD-DEPOSIT',
+      // Non-UUID path ids resolve via order_display_id (findOrderByAnyId).
+      order_display_id: 'order-deposit-1',
+      escrow_booking_id: 'escrow:order-deposit-1',
       escrow_status: 'funding',
+      // resolveExpectedDepositAmount (services/escrow.js) fails closed with
+      // 422 when no escrow amount is recorded — seed the authoritative figure.
+      escrow_amount_wei: '1000000000000000',
     });
 
     const { recordDepositTx } = await import('../../src/services/escrow.js');
-    recordDepositTx.mockResolvedValue({ txHash: '0x' + 'a'.repeat(64), bookingId: 'escrow:OD-DEPOSIT' });
+    recordDepositTx.mockResolvedValue({ txHash: '0x' + 'a'.repeat(64), bookingId: 'escrow:order-deposit-1' });
 
     const res = await request(buildApp())
       .post('/api/orders/order-deposit-1/confirm-deposit')
@@ -545,7 +585,7 @@ describe('POST /api/orders/:id/confirm-deposit — confirm deposit contract', ()
     m.store.orders.push({
       id: 'order-deposit-2',
       customer_id: CUSTOMER['x-user-id'],
-      order_display_id: 'OD-NOT-FUNDING',
+      order_display_id: 'order-deposit-2',
       escrow_status: 'pending',
     });
 
@@ -578,7 +618,10 @@ describe('POST /api/orders/:id/ratings — rating contract', () => {
   it('201: returns message and rating object', async () => {
     m.store.orders.push({
       id: 'order-rating-1',
-      order_display_id: 'ORD-RATING',
+      // The order:submit-rating policy resolver looks the order up by display
+      // id for non-UUID path ids and denies (403) when it cannot resolve the
+      // resource — the seed's display id must equal the URL id.
+      order_display_id: 'order-rating-1',
       customer_id: CUSTOMER['x-user-id'],
       driver_id: 'driver-1',
       status: 'payment_released',
@@ -603,7 +646,7 @@ describe('POST /api/orders/:id/ratings — rating contract', () => {
   it('400: bad request when order not delivered', async () => {
     m.store.orders.push({
       id: 'order-rating-2',
-      order_display_id: 'ORD-ACTIVE',
+      order_display_id: 'order-rating-2',
       customer_id: CUSTOMER['x-user-id'],
       driver_id: 'driver-1',
       status: 'in_transit',
@@ -620,7 +663,7 @@ describe('POST /api/orders/:id/ratings — rating contract', () => {
   it('400: validation error on invalid stars', async () => {
     m.store.orders.push({
       id: 'order-rating-3',
-      order_display_id: 'ORD-INVALID',
+      order_display_id: 'order-rating-3',
       customer_id: CUSTOMER['x-user-id'],
       driver_id: 'driver-1',
       status: 'payment_released',
@@ -637,7 +680,7 @@ describe('POST /api/orders/:id/ratings — rating contract', () => {
   it('403: forbidden for non-owner', async () => {
     m.store.orders.push({
       id: 'order-rating-4',
-      order_display_id: 'ORD-OTHER',
+      order_display_id: 'order-rating-4',
       customer_id: 'someone-else',
       driver_id: 'driver-1',
       status: 'payment_released',
@@ -654,14 +697,15 @@ describe('POST /api/orders/:id/ratings — rating contract', () => {
   it('409: conflict on duplicate rating', async () => {
     m.store.orders.push({
       id: 'order-rating-5',
-      order_display_id: 'ORD-DUP',
+      order_display_id: 'order-rating-5',
       customer_id: CUSTOMER['x-user-id'],
       driver_id: 'driver-1',
       status: 'payment_released',
     });
     m.store.ratings.push({
       id: 'rating-1',
-      order_display_id: 'ORD-DUP',
+      // The duplicate guard keys on the order's order_display_id.
+      order_display_id: 'order-rating-5',
       customer_id: CUSTOMER['x-user-id'],
     });
 

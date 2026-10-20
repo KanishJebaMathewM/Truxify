@@ -45,7 +45,15 @@ void main() {
       );
 
       expect(find.byType(PulsingLocationDot), findsOneWidget);
-      expect(find.byType(AnimatedBuilder), findsNothing);
+      // Scope to the dot's subtree — the theme/fonts contribute an unrelated
+      // AnimatedBuilder elsewhere in the tree.
+      expect(
+        find.descendant(
+          of: find.byType(PulsingLocationDot),
+          matching: find.byType(AnimatedBuilder),
+        ),
+        findsNothing,
+      );
     });
 
     testWidgets('PulsingLocationDot renders active state correctly', (WidgetTester tester) async {
@@ -58,10 +66,17 @@ void main() {
       );
 
       expect(find.byType(PulsingLocationDot), findsOneWidget);
-      expect(find.byType(AnimatedBuilder), findsOneWidget);
-      
-      // Stop the animation from running indefinitely so the test can finish
-      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(PulsingLocationDot),
+          matching: find.byType(AnimatedBuilder),
+        ),
+        findsOneWidget,
+      );
+
+      // The pulse animation repeats forever — a fixed pump is enough to let
+      // the test finish (pumpAndSettle would time out).
+      await tester.pump(const Duration(milliseconds: 500));
     });
   });
 }

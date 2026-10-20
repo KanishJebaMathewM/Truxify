@@ -64,7 +64,13 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js (Excerpt Cleaned)
 
+import { healthLimiter } from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
+// Duplicate import of healthLimiter removed per issue #1633
+
+export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;

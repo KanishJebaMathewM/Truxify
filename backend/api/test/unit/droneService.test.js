@@ -18,7 +18,7 @@ describe('droneService', () => {
 
       const mission = await droneService.launchDroneDelivery(launchParams);
 
-      expect(mission.missionId).toMatch(/^MSN-\d+$/);
+      expect(mission.missionId).toMatch(/^MSN-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       expect(mission.droneId).toMatch(/^DRN-AeroX-\d+$/);
       expect(mission.tripId).toBe('TRIP-DRN-101');
       expect(mission.parcelId).toBe('PARCEL-MED-44');

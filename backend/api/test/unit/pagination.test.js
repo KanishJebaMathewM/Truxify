@@ -5,6 +5,7 @@ import {
   parseLimit,
   calculatePagination,
   getPaginationMeta,
+  formatPaginationMeta,
   paginateArray,
 } from '../../src/utils/pagination.js';
 import { validatePagination } from '../../src/middleware/pagination.js';
@@ -245,6 +246,45 @@ describe('Pagination Utilities (src/utils/pagination.js)', () => {
       expect(meta.offset).toBe(25);
       expect(meta.hasNextPage).toBe(true);
       expect(meta.hasPrevPage).toBe(true);
+      expect(meta.hasPreviousPage).toBe(true);
+    });
+  });
+
+  describe('formatPaginationMeta', () => {
+    it('handles first page correctly', () => {
+      const meta = formatPaginationMeta(100, 1, 20);
+      expect(meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 100,
+        totalPages: 5,
+        hasNextPage: true,
+        hasPreviousPage: false,
+      });
+    });
+
+    it('handles middle page correctly', () => {
+      const meta = formatPaginationMeta(100, 3, 20);
+      expect(meta).toEqual({
+        page: 3,
+        limit: 20,
+        total: 100,
+        totalPages: 5,
+        hasNextPage: true,
+        hasPreviousPage: true,
+      });
+    });
+
+    it('handles empty dataset with total = 0', () => {
+      const meta = formatPaginationMeta(0, 1, 20);
+      expect(meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+        hasNextPage: false,
+        hasPreviousPage: false,
+      });
     });
   });
 

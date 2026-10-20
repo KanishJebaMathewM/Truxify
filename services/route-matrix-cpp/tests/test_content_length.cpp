@@ -1,6 +1,7 @@
 #include "../include/http_parse.hpp"
 #include <cassert>
 #include <cstddef>
+#include <iostream>
 #include <string>
 
 int main() {

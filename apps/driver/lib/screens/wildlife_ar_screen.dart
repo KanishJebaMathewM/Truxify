@@ -152,7 +152,7 @@ class _WildlifeArScreenState extends State<WildlifeArScreen> {
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.orange, width: 2),
-                    color: Colors.orange.withOpacity(0.2),
+                    color: Colors.orange.withValues(alpha: 0.2),
                   ),
                   child: const Text('DEER\n800 FT', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 10), textAlign: TextAlign.center),
                 ),
@@ -166,7 +166,7 @@ class _WildlifeArScreenState extends State<WildlifeArScreen> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.red, width: 3),
-                    color: Colors.red.withOpacity(0.3),
+                    color: Colors.red.withValues(alpha: 0.3),
                   ),
                   child: const Text('MOOSE\nIMMINENT COLLISION\n400 FT', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 14), textAlign: TextAlign.center),
                 ),
@@ -263,7 +263,7 @@ class RoadPerspectivePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.green.withOpacity(0.3)
+      ..color = Colors.green.withValues(alpha: 0.3)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
@@ -276,7 +276,7 @@ class RoadPerspectivePainter extends CustomPainter {
 
     // Center dash
     final dashPaint = Paint()
-      ..color = Colors.green.withOpacity(0.5)
+      ..color = Colors.green.withValues(alpha: 0.5)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
       

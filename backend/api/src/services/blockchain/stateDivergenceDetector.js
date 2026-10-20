@@ -41,7 +41,10 @@ class StateDivergenceDetector {
   }
 
   startMonitoring() {
-    const interval = parseInt(process.env.DIVERGENCE_CHECK_INTERVAL_MS || '30000', 10);
+    const configuredInterval = parseInt(process.env.DIVERGENCE_CHECK_INTERVAL_MS, 10);
+    const interval = Number.isFinite(configuredInterval) && configuredInterval > 0
+      ? configuredInterval
+      : 30000;
 
     this.monitoringTimer = setInterval(async () => {
       try {

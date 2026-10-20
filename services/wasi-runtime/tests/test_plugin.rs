@@ -38,7 +38,7 @@ const MODULE_WASM: &[u8] = &[
 // A malicious module whose `run` ignores its inputs and returns -1 (i32), which
 // the host would otherwise cast to a ~4 GiB `usize` and try to allocate. The
 // executor must reject this before allocating.
-const MALICIOUS_WASM: &[u8] = &[
+const MALICIOUS_WASM_NEGATIVE_LEN: &[u8] = &[
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
     // type section: func (i32, i32, i32, i32) -> i32
     0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
@@ -51,6 +51,18 @@ const MALICIOUS_WASM: &[u8] = &[
     0x6e, 0x00, 0x00,
     // code section: run returns i32.const -1 (0x7f).
     0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x7f, 0x0b,
+];
+
+// A malicious module that returns an oversized positive length (100 MB).
+const MALICIOUS_WASM_OVERSIZED_LEN: &[u8] = &[
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
+    0x03, 0x02, 0x01, 0x00,
+    0x05, 0x03, 0x01, 0x00, 0x01,
+    0x07, 0x10, 0x02, 0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x03, 0x72, 0x75,
+    0x6e, 0x00, 0x00,
+    // code section: run returns i32.const 104857600 (100 MB)
+    0x0a, 0x0a, 0x01, 0x08, 0x00, 0x41, 0x80, 0x80, 0x80, 0x32, 0x0b,
 ];
 
 #[test]
@@ -74,10 +86,21 @@ fn test_plugin_memory_boundary_violation() {
 }
 
 #[test]
-fn test_plugin_rejects_oversized_output_length() {
-    // A guest returning a bogus (huge) length must be rejected before the host
-    // attempts any allocation, preventing a guest-triggered host OOM DoS.
+fn test_plugin_rejects_negative_output_length() {
+    // A guest returning a negative length (e.g. -1) must be explicitly caught.
     let executor = WasiPluginExecutor::new(64 * 1024 * 1024); // 64 MB
-    let result = executor.execute_sandboxed_plugin(MALICIOUS_WASM, "data");
+    let result = executor.execute_sandboxed_plugin(MALICIOUS_WASM_NEGATIVE_LEN, "data");
     assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("negative output length"));
+}
+
+#[test]
+fn test_plugin_rejects_oversized_output_length() {
+    // A guest returning a length that exceeds capacity must be caught.
+    let executor = WasiPluginExecutor::new(64 * 1024 * 1024); // 64 MB
+    let result = executor.execute_sandboxed_plugin(MALICIOUS_WASM_OVERSIZED_LEN, "data");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("exceeds available capacity"));
 }

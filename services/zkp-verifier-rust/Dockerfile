@@ -15,4 +15,6 @@ COPY --from=builder /app/target/release/truxify-zkp-verifier .
 
 EXPOSE 8087
 
+USER nobody
+
 CMD ["./truxify-zkp-verifier"]

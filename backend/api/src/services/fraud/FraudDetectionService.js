@@ -25,7 +25,8 @@ class FraudDetectionService {
     
     this.pendingUpserts = new Map();
     this.pendingRetries = new Map();
-    this.maxFlushRetries = parseInt(process.env.FRAUD_FLUSH_MAX_RETRIES || '5', 10);
+    const configuredMaxFlushRetries = parseInt(process.env.FRAUD_FLUSH_MAX_RETRIES, 10);
+    this.maxFlushRetries = Number.isFinite(configuredMaxFlushRetries) ? configuredMaxFlushRetries : 5;
     this.dlq = [];
     this.maxDlqSize = 1000;
     this._consecutiveFlushFailures = 0;

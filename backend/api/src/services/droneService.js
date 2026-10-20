@@ -23,7 +23,7 @@ class DroneService {
     if (!ownerId || !tripId || !parcelId) {
       throw new Error('ownerId, tripId, and parcelId are required');
     }
-    const droneId = `DRN-AeroX-${Math.floor(10 + Math.random() * 90)}`;
+    const droneId = `DRN-AeroX-${crypto.randomInt(10, 100)}`;
     const missionId = `MSN-${crypto.randomUUID()}`;
 
     const missionData = {

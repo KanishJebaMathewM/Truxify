@@ -2,7 +2,13 @@ import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { AppError } from '../utils/errors.js';
 import { createUserClient } from '../config/db.js';
+// Inside backend/api/src/controllers/escortWalletController.js
 
+// CHANGE FROM:
+// import { AppError } from '../errors/AppError.js';
+
+// CHANGE TO:
+import { AppError } from '../utils/errors.js';
 /**
  * Resolve the resource for the 'escort:issue-credential' ownership check:
  * the normalized subject from the body and the authenticated caller's own
@@ -89,45 +95,57 @@ export const handshake = async (req, res, next) => {
         let allCompliant = true;
 
         for (const address of escorts) {
-            const credentials = await didService.getCredentials(address);
+            // A provider failure is scoped to this escort; it must not hide
+            // other convoy results or allow partial verification to pass.
+            try {
+                const credentials = await didService.getCredentials(address);
 
-            if (!credentials || credentials.length === 0) {
+                if (!credentials || credentials.length === 0) {
+                    complianceStatus.push({
+                        address,
+                        compliant: false,
+                        reason: 'No credentials found'
+                    });
+                    allCompliant = false;
+                    continue;
+                }
+
+                let escortCompliant = true;
+                const validCredentials = [];
+
+                for (const cred of credentials) {
+                    if (cred.revoked) continue;
+
+                    // Verify against registry
+                    const verification = await didService.verifyCredential(cred.id);
+                    if (verification.isValid) {
+                        validCredentials.push(cred);
+                    }
+                }
+
+                if (validCredentials.length === 0) {
+                    escortCompliant = false;
+                    allCompliant = false;
+                }
+
+                complianceStatus.push({
+                    address,
+                    compliant: escortCompliant,
+                    credentials: validCredentials.map(c => ({
+                        id: c.id,
+                        type: c.type,
+                        validUntil: c.validUntil
+                    }))
+                });
+            } catch (error) {
+                logger.warn({ err: error, address }, 'Escort credential verification unavailable');
+                allCompliant = false;
                 complianceStatus.push({
                     address,
                     compliant: false,
-                    reason: 'No credentials found'
+                    reason: 'Credential verification unavailable'
                 });
-                allCompliant = false;
-                continue;
             }
-
-            let escortCompliant = true;
-            const validCredentials = [];
-
-            for (const cred of credentials) {
-                if (cred.revoked) continue;
-
-                // Verify against registry
-                const verification = await didService.verifyCredential(cred.id);
-                if (verification.isValid) {
-                    validCredentials.push(cred);
-                }
-            }
-
-            if (validCredentials.length === 0) {
-                escortCompliant = false;
-                allCompliant = false;
-            }
-
-            complianceStatus.push({
-                address,
-                compliant: escortCompliant,
-                credentials: validCredentials.map(c => ({
-                    id: c.id,
-                    type: c.type,
-                    validUntil: c.validUntil
-                }))
-            });
         }
 
         return res.status(200).json({

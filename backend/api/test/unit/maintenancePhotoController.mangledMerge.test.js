@@ -162,4 +162,42 @@ describe('maintenancePhotoController — bad-merge regression (#14876)', () => {
     expect(dbMock.__storageObjects.length).toBe(1);
     expect(dbMock.__storageObjects[0].bucket).toBe('maintenance-photos');
   });
+    it('returns signed URLs for both existing and newly uploaded photos (#10264)', async () => {
+    dbMock.__setTicketStore([
+      {
+        id: 'ticket-1',
+        driver_id: 'driver-1',
+        photo_urls: ['driver-1/ticket-1/existing-photo.jpg'],
+      },
+    ]);
+
+    const { res, sent } = fakeRes();
+
+    await uploadMaintenancePhotos(
+      {
+        user: { id: 'driver-1' },
+        token: 'jwt-token',
+        params: { ticketId: 'ticket-1' },
+        files: [{ buffer: JPEG_BYTES, mimetype: 'image/jpeg' }],
+      },
+      res,
+    );
+
+    expect(sent.code).toBe(200);
+    expect(sent.body.success).toBe(true);
+    expect(sent.body.uploaded_count).toBe(1);
+    expect(sent.body.photo_urls).toHaveLength(2);
+
+    expect(sent.body.photo_urls[0]).toBe(
+      'https://mock-storage.example/maintenance-photos/driver-1/ticket-1/existing-photo.jpg?expires=604800',
+    );
+
+    expect(sent.body.photo_urls[1]).toMatch(
+      /^https:\/\/mock-storage\.example\/maintenance-photos\/driver-1\/ticket-1\/.+\?expires=604800$/,
+    );
+
+    expect(sent.body.photo_urls).not.toContain(
+      'driver-1/ticket-1/existing-photo.jpg',
+    );
+  });
 });

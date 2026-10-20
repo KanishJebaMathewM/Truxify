@@ -16,6 +16,9 @@ vi.mock('../../../../src/core/performanceMetrics.js', () => ({
 }));
 
 vi.mock('../../../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   supabaseAdmin: null,
   supabase: {
     from: vi.fn(() => ({

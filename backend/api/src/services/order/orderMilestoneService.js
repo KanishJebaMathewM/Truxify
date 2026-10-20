@@ -49,7 +49,8 @@ export class OrderMilestoneService {
       }
 
       const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId);
-      if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
+      if (orderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: orderErr.message });
+      if (!order) throw new DomainError(404, { error: 'Order not found.' });
       if (order.driver_id !== driverId)
         throw new DomainError(403, {
           error: 'Access Denied: You are not assigned to this order.'

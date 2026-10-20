@@ -5,6 +5,7 @@ import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { getHaversineDistance } from '../routingService.js';
 import { broadcastOrderEta } from '../../sockets/tracker.js';
 import { emitEtaUpdateToBooking } from '../../sockets/locationServer.js';
+import { validateCoordinate } from '../../utils/coordinates.js';
 
 /** Order statuses where live ETA updates are meaningful. */
 export const ACTIVE_ETA_STATUSES = [
@@ -90,11 +91,13 @@ export function resolveDestinationForOrder(order) {
   const lat = usePickup ? order.pickup_lat : order.drop_lat;
   const lng = usePickup ? order.pickup_lng : order.drop_lng;
 
-  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+  const latitude = validateCoordinate(lat, 'lat');
+  const longitude = validateCoordinate(lng, 'lng');
+  if (!latitude.valid || !longitude.valid) {
     return null;
   }
 
-  return { lat: Number(lat), lng: Number(lng) };
+  return { lat: latitude.value, lng: longitude.value };
 }
 
 export function isActiveEtaStatus(status) {

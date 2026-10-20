@@ -9,7 +9,26 @@ import GpsLog from '../models/GpsLog.js';
 import { scheduleEtaRecalculationOnLocationUpdate } from '../services/order/etaService.js';
 import DeliveryDelayService from '../services/order/deliveryDelayService.js';
 import { calculateAdaptiveInterval, getQueueDepth } from './adaptivePoller.js';
+// backend/api/src/sockets/tracker.js (Excerpt Fix)
 
+export function registerTrackerHandlers(io, socket) {
+  socket.on('location:update', async (payload) => {
+    try {
+      const { tripId, lat, lng } = payload;
+      if (!tripId || lat === undefined || lng === undefined) {
+        throw new Error('Invalid location payload parameters');
+      }
+      // Process telemetry update...
+      socket.to(tripId).emit('location:broadcast', { tripId, lat, lng, timestamp: new Date() });
+    } catch (err) {
+      logger.error({ err, payload }, '[tracker] Error handling location update');
+      socket.emit('error', { message: err.message });
+    } finally {
+      // FIX: Ensure balanced block structure without orphan braces per issue #2349
+      socket.recordMetrics?.();
+    }
+  });
+}
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
   lng: { type: 'number', required: false, min: -180, max: 180 },

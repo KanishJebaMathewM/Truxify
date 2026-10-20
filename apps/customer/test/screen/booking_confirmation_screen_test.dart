@@ -171,12 +171,15 @@ void main() {
 
       await tester.tap(find.textContaining("I've Paid"));
       await tester.pump(); // confirm starts
-      await tester.pump(); // status poll resolves -> success state
+      await tester.pump(); // status poll resolves
 
       expect(find.textContaining('Booking Confirmed'), findsOneWidget);
 
-      // Flush the auto-navigation timer so no timers leak after teardown.
-      await tester.pump(const Duration(milliseconds: 1900));
+      // Flush the auto-navigation chain (success animation + 1200ms delay)
+      // so no timers leak after teardown — 1900ms was shorter than the chain.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
       await tester.pump();
     });
 
@@ -190,8 +193,8 @@ void main() {
       await reachUpiSheet(tester);
 
       await tester.tap(find.textContaining("I've Paid"));
-      await tester.pump();
-      await tester.pump();
+      await tester.pump(); // confirm starts
+      await tester.pump(); // status poll resolves
 
       expect(find.text('Verifying your payment'), findsOneWidget);
       expect(find.text('Check payment status'), findsOneWidget);
@@ -205,8 +208,8 @@ void main() {
       await reachUpiSheet(tester);
 
       await tester.tap(find.textContaining("I've Paid"));
-      await tester.pump();
-      await tester.pump();
+      await tester.pump(); // confirm starts
+      await tester.pump(); // status poll resolves
 
       expect(find.text('Verifying your payment'), findsOneWidget);
       expect(find.textContaining('could not verify'), findsOneWidget);

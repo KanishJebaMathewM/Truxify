@@ -2,7 +2,21 @@ const assert = require("node:assert/strict");
 const { ethers } = require("hardhat");
 
 async function assertRejectsWith(promise, message) {
-  await assert.rejects(promise, error => error.message.includes(message));
+  await assert.rejects(promise, error => {
+    if (error.message.includes(message)) return true;
+    // Hardhat cannot infer reason strings for this contract because two
+    // artifacts share the name "Escrow" (contracts/Escrow.sol and
+    // contracts/deprecated/Escrow.sol); fall back to decoding the raw
+    // Error(string) revert data carried on the error.
+    const data = error.data ?? error.info?.error?.data;
+    if (typeof data === "string" && data.startsWith("0x08c379a0")) {
+      try {
+        const reason = ethers.AbiCoder.defaultAbiCoder().decode(["string"], "0x" + data.slice(10))[0];
+        return reason.includes(message);
+      } catch { return false; }
+    }
+    return false;
+  });
 }
 
 function bookingId(label) {
@@ -12,7 +26,7 @@ function bookingId(label) {
 describe("Escrow", function () {
   async function deployEscrow() {
     const [owner, relayer, customer, driver, outsider] = await ethers.getSigners();
-    const Escrow = await ethers.getContractFactory("Escrow");
+    const Escrow = await ethers.getContractFactory("contracts/Escrow.sol:Escrow");
     const escrow = await Escrow.deploy(relayer.address);
     await escrow.waitForDeployment();
     return { escrow, owner, relayer, customer, driver, outsider };

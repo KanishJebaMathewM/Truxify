@@ -14,6 +14,11 @@ const DEFAULT_PRIVATE_FIELDS = [
 ];
 
 function sanitize(value) {
+  // Database timestamps must retain Date's ISO-string/null JSON serialization.
+  if (value instanceof Date) {
+    return value;
+  }
+
   if (Array.isArray(value)) {
     return value.map(sanitize);
   }

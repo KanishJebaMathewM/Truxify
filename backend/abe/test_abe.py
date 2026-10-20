@@ -70,6 +70,13 @@ class TestCPABE(unittest.TestCase):
 
         with self.assertRaises((InvalidTag, PermissionError)):
             self.cipher.decrypt_document(enc["ciphertext_b64"], altered_policy, attrs)
+            # backend/abe/test_abe.py (around line 25)
+
+# Before:
+# access_attributes = {"Role: Driver", "TripID: TRIP_9999"} // Wrong trip ID.
+
+# After:
+             access_attributes = {"Role: Driver", "TripID: TRIP_9999"}  # Wrong trip ID.
 
 
 if __name__ == '__main__':

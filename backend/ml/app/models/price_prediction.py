@@ -4,7 +4,6 @@ import os
 import threading
 import time
 from collections import OrderedDict
-import httpx
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -15,7 +14,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .base import get_model_meta, load_model, save_model
+from .base import get_model_meta, load_model_snapshot, save_model
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +54,33 @@ _now = time.monotonic
 # city -> (multiplier, expires_at_monotonic). Ordered by insertion so the LRU
 # eviction on overflow stays deterministic.
 _WEATHER_CACHE: "OrderedDict[str, Tuple[float, float]]" = OrderedDict()
-_WEATHER_CACHE_LOCK = threading.Lock()
+_WEATHER_CACHE_LOCK = threading.RLock()
+_WEATHER_GENERATION = 0
+
+
+def _bounded_weather_setting(name: str, default: float, maximum: float) -> float:
+    """Keep admission settings finite and positive even with invalid config."""
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return min(value, maximum) if math.isfinite(value) and value > 0 else default
+
+
+ML_WEATHER_MAX_INFLIGHT = max(1, int(_bounded_weather_setting("ML_WEATHER_MAX_INFLIGHT", 4, 32)))
+ML_WEATHER_COALESCE_WAIT_SECONDS = _bounded_weather_setting(
+    "ML_WEATHER_COALESCE_WAIT_SECONDS", 2, 30
+)
+
+
+class _WeatherFlight:
+    def __init__(self, generation: int):
+        self.generation = generation
+        self.done = threading.Event()
+        self.result = 1.0
+
+
+_WEATHER_FLIGHTS: dict[str, _WeatherFlight] = {}
 
 _WEATHER_CLIENT = httpx.Client(
     timeout=httpx.Timeout(ML_WEATHER_TIMEOUT_SECONDS),
@@ -69,8 +94,10 @@ _WEATHER_CLIENT = httpx.Client(
 
 
 def reset_weather_cache() -> None:
-    """Drop every cached weather multiplier (used by tests)."""
+    """Invalidate cached results without releasing unsettled provider owners."""
+    global _WEATHER_GENERATION
     with _WEATHER_CACHE_LOCK:
+        _WEATHER_GENERATION += 1
         _WEATHER_CACHE.clear()
 
 
@@ -89,7 +116,9 @@ def _cached_weather_multiplier(city: str) -> Optional[float]:
         return None
 
 
-def _cache_weather_multiplier(city: str, multiplier: float, ok: bool = True) -> None:
+def _cache_weather_multiplier(
+    city: str, multiplier: float, ok: bool = True, *, generation: int | None = None
+) -> None:
     """Cache a weather multiplier with a TTL; failures use a short TTL.
 
     The TTL is chosen from an explicit success flag so that a successful
@@ -97,6 +126,8 @@ def _cache_weather_multiplier(city: str, multiplier: float, ok: bool = True) -> 
     while failed lookups (also neutral 1.0) still use the short failure TTL.
     """
     with _WEATHER_CACHE_LOCK:
+        if generation is not None and generation != _WEATHER_GENERATION:
+            return
         ttl = (
             ML_WEATHER_CACHE_TTL_SECONDS
             if ok
@@ -304,6 +335,9 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
         math.sin(d_lat / 2) ** 2
         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lng / 2) ** 2
     )
+    # Floating-point rounding near antipodes may put a slightly above one.
+    # Callers validate geographic domains before this calculation.
+    a = min(1.0, max(0.0, a))
     return r_earth * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
@@ -315,7 +349,15 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
         drop_lat = float(row.get("drop_lat"))
         drop_lng = float(row.get("drop_lng"))
         weight_kg = float(row.get("weight_tonnes")) * 1000.0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if not all(math.isfinite(value) for value in (
+        pickup_lat, pickup_lng, drop_lat, drop_lng, weight_kg,
+    )):
+        return None
+    if not (-90 <= pickup_lat <= 90 and -90 <= drop_lat <= 90
+            and -180 <= pickup_lng <= 180 and -180 <= drop_lng <= 180):
         return None
 
     distance_km = _haversine_km(pickup_lat, pickup_lng, drop_lat, drop_lng)
@@ -335,9 +377,9 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
         price_paisa = row.get("total_amount")
     try:
         price_paisa = float(price_paisa)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    if price_paisa <= 0:
+    if not math.isfinite(price_paisa) or price_paisa <= 0:
         return None
 
     return {
@@ -366,11 +408,36 @@ def _get_weather_multiplier(city: str) -> float:
     """
     if not city:
         return 1.0
-    cached = _cached_weather_multiplier(city)
-    if cached is not None:
-        return cached
-    multiplier, ok = _fetch_weather_multiplier_http(city)
-    _cache_weather_multiplier(city, multiplier, ok)
+    with _WEATHER_CACHE_LOCK:
+        cached = _cached_weather_multiplier(city)
+        if cached is not None:
+            return cached
+        flight = _WEATHER_FLIGHTS.get(city)
+        owner = flight is None
+        if flight is not None and flight.generation != _WEATHER_GENERATION:
+            return 1.0
+        if owner:
+            if len(_WEATHER_FLIGHTS) >= ML_WEATHER_MAX_INFLIGHT:
+                return 1.0
+            flight = _WeatherFlight(_WEATHER_GENERATION)
+            _WEATHER_FLIGHTS[city] = flight
+    if not owner:
+        return flight.result if flight.done.wait(ML_WEATHER_COALESCE_WAIT_SECONDS) else 1.0
+
+    multiplier, ok = 1.0, False
+    try:
+        multiplier, ok = _fetch_weather_multiplier_http(city)
+    except Exception:
+        logger.exception("Unexpected weather provider failure for %s", city)
+    finally:
+        with _WEATHER_CACHE_LOCK:
+            try:
+                _cache_weather_multiplier(city, multiplier, ok, generation=flight.generation)
+            finally:
+                flight.result = multiplier
+                if _WEATHER_FLIGHTS.get(city) is flight:
+                    del _WEATHER_FLIGHTS[city]
+                flight.done.set()
     return multiplier
 
 
@@ -402,9 +469,11 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
     """
     if not city:
         return 1.0
-    cached = _cached_weather_multiplier(city)
-    if cached is not None:
-        return cached
+    with _WEATHER_CACHE_LOCK:
+        cached = _cached_weather_multiplier(city)
+        if cached is not None:
+            return cached
+        generation = _WEATHER_GENERATION
     api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
     if not api_key:
         return 1.0
@@ -415,11 +484,11 @@ async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) ->
         )
         response = await client.get(url, timeout=ML_WEATHER_TIMEOUT_SECONDS)
         multiplier, ok = _parse_weather_multiplier(response)
-        _cache_weather_multiplier(city, multiplier, ok)
+        _cache_weather_multiplier(city, multiplier, ok, generation=generation)
         return multiplier
     except Exception as e:
         logger.warning("Weather API failed for %s: %s", city, e)
-        _cache_weather_multiplier(city, 1.0, ok=False)
+        _cache_weather_multiplier(city, 1.0, ok=False, generation=generation)
         return 1.0
 
 
@@ -566,10 +635,13 @@ def predict_price(
     if cargo_weight_kg <= 0:
         raise ValueError("cargo_weight_kg must be positive")
 
-    if not _model_is_real():
+    snapshot = load_model_snapshot(MODEL_NAME)
+    if snapshot is None or not bool(
+        ((snapshot.metadata or {}).get("metrics") or {}).get("is_real_model")
+    ):
         return None
 
-    loaded = load_model(MODEL_NAME)
+    loaded = snapshot.model
     if loaded is None or not isinstance(loaded, (list, tuple)) or len(loaded) != 3:
         logger.warning("Persisted price model is not a real-data model; ignoring.")
         return None

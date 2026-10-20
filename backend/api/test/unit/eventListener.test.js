@@ -47,6 +47,7 @@ vi.mock('axios', () => ({
 }));
 
 import {
+  enqueueLiveEvent,
   getLastProcessedBlock,
   saveLastProcessedBlock,
   handlePaymentLockedEvent,
@@ -164,5 +165,28 @@ describe('eventListener', () => {
       );
       delete process.env.N8N_DISPUTE_WEBHOOK_URL;
     });
+  });
+});
+
+describe('serialized live-event queue', () => {
+  it('waits for an earlier asynchronous event before starting the next', async () => {
+    let finishFirst;
+    const pending = new Promise((resolve) => { finishFirst = resolve; });
+    const calls = [];
+    const first = enqueueLiveEvent(async () => { calls.push('first'); await pending; });
+    const second = enqueueLiveEvent(() => { calls.push('second'); });
+    await Promise.resolve();
+    expect(calls).toEqual(['first']);
+    finishFirst();
+    await Promise.all([first, second]);
+    expect(calls).toEqual(['first', 'second']);
+  });
+
+  it('continues processing after an earlier handler rejects', async () => {
+    const next = vi.fn();
+    const first = enqueueLiveEvent(() => { throw new Error('simulated event failure'); });
+    const second = enqueueLiveEvent(next, { blockNumber: 8 });
+    await Promise.all([first, second]);
+    expect(next).toHaveBeenCalledWith({ blockNumber: 8 });
   });
 });

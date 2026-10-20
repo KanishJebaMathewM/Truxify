@@ -1,0 +1,38 @@
+name: Native federated model admission
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/federated/federated_server.py'
+      - 'backend/ml/federated/model_updates.py'
+      - 'backend/ml/tests/test_federated_model_admission.py'
+      - '.github/workflows/federated-model-admission.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-rounds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install scoped native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          python -m pip install tensorflow-cpu==2.16.1 numpy==1.26.4 redis==5.0.0 cryptography==44.0.0 pytest==9.0.3 ruff==0.16.9
+      - name: Verify native model and existing federated contracts
+        env:
+          PYTHONPATH: backend/ml
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TF_NUM_INTRAOP_THREADS: '1'
+          TF_NUM_INTEROP_THREADS: '1'
+        run: python -m pytest backend/ml/tests/test_federated_model_admission.py backend/ml/tests/test_federated.py -q
+      - name: Analyze new sources and scoped legacy server
+        run: |
+          python -m ruff check backend/ml/federated/model_updates.py backend/ml/tests/test_federated_model_admission.py
+          python -m ruff check backend/ml/federated/federated_server.py --ignore I001,F401,UP035,UP045,UP006,BLE001,S110,SIM102,DTZ005,C401,RUF010

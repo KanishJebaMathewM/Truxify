@@ -77,7 +77,7 @@ class _ArLoadingOptimizerScreenState extends State<ArLoadingOptimizerScreen> {
         height: 200,
         decoration: BoxDecoration(
           border: Border.all(color: Colors.tealAccent, width: 4),
-          color: Colors.tealAccent.withOpacity(0.2),
+          color: Colors.tealAccent.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(

@@ -4,7 +4,6 @@
  */
 
 import logger from '../middleware/logger.js';
-// backend/api/src/services/weighStationService.js (Excerpt)
 
 import crypto from 'crypto';
 import { logger } from '../utils/logger.js';

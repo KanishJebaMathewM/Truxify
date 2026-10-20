@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
 mod sig_verifier;
+pub mod protobuf_parser;
 
 #[derive(Serialize, Deserialize)]
 pub struct Coordinate {

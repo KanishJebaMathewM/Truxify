@@ -2,6 +2,8 @@ import hashlib
 import logging
 import os
 import pickle
+import threading
+from functools import wraps
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -13,22 +15,33 @@ MODEL_HASH_PATH = os.path.join(MODEL_DIR, "eta_predictor.sha256")
 logger = logging.getLogger(__name__)
 
 
+def _model_writer(method):
+    @wraps(method)
+    def owned(predictor, *args, **kwargs):
+        with predictor._lifecycle_lock:
+            return method(predictor, *args, **kwargs)
+    return owned
+
+
 class ETAPredictor:
     def __init__(self):
         self.model = None
+        self._lifecycle_lock = threading.RLock()
+        self._state_lock = threading.Lock()
 
     def generate_synthetic_data(self, n=1000):
-        np.random.seed(42)
+        # Own the stream per invocation while preserving legacy seed42 draws.
+        rng = np.random.RandomState(42)
 
-        distance = np.random.uniform(5, 1200, n)
-        time_of_day = np.random.randint(0, 24, n)
-        day_of_week = np.random.randint(0, 7, n)
-        route_type = np.random.choice([0, 1], n)
+        distance = rng.uniform(5, 1200, n)
+        time_of_day = rng.randint(0, 24, n)
+        day_of_week = rng.randint(0, 7, n)
+        route_type = rng.choice([0, 1], n)
 
         historical_speed = np.where(
             route_type == 1,
-            np.random.uniform(55, 85, n),
-            np.random.uniform(20, 45, n),
+            rng.uniform(55, 85, n),
+            rng.uniform(20, 45, n),
         )
 
         traffic_factor = np.where(
@@ -41,7 +54,7 @@ class ETAPredictor:
         weekend_factor = np.where(day_of_week >= 5, 1.1, 1.0)
 
         eta = (distance / historical_speed) * 60 * traffic_factor * weekend_factor
-        eta += np.random.normal(0, 10, n)
+        eta += rng.normal(0, 10, n)
 
         X = np.column_stack([
             distance,
@@ -53,25 +66,33 @@ class ETAPredictor:
 
         return X, eta
 
+    @_model_writer
     def train(self):
+        candidate = self._fit_and_persist()
+        with self._state_lock:
+            self.model = candidate
+
+    def _fit_and_persist(self):
+        """Prepare privately; the owning train/load operation publishes last."""
         X, y = self.generate_synthetic_data()
 
         X_train, _, y_train, _ = train_test_split(
             X, y, test_size=0.2, random_state=42
         )
 
-        self.model = RandomForestRegressor(
+        candidate = RandomForestRegressor(
             n_estimators=100,
             random_state=42
         )
 
-        self.model.fit(X_train, y_train)
+        candidate.fit(X_train, y_train)
 
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
 
         with open(MODEL_PATH, "wb") as f:
-            pickle.dump(self.model, f)
+            pickle.dump(candidate, f)
         self._save_hash()
+        return candidate
 
     def _save_hash(self):
         with open(MODEL_PATH, "rb") as f:
@@ -90,22 +111,34 @@ class ETAPredictor:
             expected = f.read().strip()
         return actual == expected
 
+    @_model_writer
     def load(self):
         if not os.path.exists(MODEL_PATH):
-            self.train()
+            self._fit_and_persist()
 
         if not self._verify_hash():
             logger.warning("[eta] Model integrity check failed — retraining.")
             os.remove(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
-            self.train()
-            return
+            self._fit_and_persist()
+            if not self._verify_hash():
+                raise ValueError("Retrained ETA model did not pass its integrity check")
 
         with open(MODEL_PATH, "rb") as f:
-            self.model = pickle.load(f)
+            candidate = pickle.load(f)
+        with self._state_lock:
+            self.model = candidate
 
     def predict(self, distance, time_of_day, day_of_week, route_type, historical_speed):
-        if self.model is None:
-            self.load()
+        with self._state_lock:
+            model = self.model
+        if model is None:
+            with self._lifecycle_lock:
+                with self._state_lock:
+                    model = self.model
+                if model is None:
+                    self.load()
+                    with self._state_lock:
+                        model = self.model
 
         if isinstance(route_type, int):
             route_type_value = route_type
@@ -122,7 +155,7 @@ class ETAPredictor:
             historical_speed,
         ]])
 
-        eta = float(self.model.predict(features)[0])
+        eta = float(model.predict(features)[0])
 
         return {
             "eta_minutes": round(max(eta, 1), 2),

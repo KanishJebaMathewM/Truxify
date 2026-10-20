@@ -1,0 +1,40 @@
+name: Native anomaly runtime generations
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/anomaly/**'
+      - 'backend/ml/routes/anomaly_routes.py'
+      - 'backend/ml/tests/test_anomaly_generation_contract.py'
+      - 'backend/ml/tests/test_autoencoder_shared_topology.py'
+      - '.github/workflows/anomaly-runtime-generations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-generations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install scoped native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          python -m pip install tensorflow-cpu==2.16.1 numpy==1.26.4 redis==5.0.0 scikit-learn==1.5.2 fastapi==0.116.1 httpx==0.27.0 pytest==9.0.3 ruff==0.16.9
+      - name: Native paired generations and existing shared graph consumers
+        env:
+          PYTHONPATH: backend/ml
+          MPLCONFIGDIR: /tmp/truxify-mpl-cache
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          TF_NUM_INTRAOP_THREADS: '1'
+          TF_NUM_INTEROP_THREADS: '1'
+        run: python -m pytest backend/ml/tests/test_anomaly_generation_contract.py backend/ml/tests/test_autoencoder_shared_topology.py -q
+      - name: Analyze new sources and scoped legacy service
+        run: |
+          python -m ruff check backend/ml/anomaly/generation_contract.py backend/ml/tests/test_anomaly_generation_contract.py
+          python -m ruff check backend/ml/anomaly/detector.py backend/ml/routes/anomaly_routes.py --ignore I001,F401,UP035,UP006,UP045,RUF013,PERF102,DTZ005,BLE001

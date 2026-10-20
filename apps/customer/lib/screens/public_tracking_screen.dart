@@ -25,7 +25,7 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
   bool _isLoading = true;
   String? _error;
   Timer? _refreshTimer;
-  MapController _mapController = MapController();
+  final MapController _mapController = MapController();
 
   static const Duration _refreshInterval = Duration(seconds: 15);
 

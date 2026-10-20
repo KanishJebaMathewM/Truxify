@@ -1,0 +1,36 @@
+name: ML ordered shelf search
+on:
+  pull_request:
+    paths:
+      - 'backend/ml/app/models/bin_packing.py'
+      - 'backend/ml/app/models/_shelf_fit_index.py'
+      - 'backend/ml/tests/test_shelf_fit_index.py'
+      - 'backend/ml/tests/test_bin_packing_algo.py'
+      - '.github/workflows/ml-shelf-search.yml'
+      - 'backend/ml/requirements.txt'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ordered-shelf-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: backend/ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install focused dependencies
+        run: python -m pip install pytest==9.0.3 numpy==1.26.4 fastapi==0.116.1 pydantic==2.11.1 requests==2.33.0 ruff==0.16.9
+      - name: Verify placement compatibility and work bounds
+        run: >-
+          python -m pytest backend/ml/tests/test_shelf_fit_index.py
+          backend/ml/tests/test_bin_packing_algo.py::TestHaversine -q
+      - name: Analyze new search and tests and compile placement module
+        run: |
+          ruff check backend/ml/app/models/_shelf_fit_index.py backend/ml/tests/test_shelf_fit_index.py
+          python -m py_compile backend/ml/app/models/bin_packing.py backend/ml/app/models/_shelf_fit_index.py

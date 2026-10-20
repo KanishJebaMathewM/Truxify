@@ -1,0 +1,133 @@
+```js
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.hoisted(() => {
+  process.env.SHARD_PASSWORD_NORTH = 'mock';
+  process.env.SHARD_PASSWORD_SOUTH = 'mock';
+  process.env.SHARD_PASSWORD_EAST = 'mock';
+  process.env.SHARD_PASSWORD_WEST = 'mock';
+});
+
+vi.mock('../../src/services/shardManager.js', () => ({
+  shardManager: {
+    getShardForLocation: vi.fn()
+  }
+}));
+
+import { shardMiddleware } from '../../src/middleware/shardMiddleware.js';
+import { shardManager } from '../../src/services/shardManager.js';
+
+describe('shardMiddleware', () => {
+  let req;
+  let res;
+  let next;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    req = {
+      query: {},
+      body: {}
+    };
+
+    res = {
+      setHeader: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn()
+    };
+
+    next = vi.fn();
+
+    shardManager.getShardForLocation.mockResolvedValue('north');
+  });
+
+  it('attaches default north shard when no lat/lng are supplied', async () => {
+    await shardMiddleware(req, res, next);
+
+    expect(req.shard).toBe('north');
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves the correct shard for valid coordinates', async () => {
+    shardManager.getShardForLocation.mockResolvedValue('south');
+
+    req.query.lat = '10.8505';
+    req.query.lng = '76.2711';
+
+    await shardMiddleware(req, res, next);
+
+    expect(
+      shardManager.getShardForLocation
+    ).toHaveBeenCalledWith(10.8505, 76.2711);
+
+    expect(req.shard).toBe('south');
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls next() for valid coordinates', async () => {
+    req.query.lat = '40.7128';
+    req.query.lng = '-74.0060';
+
+    await shardMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 400 when lat is provided but lng is missing', async () => {
+    req.query.lat = '40.0';
+
+    await shardMiddleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when lng is provided but lat is missing', async () => {
+    req.query.lng = '-74.0';
+
+    await shardMiddleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for out-of-range latitude', async () => {
+    req.query.lat = '91.0';
+    req.query.lng = '-74.0';
+
+    await shardMiddleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for out-of-range longitude', async () => {
+    req.query.lat = '40.0';
+    req.query.lng = '-181.0';
+
+    await shardMiddleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('handles shardManager errors', async () => {
+    shardManager.getShardForLocation.mockRejectedValue(
+      new Error('Shard resolution failed')
+    );
+
+    req.query.lat = '40.7128';
+    req.query.lng = '-74.0060';
+
+    await shardMiddleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+

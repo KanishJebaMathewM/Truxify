@@ -1,6 +1,66 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ProfileModel } from '../../../src/models/ProfileModel.js';
+// backend/api/test/unit/profileModel.test.js
 
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import ProfileModel from '../../src/models/ProfileModel.js';
+
+// Mock database / mongoose / mongodb dependency
+vi.mock('../../src/config/database.js', () => ({
+  default: {
+    collection: vi.fn(() => ({
+      findOne: vi.fn(),
+      insertOne: vi.fn(),
+      updateOne: vi.fn(),
+      deleteOne: vi.fn(),
+    })),
+  },
+}));
+
+describe('ProfileModel Unit Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should successfully find a profile by ID', async () => {
+    const mockProfile = { id: 'user_123', name: 'Joshua Miracle J', email: 'joshua@example.com' };
+    
+    // Mock implementation for findById
+    vi.spyOn(ProfileModel, 'findById').mockResolvedValueOnce(mockProfile);
+
+    const result = await ProfileModel.findById('user_123');
+    expect(result).toEqual(mockProfile);
+    expect(result.id).toBe('user_123');
+  });
+
+  it('should successfully create a new profile', async () => {
+    const newProfileData = { name: 'Joshua Miracle J', role: 'Developer' };
+    const createdProfile = { id: 'user_new', ...newProfileData };
+
+    vi.spyOn(ProfileModel, 'create').mockResolvedValueOnce(createdProfile);
+
+    const result = await ProfileModel.create(newProfileData);
+    expect(result).toEqual(createdProfile);
+    expect(result.id).toBeDefined();
+  });
+
+  it('should successfully update an existing profile', async () => {
+    const updatedData = { name: 'Joshua Miracle J Updated' };
+    const updatedProfile = { id: 'user_123', ...updatedData };
+
+    vi.spyOn(ProfileModel, 'update').mockResolvedValueOnce(updatedProfile);
+
+    const result = await ProfileModel.update('user_123', updatedData);
+    expect(result.name).toBe('Joshua Miracle J Updated');
+  });
+
+  it('should successfully delete a profile', async () => {
+    vi.spyOn(ProfileModel, 'delete').mockResolvedValueOnce({ success: true });
+
+    const result = await ProfileModel.delete('user_123');
+    expect(result.success).toBe(true);
+  });
+});
 describe('ProfileModel', () => {
   describe('fromProfile', () => {
     it('normalizes a profile object correctly', () => {

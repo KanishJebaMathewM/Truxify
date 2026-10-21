@@ -144,7 +144,26 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Top Level Cleanup Excerpt)
 
+import express from 'express';
+import { supabase } from '../config/db.js';
+import { authenticate, authorizeRole } from '../middleware/auth.js';
+import { validateBody, validateParams } from '../validation/requestSchemas.js';
+
+// ✅ Consolidated Single Imports (Replacing duplicate/conflicting imports)
+import { OrderRepository } from '../repositories/orderRepository.js';
+import { BidAcceptanceService } from '../services/bidAcceptanceService.js';
+import { OrderTimelineService } from '../services/orderTimelineService.js';
+import { DomainError } from '../errors/domainError.js';
+import { expireDeliveryOtps } from '../services/otpService.js';
+import { predictDemand } from '../services/ml.js';
+import { generateOrderDisplayId } from '../utils/displayId.js';
+
+const router = express.Router();
+const orderRepository = new OrderRepository();
+const bidAcceptanceService = new BidAcceptanceService();
+const orderTimelineService = new OrderTimelineService();
 import {
   bidLimiter,
   userLimiter,

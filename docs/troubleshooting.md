@@ -13,32 +13,68 @@ It covers both Docker-based and non-Docker development workflows.
 \---
 
 
+### 1. Database Connection Failures
+* **Symptom:** The backend fails to start with connection timeout errors or `ECONNREFUSED` on PostgreSQL/MongoDB.
+* **Resolution:**
+  1. Verify that database services are running locally or check remote connection strings in your `.env` file.
+  2. Ensure your IP address is whitelisted if using a managed cloud database.
+  3. Test connectivity using `nc -zv <host> <port>`.
 
-\## 📋 Quick Troubleshooting Checklist
+### 2. Redis Connection Refused
+* **Symptom:** Caching errors or WebSocket authentication state failures during startup.
+* **Resolution:**
+  1. Confirm Redis is running: `redis-cli ping` (should return `PONG`).
+  2. Check `REDIS_URL` configuration in your environment variables.
 
+---
 
+## Backend & API Issues
 
-Before troubleshooting a specific issue, make sure:
+### Environment Variable Parsing Failures
+* **Symptom:** Services throw undefined errors on startup due to missing required keys.
+* **Resolution:**
+  1. Copy `.env.example` to `.env` in the `backend/api/` directory.
+  2. Ensure all mandatory keys (JWT secrets, database credentials, OSRM endpoints) are populated.
 
+### Rate Limiting and Shared NAT Issues
+* **Symptom:** Drivers on mobile carrier networks experiencing unexpected `429 Too Many Requests` errors on delivery verification.
+* **Resolution:**
+  * Ensure rate limiters utilize user ID keys (`req.user.id`) rather than default IP-based throttling to prevent cross-driver blockage behind shared carrier NAT.
 
+---
 
-\* Git is installed and the repository is up to date.
+## Mobile Application (Flutter) Issues
 
-\* Flutter SDK is installed for mobile app development.
+### Flutter Secure Storage / Build Failures on Android
+* **Symptom:** Compilation errors related to SDK versions or plaintext token warnings.
+* **Resolution:**
+  1. Verify that `minSdkVersion` in `android/app/build.gradle.kts` is set to at least `21`.
+  2. Run `flutter clean` followed by `flutter pub get`.
 
-\* Node.js and npm are installed for backend development.
+### IDE Artifacts & .metadata Conflicts
+* **Symptom:** Git status shows untracked changes in `.metadata` or build directories across developer machines.
+* **Resolution:**
+  1. Run `git rm --cached .metadata` to remove it from git tracking.
+  2. Confirm that root and app-level `.gitignore` files include `.metadata`, `.dart_tool/`, and `build/`.
 
-\* Docker and Docker Compose are installed if using the containerized setup.
+---
 
-\* Required environment variables are configured.
+## Blockchain & Smart Contracts
 
-\* Required local services are running.
+### Escrow Transaction Reverts
+* **Symptom:** `withdrawFunds()` calls fail or revert during testing.
+* **Resolution:**
+  1. Ensure only the designated payee invokes the withdrawal function.
+  2. Verify that the escrow has not already been released or refunded.
+  3. Check that OpenZeppelin `ReentrancyGuard` modifiers are properly initialized.
 
-\* The required ports are not being used by another application.
+---
 
+## Support & Assistance
 
-
-\---
+If you encounter an issue not covered in this guide:
+1. Search existing GitHub issues or open a new issue with detailed reproduction steps and logs.
+2. Join the contributor discussions on our project channels.
 
 
 

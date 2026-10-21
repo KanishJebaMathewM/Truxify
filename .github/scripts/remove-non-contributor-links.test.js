@@ -8,7 +8,7 @@ const {
   removeLinks,
   run,
   scanAll
-} = require('./remove-non-contributor-links');
+} = require('./remove-non-contributor-links.cjs');
 
 test('isNonContributor correctly classifies author associations', () => {
   assert.equal(isNonContributor('OWNER'), false);

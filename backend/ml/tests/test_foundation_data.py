@@ -30,11 +30,20 @@ class TestLogisticsDataProcessor:
         assert ids == [1, 0]
 
     def test_create_pretraining_data_shape(self):
-        """Each item must yield tokens/labels/metadata."""
+        """MLM records retain lexical labels and explicit independent padding identity."""
         data = [{"origin": "Delhi", "destination": "Mumbai", "cargo_type": "bulk", "route": "highway"}]
         result = self.processor.create_pretraining_data(data)
         assert len(result) == 1
-        assert set(result[0].keys()) == {"tokens", "labels", "metadata"}
+        assert set(result[0].keys()) == {"tokens", "labels", "metadata", "pad_id"}
+        assert result[0]["pad_id"] == self.processor.vocab["[PAD]"]
+        expected = [self.processor.vocab[word] for word in ("delhi", "mumbai", "bulk", "highway")]
+        assert result[0]["pad_id"] not in expected
+        for token, label, lexical in zip(result[0]["tokens"], result[0]["labels"], expected):
+            if label == -100:
+                assert token == lexical
+            else:
+                assert label == lexical
+                assert token == self.processor.vocab["[MASK]"]
         assert len(result[0]["tokens"]) == len(result[0]["labels"])
 
     def test_create_finetuning_data_classification(self):

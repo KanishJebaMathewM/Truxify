@@ -410,7 +410,7 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _selectedType,
+              initialValue: _selectedType,
               decoration: const InputDecoration(labelText: 'Payment Type'),
               items: _types
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))

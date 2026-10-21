@@ -102,7 +102,7 @@ class BatteryService extends ChangeNotifier {
         _currentInfo = newInfo;
         notifyListeners();
         debugPrint(
-          '[BatteryService] Battery updated: ${level}% '
+          '[BatteryService] Battery updated: $level% '
           '${isCharging ? "(charging)" : ""}',
         );
       }

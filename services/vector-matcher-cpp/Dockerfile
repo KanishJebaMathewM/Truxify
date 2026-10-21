@@ -18,4 +18,6 @@ COPY --from=builder /app/build/vector-matcher-cpp .
 
 EXPOSE 8088
 
+USER nobody
+
 CMD ["./vector-matcher-cpp"]

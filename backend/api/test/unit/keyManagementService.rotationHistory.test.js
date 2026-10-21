@@ -42,6 +42,9 @@ function chainable() {
 // whose `supabase` property the test reassigns.
 const dbMock = { supabase: null, supabaseAdmin: null };
 vi.mock('../../src/config/db.js', () => ({
+  
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
   get supabase() {
     return dbMock.supabase;
   },

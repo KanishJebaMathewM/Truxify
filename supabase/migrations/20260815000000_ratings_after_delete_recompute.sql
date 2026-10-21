@@ -33,6 +33,13 @@ AS $$
 DECLARE
   v_new_avg NUMERIC(3,2);
 BEGIN
+  -- SECURITY DEFINER runs as the function owner — restrict to the backend
+  -- (issue #5890 release gate). auth.role() is NULL for direct SQL
+  -- (migrations/maintenance); app traffic must be service_role.
+  IF auth.role() IS NOT NULL AND auth.role() <> 'service_role' THEN
+    RAISE EXCEPTION 'recompute_driver_rating_after_rating_delete: only the backend may recompute ratings';
+  END IF;
+
   -- Only the deleted row's driver is affected.
   SELECT ROUND(AVG(stars)::NUMERIC, 2)
   INTO v_new_avg

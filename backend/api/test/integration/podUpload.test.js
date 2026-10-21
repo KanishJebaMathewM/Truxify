@@ -13,6 +13,9 @@ const m = createSupabaseMock();
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   supabaseAdmin: null,
+  // The PoD route builds a caller-scoped client for the storage upload;
+  // a missing mock export makes vitest throw on access.
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() { return null; },
   mongoDb: null,
@@ -227,9 +230,10 @@ describe('POST /api/orders/:id/pod — Proof of Delivery upload', () => {
       .field('content-type', 'multipart/form-data')
       .attach('photo', pdfBuffer, { filename: 'doc.pdf', contentType: 'application/pdf' });
 
-    // Multer fileFilter rejects invalid types — the file is silently excluded.
-    // The endpoint processes with no valid photo files and returns success.
-    expect(res.status).toBe(200);
+    // Multer fileFilter rejects invalid types — the file is silently excluded,
+    // and the route's no-valid-files guard then rejects the submission.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('At least one valid proof file (signature or photo) is required');
     const updatedOrder = m.store.orders.find(o => o.id === ORDER_ID);
     // PDF was rejected, so photo should NOT have been uploaded
     expect(updatedOrder.pod_photo_url).toBeNull();

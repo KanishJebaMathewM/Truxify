@@ -77,3 +77,7 @@ dart_defines/*.env
 
 # Local VC status-list allocation state
 **/.truxify-vc-status-index.json
+
+# SQLite files the ML service creates at startup (sqlite:///./traffic.db,
+# sqlite:///./ab_testing.db in backend/ml/routes). Local runs write to them.
+*.db

@@ -102,14 +102,14 @@ class _RetentionDashboardScreenState extends State<RetentionDashboardScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: riskColor.withOpacity(0.5))),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: riskColor.withValues(alpha: 0.5))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: riskColor.withOpacity(0.1),
+              color: riskColor.withValues(alpha: 0.1),
               borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
             ),
             child: Row(
@@ -165,7 +165,7 @@ class _RetentionDashboardScreenState extends State<RetentionDashboardScreen> {
                       Expanded(child: Text(factor, style: TextStyle(color: Colors.grey[800]))),
                     ],
                   ),
-                )).toList(),
+                )),
                 const Divider(height: 24),
                 Container(
                   width: double.infinity,

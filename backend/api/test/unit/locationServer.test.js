@@ -25,7 +25,10 @@ vi.mock('socket.io', () => ({ Server: sio.Server }))
 vi.mock('jsonwebtoken', () => ({ default: { verify: vi.fn(), sign: vi.fn() } }))
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }))
 vi.mock('../../src/models/GpsLog.js', () => ({ GpsLog: { create: vi.fn() } }))
-vi.mock('../../src/config/db.js', () => ({ supabase: {} }))
+vi.mock('../../src/config/db.js', () => ({ 
+  redisClient: global.mockRedis,
+  upstashRedisClient: global.mockRedis,
+  supabase: {} }))
 
 const {
   initLocationServer,

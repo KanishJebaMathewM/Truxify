@@ -28,8 +28,6 @@ class AuthService {
   bool get isAuthenticating => _isAuthenticating;
   String? get lastAuthError => _lastAuthError;
 
-  void _clearError() => _lastAuthError = null;
-
   bool _validatePhone(String phone) {
     final clean = phone.replaceAll(RegExp(r'[\s\-()]'), '');
     if (!clean.startsWith('+')) {
@@ -78,6 +76,15 @@ class AuthService {
     int? forceResendingToken,
     Duration timeout = const Duration(seconds: 60),
   }) async {
+    if (!_validatePhone(phoneNumber)) {
+      onVerificationFailed(
+        FirebaseAuthException(
+          code: 'invalid-phone-number',
+          message: _lastAuthError ?? 'Invalid phone number',
+        ),
+      );
+      return;
+    }
     if (_auth == null) {
       onVerificationFailed(
         FirebaseAuthException(

@@ -1,0 +1,645 @@
+{
+  "provenance": "Python3 Fraction.from_float; exact binary64 rational product rounded nearest paisa, ties upward. Seed17769; generated independently of production JavaScript.",
+  "cases": [
+    {
+      "distanceKm": 0.00225,
+      "ratePaisa": 2000,
+      "expectedPaisa": "4"
+    },
+    {
+      "distanceKm": 0.5,
+      "ratePaisa": 1,
+      "expectedPaisa": "1"
+    },
+    {
+      "distanceKm": 0.49,
+      "ratePaisa": 1,
+      "expectedPaisa": "0"
+    },
+    {
+      "distanceKm": 0.51,
+      "ratePaisa": 1,
+      "expectedPaisa": "1"
+    },
+    {
+      "distanceKm": 0.1,
+      "ratePaisa": 2000,
+      "expectedPaisa": "200"
+    },
+    {
+      "distanceKm": 5e-324,
+      "ratePaisa": 9007199254740991,
+      "expectedPaisa": "0"
+    },
+    {
+      "distanceKm": 1e+308,
+      "ratePaisa": 9007199254740991,
+      "expectedPaisa": "900719925474099109889061374084998981091259443338049380090384798113511242238653716876335621076868136197690327347424585924638380701000407627149334117522992743048663233976914665230668995439163921712080276187288939699203943580563335948019796968249816283176964162636314652426771364005302276128906924201173295501691929380022910976"
+    },
+    {
+      "distanceKm": 0,
+      "ratePaisa": 0,
+      "expectedPaisa": "0"
+    },
+    {
+      "distanceKm": 9.914559382835385,
+      "ratePaisa": 6990287657647592,
+      "expectedPaisa": "69305622084848321"
+    },
+    {
+      "distanceKm": 25.691142103053323,
+      "ratePaisa": 2366390918608476,
+      "expectedPaisa": "60795285361345248"
+    },
+    {
+      "distanceKm": 31.86708511468639,
+      "ratePaisa": 1590341962926483,
+      "expectedPaisa": "50679562694035660"
+    },
+    {
+      "distanceKm": 47.15146228526501,
+      "ratePaisa": 6232496219378826,
+      "expectedPaisa": "293871310431097487"
+    },
+    {
+      "distanceKm": 15.25242729881774,
+      "ratePaisa": 1565553930332371,
+      "expectedPaisa": "23878497504772861"
+    },
+    {
+      "distanceKm": 30.453769350240268,
+      "ratePaisa": 6295595985159579,
+      "expectedPaisa": "191724628054348473"
+    },
+    {
+      "distanceKm": 32.181275177497504,
+      "ratePaisa": 7783234247577612,
+      "expectedPaisa": "250474403092217868"
+    },
+    {
+      "distanceKm": 7.98989454032214,
+      "ratePaisa": 6282447893097320,
+      "expectedPaisa": "50196096120916611"
+    },
+    {
+      "distanceKm": 50.15614937346219,
+      "ratePaisa": 3304786169176696,
+      "expectedPaisa": "165755348748578259"
+    },
+    {
+      "distanceKm": 53.054601717704976,
+      "ratePaisa": 6413709710146138,
+      "expectedPaisa": "340276814204780378"
+    },
+    {
+      "distanceKm": 47.50129862773155,
+      "ratePaisa": 8292322114256999,
+      "expectedPaisa": "393896069066663976"
+    },
+    {
+      "distanceKm": 99.77781115004082,
+      "ratePaisa": 1526903844295688,
+      "expectedPaisa": "152351123420406488"
+    },
+    {
+      "distanceKm": 94.50852989361834,
+      "ratePaisa": 664317318989283,
+      "expectedPaisa": "62783653200547046"
+    },
+    {
+      "distanceKm": 46.15824392168162,
+      "ratePaisa": 5933411232564364,
+      "expectedPaisa": "273875842960351485"
+    },
+    {
+      "distanceKm": 35.16309011365071,
+      "ratePaisa": 5541747771225948,
+      "expectedPaisa": "194864976266740992"
+    },
+    {
+      "distanceKm": 21.52411186676888,
+      "ratePaisa": 1092777981400808,
+      "expectedPaisa": "23521075517212874"
+    },
+    {
+      "distanceKm": 44.49832064682398,
+      "ratePaisa": 4214331378230402,
+      "expectedPaisa": "187530668980468045"
+    },
+    {
+      "distanceKm": 0.2190487545539188,
+      "ratePaisa": 5052202242814050,
+      "expectedPaisa": "1106678609042933"
+    },
+    {
+      "distanceKm": 7.529654711582523,
+      "ratePaisa": 1082837547178516,
+      "expectedPaisa": "8153392838991176"
+    },
+    {
+      "distanceKm": 62.36101061154409,
+      "ratePaisa": 529561259913829,
+      "expectedPaisa": "33023975348948947"
+    },
+    {
+      "distanceKm": 53.30857654129668,
+      "ratePaisa": 6121580956830954,
+      "expectedPaisa": "326332766990967083"
+    },
+    {
+      "distanceKm": 85.37079077036304,
+      "ratePaisa": 59237752386013,
+      "expectedPaisa": "5057173764652890"
+    },
+    {
+      "distanceKm": 10.41505610803216,
+      "ratePaisa": 2045353666182851,
+      "expectedPaisa": "21302473194063676"
+    },
+    {
+      "distanceKm": 43.847729931457366,
+      "ratePaisa": 8796120669068767,
+      "expectedPaisa": "385689923541837364"
+    },
+    {
+      "distanceKm": 75.49198943291951,
+      "ratePaisa": 6456540312346583,
+      "expectedPaisa": "487417073032887078"
+    },
+    {
+      "distanceKm": 72.65708245546794,
+      "ratePaisa": 4499238639818452,
+      "expectedPaisa": "326901552840116702"
+    },
+    {
+      "distanceKm": 81.10075717763087,
+      "ratePaisa": 4992719883437208,
+      "expectedPaisa": "404913362922570497"
+    },
+    {
+      "distanceKm": 34.30926100111018,
+      "ratePaisa": 3625323274373018,
+      "expectedPaisa": "124382162433863246"
+    },
+    {
+      "distanceKm": 27.15272852511387,
+      "ratePaisa": 4120455347590009,
+      "expectedPaisa": "111881605452965218"
+    },
+    {
+      "distanceKm": 82.51667869876688,
+      "ratePaisa": 1932399203406311,
+      "expectedPaisa": "159455164185231633"
+    },
+    {
+      "distanceKm": 34.04405436925765,
+      "ratePaisa": 5229440679387507,
+      "expectedPaisa": "178031362809875957"
+    },
+    {
+      "distanceKm": 75.75691406747421,
+      "ratePaisa": 3748214619031811,
+      "expectedPaisa": "283953172800443501"
+    },
+    {
+      "distanceKm": 0.22828214226062737,
+      "ratePaisa": 1754384669454094,
+      "expectedPaisa": "400494690692183"
+    },
+    {
+      "distanceKm": 73.62032742699853,
+      "ratePaisa": 6140145328190758,
+      "expectedPaisa": "452039509510758943"
+    },
+    {
+      "distanceKm": 29.336308367720864,
+      "ratePaisa": 6059875761238056,
+      "expectedPaisa": "177774384001756824"
+    },
+    {
+      "distanceKm": 35.1545541317334,
+      "ratePaisa": 1259235795984315,
+      "expectedPaisa": "44267872954546996"
+    },
+    {
+      "distanceKm": 81.07718657867326,
+      "ratePaisa": 5798489426553560,
+      "expectedPaisa": "470125209111147122"
+    },
+    {
+      "distanceKm": 76.20605407730517,
+      "ratePaisa": 4834968247572327,
+      "expectedPaisa": "368453851736550155"
+    },
+    {
+      "distanceKm": 55.03235973857667,
+      "ratePaisa": 1351462109599976,
+      "expectedPaisa": "74374148988561614"
+    },
+    {
+      "distanceKm": 49.490185088765635,
+      "ratePaisa": 194651014144433,
+      "expectedPaisa": "9633314717723927"
+    },
+    {
+      "distanceKm": 36.61000338840324,
+      "ratePaisa": 1635352436278721,
+      "expectedPaisa": "59870258233397474"
+    },
+    {
+      "distanceKm": 46.59929897532577,
+      "ratePaisa": 4355591301832758,
+      "expectedPaisa": "202967501288433090"
+    },
+    {
+      "distanceKm": 60.66783218571118,
+      "ratePaisa": 6245545326011981,
+      "expectedPaisa": "378903695746747666"
+    },
+    {
+      "distanceKm": 11.35844926338353,
+      "ratePaisa": 7211393579295664,
+      "expectedPaisa": "81910248088719555"
+    },
+    {
+      "distanceKm": 15.737227052766611,
+      "ratePaisa": 5279105275123089,
+      "expectedPaisa": "83078478350070001"
+    },
+    {
+      "distanceKm": 24.50861538579099,
+      "ratePaisa": 1068723863532885,
+      "expectedPaisa": "26192942124944055"
+    },
+    {
+      "distanceKm": 15.920628889843725,
+      "ratePaisa": 8762117838937451,
+      "expectedPaisa": "139498426402802647"
+    },
+    {
+      "distanceKm": 91.22855828575317,
+      "ratePaisa": 6554108032923207,
+      "expectedPaisa": "597921826692657823"
+    },
+    {
+      "distanceKm": 57.39197989440362,
+      "ratePaisa": 3347028583033064,
+      "expectedPaisa": "192092597143427842"
+    },
+    {
+      "distanceKm": 68.57952943616482,
+      "ratePaisa": 1973830350873099,
+      "expectedPaisa": "135364356649697226"
+    },
+    {
+      "distanceKm": 97.30716842610131,
+      "ratePaisa": 3778930037954855,
+      "expectedPaisa": "367716981673726504"
+    },
+    {
+      "distanceKm": 51.34491093220428,
+      "ratePaisa": 3595969078637811,
+      "expectedPaisa": "184634712057619090"
+    },
+    {
+      "distanceKm": 81.88069089084019,
+      "ratePaisa": 3934604061302222,
+      "expectedPaisa": "322168098921331646"
+    },
+    {
+      "distanceKm": 54.27087714458093,
+      "ratePaisa": 6825254097355966,
+      "expectedPaisa": "370412526598153234"
+    },
+    {
+      "distanceKm": 76.8609687648336,
+      "ratePaisa": 3984799591327324,
+      "expectedPaisa": "306275556923131147"
+    },
+    {
+      "distanceKm": 44.36642391657334,
+      "ratePaisa": 8190378676135918,
+      "expectedPaisa": "363377812382708876"
+    },
+    {
+      "distanceKm": 32.742830666883115,
+      "ratePaisa": 5671668944197788,
+      "expectedPaisa": "185706495838487914"
+    },
+    {
+      "distanceKm": 83.8878189939609,
+      "ratePaisa": 898493739511541,
+      "expectedPaisa": "75372680187351211"
+    },
+    {
+      "distanceKm": 90.7475690498505,
+      "ratePaisa": 4647105005360580,
+      "expectedPaisa": "421713482355865100"
+    },
+    {
+      "distanceKm": 50.244022340463125,
+      "ratePaisa": 8048947298449751,
+      "expectedPaisa": "404411487880519609"
+    },
+    {
+      "distanceKm": 66.56842413778759,
+      "ratePaisa": 1992509075184641,
+      "expectedPaisa": "132638189215282080"
+    },
+    {
+      "distanceKm": 68.17097353594754,
+      "ratePaisa": 4677758498949313,
+      "expectedPaisa": "318887350839427300"
+    },
+    {
+      "distanceKm": 68.03726937873907,
+      "ratePaisa": 5250645886670986,
+      "expectedPaisa": "357239608603802123"
+    },
+    {
+      "distanceKm": 81.67263107103298,
+      "ratePaisa": 5428472944877587,
+      "expectedPaisa": "443357668106071120"
+    },
+    {
+      "distanceKm": 87.55516470720703,
+      "ratePaisa": 5155058060904564,
+      "expectedPaisa": "451351957597714373"
+    },
+    {
+      "distanceKm": 15.309794443627322,
+      "ratePaisa": 4825547421567896,
+      "expectedPaisa": "73878139102180323"
+    },
+    {
+      "distanceKm": 82.5486184590127,
+      "ratePaisa": 5229858211221820,
+      "expectedPaisa": "431717570072884676"
+    },
+    {
+      "distanceKm": 70.9987902370156,
+      "ratePaisa": 7901887081471816,
+      "expectedPaisa": "561024423374000846"
+    },
+    {
+      "distanceKm": 87.16740025062657,
+      "ratePaisa": 6275811007691557,
+      "expectedPaisa": "547046130004738018"
+    },
+    {
+      "distanceKm": 65.64818313119672,
+      "ratePaisa": 3084933536736817,
+      "expectedPaisa": "202520281767268937"
+    },
+    {
+      "distanceKm": 13.293950909115216,
+      "ratePaisa": 7262634089367395,
+      "expectedPaisa": "96549101054916838"
+    },
+    {
+      "distanceKm": 95.14814765368389,
+      "ratePaisa": 1362203721269808,
+      "expectedPaisa": "129611160805777349"
+    },
+    {
+      "distanceKm": 1.9725425369409688,
+      "ratePaisa": 5681256977408230,
+      "expectedPaisa": "11206521051230410"
+    },
+    {
+      "distanceKm": 57.138432051737595,
+      "ratePaisa": 725937828592912,
+      "expectedPaisa": "41478949292842036"
+    },
+    {
+      "distanceKm": 10.390256706832812,
+      "ratePaisa": 7014148349594629,
+      "expectedPaisa": "72878801932095892"
+    },
+    {
+      "distanceKm": 67.0667559801925,
+      "ratePaisa": 4841365024852697,
+      "expectedPaisa": "324694646732834412"
+    },
+    {
+      "distanceKm": 2.130056286923221,
+      "ratePaisa": 1519040141419234,
+      "expectedPaisa": "3235641003318778"
+    },
+    {
+      "distanceKm": 15.399426043398112,
+      "ratePaisa": 1291184865666855,
+      "expectedPaisa": "19883505847191659"
+    },
+    {
+      "distanceKm": 11.924846833087644,
+      "ratePaisa": 5458479439313789,
+      "expectedPaisa": "65091531255375054"
+    },
+    {
+      "distanceKm": 19.190853695443288,
+      "ratePaisa": 1097829538113363,
+      "expectedPaisa": "21068286048469630"
+    },
+    {
+      "distanceKm": 79.14891605525824,
+      "ratePaisa": 6400572627961111,
+      "expectedPaisa": "506598385636077607"
+    },
+    {
+      "distanceKm": 16.490678160161508,
+      "ratePaisa": 3272624360364391,
+      "expectedPaisa": "53967795065873587"
+    },
+    {
+      "distanceKm": 49.5246574378834,
+      "ratePaisa": 6750128632500128,
+      "expectedPaisa": "334297808186217157"
+    },
+    {
+      "distanceKm": 57.9562043313108,
+      "ratePaisa": 6729307539403778,
+      "expectedPaisa": "390005122761915665"
+    },
+    {
+      "distanceKm": 79.0584416561327,
+      "ratePaisa": 7242658117004648,
+      "expectedPaisa": "572593264178527889"
+    },
+    {
+      "distanceKm": 98.3694055976825,
+      "ratePaisa": 880231978765350,
+      "expectedPaisa": "86587896539219365"
+    },
+    {
+      "distanceKm": 25.109719981190317,
+      "ratePaisa": 7661945473383139,
+      "expectedPaisa": "192389305347799305"
+    },
+    {
+      "distanceKm": 17.97600352590516,
+      "ratePaisa": 6935449785557044,
+      "expectedPaisa": "124671669798911608"
+    },
+    {
+      "distanceKm": 10.919212122647536,
+      "ratePaisa": 7765721120929972,
+      "expectedPaisa": "84795556204758566"
+    },
+    {
+      "distanceKm": 59.49100140044901,
+      "ratePaisa": 2472034221049223,
+      "expectedPaisa": "147063791306397198"
+    },
+    {
+      "distanceKm": 2.765487352351903,
+      "ratePaisa": 4559927069853234,
+      "expectedPaisa": "12610420639326191"
+    },
+    {
+      "distanceKm": 21.146502103582655,
+      "ratePaisa": 5472956151727880,
+      "expectedPaisa": "115733878775329248"
+    },
+    {
+      "distanceKm": 0.7069680379743537,
+      "ratePaisa": 8511633785734385,
+      "expectedPaisa": "6017453037456859"
+    },
+    {
+      "distanceKm": 89.69979018270612,
+      "ratePaisa": 7629119195311911,
+      "expectedPaisa": "684330391098334200"
+    },
+    {
+      "distanceKm": 99.56594767598142,
+      "ratePaisa": 6745667546296254,
+      "expectedPaisa": "671638781954098797"
+    },
+    {
+      "distanceKm": 48.85980484373286,
+      "ratePaisa": 3770296861027675,
+      "expectedPaisa": "184215968832750793"
+    },
+    {
+      "distanceKm": 84.43537771902068,
+      "ratePaisa": 512388525366475,
+      "expectedPaisa": "43263718678210325"
+    },
+    {
+      "distanceKm": 30.577437700000797,
+      "ratePaisa": 5692675966625444,
+      "expectedPaisa": "174067444715781328"
+    },
+    {
+      "distanceKm": 60.71916308499657,
+      "ratePaisa": 928473195522730,
+      "expectedPaisa": "56376115378992553"
+    },
+    {
+      "distanceKm": 30.429409911876338,
+      "ratePaisa": 6229225875511858,
+      "expectedPaisa": "189551667599617090"
+    },
+    {
+      "distanceKm": 51.95977295883205,
+      "ratePaisa": 8994445185937028,
+      "expectedPaisa": "467349329751947876"
+    },
+    {
+      "distanceKm": 32.00557879666973,
+      "ratePaisa": 8208049785217694,
+      "expectedPaisa": "262703384167772966"
+    },
+    {
+      "distanceKm": 8.582779629527126,
+      "ratePaisa": 7703100507530215,
+      "expectedPaisa": "66114014120230394"
+    },
+    {
+      "distanceKm": 33.88725865740842,
+      "ratePaisa": 1930874289993456,
+      "expectedPaisa": "65432036499948072"
+    },
+    {
+      "distanceKm": 38.63775127418232,
+      "ratePaisa": 6272284710736285,
+      "expectedPaisa": "242346976574285187"
+    },
+    {
+      "distanceKm": 59.909822576956294,
+      "ratePaisa": 6274575492185611,
+      "expectedPaisa": "375908704482558171"
+    },
+    {
+      "distanceKm": 90.05560858546738,
+      "ratePaisa": 4982560642788911,
+      "expectedPaisa": "448707531000352933"
+    },
+    {
+      "distanceKm": 87.46950180676778,
+      "ratePaisa": 4767906975081471,
+      "expectedPaisa": "417046447771389432"
+    },
+    {
+      "distanceKm": 68.98408140872509,
+      "ratePaisa": 5619810152713891,
+      "expectedPaisa": "387677441076394832"
+    },
+    {
+      "distanceKm": 57.58565769156102,
+      "ratePaisa": 4638412961750043,
+      "expectedPaisa": "267106061047437684"
+    },
+    {
+      "distanceKm": 94.68810916630562,
+      "ratePaisa": 4072504926244076,
+      "expectedPaisa": "385617791036516496"
+    },
+    {
+      "distanceKm": 25.292426907813116,
+      "ratePaisa": 4651174762762164,
+      "expectedPaisa": "117639497722627043"
+    },
+    {
+      "distanceKm": 85.42487055012676,
+      "ratePaisa": 6208228141829888,
+      "expectedPaisa": "530337085361472147"
+    },
+    {
+      "distanceKm": 29.504447737199378,
+      "ratePaisa": 4154844635456843,
+      "expectedPaisa": "122586396403019625"
+    },
+    {
+      "distanceKm": 63.18693483209348,
+      "ratePaisa": 5459638676863833,
+      "expectedPaisa": "344977833281772076"
+    },
+    {
+      "distanceKm": 24.25374166600299,
+      "ratePaisa": 1785871902267174,
+      "expectedPaisa": "43314075766161380"
+    },
+    {
+      "distanceKm": 70.7292977212015,
+      "ratePaisa": 4195540781721970,
+      "expectedPaisa": "296747653051855712"
+    },
+    {
+      "distanceKm": 40.09592903217357,
+      "ratePaisa": 8163072583350699,
+      "expectedPaisa": "327305978986511414"
+    },
+    {
+      "distanceKm": 47.91629301773843,
+      "ratePaisa": 3816082580379307,
+      "expectedPaisa": "182852531101342249"
+    },
+    {
+      "distanceKm": 16.312136695094747,
+      "ratePaisa": 4034986460966872,
+      "expectedPaisa": "65819250714148200"
+    }
+  ]
+}

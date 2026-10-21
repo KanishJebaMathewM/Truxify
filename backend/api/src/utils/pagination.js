@@ -22,8 +22,10 @@ export function parsePage(raw) {
 
 export function parseLimit(raw, max = DEFAULTS.maxLimit) {
   const l = normalizeNumber(raw);
-  if (!Number.isFinite(l) || l < 1) return DEFAULTS.limit;
-  const maxLimit = Number.isFinite(max) ? max : DEFAULTS.maxLimit;
+  const maxLimit = Number.isFinite(max)
+    ? Math.max(1, Math.floor(max))
+    : DEFAULTS.maxLimit;
+  if (!Number.isFinite(l) || l < 1) return Math.min(DEFAULTS.limit, maxLimit);
   return Math.min(Math.floor(l), maxLimit);
 }
 
@@ -38,7 +40,7 @@ export function buildPagination(params = {}) {
 
   const limit = Number.isFinite(rawLimit)
     ? Math.min(Math.max(1, Math.floor(rawLimit)), maxLimit)
-    : DEFAULTS.limit;
+    : Math.min(DEFAULTS.limit, maxLimit);
 
   let page;
   let offset;
@@ -63,8 +65,8 @@ export function calculatePagination({ total = 0, page = 1, limit = 20, offset = 
   const totalPages = safeTotal === 0 ? 0 : Math.ceil(safeTotal / pagination.limit);
   const isFirstPage = pagination.page === 1;
   const isLastPage = totalPages === 0 || pagination.page >= totalPages;
-  const hasNextPage = pagination.page < totalPages;
-  const hasPrevPage = pagination.page > 1;
+  const hasNextPage = safeTotal > 0 && pagination.page < totalPages;
+  const hasPrevPage = safeTotal > 0 && pagination.page > 1;
   const isOverflow = safeTotal > 0 && pagination.offset >= safeTotal;
   const isEmpty = safeTotal === 0;
 
@@ -87,6 +89,18 @@ export function getPaginationMeta(total, page, limit) {
   return calculatePagination({ total, page, limit });
 }
 
+export function formatPaginationMeta(total = 0, page = 1, limit = 20) {
+  const meta = calculatePagination({ total, page, limit });
+  return {
+    page: meta.page,
+    limit: meta.limit,
+    total: meta.total,
+    totalPages: meta.totalPages,
+    hasNextPage: meta.hasNextPage,
+    hasPreviousPage: meta.hasPreviousPage,
+  };
+}
+
 export function paginateArray(items = [], params = {}) {
   if (!Array.isArray(items)) {
     return { data: [], pagination: calculatePagination({ total: 0, ...params }) };
@@ -105,5 +119,6 @@ export default {
   parseLimit,
   calculatePagination,
   getPaginationMeta,
+  formatPaginationMeta,
   paginateArray,
 };

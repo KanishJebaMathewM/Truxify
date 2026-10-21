@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:driver/services/driver_insights_service.dart';
+import 'package:truxify_driver/services/driver_insights_service.dart';
 
 void main() {
   group('ProfitPrediction.fromJson', () {

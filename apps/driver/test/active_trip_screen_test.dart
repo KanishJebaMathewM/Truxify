@@ -19,6 +19,15 @@ Widget _buildTestApp(Trip trip, {List<TripStop>? stops, MarketplaceRepository? r
   );
 }
 
+
+/// The screen's LiveDot animates forever, so pumpAndSettle never settles.
+/// Bounded pumps: flush microtasks/async work, then let transitions play.
+Future<void> boundedSettle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pump();
+}
+
 void main() {
   late MockMarketplaceRepository mockRepo;
 
@@ -50,7 +59,7 @@ void main() {
 
   testWidgets('ActiveTripScreen renders trip summary and stop cards', (tester) async {
     await tester.pumpWidget(_buildTestApp(testTrip, repo: mockRepo));
-    await tester.pumpAndSettle();
+    await boundedSettle(tester);
 
     expect(find.text('Active Trip'), findsOneWidget);
     expect(find.text('Surat → Bhiwandi → Chakan'), findsOneWidget);
@@ -62,17 +71,17 @@ void main() {
 
   testWidgets('enters OTP and confirms stop delivery', (tester) async {
     await tester.pumpWidget(_buildTestApp(testTrip, repo: mockRepo));
-    await tester.pumpAndSettle();
+    await boundedSettle(tester);
 
     // Enter 6-digit OTP in first stop's OTP field
     final otpField = find.byType(TextField).first;
     await tester.enterText(otpField, '123456');
-    await tester.pumpAndSettle();
+    await boundedSettle(tester);
 
     // Tap Confirm button
     final confirmBtn = find.text('Confirm').first;
     await tester.tap(confirmBtn);
-    await tester.pumpAndSettle();
+    await boundedSettle(tester);
 
     // Verify confirmTripStop was called
     verify(() => mockRepo.confirmTripStop(
@@ -114,7 +123,7 @@ void main() {
     ];
 
     await tester.pumpWidget(_buildTestApp(testTrip, stops: completedStops, repo: mockRepo));
-    await tester.pumpAndSettle();
+    await boundedSettle(tester);
 
     expect(find.text('Trip Complete ✓'), findsOneWidget);
     expect(find.textContaining('Smart contract payment of ₹28,500 released'), findsOneWidget);

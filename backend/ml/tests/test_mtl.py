@@ -5,7 +5,7 @@ from mtl.model import MultiTaskModel, MultiTaskTrainer, MTLLoss
 
 class TestMTLModel:
     def test_mtl_init(self):
-        model = MultiTaskModel(input_dim=12)
+        model = MultiTaskModel(input_dim=12, tasks={"eta": {"output_dim": 1, "type": "regression"}})
         assert model is not None
         assert hasattr(model, 'forward')
 

@@ -14,6 +14,11 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import twilio from 'twilio';
+
+const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
 
 /**
  * OTP configuration constants
@@ -87,7 +92,9 @@ export function verifyOtpHash(providedOtp, storedHash, storedSalt) {
 
 /**
  * Checks rate limiting for OTP requests per phone number.
- * Prevents abuse by limiting OTPs to MAX_OTPS_PER_WINDOW per RATE_LIMIT_WINDOW_MINUTES.
+ * Prevents abuse by limiting OTP requests to MAX_OTPS_PER_WINDOW per RATE_LIMIT_WINDOW_MINUTES.
+ * Counts all OTP creation attempts within the window regardless of active/verified status,
+ * ensuring callers cannot bypass rate limits by requesting new OTPs.
  * 
  * @param {string} phone - Phone number in E.164 format
  * @returns {Promise<{allowed: boolean, retryAfter?: number, reason?: string}>}
@@ -168,6 +175,19 @@ export async function requestOtp(phone, options = {}) {
     };
   }
 
+  // Supersede any previously active OTPs for this phone before creating a new one.
+  // Must be called before the insert so the new OTP itself is not caught by the filter.
+  try {
+    await invalidatePreviousOtps(phone);
+  } catch (invalErr) {
+    logger.error({ err: invalErr, phone }, 'Failed to invalidate prior OTPs before generating new one');
+    return {
+      success: false,
+      error: 'DATABASE_ERROR',
+      message: 'Failed to invalidate previous OTP'
+    };
+  }
+
   // Generate OTP and salt
   const plaintextOtp = generateOtp();
   const salt = generateSalt();
@@ -186,7 +206,8 @@ export async function requestOtp(phone, options = {}) {
   }
 
   try {
-    // Insert OTP record into phone_otps table
+    // Insert OTP record into phone_otps table.
+    // is_active:true marks this as the current valid OTP for the phone.
     const { data, error } = await supabaseAdmin
       .from('phone_otps')
       .insert([{
@@ -194,6 +215,7 @@ export async function requestOtp(phone, options = {}) {
         otp_hash: otpHash,
         otp_salt: salt,
         expires_at: expiresAt.toISOString(),
+        is_active: true,
         verified: false,
         verified_at: null,
         channel,
@@ -261,41 +283,79 @@ async function deliverOtp(phone, otp, channel) {
     }, `[DEV] OTP Delivery - Channel: ${channel.toUpperCase()}`);
   }
 
-  // TODO: Integrate with actual SMS/Voice provider
-  // Example with Twilio:
-  // await twilioClient.messages.create({
-  //   body: `Your Truxify verification code is: ${otp}`,
-  //   to: phone,
-  //   from: process.env.TWILIO_PHONE_NUMBER
-  // });
+  if (!twilioClient) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('Twilio credentials not configured in production');
+    }
+    return;
+  }
+
+  try {
+    if (channel === 'sms') {
+      await twilioClient.messages.create({
+        body: `Your Truxify verification code is: ${otp}`,
+        to: phone,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+    } else if (channel === 'voice') {
+      await twilioClient.calls.create({
+        twiml: `<Response><Say>Your Truxify verification code is ${otp.split('').join(' ')}. I repeat, ${otp.split('').join(' ')}.</Say></Response>`,
+        to: phone,
+        from: process.env.TWILIO_PHONE_NUMBER
+      });
+    }
+    logger.info({ phone: phone.replace(/(\+\d{2})\d+(\d{4})/, '$1***$2'), channel }, 'OTP successfully delivered via Twilio');
+  } catch (error) {
+    logger.error({ err: error, phone: phone.replace(/(\+\d{2})\d+(\d{4})/, '$1***$2'), channel }, 'Failed to deliver OTP via Twilio');
+    throw error;
+  }
 }
 
 /**
- * Invalidates all unverified OTPs for a phone number.
- * Called when a new OTP is requested to prevent multiple valid OTPs.
- * 
- * @param {string} phone - Phone number
+ * Deactivates all currently active OTPs for a phone number without touching
+ * the `verified` column.
+ *
+ * Previously this function set `verified = true` to "cancel" superseded OTPs,
+ * which corrupted the audit trail by making them indistinguishable from OTPs
+ * the user actually verified (fixes #16055).
+ *
+ * The `verified` column is now reserved exclusively for OTPs that the user
+ * successfully entered. Superseded OTPs are identified by:
+ *   - `is_active = false`              — the OTP is no longer usable
+ *   - `invalidated_reason = 'superseded'` — explains why it was deactivated
+ *   - `invalidated_at`                 — timestamp when it was superseded
+ *   - `verified` remains `false`       — the user never entered this OTP
+ *
+ * @param {string} phone - Phone number in E.164 format
  */
 export async function invalidatePreviousOtps(phone) {
   if (!supabaseAdmin) return;
 
   try {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('phone_otps')
-      .update({ 
-        verified: true, 
-        verified_at: new Date().toISOString(),
-        invalidated_reason: 'superseded'
+      .update({
+        is_active: false,
+        invalidated_reason: 'superseded',
+        invalidated_at: new Date().toISOString(),
       })
       .eq('phone', phone)
+      .eq('is_active', true)
       .eq('verified', false);
+
+    if (error) {
+      logger.error({ err: error, phone }, 'Failed to invalidate previous OTPs');
+      throw error;
+    }
   } catch (err) {
     logger.error({ err, phone }, 'Failed to invalidate previous OTPs');
+    throw err;
   }
 }
 
 /**
- * Marks an OTP as verified after successful verification.
+ * Marks an OTP as verified after successful verification and deactivates it
+ * so it cannot be reused.
  * 
  * @param {string} otpId - The OTP record ID
  */
@@ -307,7 +367,9 @@ export async function markOtpVerified(otpId) {
       .from('phone_otps')
       .update({ 
         verified: true, 
-        verified_at: new Date().toISOString()
+        verified_at: new Date().toISOString(),
+        // Deactivate after successful use — a verified OTP must not be reusable.
+        is_active: false,
       })
       .eq('id', otpId);
   } catch (err) {
@@ -326,19 +388,17 @@ export async function incrementOtpAttempts(otpId) {
   if (!supabaseAdmin || !otpId) return 0;
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from('phone_otps')
-      .update({ attempts: supabaseAdmin.rpc ? 'attempts + 1' : 1 })
-      .eq('id', otpId)
-      .select('attempts')
-      .single();
+    const { data, error } = await supabaseAdmin.rpc(
+      'increment_otp_attempts',
+      { otp_id: otpId }
+    );
 
     if (error) {
       logger.error({ err: error, otpId }, 'Failed to increment OTP attempts');
       return 0;
     }
 
-    return data?.attempts || 0;
+    return data ?? 0;
   } catch (err) {
     logger.error({ err, otpId }, 'Error incrementing OTP attempts');
     return 0;

@@ -123,18 +123,27 @@ export class FlashbotsRelay {
       `[FlashbotsRelay] Submitting private transaction bundle to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`
     );
 
+    // Flashbots requires X-Flashbots-Signature over the EXACT raw JSON bytes
+    // — sign the serialized payload, never a re-serialized copy (the axios-era
+    // header was dropped in the fetch rewrite; unsigned bundles are rejected).
+    const rawBody = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'eth_sendBundle',
+      params: [{
+        txs: bundle.signedBundle,
+        blockNumber: blockHex,
+      }],
+    });
+    const signature = `${this.wallet.address}:${await this.wallet.signMessage(rawBody)}`;
+
     const response = await fetch(this.flashbotsRelayUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_sendBundle',
-        params: [{
-          txs: bundle.signedBundle,
-          blockNumber: blockHex,
-        }],
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Flashbots-Signature': signature,
+      },
+      body: rawBody,
     });
 
     const payload = await response.json().catch(() => ({}));

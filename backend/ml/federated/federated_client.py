@@ -8,6 +8,10 @@ from typing import Dict, Any, Optional, List
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 import os
 import time
+from threading import RLock
+
+from .client_round_protocol import MAX_MODEL_ENVELOPE_BYTES, admit_round_model, round_owned
+from .local_training_transition import fit_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,12 @@ class FederatedClient:
     """Federated Learning Client for Driver Device"""
     
     def __init__(self, client_id: str, redis_url: Any = "redis://localhost:6379"):
+        self._round_lock = RLock()
+        self._accepted_round = None
+        self._round_model = None
+        self._trained_round = None
+        self._published_round = None
+        self._training_result = None
         self.client_id = client_id
         if isinstance(redis_url, str):
             self.redis = redis.Redis.from_url(redis_url)
@@ -64,6 +74,8 @@ class FederatedClient:
             loss='binary_crossentropy',
             metrics=['accuracy']
         )
+        # Register native Adam moments before any accepted round can train.
+        model.optimizer.build(model.trainable_variables)
         return model
 
     def _register_client(self):
@@ -167,11 +179,14 @@ class FederatedClient:
                 pass
             self.pubsub = None
 
+    @round_owned
     def receive_weights(self):
         """Receive model weights from server and synchronize active round"""
         try:
             encrypted = self.redis.get(f'federated:weights:{self.client_id}')
             if not encrypted:
+                return False
+            if not isinstance(encrypted, bytes) or len(encrypted) > MAX_MODEL_ENVELOPE_BYTES:
                 return False
 
             if not self.cipher:
@@ -196,26 +211,24 @@ class FederatedClient:
 
             payload = json.loads(decrypted)
 
-            if isinstance(payload, dict):
-                weights = payload.get('weights', [])
-                if 'round' in payload:
-                    self.training_round = payload['round']
-            elif isinstance(payload, list):
-                weights = payload
-                saved_round = self.redis.get('federated:round')
-                if saved_round is not None:
-                    try:
-                        self.training_round = int(saved_round)
-                    except (ValueError, TypeError):
-                        pass
-            else:
-                return False
+            round_id, weights_np = admit_round_model(
+                payload, self.model.get_weights(),
+                self.redis.get('federated:round') if isinstance(payload, list) else None,
+            )
+            if self._accepted_round is not None:
+                if round_id < self._accepted_round:
+                    return False
+                if round_id == self._accepted_round:
+                    # Duplicate notices must not replace a trained local model.
+                    return all(np.array_equal(a, b) for a, b in zip(weights_np, self._round_model))
 
-            # Convert to numpy
-            weights_np = [np.array(w) for w in weights]
-
-            # Update local model
             self.model.set_weights(weights_np)
+            self.training_round = round_id
+            self._accepted_round = round_id
+            self._round_model = [w.copy() for w in weights_np]
+            self._trained_round = None
+            self._published_round = None
+            self._training_result = None
 
             logger.info(f"📥 Received weights for round {self.training_round}")
             return True
@@ -224,43 +237,36 @@ class FederatedClient:
 
         return False
     
+    @round_owned
     def train_local(self, data: np.ndarray, labels: np.ndarray, epochs: int = 5):
         """Train local model on driver data"""
         try:
-            self.local_data = (data, labels)
-            
-            # Train locally
-            history = self.model.fit(
-                data, labels,
-                epochs=epochs,
-                batch_size=32,
-                verbose=0
-            )
-
-            hist = getattr(history, 'history', {}) if history is not None else {}
-            loss = hist.get('loss', [0.0])[-1] if 'loss' in hist and len(hist['loss']) > 0 else 0.0
-            acc = hist.get('accuracy', [1.0])[-1] if 'accuracy' in hist and len(hist['accuracy']) > 0 else 1.0
-
-            loss_val = float(loss) if isinstance(loss, (int, float, np.number)) else 0.0
-            acc_val = float(acc) if isinstance(acc, (int, float, np.number)) else 1.0
-
-            logger.info(f"📊 Local training completed: loss={loss_val:.4f}")
-
-            return {
-                'success': True,
-                'loss': loss_val,
-                'accuracy': acc_val
-            }
+            if self._accepted_round is None or self.training_round != self._accepted_round:
+                return {'success': False, 'error': 'No accepted server model round'}
+            if self._trained_round == self.training_round:
+                return dict(self._training_result, duplicate=True)
+            metrics, owned = fit_candidate(self.model, data, labels, epochs)
+            self.local_data = owned
+            self._training_result = {'success': True, **metrics}
+            self._trained_round = self.training_round
+            return dict(self._training_result)
             
         except Exception as e:
             logger.error(f"Local training failed: {e}")
             return {'success': False, 'error': str(e)}
     
+    @round_owned
     def send_update(self):
         """Send model update to server"""
         try:
+            if self._accepted_round is None or self._trained_round != self.training_round:
+                return {'success': False, 'error': 'No trained accepted round to publish'}
+            if self._published_round == self.training_round:
+                return {'success': True, 'duplicate': True}
             # Get local model weights
             weights = self.model.get_weights()
+            if any(not np.isfinite(w).all() for w in weights):
+                return {'success': False, 'error': 'Trained model is not finite'}
             weights_serialized = [w.tolist() for w in weights]
 
             # Envelope carries the round this update was computed against so the
@@ -269,7 +275,7 @@ class FederatedClient:
                 'round': self.training_round,
                 'weights': weights_serialized,
             }
-            weights_json = json.dumps(payload)
+            weights_json = json.dumps(payload, allow_nan=False)
 
             if not self.cipher:
                 if not self.refresh_encryption_key() or not self.cipher:
@@ -296,6 +302,7 @@ class FederatedClient:
                 })
             )
             
+            self._published_round = self.training_round
             logger.info(f"📤 Sent update to server")
             return {'success': True}
             
@@ -303,12 +310,14 @@ class FederatedClient:
             logger.error(f"Failed to send update: {e}")
             return {'success': False, 'error': str(e)}
     
+    @round_owned
     def participate_in_round(self, data: np.ndarray, labels: np.ndarray, epochs: int = 5):
         """Full participation in federated learning round"""
         try:
             # Receive global weights
-            self.receive_weights()
-            
+            if not self.receive_weights():
+                return {'success': False, 'error': 'No valid server model received'}
+
             # Train locally
             training_result = self.train_local(data, labels, epochs)
             
@@ -316,10 +325,8 @@ class FederatedClient:
                 # Send update
                 update_result = self.send_update()
                 participated_round = self.training_round
-                self.training_round += 1
-
                 return {
-                    'success': True,
+                    'success': bool(update_result.get('success')),
                     'training': training_result,
                     'update': update_result,
                     'round': participated_round

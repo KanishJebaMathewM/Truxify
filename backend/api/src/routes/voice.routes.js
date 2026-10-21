@@ -21,13 +21,73 @@ const upload = multer({
   }
 });
 /**
- * @swagger
+ * @openapi
+ * components:
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *   schemas:
+ *     VoiceAssistantError:
+ *       type: object
+ *       required: [error]
+ *       properties:
+ *         error:
+ *           type: string
+ *           example: Audio file is required
  * /api/v1/voice/assistant:
  *   post:
- *     summary: Interact with the Voice AI Assistant
- *     description: Accepts an audio file, transcribes it, queries the LLM, and returns TTS audio.
  *     tags: [Voice]
+ *     summary: Interact with the Voice AI Assistant
+ *     description: Accepts an audio file, transcribes it, queries the LLM, and returns synthesized TTS audio.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [audio]
+ *             properties:
+ *               audio:
+ *                 type: string
+ *                 format: binary
+ *                 description: Audio recording to transcribe. Only audio MIME types are accepted and uploads are limited to 10 MiB.
+ *               language:
+ *                 type: string
+ *                 enum: [en, hi, bn, ta, te, mr, gu, kn, ml]
+ *                 default: en
+ *                 description: Language used for transcription and assistant processing.
+ *     responses:
+ *       200:
+ *         description: Synthesized assistant response audio stream.
+ *         content:
+ *           audio/mpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: Audio file is missing or the requested language is unsupported.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/VoiceAssistantError'
+ *       401:
+ *         description: Authentication is required.
+ *       413:
+ *         description: Uploaded audio exceeds the 10 MiB limit.
+ *       429:
+ *         description: Rate limit exceeded.
+ *       500:
+ *         description: Voice query processing failed.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/VoiceAssistantError'
  */
+
 router.post('/assistant', authenticate, userLimiter, upload.single('audio'), async (req, res) => {
   try {
     if (!req.file) {

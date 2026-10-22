@@ -135,7 +135,17 @@ function parseOptionalCoordinate(value, field, min, max) {
 
   return { value: parsed };
 }
+// backend/api/src/routes/tripRoutes.js (Excerpt Example)
 
+// BEFORE:
+// return res.status(500).json({ success: false, message: err.message });
+
+// AFTER:
+// FIX: Normalize error responses to use { error } key per issue #2281
+return res.status(500).json({
+  success: false,
+  error: err.message,
+});
 // ============================================================================
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
 // ============================================================================

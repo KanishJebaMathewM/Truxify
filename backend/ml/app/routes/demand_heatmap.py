@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from typing import List
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ import random
 from app.models.demand_forecast import predict_demand
 
 @router.get("/demand-heatmap", response_model=DemandHeatmapResponse)
-async def get_demand_heatmap(hours: int = 48):
+async def get_demand_heatmap(hours: int = Query(48, ge=1, le=168)):
     """
     Returns demand heatmap data for the next N hours using ML model inference (Model #9).
     """

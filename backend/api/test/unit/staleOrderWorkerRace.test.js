@@ -5,6 +5,7 @@ const loggerWarnMock = vi.fn();
 const redisSetMock = vi.fn();
 const redisDelMock = vi.fn();
 const redisExpireMock = vi.fn();
+const redisEvalMock = vi.fn();
 
 vi.mock('node-cron', () => ({
   default: {
@@ -52,6 +53,7 @@ vi.mock('../../src/config/db.js', () => ({
     set: redisSetMock,
     del: redisDelMock,
     expire: redisExpireMock,
+    eval: redisEvalMock,
   },
 }));
 
@@ -74,9 +76,10 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
   beforeEach(async () => {
     sendPushNotificationMock.mockReset();
     loggerWarnMock.mockClear();
-    redisSetMock.mockReset().mockResolvedValue(true);
+    redisSetMock.mockReset().mockResolvedValue('OK');
     redisDelMock.mockReset().mockResolvedValue(true);
     redisExpireMock.mockReset().mockResolvedValue(true);
+    redisEvalMock.mockReset().mockResolvedValue(1);
     vi.resetModules();
     orderRepository = {
       findStalePendingOrders: vi.fn(),

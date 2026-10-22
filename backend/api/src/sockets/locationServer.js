@@ -50,7 +50,25 @@ function startHeartbeatSweep() {
 
   heartbeatTimer = setInterval(() => {
     const now = Date.now();
+// backend/api/src/server.js (Excerpt)
 
+const INSECURE_SECRETS = ['secret', 'changeme', 'your_jwt_secret', 'jwt_secret', '123456'];
+
+function validateJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  
+  if (!secret || INSECURE_SECRETS.includes(secret.toLowerCase())) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('FATAL: JWT_SECRET is set to a default or insecure value. Refusing to start in production.');
+      process.exit(1);
+    } else {
+      console.warn('⚠️ WARNING: JWT_SECRET is using an insecure default value. Please generate a secure secret before deploying.');
+    }
+  }
+}
+
+// Call during server bootstrap before listening
+validateJwtSecret();
     for (const [socketId, entry] of activeDrivers) {
       const { driverId, socket, lastPong } = entry;
       const age = now - lastPong;

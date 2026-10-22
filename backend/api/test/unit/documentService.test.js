@@ -41,10 +41,10 @@ describe('documentService - Driver Credentials & Verification State Machine', ()
 
     describe('processDocumentUpload', () => {
         const validFile = {
-            buffer: Buffer.from('Commercial Driver License Mock'),
+            buffer: Buffer.from('%PDF-1.7\nCommercial Driver License Mock\n', 'ascii'),
             originalname: 'license.pdf',
             mimetype: 'application/pdf',
-            size: 1024
+            size: Buffer.byteLength('%PDF-1.7\nCommercial Driver License Mock\n', 'ascii')
         };
 
         it('should successfully upload document and register DB row', async () => {

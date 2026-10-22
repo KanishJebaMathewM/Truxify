@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
@@ -23,6 +24,7 @@ class VoiceRecordingService {
     try {
       return await _recorder.hasPermission();
     } catch (e) {
+      debugPrint('[VoiceRecording] permission check failed: $e');
       return false;
     }
   }
@@ -60,6 +62,7 @@ class VoiceRecordingService {
 
       return true;
     } catch (e) {
+      debugPrint('[VoiceRecording] start failed: $e');
       return false;
     }
   }
@@ -86,6 +89,7 @@ class VoiceRecordingService {
 
       return audioBytes;
     } catch (e) {
+      debugPrint('[VoiceRecording] stop failed: $e');
       _isRecording = false;
       return null;
     }

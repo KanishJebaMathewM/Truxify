@@ -162,7 +162,62 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js
 
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+// Imported order service containing en-route matching logic
+import { matchEnRouteLoads } from '../services/orderService.js';
+
+const router = express.Router();
+
+/**
+ * GET /api/orders/load-offers/en-route
+ * Retrieves en-route load suggestions for drivers based on current coordinates and max detour distance.
+ * Registered per issue #13304.
+ */
+router.get('/orders/load-offers/en-route', authenticateToken, async (req, res) => {
+  try {
+    const { currentLat, currentLng, maxDetourKm = 50 } = req.query;
+
+    if (!currentLat || !currentLng) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing currentLat or currentLng coordinate query parameters'
+      });
+    }
+
+    logger.info('Fetching en-route load offers for driver', {
+      driverId: req.user?.id,
+      currentLat,
+      currentLng,
+      maxDetourKm
+    });
+
+    const enRouteLoads = await matchEnRouteLoads({
+      lat: parseFloat(currentLat),
+      lng: parseFloat(currentLng),
+      maxDetourKm: parseFloat(maxDetourKm)
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: enRouteLoads
+    });
+  } catch (err) {
+    logger.error('Failed to retrieve en-route load offers', {
+      error: err.message,
+      stack: err.stack
+    });
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching en-route loads'
+    });
+  }
+});
+
+export default router;
 import {
   bidLimiter,
   userLimiter,

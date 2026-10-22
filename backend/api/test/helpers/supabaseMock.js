@@ -1,441 +1,1033 @@
+
 /**
  * In-memory Supabase query builder mock.
  *
- * The order + driver routes use a subset of the supabase-js surface:
- *
- *   supabase.from('orders').insert({...}).select('...').single()
- *   supabase.from('order_timeline').insert([...])
- *   supabase.from('load_offers').insert({...})
- *   supabase.from('orders').select('...').eq(...).maybeSingle()
- *   supabase.from('orders').select('...').order(...)
- *   supabase.rpc('accept_bid_tx', {...})
- *
- * This helper returns a fresh, chainable builder that records every call,
- * lets the test pre-load responses or assertions, and returns the recorded
- * payload on the final await.
- *
- * Tests use it via `vi.mock('../../src/config/db.js', () => ...)` to
- * swap the real supabase client out without touching the route code.
- *
- * No real Supabase / Postgres needed.
+ * Supports:
+ * - insert, select, update, upsert, delete
+ * - eq, neq, gt, gte, lt, lte, in, like, ilike, is, not, or
+ * - order, limit, range, single, maybeSingle
+ * - RPC simulations for orders, device tokens, and maintenance photos
+ * - Storage upload, signed URLs, and removal
+ * - Programmed errors and responses for Vitest
  */
 
+function cloneValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(cloneValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        cloneValue(item),
+      ])
+    );
+  }
+
+  return value;
+}
+
 class SupabaseQueryBuilder {
-  /**
-   * @param {object} options
-   * @param {string} options.table - logical table name (orders, load_offers, ...)
-   * @param {object} options.store - shared in-memory row store keyed by table
-   * @param {object} options.programmed - per-test programmed responses
-   *   (e.g. { nextInsertError: { message: 'duplicate key' } })
-   * @param {Array} options.programmed.calls - shared log of every awaited call
-   */
   constructor({ table, store, programmed, calls }) {
     this._table = table;
     this._store = store;
     this._programmed = programmed;
     this._calls = calls;
-    this._mode = null;          // 'insert' | 'select' | 'rpc'
-    this._payload = null;       // for insert / rpc
+
+    this._mode = null;
+    this._payload = null;
     this._select = '*';
-    this._filters = [];         // [{col, op, val}]
-    this._order = null;         // {col, ascending} — last .order() call
-    this._orders = [];          // [{col, ascending}] — every .order() call
+    this._filters = [];
+    this._order = null;
+    this._orders = [];
     this._limit = null;
+    this._range = null;
     this._single = false;
     this._maybeSingle = false;
+    this._options = null;
+    this._executed = null;
   }
 
-  // ── Mutating verbs ──────────────────────────────────────────────
+  // ---------------------------------------------------------------
+  // Query methods
+  // ---------------------------------------------------------------
+
   insert(payload) {
     this._mode = 'insert';
     this._payload = payload;
     return this;
   }
+
   update(payload) {
     this._mode = 'update';
     this._payload = payload;
     return this;
   }
-  upsert(payload, options) {
+
+  upsert(payload, options = {}) {
     this._mode = 'upsert';
     this._payload = payload;
     this._options = options;
     return this;
   }
+
   delete() {
     this._mode = 'delete';
     return this;
   }
+
   select(columns = '*') {
-    this._mode = this._mode ?? 'select';
+    if (this._mode === null) {
+      this._mode = 'select';
+    }
+
     this._select = columns;
     return this;
   }
 
-  // ── Filter verbs (chainable, no-op except they record) ─────────
-  eq(col, val)  { this._filters.push({ col, op: 'eq', val }); return this; }
-  neq(col, val) { this._filters.push({ col, op: 'neq', val }); return this; }
-  gt(col, val)  { this._filters.push({ col, op: 'gt', val }); return this; }
-  gte(col, val) { this._filters.push({ col, op: 'gte', val }); return this; }
-  lt(col, val)  { this._filters.push({ col, op: 'lt', val }); return this; }
-  lte(col, val) { this._filters.push({ col, op: 'lte', val }); return this; }
-  in(col, vals) { this._filters.push({ col, op: 'in', val: vals }); return this; }
-  like(col, p)  { this._filters.push({ col, op: 'like', val: p }); return this; }
-  ilike(col, p) { this._filters.push({ col, op: 'ilike', val: p }); return this; }
-  is(col, val)  { this._filters.push({ col, op: 'is', val }); return this; }
-  not(col, op, val) { this._filters.push({ col, op: `not:${op}`, val }); return this; }
-  or(spec) { this._filters.push({ col: null, op: 'or', val: spec }); return this; }
-  order(col, opts = {}) {
-    const entry = { col, ascending: opts.ascending !== false };
-    this._orders.push(entry);
-    this._order = entry;
+  // ---------------------------------------------------------------
+  // Filters
+  // ---------------------------------------------------------------
+
+  eq(col, val) {
+    this._filters.push({ col, op: 'eq', val });
     return this;
   }
-  limit(n) { this._limit = n; return this; }
-  range(from, to) { this._range = [from, to]; return this; }
 
-  // ── Single-row terminators ────────────────────────────────────
-  single()    { this._single = true;     return this._exec(); }
-  maybeSingle() { this._maybeSingle = true; return this._exec(); }
+  neq(col, val) {
+    this._filters.push({ col, op: 'neq', val });
+    return this;
+  }
 
-  // ── await → execute ───────────────────────────────────────────
+  gt(col, val) {
+    this._filters.push({ col, op: 'gt', val });
+    return this;
+  }
+
+  gte(col, val) {
+    this._filters.push({ col, op: 'gte', val });
+    return this;
+  }
+
+  lt(col, val) {
+    this._filters.push({ col, op: 'lt', val });
+    return this;
+  }
+
+  lte(col, val) {
+    this._filters.push({ col, op: 'lte', val });
+    return this;
+  }
+
+  in(col, vals) {
+    this._filters.push({ col, op: 'in', val: vals });
+    return this;
+  }
+
+  like(col, pattern) {
+    this._filters.push({ col, op: 'like', val: pattern });
+    return this;
+  }
+
+  ilike(col, pattern) {
+    this._filters.push({ col, op: 'ilike', val: pattern });
+    return this;
+  }
+
+  is(col, val) {
+    this._filters.push({ col, op: 'is', val });
+    return this;
+  }
+
+  not(col, op, val) {
+    this._filters.push({
+      col,
+      op: `not:${op}`,
+      val,
+    });
+    return this;
+  }
+
+  or(spec) {
+    this._filters.push({
+      col: null,
+      op: 'or',
+      val: spec,
+    });
+    return this;
+  }
+
+  order(col, opts = {}) {
+    const entry = {
+      col,
+      ascending: opts.ascending !== false,
+    };
+
+    this._orders.push(entry);
+    this._order = entry;
+
+    return this;
+  }
+
+  limit(n) {
+    this._limit = n;
+    return this;
+  }
+
+  range(from, to) {
+    this._range = [from, to];
+    return this;
+  }
+
+  // ---------------------------------------------------------------
+  // Single-row terminators
+  // ---------------------------------------------------------------
+
+  single() {
+    this._single = true;
+    return this._exec();
+  }
+
+  maybeSingle() {
+    this._maybeSingle = true;
+    return this._exec();
+  }
+
+  // ---------------------------------------------------------------
+  // Thenable support: await supabase.from(...).select(...)
+  // ---------------------------------------------------------------
+
   then(resolve, reject) {
     return this._exec().then(resolve, reject);
   }
-  catch(reject) { return this._exec().catch(reject); }
 
-  // Split a PostgREST-style OR spec on top-level commas, respecting and(...)
-  // groups so an inner comma does not break the group.
+  catch(reject) {
+    return this._exec().catch(reject);
+  }
+
+  finally(callback) {
+    return this._exec().finally(callback);
+  }
+
+  // ---------------------------------------------------------------
+  // PostgREST OR parsing
+  // ---------------------------------------------------------------
+
   _splitOr(spec) {
     const parts = [];
     let depth = 0;
     let current = '';
-    for (const ch of spec) {
-      if (ch === '(') depth++;
-      if (ch === ')') depth--;
-      if (ch === ',' && depth === 0) {
-        parts.push(current);
-        current = '';
-      } else {
+    let quoted = false;
+    let escaped = false;
+
+    for (const ch of String(spec)) {
+      if (escaped) {
         current += ch;
+        escaped = false;
+        continue;
       }
+
+      if (ch === '\\') {
+        current += ch;
+        escaped = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        quoted = !quoted;
+      }
+
+      if (!quoted) {
+        if (ch === '(') depth++;
+        if (ch === ')') depth--;
+
+        if (ch === ',' && depth === 0) {
+          parts.push(current.trim());
+          current = '';
+          continue;
+        }
+      }
+
+      current += ch;
     }
-    if (current) parts.push(current);
+
+    if (current.trim()) {
+      parts.push(current.trim());
+    }
+
     return parts;
   }
 
-  // Parse a single `col.op.value` condition into a { col, op, val } filter.
   _parseCond(cond) {
     let opPrefix = '';
-    let rest = cond;
+    let rest = String(cond).trim();
+
     if (rest.startsWith('not.')) {
       opPrefix = 'not:';
       rest = rest.substring(4);
     }
+
     const firstDot = rest.indexOf('.');
     const secondDot = rest.indexOf('.', firstDot + 1);
+
+    if (firstDot === -1 || secondDot === -1) {
+      return {
+        col: null,
+        op: 'invalid',
+        val: rest,
+      };
+    }
+
     const col = rest.slice(0, firstDot);
     const op = rest.slice(firstDot + 1, secondDot);
     let val = rest.slice(secondDot + 1);
+
     if (op === 'is') {
       if (val === 'null') val = null;
       if (val === 'true') val = true;
       if (val === 'false') val = false;
     }
-    return { col, op: opPrefix + op, val };
+
+    // Handle quoted values in simple PostgREST expressions.
+    if (
+      val.length >= 2 &&
+      val.startsWith('"') &&
+      val.endsWith('"')
+    ) {
+      val = val.slice(1, -1);
+    }
+
+    return {
+      col,
+      op: opPrefix + op,
+      val,
+    };
   }
 
-  _matches(row, f) {
-    const v = row[f.col];
-    let op = f.op;
+  // ---------------------------------------------------------------
+  // LIKE / ILIKE helper
+  // ---------------------------------------------------------------
+
+  _likeMatches(value, pattern, caseInsensitive = false) {
+    if (value == null || pattern == null) {
+      return false;
+    }
+
+    // Convert SQL wildcards to regular-expression wildcards.
+    // Escape all other regular-expression characters first.
+    const escaped = String(pattern)
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/%/g, '.*')
+      .replace(/_/g, '.');
+
+    const flags = caseInsensitive ? 'i' : '';
+
+    return new RegExp(`^${escaped}$`, flags)
+      .test(String(value));
+  }
+
+  // ---------------------------------------------------------------
+  // Filter evaluation
+  // ---------------------------------------------------------------
+
+  _matches(row, filter) {
+    if (!row) return false;
+
+    if (filter.op === 'or') {
+      const conditions = this._splitOr(String(filter.val));
+
+      return conditions.some(condition => {
+        const trimmed = condition.trim();
+
+        if (
+          trimmed.startsWith('and(') &&
+          trimmed.endsWith(')')
+        ) {
+          return this._splitOr(
+            trimmed.slice(4, -1)
+          ).every(part =>
+            this._matches(row, this._parseCond(part))
+          );
+        }
+
+        return this._matches(
+          row,
+          this._parseCond(trimmed)
+        );
+      });
+    }
+
+    if (filter.op === 'invalid' || filter.col == null) {
+      return false;
+    }
+
+    const value = row[filter.col];
+
+    let op = filter.op;
     let negate = false;
+
     if (op.startsWith('not:')) {
       negate = true;
       op = op.substring(4);
     }
-    let isMatched;
-    let res;
+
+    let matched = false;
+
     switch (op) {
       case 'eq':
-        isMatched = v === f.val;
+        matched = value === filter.val;
         break;
-      case 'is':
-        // Postgres returns NULL for missing/undefined fields; a row without
-        // the column should satisfy an `is null` filter.
-        isMatched = f.val === null ? (v === null || v === undefined) : v === f.val;
-        break;
-      case 'or': {
-        const topLevel = this._splitOr(String(f.val));
-        isMatched = topLevel.some(cond => {
-          if (cond.startsWith('and(') && cond.endsWith(')')) {
-            return this._splitOr(cond.slice(4, -1)).every(part => this._matches(row, this._parseCond(part)));
-          }
-          return this._matches(row, this._parseCond(cond));
-        });
-        break;
-      }
+
       case 'neq':
-        isMatched = v !== f.val;
+        matched = value !== filter.val;
         break;
+
+      case 'is':
+        matched =
+          filter.val === null
+            ? value == null
+            : value === filter.val;
+        break;
+
       case 'gt':
-        isMatched = v > f.val;
+        matched = value > filter.val;
         break;
+
       case 'gte':
-        isMatched = v >= f.val;
+        matched = value >= filter.val;
         break;
+
       case 'lt':
-        isMatched = v < f.val;
+        matched = value < filter.val;
         break;
+
       case 'lte':
-        isMatched = v <= f.val;
+        matched = value <= filter.val;
         break;
-      case 'ilike': {
-        const valRegex = new RegExp(f.val.replace(/%/g, '.*'), 'i');
-        isMatched = valRegex.test(v);
+
+      case 'like':
+        matched = this._likeMatches(value, filter.val);
         break;
-      }
+
+      case 'ilike':
+        matched = this._likeMatches(
+          value,
+          filter.val,
+          true
+        );
+        break;
+
       case 'in': {
-        if (typeof f.val === 'string') {
-          const clean = f.val.replace(/^\s*\(\s*|\s*\)\s*$/g, '');
-          const items = clean.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
-          isMatched = items.includes(v);
-        } else if (Array.isArray(f.val)) {
-          isMatched = f.val.includes(v);
-        } else {
-          isMatched = false;
+        let values = filter.val;
+
+        if (typeof values === 'string') {
+          const clean = values.replace(
+            /^\s*\(\s*|\s*\)\s*$/g,
+            ''
+          );
+
+          values = clean
+            ? clean.split(',').map(item =>
+                item.trim().replace(/^["']|["']$/g, '')
+              )
+            : [];
         }
+
+        if (Array.isArray(values)) {
+          matched = values.some(item => item === value);
+
+          // Accommodate numeric IDs represented as strings.
+          if (
+            !matched &&
+            value != null &&
+            values.some(item =>
+              String(item) === String(value)
+            )
+          ) {
+            matched = true;
+          }
+        }
+
         break;
       }
+
       default:
-        isMatched = true;
+        // Unsupported filters should not silently match every row.
+        matched = false;
         break;
     }
-    return negate ? !isMatched : isMatched;
+
+    return negate ? !matched : matched;
   }
 
+  // ---------------------------------------------------------------
+  // Programmed responses
+  // ---------------------------------------------------------------
+
+  _hasProgrammedValue(key) {
+    return Object.prototype.hasOwnProperty.call(
+      this._programmed,
+      key
+    );
+  }
+
+  _consumeProgrammedValue(key) {
+    const value = this._programmed[key];
+    delete this._programmed[key];
+    return value;
+  }
+
+  _getMatchingError() {
+    const errors = this._programmed.matchingErrors;
+
+    if (!Array.isArray(errors)) {
+      return null;
+    }
+
+    const index = errors.findIndex(
+      item =>
+        item.table === this._table &&
+        item.mode === this._mode
+    );
+
+    if (index === -1) {
+      return null;
+    }
+
+    return errors.splice(index, 1)[0];
+  }
+
+  // ---------------------------------------------------------------
+  // Execute the query
+  // ---------------------------------------------------------------
+
   async _exec() {
+    // Prevent duplicate execution when a query is awaited more than once.
+    if (this._executed) {
+      return this._executed;
+    }
+
+    this._executed = this._executeQuery();
+
+    return this._executed;
+  }
+
+  async _executeQuery() {
     const callRecord = {
       table: this._table,
       mode: this._mode,
-      payload: this._payload,
+      payload: cloneValue(this._payload),
       select: this._select,
-      filters: this._filters,
-      order: this._order,
-      orders: this._orders,
+      filters: cloneValue(this._filters),
+      order: this._order
+        ? { ...this._order }
+        : null,
+      orders: cloneValue(this._orders),
       limit: this._limit,
+      range: this._range
+        ? [...this._range]
+        : null,
       single: this._single,
       maybeSingle: this._maybeSingle,
     };
+
     this._calls.push(callRecord);
 
-    const matchingErrorIndex = this._programmed?.matchingErrors?.findIndex(item =>
-      item.table === this._table && item.mode === this._mode
-    ) ?? -1;
-    if (matchingErrorIndex !== -1) {
-      const [match] = this._programmed.matchingErrors.splice(matchingErrorIndex, 1);
-      return { data: null, error: match.error };
+    // Per-table and per-mode programmed errors.
+    const matchingError = this._getMatchingError();
+
+    if (matchingError) {
+      return {
+        data: null,
+        error: matchingError.error,
+      };
     }
 
-    // Programmed error path (e.g. simulate a supabase-side failure)
-    if (this._programmed?.nextError) {
-      const err = this._programmed.nextError;
-      this._programmed.nextError = null;
-      return { data: null, error: err };
+    // Generic programmed error.
+    if (this._hasProgrammedValue('nextError')) {
+      const error = this._consumeProgrammedValue(
+        'nextError'
+      );
+
+      return {
+        data: null,
+        error,
+      };
     }
-    // Programmed data path (e.g. simulate a specific row in .single())
-    if (this._programmed?.nextData) {
-      const data = this._programmed.nextData;
-      this._programmed.nextData = null;
-      return { data, error: null };
+
+    // Programmed response data, including null, false, or 0.
+    if (this._hasProgrammedValue('nextData')) {
+      const data = this._consumeProgrammedValue(
+        'nextData'
+      );
+
+      return {
+        data,
+        error: null,
+      };
     }
+
+    if (!Array.isArray(this._store[this._table])) {
+      this._store[this._table] = [];
+    }
+
+    // -------------------------------------------------------------
+    // UPSERT
+    // -------------------------------------------------------------
 
     if (this._mode === 'upsert') {
-      const rows = Array.isArray(this._payload) ? this._payload : [this._payload];
-      if (!this._store[this._table]) {
-        this._store[this._table] = [];
-      }
-      const onConflict = this._options?.onConflict;
-      for (const row of rows) {
-        let foundIdx = -1;
-        if (onConflict) {
-          foundIdx = this._store[this._table].findIndex(r => r[onConflict] === row[onConflict]);
-        } else {
-          const pkFields = ['id', 'user_id', 'event_id'];
-          for (const pk of pkFields) {
-            if (row[pk] !== undefined) {
-              foundIdx = this._store[this._table].findIndex(r => r[pk] === row[pk]);
-              if (foundIdx !== -1) break;
-            }
-          }
+      const inputRows = Array.isArray(this._payload)
+        ? this._payload
+        : [this._payload];
+
+      const resultRows = [];
+
+      for (const input of inputRows) {
+        if (!input || typeof input !== 'object') {
+          return {
+            data: null,
+            error: {
+              message: 'upsert payload must contain objects',
+            },
+          };
         }
+
+        const row = cloneValue(input);
+        let foundIdx = -1;
+
+        const conflictFields = this._options?.onConflict
+          ? String(this._options.onConflict)
+              .split(',')
+              .map(field => field.trim())
+          : ['id', 'user_id', 'event_id'];
+
+        for (const field of conflictFields) {
+          if (row[field] === undefined) continue;
+
+          foundIdx = this._store[this._table].findIndex(
+            existing =>
+              existing[field] === row[field]
+          );
+
+          if (foundIdx !== -1) break;
+        }
+
         if (foundIdx !== -1) {
-          this._store[this._table][foundIdx] = { ...this._store[this._table][foundIdx], ...row };
+          this._store[this._table][foundIdx] = {
+            ...this._store[this._table][foundIdx],
+            ...row,
+          };
+
+          resultRows.push(
+            this._store[this._table][foundIdx]
+          );
         } else {
           this._store[this._table].push(row);
+          resultRows.push(row);
         }
       }
-      return { data: rows, error: null };
+
+      return {
+        data: resultRows,
+        error: null,
+      };
     }
+
+    // -------------------------------------------------------------
+    // INSERT
+    // -------------------------------------------------------------
 
     if (this._mode === 'insert') {
-      const rows = Array.isArray(this._payload) ? this._payload : [this._payload];
-      for (const row of rows) {
-        this._store[this._table].push(row);
-      }
-      if (this._single) {
-        // Return the inserted row (or a synthetic id+timestamp if missing)
-        const row = { id: `mock-${this._table}-${this._store[this._table].length}`,
-                      created_at: new Date().toISOString(),
-                      ...rows[0] };
-        return { data: row, error: null };
-      }
-      return { data: rows, error: null };
-    }
-    if (this._mode === 'update') {
-      let rows = this._store[this._table] ?? [];
-      let updatedRows = [];
+      const inputRows = Array.isArray(this._payload)
+        ? this._payload
+        : [this._payload];
 
-      for (const row of rows) {
-        const matches = this._filters.every(f => this._matches(row, f));
+      const insertedRows = [];
+
+      for (const input of inputRows) {
+        if (!input || typeof input !== 'object') {
+          return {
+            data: null,
+            error: {
+              message: 'insert payload must contain objects',
+            },
+          };
+        }
+
+        const row = cloneValue(input);
+
+        if (row.id == null) {
+          row.id =
+            `mock-${this._table}-` +
+            (this._store[this._table].length + 1);
+        }
+
+        if (row.created_at == null) {
+          row.created_at = new Date().toISOString();
+        }
+
+        this._store[this._table].push(row);
+        insertedRows.push(row);
+      }
+
+      if (this._single) {
+        return {
+          data: insertedRows[0] ?? null,
+          error: insertedRows[0]
+            ? null
+            : {
+                code: 'PGRST116',
+                message: 'no rows',
+              },
+        };
+      }
+
+      if (this._maybeSingle) {
+        return {
+          data: insertedRows[0] ?? null,
+          error: null,
+        };
+      }
+
+      return {
+        data: insertedRows,
+        error: null,
+      };
+    }
+
+    // -------------------------------------------------------------
+    // UPDATE
+    // -------------------------------------------------------------
+
+    if (this._mode === 'update') {
+      const updatedRows = [];
+
+      for (const row of this._store[this._table]) {
+        const matches = this._filters.every(filter =>
+          this._matches(row, filter)
+        );
 
         if (matches) {
-          Object.assign(row, this._payload);
+          Object.assign(row, cloneValue(this._payload));
           updatedRows.push(row);
         }
       }
 
       if (this._single) {
-        return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
+        return {
+          data: updatedRows[0] ?? null,
+          error: updatedRows[0]
+            ? null
+            : {
+                code: 'PGRST116',
+                message: 'no rows',
+              },
+        };
       }
+
       if (this._maybeSingle) {
-        return { data: updatedRows[0] ?? null, error: null };
+        return {
+          data: updatedRows[0] ?? null,
+          error: null,
+        };
       }
-      return { data: updatedRows, error: null };
+
+      return {
+        data: updatedRows,
+        error: null,
+      };
     }
 
+    // -------------------------------------------------------------
+    // DELETE
+    // -------------------------------------------------------------
+
     if (this._mode === 'delete') {
-      const rows = this._store[this._table] ?? [];
       const remaining = [];
       const deleted = [];
-      for (const row of rows) {
-        const matches = this._filters.every(f => this._matches(row, f));
+
+      for (const row of this._store[this._table]) {
+        const matches = this._filters.every(filter =>
+          this._matches(row, filter)
+        );
+
         if (matches) {
           deleted.push(row);
         } else {
           remaining.push(row);
         }
       }
+
       this._store[this._table] = remaining;
-      return { data: deleted, error: null, count: deleted.length };
+
+      return {
+        data: deleted,
+        error: null,
+        count: deleted.length,
+      };
     }
 
+    // -------------------------------------------------------------
+    // SELECT
+    // -------------------------------------------------------------
+
     if (this._mode === 'select' || this._mode === null) {
-      let rows = (this._store[this._table] ?? []).slice();
-      for (const f of this._filters) {
-        rows = rows.filter(r => this._matches(r, f));
+      let rows = this._store[this._table].slice();
+
+      for (const filter of this._filters) {
+        rows = rows.filter(row =>
+          this._matches(row, filter)
+        );
       }
-      if (this._orders.length) {
+
+      if (this._orders.length > 0) {
         rows.sort((a, b) => {
           for (const { col, ascending } of this._orders) {
             if (a[col] === b[col]) continue;
-            const cmp = a[col] > b[col] ? 1 : -1;
-            return ascending ? cmp : -cmp;
+
+            // Keep nullish values deterministic.
+            if (a[col] == null) {
+              return ascending ? -1 : 1;
+            }
+
+            if (b[col] == null) {
+              return ascending ? 1 : -1;
+            }
+
+            const comparison = a[col] > b[col] ? 1 : -1;
+
+            return ascending
+              ? comparison
+              : -comparison;
           }
+
           return 0;
         });
       }
+
       const totalCount = rows.length;
+
       if (this._range) {
         const [from, to] = this._range;
         rows = rows.slice(from, to + 1);
       }
-      if (this._limit != null) rows = rows.slice(0, this._limit);
-      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { code: 'PGRST116', message: 'no rows' }, count: rows[0] ? 1 : 0 };
-      if (this._maybeSingle) return { data: rows[0] ?? null, error: null, count: rows[0] ? 1 : 0 };
-      return { data: rows, error: null, count: totalCount };
+
+      if (this._limit != null) {
+        rows = rows.slice(0, this._limit);
+      }
+
+      if (this._single) {
+        const row = rows[0] ?? null;
+
+        return {
+          data: row,
+          error: row
+            ? null
+            : {
+                code: 'PGRST116',
+                message: 'no rows',
+              },
+          count: row ? 1 : 0,
+        };
+      }
+
+      if (this._maybeSingle) {
+        return {
+          data: rows[0] ?? null,
+          error: null,
+          count: rows[0] ? 1 : 0,
+        };
+      }
+
+      return {
+        data: rows,
+        error: null,
+        count: totalCount,
+      };
     }
 
-    return { data: null, error: { message: `mock: unhandled mode ${this._mode}` } };
+    return {
+      data: null,
+      error: {
+        message: `mock: unhandled mode ${this._mode}`,
+      },
+    };
   }
 }
 
-/**
- * Build a fresh supabase mock for a single test.
- *
- * @returns {{
- *   supabase: object,   // mock with .from() / .rpc()
- *   store:    object,   // per-table in-memory row arrays
- *   calls:    Array,    // every awaited query, with payload
- *   programError: (msg: string) => void,
- *   programData:   (data: any)  => void,
- * }}
- */
+// =================================================================
+// CREATE SUPABASE MOCK
+// =================================================================
+
 export function createSupabaseMock(initialStore = {}) {
-  const store = { ...initialStore };
+  const initialSnapshot = cloneValue(initialStore);
+  const store = cloneValue(initialSnapshot);
   const calls = [];
   const programmed = {};
+
   const supabase = {
     from(table) {
-      if (!(table in store)) store[table] = [];
-      return new SupabaseQueryBuilder({ table, store, programmed, calls });
+      if (!Array.isArray(store[table])) {
+        store[table] = [];
+      }
+
+      return new SupabaseQueryBuilder({
+        table,
+        store,
+        programmed,
+        calls,
+      });
     },
-    rpc(fnName, args) {
-      calls.push({ rpc: fnName, args });
+
+    // -------------------------------------------------------------
+    // RPC
+    // -------------------------------------------------------------
+
+    rpc(fnName, args = {}) {
+      calls.push({
+        rpc: fnName,
+        args: cloneValue(args),
+      });
+
       if (programmed.nextRpcError) {
-        const err = programmed.nextRpcError; programmed.nextRpcError = null;
-        return Promise.resolve({ data: null, error: err });
+        const error = programmed.nextRpcError;
+        programmed.nextRpcError = null;
+
+        return Promise.resolve({
+          data: null,
+          error,
+        });
       }
-      if (programmed.nextError) {
-        const err = programmed.nextError; programmed.nextError = null;
-        return Promise.resolve({ data: null, error: err });
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          programmed,
+          'nextError'
+        )
+      ) {
+        const error = programmed.nextError;
+        delete programmed.nextError;
+
+        return Promise.resolve({
+          data: null,
+          error,
+        });
       }
-      if (programmed.nextData) {
-        const data = programmed.nextData; programmed.nextData = null;
-        return Promise.resolve({ data, error: null });
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          programmed,
+          'nextData'
+        )
+      ) {
+        const data = programmed.nextData;
+        delete programmed.nextData;
+
+        return Promise.resolve({
+          data,
+          error: null,
+        });
       }
-      // Simulate PL/pgSQL RPC side-effects that bump row versions
-      if (fnName === 'accept_bid_tx' && args?.p_order_id) {
-        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
-        if (idx !== -1 && typeof store.orders[idx].version === 'number') {
-          // Replace with a new object so the caller's reference retains the old version
-          store.orders[idx] = { ...store.orders[idx], version: store.orders[idx].version + 1 };
+
+      // -----------------------------------------------------------
+      // accept_bid_tx
+      // -----------------------------------------------------------
+
+      if (
+        fnName === 'accept_bid_tx' &&
+        args.p_order_id
+      ) {
+        const orders = store.orders ?? [];
+        const offers = store.load_offers ?? [];
+
+        const orderIdx = orders.findIndex(
+          order => order.id === args.p_order_id
+        );
+
+        if (orderIdx === -1) {
+          return Promise.resolve({
+            data: null,
+            error: null,
+          });
         }
+
+        const currentOrder = orders[orderIdx];
+
+        const updatedOrder = {
+          ...currentOrder,
+          driver_id: args.p_driver_id,
+          status: 'active',
+        };
+
+        if (typeof currentOrder.version === 'number') {
+          updatedOrder.version = currentOrder.version + 1;
+        }
+
+        store.orders[orderIdx] = updatedOrder;
+
         if (args.p_load_id) {
-          const offerIdx = store.load_offers?.findIndex(o => o.id === args.p_load_id);
+          const offerIdx = offers.findIndex(
+            offer => offer.id === args.p_load_id
+          );
+
           if (offerIdx !== -1) {
-            store.load_offers[offerIdx] = { ...store.load_offers[offerIdx], status: 'claimed' };
+            store.load_offers[offerIdx] = {
+              ...offers[offerIdx],
+              status: 'claimed',
+            };
           }
         }
-        if (idx !== -1) {
-          store.orders[idx] = { ...store.orders[idx], driver_id: args.p_driver_id, status: 'active' };
-        }
+
+        return Promise.resolve({
+          data: updatedOrder,
+          error: null,
+        });
       }
+
+      // -----------------------------------------------------------
+      // register_device_token
+      // -----------------------------------------------------------
+
       if (fnName === 'register_device_token') {
-        const nowIso = new Date().toISOString();
+        const now = new Date().toISOString();
         const userId = args.p_user_id;
         const token = args.p_fcm_token;
         const deviceId = args.p_device_id ?? null;
-        store.user_devices = store.user_devices || [];
 
-        // Rotate: if this user+deviceId already has an active row with a
-        // different token, retire it so token rotation never duplicates rows.
+        store.user_devices ??= [];
+        store.profiles ??= [];
+
+        // Retire the previous token for this user and device.
         if (deviceId) {
           for (const row of store.user_devices) {
-            if (row.device_id === deviceId && row.user_id === userId && row.fcm_token !== token && row.is_active !== false) {
+            if (
+              row.device_id === deviceId &&
+              row.user_id === userId &&
+              row.fcm_token !== token &&
+              row.is_active !== false
+            ) {
               row.is_active = false;
-              row.deactivated_at = nowIso;
+              row.deactivated_at = now;
+              row.updated_at = now;
             }
           }
         }
 
-        // Upsert by fcm_token (idempotent re-registration).
-        let row = store.user_devices.find((d) => d.fcm_token === token);
+        // Idempotent registration by token.
+        let row = store.user_devices.find(
+          device => device.fcm_token === token
+        );
+
         if (!row) {
-          row = { id: `device-${store.user_devices.length + 1}` };
+          row = {
+            id: `device-${store.user_devices.length + 1}`,
+          };
+
           store.user_devices.push(row);
         }
+
         Object.assign(row, {
-          id: row.id,
           user_id: userId,
           fcm_token: token,
           platform: args.p_platform ?? 'android',
@@ -443,147 +1035,301 @@ export function createSupabaseMock(initialStore = {}) {
           metadata: args.p_metadata ?? null,
           is_active: true,
           deactivated_at: null,
-          last_seen: args.p_last_seen ?? nowIso,
-          created_at: row.created_at ?? nowIso,
-          updated_at: nowIso,
+          last_seen: args.p_last_seen ?? now,
+          created_at: row.created_at ?? now,
+          updated_at: now,
         });
 
-        // Previous owner of this token loses profile-level delivery fallback.
-        if (args.p_prev_user_id && args.p_prev_user_id !== userId) {
-          const prevProfile = store.profiles?.find((p) => p.id === args.p_prev_user_id);
-          if (prevProfile) {
-            prevProfile.fcm_token = null;
-            prevProfile.fcm_token_updated_at = nowIso;
+        // Clear the previous user's profile fallback.
+        if (
+          args.p_prev_user_id &&
+          args.p_prev_user_id !== userId
+        ) {
+          const previousProfile = store.profiles.find(
+            profile => profile.id === args.p_prev_user_id
+          );
+
+          if (previousProfile) {
+            previousProfile.fcm_token = null;
+            previousProfile.fcm_token_updated_at = now;
           }
         }
 
-        // Sync the registering user's profile fallback token.
-        const profile = store.profiles?.find((p) => p.id === userId);
+        // Update the registering user's fallback token.
+        const profile = store.profiles.find(
+          item => item.id === userId
+        );
+
         if (profile) {
           profile.fcm_token = token;
-          profile.fcm_token_updated_at = nowIso;
+          profile.fcm_token_updated_at = now;
         }
+
+        return Promise.resolve({
+          data: row,
+          error: null,
+        });
       }
+
+      // -----------------------------------------------------------
+      // unregister_device_token
+      // -----------------------------------------------------------
+
       if (fnName === 'unregister_device_token') {
-        const nowIso = new Date().toISOString();
+        const now = new Date().toISOString();
         const userId = args.p_user_id;
         const token = args.p_fcm_token;
-        // Only the CURRENT user's matching device may be deactivated; a shared
-        // token owned by another user is never touched.
-        const row = store.user_devices?.find((d) => d.fcm_token === token && d.user_id === userId);
+
+        store.user_devices ??= [];
+        store.profiles ??= [];
+
+        const row = store.user_devices.find(
+          device =>
+            device.fcm_token === token &&
+            device.user_id === userId
+        );
+
         let deletedCount = 0;
+
         if (row) {
           row.is_active = false;
-          row.deactivated_at = nowIso;
-          row.updated_at = nowIso;
+          row.deactivated_at = now;
+          row.updated_at = now;
           deletedCount = 1;
         }
-        // Profile fallback: point to another active device, or null.
-        const nextActive = store.user_devices?.find(
-          (d) => d.user_id === userId && d.is_active !== false && d.fcm_token !== token
+
+        const nextActive = store.user_devices.find(
+          device =>
+            device.user_id === userId &&
+            device.is_active !== false &&
+            device.fcm_token !== token
         );
-        const profile = store.profiles?.find((p) => p.id === userId);
+
+        const profile = store.profiles.find(
+          item => item.id === userId
+        );
+
         if (profile && profile.fcm_token === token) {
           profile.fcm_token = nextActive?.fcm_token ?? null;
-          profile.fcm_token_updated_at = nowIso;
+          profile.fcm_token_updated_at = now;
         }
-        return Promise.resolve({ data: deletedCount, error: null });
+
+        return Promise.resolve({
+          data: deletedCount,
+          error: null,
+        });
       }
-      // Simulate the append_maintenance_photos PL/pgSQL RPC (see
-      // migrations/20260811000000_create_append_maintenance_photos.sql)
-      if (fnName === 'append_maintenance_photos' && args?.p_ticket_id) {
-        const idx = store.truck_maintenance_tickets?.findIndex(t => t.id === args.p_ticket_id);
+
+      // -----------------------------------------------------------
+      // append_maintenance_photos
+      // -----------------------------------------------------------
+
+      if (
+        fnName === 'append_maintenance_photos' &&
+        args.p_ticket_id
+      ) {
+        store.truck_maintenance_tickets ??= [];
+
+        const idx = store.truck_maintenance_tickets.findIndex(
+          ticket => ticket.id === args.p_ticket_id
+        );
+
         if (idx !== -1) {
+          const ticket = store.truck_maintenance_tickets[idx];
+
           store.truck_maintenance_tickets[idx] = {
-            ...store.truck_maintenance_tickets[idx],
+            ...ticket,
             photo_urls: [
-              ...(store.truck_maintenance_tickets[idx].photo_urls || []),
-              ...(args.p_new_paths || []),
+              ...(ticket.photo_urls ?? []),
+              ...(args.p_new_paths ?? []),
             ],
           };
+
+          return Promise.resolve({
+            data: store.truck_maintenance_tickets[idx],
+            error: null,
+          });
         }
+
+        return Promise.resolve({
+          data: null,
+          error: null,
+        });
       }
-      if (fnName === 'update_order_status_tx' && args?.p_order_id) {
-        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
-        if (idx === undefined || idx === -1 || !store.orders) {
-          return Promise.resolve({ data: [], error: null });
+
+      // -----------------------------------------------------------
+      // update_order_status_tx
+      // -----------------------------------------------------------
+
+      if (
+        fnName === 'update_order_status_tx' &&
+        args.p_order_id
+      ) {
+        const orders = store.orders ?? [];
+
+        const idx = orders.findIndex(
+          order => order.id === args.p_order_id
+        );
+
+        if (idx === -1) {
+          return Promise.resolve({
+            data: [],
+            error: null,
+          });
         }
-        const current = store.orders[idx];
-        // Mirrors the PL/pgSQL guards in update_order_status_tx
-        // (supabase/migrations/20260812000000_order_outbox.sql): the function
-        // returns ZERO ROWS when a guard rejects the transition, which callers
-        // translate into 409 conflicts.
-        if (args.p_not_statuses && args.p_not_statuses.includes(current.status)) {
-          return Promise.resolve({ data: [], error: null });
+
+        const current = orders[idx];
+
+        // Match the status transition guards.
+        if (
+          args.p_not_statuses &&
+          args.p_not_statuses.includes(current.status)
+        ) {
+          return Promise.resolve({
+            data: [],
+            error: null,
+          });
         }
-        if (args.p_escrow_in_statuses &&
-            (current.escrow_status == null || !args.p_escrow_in_statuses.includes(current.escrow_status))) {
-          return Promise.resolve({ data: [], error: null });
+
+        if (
+          args.p_escrow_in_statuses &&
+          (
+            current.escrow_status == null ||
+            !args.p_escrow_in_statuses.includes(
+              current.escrow_status
+            )
+          )
+        ) {
+          return Promise.resolve({
+            data: [],
+            error: null,
+          });
         }
-        store.orders[idx] = {
+
+        const updated = {
           ...current,
           status: args.p_status,
           updated_at: new Date().toISOString(),
           version: (current.version ?? 0) + 1,
-          // coalesce(param, column) semantics for the optional fields
-          ...(args.p_cancellation_reason != null && { cancellation_reason: args.p_cancellation_reason }),
-          ...(args.p_cancellation_fee != null && { cancellation_fee: args.p_cancellation_fee }),
-          ...(args.p_escrow_status != null && { escrow_status: args.p_escrow_status }),
-          ...(args.p_escrow_refund_attempts != null && { escrow_refund_attempts: args.p_escrow_refund_attempts }),
-          ...(args.p_refund_tx_hash != null && { refund_tx_hash: args.p_refund_tx_hash }),
-          ...(args.p_escrow_refund_last_attempt_at != null && { escrow_refund_last_attempt_at: args.p_escrow_refund_last_attempt_at }),
-          ...(args.p_escrow_refunded_at != null && { escrow_refunded_at: args.p_escrow_refunded_at }),
-          ...(args.p_escrow_refund_submitted_at != null && { escrow_refund_submitted_at: args.p_escrow_refund_submitted_at }),
-          escrow_refund_error: args.p_clear_escrow_refund_error
-            ? null
-            : (args.p_escrow_refund_error ?? current.escrow_refund_error ?? null),
+
+          ...(args.p_cancellation_reason != null && {
+            cancellation_reason: args.p_cancellation_reason,
+          }),
+
+          ...(args.p_cancellation_fee != null && {
+            cancellation_fee: args.p_cancellation_fee,
+          }),
+
+          ...(args.p_escrow_status != null && {
+            escrow_status: args.p_escrow_status,
+          }),
+
+          ...(args.p_escrow_refund_attempts != null && {
+            escrow_refund_attempts:
+              args.p_escrow_refund_attempts,
+          }),
+
+          ...(args.p_refund_tx_hash != null && {
+            refund_tx_hash: args.p_refund_tx_hash,
+          }),
+
+          ...(args.p_escrow_refund_last_attempt_at != null && {
+            escrow_refund_last_attempt_at:
+              args.p_escrow_refund_last_attempt_at,
+          }),
+
+          ...(args.p_escrow_refunded_at != null && {
+            escrow_refunded_at:
+              args.p_escrow_refunded_at,
+          }),
+
+          ...(args.p_escrow_refund_submitted_at != null && {
+            escrow_refund_submitted_at:
+              args.p_escrow_refund_submitted_at,
+          }),
+
+          escrow_refund_error:
+            args.p_clear_escrow_refund_error
+              ? null
+              : (
+                  args.p_escrow_refund_error ??
+                  current.escrow_refund_error ??
+                  null
+                ),
         };
-        return Promise.resolve({ data: [store.orders[idx]], error: null });
+
+        store.orders[idx] = updated;
+
+        return Promise.resolve({
+          data: [updated],
+          error: null,
+        });
       }
-      // Simulate create_order_tx: the real PL/pgSQL function inserts the order
-      // (plus its default timeline and load offer) in ONE transaction and
-      // returns the order row as JSON (migrations/20260723000003_create_order_tx.sql).
-      if (fnName === 'create_order_tx' && args?.p_order_display_id) {
-        store.orders = store.orders || [];
+
+      // -----------------------------------------------------------
+      // create_order_tx
+      // -----------------------------------------------------------
+
+      if (
+        fnName === 'create_order_tx' &&
+        args.p_order_display_id
+      ) {
+        store.orders ??= [];
+        store.order_timeline ??= [];
+        store.load_offers ??= [];
+
+        const now = new Date().toISOString();
+
         const order = {
           id: `mock-order-${store.orders.length + 1}`,
           order_display_id: args.p_order_display_id,
           customer_id: args.p_customer_id,
           status: 'pending',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          created_at: now,
+          updated_at: now,
+
           pickup_address: args.p_pickup_address,
           pickup_lat: args.p_pickup_lat,
           pickup_lng: args.p_pickup_lng,
+
           drop_address: args.p_drop_address,
           drop_lat: args.p_drop_lat,
           drop_lng: args.p_drop_lng,
+
           pickup_date: args.p_pickup_date,
           pickup_time: args.p_pickup_time,
+
           goods_type: args.p_goods_type,
           weight_tonnes: args.p_weight_tonnes,
           is_stackable: args.p_is_stackable,
           is_fragile: args.p_is_fragile,
           special_requirements: args.p_special_requirements,
+
           base_freight: args.p_base_freight,
           toll_estimate: args.p_toll_estimate,
           platform_fee: args.p_platform_fee,
           total_amount: args.p_total_amount,
           estimated_price: args.p_estimated_price,
         };
+
         store.orders.push(order);
-        // The real RPC also inserts the default 8-milestone timeline and the
-        // marketplace load_offers row in the same transaction
-        // (20260723000003_create_order_tx.sql).
-        store.order_timeline = store.order_timeline || [];
-        const now = new Date().toISOString();
-        const DEFAULTS = [
-          ['Order Placed', true, 10], ['Truck Assigned', false, 20],
-          ['En Route to Pickup', false, 30], ['Arrived at Pickup', false, 35],
-          ['Goods Loaded', false, 40], ['In Transit', false, 50],
-          ['Arriving', false, 55], ['Delivered', false, 60],
+
+        const milestones = [
+          ['Order Placed', true, 10],
+          ['Truck Assigned', false, 20],
+          ['En Route to Pickup', false, 30],
+          ['Arrived at Pickup', false, 35],
+          ['Goods Loaded', false, 40],
+          ['In Transit', false, 50],
+          ['Arriving', false, 55],
+          ['Delivered', false, 60],
         ];
-        for (const [milestone, completed, sort_order] of DEFAULTS) {
+
+        for (const [
+          milestone,
+          completed,
+          sort_order,
+        ] of milestones) {
           store.order_timeline.push({
             order_display_id: args.p_order_display_id,
             milestone,
@@ -592,7 +1338,7 @@ export function createSupabaseMock(initialStore = {}) {
             sort_order,
           });
         }
-        store.load_offers = store.load_offers || [];
+
         store.load_offers.push({
           order_display_id: args.p_order_display_id,
           customer_id: args.p_customer_id,
@@ -603,80 +1349,228 @@ export function createSupabaseMock(initialStore = {}) {
           freight_value: args.p_total_amount,
           status: 'available',
         });
-        return Promise.resolve({ data: order, error: null });
+
+        return Promise.resolve({
+          data: order,
+          error: null,
+        });
       }
-      // Simulate update_order_and_load_offer: applies the change-drop update
-      // sets to the order and its load offer atomically and returns the
-      // updated order row (migrations/20260802000000_secure_update_order_and_load_offer.sql).
-      if (fnName === 'update_order_and_load_offer' && args?.p_order_id) {
-        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
-        if (idx === undefined || idx === -1) {
-          return Promise.resolve({ data: null, error: { message: 'Order not found' } });
+
+      // -----------------------------------------------------------
+      // update_order_and_load_offer
+      // -----------------------------------------------------------
+
+      if (
+        fnName === 'update_order_and_load_offer' &&
+        args.p_order_id
+      ) {
+        store.orders ??= [];
+        store.load_offers ??= [];
+
+        const orderIdx = store.orders.findIndex(
+          order => order.id === args.p_order_id
+        );
+
+        if (orderIdx === -1) {
+          return Promise.resolve({
+            data: null,
+            error: {
+              message: 'Order not found',
+            },
+          });
         }
-        store.orders[idx] = { ...store.orders[idx], ...(args.p_order_updates || {}) };
-        const offerIdx = store.load_offers?.findIndex(o => o.order_display_id === args.p_order_display_id);
-        if (offerIdx !== undefined && offerIdx !== -1) {
-          store.load_offers[offerIdx] = { ...store.load_offers[offerIdx], ...(args.p_offer_updates || {}) };
+
+        store.orders[orderIdx] = {
+          ...store.orders[orderIdx],
+          ...(args.p_order_updates ?? {}),
+        };
+
+        const offerIdx = store.load_offers.findIndex(
+          offer =>
+            offer.order_display_id ===
+            args.p_order_display_id
+        );
+
+        if (offerIdx !== -1) {
+          store.load_offers[offerIdx] = {
+            ...store.load_offers[offerIdx],
+            ...(args.p_offer_updates ?? {}),
+          };
         }
-        return Promise.resolve({ data: store.orders[idx], error: null });
+
+        return Promise.resolve({
+          data: store.orders[orderIdx],
+          error: null,
+        });
       }
-      return Promise.resolve({ data: null, error: null });
+
+      // Default response for unimplemented RPC functions.
+      return Promise.resolve({
+        data: null,
+        error: null,
+      });
     },
+
+    // -------------------------------------------------------------
+    // Supabase Storage mock
+    // -------------------------------------------------------------
+
     storage: {
       from(bucket) {
         return {
-          async upload(path, buffer, options) {
-            calls.push({ storageUpload: { bucket, path, options } });
+          async upload(path, buffer, options = {}) {
+            calls.push({
+              storageUpload: {
+                bucket,
+                path,
+                options: cloneValue(options),
+              },
+            });
+
             if (programmed.nextStorageError) {
-              const err = programmed.nextStorageError;
+              const error = programmed.nextStorageError;
               programmed.nextStorageError = null;
-              return { data: null, error: err };
+
+              return {
+                data: null,
+                error,
+              };
             }
-            if (!store.__storageObjects) store.__storageObjects = [];
-            store.__storageObjects.push({ bucket, path, buffer, options });
-            return { data: { path }, error: null };
+
+            store.__storageObjects ??= [];
+
+            store.__storageObjects.push({
+              bucket,
+              path,
+              buffer,
+              options: cloneValue(options),
+            });
+
+            return {
+              data: { path },
+              error: null,
+            };
           },
+
           async createSignedUrl(path, expiresIn) {
-            calls.push({ storageSignedUrl: { bucket, path, expiresIn } });
-            const signedUrl = `https://mock-storage.supabase.co/storage/v1/object/sign/${bucket}/${path}?token=mock-token`;
-            return { data: { signedUrl }, error: null };
+            calls.push({
+              storageSignedUrl: {
+                bucket,
+                path,
+                expiresIn,
+              },
+            });
+
+            const signedUrl =
+              'https://mock-storage.supabase.co/storage/v1/' +
+              `object/sign/${bucket}/${path}?token=mock-token`;
+
+            return {
+              data: { signedUrl },
+              error: null,
+            };
           },
+
           async remove(paths) {
-            calls.push({ storageRemove: { bucket, paths } });
-            if (!store.__storageObjects) store.__storageObjects = [];
-            const pathList = Array.isArray(paths) ? paths : [paths];
-            store.__storageObjects = store.__storageObjects.filter(
-              (o) => !(o.bucket === bucket && pathList.includes(o.path))
+            calls.push({
+              storageRemove: {
+                bucket,
+                paths: cloneValue(paths),
+              },
+            });
+
+            store.__storageObjects ??= [];
+
+            const pathList = Array.isArray(paths)
+              ? paths
+              : [paths];
+
+            const removed = store.__storageObjects.filter(
+              object =>
+                object.bucket === bucket &&
+                pathList.includes(object.path)
             );
-            return { data: null, error: null };
+
+            store.__storageObjects =
+              store.__storageObjects.filter(
+                object =>
+                  !(
+                    object.bucket === bucket &&
+                    pathList.includes(object.path)
+                  )
+              );
+
+            return {
+              data: removed.map(object => ({
+                name: object.path,
+              })),
+              error: null,
+            };
           },
         };
       },
     },
   };
+
+  // ---------------------------------------------------------------
+  // Public helpers for tests
+  // ---------------------------------------------------------------
+
   return {
     supabase,
     store,
     calls,
-    /**
-     * Return the mock to its initial state. Needed by suites that build the
-     * mock once at module scope — the usual shape when it has to be visible
-     * to a hoisted vi.mock factory — and clear it between tests instead of
-     * constructing a fresh one.
-     */
+
     reset() {
-      for (const table of Object.keys(store)) delete store[table];
-      Object.assign(store, initialStore);
+      for (const key of Object.keys(store)) {
+        delete store[key];
+      }
+
+      Object.assign(store, cloneValue(initialSnapshot));
+
       calls.length = 0;
-      for (const key of Object.keys(programmed)) delete programmed[key];
+
+      for (const key of Object.keys(programmed)) {
+        delete programmed[key];
+      }
     },
-    programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
-    programErrorFor(table, mode, msg = 'mock error') {
+
+    programError(msg = 'mock error') {
+      programmed.nextError = {
+        message: msg,
+      };
+    },
+
+    programErrorFor(
+      table,
+      mode,
+      msg = 'mock error'
+    ) {
       programmed.matchingErrors ??= [];
-      programmed.matchingErrors.push({ table, mode, error: { message: msg } });
+
+      programmed.matchingErrors.push({
+        table,
+        mode,
+        error: {
+          message: msg,
+        },
+      });
     },
-    programRpcError(msg = 'mock error') { programmed.nextRpcError = { message: msg }; },
-    programStorageError(msg = 'mock error') { programmed.nextStorageError = { message: msg }; },
-    programData(data)                   { programmed.nextData = data; },
+
+    programRpcError(msg = 'mock error') {
+      programmed.nextRpcError = {
+        message: msg,
+      };
+    },
+
+    programStorageError(msg = 'mock error') {
+      programmed.nextStorageError = {
+        message: msg,
+      };
+    },
+
+    programData(data) {
+      programmed.nextData = data;
+    },
   };
 }

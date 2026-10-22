@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import redis
 import soundfile as sf
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from multimodal.audio_monitor import AudioMonitor
 from multimodal.vision_monitor import VisionMonitor
 from multimodal.vision_execution import process_encoded_frame, read_latest_vision
@@ -123,7 +123,7 @@ async def analyze_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/record")
-async def record_audio(duration: int = 2):
+async def record_audio(duration: int = Query(2, ge=1, le=10)):
     """Record and analyze audio"""
     try:
         # Record audio

@@ -64,6 +64,24 @@ import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
+// backend/api/src/routes/healthRoutes.js (Excerpt)
+
+import express from 'express';
+const router = express.Router();
+
+// Primary /ready readiness check endpoint
+router.get('/ready', async (req, res) => {
+  try {
+    // Check DB and Redis connectivity...
+    return res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+  } catch (err) {
+    return res.status(503).json({ status: 'not ready', error: err.message });
+  }
+});
+
+// ❌ Removed duplicate dead-code route registration at lines 112-113:
+// router.get('/ready', ...);
+
 import express from 'express';
 import * as Sentry from '@sentry/node';
 import logger from '../middleware/logger.js';

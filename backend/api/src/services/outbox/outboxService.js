@@ -2,6 +2,8 @@ import { supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import crypto from 'crypto';
 
+const DEAD_LETTER_BATCH_SIZE = 200;
+
 /**
  * Transactional Outbox Service
  *
@@ -150,7 +152,8 @@ export class OutboxService {
       .from('outbox_events')
       .select('*')
       .eq('status', 'failed')
-      .gte('retry_count', maxRetries);
+      .gte('retry_count', maxRetries)
+      .limit(DEAD_LETTER_BATCH_SIZE);
 
     if (fetchError) {
       logger.error('[OutboxService] Failed to fetch exhausted events:', fetchError.message);
@@ -200,6 +203,12 @@ export class OutboxService {
       count: exhausted.length,
       eventIds: ids,
     });
+
+    if (exhausted.length >= DEAD_LETTER_BATCH_SIZE) {
+      logger.warn(
+        `[OutboxService] Dead-letter batch limit (${DEAD_LETTER_BATCH_SIZE}) reached; remaining events will be processed next cycle.`,
+      );
+    }
   }
 
   /**

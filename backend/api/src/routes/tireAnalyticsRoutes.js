@@ -172,7 +172,7 @@ export const isValidTpmsReading = (reading) => {
  *       401:
  *         description: Authentication is required.
  *       429:
- *         description: Rate limit exceeded.
+ *         description: Rate limit exceeded or tire report registry capacity exhausted.
  *       500:
  *         description: Failed to calculate tire wear analytics.
  */
@@ -220,7 +220,9 @@ router.post('/analyze', authenticate, userLimiter, async (req, res) => {
       report
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Failed to calculate tire wear analytics' });
+    return res.status(err.statusCode === 429 ? 429 : 500).json({
+      error: err.message || 'Failed to calculate tire wear analytics'
+    });
   }
 });
 

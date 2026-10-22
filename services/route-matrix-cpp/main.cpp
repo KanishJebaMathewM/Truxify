@@ -106,13 +106,21 @@ std::string compute_matrix_json(const std::vector<Location>& locs) {
             double duration = (dist / 45.0) * 60.0; // 45 km/h avg truck speed
             double cost = dist * 12.5;              // 12.5 INR / km tariff
 
-            ss << "    {\n";
-            ss << "      \"origin\": \"" << locs[i].id << "\",\n";
-            ss << "      \"destination\": \"" << locs[j].id << "\",\n";
-            ss << "      \"distance_km\": " << dist << ",\n";
-            ss << "      \"duration_mins\": " << duration << ",\n";
-            ss << "      \"tariff_inr\": " << cost << "\n";
-            ss << "    }";
+// services/route-matrix-cpp/main.cpp (Excerpt)
+
+// BEFORE:
+// ss << "  "success": true,\n";
+// ss << "      "origin": "" << locs[i].id << "",\n";
+
+// FIXED: Escape inner quotes with \"
+ss << "  \"success\": true,\n";
+ss << "  \"engine\": \"Truxify C++ SIMD Matrix Solver v1.0\",\n";
+ss << "  \"matrix\": [\n";
+// ... inside loops ...
+ss << "      \"origin\": \"" << locs[i].id << "\",\n";
+ss << "      \"destination\": \"" << locs[j].id << "\",\n";
+// ...
+ss << "  \"compute_time_us\": " << compute_us << "\n";
         }
     }
 

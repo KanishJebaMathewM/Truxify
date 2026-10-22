@@ -98,15 +98,14 @@ class TokenizationService {
     // ============ Chain clients (created on first use) ============
 
     get wallet() {
-        if (!this.provider || !this.tokenAddress) {
-            return null;
+        if (this._wallet) {
+            return this._wallet;
         }
-        if (!this._wallet) {
-            if (!process.env.PRIVATE_KEY) {
-                throw new Error('Tokenization chain access is not configured: set PRIVATE_KEY');
-            }
-            this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
+        if (!process.env.PRIVATE_KEY) {
+            throw new Error('Tokenization chain access is not configured: set PRIVATE_KEY');
         }
+        this._requireConfigured();
+        this._wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         return this._wallet;
     }
 
@@ -115,15 +114,14 @@ class TokenizationService {
     }
 
     get token() {
-        if (!this.provider || !this.tokenAddress) {
-            return null;
+        if (this._token) {
+            return this._token;
         }
-        if (!this._token) {
-            if (!this.tokenAddress) {
-                throw new Error('Tokenization chain access is not configured: set ASSET_TOKEN_ADDRESS');
-            }
-            this._token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
+        if (!process.env.ASSET_TOKEN_ADDRESS) {
+            throw new Error('Tokenization chain access is not configured: set ASSET_TOKEN_ADDRESS');
         }
+        this._requireConfigured();
+        this._token = new ethers.Contract(this.tokenAddress, this.tokenABI, this.wallet);
         return this._token;
     }
 

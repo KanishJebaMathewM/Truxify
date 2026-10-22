@@ -1,13 +1,45 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import RenderScheduler from '../scheduler/RenderScheduler.js';
 
-describe('RenderScheduler cancelled dependency handling', () => {
-    let scheduler;
+// backend/scheduler/RenderScheduler.test.js (Excerpt)
 
-    beforeEach(() => {
-        scheduler = new RenderScheduler({ maxConcurrent: 1 });
-        scheduler.pause();
-    });
+describe('RenderScheduler Cancellation & Unblocking', () => {
+  it('unlinks cancelled task and lets unblocked dependents become schedulable', () => {
+    const scheduler = new RenderScheduler();
+    
+    // Setup tasks with dependencies
+    scheduler.addTask('taskA', () => {});
+    scheduler.addTask('taskB', ['taskA'], () => {}); // depends on A
+
+    // Cancel taskA
+    scheduler.cancel('taskA');
+
+    // Assertions reflecting the unblocking contract
+    expect(scheduler.taskMap.has('taskA')).toBe(false); // Cancelled task leaves taskMap
+    expect(scheduler.taskMap.has('taskB')).toBe(true);  // Dependent survives
+    
+    // taskB should now have no remaining dependencies and be ready for scheduling
+    expect(scheduler.getSchedulableTasks()).toContain('taskB');
+  });
+
+  it('retains dependent in taskMap with surviving dependencies still blocking execution', () => {
+    const scheduler = new RenderScheduler();
+    
+    scheduler.addTask('taskA', () => {});
+    scheduler.addTask('taskB', () => {});
+    scheduler.addTask('taskC', ['taskA', 'taskB'], () => {}); // depends on both A and B
+
+    // Cancel only taskA
+    scheduler.cancel('taskA');
+
+    // Assertions
+    expect(scheduler.taskMap.has('taskA')).toBe(false); // taskA is removed
+    expect(scheduler.taskMap.has('taskC')).toBe(true);  // dependent C survives
+    
+    // taskC should still be blocked because taskB is uncompleted/un-cancelled
+    expect(scheduler.getSchedulableTasks()).not.toContain('taskC');
+  });
+});
 
     it('releases dependents when a dependency is cancelled', () => {
         const depId = scheduler.schedule(() => 'dep', 2);

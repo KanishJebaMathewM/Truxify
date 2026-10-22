@@ -2,7 +2,7 @@ import refreshTokenService from '../services/refreshTokenService.js';
 import jwt from 'jsonwebtoken';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
-const getJwtSecret = () => process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+import { getJwtSecret } from '../config/jwtSecret.js';
 
 const createAccessToken = (tokenRecord) => jwt.sign(
   {

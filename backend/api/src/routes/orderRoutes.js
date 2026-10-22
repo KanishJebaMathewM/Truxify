@@ -396,6 +396,48 @@ router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
  */
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   const orderId = req.params.id;
+  const { milestone } = req.body;
+
+  const lockKey = `milestone_lock:${orderId}`;
+  const lock = await acquireLockOrFallback(lockKey, 10000);
+  if (!lock.ok) {
+    return res.status(409).json({ error: 'Another milestone update is in progress for this order. Please try again.' });
+  }
+  // backend/api/src/routes/orderRoutes.js (Excerpt)
+
+// FIX: Declare pricing outside the try block to prevent block-scoped ReferenceError per issue #3785
+let pricing;
+
+try {
+  const routeEstimate = await getRouteEstimate({
+    pickup: req.body.pickup,
+    dropoff: req.body.dropoff,
+  });
+  
+  pricing = computeOrderPricing({
+    routeEstimate,
+    vehicleType: req.body.vehicleType,
+  });
+} catch (pricingErr) {
+  logger.error({ err: pricingErr }, '[orderRoutes] Pricing computation error');
+  return res.status(400).json({
+    success: false,
+    error: `Failed to compute pricing: ${pricingErr.message}`,
+  });
+}
+
+let estimatedPrice = null;
+
+try {
+  const mlResult = await predictPrice({
+    distanceKm: pricing.distanceKm, // Now safely in scope
+    vehicleType: req.body.vehicleType,
+  });
+  estimatedPrice = mlResult.predictedPrice;
+} catch (mlErr) {
+  logger.warn({ err: mlErr }, '[orderRoutes] ML price prediction fallback triggered');
+  estimatedPrice = pricing.basePrice;
+}
   const { amount } = req.body;
   const driverId = req.user.id;
 

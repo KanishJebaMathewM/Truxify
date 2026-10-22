@@ -1,0 +1,36 @@
+name: Telemetry bulk recovery
+on:
+  pull_request:
+    paths:
+      - backend/api/src/sockets/telemetryBuffer.js
+      - backend/api/src/sockets/telemetryBulkOutcome.js
+      - backend/api/test/unit/telemetryBulkRecovery.test.js
+      - backend/api/test/unit/fixtures/mongoBulkWire.js
+      - tools/telemetry-bulk-tests/**
+      - .github/workflows/telemetry-bulk-recovery.yml
+  push:
+    branches: [main]
+    paths:
+      - backend/api/src/sockets/telemetryBuffer.js
+      - backend/api/src/sockets/telemetryBulkOutcome.js
+      - backend/api/test/unit/telemetryBulkRecovery.test.js
+      - backend/api/test/unit/fixtures/mongoBulkWire.js
+      - tools/telemetry-bulk-tests/**
+      - .github/workflows/telemetry-bulk-recovery.yml
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/telemetry-bulk-tests/package-lock.json
+      - run: npm ci --prefix tools/telemetry-bulk-tests --ignore-scripts
+      - run: bash tools/telemetry-bulk-tests/run.sh

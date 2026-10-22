@@ -64,7 +64,30 @@ export function parseDistanceKm(value) {
  * scan; this stops a pathological data set from returning an unbounded set.
  */
 export const DEADHEAD_MAX_ROWS = 1000;
+// backend/api/src/services/driver/earningsReportService.js
 
+/**
+ * Safely parses a decimal value from database or external inputs.
+ * Added Number.isFinite guard per issue #13596.
+ * 
+ * @param {any} value - Raw input value to parse.
+ * @param {number} fallback - Default numeric value if parsing fails (defaults to 0.00).
+ * @returns {number} Valid finite numeric decimal.
+ */
+export function parseDecimal(value, fallback = 0.00) {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const parsed = typeof value === 'number' ? value : parseFloat(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  // Round to 2 decimal places for currency precision
+  return Math.round(parsed * 100) / 100;
+}
 /**
  * Defensive row cap on the period earnings query. PostgREST silently caps a
  * single response at 1000 rows, so without an explicit limit a driver with

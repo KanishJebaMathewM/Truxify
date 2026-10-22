@@ -69,7 +69,10 @@ export function generateOtaTuningPayload(tuningParams) {
     };
 
     // Sign payload with HMAC SHA-256 for secure gateway verification
-    const secret = process.env.ECM_OTA_SIGNING_KEY || 'ecm-ota-secure-key';
+    const secret = process.env.ECM_OTA_SIGNING_KEY;
+    if (!secret || secret.length < 32) {
+      throw new Error('ECM_OTA_SIGNING_KEY must be set to a value of at least 32 characters.');
+    }
     const signature = crypto
         .createHmac('sha256', secret)
         .update(JSON.stringify(otaPackage))

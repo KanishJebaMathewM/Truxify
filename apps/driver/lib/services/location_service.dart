@@ -12,7 +12,26 @@ import 'battery_service.dart';
 import 'location_replay_service.dart';
 import 'offline_location_queue.dart';
 import 'secure_storage.dart';
+// apps/driver/lib/services/location_service.dart (Excerpt)
 
+void _connectWebSocket() async {
+  final token = await _secureStorage.read(key: 'auth_token');
+  
+  // Build WebSocket URI with token for connection
+  final wsUri = Uri.parse('$_wsBaseUrl/ws/driver/location').replace(
+    queryParameters: {'token': token},
+  );
+
+  // ✅ Secure logging: Redact token before printing to debug console
+  final sanitizedUri = wsUri.replace(
+    queryParameters: {'token': 'REDACTED_SECURE_TOKEN'},
+  );
+  
+  debugPrint('Connecting to WebSocket: $sanitizedUri');
+
+  // Establish WebSocket connection...
+  // _channel = WebSocketChannel.connect(wsUri);
+}
 /// WebSocket connection lifecycle for the driver location channel.
 enum WsConnectionStatus { connecting, connected, disconnected }
 
@@ -721,4 +740,9 @@ class LocationService {
     _resilientWs = null;
   }
 
+  void stopTracking() {
+    _timer?.cancel();
+    _socket?.disconnect();
+  }
+}
 }

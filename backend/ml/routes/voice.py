@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Optional
 
@@ -5,6 +6,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 import httpx
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/voice",
@@ -86,7 +88,8 @@ async def transcribe_voice(
                 data = response.json()
                 transcript = data.get("transcript", "")
                 language = data.get("language", "auto")
-            except Exception:
+            except Exception as exc:
+                logger.warning('Bhashini transcription failed: %s', exc)
                 transcript = ""
                 language = "auto"
     else:
@@ -114,8 +117,8 @@ async def transcribe_voice(
                         }
                     )
                     intent = res.json()["choices"][0]["message"]["content"].strip()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning('OpenAI intent extraction failed: %s', exc)
 
     return VoiceQueryResponse(
         success=True,
@@ -161,7 +164,8 @@ async def process_voice_query(request: TextVoiceRequest):
                     }
                 )
                 intent = res.json()["choices"][0]["message"]["content"].strip()
-            except Exception:
+            except Exception as exc:
+                logger.warning('OpenAI intent extraction failed: %s', exc)
                 intent = "general_query"
     else:
         lowered = text.lower()
@@ -204,7 +208,8 @@ async def text_to_speech(request: TextVoiceRequest):
                 # Returning a mock presigned S3 URL for architectural completeness.
                 audio_url = f"https://truxify-assets.s3.amazonaws.com/tts/{hash(text)}.mp3"
                 message = "TTS generated successfully."
-            except Exception:
+            except Exception as exc:
+                logger.warning('ElevenLabs synthesis failed: %s', exc)
                 audio_url = None
                 message = "TTS generation failed."
     else:

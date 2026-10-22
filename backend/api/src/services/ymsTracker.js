@@ -7,6 +7,63 @@ const trailerDwellLedger = new Map(); // trailerId -> dwellRecord
 const dockAppointments = new Map(); // appointmentId -> appointmentRecord
 const hostlerTaskQueue = [];
 
+// Bounds for the in-memory yard stores. These limits keep a long-running API
+// process from retaining every facility, slot, pin, and dwell record forever.
+export const MAX_YARD_FACILITIES = 200;
+export const MAX_SLOTS_PER_FACILITY = 500;
+export const MAX_YARD_PINS = 500;
+export const MAX_DWELL_RECORDS = 500;
+export const MAX_DOCK_APPOINTMENTS = 500;
+export const MAX_HOSTLER_TASKS = 500;
+export const YARD_PIN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const YARD_DWELL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const YARD_APPOINTMENT_TTL_MS = 24 * 60 * 60 * 1000;
+export const YARD_TASK_TTL_MS = 24 * 60 * 60 * 1000;
+
+function capacityError(message) {
+    const error = new Error(message);
+    error.code = 'YMS_CAPACITY';
+    error.statusCode = 429;
+    return error;
+}
+
+function timestampMs(value) {
+    const parsed = value ? new Date(value).getTime() : NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pruneExpiredYardState(now = Date.now()) {
+    for (const [trailerId, pin] of trailerYardPins) {
+        const droppedAt = timestampMs(pin.droppedAt);
+        if (droppedAt === null || now - droppedAt > YARD_PIN_TTL_MS) {
+            trailerYardPins.delete(trailerId);
+        }
+    }
+
+    for (const [trailerId, dwell] of trailerDwellLedger) {
+        if (dwell.checkOutTime) {
+            const checkedOutAt = timestampMs(dwell.checkOutTime);
+            if (checkedOutAt === null || now - checkedOutAt > YARD_DWELL_RETENTION_MS) {
+                trailerDwellLedger.delete(trailerId);
+            }
+        }
+    }
+
+    for (const [appointmentId, appointment] of dockAppointments) {
+        const createdAt = timestampMs(appointment?.createdAt);
+        if (createdAt === null || now - createdAt > YARD_APPOINTMENT_TTL_MS) {
+            dockAppointments.delete(appointmentId);
+        }
+    }
+
+    for (let i = hostlerTaskQueue.length - 1; i >= 0; i--) {
+        const createdAt = timestampMs(hostlerTaskQueue[i]?.createdAt);
+        if (createdAt === null || now - createdAt > YARD_TASK_TTL_MS) {
+            hostlerTaskQueue.splice(i, 1);
+        }
+    }
+}
+
 export const SlotType = {
     DRY_VAN: 'DRY_VAN',
     REEFER_ELECTRIC: 'REEFER_ELECTRIC',
@@ -77,11 +134,23 @@ export function registerYardSlot(facilityId, slotData) {
         throw new Error('slotData.slotId is required.');
     }
 
+    pruneExpiredYardState();
+
     if (!yardSlots.has(facilityId)) {
+        if (yardSlots.size >= MAX_YARD_FACILITIES) {
+            throw capacityError(
+                `Yard facility capacity reached (${MAX_YARD_FACILITIES}). Try again after older yard data expires.`
+            );
+        }
         yardSlots.set(facilityId, new Map());
     }
 
     const facilityMap = yardSlots.get(facilityId);
+    if (!facilityMap.has(slotData.slotId) && facilityMap.size >= MAX_SLOTS_PER_FACILITY) {
+        throw capacityError(
+            `Yard slot capacity reached for facility ${facilityId} (${MAX_SLOTS_PER_FACILITY}).`
+        );
+    }
     const record = {
         slotId: slotData.slotId,
         facilityId,
@@ -137,6 +206,14 @@ export function allocateYardSlot(facilityId, trailerRequirements = {}) {
 
     if (!facilityId || !trailerId) {
         throw new Error('facilityId and trailerId are required for yard slot allocation.');
+    }
+
+    pruneExpiredYardState();
+
+    if (!trailerDwellLedger.has(trailerId) && trailerDwellLedger.size >= MAX_DWELL_RECORDS) {
+        throw capacityError(
+            `Yard dwell capacity reached (${MAX_DWELL_RECORDS}). Try again after released records expire.`
+        );
     }
 
     const availableSlots = listYardSlots(facilityId, { status: SlotStatus.AVAILABLE });
@@ -362,6 +439,14 @@ export function recordTrailerDrop(dropData) {
         yardSlotId = 'UNASSIGNED_SLOT',
         zone = 'GENERAL_YARD'
     } = dropData;
+
+    pruneExpiredYardState();
+
+    if (!trailerYardPins.has(trailerId) && trailerYardPins.size >= MAX_YARD_PINS) {
+        throw capacityError(
+            `Yard pin capacity reached (${MAX_YARD_PINS}). Try again after older pins expire.`
+        );
+    }
 
     const pinRecord = {
         trailerId,

@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter
 from typing import List
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/ml", tags=["ML"])
+
+logger = logging.getLogger(__name__)
 
 class DemandZone(BaseModel):
     lat: float
@@ -62,7 +66,8 @@ async def get_demand_heatmap(hours: int = 48):
             pred = predict_demand(features)
             # Normalize to 0.0 - 1.0 (assuming typical max demand is around 100)
             intensity = min(max(pred / 100.0, 0.0), 1.0)
-        except Exception:
+        except Exception as exc:
+            logger.warning('predict_demand failed for zone %s: %s', zone['label'], exc)
             intensity = 0.5  # fallback if model fails
 
         zones.append({

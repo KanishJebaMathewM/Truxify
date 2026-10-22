@@ -163,7 +163,24 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 // NOTE: In a real project, you'd likely move all handlers to driverController.js.
 // Here, we are merging into the router file. I will assume the existence of 
 // driverController.js as per the new snippet.
+// backend/api/src/routes/driverRoutes.js (Excerpt)
 
+// BEFORE:
+// const { data, error } = await supabase
+//   .from('route_map_points')
+//   .update({ claimed })
+//   .eq('id', routePointId);
+
+// FIXED: Update is_claimed column per issue #6965
+const { data, error } = await supabase
+  .from('route_map_points')
+  .update({ is_claimed: claimed })
+  .eq('id', routePointId);
+
+if (error) {
+  logger.error({ err: error, routePointId }, '[driverRoutes] Failed to update route point claim status');
+  return res.status(500).json({ error: 'Failed to update route point' });
+}
 import driverController from '../controllers/driverController.js'; 
 
 // Reuse one caller-scoped client per request without sharing credentials

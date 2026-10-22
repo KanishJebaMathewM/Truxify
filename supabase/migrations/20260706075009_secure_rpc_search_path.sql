@@ -171,7 +171,8 @@ BEGIN
     RAISE EXCEPTION 'Order is no longer pending';
   END IF;
 
-  IF auth.uid() <> v_customer_id THEN
+  -- Security Check: Ensure caller is authenticated and owns the order
+  IF auth.uid() IS NULL OR auth.uid() <> v_customer_id THEN
     RAISE EXCEPTION 'Not authorized to accept bids for this order';
   END IF;
 
@@ -193,17 +194,17 @@ BEGIN
     WHERE id = p_load_id;
 
   UPDATE orders
-    SET driver_id        = p_driver_id,
-        truck_id         = p_truck_id,
-        status           = 'truck_assigned',
-        driver_name      = p_driver_name,
-        driver_rating    = p_driver_rating,
-        truck_number     = p_truck_number,
-        total_amount     = p_bid_amount,
-        bid_amount       = p_bid_amount,
+    SET driver_id         = p_driver_id,
+        truck_id          = p_truck_id,
+        status            = 'truck_assigned',
+        driver_name       = p_driver_name,
+        driver_rating     = p_driver_rating,
+        truck_number      = p_truck_number,
+        total_amount      = p_bid_amount,
+        bid_amount        = p_bid_amount,
         escrow_booking_id = coalesce(p_escrow_booking_id, escrow_booking_id),
-        version          = version + 1,
-        updated_at       = now()
+        version           = version + 1,
+        updated_at        = now()
     WHERE id = p_order_id;
 
   UPDATE order_timeline

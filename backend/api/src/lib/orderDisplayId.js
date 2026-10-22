@@ -14,7 +14,37 @@ const DISPLAY_ID_RANDOM_LENGTH = 12;
 // Upper bound on how many times a caller will re-roll the display id when an
 // insert fails with a unique-constraint violation (issue #5740).
 export const ORDER_DISPLAY_ID_MAX_RETRIES = 5;
+// backend/api/src/lib/orderDisplayId.js
 
+export function parseDisplayId(displayId) {
+  // Guard against null, undefined, or non-string inputs
+  if (!displayId || typeof displayId !== 'string') {
+    return { 
+      valid: false, 
+      error: 'Display ID must be a non-empty string', 
+      prefix: null, 
+      sequence: null 
+    };
+  }
+
+  // Proceed with safe string parsing
+  const parts = displayId.split('-');
+  if (parts.length < 2) {
+    return { 
+      valid: false, 
+      error: 'Invalid display ID format', 
+      prefix: null, 
+      sequence: null 
+    };
+  }
+
+  return {
+    valid: true,
+    error: null,
+    prefix: parts[0],
+    sequence: parts[1]
+  };
+}
 /**
  * Generate a globally unique order display id of the form
  * `#FF<YYYYMMDD><12-char alphanumeric>` (e.g. `#FF20260802K9X2Q7Z4M1A3`).

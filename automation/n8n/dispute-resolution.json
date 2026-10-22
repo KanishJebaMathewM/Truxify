@@ -1,13 +1,139 @@
 {
-  "name": "Dispute Resolution and Escalation Workflow",
+{
+  "name": "Truxify - Dispute Resolution & Escrow Freeze",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "dispute-trigger",
-        "authentication": "headerAuth",
+        "path": "delivery-disputed",
         "options": {}
       },
+      "name": "Webhook: Delivery Disputed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.API_BASE_URL }}/api/payments/freeze",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "bookingId": "={{ $json.body.bookingId }}"
+        },
+        "options": {}
+      },
+      "name": "HTTP: Freeze Escrow Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate GPS trail from MongoDB and OTP logs from Supabase\nconst bookingId = $input.item.json.bookingId;\nreturn [{\n  json: {\n    bookingId,\n    evidenceTimestamp: new Date().toISOString(),\n    status: 'FROZEN_PENDING_INVESTIGATION'\n  }\n}];"
+      },
+      "name": "Package Evidence (GPS & OTP)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [710, 300]
+    },
+    {
+      "parameters": {
+        "amount": 24,
+        "unit": "hours"
+      },
+      "name": "Wait (24h Resolution Window)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [940, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.resolved }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "name": "Check If Unresolved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1170, 300]
+    },
+    {
+      "parameters": {
+        "subject": "URGENT: Truxify Dispute Escalated to Arbitration",
+        "text": "Dispute for booking {{ $json.bookingId }} has exceeded 24h without resolution. Evidence package ready for admin review.",
+        "options": {}
+      },
+      "name": "Email Admin & Create Arbitration",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [1400, 200]
+    }
+  ],
+  "connections": {
+    "Webhook: Delivery Disputed": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Freeze Escrow Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP: Freeze Escrow Payment": {
+      "main": [
+        [
+          {
+            "node": "Package Evidence (GPS & OTP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package Evidence (GPS & OTP)": {
+      "main": [
+        [
+          {
+            "node": "Wait (24h Resolution Window)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (24h Resolution Window)": {
+      "main": [
+        [
+          {
+            "node": "Check If Unresolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Unresolved": {
+      "main": [
+        [
+          {
+            "node": "Email Admin & Create Arbitration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
       "id": "1d8ea83e-d9a4-4db2-a9b0-30f16f5c5315",
       "name": "Dispute Webhook Trigger",
       "type": "n8n-nodes-base.webhook",

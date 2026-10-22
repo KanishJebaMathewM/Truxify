@@ -180,7 +180,52 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
     user: req.user,
   });
 });
+// backend/api/src/routes/authRoutes.js (Excerpt)
 
+const express = require('express');
+const router = express.Router();
+const authService = require('../services/authService');
+
+/**
+ * @route   POST /api/auth/verify-otp
+ * @desc    Verify OTP code and issue session token
+ * @access  Public
+ */
+router.post('/verify-otp', async (req, res, next) => {
+  try {
+    const { identifier, otp } = req.body;
+
+    // 1. Input Validation
+    if (!identifier || !otp) {
+      return res.status(400).json({
+        error: 'INVALID_REQUEST',
+        message: 'Both identifier (email/phone) and otp are required.'
+      });
+    }
+
+    // 2. Verify OTP via service layer
+    const result = await authService.verifyOtp({ identifier, otp });
+
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({
+        error: result.errorCode || 'VERIFICATION_FAILED',
+        message: result.message
+      });
+    }
+
+    // 3. Return session token on successful verification
+    return res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully.',
+      token: result.token,
+      user: result.user
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+module.exports = router;
 import crypto from "crypto";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";

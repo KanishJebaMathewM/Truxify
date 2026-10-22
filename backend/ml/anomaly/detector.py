@@ -8,10 +8,41 @@ from concurrent.futures import Future
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from .models import LSTMAutoencoder
+from sklearn.preprocessing import StandardScaler
+# backend/ml/anomaly/detector.py
 from threading import RLock
 from pathlib import Path
 from .generation_contract import admit_training, capture, prepare_candidate, finite_array
 
+def detect_transaction_anomaly(self, transaction: dict) -> dict:
+    """
+    Detects anomalies in financial transactions using a rolling temporal feature window
+    keyed by a stable account/customer identifier rather than a one-shot transaction_id.
+    """
+    features = self._extract_transaction_features(transaction)
+    
+    # FIX: Use stable account_id or customer_id as entity_key so the rolling window 
+    # accumulates actual historical transactions for LSTM autoencoder sequence analysis.
+    entity_id = str(
+        transaction.get('account_id') or 
+        transaction.get('customer_id') or 
+        transaction.get('card_id') or 
+        'unknown_account'
+    )
+
+    result = self.detect_anomaly(
+        'transactions', 
+        features,
+        entity_key=entity_id
+    )
+
+    return {
+        'transaction_id': transaction.get('transaction_id'),
+        'account_id': entity_id,
+        'anomaly_score': result.get('score'),
+        'is_anomaly': result.get('is_anomaly'),
+        'reconstruction_error': result.get('error')
+    }
 logger = logging.getLogger(__name__)
 
 class AnomalyDetector:
@@ -374,5 +405,7 @@ class AnomalyDetector:
             'total_anomalies': total_anomalies,
             'by_type': by_type,
             'by_severity': by_severity,
+            'last_anomaly': self.anomaly_history[-1] if self.anomaly_history else None
+        }
             'last_anomaly': history[-1] if history else None
         }

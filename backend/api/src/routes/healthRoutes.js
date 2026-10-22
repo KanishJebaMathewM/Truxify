@@ -58,64 +58,14 @@
  */
 
 import express from 'express';
+import * as Sentry from '@sentry/node';
 import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
 import { captureDebugException } from '../middleware/sentry.js';
-import express from 'express';
-import * as Sentry from '@sentry/node';
-import logger from '../middleware/logger.js';
 
-const router = express.Router();
-
-// ... existing health check routes ...
-
-/**
- * GET /api/health/sentry-debug
- * Triggers a test exception capture via Sentry for instrumentation verification.
- */
-router.get('/sentry-debug', async (req, res) => {
-  try {
-    const testError = new Error('Sentry Test Error from Truxify Node.js Backend');
-    
-    // Explicitly capture exception with Sentry if initialized
-    if (Sentry && typeof Sentry.captureException === 'function') {
-      const eventId = Sentry.captureException(testError, {
-        tags: {
-          endpoint: '/api/health/sentry-debug',
-          environment: process.env.NODE_ENV || 'development'
-        },
-        extra: {
-          timestamp: new Date().toISOString(),
-          requestedBy: req.ip
-        }
-      });
-
-      logger.info({ eventId }, 'Sentry debug test exception captured successfully');
-      
-      return res.status(200).json({
-        success: true,
-        message: 'Sentry test exception captured and sent successfully.',
-        sentryEventId: eventId
-      });
-    } else {
-      // Fallback if Sentry is not active in the current environment
-      logger.warn('Sentry is not initialized; test error logged locally.');
-      throw testError;
-    }
-  } catch (err) {
-    logger.error({ error: err.message }, 'Failed to process Sentry debug endpoint');
-    return res.status(500).json({
-      success: false,
-      error: 'Sentry SDK not configured or capture failed',
-      details: err.message
-    });
-  }
-});
-
-export default router;
 const router = express.Router();
 
 const DEFAULT_TIMEOUT_MS = 400;
@@ -142,7 +92,7 @@ async function checkSupabase() {
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
-    logger.error({ event: 'HEALTH_SUPABASE_CHECK_FAILED', error: err?.message }, 'Supabase check failed');
+    logger.error({ event: 'HEALTH_SUPABASE_CHECK_FAILED', error: err?.message || err }, 'Supabase check failed');
     return 'failed';
   }
 }
@@ -153,7 +103,7 @@ async function checkMongo() {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
   } catch (err) {
-    logger.error({ event: 'HEALTH_MONGODB_CHECK_FAILED', error: err?.message }, 'MongoDB check failed');
+    logger.error({ event: 'HEALTH_MONGODB_CHECK_FAILED', error: err?.message || err }, 'MongoDB check failed');
     return 'failed';
   }
 }
@@ -164,7 +114,7 @@ async function checkRedis() {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
   } catch (err) {
-    logger.error({ event: 'HEALTH_REDIS_CHECK_FAILED', error: err?.message }, 'Redis check failed');
+    logger.error({ event: 'HEALTH_REDIS_CHECK_FAILED', error: err?.message || err }, 'Redis check failed');
     return 'failed';
   }
 }
@@ -248,7 +198,7 @@ router.get('/', healthLimiter, async (req, res) => {
       memory: process.memoryUsage(),
     });
   } catch (err) {
-    logger.error({ event: 'HEALTH_CHECK_ERROR', error: err?.message }, 'Health check failed with unhandled exception.');
+    logger.error({ event: 'HEALTH_CHECK_ERROR', error: err?.message || err }, 'Health check failed with unhandled exception.');
     return res.status(503).json({
       status: 'degraded',
       timestamp: new Date().toISOString(),
@@ -360,7 +310,7 @@ router.get('/full', healthLimiter, async (req, res) => {
     return res.status(httpStatus).json(result);
   } catch (err) {
     logger.error(
-      { event: 'HEALTH_AGGREGATED_CHECK_FAILED', requestId: req.requestId || req.id, error: err && err.message },
+      { event: 'HEALTH_AGGREGATED_CHECK_FAILED', requestId: req.requestId || req.id, error: err?.message || err },
       'Aggregated health check failed',
     );
     return res.status(500).json({
@@ -371,19 +321,42 @@ router.get('/full', healthLimiter, async (req, res) => {
   }
 });
 
-router.get('/sentry-debug', healthLimiter, (req, res) => {
+/**
+ * GET /api/health/sentry-debug
+ * Triggers a test exception capture via Sentry for instrumentation verification.
+ */
+router.get('/sentry-debug', healthLimiter, async (req, res) => {
   if (process.env.SENTRY_DEBUG_ENABLED !== 'true' || process.env.NODE_ENV === 'production') {
     return res.status(404).json({ error: 'Not found' });
   }
 
-  const err = new Error('Sentry Test Error from Node.js Backend');
-  err.name = 'SentryDebugTestError';
-  const eventId = captureDebugException(err);
+  try {
+    const testError = new Error('Sentry Test Error from Truxify Node.js Backend');
+    testError.name = 'SentryDebugTestError';
 
-  if (eventId) {
-    return res.status(200).json({ sent: true, eventId });
+    const eventId = captureDebugException(testError);
+
+    if (eventId) {
+      logger.info({ eventId }, 'Sentry debug test exception captured successfully');
+      return res.status(200).json({
+        success: true,
+        message: 'Sentry test exception captured and sent successfully.',
+        sentryEventId: eventId,
+      });
+    }
+
+    return res.status(503).json({
+      success: false,
+      error: 'Sentry SDK not configured or capture failed (SENTRY_DSN unset).',
+    });
+  } catch (err) {
+    logger.error({ error: err?.message || err }, 'Failed to process Sentry debug endpoint');
+    return res.status(500).json({
+      success: false,
+      error: 'Sentry SDK execution error',
+      details: err?.message,
+    });
   }
-  return res.status(503).json({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
 });
 
 export default router;

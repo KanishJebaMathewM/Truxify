@@ -3,7 +3,27 @@ import { supabaseAdmin } from '../config/db.js';
 import { escrowRelease, getOnChainEscrowBooking, getEscrowBookingId, resolveExpectedDepositAmount } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, withLockRenewal, LockAcquisitionError } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/services/escrowReleaseReconciliation.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function reconcileEscrowReleases() {
+  try {
+    // Reconciliation logic...
+  } catch (err) {
+    // Before: logger.error('[Reconciliation] Failed to fetch pending escrows:', err.message);
+    // After: Structured Pino object format
+    logger.error({ err }, '[Reconciliation] Failed to fetch pending escrows');
+  }
+
+  try {
+    // Step 2 logic...
+  } catch (err) {
+    // Before: logger.warn('[Reconciliation] Warning during verification:', err);
+    // After:
+    logger.warn({ err }, '[Reconciliation] Warning during verification');
+  }
+}
 /**
  * Escrow release reconciliation.
  *

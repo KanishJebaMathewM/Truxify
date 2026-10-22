@@ -13,8 +13,27 @@ import logger from '../middleware/logger.js';
 import { DomainError } from './order/domainError.js';
 import { calculateDistanceKm, TRANSSHIPMENT_HUBS } from './relayDispatchService.js';
 
-const HANDSHAKE_SECRET = process.env.RELAY_HANDSHAKE_SECRET || 'truxify-relay-handshake-secret-key-2026';
 const TOKEN_TTL_SECONDS = 600; // 10 minutes
+const MIN_HANDSHAKE_SECRET_LENGTH = 32;
+
+function getHandshakeSecret() {
+  const secret = process.env.RELAY_HANDSHAKE_SECRET;
+  if (typeof secret !== 'string' || secret.length < MIN_HANDSHAKE_SECRET_LENGTH) {
+    throw new DomainError(503, {
+      error: 'Relay handshake is not configured: set a RELAY_HANDSHAKE_SECRET of at least 32 characters.',
+    });
+  }
+  return secret;
+}
+
+function signaturesMatch(expectedHex, providedHex) {
+  if (typeof expectedHex !== 'string' || typeof providedHex !== 'string') return false;
+  if (expectedHex.length !== providedHex.length) return false;
+  const expected = Buffer.from(expectedHex, 'hex');
+  const provided = Buffer.from(providedHex, 'hex');
+  if (expected.length !== provided.length) return false;
+  return crypto.timingSafeEqual(expected, provided);
+}
 
 /**
  * Generates an encrypted/signed QR hand-off payload for the inbound transferring driver.
@@ -25,9 +44,9 @@ export function generateHandshakeToken(relayBookingId, legIndex, inboundDriverId
   const inboundOtp = crypto.randomInt(100000, 999999).toString();
   const outboundOtp = crypto.randomInt(100000, 999999).toString();
 
-  const rawPayload = `${relayBookingId}:${legIndex}:${inboundDriverId}:${hubId}:${timestamp}:${nonce}:${inboundOtp}`;
+  const rawPayload = `${relayBookingId}:${legIndex}:${inboundDriverId}:${hubId}:${timestamp}:${nonce}:${inboundOtp}:${outboundOtp}`;
   const signature = crypto
-    .createHmac('sha256', HANDSHAKE_SECRET)
+    .createHmac('sha256', getHandshakeSecret())
     .update(rawPayload)
     .digest('hex');
 
@@ -53,8 +72,15 @@ export function generateHandshakeToken(relayBookingId, legIndex, inboundDriverId
 export function verifyHubGeofence(driverLat, driverLng, hubId) {
   const hub = TRANSSHIPMENT_HUBS.find((h) => h.id === hubId);
   if (!hub) {
-    // If custom hub coordinates, allow standard 2000m tolerance
-    return { isWithinGeofence: true, distanceMeters: 0 };
+    // An unregistered hub has no authoritative coordinates. Treating it as a
+    // pass would let a caller skip the geofence by inventing an id.
+    return {
+      isWithinGeofence: false,
+      distanceMeters: null,
+      maxAllowedRadiusMeters: null,
+      hubName: 'UNKNOWN_HUB',
+      reason: 'UNKNOWN_HUB',
+    };
   }
 
   const distanceKm = calculateDistanceKm(driverLat, driverLng, hub.lat, hub.lng);
@@ -93,20 +119,25 @@ export async function verifyRelayHandshake(verificationData) {
     outboundGps,
   } = verificationData;
 
-  // 1. Check TTL expiry
+  // 1. Check TTL expiry. A timestamp far in the future is also invalid; the
+  // 60-second allowance covers ordinary clock skew between the two drivers.
   const now = Math.floor(Date.now() / 1000);
+  if (!Number.isSafeInteger(tokenTimestamp) || tokenTimestamp > now + 60) {
+    throw new DomainError(400, { error: 'Hand-off token timestamp is invalid.' });
+  }
   if (now - tokenTimestamp > TOKEN_TTL_SECONDS) {
     throw new DomainError(400, { error: 'Hand-off token has expired. Please regenerate QR token.' });
   }
 
-  // 2. Verify HMAC Token Integrity
-  const rawPayload = `${relayBookingId}:${legIndex}:${inboundDriverId}:${hubId}:${tokenTimestamp}:${nonce}:${expectedInboundOtp}`;
+  // 2. Verify HMAC Token Integrity. Both OTPs are part of the signed payload so
+  // the receiver cannot substitute a different outbound confirmation.
+  const rawPayload = `${relayBookingId}:${legIndex}:${inboundDriverId}:${hubId}:${tokenTimestamp}:${nonce}:${expectedInboundOtp}:${expectedOutboundOtp}`;
   const computedSignature = crypto
-    .createHmac('sha256', HANDSHAKE_SECRET)
+    .createHmac('sha256', getHandshakeSecret())
     .update(rawPayload)
     .digest('hex');
 
-  if (computedSignature !== signature) {
+  if (!signaturesMatch(computedSignature, signature)) {
     throw new DomainError(401, { error: 'Invalid hand-off token signature. Cryptographic check failed.' });
   }
 
@@ -118,22 +149,31 @@ export async function verifyRelayHandshake(verificationData) {
     throw new DomainError(400, { error: 'Dual OTP confirmation failed: OTP mismatch between drivers.' });
   }
 
-  // 4. Verify Dual Geofence Presence at Hub
-  if (inboundGps && outboundGps) {
-    const inboundCheck = verifyHubGeofence(inboundGps.lat, inboundGps.lng, hubId);
-    const outboundCheck = verifyHubGeofence(outboundGps.lat, outboundGps.lng, hubId);
+  // 4. Verify Dual Geofence Presence at Hub. Both drivers must provide fresh
+  // coordinates; missing telemetry is not evidence that the hand-off happened.
+  if (!inboundGps || !outboundGps) {
+    throw new DomainError(403, {
+      error: 'Both drivers must provide GPS coordinates before a relay hand-off can be verified.',
+    });
+  }
 
-    if (!inboundCheck.isWithinGeofence) {
-      throw new DomainError(403, {
-        error: `Inbound driver is outside hub geofence (${inboundCheck.distanceMeters}m from ${inboundCheck.hubName}, max ${inboundCheck.maxAllowedRadiusMeters}m)`,
-      });
-    }
+  const inboundCheck = verifyHubGeofence(inboundGps.lat, inboundGps.lng, hubId);
+  const outboundCheck = verifyHubGeofence(outboundGps.lat, outboundGps.lng, hubId);
 
-    if (!outboundCheck.isWithinGeofence) {
-      throw new DomainError(403, {
-        error: `Outbound driver is outside hub geofence (${outboundCheck.distanceMeters}m from ${outboundCheck.hubName}, max ${outboundCheck.maxAllowedRadiusMeters}m)`,
-      });
-    }
+  if (!inboundCheck.isWithinGeofence) {
+    throw new DomainError(403, {
+      error: inboundCheck.reason === 'UNKNOWN_HUB'
+        ? 'Inbound driver geofence cannot be verified: unknown hub id.'
+        : `Inbound driver is outside hub geofence (${inboundCheck.distanceMeters}m from ${inboundCheck.hubName}, max ${inboundCheck.maxAllowedRadiusMeters}m)`,
+    });
+  }
+
+  if (!outboundCheck.isWithinGeofence) {
+    throw new DomainError(403, {
+      error: outboundCheck.reason === 'UNKNOWN_HUB'
+        ? 'Outbound driver geofence cannot be verified: unknown hub id.'
+        : `Outbound driver is outside hub geofence (${outboundCheck.distanceMeters}m from ${outboundCheck.hubName}, max ${outboundCheck.maxAllowedRadiusMeters}m)`,
+    });
   }
 
   // 5. Generate Deterministic On-Chain Hand-off Receipt Digest

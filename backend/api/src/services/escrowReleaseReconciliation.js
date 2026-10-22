@@ -3,7 +3,21 @@ import { supabaseAdmin } from '../config/db.js';
 import { escrowRelease, getOnChainEscrowBooking, getEscrowBookingId, resolveExpectedDepositAmount } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, withLockRenewal, LockAcquisitionError } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
+// backend/api/src/services/escrowReleaseReconciliation.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+import redisClient from '../config/redis.js';
+
+// ... inside reconciliation setup ...
+
+leaseExtender = setInterval(async () => {
+    try {
+        await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+    } catch (err) {
+        // Fix: Log the error instead of swallowing it silently, using structured Pino format
+        logger.error({ err }, '[escrow-release-reconciliation] Failed to extend Redis lock');
+    }
+}, LEASE_EXTENSION_INTERVAL_MS);
 /**
  * Escrow release reconciliation.
  *

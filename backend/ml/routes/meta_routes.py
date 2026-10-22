@@ -135,7 +135,7 @@ def few_shot_classify(request: FewShotClassifyRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/sample")
-async def sample_task(k_shot: int = 5):
+async def sample_task(k_shot: Annotated[int, Query(ge=1, le=1000)] = 5):
     """Sample a task for meta-learning"""
     try:
         task = task_generator.sample_task(k_shot)

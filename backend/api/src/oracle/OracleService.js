@@ -1,4 +1,4 @@
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { verifyDeliveryOtpHash } from '../services/notificationService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
@@ -22,7 +22,13 @@ export const ORACLE_THRESHOLD = 2;
 class OracleService {
   constructor(deps = {}) {
     this.orderRepository = deps.orderRepository || null;
-    this.supabase = deps.supabase || supabase;
+    // The oracle reads orders and delivery_otps on behalf of the server,
+    // not on behalf of the caller. Both tables only grant SELECT to
+    // service_role/authenticated, so the anon key could never read a row:
+    // every provider returned 'Order not found' and the 2-of-3 consensus was
+    // unreachable. Access to an order is authorised at the route boundary
+    // (authorizeOrderAccess), not by RLS.
+    this.supabase = deps.supabase || supabaseAdmin;
     this.chainlinkRpcUrl = deps.chainlinkRpcUrl || process.env.CHAINLINK_RPC_URL || null;
     this.defaultGasPriceGwei = deps.defaultGasPriceGwei || (process.env.DEFAULT_GAS_PRICE_GWEI ? Number(process.env.DEFAULT_GAS_PRICE_GWEI) : 30);
   }

@@ -59,6 +59,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 
 process.env.PRIVATE_KEY = '0x0000000000000000000000000000000000000000000000000000000000000001'
 process.env.ASSET_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000002'
+process.env.POLYGON_RPC_URL = 'http://localhost:8545'
 
 const { default: tokenService } = await import('../../../tokenization/token.service.js')
 
@@ -67,6 +68,8 @@ const receipt = { hash: '0xsell-transaction' }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  tokenService.provider = tokenService.provider || {}
+  tokenService.tokenAddress = tokenService.tokenAddress || process.env.ASSET_TOKEN_ADDRESS
   mocks.contract.sellFraction.mockResolvedValue({
     wait: vi.fn().mockResolvedValue(receipt),
   })

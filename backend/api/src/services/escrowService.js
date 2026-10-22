@@ -1,10 +1,17 @@
-const { createClient } = require('@supabase/supabase-js');
-const { ethers } = require('ethers');
-const {
+import { createClient } from '@supabase/supabase-js';
+import { ethers } from 'ethers';
+import {
     validateEscrowAmount,
     validateBlockchainAddress,
     validateBookingId
-} = require('../utils/escrowValidator');
+} from '../utils/escrowValidator.js';
+export {
+  paisaToMaticWei,
+  weiWithinTolerance,
+  resolveExpectedDepositAmount,
+  getEscrowBookingId,
+  ESCROW_MATIC_PER_PAISA
+} from './escrow.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -203,7 +210,12 @@ const releaseEscrowFunds = async (userId, bookingId) => {
     }
 };
 
-module.exports = {
+export {
+    initiateEscrowDeposit,
+    releaseEscrowFunds,
+};
+
+export default {
     initiateEscrowDeposit,
     releaseEscrowFunds,
 };

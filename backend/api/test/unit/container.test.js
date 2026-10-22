@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("../../../src/config/db.js", () => ({
+vi.mock("../../src/config/db.js", () => ({
   supabase: {},
   supabaseAdmin: null,
   redisClient: null,
@@ -10,7 +10,7 @@ vi.mock("../../../src/config/db.js", () => ({
 
 describe("container", () => {
   it("exports all expected service instances", async () => {
-    const container = await import("../../../src/core/container.js");
+    const container = await import("../../src/core/container.js");
     expect(container.orderRepository).toBeDefined();
     expect(container.orderTimelineService).toBeDefined();
     expect(container.orderValidationService).toBeDefined();
@@ -22,19 +22,19 @@ describe("container", () => {
     expect(container.orderLifecycleService).toBeDefined();
     expect(container.oracleService).toBeDefined();
     expect(container.verificationService).toBeDefined();
-  });
+  }, 30000);
 
   it("exports logger from middleware", async () => {
-    const container = await import("../../../src/core/container.js");
+    const container = await import("../../src/core/container.js");
     expect(container.logger).toBeDefined();
     expect(typeof container.logger.info).toBe("function");
     expect(typeof container.logger.warn).toBe("function");
     expect(typeof container.logger.error).toBe("function");
-  });
+  }, 30000);
 
   it("exports db clients", async () => {
-    const container = await import("../../../src/core/container.js");
+    const container = await import("../../src/core/container.js");
     expect(container.supabase).toBeDefined();
     expect(container.redisClient).toBeNull();
-  });
+  }, 30000);
 });

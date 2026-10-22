@@ -204,4 +204,70 @@ router.get(
   }
 );
 
+function parseHistoryQuery(query) {
+  const limit = query.limit === undefined ? 100 : Number(query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) return null;
+
+  const filter = {};
+  if (query.from !== undefined) {
+    const from = new Date(query.from);
+    if (Number.isNaN(from.getTime())) return null;
+    filter.timestamp = { ...filter.timestamp, $gte: from };
+  }
+  if (query.to !== undefined) {
+    const to = new Date(query.to);
+    if (Number.isNaN(to.getTime())) return null;
+    filter.timestamp = { ...filter.timestamp, $lte: to };
+  }
+
+  return { limit, filter };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// GET /api/public/tracking/:token/history
+// Public — returns bounded GPS history for a valid tracking link.
+// ──────────────────────────────────────────────────────────────────────────
+router.get(
+  '/tracking/:token/history',
+  publicLimiter,
+  validateParams(publicTrackingTokenSchema),
+  async (req, res) => {
+    try {
+      const query = parseHistoryQuery(req.query);
+      if (!query) {
+        return res.status(422).json({ error: 'limit must be 1-500 and from/to must be valid dates' });
+      }
+
+      const validation = await trackingTokenService.validateToken(req.params.token);
+      if (validation.reason === 'validation_error') {
+        return res.status(400).json({ error: 'Invalid tracking token' });
+      }
+      if (!validation.valid) {
+        const { status, message } = trackingTokenInvalidResponse(validation);
+        return res.status(status).json({ error: message });
+      }
+
+      const logs = await GpsLog.find({ bookingId: validation.orderDisplayId, ...query.filter })
+        .sort({ timestamp: -1 })
+        .limit(query.limit)
+        .lean();
+
+      return res.json({
+        points: logs.map((log) => ({
+          latitude: log.lat,
+          longitude: log.lng,
+          speed: log.speed,
+          heading: log.heading,
+          timestamp: log.timestamp,
+        })),
+        count: logs.length,
+        limit: query.limit,
+      });
+    } catch (err) {
+      logger.error({ err }, 'Error fetching public tracking history');
+      return res.status(500).json({ error: 'Failed to load tracking history' });
+    }
+  }
+);
+
 export default router;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 
 // 1. Mock Logger with debug support
-vi.mock('../../../src/utils/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -11,17 +11,11 @@ vi.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
-// 2. Mock Profile Cache module
-vi.mock('../../../src/services/profileCache.js', () => ({
-  getCachedSupabaseProfile: vi.fn().mockResolvedValue({
-    id: 'usr_mock_12345',
-    role: 'customer',
-    status: 'active',
-  }),
-}));
 
 // 3. Mock Database / Supabase Admin module
-vi.mock('../../../src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
+  firebaseAdmin: null,
+  redisClient: null,
   supabase: {
     auth: {
       getUser: vi.fn().mockResolvedValue({
@@ -50,12 +44,13 @@ vi.mock('../../../src/config/db.js', () => ({
   })),
 }));
 
-import { authenticate } from '../../../src/middleware/auth.js';
+import { authenticate } from '../../src/middleware/auth.js';
 
 describe('Auth Middleware (Unit Tests)', () => {
   let req, res, next;
 
   beforeEach(() => {
+    process.env.BYPASS_AUTH = 'false';
     vi.clearAllMocks();
     req = {
       headers: {},
@@ -78,7 +73,8 @@ describe('Auth Middleware (Unit Tests)', () => {
   });
 
   it('successfully authenticates request with valid local-JWT / fallback flow', async () => {
-    req.headers['authorization'] = 'Bearer valid-mock-jwt-token';
+    const { getJwtSecret } = await import('../../src/config/jwtSecret.js');
+    req.headers['authorization'] = 'Bearer ' + jwt.sign({ id: 'usr_mock_12345', role: 'customer' }, getJwtSecret());
 
     await authenticate(req, res, next);
 
@@ -88,10 +84,10 @@ describe('Auth Middleware (Unit Tests)', () => {
   });
 
   it('handles invalid token format and responds with 401 unauthorized', async () => {
-    req.headers['authorization'] = 'Bearer invalid-token-string';
+    req.headers['authorization'] = 'Bearer ' + jwt.sign({ iss: 'supabase' }, 'secret');
 
     // Mock token verification failure
-    const db = await import('../../../src/config/db.js');
+    const db = await import('../../src/config/db.js');
     db.supabase.auth.getUser.mockResolvedValueOnce({
       data: { user: null },
       error: { message: 'Invalid token' },
@@ -558,6 +554,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
   it('strips dev auth headers in production and falls through to token flow', async () => {
     process.env.BYPASS_AUTH = 'false';
     process.env.NODE_ENV = 'production';
+    process.env.JWT_SECRET = 'a'.repeat(32);
 
     vi.doMock('../../src/config/db.js', () => ({
       createUserClient: () => null,

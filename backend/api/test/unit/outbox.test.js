@@ -1,8 +1,8 @@
-// backend/api/test/unit/outbox.test.js
+import { describe, test, expect, vi, beforeEach } from 'vitest';
+import outboxService from '../../src/outbox/service.js';
+import outboxRelay from '../../src/outbox/relay.js';
 
-// Adjust the relative path to target the actual service and relay files in backend/api/src/outbox/
-const outboxService = require('../../src/outbox/service'); // or '../../src/outbox/outboxService'
-const outboxRelay = require('../../src/outbox/relay');     // or '../../src/outbox/outboxRelay'
+const jest = vi;
 
 describe('Outbox Unit Tests', () => {
   let mockDb;

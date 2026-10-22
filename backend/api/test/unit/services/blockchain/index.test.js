@@ -16,11 +16,18 @@ vi.mock('../../../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('ethers', () => ({
-  JsonRpcProvider: class {},
-  Contract: class {},
-  Wallet: class {},
-}));
+vi.mock('ethers', () => {
+  const mockEthers = {
+    JsonRpcProvider: class {},
+    Contract: class {},
+    Wallet: class {},
+  };
+  return {
+    ...mockEthers,
+    ethers: mockEthers,
+    default: mockEthers,
+  };
+});
 
 vi.mock('../../../../src/config/db.js', () => ({
   supabase: null,

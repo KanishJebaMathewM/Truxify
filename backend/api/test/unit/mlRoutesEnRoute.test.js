@@ -38,6 +38,7 @@ vi.mock('../../src/middleware/auth.js', () => ({
     req.user = { id: 'driver-1', role: 'driver' };
     next();
   },
+  requireRole: () => (req, res, next) => next(),
 }));
 
 vi.mock('../../src/middleware/rateLimiter.js', () => ({

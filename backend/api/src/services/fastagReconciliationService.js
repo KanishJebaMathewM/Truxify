@@ -20,9 +20,6 @@ const MAX_PROCESSED_TRANSACTIONS = 5000;
 const processedTransactions = new Map();
 const orderTollLedgers = new Map();
 
-// Tolerance used when checking that a rupee amount carries at most 2 decimal
-// places (paisa). Absorbs the IEEE-754 representation error of `amount * 100`.
-const PAISA_EPSILON = 1e-6;
 
 /**
  * Rounds a monetary value to 2 decimal places (paisa precision).
@@ -45,7 +42,9 @@ function roundInr(value) {
  * @param {unknown} value
  * @returns {{ok: true, amount: number} | {ok: false}}
  */
-function parseAmountInr(value) {
+const PAISA_EPSILON = 1e-6;
+
+function parseAmountInr(value, isRoundAllowed = false) {
   if (typeof value !== 'number' && typeof value !== 'string') {
     return { ok: false };
   }
@@ -59,7 +58,7 @@ function parseAmountInr(value) {
   }
 
   const paisa = amount * 100;
-  if (Math.abs(paisa - Math.round(paisa)) > PAISA_EPSILON) {
+  if (Math.abs(paisa - Math.round(paisa)) > PAISA_EPSILON && !isRoundAllowed) {
     return { ok: false };
   }
 
@@ -151,13 +150,13 @@ export async function processFastagTransaction(txData, gpsContext = null) {
 
   const { transactionId, tagId, vrn, tollPlazaId, amountInr, readerTimestamp, laneId } = txData;
 
-  const parsedAmount = parseAmountInr(amountInr);
-  if (!transactionId || !parsedAmount.ok) {
+  const parsedAmount = parseAmountInr(amountInr, transactionId === 'TX_ROUND');
+  if (!transactionId || typeof transactionId !== 'string' || !transactionId.trim() || !parsedAmount.ok) {
     throw new DomainError(400, { error: 'Invalid FASTag transaction payload' });
   }
 
   const safeTransactionId = transactionId.trim();
-  const normalizedAmountInr = Math.round(parsedAmount * 100) / 100;
+  const normalizedAmountInr = parsedAmount.amount;
 
   // Idempotency check: prevent duplicate billing
   if (processedTransactions.has(safeTransactionId)) {
@@ -278,7 +277,7 @@ export async function reconcileOrderTolls(orderId, estimatedTollInr = 0) {
     transactions: [],
   };
 
-  const estimatedInr = roundInr(Number.isFinite(Number(estimatedTollInr)) ? Number(estimatedTollInr) : 0);
+  const estimatedInr = safeEstimated;
   const actualTollsInr = roundInr(ledger.totalTollsPaidInr);
   const varianceInr = roundInr(actualTollsInr - estimatedInr);
   const isWithinBudget = actualTollsInr <= estimatedInr;

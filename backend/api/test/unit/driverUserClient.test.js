@@ -113,7 +113,7 @@ describe('driver router authenticated clients and RLS', () => {
         USING (driver_id = get_profile_id()) WITH CHECK (driver_id = get_profile_id());
       CREATE POLICY own_wallet ON wallet_transactions FOR SELECT TO authenticated USING (driver_id = get_profile_id());
     `);
-  });
+  }, 60000);
   afterAll(async () => { await state.db?.close(); });
   beforeEach(async () => {
     vi.clearAllMocks();

@@ -1,4 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('dataloader', () => {
+  return {
+    default: class DataLoader {
+      constructor(batchFn) {
+        this.batchFn = batchFn;
+      }
+    },
+  };
+});
+
 import {
   resolveUserContext,
   DEFAULT_ROLE,

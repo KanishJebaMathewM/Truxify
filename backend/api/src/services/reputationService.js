@@ -1,4 +1,4 @@
-// Inside backend/api/src/services/reputationService.js
+import logger from '../middleware/logger.js';
 
 export async function aggregateRating(userId, roleScore) {
   // Add defensive null/undefined guard for roleScore

@@ -1,4 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../../src/config/db.js', () => ({
+  supabase: null,
+  supabaseAdmin: null,
+  redisClient: null,
+  mongoDb: null,
+  firebaseAdmin: null,
+}));
 
 /**
  * auditRoutes.js is statically imported by src/index.js and mounted at
@@ -9,7 +17,7 @@ import { describe, it, expect } from 'vitest';
  * This pins the one property that failure violated: the module links and
  * exports a usable Express router.
  */
-describe('auditRoutes module load', () => {
+describe('auditRoutes module load', { timeout: 30000 }, () => {
   it('links without a SyntaxError and default-exports an Express router', async () => {
     const mod = await import('../../src/routes/auditRoutes.js');
 

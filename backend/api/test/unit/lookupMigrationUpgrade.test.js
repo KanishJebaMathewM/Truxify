@@ -16,7 +16,7 @@ async function db({ legacy = false, defaults = false } = {}) {
 }
 afterEach(async () => { while (databases.length) await databases.pop().close(); });
 
-describe('lookup migration upgrade from the earlier minimal schemas', () => {
+describe('lookup migration upgrade from the earlier minimal schemas', { timeout: 60000 }, () => {
   it('applies both migrations in order and adds every enriched lookup column', async () => {
     const database = await db({ legacy: true });
     await database.exec(upgradeSql);

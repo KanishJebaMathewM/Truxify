@@ -1,6 +1,7 @@
-const escrowService = require('../services/escrowService');
+import escrowService from '../services/escrowService.js';
+import logger from '../middleware/logger.js';
 
-const depositEscrow = async (req, res) => {
+export const depositEscrow = async (req, res) => {
     try {
         const userId = req.user.uid;
         const { bookingId, amount, driverWalletAddress } = req.body;
@@ -40,7 +41,7 @@ const depositEscrow = async (req, res) => {
 }
 };
 
-const releaseEscrow = async (req, res) => {
+export const releaseEscrow = async (req, res) => {
     try {
         const userId = req.user.uid;
         const { bookingId } = req.params;
@@ -72,7 +73,7 @@ const releaseEscrow = async (req, res) => {
     }
 };
 
-module.exports = {
+export default {
     depositEscrow,
     releaseEscrow,
 };

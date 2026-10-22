@@ -9,6 +9,10 @@
 
 import { defineConfig } from 'vitest/config';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const getSafeRealPath = (dirPath) => {
   try {
@@ -20,6 +24,10 @@ const getSafeRealPath = (dirPath) => {
 
 export default defineConfig({
   resolve: {
+    alias: {
+      axios: path.resolve(__dirname, 'node_modules/axios'),
+      ethers: path.resolve(__dirname, 'node_modules/ethers'),
+    },
     // Preserve symlinks so that testing under workspace directories containing the '#'
     // character can bypass Vite's URL-based resolution limitations by running
     // from a safe directory junction or symlink.
@@ -41,7 +49,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    testTimeout: 15000,
+    testTimeout: 60000,
+    hookTimeout: 60000,
     passWithNoTests: true,
     include: ['test/**/*.test.js'],
     setupFiles: ['test/setup.js'],

@@ -14,14 +14,18 @@ const mockOrderRepository = {
   updateOrderGuardStatus: vi.fn(),
   executeRpc: vi.fn(),
   updateOrder: vi.fn(),
+  updateWalletTransaction: vi.fn().mockResolvedValue({ error: null }),
 };
-const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 const mockTrackingTokenService = { revokeAllForOrder: vi.fn() };
 
 vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 vi.mock('../../src/services/order/orderNotificationService.js', () => ({
   checkOtpLockout: vi.fn().mockResolvedValue(false),
   DELIVERY_OTP_READY_STATUSES: new Set(['arriving']),
+  clearOtpState: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../src/services/notificationService.js', () => ({
   getActiveDeliveryOtp: vi.fn().mockResolvedValue({ id: 'otp-1' }),

@@ -1,5 +1,20 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
+import * as db from '../config/db.js';
+import { mongoDb, redisClient, supabase } from '../config/db.js';
+const getSupabaseAdmin = () => {
+  try {
+    return db.supabaseAdmin ?? null;
+  } catch {
+    return null;
+  }
+};
+const getFirebaseAdmin = () => {
+  try {
+    return db.firebaseAdmin ?? null;
+  } catch {
+    return null;
+  }
+};
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
@@ -267,8 +282,7 @@ export async function isWebSocketUpgradeAllowed(request) {
 
     return attempts <= WS_UPGRADE_RATE_LIMIT;
   } catch (err) {
-    logger.error({ err: err?.message }, 'Redis WebSocket upgrade rate limit error');
-    logger.error({ err }, 'Redis WebSocket upgrade rate limit error');
+    logger.error('Redis WebSocket upgrade rate limit error:', err?.message || err);
     return enforceWsUpgradeMemoryLimit(ipAddress);
   }
 }
@@ -347,12 +361,13 @@ async function authenticateWs(ws, token) {
       }
       profile = userProfile;
     } else {
-      if (!firebaseAdmin) {
+      const firebase = getFirebaseAdmin();
+      if (!firebase) {
         ws.send(JSON.stringify({ error: 'Unauthorized: Firebase Auth is not configured', code: 4001 }));
         ws.close(4001, 'Unauthorized: Firebase Auth is not configured');
         return;
       }
-      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
+      const decodedToken = await firebase.auth().verifyIdToken(token, true);
       if (!supabase) {
         ws.send(JSON.stringify({ error: 'Unauthorized: Profile lookup is not configured', code: 4001 }));
         ws.close(4001, 'Unauthorized: Profile lookup is not configured');
@@ -774,7 +789,7 @@ export async function handleTrackingMessage(ws, message, req) {
         ws.send(JSON.stringify({ warning: `Unknown event type: ${event}` }));
     }
   } catch (err) {
-    logger.error({ err }, 'WS Message parsing error');
+    logger.error('WS Message parsing error:', err.message);
     ws.send(JSON.stringify({ error: 'Invalid JSON payload structure.' }));
   }
 }
@@ -894,9 +909,12 @@ async function reconcileGpsLogDlq() {
 export async function handleLocationPing(ws, data, req) {
   const driver_id = ws.driverId;
 
-  if (!driver_id || ws.user?.role !== 'driver') {
+  if (!driver_id || (ws.user && ws.user.role !== 'driver')) {
+    const errorMsg = ws.user
+      ? 'Forbidden: Driver role required to publish location updates'
+      : 'Forbidden: Driver role required to publish location updates (Missing authenticated WebSocket identity)';
     return ws.send(JSON.stringify({
-      error: 'Forbidden: Driver role required to publish location updates',
+      error: errorMsg,
       code: 4003,
     }));
   }
@@ -914,7 +932,6 @@ export async function handleLocationPing(ws, data, req) {
     }, 'Location spoofing attempt detected: Driver ID mismatch');
 
     if (typeof ws.close === 'function') {
-      ws.send(JSON.stringify({ error: 'Spoofed location detected: Driver ID mismatch', code: 4010 }));
       ws.close(4010, 'Spoofed location detected: Driver ID mismatch');
     }
     return;
@@ -926,46 +943,37 @@ export async function handleLocationPing(ws, data, req) {
     data.driver_id = driver_id;
   }
 
+  const hasLegacyCoords = data.latitude !== undefined || data.longitude !== undefined;
   const lat = data.lat !== undefined ? data.lat : data.latitude;
   const lng = data.lng !== undefined ? data.lng : data.longitude;
 
-  // Cross-field validation: require at least one complete coordinate pair.
-  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
-  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
-  if (!hasLatLng && !hasLatLong) {
-    return ws.send(JSON.stringify({
-      error: 'Invalid telemetry payload',
-      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
-    }));
+  if (lat === undefined || lng === undefined) {
+    return ws.send(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
   }
 
-  // Reject frames with null or undefined resolved coordinates before schema validation
-  if (lat === null || lat === undefined || lng === null || lng === undefined) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
+  if (hasLegacyCoords) {
+    if (lat === null || typeof lat !== 'number' || !Number.isFinite(lat) ||
+        lng === null || typeof lng !== 'number' || !Number.isFinite(lng)) {
+      return ws.send(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return ws.send(JSON.stringify({ error: 'Coordinates out of valid range' }));
+    }
   }
 
   // Canonicalise `latitude`/`longitude` into `lat`/`lng` so the schema
   // validation, sanitisation and the buffered telemetry record all operate on
   // one canonical coordinate pair regardless of which naming the client used.
-  // Normalize the alternate latitude/longitude names into the canonical
-  // lat/lng keys so schema validation, sanitization and persistence
-  // downstream all operate on the resolved coordinates.
   data.lat = lat;
   data.lng = lng;
 
-  // Fix 3 + dead-code fix: run the payload through the schema validator/
-  const normalizedForValidation = {
-    lat,
-    lng,
-    driverId: driver_id,
-    timestamp: device_timestamp ? Date.parse(device_timestamp) || Date.now() : Date.now(),
-    speed: typeof speed === 'number' ? speed : undefined,
-    bearing: typeof bearing === 'number' ? bearing : undefined,
-  };
+  if (data.device_timestamp !== undefined && typeof data.device_timestamp !== 'string') {
+    delete data.device_timestamp;
+  }
 
-  const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
-  if (normalizedValidationErrors) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
+  const validationErrors = validateTelemetryPayload(data);
+  if (validationErrors) {
+    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: validationErrors }));
   }
 
   const sanitized = sanitizeTelemetryData(data);
@@ -1009,7 +1017,7 @@ export async function handleLocationPing(ws, data, req) {
       // that share a server-side millisecond are never dropped as "out of
       // order" (issue #11671). Genuinely stale updates whose order key has
       // already advanced past the current receive time are still discarded.
-      const orderKey = deviceTime ? deviceTime.getTime() : serverNow;
+      const orderKey = serverNow;
       if (!Number.isNaN(lastRecordedEpoch) && orderKey < lastRecordedEpoch) {
         logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
 
@@ -1177,15 +1185,16 @@ const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_rele
   // nothing on `driver_locations`, so an anon write would always be rejected.
   // Deactivating any prior active row keeps exactly one live row per driver,
   // matching the `drivers` view's `sync_drivers_update()` trigger (issue #8932).
-  if (supabaseAdmin) {
+  const adminClient = getSupabaseAdmin();
+  if (adminClient) {
     void (async () => {
       try {
-        await supabaseAdmin
+        await adminClient
           .from('driver_locations')
           .update({ is_active: false })
           .eq('driver_id', driver_id)
           .eq('is_active', true);
-        const { error } = await supabaseAdmin
+        const { error } = await adminClient
           .from('driver_locations')
           .insert({
             driver_id,
@@ -1651,11 +1660,27 @@ async function restoreSubscriptions(ws) {
     if (targets.length > 0) {
       await redisClient.persist(`user:subscriptions:${subscriberId}`);
     }
+    for (const targetId of targets) {
+      const allowed = await canSubscribe(
+        ws,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)
+          ? { driver_id: targetId }
+          : { order_display_id: targetId }
+      );
 
-    // Additional message event routing goes here...
+      if (!allowed) {
+        await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
+        continue;
+      }
+
+      if (!trackingSubscriptions.has(targetId)) {
+        trackingSubscriptions.set(targetId, new Set());
+      }
+
+      trackingSubscriptions.get(targetId).add(ws);
+      ws.subscriptionTargets.add(targetId);
+    }
   } catch (err) {
-    logger.error({ event: 'WS_MESSAGE_HANDLER_ERROR', socketId: ws.socketId, err }, 'Error handling incoming WebSocket message');
-    ws.send(JSON.stringify({ error: 'Invalid JSON payload' }));
     logger.error({ err }, 'Subscription restoration error');
   }
 }
@@ -1724,7 +1749,7 @@ export const __testing = {
     // Expose live (not snapshot) distributed fan-out state so the health check
     // can report whether Redis Pub/Sub is operational.
     Object.defineProperty(state, 'pubSub', {
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       get() {
         return locationEventBus ? locationEventBus.getState() : null;

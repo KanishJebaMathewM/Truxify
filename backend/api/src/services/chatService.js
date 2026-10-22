@@ -7,11 +7,11 @@ import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { encryptMessage, decryptMessage } from '../lib/chatEncryption.js';
 import { enqueueOfflineMessage } from '../lib/messageQueue.js';
+import { getChatEncryptionSecret } from '../config/chatEncryptionSecret.js';
 
 const CHAT_RATE_LIMIT_PREFIX = 'chat:rate:';
 const RATE_LIMIT_WINDOW_SEC = 60;
 const MAX_MESSAGES_PER_WINDOW = 60;
-const ENCRYPTION_SECRET = process.env.CHAT_ENCRYPTION_SECRET || 'truxify-default-chat-secret-change-me';
 
 function parseAttachmentContent(raw) {
     try {
@@ -57,7 +57,7 @@ export async function saveChatMessage({ orderId, senderId, senderRole, type, con
     if (!supabaseAdmin) throw new Error('Supabase not configured');
 
     const encryptedContent = type === 'text'
-        ? encryptMessage(content, ENCRYPTION_SECRET)
+        ? encryptMessage(content, getChatEncryptionSecret())
         : content; // Images/locations are URLs/JSON, not encrypted the same way
 
     const { data, error } = await supabaseAdmin
@@ -122,7 +122,7 @@ export async function getChatHistory(orderId, limit = 50, before = null) {
         senderRole: msg.sender_role,
         type: msg.message_type,
         content: msg.message_type === 'text'
-            ? decryptMessage(msg.encrypted_content, ENCRYPTION_SECRET)
+            ? decryptMessage(msg.encrypted_content, getChatEncryptionSecret())
             : parseAttachmentContent(msg.encrypted_content),
         isRead: msg.is_read,
         timestamp: msg.created_at

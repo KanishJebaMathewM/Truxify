@@ -93,11 +93,17 @@ contract DAO is Ownable {
      * accumulated vote total, so the shared pool cannot be drained.
      */
     function releaseVotes(uint256 _proposalId) external {
+        Proposal storage proposal = proposals[_proposalId];
+        require(block.timestamp >= proposal.votingDeadline, "Voting still active");
         uint256 held = tokensHeld[_proposalId][msg.sender];
         require(held > 0, "No votes to release");
         require(!votesReleased[_proposalId][msg.sender], "Already released");
 
+        uint256 cast = votesCast[_proposalId][msg.sender];
         votesReleased[_proposalId][msg.sender] = true;
+        votesCast[_proposalId][msg.sender] = 0;
+        tokensHeld[_proposalId][msg.sender] = 0;
+        proposal.voteCount -= cast;
         require(governanceToken.transfer(msg.sender, held), "Token transfer failed");
 
         emit VotesReleased(_proposalId, msg.sender, held);

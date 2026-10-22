@@ -162,7 +162,26 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+import rateLimit from 'express-rate-limit';
+
+const predictDemandLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP/user to 100 requests per windowMs
+  keyGenerator: (req) => {
+    if (!req.user || !req.user.id) {
+      // Fallback to client IP for unauthenticated requests instead of throwing
+      return req.ip ?? 'unknown-ip';
+    }
+    return req.user.id;
+  },
+  message: {
+    success: false,
+    error: 'TOO_MANY_REQUESTS',
+    message: 'Too many demand prediction requests, please try again later.'
+  }
+});
 import {
   bidLimiter,
   userLimiter,

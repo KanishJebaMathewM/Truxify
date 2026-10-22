@@ -6,22 +6,6 @@
  */
 
 /** Columns the response actually serialises. Replaces a `select('*')`. */
-// backend/api/src/services/driver/earningsReportService.js
-
-export function parseDistanceKm(value) {
-  if (value === undefined || value === null) return 0;
-  
-  // Preserve digits and decimal points, stripping units like " km"
-  const cleaned = String(value).replace(/[^0-9.]/g, '');
-  
-  // Normalize by keeping only the first decimal point if multiple exist
-  const normalized = cleaned.replace(/(\..*?)\..*/g, '$1');
-  
-  if (normalized.length === 0) return 0;
-  
-  const parsed = parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 export const EARNINGS_TRIP_COLUMNS = [
   'trip_display_id',
   'route_label',
@@ -41,24 +25,6 @@ export const DEADHEAD_COLUMNS = 'route_label, trip_date';
  * deadhead run. Matches the existing behaviour.
  */
 export const DEADHEAD_MAX_GAP_DAYS = 3;
-// backend/api/src/services/driver/earningsReportService.js
-
-export function parseDistanceKm(value) {
-  if (value === undefined || value === null) return 0;
-
-  // Preserve digits and a single decimal point
-  const cleaned = String(value).replace(/[^0-9.]/g, '');
-  
-  // Drop any extra duplicate decimal points (e.g., "12..5" -> "12.5")
-  const normalized = cleaned.replace(/(\..*?)\..*/g, '$1');
-
-  if (normalized.length === 0) {
-    return 0;
-  }
-
-  const parsed = parseFloat(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 /**
  * Defensive row cap on the deadhead query. The date bound already limits the
  * scan; this stops a pathological data set from returning an unbounded set.
@@ -153,10 +119,11 @@ export function parseDistanceKm(value) {
     return 0;
   }
   const decimal = String(value).replace(/[^0-9.]/g, '');
-  if (decimal.length === 0) {
+  const normalized = decimal.replace(/(\..*?)\..*/g, '$1');
+  if (normalized.length === 0) {
     return 0;
   }
-  const parsed = parseFloat(decimal);
+  const parsed = parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 

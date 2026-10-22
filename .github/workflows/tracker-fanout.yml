@@ -1,0 +1,28 @@
+name: Tracker fanout
+on:
+  pull_request:
+    paths:
+      - backend/api/src/sockets/tracker.js
+      - backend/api/src/sockets/trackingFanout.js
+      - backend/api/src/sockets/locationEventBus.js
+      - backend/api/test/trackerFanout.test.js
+      - backend/api/test/locationEventBus.test.js
+      - tools/tracker-fanout-tests/**
+      - .github/workflows/tracker-fanout.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fanout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/tracker-fanout-tests/package-lock.json
+      - run: npm ci --no-fund
+        working-directory: tools/tracker-fanout-tests
+      - run: bash tools/tracker-fanout-tests/run.sh

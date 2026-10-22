@@ -69,13 +69,9 @@ docker-compose.override.yml
 # Google Services config (contains API keys/secrets)
 **/google-services.json
 
-# Dart define env files (may contain API keys/secrets)
+# Dart define env files (contain API keys)
 dart_defines/*.env
 !dart_defines/*.env.example
-
-.git_corrupted/
-
-# Local VC status-list allocation state
 **/.truxify-vc-status-index.json
 
 *.sqlite

@@ -152,7 +152,7 @@ export async function processDocumentExpiryBatch() {
           if (leaseLost) return;
 
           if (error) {
-            throw new Error(error.message);
+            throw new Error(error.message, { cause: error });
           }
 
           page = data || [];
@@ -160,7 +160,7 @@ export async function processDocumentExpiryBatch() {
           offset += page.length;
         } while (page.length === DOCS_PAGE_SIZE);
       } catch (err) {
-        logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, err.message);
+        logger.error({ err }, `[document-expiry] Failed to query documents for ${window.label} window: ${err.message}`);
         continue;
       }
 
@@ -179,8 +179,6 @@ export async function processDocumentExpiryBatch() {
         }
 
         const alreadyNotified = await hasExistingNotification(doc.driver_id, doc.id, window.days);
-        // A renewal can fail while a query is in flight. Never dispatch the
-        // next reminder after ownership loss; an already sent push cannot be recalled.
         if (leaseLost) return;
         if (alreadyNotified) {
           logger.info(`[document-expiry] Document ${doc.id} already notified for ${window.label} window, skipping.`);
@@ -210,7 +208,7 @@ export async function processDocumentExpiryBatch() {
           totalNotificationsSent++;
           logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.driver_id}`);
         } catch (err) {
-          logger.error(`[document-expiry] Failed to send notification for document ${doc.id}:`, err.message);
+          logger.error({ err, docId: doc.id }, `[document-expiry] Failed to send notification for document ${doc.id}: ${err.message}`);
         }
       }
     }
@@ -220,27 +218,27 @@ export async function processDocumentExpiryBatch() {
     }
 
     if (lockAcquired && redisClient) {
+      try {
+        const released = await redisClient.eval(
+          RELEASE_LOCK_SCRIPT,
+          1,
+          LOCK_KEY,
+          lockToken
+        );
 
-try {
-  const released = await redisClient.eval(
-    RELEASE_LOCK_SCRIPT,
-    1,
-    LOCK_KEY,
-    lockToken
-  );
-
-  if (!released) {
-    logger.warn(
-      { lockKey: LOCK_KEY, lockToken },
-      'Document expiry lock release returned 0 - lock may have been released by another process'
-    );
-  }
-} catch (err) {
-  logger.error(
-    { err, lockKey: LOCK_KEY, lockToken },
-    'Failed to release document expiry worker lock'
-  );
-}    }
+        if (!released) {
+          logger.warn(
+            { lockKey: LOCK_KEY, lockToken },
+            'Document expiry lock release returned 0 - lock may have been released by another process'
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, lockKey: LOCK_KEY, lockToken },
+          'Failed to release document expiry worker lock'
+        );
+      }
+    }
 
     if (!lockAcquired) {
       workerRunning = false;

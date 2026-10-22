@@ -73,20 +73,38 @@ router.post(
         return res.status(400).json({ error: 'Cannot share tracking for completed or cancelled orders' });
       }
 
-      // Revoke any existing active tracking links before creating a new one (#4965)
-      await tokenService.revokeAllForOrder(orderDisplayId);
+      // Validate configuration before touching existing links. Previously the
+      // old link was revoked first, so a missing PUBLIC_TRACKING_URL left the
+      // customer with no working link at all.
+      const baseUrl = process.env.PUBLIC_TRACKING_URL;
+      if (!baseUrl) {
+        logger.error({ orderDisplayId }, 'PUBLIC_TRACKING_URL is not configured');
+        return res.status(503).json({ error: 'Tracking links are temporarily unavailable' });
+      }
+
+      // Capture the old links, create the replacement, then revoke only the old
+      // IDs. Revoking before creation destroyed the only link when the insert
+      // failed, and a blanket revoke after creation would revoke the new token.
+      let previousTokens = [];
+      try {
+        previousTokens = await tokenService.getActiveTokensForOrder(orderDisplayId);
+      } catch (err) {
+        logger.warn({ err, orderDisplayId }, 'Could not list existing tracking tokens');
+      }
 
       const tokenData = await tokenService.createToken({
         orderDisplayId,
         createdBy: userId,
       });
 
-      // Build the public tracking URL
-      const baseUrl = process.env.PUBLIC_TRACKING_URL;
-      if (!baseUrl) {
-        logger.error({ orderDisplayId }, 'PUBLIC_TRACKING_URL is not configured');
-        return res.status(503).json({ error: 'Tracking links are temporarily unavailable' });
+      for (const previous of previousTokens) {
+        try {
+          await tokenService.revokeToken(previous.id);
+        } catch (err) {
+          logger.warn({ err, orderDisplayId, tokenId: previous.id }, 'Could not revoke previous tracking token');
+        }
       }
+
       const trackingUrl = `${baseUrl}/track/${tokenData.token}`;
 
       logger.info({ orderDisplayId, userId, tokenId: tokenData.id }, 'Tracking share link generated');

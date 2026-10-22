@@ -8,5 +8,7 @@ export function getStatementPayout(order) {
     + (Number(order.toll_estimate) || 0)
     + (Number(order.platform_fee) || 0);
   const amount = Number(order.bid_amount ?? order.total_amount ?? legacyTotal);
-  return Number.isFinite(amount) ? amount : 0;
+  if (!Number.isFinite(amount)) return 0;
+  // A negative or corrupt legacy amount must never become a wallet debit.
+  return Math.max(0, amount);
 }

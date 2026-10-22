@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import logger from '../middleware/logger.js';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const supabaseUrl = process.env.SUPABASE_URL || 'https://mock.supabase.co';

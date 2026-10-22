@@ -5,7 +5,41 @@ class EscrowAmountMismatchError extends Error {
     this.code = 'ESCROW_AMOUNT_MISMATCH';
   }
 }
+// backend/api/src/services/escrow.js
 
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+
+/**
+ * Updates the on-chain booking amount when a drop location is modified.
+ * Added per issue #11240.
+ */
+export async function escrowUpdateAmount(bookingId, newAmountWei) {
+  try {
+    logger.info('Initiating on-chain escrow booking amount update', { bookingId, newAmountWei });
+
+    const contract = getEscrowContractInstance();
+    const tx = await contract.updateBookingAmount(bookingId, newAmountWei);
+    const receipt = await tx.wait();
+
+    logger.info('Successfully updated on-chain escrow booking amount', {
+      bookingId,
+      txHash: receipt.transactionHash
+    });
+
+    return {
+      success: true,
+      txHash: receipt.transactionHash
+    };
+  } catch (err) {
+    logger.error('Failed to update on-chain escrow amount', {
+      error: err.message,
+      bookingId,
+      newAmountWei
+    });
+    throw err;
+  }
+}
 /**
  * Polygon Blockchain — Escrow Payment Service
  *

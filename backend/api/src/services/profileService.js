@@ -9,7 +9,26 @@ import logger from '../middleware/logger.js';
 function isCacheEnabled() {
   return process.env.CACHE_ENABLED !== 'false';
 }
+// backend/api/src/services/profileService.js (Excerpt - Cleaned)
 
+import db from '../config/database.js';
+
+export async function updateProfileFcmToken(userId, fcmToken) {
+  if (!userId || !fcmToken) {
+    throw new Error('UserId and fcmToken are required for profile sync.');
+  }
+
+  const { data, error } = await db
+    .from('profiles')
+    .update({ fcm_token: fcmToken, updated_at: new Date() })
+    .eq('id', userId);
+
+  if (error) {
+    throw new Error(`Failed to update profile FCM token: ${error.message}`);
+  }
+
+  return data;
+}
 export async function getProfile(userId) {
   return measureExecution('ProfileService.getProfile', async () => {
     if (!supabaseAdmin) {

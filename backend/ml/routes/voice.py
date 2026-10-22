@@ -63,7 +63,14 @@ async def transcribe_voice(
             detail="Unsupported audio format.",
         )
 
-    audio_data = await audio.read()
+    MAX_VOICE_BYTES = 10 * 1024 * 1024
+    audio_data = await audio.read(MAX_VOICE_BYTES + 1)
+
+    if len(audio_data) > MAX_VOICE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Audio file is too large.",
+        )
 
     if not audio_data:
         raise HTTPException(

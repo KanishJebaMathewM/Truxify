@@ -14,7 +14,7 @@ import { DomainError } from './order/domainError.js';
 import { calculateMeanKineticTemperature } from './coldChainAnomalyService.js';
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
-const ML_API_KEY = process.env.ML_API_KEY || 'truxify-ml-secret-api-key-2026';
+const ML_API_KEY = process.env.ML_API_KEY;
 const MAX_WINDOW_SAMPLES = 120; // 2 hours of 1-sample/min
 
 // In-memory sliding telemetry buffers by loadId / bookingId
@@ -161,6 +161,11 @@ export async function evaluateViaMlService(loadId) {
 
   if (buffer.length === 0) {
     throw new DomainError(404, { error: 'No telemetry buffer data available for this load' });
+  }
+
+  if (!ML_API_KEY) {
+    logger.error({ loadId }, '[iotTelemetryWorker] ML_API_KEY is not configured; refusing to call the ML service');
+    throw new DomainError(503, { error: 'ML service evaluation is unavailable: ML_API_KEY is not configured' });
   }
 
   const temperatures = buffer.map((s) => s.temperature);

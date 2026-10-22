@@ -268,6 +268,70 @@ describe('FraudDetectionService - Complete Core & Edge Case Test Suite', () => {
   });
 
   // ============================================================================
+  // 4b. getRealTimeRisk — isSuspicious reflects fraudThreshold (#19174)
+  // ============================================================================
+  describe('getRealTimeRisk — isSuspicious reflects fraudThreshold', () => {
+    it('returns isSuspicious true when combined risk exceeds the default threshold', async () => {
+      vi.setSystemTime(new Date(2026, 0, 1, 3, 0, 0));
+      const now = Date.now();
+
+      const userId = 'high-risk-user';
+      fraudService.behavioralProfiles.set(userId, {
+        userId,
+        events: Array.from({ length: 65 }, () => ({
+          type: 'click', timestamp: now, data: { type: 'click' }
+        })),
+        patterns: {
+          typingSpeed: Array.from({ length: 15 }, (_, i) => ({
+            speed: i % 2 === 0 ? 10 : 200, timestamp: now
+          })),
+          mouseMovements: [],
+          deviceFingerprint: null,
+          locationHistory: [
+            { lat: 28.61, lng: 77.23, timestamp: now },
+            { lat: 37.77, lng: -122.41, timestamp: now + 3_600_000 },
+            ...Array.from({ length: 10 }, (_, i) => ({
+              lat: 37.77, lng: -122.41, timestamp: now + 3_600_000 + (i + 1) * 1000
+            })),
+          ],
+          transactionPatterns: [
+            ...Array.from({ length: 12 }, () => ({
+              amount: 100, type: 'payment', timestamp: now
+            })),
+            { amount: 10000, type: 'payment', timestamp: now },
+          ],
+        },
+        lastActivity: now,
+        createdAt: now,
+      });
+
+      const result = await fraudService.getRealTimeRisk(userId, {
+        amount: 150_000,
+        frequency: 12,
+        deviceChanged: true,
+      });
+
+      expect(result).not.toBeNull();
+      expect(typeof result.isSuspicious).toBe('boolean');
+      expect(result.isSuspicious).toBe(true);
+    });
+
+    it('returns isSuspicious false when combined risk is below threshold', async () => {
+      vi.setSystemTime(new Date(2026, 0, 1, 10, 0, 0));
+
+      const result = await fraudService.getRealTimeRisk('low-risk-user', {
+        amount: 100,
+        frequency: 1,
+        deviceChanged: false,
+      });
+
+      expect(result).not.toBeNull();
+      expect(typeof result.isSuspicious).toBe('boolean');
+      expect(result.isSuspicious).toBe(false);
+    });
+  });
+
+  // ============================================================================
   // 5. Auto-Review Queue & Fraud Stats Management
   // ============================================================================
   describe('Auto-Review Queue & Statistics', () => {

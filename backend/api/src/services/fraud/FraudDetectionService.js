@@ -11,7 +11,8 @@ class FraudDetectionService {
       logger.warn('[FraudDetection] Redis not configured — behavior tracking will use Supabase only');
     }
     this.behavioralProfiles = new Map();
-    this.fraudThreshold = parseFloat(process.env.FRAUD_THRESHOLD) ?? 0.7;
+    const parsedThreshold = parseFloat(process.env.FRAUD_THRESHOLD);
+    this.fraudThreshold = Number.isFinite(parsedThreshold) ? parsedThreshold : 0.7;
     this.riskScores = new Map();
     this._maxRiskScores = 10000;
     this._maxBehavioralProfiles = 5000;

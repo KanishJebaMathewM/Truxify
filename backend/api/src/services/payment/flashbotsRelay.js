@@ -15,11 +15,25 @@ export class BundleExecutedEvent extends BaseEvent {
   }
 }
 
+const DEFAULT_RELAY_TIMEOUT_MS = 10000;
+const MAX_RELAY_TIMEOUT_MS = 60000;
+
+function resolveRelayTimeout(value) {
+  const parsed = Number(value);
+  if (Number.isSafeInteger(parsed) && parsed > 0 && parsed <= MAX_RELAY_TIMEOUT_MS) {
+    return parsed;
+  }
+  return DEFAULT_RELAY_TIMEOUT_MS;
+}
+
 export class FlashbotsRelay {
   constructor(providerUrl, relayerPrivateKey, options = {}) {
     this.providerUrl = providerUrl || process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
     this.relayerPrivateKey = relayerPrivateKey || process.env.RELAYER_WALLET_PRIVATE_KEY;
     this.flashbotsRelayUrl = options.flashbotsRelayUrl || process.env.FLASHBOTS_RELAY_URL || 'https://relay.flashbots.net';
+    this.timeoutMs = resolveRelayTimeout(
+      options.timeoutMs ?? process.env.FLASHBOTS_RELAY_TIMEOUT_MS
+    );
     this.bundleResults = options.bundleResults || [];
     this._provider = null;
     this._wallet = null;
@@ -137,14 +151,29 @@ export class FlashbotsRelay {
     });
     const signature = `${this.wallet.address}:${await this.wallet.signMessage(rawBody)}`;
 
-    const response = await fetch(this.flashbotsRelayUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Flashbots-Signature': signature,
-      },
-      body: rawBody,
-    });
+    let response;
+    try {
+      response = await fetch(this.flashbotsRelayUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Flashbots-Signature': signature,
+        },
+        body: rawBody,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new Error(`Flashbots relay request timed out after ${this.timeoutMs}ms`, { cause: err });
+      }
+      throw err;
+    }
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const suffix = detail ? `: ${String(detail).slice(0, 300)}` : '';
+      throw new Error(`Flashbots relay returned HTTP ${response.status}${suffix}`);
+    }
 
     const payload = await response.json().catch(() => ({}));
     if (payload.error) {

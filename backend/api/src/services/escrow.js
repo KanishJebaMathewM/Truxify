@@ -1,3 +1,46 @@
+// backend/api/src/services/escrow.js (Excerpt Cleaned)
+
+import { supabase } from '../config/supabase.js';
+import { logger } from '../utils/logger.js';
+
+/**
+ * Retrieves escrow booking details by booking ID.
+ */
+export async function getEscrowBooking(bookingId) {
+  try {
+    const { data, error } = await supabase
+      .from('escrow_bookings')
+      .select('*')
+      .eq('booking_id', bookingId)
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    logger.error({ err, bookingId }, '[escrowService] Failed to fetch escrow booking');
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Marks an escrow booking status as started.
+ */
+export async function markEscrowBookingStarted(bookingId) {
+  try {
+    const { data, error } = await supabase
+      .from('escrow_bookings')
+      .update({ status: 'STARTED', updated_at: new Date().toISOString() })
+      .eq('booking_id', bookingId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    logger.error({ err, bookingId }, '[escrowService] Failed to mark escrow booking as started');
+    return { success: false, error: err.message };
+  }
+}
 class EscrowAmountMismatchError extends Error {
   constructor(expectedWei, actualWei) {
     super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);

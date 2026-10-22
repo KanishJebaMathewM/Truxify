@@ -109,7 +109,7 @@ services:
       start_period: 30s
 
   osrm:
-    image: osrm/osrm-backend:latest
+    image: osrm/osrm-backend:v5.27.1
     container_name: truxify-osrm
     volumes:
       - ./osrm-data:/data

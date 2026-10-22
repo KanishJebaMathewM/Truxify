@@ -5,7 +5,16 @@ import { VALID_LANGUAGES } from '../schemas/profile.js';
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);
 }
+// backend/api/src/validation/requestSchemas.js (Excerpt)
 
+// Keep primary declaration
+export const updateProfileSchema = z.object({
+  fullName: z.string().min(2, 'Full name must be at least 2 characters long').optional(),
+  phone: z.string().optional(),
+  avatarUrl: z.string().url('Invalid avatar URL').optional()
+});
+
+// Remove the redundant/duplicate export later in the file
 const coerceNumber = (schema) => z.preprocess(
   (val) => {
     if (val === undefined || val === null || val === '') {

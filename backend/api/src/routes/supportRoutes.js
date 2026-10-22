@@ -113,6 +113,17 @@ const router = express.Router();
 // admin handlers use the service-role client so they can see all tickets.
 const adminDb = getAdminClient();
 const userDb = (req) => createUserClient(req.token);
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+// ✅ Retained: First clean declaration using validated query params
+const limit = Math.min(100, parsedLimit.value);
+const offset = parsedOffset.value;
+
+// ... intermediate logic ...
+
+// ❌ Removed redundant duplicate declaration:
+// const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
+// const offset = Math.max(0, Number(rawOffset) || 0);
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, assigned_to, created_at, updated_at';

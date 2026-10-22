@@ -77,7 +77,26 @@ class KyberKEM:
         """Initialize lookup tables for efficiency"""
         self.ntt_roots = self._compute_ntt_roots()
         self.inv_ntt_roots = self._compute_inv_ntt_roots()
+    # backend/kyber/kyber_core.py (Excerpt)
+
+def encapsulate(pub_key):
+    # ... polynomial generation and encryption ...
+    u, v = compress_ciphertext(c1, c2)
     
+    # Derived from uncompressed/raw ciphertext components
+    ss = _derive_secret(u_bytes, v_bytes)
+    return ciphertext, ss
+
+def decapsulate(priv_key, ciphertext):
+    # ... decryption and re-encryption check ...
+    u_decompressed, v_decompressed = decompress_ciphertext(ciphertext)
+    
+    # FIX: Align with encapsulate by deriving ss from the same raw ciphertext bytes per issue #6010
+    # Use the serialized/uncompressed representation of u and v rather than decompressed polynomial points
+    u_bytes, v_bytes = extract_ciphertext_bytes(ciphertext)
+    ss = _derive_secret(u_bytes, v_bytes)
+    
+    return ss
     def _compute_ntt_roots(self) -> np.ndarray:
         """Compute NTT roots of unity"""
         roots = np.zeros(self.n, dtype=int)
@@ -410,4 +429,6 @@ class KyberCore:
             
         shared_secret = self.decapsulate(kem_ciphertext, recipient_secret_key, recipient_public_key)
         plaintext = self.symmetric_decrypt(encrypted_payload, shared_secret)
+        
+        return plaintext
         return plaintext

@@ -31,6 +31,77 @@ export async function getProfile(userId) {
   });
 }
 
+export async function getProfileById(userId) {
+  if (typeof userId !== 'string' || !userId.trim()) {
+    return null;
+  }
+  return getProfile(userId);
+}
+
+export async function createProfile(profileData) {
+  return measureExecution('ProfileService.createProfile', async () => {
+    if (!supabaseAdmin) {
+      throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .insert(profileData)
+      .select()
+      .single();
+
+    if (error) {
+      logger.error({ err: error, profileData }, 'Failed to create profile');
+      throw error;
+    }
+
+    return data;
+  });
+}
+
+export async function updateProfile(userId, updates) {
+  return measureExecution('ProfileService.updateProfile', async () => {
+    if (!supabaseAdmin) {
+      throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      logger.error({ err: error, userId, updates }, 'Failed to update profile');
+      throw error;
+    }
+
+    return data;
+  });
+}
+
+export async function deleteProfile(userId) {
+  return measureExecution('ProfileService.deleteProfile', async () => {
+    if (!supabaseAdmin) {
+      throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .delete()
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      logger.error({ err: error, userId }, 'Failed to delete profile');
+      throw error;
+    }
+
+    return data;
+  });
+}
+
 export async function getCustomerStats(userId) {
   return measureExecution('ProfileService.getCustomerStats', async () => {
     const client = supabaseAdmin || supabase;
@@ -95,4 +166,71 @@ export async function getDriverDetails(userId) {
           return cached;
         }
       } catch (err) {
-        logger
+        logger.warn({ err, userId }, 'Driver details cache read failed, falling back to database');
+      }
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('driver_details')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (data && isCacheEnabled()) {
+      try {
+        await setCachedDriverDetails(userId, data);
+      } catch (err) {
+        logger.warn({ err, userId }, 'Driver details cache write failed');
+      }
+    }
+
+    return data;
+  });
+}
+
+export function sanitizeProfilePii(profile) {
+  if (!profile) return null;
+
+  const sanitized = { ...profile };
+
+  if (sanitized.phone) {
+    if (sanitized.phone.length <= 4) {
+      sanitized.phone = '****';
+    } else {
+      sanitized.phone = '*'.repeat(sanitized.phone.length - 4) + sanitized.phone.slice(-4);
+    }
+  }
+
+  if (sanitized.email) {
+    const parts = sanitized.email.split('@');
+    if (parts.length === 2) {
+      const [user, domain] = parts;
+      if (user.length <= 2) {
+        sanitized.email = `**@${domain}`;
+      } else {
+        sanitized.email = `${user[0]}${'*'.repeat(user.length - 2)}${user.slice(-1)}@${domain}`;
+      }
+    }
+  }
+
+  if (sanitized.kyc_doc_number) {
+    sanitized.kyc_doc_number = '********';
+  }
+
+  return sanitized;
+}
+
+export const ProfileService = {
+  getProfile,
+  getProfileById,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  getCustomerStats,
+  getDriverDetails,
+  sanitizeProfilePii,
+};
+
+export default ProfileService;

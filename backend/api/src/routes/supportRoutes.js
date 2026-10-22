@@ -104,6 +104,42 @@ import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { formatPaginationMeta } from '../utils/pagination.js';
 
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+import { validateParams, uuidParamSchema } from '../validation/requestSchemas.js';
+
+// Before:
+// router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) => { ... })
+
+// After: Apply validateParams middleware with uuidParamSchema
+router.get(
+  '/tickets/:id/comments',
+  authenticate,
+  userLimiter,
+  validateParams(uuidParamSchema),
+  async (req, res) => {
+    const ticketId = req.params.id;
+    try {
+      const { data: ticket, error: fetchError } = await supabase
+        .from('support_tickets')
+        .select('id, user_id')
+        .eq('id', ticketId);
+
+      if (fetchError) {
+        return res.status(500).json({ success: false, error: fetchError.message });
+      }
+
+      if (!ticket || ticket.length === 0) {
+        return res.status(404).json({ success: false, error: 'Ticket not found' });
+      }
+
+      // Fetch and return comments...
+      return res.status(200).json({ success: true, data: [] });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
 const router = express.Router();
 
 // support_tickets / support_ticket_comments are authenticated/service-role

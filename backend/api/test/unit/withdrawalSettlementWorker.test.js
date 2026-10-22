@@ -67,6 +67,10 @@ vi.mock('../../src/services/wallet/payoutProvider.js', () => ({
   isPayoutProviderConfigured: isPayoutProviderConfiguredMock,
 }));
 
+vi.mock('../../src/services/notificationService.js', () => ({
+  sendPushNotification: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/core/telemetry/WorkerTracer.js', () => ({
   WorkerTracer: {
     wrapIntervalWorker: vi.fn(() => async () => {}),
@@ -237,6 +241,33 @@ describe('Withdrawal Settlement Worker', () => {
       p_settlement_ref: 'ref-1',
     });
     expect(admin.rpc).not.toHaveBeenCalledWith('fail_withdrawal_tx', expect.anything());
+  });
+
+  it('does not start an overlapping cycle while settlement is still running', async () => {
+    let releaseQuery;
+    const pendingQuery = new Promise((resolve) => {
+      releaseQuery = resolve;
+    });
+    const selectQuery = {
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnValue(pendingQuery),
+    };
+    admin.from.mockReturnValue({
+      select: vi.fn().mockReturnValue(selectQuery),
+      update: vi.fn(),
+    });
+
+    const firstCycle = settlePendingWithdrawals();
+    await Promise.resolve();
+
+    await settlePendingWithdrawals();
+
+    expect(admin.from).toHaveBeenCalledTimes(1);
+
+    releaseQuery({ data: [], error: null });
+    await firstCycle;
   });
 
   it('does not settle anything when the pending query errors', async () => {

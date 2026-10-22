@@ -4,7 +4,50 @@
  */
 
 import logger from '../middleware/logger.js';
+// backend/api/src/services/weighStationService.js (Excerpt)
 
+import crypto from 'crypto';
+import { logger } from '../utils/logger.js';
+
+/**
+ * MOCK IMPLEMENTATION: Pending integration with real compliance provider (Drivewyze / PrePass).
+ * Evaluates whether a driver is eligible to bypass a weigh station based on location coordinates.
+ */
+export async function checkBypassEligibility({ lat, lng, vehicleId }) {
+  try {
+    if (lat === undefined || lng === undefined) {
+      throw new Error('Latitude and longitude are required for weigh station check');
+    }
+
+    // FIX: Generate deterministic station ID derived from coordinates per issue #6527
+    const normalizedLat = Number(lat).toFixed(4);
+    const normalizedLng = Number(lng).toFixed(4);
+    const stationId = `STATION_${normalizedLat}_${normalizedLng}`;
+
+    // FIX: Replace Math.random() with crypto.randomInt() for secure randomness
+    // 30% baseline chance of bypass eligibility in mock mode
+    const randomVal = crypto.randomInt(0, 100);
+    const isBypassGranted = randomVal < 30;
+
+    logger.info(
+      { stationId, vehicleId, isBypassGranted },
+      '[weighStationService] Bypass eligibility evaluated (Mock)'
+    );
+
+    return {
+      success: true,
+      stationId,
+      bypassGranted: isBypassGranted,
+      provider: 'MOCK_COMPLIANCE_PROVIDER',
+      timestamp: new Date().toISOString(),
+    };
+  } catch (err) {
+    logger.error({ err, lat, lng, vehicleId }, '[weighStationService] Failed to check bypass eligibility');
+    return {
+      success: false,
+      error: `Weigh station check failed: ${err.message}`,
+    };
+  }
 /**
  * Checks weigh station bypass eligibility for a given trip/truck.
  * NOTE: This is currently a mock service and must be replaced with a real regulatory API integration before production rollout.

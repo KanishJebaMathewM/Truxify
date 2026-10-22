@@ -156,12 +156,20 @@ export function validateImageFile(file) {
         return { valid: false, error: `Invalid file type: ${file.mimetype}` };
     }
 
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-        return { valid: false, error: `File too large (${Math.round(file.size / 1024 / 1024)}MB). Max 10MB.` };
+    // `file.size` comes from the multipart parser/client and can be omitted or
+    // inflated. Measure the bytes that will actually be sent to OCR so an
+    // undersized or oversized payload cannot slip through.
+    if (!Buffer.isBuffer(file.buffer)) {
+        return { valid: false, error: 'File content is missing or unreadable' };
     }
 
-    if (file.size < 1024) {
+    const size = file.buffer.length;
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (size > maxSize) {
+        return { valid: false, error: `File too large (${Math.round(size / 1024 / 1024)}MB). Max 10MB.` };
+    }
+
+    if (size < 1024) {
         return { valid: false, error: 'File too small, likely corrupted' };
     }
 

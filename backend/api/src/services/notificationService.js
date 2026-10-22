@@ -63,6 +63,52 @@ const ALLOWED_NOTIF_TYPES = new Set([
 ]);
 // backend/api/src/services/notificationService.js
 
+import logger from '../middleware/logger.js';
+import redisClient from '../config/redis.js';
+
+/**
+ * Publishes a notification event to the Redis pub/sub channel.
+ * Updated per issue #13822 to prevent silent failures during Redis publish.
+ * 
+ * @param {string} channel - Redis channel name.
+ * @param {Object} payload - Notification payload object.
+ * @returns {Promise<boolean>} Success status of the publish operation.
+ */
+export async function publishNotificationEvent(channel, payload) {
+  if (!channel || !payload) {
+    logger.warn('Publish notification skipped: Missing channel or payload', { channel });
+    return false;
+  }
+
+  try {
+    const serializedPayload = JSON.stringify(payload);
+    
+    // Ensure redis publish is properly awaited
+    const receiversCount = await redisClient.publish(channel, serializedPayload);
+    
+    logger.info('Notification event published successfully', { 
+      channel, 
+      receiversCount,
+      notificationId: payload.id || payload.orderId 
+    });
+    
+    return true;
+  } catch (err) {
+    // FIX: Log Redis publish failure explicitly for operator alerting and observability
+    logger.error('CRITICAL: Failed to publish notification event to Redis', {
+      channel,
+      error: err.message,
+      stack: err.stack,
+      payloadSummary: {
+        id: payload.id,
+        type: payload.type
+      }
+    });
+
+    // Optionally rethrow or return false depending on upstream fault tolerance requirements
+    return false;
+  }
+}
 // Before:
 // console.error('Error inserting notification:', error);
 

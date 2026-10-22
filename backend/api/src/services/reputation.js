@@ -22,7 +22,21 @@
 import { ethers } from "ethers";
 import logger from "../middleware/logger.js";
 import { measureExecution } from "../core/performanceMetrics.js";
+// backend/api/src/services/reputation.js (Excerpt)
 
+async function retryWithBackoff(fn, retries = 3, baseDelayMs = 1000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === retries) throw err;
+      
+      // FIX: Add random jitter to prevent thundering herd per issue #6686
+      const jitter = Math.random() * baseDelayMs * attempt;
+      await new Promise((resolve) => setTimeout(resolve, jitter));
+    }
+  }
+}
 // Safe math utilities for reputation calculations.
 
 // Minimal ABI — only the subset the backend needs to call.

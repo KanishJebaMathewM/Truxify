@@ -1,5 +1,38 @@
+const { createClient } = require('redis');
+const { createClient: createSupabaseClient } = require('@supabase/supabase-js');
+// backend/api/src/services/locationService.js (Excerpt)
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
+import { logger } from '../utils/logger.js';
+
+/**
+ * Verifies latitude, longitude, and accuracy parameters for location tracking.
+ */
+export function verifyLocation({ lat, lng, accuracy }) {
+  try {
+    if (lat === undefined || lng === undefined) {
+      return { valid: false, error: 'Latitude and longitude are required' };
+    }
+
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+
+    // Validate geographical boundaries
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return { valid: false, error: 'Coordinates are out of valid geographical bounds' };
+    }
+
+    // Optional accuracy check (e.g., reject readings with > 100m error radius if provided)
+    if (accuracy !== undefined && Number(accuracy) > 100) {
+      return { valid: false, error: 'Location accuracy is insufficient for trusted tracking' };
+    }
+
+    return { valid: true };
+  } catch (err) {
+    logger.error({ err, lat, lng }, '[locationService] Error during location verification');
+    return { valid: false, error: `Verification exception: ${err.message}` };
+  }
+}
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const supabaseUrl = process.env.SUPABASE_URL || 'https://mock.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'mock-key';

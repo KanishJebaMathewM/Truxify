@@ -22,17 +22,7 @@ function trimCache() {
   for (const key of expiredKeys) {
     audioCache.delete(key);
   }
-  const transcriptionResponse = await axios.post(
-  'https://api.openai.com/v1/audio/transcriptions',
-  form,
-  {
-    headers: {
-      ...form.getHeaders(),
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    timeout: 10000, // ADD THIS LINE
-  }
-);
+
   // 2. If capacity still exceeds MAX_CACHE_SIZE, evict oldest remaining entries
   if (audioCache.size > MAX_CACHE_SIZE) {
     const oldest = [...audioCache.entries()]
@@ -82,7 +72,7 @@ async function getBookingContext(bookingId, userId) {
 
     return order;
   } catch (err) {
-      logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
+    logger.warn({ event: 'VOICE_ORDER_LOOKUP_ERROR', error: err.message }, 'Orders table check failed in voiceService');
   }
   return null;
 }
@@ -227,7 +217,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
-      logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
+    logger.error({ event: 'WHISPER_TRANSCRIPTION_FAILED', error: err.message }, 'Whisper transcription failed');
     throw new Error('Transcription failed: ' + (err?.message ?? String(err)), { cause: err });
   }
 

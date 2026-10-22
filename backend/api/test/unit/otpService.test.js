@@ -107,6 +107,14 @@ describe('otpService', () => {
       expect(verifyOtpHash('4821', '', 'salt')).toBe(false);
       expect(verifyOtpHash('4821', 'hash', '')).toBe(false);
     });
+
+    it('fails closed without throwing when the stored hash has an unexpected length', () => {
+      const salt = generateSalt();
+      // A 64-byte scrypt digest from the newer format, not this module's 32-byte sha256.
+      const foreignLengthHash = 'a'.repeat(128);
+      expect(() => verifyOtpHash('4821', foreignLengthHash, salt)).not.toThrow();
+      expect(verifyOtpHash('4821', foreignLengthHash, salt)).toBe(false);
+    });
   });
 
   describe('checkOtpRateLimit', () => {

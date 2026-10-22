@@ -47,6 +47,13 @@ async function isNonceReplayed(nonce) {
     }
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    // A per-process Map cannot prevent a captured request from being replayed
+    // against another replica. Production therefore requires the shared store.
+    logger.error('[Webhook] Redis unavailable — refusing production webhook without shared replay protection');
+    throw new Error('Shared webhook replay store unavailable');
+  }
+
   pruneSeenNonces(now);
   if (seenNonces.has(nonce)) return true;
   seenNonces.set(nonce, now + ESCROW_NONCE_TTL_SECONDS * 1000);
@@ -97,6 +104,11 @@ async function verifyWebhookSignature(req, res, next) {
   if (!timestampHeader || !nonce) {
     logger.warn('[Webhook] Missing x-escrow-timestamp or x-escrow-nonce header — rejecting request');
     return res.status(401).json({ error: 'Missing replay-protection headers' });
+  }
+
+  if (typeof nonce !== 'string' || nonce.length === 0 || nonce.length > 128) {
+    logger.warn('[Webhook] Invalid x-escrow-nonce header — rejecting request');
+    return res.status(401).json({ error: 'Invalid replay-protection headers' });
   }
 
   const timestamp = Number(timestampHeader);

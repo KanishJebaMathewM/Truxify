@@ -386,6 +386,15 @@ export function recordTrailerDrop(dropData) {
  */
 export function locateTrailerInYard(trailerId, driverLocation = {}) {
     const pin = trailerYardPins.get(trailerId);
+    // backend/api/src/services/tracker.js (Excerpt)
+
+try {
+  // Real-time tracking message processing / payload parsing
+  handleTrackingMessage(socket, incomingData);
+} catch (e) {
+  // FIX: Add proper error logging for tracker WebSocket failures per issue #4888
+  logger.error({ err: e }, '[tracker] Failed to process real-time tracking message');
+}
 
     if (!pin) {
         return {

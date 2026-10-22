@@ -145,8 +145,8 @@ Copy `.env.example` at the repository root or in component directories to set yo
 | `JWT_SECRET` | Backend JWT signing secret | `truxify-jwt-secret-key` |
 | `POLYGON_RPC_URL` | Polygon JSON-RPC Endpoint | `https://polygon-mumbai.g.alchemy.com/v2/...` |
 | `ESCROW_CONTRACT_ADDRESS` | Deployed TruxifyEscrow contract | `0x1234567890abcdef1234567890abcdef12345678` |
-| `UPSTASH_REDIS_REST_URL` | Redis Caching REST Endpoint | `https://...upstash.io` |
-| `UPSTASH_REDIS_REST_TOKEN` | Redis Caching Authentication Token | `AZ...` |
+| `REDIS_REST_URL` | Redis Caching REST Endpoint | `https://...upstash.io` |
+| `REDIS_REST_TOKEN` | Redis Caching Authentication Token | `AZ...` |
 | `N8N_DISPUTE_WEBHOOK_URL` | n8n Dispute Resolution Webhook | `https://n8n.truxify.com/webhook/dispute` |
 | `BYPASS_AUTH` | Bypass Firebase Auth in local dev | `true` |
 

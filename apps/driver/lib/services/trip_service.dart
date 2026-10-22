@@ -1,7 +1,34 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
+// apps/driver/lib/services/trip_service.dart (Excerpt)
 
+class TripService {
+  final ApiClient _apiClient;
+
+  TripService(this._apiClient);
+
+  Future<List<TripStop>> fetchTripStops(String tripDisplayId) async {
+    // FIX: Update endpoint prefix from /api/trips/ to /api/driver/trips/ per issue #1898
+    final response = await _apiClient.get('/api/driver/trips/$tripDisplayId/stops');
+    
+    if (response.statusCode == 200) {
+      final List data = response.data['stops'] ?? [];
+      return data.map((json) => TripStop.fromJson(json)).toList();
+    }
+    throw Exception('Failed to fetch trip stops: ${response.statusMessage}');
+  }
+
+  Future<RouteMapData> fetchRouteMapPoints(String tripDisplayId) async {
+    // FIX: Update endpoint prefix from /api/trips/ to /api/driver/trips/ per issue #1898
+    final response = await _apiClient.get('/api/driver/trips/$tripDisplayId/route-points');
+    
+    if (response.statusCode == 200) {
+      return RouteMapData.fromJson(response.data);
+    }
+    throw Exception('Failed to fetch route map points: ${response.statusMessage}');
+  }
+}
 class TripService {
   TripService({
     SupabaseClient? client,

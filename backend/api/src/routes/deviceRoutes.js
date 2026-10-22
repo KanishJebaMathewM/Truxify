@@ -46,7 +46,44 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { registerDeviceSchema, unregisterDeviceSchema } from '../validation/requestSchemas.js';
 import { deviceLimiter } from '../middleware/rateLimiter.js';
+// backend/api/src/routes/deviceRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { getUniquePlatforms } from '../services/deviceService.js';
+import { authenticate } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js';
+
+const router = Router();
+
+/**
+ * GET /api/devices/platforms
+ * Returns a list of unique registered device platforms.
+ */
+router.get('/platforms', authenticate, async (req, res) => {
+  try {
+    const result = await getUniquePlatforms();
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      platforms: result.platforms,
+    });
+  } catch (err) {
+    logger.error({ err }, '[deviceRoutes] Error in GET /api/devices/platforms');
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error while fetching platforms',
+    });
+  }
+});
+
+export default router;
 const router = express.Router();
 
 /**

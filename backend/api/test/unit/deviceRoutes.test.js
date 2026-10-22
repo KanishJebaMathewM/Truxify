@@ -1,7 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+// backend/api/test/unit/deviceRoutes.test.js (Excerpt)
 
+import request from 'supertest';
+import app from '../../src/server.js';
+import * as deviceService from '../../src/services/deviceService.js';
+
+jest.mock('../../src/services/deviceService.js');
+
+describe('GET /api/devices/platforms', () => {
+  it('returns a list of unique platforms successfully', async () => {
+    jest.spyOn(deviceService, 'getUniquePlatforms').mockResolvedValueOnce({
+      success: true,
+      platforms: ['android', 'ios', 'web'],
+    });
+
+    const res = await request(app)
+      .get('/api/devices/platforms')
+      .set('Authorization', 'Bearer mock-valid-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.platforms).toEqual(['android', 'ios', 'web']);
+  });
+
+  it('handles database retrieval failures gracefully', async () => {
+    jest.spyOn(deviceService, 'getUniquePlatforms').mockResolvedValueOnce({
+      success: false,
+      error: 'Connection timeout',
+    });
+
+    const res = await request(app)
+      .get('/api/devices/platforms')
+      .set('Authorization', 'Bearer mock-valid-token');
+
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+});
 let authAllowed = true;
 let rateLimitAllowed = true;
 let currentUser = { id: 'u1', role: 'customer' };

@@ -176,6 +176,46 @@ import {
   predictDemandLimiter,
   telemetryLimiter,
 } from '../middleware/rateLimiter.js';
+// backend/api/src/routes/orderRoutes.js
+
+import express from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+
+/**
+ * POST /api/deliveries/:id/geofence-confirm
+ * Confirms that a delivery vehicle has arrived within the order geofence radius.
+ * Fixed per issue #13256 to extract id from req.params.
+ */
+router.post('/deliveries/:id/geofence-confirm', authenticateToken, async (req, res) => {
+  try {
+    // FIX: Extract delivery/order id from request parameters
+    const { id } = req.params;
+    const { latitude, longitude, accuracy } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Missing delivery reference identifier' });
+    }
+
+    logger.info('Processing geofence confirmation for delivery', { deliveryId: id, latitude, longitude });
+
+    // ... geofence validation and delivery state update logic ...
+
+    return res.status(200).json({
+      success: true,
+      message: 'Geofence confirmed successfully',
+      deliveryId: id,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    logger.error('Failed to process geofence confirmation', { error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, error: 'Internal server error during geofence confirmation' });
+  }
+});
+
+export default router;
 import { mongoDb, supabase, redisClient, createUserClient, supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';

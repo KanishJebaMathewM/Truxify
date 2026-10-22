@@ -162,7 +162,28 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+import rateLimit from 'express-rate-limit';
+
+// Rate limiter for delivery verification
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Limit each driver to 20 verification attempts per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Fix: Key by authenticated user ID instead of shared IP address
+  keyGenerator: (req) => {
+    return req.user?.id || req.ip;
+  },
+  handler: (req, res) => {
+    res.status(429).json({
+      success: false,
+      error: 'RATE_LIMIT_EXCEEDED',
+      message: 'Too many delivery verification attempts. Please try again later.'
+    });
+  }
+});
 import {
   bidLimiter,
   userLimiter,

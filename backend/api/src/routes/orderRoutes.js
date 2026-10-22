@@ -359,7 +359,18 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), valid
 
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), getActiveOrders);
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id, status');
+  orderValidationService.assertOrderFound(order);
+  return { order };}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    // ... handler logic ...
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 router.get('/load-offers', authenticate, userLimiter, getLoadOffers);
 

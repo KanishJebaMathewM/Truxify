@@ -3,7 +3,26 @@ import { redisClient, supabaseAdmin } from '../../config/db.js';
 import { withLock } from '../../lib/redisLock.js';
 
 const CONNECTION_PAGE_SIZE = 1000;
+// backend/api/src/services/fraudDetectionService.js (Excerpt)
 
+export class FraudDetectionService {
+  constructor() {
+    // FIX: Use Number.isFinite() to fall back to 0.7 when FRAUD_THRESHOLD is unset or NaN per issue #19174
+    const parsedThreshold = parseFloat(process.env.FRAUD_THRESHOLD);
+    this.fraudThreshold = Number.isFinite(parsedThreshold) ? parsedThreshold : 0.7;
+  }
+
+  getRealTimeRisk(riskData) {
+    const riskScore = this.calculateRiskScore(riskData);
+    const isSuspicious = riskScore >= this.fraudThreshold;
+
+    return {
+      riskScore,
+      fraudThreshold: this.fraudThreshold,
+      isSuspicious,
+    };
+  }
+}
 class FraudDetectionService {
   constructor() {
     this.redis = redisClient;

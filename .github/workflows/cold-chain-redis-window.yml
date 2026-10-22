@@ -1,0 +1,29 @@
+name: Cold-chain Redis window
+on:
+  pull_request:
+    paths:
+      - 'backend/api/src/services/coldChainAnomalyService.js'
+      - 'backend/api/test/unit/coldChainRedisWindow.test.js'
+      - 'backend/api/src/core/performanceMetrics.js'
+      - 'tools/cold-chain-window-tests/**'
+      - '.github/workflows/cold-chain-redis-window.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cold-chain-window:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: |
+            backend/api
+            tools/cold-chain-window-tests
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+      - name: Install isolated native Redis runtime
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - run: npm ci --prefix tools/cold-chain-window-tests --ignore-scripts
+      - run: bash tools/cold-chain-window-tests/run.sh

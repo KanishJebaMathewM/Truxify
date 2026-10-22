@@ -5,7 +5,88 @@ const mockAppendFile = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 vi.mock('fs/promises', () => ({
   appendFile: mockAppendFile,
 }))
+// backend/api/test/unit/auditLogService.test.js
 
+import { insertLog, queryLogs } from '../../src/services/auditLogService.js';
+import { supabase } from '../../src/config/supabase.js';
+
+// Mock Supabase client
+jest.mock('../../src/config/supabase.js', () => ({
+  supabase: {
+    from: jest.fn(),
+  },
+}));
+
+describe('auditLogService Unit Tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('insertLog', () => {
+    it('successfully inserts an audit log entry', async () => {
+      const mockInsert = jest.fn().mockResolvedValue({ data: [{ id: 1 }], error: null });
+      supabase.from.mockReturnValue({ insert: mockInsert });
+
+      const logData = { userId: 'user-123', action: 'UPDATE_ROLE', details: { role: 'admin' } };
+      const result = await insertLog(logData);
+
+      expect(supabase.from).toHaveBeenCalledWith('audit_logs');
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 'user-123',
+          action: 'UPDATE_ROLE',
+        })
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('handles database errors during log insertion', async () => {
+      const mockInsert = jest.fn().mockResolvedValue({ data: null, error: { message: 'DB constraint violation' } });
+      supabase.from.mockReturnValue({ insert: mockInsert });
+
+      const result = await insertLog({ action: 'TEST_ACTION' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DB constraint violation');
+    });
+  });
+
+  describe('queryLogs', () => {
+    it('queries logs with filters and pagination successfully', async () => {
+      const mockRange = jest.fn().mockResolvedValue({
+        data: [{ id: 1, action: 'LOGIN' }],
+        error: null,
+        count: 1,
+      });
+      const mockOrder = jest.fn().mockReturnValue({ range: mockRange });
+      const mockEq = jest.fn().mockReturnValue({ order: mockOrder });
+      const mockSelect = jest.fn().mockReturnValue({ eq: mockEq });
+      
+      supabase.from.mockReturnValue({ select: mockSelect });
+
+      const filters = { userId: 'user-123', limit: 10, offset: 0 };
+      const result = await queryLogs(filters);
+
+      expect(supabase.from).toHaveBeenCalledWith('audit_logs');
+      expect(mockEq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(mockRange).toHaveBeenCalledWith(0, 9);
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('handles database errors during log querying', async () => {
+      const mockOrder = jest.fn().mockRejectedValue(new Error('Connection timeout'));
+      const mockSelect = jest.fn().mockReturnValue({ order: mockOrder });
+      
+      supabase.from.mockReturnValue({ select: mockSelect });
+
+      const result = await queryLogs({});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Connection timeout');
+    });
+  });
+});
 const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
   info: vi.fn(),

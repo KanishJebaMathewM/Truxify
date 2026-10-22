@@ -6,6 +6,31 @@
 import crypto from 'crypto';
 
 const HMAC_ALGORITHM = 'sha256';
+const HMAC_HEX_LENGTH = 64;
+
+/**
+ * Build a deterministic representation of every field in an audit record.
+ *
+ * Signing only id/timestamp/event_type/user_id leaves the action, resource,
+ * details, IP address, and outcome unauthenticated. An attacker with database
+ * access could rewrite those fields while preserving a valid signature.
+ * Object keys are sorted so signatures do not depend on JSON insertion order.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function canonicalize(value) {
+    if (value === null || typeof value !== 'object') {
+        return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(canonicalize).join(',')}]`;
+    }
+    const keys = Object.keys(value)
+        .filter((key) => key !== 'signature')
+        .sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`).join(',')}}`;
+}
 
 /**
  * Signs a batch of log entries using a rotating HMAC key.
@@ -16,10 +41,8 @@ const HMAC_ALGORITHM = 'sha256';
 export function signLogBatch(logs, secret) {
     if (!logs || logs.length === 0 || !secret) return '';
 
-    // Create a deterministic string representation of the batch
-    const payload = logs.map(log => {
-        return `${log.id}|${log.timestamp}|${log.event_type}|${log.user_id}`;
-    }).join('\n');
+    // Sign the complete record, not only the routing metadata.
+    const payload = logs.map(canonicalize).join('\n');
 
     return crypto
         .createHmac(HMAC_ALGORITHM, secret)
@@ -38,6 +61,9 @@ export function verifyLogBatch(logs, signature, secret) {
     if (!signature || !secret) return false;
 
     const expectedSignature = signLogBatch(logs, secret);
+    if (!expectedSignature || !new RegExp(`^[a-f0-9]{${HMAC_HEX_LENGTH}}$`, 'i').test(signature)) {
+        return false;
+    }
 
     // Timing-safe comparison
     try {

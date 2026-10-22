@@ -5,13 +5,45 @@
 import { supabaseAdmin, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { pluralize, formatMessage } from '../lib/pluralizer.js';
-import { formatNumber, formatCurrency, formatDate, formatDateTime, isRTL } from '../lib/formatters.js';
+import {
+    formatNumber,
+    formatCurrency,
+    formatDate,
+    formatDateTime,
+    isRTL,
+    SUPPORTED_LOCALES
+} from '../lib/formatters.js';
 
 const CACHE_PREFIX = 'i18n:translations:';
 const CACHE_TTL_SECONDS = 3600; // 1 hour
+export const MEMORY_CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
+export const MAX_MEMORY_CACHE_ENTRIES = 100;
 
-// In-memory cache for fast access
+// In-memory cache for fast access: locale -> { dict, cachedAt }
 const memoryCache = new Map();
+
+export function isSupportedLocale(locale) {
+    return typeof locale === 'string' && SUPPORTED_LOCALES.includes(locale);
+}
+
+function pruneMemoryCache(now = Date.now()) {
+    for (const [locale, entry] of memoryCache) {
+        if (now - entry.cachedAt > MEMORY_CACHE_TTL_MS) {
+            memoryCache.delete(locale);
+        }
+    }
+}
+
+function setMemoryCache(locale, dict, now = Date.now()) {
+    pruneMemoryCache(now);
+    if (!memoryCache.has(locale) && memoryCache.size >= MAX_MEMORY_CACHE_ENTRIES) {
+        const oldest = memoryCache.keys().next().value;
+        if (oldest !== undefined) memoryCache.delete(oldest);
+    }
+    // Re-insert so Map iteration order tracks least-recently-used entries.
+    memoryCache.delete(locale);
+    memoryCache.set(locale, { dict, cachedAt: now });
+}
 
 /**
  * Loads translations for a specific locale from Supabase, with Redis/memory caching.
@@ -19,9 +51,19 @@ const memoryCache = new Map();
  * @returns {Promise<object>} Translation dictionary
  */
 export async function loadTranslations(locale) {
+    if (!isSupportedLocale(locale)) {
+        return {};
+    }
+
     // 1. Check memory cache
-    if (memoryCache.has(locale)) {
-        return memoryCache.get(locale);
+    const now = Date.now();
+    pruneMemoryCache(now);
+    const cachedEntry = memoryCache.get(locale);
+    if (cachedEntry) {
+        // Re-insert for LRU ordering without extending the fixed TTL.
+        memoryCache.delete(locale);
+        memoryCache.set(locale, cachedEntry);
+        return cachedEntry.dict;
     }
 
     // 2. Check Redis cache
@@ -30,7 +72,7 @@ export async function loadTranslations(locale) {
             const cached = await redisClient.get(`${CACHE_PREFIX}${locale}`);
             if (cached) {
                 const parsed = JSON.parse(cached);
-                memoryCache.set(locale, parsed);
+                setMemoryCache(locale, parsed);
                 return parsed;
             }
         } catch (err) {
@@ -66,7 +108,7 @@ export async function loadTranslations(locale) {
         }
 
         // Populate caches
-        memoryCache.set(locale, dict);
+        setMemoryCache(locale, dict);
         if (redisClient && redisClient.status === 'ready') {
             try {
                 await redisClient.set(

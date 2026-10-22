@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/config/db.js', () => ({
   get supabaseAdmin() { return global.__i18nSupabase; },
@@ -10,7 +10,12 @@ vi.mock('../../src/middleware/logger.js', () => ({
 
 const { createSupabaseMock } = await import('../helpers/supabaseMock.js');
 const { RedisMock } = await import('../mocks/redisMock.js');
-const { loadTranslations, translate, clearTranslationCache } = await import('../../src/services/i18nService.js');
+const {
+  loadTranslations,
+  translate,
+  clearTranslationCache,
+  MEMORY_CACHE_TTL_MS,
+} = await import('../../src/services/i18nService.js');
 
 const seed = () => createSupabaseMock({
   translations: [
@@ -26,6 +31,10 @@ describe('i18nService', () => {
     global.__i18nRedis = new RedisMock();
     global.__i18nRedis.status = 'ready';
     await clearTranslationCache(); // wipe module memory cache between tests
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('loads translations into a dict (plural_forms JSON-parsed)', async () => {
@@ -72,5 +81,35 @@ describe('i18nService', () => {
     global.__i18nSupabase = { from: () => { throw new Error('db down'); } };
     global.__i18nRedis.status = 'connecting';
     expect(await loadTranslations('xx-IN')).toEqual({});
+  });
+
+  it('does not query storage for an unsupported locale', async () => {
+    const from = vi.fn();
+    global.__i18nSupabase = { from };
+    global.__i18nRedis.status = 'connecting';
+
+    await expect(loadTranslations('xx-IN')).resolves.toEqual({});
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it('falls back to English for an unsupported locale', async () => {
+    await expect(translate('greeting', { name: 'Ram' }, 'xx-XX')).resolves.toBe('Hello Ram');
+  });
+
+  it('reloads from the database after the memory cache TTL expires', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    await loadTranslations('hi-IN');
+
+    global.__i18nSupabase = createSupabaseMock({
+      translations: [{ locale: 'hi-IN', key: 'greeting', value: 'नया {name}', plural_forms: null }],
+    }).supabase;
+    global.__i18nRedis.status = 'connecting';
+
+    vi.setSystemTime(new Date(Date.now() + MEMORY_CACHE_TTL_MS + 1));
+
+    const dict = await loadTranslations('hi-IN');
+    expect(dict.greeting).toBe('नया {name}');
   });
 });

@@ -9,6 +9,9 @@ import { rotateRefreshToken, hashRefreshToken } from '../../src/services/refresh
 import { refreshToken } from '../../src/controllers/authController.js';
 import { clearTokenFamilyStore, registerTokenFamily, verifyAndRotateFamily, isFamilyRevoked } from '../../src/security/tokenFamilyManager.js';
 
+process.env.SUPABASE_URL = 'https://test.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+
 const now = new Date('2026-01-01T12:00:00.000Z');
 let writes;
 beforeEach(() => {

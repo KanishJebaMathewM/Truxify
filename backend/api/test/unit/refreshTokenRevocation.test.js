@@ -8,6 +8,9 @@ vi.mock('../../src/security/tokenFamilyManager.js', () => ({
 }));
 import { revokeToken, revokeAllUserTokens, rotateRefreshToken, hashRefreshToken } from '../../src/services/refreshTokenService.js';
 
+process.env.SUPABASE_URL = 'https://test.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+
 let query, writeError;
 beforeEach(() => {
   writeError = null;

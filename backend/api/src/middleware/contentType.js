@@ -14,7 +14,46 @@ export function requireJsonContent(req, res, next) {
         ],
       });
     }
+// backend/api/test/unit/contentType.test.js
 
+import { requireJsonContent } from '../../src/middleware/contentType.js';
+
+describe('contentType middleware Unit Tests', () => {
+  let req, res, next;
+
+  beforeEach(() => {
+    req = { headers: {} };
+    res = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn().mockReturnThis(),
+    };
+    next = jest.fn();
+  });
+
+  it('calls next() when Content-Type is application/json', () => {
+    req.headers['content-type'] = 'application/json; charset=utf-8';
+
+    requireJsonContent(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns 415 status when Content-Type is missing or not application/json', () => {
+    req.headers['content-type'] = 'text/plain';
+
+    requireJsonContent(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(415);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: expect.stringContaining('Unsupported Media Type'),
+      })
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+});
     // Compare the base media type exactly (ignoring parameters such as
     // charset). A substring match previously let malformed values like
     // `text/plain; application/json` or `application/jsonx` through.

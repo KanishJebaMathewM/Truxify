@@ -10,6 +10,38 @@ import { supabaseAdmin } from '../config/db.js';
  * @param {Object|number} [options] - Safe fallback value or options object ({ fallback, throwOnError })
  * @returns {number} Safe fuel efficiency value
  */
+// backend/api/src/services/fuelAdvisorService.js (Cleaned Excerpt)
+
+/**
+ * Calculates fuel efficiency based on distance and fuel amount.
+ * @param {number} distance - Distance traveled in kilometers or miles.
+ * @param {number} fuelAmount - Fuel consumed in liters or gallons.
+ * @param {Object} [options={}] - Additional calculation options (e.g., metric units).
+ * @returns {number} Calculated efficiency rating.
+ */
+export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
+  if (typeof distance !== 'number' || typeof fuelAmount !== 'number') {
+    throw new TypeError('Distance and fuel amount must be valid numbers.');
+  }
+
+  if (fuelAmount <= 0) {
+    if (options.strict) {
+      throw new Error('Fuel amount must be greater than zero.');
+    }
+    return 0.0;
+  }
+
+  if (distance < 0) {
+    throw new Error('Distance cannot be negative.');
+  }
+
+  const efficiency = distance / fuelAmount;
+  return Number(efficiency.toFixed(2));
+}
+
+export default {
+  calculateFuelEfficiency
+};
 export function calculateFuelEfficiency(distance, fuelAmount, options = {}) {
   const fallback = typeof options === 'number' ? options : (options?.fallback ?? 0);
   const throwOnError = typeof options === 'object' && options?.throwOnError === true;

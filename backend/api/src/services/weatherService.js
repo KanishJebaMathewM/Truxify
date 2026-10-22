@@ -5,6 +5,22 @@
  * based on latitude/longitude for the fueling advisor.
  */
 
+function normalizeCoordinates(lat, lng) {
+  const parsedLat = Number(lat);
+  const parsedLng = Number(lng);
+  if (
+    !Number.isFinite(parsedLat) ||
+    !Number.isFinite(parsedLng) ||
+    parsedLat < -90 ||
+    parsedLat > 90 ||
+    parsedLng < -180 ||
+    parsedLng > 180
+  ) {
+    return null;
+  }
+  return { lat: parsedLat, lng: parsedLng };
+}
+
 export class WeatherService {
   constructor({ logger }) {
     this.logger = logger;
@@ -27,17 +43,14 @@ export class WeatherService {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 50));
     
-    const numLat = Number(lat);
     let tempC = 15; // default warm
     let condition = 'clear';
 
     // Number('abc') -> NaN; NaN comparisons are always false so a bad
-    // latitude would silently fall through to the warm default. Guard it
-    // explicitly so the intent is clear.
-    const validLat = Number.isFinite(numLat);
-    const validLng = Number.isFinite(Number(lng));
-
-    if (!validLat || !validLng) {
+    // latitude would silently fall through to the warm default. Range checks
+    // also stop 999 from being reported as a polar snow forecast.
+    const coordinates = normalizeCoordinates(lat, lng);
+    if (!coordinates) {
       return {
         temperature_c: tempC,
         condition,
@@ -45,7 +58,7 @@ export class WeatherService {
       };
     }
 
-    if (validLat && (numLat > 40 || numLat < -40)) {
+    if (coordinates.lat > 40 || coordinates.lat < -40) {
       tempC = -5;
       condition = 'snow';
     }
@@ -69,15 +82,13 @@ export class WeatherService {
  * @returns {boolean} True if hazardous conditions are likely
  */
 export async function checkSevereWeatherAdvisory(lat, lng) {
-  const numLat = Number(lat);
-  const numLng = Number(lng);
-  
-  if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+  const coordinates = normalizeCoordinates(lat, lng);
+  if (!coordinates) {
     return false;
   }
   
   // Extreme polar regions or high-altitude simulation check
-  if (Math.abs(numLat) > 60) {
+  if (Math.abs(coordinates.lat) > 60) {
     return true; // Blizzard/Severe hazard warning
   }
   
@@ -148,16 +159,14 @@ export function calculateWeatherFuelPenalty(condition, temperatureC) {
  * @returns {string} Advisory region descriptor
  */
 export function getMeteorologicalRegion(lat, lng) {
-  const numLat = Number(lat);
-  const numLng = Number(lng);
-
-  if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+  const coordinates = normalizeCoordinates(lat, lng);
+  if (!coordinates) {
     return 'UNKNOWN_REGION';
   }
 
-  if (numLat > 40) return 'NORTH_TEMPERATE_POLAR';
-  if (numLat < -40) return 'SOUTH_TEMPERATE_POLAR';
-  if (numLat >= -15 && numLat <= 15) return 'EQUATORIAL_TROPICAL';
+  if (coordinates.lat > 40) return 'NORTH_TEMPERATE_POLAR';
+  if (coordinates.lat < -40) return 'SOUTH_TEMPERATE_POLAR';
+  if (coordinates.lat >= -15 && coordinates.lat <= 15) return 'EQUATORIAL_TROPICAL';
   
   return 'MID_LATITUDE_ZONE';
 }
@@ -190,11 +199,13 @@ async function assessRouteWeatherRisk(routeCoords) {
       continue;
     }
     
-    // Check using helper logic
-    const isSevere = Math.abs(coord.lat) > 60;
-    if (isSevere) {
+    // Check using helper logic; a malformed or out-of-range waypoint must not
+    // create a severe-weather advisory for an entire route.
+    const coordinates = normalizeCoordinates(coord.lat, coord.lng);
+    if (!coordinates) continue;
+    if (Math.abs(coordinates.lat) > 60) {
       severeCount++;
-    } else if (Math.abs(coord.lat) > 40) {
+    } else if (Math.abs(coordinates.lat) > 40) {
       chillyCount++;
     }
   }

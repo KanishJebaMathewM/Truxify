@@ -105,6 +105,23 @@ import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, para
 import { formatPaginationMeta } from '../utils/pagination.js';
 
 const router = express.Router();
+router.use(userLimiter);
+// backend/api/src/routes/supportRoutes.js (Excerpt)
+
+const ADMIN_ONLY_STATUSES = ['closed', 'in_progress'];
+
+// Inside PATCH /api/support/tickets/:id route handler:
+if (
+  req.user.role !== 'admin' &&
+  normalizedStatus !== ticket.status &&
+  ADMIN_ONLY_STATUSES.includes(normalizedStatus)
+) {
+  return res.status(403).json({
+    success: false,
+    error: 'ACCESS_DENIED',
+    message: 'Access Denied: Only admins can change tickets to this status.'
+  });
+}
 
 // support_tickets / support_ticket_comments are authenticated/service-role
 // only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the

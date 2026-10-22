@@ -53,16 +53,26 @@ class EscalationHandler {
   }
 
   setupEscalationTimers(alertId, record) {
+    const runEscalation = (level) => {
+      // Timer callbacks are not awaited by Node. A rejected route/store call
+      // would become an unhandled rejection and can terminate the process,
+      // leaving every other tracked alert without further escalation.
+      this.performEscalation(alertId, level).catch((err) => {
+        logger.error({ err, alertId, level }, '[EscalationHandler] Escalation step failed');
+        Sentry.captureException(err);
+      });
+    };
+
     const firstTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.ON_CALL);
+      runEscalation(ESCALATION_LEVELS.ON_CALL);
     }, ESCALATION_THRESHOLDS.FIRST_ESCALATION);
 
     const secondTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.SENIOR_ENGINEER);
+      runEscalation(ESCALATION_LEVELS.SENIOR_ENGINEER);
     }, ESCALATION_THRESHOLDS.SECOND_ESCALATION);
 
     const finalTimer = setTimeout(() => {
-      this.performEscalation(alertId, ESCALATION_LEVELS.OPERATIONS);
+      runEscalation(ESCALATION_LEVELS.OPERATIONS);
     }, ESCALATION_THRESHOLDS.FINAL_ESCALATION);
 
     this.escalationTimers.set(alertId, [firstTimer, secondTimer, finalTimer]);

@@ -185,7 +185,56 @@ const router = express.Router();
 const hosStatusSchema = z.object({
   status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
 });
+// backend/api/src/routes/driverRoutes.js (Excerpt)
 
+import { Router } from 'express';
+import { getDriverProfile, updateDriverStatus } from '../services/driverService.js';
+import { authenticate } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js'; // Ensure centralized logger is imported
+
+const router = Router();
+
+router.get('/profile', authenticate, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const result = await getDriverProfile(driverId);
+
+    if (!result.success) {
+      // FIX: Replace unstructured logs with structured logger.warn per issue #9522
+      logger.warn({ driverId, reason: result.error }, '[driverRoutes] Failed to fetch driver profile');
+      return res.status(404).json({ success: false, error: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    // FIX: Use structured logger.error with err object and metadata per issue #9522
+    logger.error({ err, userId: req.user?.id }, '[driverRoutes] Unexpected error in GET /profile');
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+router.patch('/status', authenticate, async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) {
+      logger.warn({ userId: req.user?.id, body: req.body }, '[driverRoutes] Status update missing status field');
+      return res.status(400).json({ success: false, error: 'Status field is required' });
+    }
+
+    const result = await updateDriverStatus(req.user.id, status);
+    if (!result.success) {
+      logger.error({ err: result.error, driverId: req.user.id, status }, '[driverRoutes] Failed to update driver status');
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    logger.error({ err, driverId: req.user?.id }, '[driverRoutes] Unexpected error in PATCH /status');
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+export default router;
 // ============================================================================
 // ACTIVE DRIVERS (B2B, consumed by the n8n document-integrity workflow)
 // ============================================================================

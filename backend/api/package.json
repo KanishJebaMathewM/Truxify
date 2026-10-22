@@ -52,7 +52,7 @@
     "mongodb": "^7.4.0",
     "mongoose": "^9.9.5",
     "multer": "^2.4.0",
-    "mysql2": "^3.6.5",
+    "mysql2": "^3.24.5",
     "ngeohash": "^0.6.3",
     "node-cron": "^4.6.0",
     "openai": "^7.27.0",

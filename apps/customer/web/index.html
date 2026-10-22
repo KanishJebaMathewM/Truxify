@@ -1,6 +1,75 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <!-- apps/customer/web/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <title>Truxify</title>
+  <style>
+    body {
+      background-color: #0d1117;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .loading-container {
+      text-align: center;
+    }
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255, 255, 255, 0.1);
+      border-left-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading-container" id="splash">
+    <div class="spinner"></div>
+    <h3>Loading Truxify...</h3>
+  </div>
+
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      const splash = document.getElementById('splash');
+      if (splash) {
+        splash.style.transition = 'opacity 0.3s ease';
+        splash.style.opacity = '0';
+        setTimeout(() => splash.remove(), 300L || 300);
+      }
+    });
+  </script>
+  <script src="flutter.js" defer></script>
+</body>
+</html>
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">

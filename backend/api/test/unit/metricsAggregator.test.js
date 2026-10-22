@@ -8,7 +8,41 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 const { createSupabaseMock } = await import('../helpers/supabaseMock.js');
-const { aggregateDriverUtilization } = await import('../../src/lib/metricsAggregator.js');
+const {
+  aggregateDriverUtilization,
+  aggregateRouteEfficiency,
+  aggregateDeliveryPerformance,
+  AnalyticsRangeTooLargeError,
+  MAX_ANALYTICS_ROWS,
+} = await import('../../src/lib/metricsAggregator.js');
+
+function telemetryRows(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    driver_id: 'd1',
+    total_distance_km: 1,
+    active_hours: 1,
+    idle_hours: 0,
+    total_pings: 1,
+    date: '2026-10-01',
+    fleet_manager_id: 'fm1',
+  }));
+}
+
+function orderRows(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `order-${index}`,
+    driver_id: 'd1',
+    planned_distance_km: 10,
+    actual_distance_km: 10,
+    fuel_cost_paisa: 100,
+    total_amount: 1000,
+    status: 'completed',
+    completed_at: '2026-10-01T12:00:00.000Z',
+    estimated_delivery_at: '2026-10-01T12:00:00.000Z',
+    customer_rating: 5,
+    fleet_manager_id: 'fm1',
+  }));
+}
 
 describe('aggregateDriverUtilization', () => {
   beforeEach(() => { global.__maSupabase = null; });
@@ -58,5 +92,35 @@ describe('aggregateDriverUtilization', () => {
     };
     global.__maSupabase = mock.supabase;
     expect(await aggregateDriverUtilization('fm1', '2026-10-01', '2026-10-31')).toEqual([]);
+  });
+
+  it('accepts exactly the maximum row count and requests one extra row to detect overflow', async () => {
+    const mock = createSupabaseMock({ driver_telemetry_daily: telemetryRows(MAX_ANALYTICS_ROWS) });
+    global.__maSupabase = mock.supabase;
+
+    const res = await aggregateDriverUtilization('fm1', '2026-10-01', '2026-10-31');
+
+    expect(res).toHaveLength(1);
+    expect(res[0].totalDistanceKm).toBe(MAX_ANALYTICS_ROWS);
+    expect(mock.calls[0].limit).toBe(MAX_ANALYTICS_ROWS + 1);
+  });
+
+  it('throws AnalyticsRangeTooLargeError when driver telemetry exceeds the maximum', async () => {
+    const mock = createSupabaseMock({ driver_telemetry_daily: telemetryRows(MAX_ANALYTICS_ROWS + 1) });
+    global.__maSupabase = mock.supabase;
+
+    await expect(aggregateDriverUtilization('fm1', '2026-10-01', '2026-10-31'))
+      .rejects.toBeInstanceOf(AnalyticsRangeTooLargeError);
+  });
+
+  it.each([
+    ['route efficiency', aggregateRouteEfficiency],
+    ['delivery performance', aggregateDeliveryPerformance],
+  ])('throws AnalyticsRangeTooLargeError when %s exceeds the maximum', async (_label, aggregate) => {
+    const mock = createSupabaseMock({ orders: orderRows(MAX_ANALYTICS_ROWS + 1) });
+    global.__maSupabase = mock.supabase;
+
+    await expect(aggregate('fm1', '2026-10-01', '2026-10-31'))
+      .rejects.toBeInstanceOf(AnalyticsRangeTooLargeError);
   });
 });

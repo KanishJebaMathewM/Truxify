@@ -4,40 +4,6 @@ import crypto from 'crypto';
 import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { DomainError } from './order/domainError.js';
-// Before
-logger.error({ err: error }, 'Error inserting notification');
-
-// After
-logger.error({
-  event: 'NOTIFICATION_INSERT_ERROR',
-  error: error.message,
-  stack: error.stack,
-  requestId: req?.id || requestId,
-}, 'Failed to insert notification into database');
-/**
- * Notification Service
- * Handles FCM push notification fan-outs, device token deduplication,
- * permanent vs transient error classification, and delivery-OTP management.
- * Resolved duplicate import issues (#14874) to ensure clean module evaluation.
- */
-// Inside backend/api/src/services/notificationService.js
-
-async function sendDeliveryOtpNotification(token, otpCode, options = {}) {
-  // ... existing implementation that calls sendFcmNotification() and stores it in fcmResult ...
-
-  const fcmResult = await sendFcmNotification(token, {
-    title: 'Your Delivery OTP',
-    body: `Your verification code is ${otpCode}`,
-    data: { otp: otpCode, type: 'DELIVERY_OTP' },
-    ...options
-  });
-
-  // CHANGE FROM:
-  // return { success: true };
-
-  // CHANGE TO:
-  return fcmResult ?? { success: false, error: 'Unknown FCM error' };
-}
 // ============================================================================
 // FCM fan-out configuration
 // ============================================================================

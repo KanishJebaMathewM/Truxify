@@ -14,8 +14,11 @@ const asyncRoute = (label) => (handler) => async (req, res) => {
   try {
     await handler(req, res);
   } catch (error) {
-    logger.error(`${label} error:`, error);
-    res.status(500).json({ success: false, error: error?.message ?? String(error) });
+    logger.error({ err: error, requestId: req.requestId }, `${label} error`);
+    // Prometheus/Kubernetes client errors embed upstream URLs, namespaces and
+    // sometimes bearer-token fragments. Log the detail but never return it to
+    // the caller.
+    res.status(500).json({ success: false, error: 'Autoscaler metrics unavailable' });
   }
 };
 

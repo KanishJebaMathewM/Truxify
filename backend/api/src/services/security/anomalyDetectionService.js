@@ -9,7 +9,23 @@ const ANOMALY_THRESHOLDS = {
   MULTIPLE_TRANSFERS: 5, // Number of transfers in 10 minutes
   UNUSUAL_DESTINATION: true, // New wallet destination
 };
+// backend/api/src/services/security/anomalyDetectionService.js (Excerpt)
 
+export function detectUnusualTime(transactionTimestamp) {
+  const txTime = new Date(transactionTimestamp);
+  
+  // FIX: Use getUTCHours() instead of getHours() per issue #6175
+  const hour = txTime.getUTCHours();
+
+  // Define normal operating window (e.g., 06:00 to 22:00 UTC)
+  const isUnusual = hour < 6 || hour > 22;
+
+  return {
+    isUnusual,
+    evaluatedHourUTC: hour,
+    message: isUnusual ? `Transaction occurred during unusual off-hours (${hour}:00 UTC)` : 'Normal operating hours',
+  };
+}
 /**
  * Defensive row cap on the 30-day withdrawal statistic pulls. PostgREST
  * silently caps a single response at 1000 rows, so without an explicit

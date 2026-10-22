@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
+// backend/api/src/validation/requestSchemas.js (Excerpt)
 
+import { z } from 'zod';
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters long.').optional(),
+  phone: z.string().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format.').optional(),
+  avatar_url: z.string().url('Invalid avatar URL format.').optional(),
+  verification_status: z.enum(['pending', 'verified', 'rejected'], {
+    errorMap: () => ({ message: "Verification status must be one of: 'pending', 'verified', 'rejected'." })
+  }).optional(),
+});
 // Generic field validation helpers
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);

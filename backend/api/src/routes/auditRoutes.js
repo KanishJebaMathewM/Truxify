@@ -9,6 +9,7 @@ import logger from '../middleware/logger.js';
 import { z } from 'zod';
 import { queryAuditLogs, exportAuditLogsJSON } from '../services/auditService.js';
 import { verifyLogBatch } from '../lib/logSigner.js';
+import { getAuditSigningSecret } from '../config/auditSigningSecret.js';
 
 const router = express.Router();
 
@@ -264,8 +265,6 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
  * @fileoverview Admin endpoints for querying and exporting audit logs.
  */
 
-const SIGNING_SECRET = process.env.AUDIT_SIGNING_SECRET || 'truxify-audit-signing-secret';
-
 /**
  * GET /api/audit/logs
  * Queries audit logs with filtering and pagination.
@@ -343,7 +342,7 @@ router.post('/verify', authenticate, userLimiter, requireRole(['admin', 'complia
       return res.status(400).json({ error: 'logs and signature are required' });
     }
 
-    const isValid = verifyLogBatch(logs, signature, SIGNING_SECRET);
+    const isValid = verifyLogBatch(logs, signature, getAuditSigningSecret());
 
     res.json({
       success: true,

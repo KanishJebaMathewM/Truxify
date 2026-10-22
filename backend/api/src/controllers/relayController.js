@@ -72,6 +72,13 @@ export async function createRelayBooking(req, res, next) {
       data: session,
     });
   } catch (error) {
+    if (error instanceof DomainError) {
+      return res.status(error.status || 400).json({
+        success: false,
+        error: error.message,
+        details: error.payload,
+      });
+    }
     logger.error({ error: error.message }, '[relayController.createRelayBooking] Error');
     next(error);
   }

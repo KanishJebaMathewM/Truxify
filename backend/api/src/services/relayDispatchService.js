@@ -169,8 +169,50 @@ export function partitionRouteIntoCorridorLegs(origin, destination, totalAmount 
 
 /**
  * In-memory relay session registry (mirrored to persistent store in production).
+ *
+ * The registry is bounded because every entry retains leg arrays, payout
+ * amounts, and driver assignments. Completed sessions are kept briefly for
+ * status lookups, while active sessions expire after a generous idle window so
+ * abandoned bookings cannot accumulate forever.
  */
 const activeRelaySessions = new Map();
+
+export const MAX_ACTIVE_RELAY_SESSIONS = 500;
+export const COMPLETED_RELAY_SESSION_RETENTION_MS = 24 * 60 * 60 * 1000;
+export const STALE_RELAY_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function timestampMs(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Removes completed sessions past their retention window and active sessions
+ * that have not changed within the stale-session TTL. Returns the number of
+ * removed entries so callers can observe pruning in logs and tests.
+ */
+export function pruneRelaySessions(now = Date.now()) {
+  let removed = 0;
+
+  for (const [relayBookingId, session] of activeRelaySessions) {
+    if (session.status === 'COMPLETED') {
+      const completedAt = timestampMs(session.completedAt) ?? timestampMs(session.updatedAt);
+      if (completedAt === null || now - completedAt > COMPLETED_RELAY_SESSION_RETENTION_MS) {
+        activeRelaySessions.delete(relayBookingId);
+        removed += 1;
+      }
+      continue;
+    }
+
+    const updatedAt = timestampMs(session.updatedAt);
+    if (updatedAt === null || now - updatedAt > STALE_RELAY_SESSION_TTL_MS) {
+      activeRelaySessions.delete(relayBookingId);
+      removed += 1;
+    }
+  }
+
+  return removed;
+}
 
 /**
  * Creates and initializes a relay orchestration session.
@@ -180,6 +222,13 @@ export async function createRelaySession(customerUserId, relayData) {
 
   if (!origin || !destination || !totalAmount) {
     throw new DomainError(400, { error: 'Missing required parameters: origin, destination, totalAmount' });
+  }
+
+  pruneRelaySessions();
+  if (activeRelaySessions.size >= MAX_ACTIVE_RELAY_SESSIONS) {
+    throw new DomainError(429, {
+      error: `Relay session capacity reached (${MAX_ACTIVE_RELAY_SESSIONS}). Try again after completed sessions expire.`,
+    });
   }
 
   const relayPlan = partitionRouteIntoCorridorLegs(origin, destination, totalAmount);
@@ -215,6 +264,7 @@ export async function createRelaySession(customerUserId, relayData) {
  * Retrieves a relay session by booking ID.
  */
 export async function getRelaySession(relayBookingId) {
+  pruneRelaySessions();
   const session = activeRelaySessions.get(relayBookingId);
   if (!session) {
     throw new DomainError(404, { error: `Relay session not found for ID: ${relayBookingId}` });
@@ -266,9 +316,13 @@ export async function advanceRelayLeg(relayBookingId, completedLegIndex, handoff
 
 export default {
   TRANSSHIPMENT_HUBS,
+  MAX_ACTIVE_RELAY_SESSIONS,
+  COMPLETED_RELAY_SESSION_RETENTION_MS,
+  STALE_RELAY_SESSION_TTL_MS,
   calculateDistanceKm,
   findNearestHub,
   partitionRouteIntoCorridorLegs,
+  pruneRelaySessions,
   createRelaySession,
   getRelaySession,
   advanceRelayLeg,

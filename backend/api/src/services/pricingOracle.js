@@ -10,6 +10,18 @@ const BASELINE_RATES_PER_MILE = {
 
 const NATIONAL_AVG_FUEL_PRICE = 3.90; // USD per gallon baseline
 
+function validationError(message) {
+    const error = new RangeError(message);
+    error.statusCode = 400;
+    return error;
+}
+
+function assertPositiveFinite(name, value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw validationError(`${name} must be a finite number greater than 0.`);
+    }
+}
+
 /**
  * Calculates Fair Market Value (FMV) for a given load based on live market factors.
  * 
@@ -28,6 +40,16 @@ export function calculateFairMarketValue(load = {}, marketConditions = {}) {
         truckToLoadRatio: rawRatio = 1.0, // < 1.0 indicates high demand / carrier market; > 1.0 indicates capacity surplus
         localFuelPriceUSD: rawFuelPrice = NATIONAL_AVG_FUEL_PRICE
     } = marketConditions;
+
+    if (Object.prototype.hasOwnProperty.call(load, 'currentOfferedPayout')) {
+        assertPositiveFinite('currentOfferedPayout', currentOfferedPayout);
+    }
+    if (rawRatio !== undefined && rawRatio !== null && Number.isFinite(rawRatio) && rawRatio <= 0) {
+        throw validationError('truckToLoadRatio must be greater than 0.');
+    }
+    if (rawFuelPrice !== undefined && rawFuelPrice !== null && Number.isFinite(rawFuelPrice) && rawFuelPrice <= 0) {
+        throw validationError('localFuelPriceUSD must be greater than 0.');
+    }
 
     // Guard: non-positive or non-finite distanceMiles produces no meaningful FMV
     if (!Number.isFinite(distanceMiles) || distanceMiles <= 0) {

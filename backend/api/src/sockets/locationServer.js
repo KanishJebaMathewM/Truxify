@@ -4,8 +4,29 @@ import { verifyAuthToken } from "../middleware/auth.js";
 import { supabase, redisClient } from "../config/db.js";
 import telemetryBuffer from "./telemetryBuffer.js";
 import { CLOCK_SKEW_TOLERANCE_MS } from "./tracker.js";
+// backend/api/src/sockets/locationServer.js (Excerpt)
 import { createSocketRateLimiter } from "../lib/socketRateLimiter.js";
 
+import logger from '../middleware/logger.js';
+
+export function setupLocationSocket(io) {
+  io.on('connection', (socket) => {
+    // FIX: Replace console.log with structured logger.info per issue #7230
+    logger.info({ socketId: socket.id }, '[LocationServer] Client connected');
+
+    socket.on('location:update', (data) => {
+      try {
+        // ... location processing logic ...
+      } catch (err) {
+        logger.error({ err, socketId: socket.id }, '[LocationServer] Failed to process location update');
+      }
+    });
+
+    socket.on('disconnect', (reason) => {
+      logger.info({ socketId: socket.id, reason }, '[LocationServer] Client disconnected');
+    });
+  });
+}
 let io = null;
 let _orderRepository = null;
 

@@ -35,7 +35,17 @@ const REPUTATION_ABI = [
 ];
 /** @type {ethers.Contract | null} */
 export let reputationContract = null;
-
+/**
+ * Clamps a reputation score between 0 and MAX_REPUTATION (10000).
+ * Exported per issue #6984 for reuse in on-chain bounds validation.
+ */
+export function clampReputation(score) {
+  const max = 10000;
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(score, max));
+}
 /**
  * Initialises or resets the Reputation contract client.
  * Exposed for testing and runtime reconfiguration.

@@ -208,6 +208,8 @@ async def get_fusion_stats():
 @router.post("/alert/trigger")
 async def trigger_alert(level: str = "WARNING"):
     """Manually trigger safety alert"""
+    if level not in ("INFO", "WARNING", "CRITICAL"):
+        raise HTTPException(status_code=422, detail="level must be one of INFO, WARNING, CRITICAL.")
     try:
         alert = {
             'level': level,

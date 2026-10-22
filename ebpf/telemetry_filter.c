@@ -14,14 +14,13 @@
 #define RATE_LIMIT_WINDOW_NS 1000000000ULL // 1 second in nanoseconds
 #define MAX_PACKETS_PER_SEC 10             // Max 10 telemetry pings per sec per IP
 
-struct rate_limit_entry {
-    // bpf_spin_lock requires the lock field to be exactly this type; it is
-    // only permitted inside BPF_MAP_TYPE_HASH / BPF_MAP_TYPE_ARRAY (not LRU).
-    struct bpf_spin_lock lock;
-    __u64 last_time_ns;
-    __u32 packet_count;
-};
 
+struct rate_limit_entry {
+    __u32 lock;         // 4 bytes (offset 0)
+                        // 4 bytes of alignment padding (offset 4)
+    __u64 last_time_ns; // 8 bytes (offset 8)
+    __u32 packet_count; // 4 bytes (offset 16)
+};
 // BPF Map: Per-IP Telemetry Rate Limiting.
 // BPF_MAP_TYPE_HASH supports bpf_spin_lock (LRU_HASH does not), so the verifier
 // accepts the program. A periodic userspace sweep (loader.py) deletes entries

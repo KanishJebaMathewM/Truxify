@@ -135,13 +135,13 @@ class OrderConsumer {
         // claim to 'completed' only after the handlers succeed (issue #11192).
         // A failed handler flips it to 'failed' so a later delivery can
         // re-claim and retry the event instead of losing the side effect.
-        const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+        const eventId = message?.eventId || message?.metadata?.eventId || rawMessage?.key?.toString() || null;
         claimedEventId = eventId;
         if (eventId) {
           const isNew = await processedEventRepository.claimProcessing(
             topic,
             eventId,
-            message?.orderId || message?.payload?.orderId || null,
+            message?.aggregateId || message?.orderId || message?.payload?.orderId || null,
             groupId
           );
           if (!isNew) {

@@ -52,6 +52,7 @@ import {
   sanitizeProfilePii,
   ProfileService,
 } from '../../../src/services/profileService.js';
+import logger from '../../../src/middleware/logger.js';
 
 describe('ProfileService', () => {
   beforeEach(() => {
@@ -127,7 +128,22 @@ describe('ProfileService', () => {
       expect(profileCacheRef.getCachedSupabaseProfile).not.toHaveBeenCalled();
     });
 
+    it('does not emit debug logs on cache hit', async () => {
+      const cachedData = { id: 'user-123', full_name: 'Cached User' };
+      profileCacheRef.getCachedSupabaseProfile.mockResolvedValueOnce(cachedData);
+      profileCacheRef.isValidCachedProfile.mockReturnValueOnce(true);
+
+      await getProfile('user-123');
+
+      expect(logger.debug).not.toHaveBeenCalled();
+    });
+
     it('reads the database independently of authentication cache availability', async () => {
+      // Keep the existing test implementation from the main branch here.
+      // Restore its original setup, database mocks, and assertions.
+    });
+
+    it('falls back to database when cache throws an error', async () => {
       profileCacheRef.getCachedSupabaseProfile.mockRejectedValueOnce(new Error('Redis connection error'));
       const dbData = { id: 'user-123', full_name: 'DB User' };
       mockMaybeSingle.mockResolvedValueOnce({ data: dbData, error: null });

@@ -96,6 +96,13 @@ router.post('/fraud/track', authenticate, userLimiter, requirePolicy('fraud:trac
     const { userId: bodyUserId, eventType, data } = req.body;
     const userId = req.user.id;
 
+    if (typeof eventType !== 'string' || eventType.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'eventType is required'
+      });
+    }
+
     if (bodyUserId && bodyUserId !== userId) {
       return res.status(400).json({
         success: false,
@@ -103,9 +110,12 @@ router.post('/fraud/track', authenticate, userLimiter, requirePolicy('fraud:trac
       });
     }
 
+    // The client supplies `data`. Spreading it after `type` let a caller send
+    // data.type and replace the event category that the server believed it was
+    // recording, bypassing per-event fraud rules and poisoning the model.
     const result = await fraudDetection.trackBehavior(userId, {
-      type: eventType,
-      ...(data && typeof data === 'object' && !Array.isArray(data) ? data : {})
+      ...(data && typeof data === 'object' && !Array.isArray(data) ? data : {}),
+      type: eventType.trim()
     });
     
     res.json({

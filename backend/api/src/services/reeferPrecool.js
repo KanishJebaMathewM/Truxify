@@ -63,6 +63,28 @@ export const REEFER_SPECS = {
     standardTrailerVolumeCuFt: 3400,
 };
 
+const MIN_TEMPERATURE_F = -80;
+const MAX_TEMPERATURE_F = 150;
+const MAX_ETA_MINUTES = 10080;
+
+function validationError(message) {
+    const error = new RangeError(message);
+    error.statusCode = 400;
+    return error;
+}
+
+function assertFiniteRange(name, value, min, max) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+        throw validationError(`${name} must be a finite number between ${min} and ${max}.`);
+    }
+}
+
+function assertEnum(name, value, allowed) {
+    if (!allowed.includes(value)) {
+        throw validationError(`${name} must be one of: ${allowed.join(', ')}.`);
+    }
+}
+
 /**
  * Backward-compatible linear pre-cooling evaluation.
  */
@@ -74,6 +96,11 @@ export function evaluateReeferPrecooling(params = {}) {
         currentReeferTempF = 75,
         ambientWeatherTempF = 95
     } = params;
+
+    assertFiniteRange('etaMinutes', etaMinutes, 0, MAX_ETA_MINUTES);
+    assertFiniteRange('targetCargoTempF', targetCargoTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('currentReeferTempF', currentReeferTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('ambientWeatherTempF', ambientWeatherTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
 
     const tempDelta = currentReeferTempF - targetCargoTempF;
     let estimatedCoolingMinutes = tempDelta > 0 ? tempDelta / 0.4 : 0;
@@ -126,6 +153,13 @@ export function simulateThermodynamicPulldown(options = {}) {
         reeferMode = 'CONTINUOUS_PULLDOWN',
         timeStepMinutes = 1
     } = options;
+
+    assertFiniteRange('initialTempF', initialTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('targetTempF', targetTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('ambientTempF', ambientTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('timeStepMinutes', timeStepMinutes, 0.1, 60);
+    assertEnum('insulationRating', insulationRating, ['HIGH_PERFORMANCE', 'STANDARD', 'AGED']);
+    assertEnum('reeferMode', reeferMode, ['CONTINUOUS_PULLDOWN', 'CYCLE_SENTRY']);
 
     if (initialTempF <= targetTempF) {
         return {
@@ -202,6 +236,14 @@ export function evaluatePrecoolWithThermodynamics(params = {}) {
         etaMinutes = 120,
         insulationRating = 'STANDARD'
     } = params;
+
+    assertFiniteRange('currentReeferTempF', currentReeferTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('ambientWeatherTempF', ambientWeatherTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    assertFiniteRange('etaMinutes', etaMinutes, 0, MAX_ETA_MINUTES);
+    assertEnum('insulationRating', insulationRating, ['HIGH_PERFORMANCE', 'STANDARD', 'AGED']);
+    if (customTargetTempF !== undefined) {
+        assertFiniteRange('customTargetTempF', customTargetTempF, MIN_TEMPERATURE_F, MAX_TEMPERATURE_F);
+    }
 
     const commodity = COMMODITY_PRESETS[commodityKey] || COMMODITY_PRESETS.FROZEN;
     const targetSetPointF = typeof customTargetTempF === 'number' ? customTargetTempF : commodity.targetSetPointF;

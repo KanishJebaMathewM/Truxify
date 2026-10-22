@@ -88,10 +88,24 @@ export function checkContentLength(req, maxBytes = DEFAULT_MAX) {
     err.status = 411; err.code = 'LENGTH_REQUIRED';
     return { ok: false, error: err };
   }
-  const len = Number(raw);
-  if (!Number.isFinite(len) || len < 0) {
+  // HTTP Content-Length is a non-negative decimal integer. Number() also
+  // accepts fractions, exponent notation and hex literals, so validate the
+  // grammar before converting; otherwise '1.5' or '1e9' can slip past the
+  // boundary checks while Node/busboy interprets the raw header differently.
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
     const err = new Error('Content-Length must be a non-negative integer');
     err.status = 400; err.code = 'BAD_REQUEST';
+    return { ok: false, error: err };
+  }
+  const len = Number(raw);
+  if (!Number.isSafeInteger(len) || len < 0) {
+    const err = new Error('Content-Length must be a non-negative integer');
+    err.status = 400; err.code = 'BAD_REQUEST';
+    return { ok: false, error: err };
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    const err = new Error('Invalid upload size limit');
+    err.status = 500; err.code = 'INTERNAL_ERROR';
     return { ok: false, error: err };
   }
   if (len > maxBytes) {

@@ -1,171 +1,171 @@
+
 #!/usr/bin/env bash
 # ============================================================================
 # check-escrow-abi.sh
-# ============================================================================
-# CI guard that verifies the backend (escrow.js) ABI selectors match the
-# selectors actually present in the compiled TruxifyEscrow contract.
+# CI guard for verifying backend escrow ABI selectors against the compiled
+# TruxifyEscrow contract.
 #
 # Usage:
 #   bash scripts/check-escrow-abi.sh
 #
-# This script:
-#   1. Reads the compiled contract ABI
-#      (blockchain/artifacts/contracts/TruxifyEscrow.sol/TruxifyEscrow.json)
-#      produced by `npx hardhat compile`; if it is absent, derives the
-#      function signatures from blockchain/contracts/TruxifyEscrow.sol.
-#   2. Computes the real selectors with `cast` (foundry) or node + ethers
-#      (blockchain/node_modules) — never from the expected strings themselves.
-#   3. Compares them with the selectors defined in escrow.js
-#   4. Fails (exit 1) on any mismatch or if the selectors cannot be verified.
+# Requirements:
+#   - Foundry cast OR ethers installed in blockchain/node_modules
+#   - Hardhat and the TruxifyEscrow contract
 # ============================================================================
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SOL_FILE="$ROOT_DIR/blockchain/contracts/TruxifyEscrow.sol"
-ARTIFACT_FILE="$ROOT_DIR/blockchain/artifacts/contracts/TruxifyEscrow.sol/TruxifyEscrow.json"
+BLOCKCHAIN_DIR="$ROOT_DIR/blockchain"
+SOL_FILE="$BLOCKCHAIN_DIR/contracts/TruxifyEscrow.sol"
+ARTIFACT_FILE="$BLOCKCHAIN_DIR/artifacts/contracts/TruxifyEscrow.sol/TruxifyEscrow.json"
 
-echo "🔍 Checking escrow ABI compatibility..."
+echo "Checking escrow ABI compatibility..."
 
-# Expected selectors (from backend/api/src/services/escrow.js ESCROW_ABI)
-# These are keccak256(first 4 bytes) of the function signatures.
-declare -A EXPECTED_SELECTORS
-EXPECTED_SELECTORS["createBooking(uint256,address,bytes)"]="0bb7aa51"
-EXPECTED_SELECTORS["lockPayment(uint256,address,address)"]="044e8539"
-EXPECTED_SELECTORS["commitmentNonces(address,uint256)"]="699ef9bb"
-EXPECTED_SELECTORS["releasePayment(uint256)"]="88685cd9"
-EXPECTED_SELECTORS["cancelBooking(uint256)"]="0dca825e"
-EXPECTED_SELECTORS["cancelWithPenalty(uint256,uint256)"]="ca9a63b1"
-EXPECTED_SELECTORS["markBookingStarted(uint256)"]="1f683549"
-EXPECTED_SELECTORS["raiseDispute(uint256)"]="a5c1674e"
-EXPECTED_SELECTORS["resolveDispute(uint256,uint256)"]="bdc84ac3"
-EXPECTED_SELECTORS["resolveDisputeTimeout(uint256)"]="333edf12"
-EXPECTED_SELECTORS["bookings(uint256)"]="1dab301e"
+# Expected selectors used by backend/api/src/services/escrow.js
+declare -A EXPECTED_SELECTORS=(
+  ["createBooking(uint256,address,bytes)"]="0bb7aa51"
+  ["lockPayment(uint256,address,address)"]="044e8539"
+  ["commitmentNonces(address,uint256)"]="699ef9bb"
+  ["releasePayment(uint256)"]="88685cd9"
+  ["cancelBooking(uint256)"]="0dca825e"
+  ["cancelWithPenalty(uint256,uint256)"]="ca9a63b1"
+  ["markBookingStarted(uint256)"]="1f683549"
+  ["raiseDispute(uint256)"]="a5c1674e"
+  ["resolveDispute(uint256,uint256)"]="bdc84ac3"
+  ["resolveDisputeTimeout(uint256)"]="333edf12"
+  ["bookings(uint256)"]="1dab301e"
+)
 
-if ! command -v cast &>/dev/null && [ ! -d "$ROOT_DIR/blockchain/node_modules/ethers" ]; then
-  echo "❌ Neither cast (foundry) nor ethers (blockchain/node_modules) is available to compute selectors." >&2
-  echo "   Run 'npm ci' in blockchain/ (or install foundry) and re-run." >&2
+# Check required files.
+if [[ ! -f "$SOL_FILE" ]]; then
+  echo "ERROR: Contract source not found: $SOL_FILE" >&2
   exit 1
 fi
 
-# Compute the real selector for a signature using cast or node + ethers.
-# Prints the 8-char hex selector (no 0x prefix).
+# Compile if the ABI artifact does not exist.
+if [[ ! -f "$ARTIFACT_FILE" ]]; then
+  echo "Compiled ABI not found. Running Hardhat compile..."
+
+  if [[ ! -f "$BLOCKCHAIN_DIR/package.json" ]]; then
+    echo "ERROR: blockchain/package.json not found." >&2
+    exit 1
+  fi
+
+  (
+    cd "$BLOCKCHAIN_DIR"
+    npx hardhat compile
+  )
+
+  if [[ ! -f "$ARTIFACT_FILE" ]]; then
+    echo "ERROR: Hardhat did not produce the expected ABI artifact." >&2
+    exit 1
+  fi
+fi
+
+# Require an actual selector computation tool.
+if ! command -v cast >/dev/null 2>&1 &&
+   [[ ! -d "$BLOCKCHAIN_DIR/node_modules/ethers" ]]; then
+  echo "ERROR: Neither Foundry cast nor ethers is available." >&2
+  echo "Install dependencies with npm ci in blockchain/." >&2
+  exit 1
+fi
+
+# Compute a selector from the canonical function signature.
 compute_selector() {
   local sig="$1"
-  if command -v cast &>/dev/null; then
-    cast keccak "$sig" | cut -c1-10 | sed 's/^0x//'
-  else
-    NODE_PATH="$ROOT_DIR/blockchain/node_modules" node -e "
-      const { ethers } = require('ethers');
-      const iface = new ethers.Interface(['function $sig']);
-      console.log(iface.getFunction('${sig%%(*}').selector.slice(2));
-    "
-  fi
-}
 
-# Extract the signatures exposed by the contract. Reads the compiled ABI when
-# available, otherwise parses the .sol source for function declarations and
-# public/constant state getters. Prints one signature per line.
-extract_signatures() {
-  if [ -f "$ARTIFACT_FILE" ]; then
-    NODE_PATH="$ROOT_DIR/blockchain/node_modules" node -e '
-      const fs = require("fs");
-      const artifact = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-      const seen = new Set();
-      for (const item of artifact.abi || []) {
-        if (item.type !== "function") continue;
-        const sig = `${item.name}(${(item.inputs || []).map((i) => i.type).join(",")})`;
-        if (!seen.has(sig)) { seen.add(sig); console.log(sig); }
-      }
-    ' node "$ARTIFACT_FILE"
+  if command -v cast >/dev/null 2>&1; then
+    cast sig "$sig" | sed 's/^0x//' | tr '[:upper:]' '[:lower:]'
   else
-    echo "⚠️  Compiled artifact not found — deriving selectors from $SOL_FILE." >&2
-    [ -f "$SOL_FILE" ] || { echo "❌ Contract source not found at $SOL_FILE" >&2; exit 1; }
-    NODE_PATH="$ROOT_DIR/blockchain/node_modules" node -e '
-      const fs = require("fs");
-      const src = fs.readFileSync(process.argv[2], "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/[^\n]*/g, "");
-      const seen = new Set();
-      const add = (sig) => { if (!seen.has(sig)) { seen.add(sig); console.log(sig); } };
-
-      // External/public function declarations (skip private/internal helpers).
-      const fnRe = /\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g;
-      let m;
-      while ((m = fnRe.exec(src)) !== null) {
-        const open = src.indexOf("(", m.index);
-        let depth = 0;
-        let close = -1;
-        for (let i = open; i < src.length; i++) {
-          if (src[i] === "(") depth++;
-          else if (src[i] === ")") { depth--; if (depth === 0) { close = i; break; } }
+    NODE_PATH="$BLOCKCHAIN_DIR/node_modules" \
+      node -e '
+        const { ethers } = require("ethers");
+        const signature = process.argv[1];
+        const iface = new ethers.Interface([`function ${signature}`]);
+        const fragment = iface.getFunction(signature);
+        if (!fragment) {
+          throw new Error(`Invalid function signature: ${signature}`);
         }
-        if (close === -1) continue;
-        const tail = src.slice(close + 1, src.indexOf("{", close));
-        if (/\b(private|internal)\b/.test(tail)) continue;
-
-        const params = src.slice(open + 1, close).split(",").map((p) => {
-          let s = p.trim().replace(/\b(payable|memory|calldata|storage)\b/g, " ").replace(/\s+/g, " ");
-          const words = s.split(" ");
-          if (words.length > 1) {
-            const last = words[words.length - 1];
-            if (/^[a-z_$][\w$]*$/i.test(last)) words.pop();
-          }
-          return words.join(" ").trim();
-        }).filter((p) => p.length > 0);
-
-        add(`${m[1]}(${params.join(",")})`);
-      }
-
-      // Public/constant state variables expose getters (e.g. mapping -> key getter).
-      const varRe = /(?:mapping\s*\(\s*([A-Za-z_$][\w$]*)\s*=>\s*[^)]*\)|([A-Za-z_$][\w$]*(?:\s*\[\s*\])*))\s+(?:(constant\s+)?public|public\s+constant)\s+([A-Za-z_$][\w$]*)/g;
-      let v;
-      while ((v = varRe.exec(src)) !== null) {
-        add(v[1] ? `${v[4]}(${v[1]})` : `${v[4]}()`);
-      }
-    ' node "$SOL_FILE"
+        console.log(fragment.selector.slice(2).toLowerCase());
+      ' "$sig"
   fi
 }
 
+# Extract canonical signatures from the compiled contract ABI.
 TMP_SIGS="$(mktemp)"
 trap 'rm -f "$TMP_SIGS"' EXIT
-extract_signatures > "$TMP_SIGS"
 
-if [ ! -s "$TMP_SIGS" ]; then
-  echo "❌ No signatures could be extracted from the contract. Cannot verify ABI selectors." >&2
+NODE_PATH="$BLOCKCHAIN_DIR/node_modules" \
+  node -e '
+    const fs = require("fs");
+
+    const file = process.argv[1];
+    const artifact = JSON.parse(fs.readFileSync(file, "utf8"));
+
+    if (!Array.isArray(artifact.abi)) {
+      throw new Error("Compiled artifact does not contain a valid ABI.");
+    }
+
+    const signatures = new Set();
+
+    for (const item of artifact.abi) {
+      if (item.type !== "function") continue;
+
+      const signature = `${item.name}(${item.inputs
+        .map((input) => input.type)
+        .join(",")})`;
+
+      signatures.add(signature);
+    }
+
+    for (const signature of signatures) {
+      console.log(signature);
+    }
+  ' "$ARTIFACT_FILE" > "$TMP_SIGS"
+
+if [[ ! -s "$TMP_SIGS" ]]; then
+  echo "ERROR: No function signatures found in compiled ABI." >&2
   exit 1
 fi
 
-# Build the map of actual selectors from the contract.
+# Compute selectors from the signatures extracted from the contract.
 declare -A ACTUAL_SELECTORS
+
 while IFS= read -r sig; do
-  [ -z "$sig" ] && continue
+  [[ -z "$sig" ]] && continue
   ACTUAL_SELECTORS["$sig"]="$(compute_selector "$sig")"
 done < "$TMP_SIGS"
 
+# Compare backend expectations against the compiled ABI.
 ERRORS=0
+
 for sig in "${!EXPECTED_SELECTORS[@]}"; do
   expected="${EXPECTED_SELECTORS[$sig]}"
   actual="${ACTUAL_SELECTORS[$sig]:-}"
-  if [ -z "$actual" ]; then
-    echo "  ❌ $sig → not present in the compiled contract"
+
+  if [[ -z "$actual" ]]; then
+    echo "FAIL: $sig is missing from the compiled contract."
     ERRORS=$((ERRORS + 1))
-  elif [ "$actual" = "$expected" ]; then
-    echo "  ✅ $sig → 0x$expected"
+  elif [[ "$actual" == "$expected" ]]; then
+    echo "PASS: $sig -> 0x$actual"
   else
-    echo "  ❌ $sig → expected 0x$expected, contract has 0x$actual"
+    echo "FAIL: $sig"
+    echo "  Expected: 0x$expected"
+    echo "  Actual:   0x$actual"
     ERRORS=$((ERRORS + 1))
   fi
 done
 
-echo ""
-if [ $ERRORS -eq 0 ]; then
-  echo "✅ All ABI selectors match."
+echo
+
+if [[ "$ERRORS" -eq 0 ]]; then
+  echo "All escrow ABI selectors match."
   exit 0
 else
-  echo "❌ $ERRORS ABI selector(s) mismatch. The backend escrow.js expects different selectors"
-  echo "   than what the contract provides. Do NOT deploy until this is resolved."
+  echo "$ERRORS ABI selector(s) failed verification."
+  echo "Do not deploy until the mismatch is resolved."
   exit 1
 fi

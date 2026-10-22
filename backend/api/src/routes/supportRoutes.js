@@ -625,7 +625,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
   try {
     const { data: ticket, error: fetchError } = await userDb(req)
       .from('support_tickets')
-      .select('id, user_id')
+      .select('id, user_id, status')
       .eq('id', ticketId)
       .maybeSingle();
 

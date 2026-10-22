@@ -33,11 +33,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     });
     try {
       final methods = await _repo.fetchAll();
-      if (mounted) setState(() => _methods = methods);
+      if (mounted) {
+        setState(() => _methods = methods);
+      }
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) {
+        setState(() => _error = e.toString());
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -47,7 +53,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       await _repo.setDefault(method.id);
       await _load();
     } catch (e) {
-      _showError('Failed to update default payment method.');
+      if (mounted) {
+        _showError('Failed to update default payment method.');
+      }
     }
   }
 
@@ -58,7 +66,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       await _repo.delete(method.id);
       await _load();
     } catch (e) {
-      _showError('Failed to remove payment method.');
+      if (mounted) {
+        _showError('Failed to remove payment method.');
+      }
     }
   }
 
@@ -74,7 +84,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
         await _repo.add(result);
         await _load();
       } catch (e) {
-        _showError('Failed to add payment method.');
+        if (mounted) {
+          _showError('Failed to add payment method.');
+        }
       }
     }
   }
@@ -180,7 +192,6 @@ class _PaymentCard extends StatelessWidget {
       case 'UPI':
         return Icons.account_balance_wallet_rounded;
       case 'CREDIT CARD':
-        return Icons.credit_card_rounded;
       case 'DEBIT CARD':
         return Icons.credit_card_rounded;
       case 'NET BANKING':
@@ -274,7 +285,8 @@ class _PaymentCard extends StatelessWidget {
                     Text(
                       method.provider!,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: TruxifyColors.adaptiveSecondaryText(context),
+                            color:
+                                TruxifyColors.adaptiveSecondaryText(context),
                             fontSize: 11,
                           ),
                     ),
@@ -442,7 +454,7 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
               onChanged: (v) => setState(() => _setAsDefault = v),
               title: const Text('Set as default payment method'),
               contentPadding: EdgeInsets.zero,
-              activeThumbColor: TruxifyColors.accent,
+              activeColor: TruxifyColors.accent,
             ),
             const SizedBox(height: 12),
             PrimaryButton(

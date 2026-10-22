@@ -8,6 +8,20 @@ import { redactSensitiveFields } from '../lib/logSigner.js';
 import logger from '../middleware/logger.js';
 
 /**
+ * Audit writes are best-effort: a database or queue failure must never turn a
+ * successful business response into an unhandled rejection or a failed request.
+ */
+function enqueueAuditLog(payload) {
+    try {
+        Promise.resolve(queueAuditLog(payload)).catch((err) => {
+            logger.error({ err, eventType: payload.eventType }, 'Failed to queue audit log');
+        });
+    } catch (err) {
+        logger.error({ err, eventType: payload.eventType }, 'Failed to queue audit log');
+    }
+}
+
+/**
  * Middleware factory that logs state changes for a specific resource.
  * 
  * @param {object} options
@@ -49,7 +63,7 @@ export function auditResourceChange(options) {
                 const afterState = body ? redactSensitiveFields(body, redactFields) : null;
 
                 // Fire and forget audit log
-                queueAuditLog({
+                enqueueAuditLog({
                     eventType,
                     userId: req.user?.id,
                     userRole: req.user?.role,
@@ -87,7 +101,7 @@ export function auditAction(eventType, getMetadata = null) {
             if (res.statusCode >= 200 && res.statusCode < 300) {
                 const metadata = getMetadata ? getMetadata(req, body) : {};
 
-                queueAuditLog({
+                enqueueAuditLog({
                     eventType,
                     userId: req.user?.id,
                     userRole: req.user?.role,
@@ -114,7 +128,7 @@ export function auditAction(eventType, getMetadata = null) {
  */
 export function auditErrors(err, req, res, next) {
     if (res.statusCode >= 400) {
-        queueAuditLog({
+        enqueueAuditLog({
             eventType: res.statusCode >= 500 ? 'system.error' : 'auth.login.failure',
             userId: req.user?.id || 'anonymous',
             userRole: req.user?.role || 'anonymous',

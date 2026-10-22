@@ -49,6 +49,14 @@ contract FreightAMM is ReentrancyGuard, Ownable {
      */
     function addLiquidity(uint256 amountA, uint256 amountB) external nonReentrant {
         require(amountA > 0 && amountB > 0, "Amounts must be > 0");
+        if (totalLiquidity > 0) {
+            uint256 amountBOptimal = (amountA * reserveB) / reserveA;
+            require(
+                amountB >= (amountBOptimal * 995) / 1000 &&
+                amountB <= (amountBOptimal * 1005) / 1000,
+                "Unbalanced liquidity deposit"
+            );
+        }
         
         tokenA.safeTransferFrom(msg.sender, address(this), amountA);
         tokenB.safeTransferFrom(msg.sender, address(this), amountB);

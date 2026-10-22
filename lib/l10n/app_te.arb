@@ -1,0 +1,15 @@
+{
+  "@@locale": "te",
+  "appTitle": "ట్రక్సైఫై",
+  "loginButton": "ప్రవేశించండి",
+  "activeOrders": "సక్రియ ఆర్డర్లు",
+  "loadOffers": "లోడ్ ఆఫర్లు",
+  "earningsReport": "సంపాదన నివేదిక",
+  "profile": "ప్రొఫైల్",
+  "distanceLabel": "దూరం",
+  "amountLabel": "మొత్తం",
+  "acceptBid": "బిడ్ అంగీకరించండి",
+  "startNavigation": "నావిగేషన్ ప్రారంభించండి",
+  "settings": "సెట్టింగ్‌లు",
+  "languageSelection": "భాషను ఎంచుకోండి"
+}

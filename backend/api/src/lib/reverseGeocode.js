@@ -5,7 +5,19 @@ const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const NOMINATIM_TIMEOUT_MS = 5000;
 const DEFAULT_RETRY_AFTER_MS = 60000;
 const MAX_RETRY_AFTER_MS = 60000;
+// backend/api/src/lib/reverseGeocode.js (Excerpt)
 
+import logger from '../middleware/logger.js';
+
+export async function reverseGeocode(lat, lng) {
+  try {
+    // ... geocoding API request logic ...
+  } catch (err) {
+    // FIX: Log error before returning null per issue #8346
+    logger.error({ err }, '[reverseGeocode] Geocoding failed:');
+    return null;
+  }
+}
 /**
  * Returns the Nominatim HTTP timeout in milliseconds.
  * Reads NOMINATIM_TIMEOUT_MS from environment or falls back to NOMINATIM_TIMEOUT_MS constant.

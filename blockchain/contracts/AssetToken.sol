@@ -85,6 +85,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     event FractionalSale(uint256 indexed assetId, address indexed seller, uint256 amount);
     event TradeOrderCreated(uint256 indexed orderId, uint256 tokenId, address indexed seller);
     event TradeOrderExecuted(uint256 indexed orderId, uint256 tokenId, address indexed buyer);
+    event AssetDeactivated(uint256 indexed assetId);
+    event TradeOrderCancelled(uint256 indexed assetId, uint256 indexed orderIndex, address indexed seller);
     event AssetTraded(uint256 indexed assetId, address indexed from, address indexed to, uint256 amount);
     event ComplianceCheck(address indexed user, bool verified);
     event PayoutAccrued(uint256 indexed assetId, address indexed user, uint256 amount);
@@ -157,6 +159,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     function deactivateAsset(uint256 assetId) external onlyOwner {
         require(assetExists[assetId], "Asset not found");
         assets[assetId].isActive = false;
+        emit AssetDeactivated(assetId);
     }
 
     // ============ Fractional Ownership ============
@@ -412,6 +415,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         _transfer(address(this), order.seller, order.amount);
 
         order.isActive = false;
+        emit TradeOrderCancelled(assetId, orderIndex, order.seller);
     }
 
     // ============ Compliance ============

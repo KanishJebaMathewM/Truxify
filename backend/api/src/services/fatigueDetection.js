@@ -7,13 +7,32 @@ const NEARBY_TRUCK_STOPS = [
     { stopId: 'stop-03', name: 'TA Express Travel Center', mileMarker: 152, city: 'Chambersburg', state: 'PA', availableParkingSpaces: 42, amenities: ['Showers', '24/7 Security', 'Restroom'] }
 ];
 
+function validationError(message) {
+    const error = new RangeError(message);
+    error.statusCode = 400;
+    return error;
+}
+
+function assertFiniteRange(name, value, min, max, options = {}) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+        throw validationError(`${name} must be a finite number between ${min} and ${max}.`);
+    }
+    if (options.integer && !Number.isInteger(value)) {
+        throw validationError(`${name} must be an integer between ${min} and ${max}.`);
+    }
+}
+
 /**
  * Evaluates privacy-preserving biometric telemetry against Hours of Service (HOS) data.
  * 
  * @param {Object} data - { driverId, biometricData, hosRemainingMinutes, currentLocation }
  * @returns {Object} Fatigue assessment report and proactive rest stop routing recommendations
  */
-export function evaluateDriverFatigue(data) {
+export function evaluateDriverFatigue(data = {}) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw validationError('Fatigue evaluation payload must be an object.');
+    }
+
     const {
         driverId,
         biometricData = {},
@@ -21,12 +40,25 @@ export function evaluateDriverFatigue(data) {
         currentLocation = {}
     } = data;
 
+    if (!biometricData || typeof biometricData !== 'object' || Array.isArray(biometricData)) {
+        throw validationError('biometricData must be an object.');
+    }
+    if (!currentLocation || typeof currentLocation !== 'object' || Array.isArray(currentLocation)) {
+        throw validationError('currentLocation must be an object when provided.');
+    }
+
     const {
         perclosScore = 0.05,        // Percentage of Eye Closure time (PERCLOS: > 0.15 indicates fatigue)
         blinkRatePerMin = 18,       // Normal range: 12-20 blinks/min
         headNodCount = 0,           // Head nodding detected within 5-minute rolling window
         averageEyeClosureMs = 250   // Micro-sleep indicator (> 500ms indicates drowsy blink)
     } = biometricData;
+
+    assertFiniteRange('perclosScore', perclosScore, 0, 1);
+    assertFiniteRange('blinkRatePerMin', blinkRatePerMin, 0, 120);
+    assertFiniteRange('headNodCount', headNodCount, 0, 1000, { integer: true });
+    assertFiniteRange('averageEyeClosureMs', averageEyeClosureMs, 0, 60000);
+    assertFiniteRange('hosRemainingMinutes', hosRemainingMinutes, 0, 10080);
 
     // Calculate normalized fatigue index (0.0 to 1.0)
     let fatigueScore = 0.0;

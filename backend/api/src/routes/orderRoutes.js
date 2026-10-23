@@ -162,7 +162,44 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+import express from 'express';
+import { BidAcceptanceService } from '../services/bidAcceptanceService.js';
+import { supabase } from '../config/supabase.js';
+import { createEscrowDeposit } from '../services/escrow.js';
+import logger from '../middleware/logger.js';
+import { sendNotification } from '../services/notificationService.js';
+
+const router = express.Router();
+
+// ✅ Fixed: Instantiate BidAcceptanceService with required dependencies
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  escrowService: { createEscrowDeposit },
+  logger,
+  notificationService: { sendNotification },
+});
+
+router.post('/:id/bids/:bidId/accept', async (req, res) => {
+  try {
+    const { id: orderId, bidId } = req.params;
+    const driverId = req.body.driverId;
+
+    const result = await bidAcceptanceService.acceptBid({
+      orderId,
+      bidId,
+      driverId,
+    });
+
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    logger.error({ err }, 'Failed to accept driver bid');
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+export default router;
 import {
   bidLimiter,
   userLimiter,

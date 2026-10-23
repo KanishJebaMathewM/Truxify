@@ -44,7 +44,68 @@ import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
 import { supabaseAdmin } from '../config/db.js'
+// backend/api/src/services/escrow.js (Excerpt)
 
+import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
+
+const ESCROW_ABI = [
+  'function createBooking(bytes32 bookingId, address payable driver) external payable',
+  'function releasePayment(bytes32 bookingId) external',
+  'function cancelBooking(bytes32 bookingId, uint256 penaltyAmount) external',
+  'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, bool active)'
+];
+
+export async function createEscrowDeposit(bookingId, customerWallet, driverWallet, amountWei) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from deprecated .deposit() to ABI-correct .createBooking()
+    // Note: customer address is msg.sender in TruxifyEscrow.sol, so only bookingId, driver, and value are passed.
+    const txData = await escrowContract.createBooking.populateTransaction(
+      bookingId, 
+      driverWallet, 
+      { value: amountWei }
+    );
+    
+    return { success: true, txData };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to populate escrow deposit transaction');
+    throw new Error(`Escrow deposit creation failed: ${err.message}`);
+  }
+}
+
+export async function releaseEscrowPayment(bookingId) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from .releaseFunds() to .releasePayment()
+    const tx = await escrowContract.releasePayment(bookingId);
+    await tx.wait();
+    
+    logger.info({ bookingId, txHash: tx.hash }, 'Escrow payment released successfully on-chain');
+    return { success: true, txHash: tx.hash };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to release escrow payment on-chain');
+    throw new Error(`Escrow release failed: ${err.message}`);
+  }
+}
+
+export async function cancelEscrowBooking(bookingId, penaltyAmount = 0) {
+  try {
+    const escrowContract = getEscrowContractInstance();
+    
+    // ✅ Fixed: Updated from .refundFunds() to .cancelBooking() with penalty parameter
+    const tx = await escrowContract.cancelBooking(bookingId, penaltyAmount);
+    await tx.wait();
+    
+    logger.info({ bookingId, penaltyAmount, txHash: tx.hash }, 'Escrow cancelled and refunded successfully on-chain');
+    return { success: true, txHash: tx.hash };
+  } catch (err) {
+    logger.error({ err, bookingId }, 'Failed to cancel escrow booking on-chain');
+    throw new Error(`Escrow cancellation failed: ${err.message}`);
+  }
+}
 const RPC_TIMEOUT_MS = 30_000;
 
 function withTimeout(promise, ms = RPC_TIMEOUT_MS) {

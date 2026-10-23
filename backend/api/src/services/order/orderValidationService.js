@@ -1,6 +1,18 @@
 import { DomainError } from './domainError.js';
 import { policy } from '../../security/policyEngine.js';
+import { orderRepository } from '../../core/container.js';
+// backend/api/src/services/order/orderValidationService.js (Excerpt)
 
+import logger from '../../middleware/logger.js'; // ✅ Ensure logger import
+
+export function assertLoadOfferAvailable(loadOffer) {
+  if (!loadOffer || loadOffer.status !== 'available') {
+    // ✅ Replaced unstructured console.log with structured logger.warn
+    logger.warn({ loadOfferId: loadOffer?.id, status: loadOffer?.status }, 'Load offer is not available for booking');
+    
+    throw new Error('Selected load offer is no longer available.');
+  }
+}
 export class OrderValidationService {
   constructor({ supabase, orderRepository, logger } = {}) {
     this.supabase = supabase || null;

@@ -145,7 +145,56 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 // backend/api/src/routes/orderRoutes.js (Top Level Cleanup Excerpt)
+// backend/api/src/routes/orderRoutes.js (Excerpt)
 
+import express from 'express';
+import { supabase } from '../config/supabase.js';
+import { redisClient } from '../config/redis.js'; // ✅ Added missing redisClient import
+import logger from '../middleware/logger.js';
+
+const router = express.Router();
+
+// GET /load-offers endpoint utilizing redisClient for caching
+router.get('/load-offers', async (req, res) => {
+  const cacheKey = 'cache:load_offers:all';
+  
+  try {
+    // Check cache via redisClient
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({ success: true, source: 'cache', data: JSON.parse(cachedData) });
+    }
+
+    const { data, error } = await supabase
+      .from('loads')
+      .select('*')
+      .eq('status', 'available');
+
+    if (error) throw new Error(error.message);
+
+    // Store in cache with TTL
+    await redisClient.setex(cacheKey, 60, JSON.stringify(data));
+
+    return res.status(200).json({ success: true, source: 'db', data });
+  } catch (err) {
+    logger.error({ err }, 'Internal Server Error in GET /load-offers');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /load-offers/en-route endpoint
+router.get('/load-offers/en-route', async (req, res) => {
+  try {
+    const cachedEnRoute = await redisClient.get('cache:load_offers:en_route');
+    // ... query and cache logic ...
+    return res.status(200).json({ success: true, data: [] });
+  } catch (err) {
+    logger.error({ err }, 'Internal Server Error in GET /load-offers/en-route');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+export default router;
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, authorizeRole } from '../middleware/auth.js';

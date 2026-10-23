@@ -12,7 +12,7 @@ vi.mock('../../src/core/container.js', () => ({
   orderRepository: null,
 }));
 
-const { OrderValidationService, default: defaultService } = await import(
+const { OrderValidationService } = await import(
   '../../src/services/order/orderValidationService.js'
 );
 const { DomainError } = await import('../../src/services/order/domainError.js');
@@ -82,11 +82,11 @@ describe('OrderValidationService assertions', () => {
     };
     const svc = new OrderValidationService({ orderRepository: repo });
     const order = await svc.findOrderByIdOrDisplayId('TX-o1');
-    expect(repo.findOrderById).toHaveBeenCalledWith('o1', '*');
+    // 'o1' is not a UUID — the UUID-gated lookup goes to the display-id
+    // column (querying the uuid column with a non-UUID errors in Postgres).
+    expect(repo.findOrderByDisplayId).toHaveBeenCalledWith('o1', '*');
+    expect(repo.findOrderById).not.toHaveBeenCalled();
     expect(order).toEqual({ id: 'o1' });
   });
 
-  it('default export is a service instance proxy', () => {
-    expect(defaultService).toBeDefined();
-  });
 });

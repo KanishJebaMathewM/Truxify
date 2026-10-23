@@ -145,7 +145,7 @@ async def train_client(request: TrainingRequest):
         )
         
         return {
-            'success': True,
+            'success': bool(results) and all(result.get('success') for result in results),
             'data': results,
             'client_id': request.client_id
         }
@@ -183,10 +183,11 @@ async def participate_in_round(request: TrainingRequest):
         )
 
         # Fallback drain to ensure server ingests the update immediately
-        server.drain_pending_client_updates()
+        if result.get('success'):
+            server.drain_pending_client_updates()
 
         return {
-            'success': True,
+            'success': bool(result.get('success')),
             'data': result,
             'client_id': request.client_id
         }

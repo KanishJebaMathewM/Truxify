@@ -28,6 +28,7 @@ contract ZKIdentity is Ownable {
 
     address public zkVerifier;
     mapping(address => DIDDocument) public didRegistry;
+    mapping(bytes32 => address) public didURIToIdentity;
     mapping(bytes32 => bool) public revokedCredentials;
     mapping(bytes32 => bool) public spentNullifiers;
     mapping(bytes32 => bool) public usedNullifiers;
@@ -46,6 +47,20 @@ contract ZKIdentity is Ownable {
 
     function registerDID(string calldata _didURI, bytes32 _merkleRoot) external {
         if (didRegistry[msg.sender].registeredAt != 0) revert DIDAlreadyExists(msg.sender);
+        require(bytes(_didURI).length != 0, "DID URI required");
+
+        string memory expectedDID = string.concat(
+            "did:truxify:polygon:0x",
+            _addressToLowerHex(msg.sender)
+        );
+        require(
+            keccak256(bytes(_didURI)) == keccak256(bytes(expectedDID)),
+            "DID URI must match caller"
+        );
+
+        bytes32 didURIHash = keccak256(bytes(_didURI));
+        require(didURIToIdentity[didURIHash] == address(0), "DID URI already registered");
+
         didRegistry[msg.sender] = DIDDocument({
             didURI: _didURI,
             credentialMerkleRoot: _merkleRoot,
@@ -53,6 +68,7 @@ contract ZKIdentity is Ownable {
             registeredAt: block.timestamp,
             lastUpdatedAt: block.timestamp
         });
+        didURIToIdentity[didURIHash] = msg.sender;
         emit DIDRegistered(msg.sender, _didURI, _merkleRoot, block.timestamp);
     }
 
@@ -130,5 +146,19 @@ contract ZKIdentity is Ownable {
         DIDDocument memory doc = didRegistry[_identity];
         if (doc.registeredAt == 0) revert DIDNotFound(_identity);
         return (doc.didURI, doc.credentialMerkleRoot, doc.isRevoked, doc.registeredAt, doc.lastUpdatedAt);
+    }
+
+    function _addressToLowerHex(address account) internal pure returns (string memory) {
+        bytes memory alphabet = "0123456789abcdef";
+        bytes memory buffer = new bytes(40);
+        uint160 value = uint160(account);
+
+        for (uint256 i = 0; i < 20; i++) {
+            uint8 currentByte = uint8(value >> (8 * (19 - i)));
+            buffer[i * 2] = alphabet[currentByte >> 4];
+            buffer[i * 2 + 1] = alphabet[currentByte & 0x0f];
+        }
+
+        return string(buffer);
     }
 }

@@ -4,7 +4,7 @@ template RatingNullifierCircuit() {
     // Private inputs
     signal input tripSecretKey;
     signal input customerIdentityNullifier;
-
+ 
     // Public inputs
     signal input driverAddress;
     signal input ratingStars;

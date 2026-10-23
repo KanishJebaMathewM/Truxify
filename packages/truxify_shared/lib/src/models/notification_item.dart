@@ -28,6 +28,9 @@ class NotificationItem {
   /// Bid ID extracted from [metadata], if present.
   String? get bidId => metadata?['bid_id']?.toString();
 
+  /// Load offer ID extracted from [metadata], if present.
+  String? get loadOfferId => metadata?['load_offer_id']?.toString();
+
   /// Support ticket ID extracted from [metadata], if present.
   String? get supportTicketId => metadata?['support_ticket_id']?.toString();
 

@@ -61,7 +61,7 @@ class TestDriverProfitPredictor:
 
         predictor.model = StubModel()
         result = predictor.predict(500.0, 105.0, 1200.0, 5.0, 8000.0, 10.0)
-        assert set(result.keys()) == {"predicted_profit", "confidence_interval"}
+        assert set(result.keys()) == {"predicted_profit", "confidence_interval", "interval_calibration"}
         assert result["predicted_profit"] == 5000.0
         assert "lower" in result["confidence_interval"]
         assert "upper" in result["confidence_interval"]

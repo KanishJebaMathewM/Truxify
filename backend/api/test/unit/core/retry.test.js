@@ -14,12 +14,11 @@ const NETWORK_ERROR_CODES = new Set([
   'FETCH_ERR',
 ]);
 
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
 function isTransientHttpStatus(status) {
-  if (status === null) return false;
-  if (status === 408) return true;
-  if (status >= 500 && status <= 599) return true;
-  if (status === 429 || status === 408) return true;
-  return false;
+  if (typeof status !== 'number' || !Number.isFinite(status)) return false;
+  return TRANSIENT_HTTP_STATUSES.has(status) || (status >= 500 && status <= 599);
 }
 
 function isTransientError(error) {

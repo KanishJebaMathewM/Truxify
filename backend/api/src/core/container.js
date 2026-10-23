@@ -65,11 +65,19 @@ const orderMilestoneService = new OrderMilestoneService({
   trackingTokenService,
 });
 
+import { SagaCoordinator, DatabaseSagaPersister } from './saga/index.js';
+
+const sagaPersister = new DatabaseSagaPersister({
+  supabaseClient: supabaseAdmin ?? repoClient,
+  logger,
+});
+
 const orderLifecycleService = new OrderLifecycleService({
   orderRepository,
   orderTimelineService,
   bidAcceptanceService,
   trackingTokenService,
+  sagaPersister,
 });
 
 export {
@@ -91,6 +99,10 @@ export {
   trackingTokenService,
   deliveryVerificationService,
   orderLifecycleService,
+
+  SagaCoordinator,
+  DatabaseSagaPersister,
+  sagaPersister,
 
   buildDepositTx,
   recordDepositTx,

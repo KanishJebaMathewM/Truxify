@@ -11,7 +11,29 @@ require("@nomicfoundation/hardhat-chai-matchers");
 require("@nomicfoundation/hardhat-network-helpers");
 require("@nomicfoundation/hardhat-verify");
 require("@openzeppelin/hardhat-upgrades");
+// blockchain/hardhat.config.js
+require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config();
 
+const POLYGON_AMOY_RPC = process.env.POLYGON_AMOY_RPC || "https://rpc-amoy.polygon.technology";
+const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || "0000000000000000000000000000000000000000000000000000000000000000";
+
+module.exports = {
+  solidity: "0.8.24",
+  networks: {
+    amoy: {
+      url: POLYGON_AMOY_RPC,
+      accounts: [DEPLOYER_PRIVATE_KEY],
+      chainId: 80002,
+    },
+  },
+  paths: {
+    artifacts: "./artifacts",
+    cache: "./cache",
+    sources: "./contracts",
+    tests: "./test",
+  },
+};
 const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";
 const DEPLOYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
 const POLYGONSCAN_API_KEY = process.env.POLYGONSCAN_API_KEY || "";

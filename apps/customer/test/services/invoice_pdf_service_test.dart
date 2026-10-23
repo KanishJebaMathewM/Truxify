@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io' show ZLibCodec;
+import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify/models/app_models.dart';
@@ -32,6 +34,49 @@ HistoryOrderData _buildTestOrder({
     platformFee: platformFee,
     driverPhone: driverPhone,
   );
+}
+
+
+/// dart_pdf Flate-compresses content streams — utf8-decoding the raw bytes
+/// throws (and literal text never appears). Inflate every stream block and
+/// search the decoded content. Text renders as kerning-split TJ arrays, so
+/// also emit concatenated and alphanumeric-only run forms.
+String _pdfTextContent(Uint8List bytes) {
+  final buffer = StringBuffer(String.fromCharCodes(bytes));
+  const streamMarker = [115, 116, 114, 101, 97, 109]; // 'stream'
+  const endMarker = [101, 110, 100, 115, 116, 114, 101, 97, 109]; // 'endstream'
+  int i = 0;
+  while (i < bytes.length - streamMarker.length) {
+    bool match = true;
+    for (int j = 0; j < streamMarker.length; j++) {
+      if (bytes[i + j] != streamMarker[j]) { match = false; break; }
+    }
+    if (!match) { i++; continue; }
+    int start = i + streamMarker.length;
+    if (bytes[start] == 13) start++;
+    if (bytes[start] == 10) start++;
+    int end = start;
+    outer:
+    while (end < bytes.length - endMarker.length) {
+      for (int j = 0; j < endMarker.length; j++) {
+        if (bytes[end + j] != endMarker[j]) { end++; continue outer; }
+      }
+      break;
+    }
+    try {
+      final decoded = String.fromCharCodes(ZLibCodec().decode(bytes.sublist(start, end)));
+      buffer.write(decoded);
+      final runs = RegExp(r'\((?:[^()\\]|\\.)*\)')
+          .allMatches(decoded)
+          .map((m) => m.group(0)!.substring(1, m.group(0)!.length - 1));
+      buffer.write(runs.join());
+      buffer.write(runs.join().replaceAll(RegExp(r'[^A-Za-z0-9]'), ''));
+    } catch (_) {
+      // Not a Flate stream (fonts/images) — ignore.
+    }
+    i = end + endMarker.length;
+  }
+  return buffer.toString();
 }
 
 void main() {
@@ -127,14 +172,16 @@ void main() {
 
       final doc = buildInvoicePdf(data);
       final bytes = await doc.save();
-      final content = utf8.decode(bytes);
+      final content = _pdfTextContent(bytes);
 
       expect(content, contains('ORD-7777'));
       expect(content, contains('Chennai'));
       expect(content, contains('Bangalore'));
       expect(content, contains('Kumar'));
       expect(content, contains('TN-01-AA-1111'));
-      expect(content, contains('+91 99999 11111'));
+      // Spaces between phone groups are kerning offsets, not text runs —
+      // compare alphanumeric-normalized.
+      expect(content.replaceAll(RegExp(r'[^A-Za-z0-9]'), ''), contains('919999911111'));
     });
 
     test('PDF content contains blockchain hash when provided', () async {
@@ -152,9 +199,12 @@ void main() {
 
       final doc = buildInvoicePdf(data);
       final bytes = await doc.save();
-      final content = utf8.decode(bytes);
+      final content = _pdfTextContent(bytes);
 
-      expect(content, contains('Blockchain Verification'));
+      // Kerning offsets replace spaces between runs — compare
+      // alphanumeric-normalized.
+      expect(content.replaceAll(RegExp(r'[^A-Za-z0-9]'), ''),
+          contains('BlockchainVerification'));
       expect(content, contains('0xabcdef1234567890'));
     });
 
@@ -173,7 +223,7 @@ void main() {
 
       final doc = buildInvoicePdf(data);
       final bytes = await doc.save();
-      final content = utf8.decode(bytes);
+      final content = _pdfTextContent(bytes);
 
       expect(content, isNot(contains('Blockchain Verification')));
     });
@@ -193,7 +243,7 @@ void main() {
 
       final doc = buildInvoicePdf(data);
       final bytes = await doc.save();
-      final content = utf8.decode(bytes);
+      final content = _pdfTextContent(bytes);
 
       expect(content, isNot(contains('Phone')));
     });

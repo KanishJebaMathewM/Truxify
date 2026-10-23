@@ -1,12 +1,13 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/services/sync_service.dart';
 import 'package:truxify_driver/services/api_client.dart';
-import 'package:truxify_driver/services/local_db_service.dart';
 import 'package:truxify_driver/services/trip_service.dart';
 import 'setup.dart';
 
@@ -152,6 +153,15 @@ void main() {
 
     setUpAll(() async {
       TestWidgetsFlutterBinding.ensureInitialized();
+      // sqflite ffi for LocalDbService + connectivity default 'none' (the
+      // offline path); the nested upload group overrides with 'wifi'.
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/connectivity'),
+        (call) async => call.method == 'check' ? <String>['none'] : null,
+      );
       await setupTests();
       tempDir = await Directory.systemTemp.createTemp('pod_test_');
     });
@@ -262,7 +272,7 @@ void main() {
         expect(
           requests.any((r) =>
               r.method == 'PUT' &&
-              r.url.path == '/api/trips/trip-123/stops/stop-456/complete'),
+              r.url.path == '/api/v1/trips/trip-123/stops/stop-456/complete'),
           isTrue,
           reason: 'the stop is only completed after a successful upload',
         );
@@ -293,7 +303,7 @@ void main() {
         expect(
           requests.any((r) =>
               r.method == 'PUT' &&
-              r.url.path == '/api/trips/trip-123/stops/stop-456/complete'),
+              r.url.path == '/api/v1/trips/trip-123/stops/stop-456/complete'),
           isTrue,
         );
       });

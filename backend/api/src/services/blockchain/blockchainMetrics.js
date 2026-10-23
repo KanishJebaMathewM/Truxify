@@ -20,7 +20,10 @@ class BlockchainMetrics {
   }
 
   startMetricsCollection() {
-    const metricsInterval = parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS || '60000', 10);
+    const configuredInterval = parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS, 10);
+    const metricsInterval = Number.isFinite(configuredInterval) && configuredInterval > 0
+      ? configuredInterval
+      : 60000;
 
     setInterval(async () => {
       try {

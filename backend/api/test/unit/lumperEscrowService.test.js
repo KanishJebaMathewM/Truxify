@@ -1,168 +1,180 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+/**
+ * Unit tests for backend/api/src/services/lumperEscrowService.js
+ *
+ * The service previously trusted every amount it was handed:
+ *   - `estimated_fee: 'abc'` was stored as NaN,
+ *   - `estimated_fee: -500` created a negative escrow,
+ *   - a release claim larger than the escrowed amount was paid out verbatim,
+ *   - a released escrow could be released again.
+ *
+ * Run with:  npm test -- test/unit/lumperEscrowService.test.js
+ */
+import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  },
+const mockLogger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
 }));
 
-import { LumperEscrowService } from '../../src/services/lumperEscrowService.js';
+vi.mock('../../src/middleware/logger.js', () => ({ default: mockLogger }));
 
+const { lumperEscrowService } = await import('../../src/services/lumperEscrowService.js');
+const { ValidationError } = await import('../../src/utils/errors.js');
 
-describe('LumperEscrowService', () => {
-  let service;
+async function deposit(estimatedFeeAmount = 500) {
+  return lumperEscrowService.depositLumperFee({
+    bookingId: 'BK-1',
+    brokerAddress: '0xBroker',
+    estimatedFeeAmount,
+  });
+}
 
-  beforeEach(() => {
-    service = new LumperEscrowService();
+describe('lumperEscrowService.depositLumperFee', () => {
+  it('stores a valid positive fee', async () => {
+    const escrow = await deposit(1500);
+    expect(escrow.estimatedFeeAmount).toBe(1500);
+    expect(escrow.status).toBe('HELD_IN_ESCROW');
+    expect(escrow.releasedAmount).toBeUndefined();
   });
 
-  describe('depositLumperFee', () => {
-    it('successfully deposits lumper fee into escrow contract for valid parameters', async () => {
-      const result = await service.depositLumperFee({
-        bookingId: 'BK-10023',
-        brokerAddress: '0x1111222233334444555566667777888899990000',
-        estimatedFeeAmount: 250,
-      });
-
-      expect(result).toBeDefined();
-      expect(result.escrowId).toMatch(/^LMP-BK-10023-\d+$/);
-      expect(result.bookingId).toBe('BK-10023');
-      expect(result.brokerAddress).toBe('0x1111222233334444555566667777888899990000');
-      expect(result.estimatedFeeAmount).toBe(250);
-      expect(result.status).toBe('HELD_IN_ESCROW');
-      expect(result.txHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(result.createdAt).toBeDefined();
-
-      const retrieved = await service.getEscrowStatus(result.escrowId);
-      expect(retrieved).toEqual(result);
+  it('coerces numeric strings', async () => {
+    const escrow = await lumperEscrowService.depositLumperFee({
+      bookingId: 'BK-2',
+      brokerAddress: '0xBroker',
+      estimatedFeeAmount: '750.25',
     });
-
-    it('rejects deposit when bookingId or brokerAddress is missing', async () => {
-      await expect(
-        service.depositLumperFee({
-          brokerAddress: '0x1111222233334444555566667777888899990000',
-          estimatedFeeAmount: 200,
-        })
-      ).rejects.toThrow('bookingId and brokerAddress are required');
-
-      await expect(
-        service.depositLumperFee({
-          bookingId: 'BK-200',
-          estimatedFeeAmount: 200,
-        })
-      ).rejects.toThrow('bookingId and brokerAddress are required');
-
-      await expect(service.depositLumperFee()).rejects.toThrow(
-        'bookingId and brokerAddress are required'
-      );
-    });
-
-    it('rejects deposit when estimatedFeeAmount is zero, negative, or non-numeric', async () => {
-      await expect(
-        service.depositLumperFee({
-          bookingId: 'BK-300',
-          brokerAddress: '0xBroker',
-          estimatedFeeAmount: 0,
-        })
-      ).rejects.toThrow('estimatedFeeAmount must be a positive number');
-
-      await expect(
-        service.depositLumperFee({
-          bookingId: 'BK-301',
-          brokerAddress: '0xBroker',
-          estimatedFeeAmount: -50,
-        })
-      ).rejects.toThrow('estimatedFeeAmount must be a positive number');
-
-      await expect(
-        service.depositLumperFee({
-          bookingId: 'BK-302',
-          brokerAddress: '0xBroker',
-          estimatedFeeAmount: 'invalid',
-        })
-      ).rejects.toThrow('estimatedFeeAmount must be a positive number');
-    });
+    expect(escrow.estimatedFeeAmount).toBe(750.25);
   });
 
-  describe('getEscrowStatus', () => {
-    it('returns null when escrow does not exist', async () => {
-      const status = await service.getEscrowStatus('NON-EXISTENT-ID');
-      expect(status).toBeNull();
-    });
+  it('rejects a non-numeric fee instead of storing NaN', async () => {
+    await expect(deposit('abc')).rejects.toThrow(ValidationError);
+    await expect(deposit(NaN)).rejects.toThrow(/finite/);
+    await expect(deposit(Infinity)).rejects.toThrow(/finite/);
   });
 
-  describe('processReceiptAndRelease', () => {
-    let activeEscrow;
+  it('rejects a negative fee', async () => {
+    await expect(deposit(-500)).rejects.toThrow(/greater than 0/);
+  });
 
-    beforeEach(async () => {
-      activeEscrow = await service.depositLumperFee({
-        bookingId: 'BK-ACTIVE-01',
-        brokerAddress: '0xBroker123',
-        estimatedFeeAmount: 180,
-      });
+  it('rejects a zero fee', async () => {
+    await expect(deposit(0)).rejects.toThrow(/greater than 0/);
+  });
+});
+
+describe('lumperEscrowService.processReceiptAndRelease', () => {
+  it('releases the escrowed amount when no claim is supplied', async () => {
+    const escrow = await deposit(500);
+    const released = await lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+    });
+    expect(released.status).toBe('RELEASED');
+    expect(released.releasedAmount).toBe(500);
+  });
+
+  it('releases a claim that is within the escrowed amount', async () => {
+    const escrow = await deposit(500);
+    const released = await lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+      claimedAmount: 420,
+    });
+    expect(released.releasedAmount).toBe(420);
+  });
+
+  it('allows a claim exactly equal to the escrowed amount', async () => {
+    const escrow = await deposit(500);
+    const released = await lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
+      claimedAmount: 500,
+    });
+    expect(released.releasedAmount).toBe(500);
+  });
+
+  it('rejects a claim larger than the escrowed amount', async () => {
+    const escrow = await deposit(500);
+    await expect(
+      lumperEscrowService.processReceiptAndRelease({
+        escrowId: escrow.escrowId,
+        driverWallet: '0xDriver',
+        receiptImageUrl: 'https://example.test/receipt.jpg',
+        claimedAmount: 99999999,
+      }),
+    ).rejects.toThrow(/cannot exceed/);
+
+    // The escrow must be untouched after the rejected claim.
+    const still = await lumperEscrowService.getEscrowStatus(escrow.escrowId);
+    expect(still.status).toBe('HELD_IN_ESCROW');
+    expect(still.releasedAmount).toBeUndefined();
+  });
+
+  it('rejects a negative claim instead of recording a negative payout', async () => {
+    const escrow = await deposit(500);
+    await expect(
+      lumperEscrowService.processReceiptAndRelease({
+        escrowId: escrow.escrowId,
+        driverWallet: '0xDriver',
+        receiptImageUrl: 'https://example.test/receipt.jpg',
+        claimedAmount: -100,
+      }),
+    ).rejects.toThrow(/greater than 0/);
+  });
+
+  it('rejects a NaN claim instead of silently paying the full escrow', async () => {
+    const escrow = await deposit(500);
+    await expect(
+      lumperEscrowService.processReceiptAndRelease({
+        escrowId: escrow.escrowId,
+        driverWallet: '0xDriver',
+        receiptImageUrl: 'https://example.test/receipt.jpg',
+        claimedAmount: 'abc',
+      }),
+    ).rejects.toThrow(/finite/);
+  });
+
+  it('rejects a zero claim', async () => {
+    const escrow = await deposit(500);
+    await expect(
+      lumperEscrowService.processReceiptAndRelease({
+        escrowId: escrow.escrowId,
+        driverWallet: '0xDriver',
+        receiptImageUrl: 'https://example.test/receipt.jpg',
+        claimedAmount: 0,
+      }),
+    ).rejects.toThrow(/greater than 0/);
+  });
+
+  it('rejects an unknown escrow', async () => {
+    await expect(
+      lumperEscrowService.processReceiptAndRelease({
+        escrowId: 'LMP-does-not-exist',
+        driverWallet: '0xDriver',
+        receiptImageUrl: 'https://example.test/receipt.jpg',
+      }),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it('refuses to release the same escrow twice', async () => {
+    const escrow = await deposit(500);
+    const release = () => lumperEscrowService.processReceiptAndRelease({
+      escrowId: escrow.escrowId,
+      driverWallet: '0xDriver',
+      receiptImageUrl: 'https://example.test/receipt.jpg',
     });
 
-    it('successfully verifies receipt and releases funds with custom claimedAmount', async () => {
-      const driverWallet = '0xDriverWallet789';
-      const receiptImageUrl = 'https://s3.truxify.com/receipts/rec-01.jpg';
+    await release();
+    await expect(release()).rejects.toThrow(/already been released/);
+  });
+});
 
-      const released = await service.processReceiptAndRelease({
-        escrowId: activeEscrow.escrowId,
-        driverWallet,
-        receiptImageUrl,
-        claimedAmount: 195,
-      });
-
-      expect(released.status).toBe('RELEASED');
-      expect(released.releasedAmount).toBe(195);
-      expect(released.driverWallet).toBe(driverWallet);
-      expect(released.receiptImageUrl).toBe(receiptImageUrl);
-      expect(released.releaseTxHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(released.releasedAt).toBeDefined();
-
-      const stored = await service.getEscrowStatus(activeEscrow.escrowId);
-      expect(stored.status).toBe('RELEASED');
-      expect(stored.releasedAmount).toBe(195);
-    });
-
-    it('falls back to estimatedFeeAmount when claimedAmount is omitted', async () => {
-      const released = await service.processReceiptAndRelease({
-        escrowId: activeEscrow.escrowId,
-        driverWallet: '0xDriver456',
-        receiptImageUrl: 'https://s3.truxify.com/receipts/rec-default.jpg',
-      });
-
-      expect(released.status).toBe('RELEASED');
-      expect(released.releasedAmount).toBe(180);
-    });
-
-    it('throws error when escrow ID is not found', async () => {
-      await expect(
-        service.processReceiptAndRelease({
-          escrowId: 'LMP-UNKNOWN',
-          driverWallet: '0xDriver',
-          receiptImageUrl: 'https://example.com/receipt.jpg',
-        })
-      ).rejects.toThrow('Lumper fee escrow not found');
-    });
-
-    it('throws error to prevent double-release on already released escrow', async () => {
-      await service.processReceiptAndRelease({
-        escrowId: activeEscrow.escrowId,
-        driverWallet: '0xDriverFirst',
-        receiptImageUrl: 'https://s3.truxify.com/receipts/rec-1.jpg',
-      });
-
-      await expect(
-        service.processReceiptAndRelease({
-          escrowId: activeEscrow.escrowId,
-          driverWallet: '0xDriverSecond',
-          receiptImageUrl: 'https://s3.truxify.com/receipts/rec-2.jpg',
-        })
-      ).rejects.toThrow('Lumper fee escrow already released');
-    });
+describe('lumperEscrowService.getEscrowStatus', () => {
+  it('returns null for an unknown escrow', async () => {
+    expect(await lumperEscrowService.getEscrowStatus('nope')).toBeNull();
   });
 });

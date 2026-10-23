@@ -1,0 +1,6 @@
+torch-geometric==2.6.1
+numpy==1.26.4
+networkx==3.7
+fastapi==0.116.1
+pytest==9.0.3
+ruff==0.16.9

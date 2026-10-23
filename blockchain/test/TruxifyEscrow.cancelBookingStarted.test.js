@@ -52,12 +52,16 @@ describe("TruxifyEscrow #8891 — cancelBooking started-trip guard", function ()
     expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount);
   });
 
-  it("cancelWithPenalty also rejects a started trip (consistent guard)", async function () {
+  it("cancelWithPenalty still works for a started trip (allowed since #13914)", async function () {
     const { escrow, owner } = await loadFixture(deployWithBookingFixture);
 
     await escrow.connect(owner).markBookingStarted(1n);
 
-    await expect(escrow.connect(owner).cancelWithPenalty(1n, ethers.parseEther("0.3"))).to.be
-      .revertedWith("TruxifyEscrow: Trip already started");
+    // cancelWithPenalty deliberately permits started trips (driver compensation
+    // path); only cancelBooking enforces the started-trip guard.
+    await expect(escrow.connect(owner).cancelWithPenalty(1n, ethers.parseEther("0.3"))).to.emit(
+      escrow,
+      "CancellationPenaltyApplied"
+    );
   });
 });

@@ -135,7 +135,7 @@ describe('requireApiKey', () => {
 
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res._jsonMock).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Unauthorized: Invalid API Key' })
+      expect.objectContaining({ error: expect.stringMatching(/Missing API Key/i) })
     );
     expect(next).not.toHaveBeenCalled();
   });
@@ -148,6 +148,9 @@ describe('requireApiKey', () => {
     requireApiKey(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(401);
+    expect(res._jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'Unauthorized: Invalid API Key' })
+    );
     expect(next).not.toHaveBeenCalled();
   });
 

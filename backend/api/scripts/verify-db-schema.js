@@ -319,6 +319,40 @@ async function main() {
     : 1;
 }
 
+/**
+ * Composite indexes the trips table must carry for the driver-facing reads.
+ * Mirrors supabase/migrations/20260805130000_add_trips_composite_indexes.sql.
+ */
+export const REQUIRED_COMPOSITE_INDEXES = [
+  {
+    name: 'idx_trips_driver_status_date',
+    table: 'trips',
+    columns: ['driver_id', 'status', 'trip_date'],
+    servedBy: 'Driver earnings and trip-history queries filtering on driver_id and status with ORDER BY trip_date.',
+  },
+  {
+    name: 'idx_trips_driver_display',
+    table: 'trips',
+    columns: ['driver_id', 'trip_display_id'],
+    servedBy: 'Per-trip ownership checks filtering on driver_id and trip_display_id.',
+  },
+];
+
+/**
+ * Reports which required composite indexes exist in a list of present names.
+ * Tolerates nullish or non-array input by reporting everything missing.
+ *
+ * @param {string[]|null|undefined} existingNames - index names present in the database
+ * @returns {Array<{name: string, present: boolean}>}
+ */
+export function checkCompositeIndexes(existingNames) {
+  const names = Array.isArray(existingNames) ? existingNames : [];
+  return REQUIRED_COMPOSITE_INDEXES.map((index) => ({
+    name: index.name,
+    present: names.includes(index.name),
+  }));
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main()
     .then((exitCode) => {

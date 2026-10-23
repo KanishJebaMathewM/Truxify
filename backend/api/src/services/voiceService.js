@@ -3,7 +3,44 @@ import crypto from 'crypto';
 import { supabase, supabaseAdmin } from '../config/db.js';
 const voiceDb = (supabaseAdmin && typeof supabaseAdmin.from === 'function') ? supabaseAdmin : supabase;
 import logger from '../middleware/logger.js';
+// backend/api/src/services/voiceService.js (Excerpt)
 
+import { supabase } from '../config/supabase.js';
+import logger from '../middleware/logger.js';
+
+export async function getBookingContext(userId) {
+  try {
+    // ✅ Destructure { data, error } and validate Supabase query response for bookings
+    const { data: bookingData, error: bookingError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (bookingError) {
+      // ✅ Log warning when Supabase query returns an error instead of failing silently
+      logger.warn({ err: bookingError, userId }, 'Failed to fetch booking context from Supabase');
+      return null;
+    }
+
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('user_id', userId);
+
+    if (orderError) {
+      logger.warn({ err: orderError, userId }, 'Failed to fetch orders context from Supabase');
+    }
+
+    return {
+      booking: bookingData || null,
+      orders: orderData || [],
+    };
+  } catch (err) {
+    logger.error({ err, userId }, 'Unhandled exception in getBookingContext');
+    return null;
+  }
+}
 const MAX_CACHE_SIZE = 100;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const VOICE_API_TIMEOUT_MS = 10000;

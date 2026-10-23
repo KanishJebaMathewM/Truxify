@@ -1,4 +1,22 @@
+# docker-compose.yml (Excerpt)
+
 services:
+  # ... existing services (api, db, redis, etc.) ...
+
+  osrm:
+    image: osrm/osrm-backend:latest
+    container_name: truxify-osrm
+    volumes:
+      - ./osrm-data:/data
+    command: osrm-routed --algorithm mld /data/india-latest.osrm
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
   gateway:
     image: nginx:alpine
     container_name: truxify-gateway

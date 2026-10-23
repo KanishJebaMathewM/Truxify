@@ -60,8 +60,17 @@ import {
   OTP_LOCKOUT_MINUTES,
 } from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
+import { refreshToken } from "../controllers/authController.js";
+// backend/api/src/routes/authRoutes.js (Excerpt)
 import { getJwtSecret } from "../config/jwtSecret.js";
 
+import express from 'express';
+import { userLimiter } from '../middleware/rateLimiter.js'; // ✅ Retained single import
+// ... other imports ...
+
+const router = express.Router();
+
+// ... route definitions using userLimiter ...
 const router = express.Router();
 
 const authLimiter = rateLimit({

@@ -159,7 +159,16 @@ export const checkSpeedAnomaly = (driverId, newLon, newLat, currentTimestamp = D
     driverPositionCache.set(driverId, { lon: newLon, lat: newLat, timestamp: currentTimestamp });
     return { anomaly: false, calculatedSpeedKmh: Math.round(speedKmh) };
 };
+// backend/api/src/services/locationService.js (Excerpt)
 
+export function calculateRemainingEta(estimatedArrivalTime, currentTime = Date.now()) {
+  const remainingMilliseconds = new Date(estimatedArrivalTime).getTime() - currentTime;
+  const remainingMinutes = Math.ceil(remainingMilliseconds / (1000 * 60));
+
+  // ✅ Clamp ETA to a minimum of 0 to prevent negative values
+  return Math.max(0, remainingMinutes);
+}
+const ensureIndexes = async () => {
 /**
  * Verifies or creates PostGIS geospatial indexes.
  */
